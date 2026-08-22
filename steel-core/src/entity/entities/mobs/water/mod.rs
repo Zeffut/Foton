@@ -6,6 +6,8 @@
 mod cod;
 mod fish;
 mod salmon;
+mod squid;
 
 pub use cod::CodEntity;
 pub use salmon::SalmonEntity;
+pub use squid::SquidEntity;
