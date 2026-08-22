@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use std::borrow::Cow;
 use steel_registry::data_components::vanilla_components::{
-    BLOCKS_ATTACKS, CONSUMABLE, FOOD, KINETIC_WEAPON,
+    BLOCKS_ATTACKS, CONSUMABLE, FOOD, KINETIC_WEAPON, POTION_CONTENTS, USE_REMAINDER,
 };
 
 use steel_protocol::packets::game::SoundSource;
@@ -19,7 +19,7 @@ use text_components::TextComponent;
 use crate::behavior::items::DefaultItemBehavior;
 use crate::behavior::{InteractionResult, UseItemContext, UseOnContext};
 use crate::entity::damage::DamageSource;
-use crate::entity::{Entity, LivingEntity};
+use crate::entity::{Entity, LivingEntity, MobEffectInstance};
 use crate::player::{Player, player_inventory::EquipmentSwapResult};
 use crate::world::World;
 
@@ -67,15 +67,58 @@ fn apply_consume_effects(
         );
     }
 
-    // TODO: apply `consumable.on_consume_effects()` once consume effects are wired up.
+    // Vanilla parity: `PotionContents.onConsume`, which is the listener that
+    // makes a brewed potion do anything at all. Without it a player can brew,
+    // bottle and drink and get only the sound.
+    if let Some(contents) = stack.get(POTION_CONTENTS) {
+        for (effect, duration, amplifier) in potion_effects(contents) {
+            user.add_mob_effect(MobEffectInstance::with_duration(
+                effect, duration, amplifier,
+            ));
+        }
+    }
+
+    // TODO: apply the remaining `consumable.on_consume_effects()` kinds --
+    // teleport, remove-effects, play-sound -- once they are modeled.
     // TODO: emit the EAT / DRINK game event once game-event dispatch exists.
 
     // Vanilla `ItemStack.consume` leaves creative-mode stacks untouched.
     if user.has_infinite_materials() {
         return stack.copy_with_count(stack.count());
     }
-    // TODO: honor USE_REMAINDER so bowls and bottles are returned.
-    stack.copy_with_count(stack.count().saturating_sub(1))
+
+    let consumed = stack.copy_with_count(stack.count().saturating_sub(1));
+    // Vanilla parity: `ItemStack.applyAfterUseComponentSideEffects` hands back
+    // what the container becomes -- the glass bottle from a potion, the bowl
+    // from a stew. Only when the stack is spent; a second bottle in the stack
+    // is still a potion.
+    if consumed.is_empty()
+        && let Some(remainder) = stack.get(USE_REMAINDER)
+    {
+        return remainder.convert_into().create();
+    }
+    consumed
+}
+
+/// Yields every effect a potion bottle carries.
+///
+/// Vanilla parity: `PotionContents.forEachEffect`, without the duration scale,
+/// which only differs from one outside the ominous-bottle path.
+fn potion_effects(
+    contents: &steel_registry::data_components::PotionContents,
+) -> Vec<(steel_registry::mob_effect::MobEffectRef, i32, i32)> {
+    let mut effects = Vec::new();
+
+    if let Some(potion) = contents.potion() {
+        for effect in potion.value().effects {
+            effects.push((effect.effect, effect.duration, effect.amplifier));
+        }
+    }
+    for effect in contents.custom_effects() {
+        effects.push((effect.effect(), effect.duration(), effect.amplifier()));
+    }
+
+    effects
 }
 
 /// Trait defining the behavior of an item.
@@ -331,5 +374,103 @@ impl ItemBehaviorRegistry {
 impl Default for ItemBehaviorRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod potion_tests {
+    use steel_registry::data_components::PotionContents;
+    use steel_registry::data_components::vanilla_components::POTION_CONTENTS;
+    use steel_registry::mob_effect::instance::MobEffectInstance as RegistryMobEffectInstance;
+    use steel_registry::registry::reference::RegistryReference;
+    use steel_registry::{
+        init_vanilla_registry, item_stack::ItemStack, vanilla_items, vanilla_mob_effects,
+        vanilla_potions,
+    };
+
+    use super::potion_effects;
+
+    fn bottle_of(potion: &'static steel_registry::potion::Potion) -> ItemStack {
+        let mut stack = ItemStack::new(&vanilla_items::POTION);
+        stack.set(
+            POTION_CONTENTS,
+            PotionContents::new(Some(RegistryReference::new(potion)), None, Vec::new(), None),
+        );
+        stack
+    }
+
+    #[test]
+    fn a_water_bottle_grants_nothing() {
+        init_vanilla_registry();
+        let water = bottle_of(&vanilla_potions::WATER);
+        let contents = water.get(POTION_CONTENTS).expect("bottle holds contents");
+        assert!(potion_effects(contents).is_empty());
+    }
+
+    #[test]
+    fn a_swiftness_bottle_grants_speed_for_its_own_duration() {
+        init_vanilla_registry();
+        let swiftness = bottle_of(&vanilla_potions::SWIFTNESS);
+        let contents = swiftness.get(POTION_CONTENTS).expect("holds contents");
+        let effects = potion_effects(contents);
+
+        assert_eq!(effects.len(), 1);
+        let (effect, duration, amplifier) = effects[0];
+        assert_eq!(effect, &*vanilla_mob_effects::SPEED);
+        assert!(duration > 0, "a timed potion must carry a duration");
+        assert_eq!(amplifier, 0);
+    }
+
+    #[test]
+    fn the_long_variant_lasts_longer_than_the_plain_one() {
+        init_vanilla_registry();
+        let plain = bottle_of(&vanilla_potions::SWIFTNESS);
+        let long = bottle_of(&vanilla_potions::LONG_SWIFTNESS);
+
+        let plain_duration = potion_effects(plain.get(POTION_CONTENTS).expect("contents"))[0].1;
+        let long_duration = potion_effects(long.get(POTION_CONTENTS).expect("contents"))[0].1;
+        assert!(long_duration > plain_duration);
+    }
+
+    #[test]
+    fn the_strong_variant_raises_the_amplifier_rather_than_the_duration() {
+        init_vanilla_registry();
+        let plain = bottle_of(&vanilla_potions::SWIFTNESS);
+        let strong = bottle_of(&vanilla_potions::STRONG_SWIFTNESS);
+
+        let plain_amplifier = potion_effects(plain.get(POTION_CONTENTS).expect("contents"))[0].2;
+        let strong_amplifier = potion_effects(strong.get(POTION_CONTENTS).expect("contents"))[0].2;
+        assert!(strong_amplifier > plain_amplifier);
+    }
+
+    #[test]
+    fn custom_effects_come_through_alongside_the_potion() {
+        init_vanilla_registry();
+        let mut stack = ItemStack::new(&vanilla_items::POTION);
+        stack.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                Some(RegistryReference::new(&vanilla_potions::SWIFTNESS)),
+                None,
+                vec![RegistryMobEffectInstance::simple(
+                    &vanilla_mob_effects::JUMP_BOOST,
+                    200,
+                    1,
+                )],
+                None,
+            ),
+        );
+
+        let effects = potion_effects(stack.get(POTION_CONTENTS).expect("contents"));
+        assert_eq!(
+            effects.len(),
+            2,
+            "the potion's own effect and the custom one"
+        );
+        assert!(
+            effects
+                .iter()
+                .any(|(effect, _, _)| *effect == &*vanilla_mob_effects::JUMP_BOOST)
+        );
     }
 }
