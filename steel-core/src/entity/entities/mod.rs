@@ -8,7 +8,7 @@ pub use mobs::hostile::{
     CaveSpiderEntity, CreeperEntity, HuskEntity, SkeletonEntity, SpiderEntity, StrayEntity,
     ZombieEntity,
 };
-pub use mobs::passive::{CowEntity, PigEntity, SheepEntity};
+pub use mobs::passive::{ChickenEntity, CowEntity, PigEntity, SheepEntity};
 pub use objects::display_ui::{BlockDisplayEntity, ItemFrameEntity, LeashFenceKnotEntity};
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};

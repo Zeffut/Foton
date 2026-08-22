@@ -2967,6 +2967,25 @@ fn living_entity_loot_ref<E: LivingEntity + ?Sized>(entity: &E) -> EntityRef<'_>
 
 /// Runs vanilla `LivingEntity.dropFromShearingLootTable` for `loot_table`, returning the
 /// drops resolved with the vanilla shearing loot params (origin, entity, tool).
+/// Rolls a gift loot table for one entity.
+///
+/// Vanilla parity: `Mob.dropFromGiftLootTable`, which is how a chicken lays an
+/// egg and a cat leaves a present. Unlike shearing there is no tool involved.
+pub(crate) fn gift_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
+    entity: &E,
+    loot_table: LootTableRef,
+    rng: &mut R,
+) -> Vec<ItemStack> {
+    let position = entity.position();
+    let mut context = LootContext::new(rng)
+        .with_origin(position.x, position.y, position.z)
+        .with_this_entity(living_entity_loot_ref(entity));
+    if let Some(level) = entity.level() {
+        context = context.with_game_time(level.game_time());
+    }
+    loot_table.get_random_items(&mut context)
+}
+
 pub(crate) fn shearing_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
     entity: &E,
     loot_table: LootTableRef,
