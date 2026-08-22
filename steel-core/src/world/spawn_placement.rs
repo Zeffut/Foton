@@ -10,16 +10,35 @@
 use std::sync::Arc;
 
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::blocks::shapes::is_shape_full_block;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::fluid::{is_lava_fluid, is_water_fluid};
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::{vanilla_blocks, vanilla_entities};
 use steel_utils::{BlockPos, BlockStateId, Direction};
 
-use crate::behavior::BLOCK_BEHAVIORS;
+use crate::behavior::{BLOCK_BEHAVIORS, BlockStateBehaviorExt as _};
+use crate::entity::ai::path::PathComputationType;
 use crate::entity::ai::walk::WalkPathEvaluator;
 use crate::world::signal_getter::SignalQueryContext;
 use crate::world::{LevelReader as _, World};
+
+/// Somewhere the spawn rules can read blocks from.
+///
+/// Vanilla passes a `LevelReader`, which a chunk still being generated
+/// satisfies just as well as a running world. Steel's `World` and its
+/// `WorldGenRegion` share no such trait, so the placement tests take this
+/// instead and both spawners get the same answers from the same code.
+pub trait SpawnBlockSource {
+    /// Returns the block at `pos`.
+    fn spawn_block_state(&self, pos: BlockPos) -> BlockStateId;
+}
+
+impl SpawnBlockSource for Arc<World> {
+    fn spawn_block_state(&self, pos: BlockPos) -> BlockStateId {
+        self.get_block_state(pos)
+    }
+}
 
 /// Brightest a block may glow and still be spawned on.
 ///
@@ -129,7 +148,7 @@ impl SpawnPlacementType {
     #[must_use]
     pub fn is_spawn_position_ok(
         self,
-        world: &Arc<World>,
+        level: &impl SpawnBlockSource,
         pos: BlockPos,
         entity_type: EntityTypeRef,
     ) -> bool {
@@ -137,16 +156,41 @@ impl SpawnPlacementType {
             Self::NoRestrictions => true,
             Self::InWater => {
                 let above = pos.above();
-                is_water_fluid(world.get_block_state(pos).get_fluid_state().fluid_id)
-                    && !is_redstone_conductor(world, above)
+                is_water_fluid(level.spawn_block_state(pos).get_fluid_state().fluid_id)
+                    && !is_redstone_conductor(level, above)
             }
-            Self::InLava => is_lava_fluid(world.get_block_state(pos).get_fluid_state().fluid_id),
+            Self::InLava => is_lava_fluid(level.spawn_block_state(pos).get_fluid_state().fluid_id),
             Self::OnGround => {
                 let below = pos.below();
-                is_valid_spawn_block(world, below)
-                    && is_valid_empty_spawn_block(world, pos, entity_type)
-                    && is_valid_empty_spawn_block(world, pos.above(), entity_type)
+                is_valid_spawn_block(level, below)
+                    && is_valid_empty_spawn_block(level, pos, entity_type)
+                    && is_valid_empty_spawn_block(level, pos.above(), entity_type)
             }
+        }
+    }
+
+    /// Nudges a candidate position down onto the block a mob would stand on.
+    ///
+    /// Vanilla parity: `SpawnPlacementType.adjustSpawnPosition`. Only ground
+    /// spawns move: the heightmap points at the first free block, and vanilla
+    /// steps back down into it when a mob could walk there.
+    #[must_use]
+    pub fn adjust_spawn_position(
+        self,
+        level: &impl SpawnBlockSource,
+        candidate: BlockPos,
+    ) -> BlockPos {
+        if self != Self::OnGround {
+            return candidate;
+        }
+        let below = candidate.below();
+        if level
+            .spawn_block_state(below)
+            .is_pathfindable(PathComputationType::Land)
+        {
+            below
+        } else {
+            candidate
         }
     }
 }
@@ -158,9 +202,9 @@ impl SpawnPlacementType {
 /// TODO: the handful of blocks that override `isValidSpawn` -- magma, nether
 /// wart blocks, the ones that only take fire-immune mobs -- still answer with
 /// the default here, because Steel's block behaviors have no such hook yet.
-pub(crate) fn is_valid_spawn_block(world: &Arc<World>, pos: BlockPos) -> bool {
-    let state = world.get_block_state(pos);
-    world.is_face_sturdy(state, pos, Direction::Up)
+pub(crate) fn is_valid_spawn_block(level: &impl SpawnBlockSource, pos: BlockPos) -> bool {
+    let state = level.spawn_block_state(pos);
+    state.is_face_sturdy_at(pos, Direction::Up)
         && state.get_light_emission() < MAX_SPAWNABLE_LIGHT_EMISSION
 }
 
@@ -168,12 +212,12 @@ pub(crate) fn is_valid_spawn_block(world: &Arc<World>, pos: BlockPos) -> bool {
 ///
 /// Vanilla parity: `NaturalSpawner.isValidEmptySpawnBlock`.
 fn is_valid_empty_spawn_block(
-    world: &Arc<World>,
+    level: &impl SpawnBlockSource,
     pos: BlockPos,
     entity_type: EntityTypeRef,
 ) -> bool {
-    let state = world.get_block_state(pos);
-    if world.is_collision_shape_full_block_at(pos, state) {
+    let state = level.spawn_block_state(pos);
+    if is_collision_shape_full_block(state) {
         return false;
     }
     if is_signal_source(state) {
@@ -195,8 +239,17 @@ fn is_valid_empty_spawn_block(
 ///
 /// Vanilla parity: the default `BlockBehaviour.Properties.isRedstoneConductor`,
 /// which is `isCollisionShapeFullBlock`.
-fn is_redstone_conductor(world: &Arc<World>, pos: BlockPos) -> bool {
-    world.is_collision_shape_full_block_at(pos, world.get_block_state(pos))
+fn is_redstone_conductor(level: &impl SpawnBlockSource, pos: BlockPos) -> bool {
+    is_collision_shape_full_block(level.spawn_block_state(pos))
+}
+
+/// Returns whether a block fills its cube for collision.
+///
+/// Vanilla parity: `BlockStateBase.isCollisionShapeFullBlock`, which vanilla
+/// caches on the state; the static shape is that cached answer, so spawning
+/// asks the state rather than the level.
+fn is_collision_shape_full_block(state: BlockStateId) -> bool {
+    is_shape_full_block(state.get_static_collision_shape())
 }
 
 /// Returns whether a block emits redstone on its own.
