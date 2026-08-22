@@ -2,6 +2,7 @@
 
 mod barrel;
 mod beehive;
+mod brewing_stand;
 mod brushable;
 mod chest;
 mod chiseled_bookshelf;
@@ -20,6 +21,10 @@ mod sign;
 pub use barrel::{BARREL_SLOTS, BarrelBlockEntity};
 pub use beehive::{
     BEEHIVE_MAX_OCCUPANTS, BEEHIVE_MIN_OCCUPATION_TICKS_NECTARLESS, BeehiveBlockEntity,
+};
+pub use brewing_stand::{
+    BOTTLE_SLOTS, BREWING_STAND_SLOTS, BrewingStandBlockEntity, BrewingStandDataSlots,
+    SLOT_FIRST_BOTTLE, SLOT_INGREDIENT,
 };
 pub use brushable::BrushableBlockEntity;
 pub use chest::{CHEST_SLOTS, ChestBlockEntity};

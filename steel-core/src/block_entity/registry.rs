@@ -16,11 +16,11 @@ use steel_utils::{BlockPos, BlockStateId};
 
 use super::SharedBlockEntity;
 use super::entities::{
-    BarrelBlockEntity, BeehiveBlockEntity, BrushableBlockEntity, ChestBlockEntity,
-    ChiseledBookShelfBlockEntity, ComparatorBlockEntity, DaylightDetectorBlockEntity,
-    DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity,
-    HopperBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity,
-    SignBlockEntity,
+    BarrelBlockEntity, BeehiveBlockEntity, BrewingStandBlockEntity, BrushableBlockEntity,
+    ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity,
+    DaylightDetectorBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
+    FurnaceBlockEntity, HopperBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
+    RawBlockEntity, SignBlockEntity,
 };
 use crate::world::World;
 
@@ -231,6 +231,11 @@ pub fn init_block_entities() {
         registry.register(&vanilla_block_entity_types::FURNACE, |level, pos, state| {
             Arc::new(FurnaceBlockEntity::new(level, pos, state))
         });
+
+        registry.register(
+            &vanilla_block_entity_types::BREWING_STAND,
+            |level, pos, state| Arc::new(BrewingStandBlockEntity::new(level, pos, state)),
+        );
 
         registry.register(
             &vanilla_block_entity_types::BLAST_FURNACE,

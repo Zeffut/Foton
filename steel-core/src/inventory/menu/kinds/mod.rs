@@ -2,6 +2,7 @@
 
 mod anvil_menu;
 mod basic_menu;
+mod brewing_stand_menu;
 mod chest_menu;
 mod crafting_menu;
 mod dispenser_menu;
@@ -11,6 +12,7 @@ mod inventory_menu;
 
 pub use anvil_menu::{AnvilKind, anvil};
 pub use basic_menu::BasicKind;
+pub use brewing_stand_menu::{BrewingStandKind, brewing_stand};
 pub use chest_menu::{ChestKind, chest, double_chest};
 pub use crafting_menu::{CraftingKind, crafting};
 pub use dispenser_menu::{DispenserKind, dispenser};

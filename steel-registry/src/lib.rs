@@ -78,6 +78,7 @@ pub mod pig_variant;
 pub mod poi;
 pub mod position_source;
 pub mod potion;
+pub mod potion_brewing;
 pub mod recipe;
 pub mod registry;
 pub use registry::holder;
