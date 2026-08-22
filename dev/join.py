@@ -9,7 +9,9 @@ keeps players out of the world cannot pass unnoticed.
 Used by dev/join-test.sh, which boots an offline-mode server for it.
 """
 
+import os
 import socket
+import time
 import struct
 import sys
 import zlib
@@ -45,13 +47,17 @@ CONFIG_S_KEEP_ALIVE = 4
 CONFIG_S_PONG = 5
 CONFIG_S_SELECT_KNOWN_PACKS = 7
 
+PLAY_C_ADD_ENTITY = 1
+PLAY_C_CHUNK_BATCH_FINISHED = 11
 PLAY_C_LOGIN = 49
 PLAY_C_DISCONNECT = 32
 PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_S_ACCEPT_TELEPORTATION = 0
+PLAY_S_CHUNK_BATCH_RECEIVED = 11
 PLAY_S_KEEP_ALIVE = 28
+PLAY_S_PLAYER_LOADED = 44
 
 # A joining client should not need anywhere near this many packets to be placed
 # in the world and sent its surroundings; the bound just stops a stall from
@@ -61,6 +67,11 @@ MAX_PLAY_PACKETS = 4000
 # Enough to prove terrain is really streaming, not just that one chunk slipped
 # through.
 REQUIRED_CHUNKS = 9
+
+# Optional: stay in the world afterwards and report what spawns nearby.
+# Natural spawning needs a player present, so watching from inside is the
+# only way to see it happen.
+WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 
 
 def varint(value):
@@ -219,6 +230,40 @@ def run_configuration(connection):
             registry_packets += 1
 
 
+# How many chunks the client claims it can take each tick. The server throttles
+# the next batch on this, and a client that never answers is sent nothing more
+# after the first batch -- which also means it is never told about the entities
+# standing in every chunk it did not get.
+DESIRED_CHUNKS_PER_TICK = 64.0
+
+
+def acknowledge_chunk_batch(connection):
+    connection.send(
+        PLAY_S_CHUNK_BATCH_RECEIVED,
+        struct.pack(">f", DESIRED_CHUNKS_PER_TICK),
+    )
+
+
+def read_add_entity_type(payload):
+    """Returns the entity type id out of a play AddEntity packet.
+
+    The packet opens with the entity id, a raw sixteen-byte UUID, then the type,
+    which is all this needs; the position and rotation that follow are ignored.
+    """
+    _entity_id, rest = read_varint(payload)
+    entity_type, _rest = read_varint(rest[16:])
+    return entity_type
+
+
+def describe_spawns(spawned):
+    if not spawned:
+        return "nothing"
+    return ", ".join(
+        f"type {entity_type}x{count}"
+        for entity_type, count in sorted(spawned.items(), key=lambda kv: -kv[1])
+    )
+
+
 def describe(seen):
     """Renders what arrived, busiest first, so a stall says what it was doing."""
     return ", ".join(
@@ -227,7 +272,7 @@ def describe(seen):
     )
 
 
-def run_play(connection):
+def run_play(connection, watch_seconds=0):
     """Plays far enough to prove the player is really in a loaded world.
 
     Joining is not enough on its own: the server has to place the player and
@@ -238,6 +283,7 @@ def run_play(connection):
     positioned = False
     chunks = 0
     seen = {}
+    spawned = {}
 
     for _ in range(MAX_PLAY_PACKETS):
         try:
@@ -251,6 +297,10 @@ def run_play(connection):
             return
         seen[packet_id] = seen.get(packet_id, 0) + 1
 
+        if packet_id == PLAY_C_ADD_ENTITY:
+            spawn_type = read_add_entity_type(payload)
+            spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
+
         if packet_id == PLAY_C_LOGIN:
             entity_id = struct.unpack(">i", payload[:4])[0]
             print(f"  joined the world as entity {entity_id}")
@@ -263,6 +313,8 @@ def run_play(connection):
             positioned = True
         elif packet_id == PLAY_C_LEVEL_CHUNK_WITH_LIGHT:
             chunks += 1
+        elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
+            acknowledge_chunk_batch(connection)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
@@ -270,6 +322,11 @@ def run_play(connection):
 
         if joined and positioned and chunks >= REQUIRED_CHUNKS:
             print(f"  placed in the world and sent {chunks} chunks")
+            # A real client says when it has finished loading, and the server
+            # holds back interactions until it does.
+            connection.send(PLAY_S_PLAYER_LOADED)
+            if watch_seconds > 0:
+                watch_for_spawns(connection, watch_seconds, spawned)
             return
 
     fail(
@@ -277,6 +334,36 @@ def run_play(connection):
         f"(joined={joined}, positioned={positioned}, chunks={chunks}; "
         f"got {describe(seen)})"
     )
+
+
+def watch_for_spawns(connection, seconds, spawned):
+    """Stays in the world and reports what the server spawns around the player.
+
+    Natural spawning only runs near a player, so the only way to see whether it
+    works is to be one. This keeps answering keep-alives so the server holds the
+    connection, and counts every entity it is told about.
+    """
+    print(f"  watching for spawns for {seconds}s")
+    deadline = time.monotonic() + seconds
+
+    while time.monotonic() < deadline:
+        try:
+            packet_id, payload = connection.receive()
+        except (OSError, EOFError):
+            break
+
+        if packet_id == PLAY_C_ADD_ENTITY:
+            spawn_type = read_add_entity_type(payload)
+            spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
+        elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
+            acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_KEEP_ALIVE:
+            connection.send(PLAY_S_KEEP_ALIVE, payload)
+        elif packet_id == PLAY_C_DISCONNECT:
+            fail(f"disconnected while watching: {payload[:200]!r}")
+            return
+
+    print(f"  spawned around the player: {describe_spawns(spawned)}")
 
 
 def main():
@@ -302,7 +389,7 @@ def main():
 
     print("=== Play ===")
     sock.settimeout(PLAY_SILENCE_TIMEOUT_SECONDS)
-    run_play(connection)
+    run_play(connection, watch_seconds=WATCH_SECONDS)
 
     sock.close()
     print("JOIN STATUS: OK")
