@@ -755,6 +755,7 @@ mod living_entity;
 mod manager;
 mod mob;
 mod movement_sync;
+pub mod neutral_mob;
 pub mod projectile;
 mod registry;
 mod spawn;
