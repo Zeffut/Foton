@@ -550,6 +550,40 @@ fn attached_containers_at(world: &Arc<World>, pos: BlockPos) -> AttachedContaine
         .get_attached_containers(state, world.as_ref(), pos)
 }
 
+/// Hands `stack` to whatever container sits at `pos`, entering through `face`.
+///
+/// Returns `None` when there is no container there at all, which is the case a
+/// dropper answers by throwing the item instead; otherwise the part of `stack`
+/// that did not fit.
+///
+/// Vanilla parity: the `HopperBlockEntity.getContainerAt` plus
+/// `HopperBlockEntity.addItem` pair that `DropperBlock.dispenseFrom` uses.
+pub fn insert_into_containers_at(
+    world: &Arc<World>,
+    pos: BlockPos,
+    stack: ItemStack,
+    face: Direction,
+) -> Option<ItemStack> {
+    let targets = attached_containers_at(world, pos);
+    if targets.is_empty() {
+        return None;
+    }
+
+    let mut guard = ContainerLockGuard::lock_all(&targets);
+    let leftover = add_item(
+        &mut guard,
+        None,
+        &targets,
+        stack,
+        Some(face),
+        world.game_time(),
+    );
+    if leftover.is_empty() {
+        mark_changed(&mut guard, &targets);
+    }
+    Some(leftover)
+}
+
 /// Returns whether a full block above the hopper stops it picking items up.
 ///
 /// Vanilla parity: the `isBlocked` test of `suckInItems`.
