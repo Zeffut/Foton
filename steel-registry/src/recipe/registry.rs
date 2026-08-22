@@ -3,7 +3,7 @@
 use rustc_hash::FxHashMap;
 use steel_utils::Identifier;
 
-use super::cooking::SmeltingRecipe;
+use super::cooking::{CookingKind, SmeltingRecipe};
 use super::crafting::{CraftingInput, CraftingRecipe, ShapedRecipe, ShapelessRecipe};
 use crate::item_stack::ItemStack;
 
@@ -19,6 +19,10 @@ pub struct RecipeRegistry {
     shapeless_recipes: Vec<&'static ShapelessRecipe>,
     /// All furnace smelting recipes.
     smelting_recipes: Vec<&'static SmeltingRecipe>,
+    /// All blast furnace recipes.
+    blasting_recipes: Vec<&'static SmeltingRecipe>,
+    /// All smoker recipes.
+    smoking_recipes: Vec<&'static SmeltingRecipe>,
     /// Whether registration is still allowed.
     allows_registering: bool,
 }
@@ -39,6 +43,8 @@ impl RecipeRegistry {
             shaped_recipes: Vec::new(),
             shapeless_recipes: Vec::new(),
             smelting_recipes: Vec::new(),
+            blasting_recipes: Vec::new(),
+            smoking_recipes: Vec::new(),
             allows_registering: true,
         }
     }
@@ -76,6 +82,55 @@ impl RecipeRegistry {
             "Cannot register recipes after the registry has been frozen"
         );
         self.smelting_recipes.push(recipe);
+    }
+
+    /// Registers a blast furnace recipe.
+    pub fn register_blasting(&mut self, recipe: &'static SmeltingRecipe) {
+        assert!(
+            self.allows_registering,
+            "Cannot register recipes after the registry has been frozen"
+        );
+        self.blasting_recipes.push(recipe);
+    }
+
+    /// Registers a smoker recipe.
+    pub fn register_smoking(&mut self, recipe: &'static SmeltingRecipe) {
+        assert!(
+            self.allows_registering,
+            "Cannot register recipes after the registry has been frozen"
+        );
+        self.smoking_recipes.push(recipe);
+    }
+
+    /// Returns the recipes of one cooking family.
+    const fn cooking_recipes(&self, kind: CookingKind) -> &Vec<&'static SmeltingRecipe> {
+        match kind {
+            CookingKind::Smelting => &self.smelting_recipes,
+            CookingKind::Blasting => &self.blasting_recipes,
+            CookingKind::Smoking => &self.smoking_recipes,
+        }
+    }
+
+    /// Finds the recipe of `kind` that accepts `input`.
+    ///
+    /// Unlike [`Self::find_smelting_result`], this returns the recipe itself, which
+    /// a furnace needs for its cooking time and experience reward.
+    #[must_use]
+    pub fn find_cooking_recipe(
+        &self,
+        kind: CookingKind,
+        input: &ItemStack,
+    ) -> Option<&'static SmeltingRecipe> {
+        self.cooking_recipes(kind)
+            .iter()
+            .find(|recipe| recipe.matches(input))
+            .copied()
+    }
+
+    /// Returns the number of recipes in one cooking family.
+    #[must_use]
+    pub const fn cooking_count(&self, kind: CookingKind) -> usize {
+        self.cooking_recipes(kind).len()
     }
 
     /// Finds a matching crafting recipe for the given positioned input.
@@ -217,5 +272,59 @@ impl crate::RegistryEntry for CraftingRecipe {
     fn try_id(&self) -> Option<usize> {
         use crate::RegistryExt;
         crate::REGISTRY.recipes.id_from_key(self.id())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{REGISTRY, init_vanilla_registry, vanilla_items};
+
+    #[test]
+    fn every_cooking_family_is_populated() {
+        init_vanilla_registry();
+        let recipes = &REGISTRY.recipes;
+        assert!(recipes.cooking_count(CookingKind::Smelting) > 0);
+        assert!(recipes.cooking_count(CookingKind::Blasting) > 0);
+        assert!(recipes.cooking_count(CookingKind::Smoking) > 0);
+    }
+
+    #[test]
+    fn blasting_is_twice_as_fast_as_smelting_for_the_same_ore() {
+        init_vanilla_registry();
+        let recipes = &REGISTRY.recipes;
+        let raw_iron = ItemStack::new(&vanilla_items::RAW_IRON);
+
+        let smelted = recipes
+            .find_cooking_recipe(CookingKind::Smelting, &raw_iron)
+            .expect("raw iron smelts in a furnace");
+        let blasted = recipes
+            .find_cooking_recipe(CookingKind::Blasting, &raw_iron)
+            .expect("raw iron smelts in a blast furnace");
+
+        assert_eq!(smelted.cooking_time, 200);
+        assert_eq!(blasted.cooking_time, 100);
+        assert!(smelted.result.item.key == blasted.result.item.key);
+    }
+
+    #[test]
+    fn a_smoker_cooks_food_but_never_ore() {
+        init_vanilla_registry();
+        let recipes = &REGISTRY.recipes;
+
+        let beef = ItemStack::new(&vanilla_items::BEEF);
+        assert!(
+            recipes
+                .find_cooking_recipe(CookingKind::Smoking, &beef)
+                .is_some()
+        );
+
+        let raw_iron = ItemStack::new(&vanilla_items::RAW_IRON);
+        assert!(
+            recipes
+                .find_cooking_recipe(CookingKind::Smoking, &raw_iron)
+                .is_none(),
+            "a smoker must refuse ore"
+        );
     }
 }

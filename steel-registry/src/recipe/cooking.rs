@@ -6,6 +6,21 @@ use crate::item_stack::ItemStack;
 
 use super::{Ingredient, RecipeResult};
 
+/// Which cooking block a recipe belongs to.
+///
+/// Vanilla parity: the `RecipeType` passed to `AbstractFurnaceBlockEntity`.
+/// The three families share one recipe shape but are looked up separately, so a
+/// smoker never accepts an ore and a blast furnace never accepts food.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CookingKind {
+    /// Furnace recipes, default cooking time 200 ticks.
+    Smelting,
+    /// Blast furnace recipes, default cooking time 100 ticks.
+    Blasting,
+    /// Smoker recipes, default cooking time 100 ticks.
+    Smoking,
+}
+
 /// A furnace smelting recipe.
 #[derive(Debug)]
 pub struct SmeltingRecipe {
