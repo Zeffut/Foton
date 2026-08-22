@@ -338,6 +338,43 @@ impl Player {
 mod tests {
     use super::*;
 
+    /// `eat_food` must apply the saturation value as-is.
+    ///
+    /// Vanilla has two overloads: `eat(int, float)` derives saturation through
+    /// `saturationByModifier`, while `eat(FoodProperties)` adds it directly. The
+    /// consume path uses the second one. Routing food through the first would
+    /// silently change the saturation of every food in the game, which nothing
+    /// else in the test suite would catch.
+    #[test]
+    fn eat_food_applies_saturation_directly_unlike_the_modifier_overload() {
+        let nutrition = 4;
+        let saturation = 2.4;
+
+        let mut direct = FoodData::new();
+        direct.food_level = 10;
+        direct.saturation_level = 0.0;
+        direct.eat_food(nutrition, saturation);
+
+        assert_eq!(direct.food_level, 14);
+        assert!(
+            (direct.saturation_level - saturation).abs() < f32::EPSILON,
+            "expected the raw saturation {saturation}, got {}",
+            direct.saturation_level
+        );
+
+        // The modifier overload would have produced a different value, which is
+        // exactly the mistake this test exists to catch.
+        let mut via_modifier = FoodData::new();
+        via_modifier.food_level = 10;
+        via_modifier.saturation_level = 0.0;
+        via_modifier.eat(nutrition, saturation);
+
+        assert!(
+            (via_modifier.saturation_level - direct.saturation_level).abs() > f32::EPSILON,
+            "the two overloads must not be interchangeable"
+        );
+    }
+
     #[test]
     fn exhaustion_drains_saturation_then_food() {
         let mut food = FoodData::new();
