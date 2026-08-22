@@ -11,7 +11,9 @@ use steel_registry::blocks::{
 };
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::item::BlockHitResult;
-use steel_registry::{sound_events, vanilla_blocks, vanilla_game_events, vanilla_items};
+use steel_registry::{
+    sound_events, vanilla_blocks, vanilla_damage_types, vanilla_game_events, vanilla_items,
+};
 use steel_utils::{
     BlockPos, BlockStateId,
     types::{InteractionHand, UpdateFlags},
@@ -22,16 +24,14 @@ use crate::{
     behavior::blocks::redstone::MAX_REDSTONE_SIGNAL,
     behavior::{BlockBehavior, BlockPlaceContext, InteractionResult, InventoryAccess},
     entity::Entity,
+    entity::damage::DamageSource,
     level_data::RespawnData,
     player::{Player, PlayerRespawnConfig},
+    world::explosion::ExplosionBlockInteraction,
     world::{LevelReader, World, game_event::GameEventContext},
 };
 
 /// Vanilla respawn anchor
-///
-/// TODO: Implement vanilla invalid-dimension explosion once Steel has a strict
-/// `World::explode` foundation, including block removal, water-sensitive
-/// explosion resistance, and bad-respawn-point explosion damage source.
 #[block_behavior]
 pub struct RespawnAnchorBlock {
     block: BlockRef,
@@ -39,6 +39,37 @@ pub struct RespawnAnchorBlock {
 const CHARGES: &IntProperty = &BlockStateProperties::RESPAWN_ANCHOR_CHARGES;
 impl RespawnAnchorBlock {
     const MAX_CHARGES: u8 = 4;
+
+    /// Blows the anchor up when it is used in a dimension that forbids it.
+    ///
+    /// Vanilla parity: `RespawnAnchorBlock.explode`. The anchor removes itself
+    /// first, then detonates a radius-5 fiery blast that breaks blocks.
+    fn explode(world: &Arc<World>, pos: BlockPos) {
+        world.set_block(
+            pos,
+            vanilla_blocks::AIR.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        );
+
+        // TODO: Vanilla raises the resistance at the anchor's own position to
+        // water's when a horizontal neighbour or the block above holds water, which
+        // shrinks the crater. That needs a per-position resistance override on
+        // World::explode.
+        let center = DVec3::new(
+            f64::from(pos.x()) + 0.5,
+            f64::from(pos.y()) + 0.5,
+            f64::from(pos.z()) + 0.5,
+        );
+        let damage_source = DamageSource::environment(&vanilla_damage_types::BAD_RESPAWN_POINT);
+        world.explode(
+            None,
+            Some(damage_source),
+            center,
+            5.0,
+            true,
+            ExplosionBlockInteraction::Destroy,
+        );
+    }
 
     /// New respawn anchor behavior
     #[must_use]
@@ -235,8 +266,7 @@ impl BlockBehavior for RespawnAnchorBlock {
         }
 
         if !Self::can_set_spawn(world, pos) {
-            // TODO: Once `World::explode` exist remove the anchor and use the
-            // watersensitive bad respawn point explosion behavior
+            Self::explode(world, pos);
             return InteractionResult::SuccessServer;
         }
 
