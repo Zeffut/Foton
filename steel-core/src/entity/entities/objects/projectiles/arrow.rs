@@ -118,6 +118,39 @@ impl ArrowEntity {
         arrow
     }
 
+    /// Spawns an arrow aimed at `target` rather than along the shooter's look.
+    ///
+    /// Vanilla parity: the aiming maths of `AbstractSkeleton.performRangedAttack`,
+    /// which lifts the shot by a fifth of the horizontal distance so the arc lands
+    /// on target.
+    pub fn shoot_at(
+        world: &Arc<World>,
+        shooter: &dyn Entity,
+        target: DVec3,
+        power: f32,
+        uncertainty: f32,
+    ) -> Arc<Self> {
+        let position = shooter.position().with_y(shooter.get_eye_y() - 0.1);
+        let arrow = Arc::new(Self::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            position,
+            Arc::downgrade(world),
+        ));
+        arrow.set_owner_uuid(Some(shooter.uuid()));
+
+        let dx = target.x - position.x;
+        let dz = target.z - position.z;
+        let horizontal = dx.hypot(dz);
+        let dy = horizontal.mul_add(0.2, target.y - position.y);
+        arrow.shoot(DVec3::new(dx, dy, dz), power, uncertainty);
+
+        if let Err(error) = world.try_add_entity(Arc::clone(&arrow) as Arc<dyn Entity>) {
+            log::error!("failed to add arrow entity: {error}");
+        }
+        arrow
+    }
+
     /// Returns whether the arrow is stuck in a block.
     #[must_use]
     pub fn is_in_ground(&self) -> bool {
