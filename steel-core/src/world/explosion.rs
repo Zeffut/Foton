@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
-use steel_registry::vanilla_damage_types;
+use steel_registry::{vanilla_attributes, vanilla_damage_types};
 use steel_utils::{BlockPos, WorldAabb};
 
 use crate::entity::damage::DamageSource;
@@ -183,13 +183,27 @@ impl World {
             }
 
             let exposure = f64::from(self.seen_percent(center, entity.as_ref()));
-            let damage = ((distance.mul_add(-1.0, 1.0) * exposure).mul_add(
-                distance.mul_add(-1.0, 1.0) * exposure,
-                distance.mul_add(-1.0, 1.0) * exposure,
-            ) / 2.0)
-                .mul_add(7.0 * reach, 1.0);
 
+            // Vanilla parity: `ExplosionDamageCalculator.getEntityDamageAmount`.
+            let impact = (1.0 - distance) * exposure;
+            let damage = (impact.mul_add(impact, impact) / 2.0).mul_add(7.0 * reach, 1.0);
             entity.hurt(self, &damage_source, damage as f32);
+
+            // Vanilla pushes from the blast toward the entity's eyes.
+            let origin = entity.position().with_y(entity.get_eye_y());
+            let direction = origin - center;
+            if direction.length_squared() > 0.0 {
+                let resistance = entity.as_living_entity().map_or(0.0, |living| {
+                    living
+                        .attributes()
+                        .lock()
+                        .required_value(&vanilla_attributes::EXPLOSION_KNOCKBACK_RESISTANCE)
+                });
+                let power = impact * (1.0 - resistance);
+                let knockback = direction.normalize() * power;
+                entity.set_velocity(entity.velocity() + knockback);
+                entity.mark_velocity_sync();
+            }
         }
     }
 
