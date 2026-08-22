@@ -870,7 +870,16 @@ pub trait LivingEntity: Entity {
     }
 
     /// Processes vanilla living death side effects.
+    ///
+    /// Override this to add what a specific mob does as it dies, and call
+    /// [`Self::living_die`] from the override for the shared behavior; Rust has
+    /// no `super`, so the base body lives in its own method.
     fn die(&self, source: &DamageSource) {
+        self.living_die(source);
+    }
+
+    /// Shared body of vanilla `LivingEntity.die`.
+    fn living_die(&self, source: &DamageSource) {
         if self.is_removed() {
             return;
         }

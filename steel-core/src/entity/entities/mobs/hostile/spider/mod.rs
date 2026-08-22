@@ -71,7 +71,7 @@ impl SpiderTargetGoal {
     /// Creates the daylight-gated target search for a spider.
     pub(super) fn new_for_players() -> Self {
         Self {
-            inner: NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
+            inner: NearestAttackableTargetGoal::new_for_players(true, |_, _, _| true),
         }
     }
 }

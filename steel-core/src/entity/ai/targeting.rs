@@ -7,7 +7,8 @@ use crate::world::World;
 
 const MIN_VISIBILITY_DISTANCE_FOR_INVISIBLE_TARGET: f64 = 2.0;
 
-pub(crate) type TargetingSelector = Arc<dyn Fn(&dyn LivingEntity, &World) -> bool + Send + Sync>;
+pub(crate) type TargetingSelector =
+    Arc<dyn Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool + Send + Sync>;
 
 #[derive(Clone)]
 pub(crate) struct TargetingConditions {
@@ -58,9 +59,19 @@ impl TargetingConditions {
     }
 
     #[must_use]
+    /// Narrows what counts as a target.
+    ///
+    /// The searching mob is passed alongside the candidate because some rules
+    /// are relative to it: a slime only takes a player within four blocks of
+    /// its own height, and that cannot be decided from the candidate alone.
+    /// Vanilla writes those lambdas inside the mob and captures `this`; Steel
+    /// builds its goals before the mob exists, so the searcher arrives here.
     pub(crate) fn selector(
         mut self,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.selector = Some(Arc::new(selector));
         self
@@ -80,7 +91,7 @@ impl TargetingConditions {
             return false;
         }
         if let Some(selector) = &self.selector
-            && !selector(target, world)
+            && !selector(targeter, target, world)
         {
             return false;
         }

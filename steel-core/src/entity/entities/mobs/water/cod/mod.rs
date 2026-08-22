@@ -90,7 +90,7 @@ impl CodEntity {
                     fish::AVOID_PLAYER_RANGE,
                     fish::AVOID_WALK_SPEED,
                     fish::AVOID_SPRINT_SPEED,
-                    |target, _| fish::is_player_to_flee(target),
+                    |_, target, _| fish::is_player_to_flee(target),
                 ),
             );
             goals.add_goal(

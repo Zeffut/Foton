@@ -26,7 +26,10 @@ impl NearestAttackableTargetGoal {
     #[must_use]
     pub(crate) fn new(
         must_see: bool,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self::new_with_interval(DEFAULT_RANDOM_INTERVAL, must_see, false, selector)
     }
@@ -36,7 +39,10 @@ impl NearestAttackableTargetGoal {
         random_interval: i32,
         must_see: bool,
         must_reach: bool,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self::new_with_options(
             random_interval,
@@ -50,7 +56,10 @@ impl NearestAttackableTargetGoal {
     #[must_use]
     pub(crate) fn new_for_players(
         must_see: bool,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self::new_for_players_with_interval(DEFAULT_RANDOM_INTERVAL, must_see, false, selector)
     }
@@ -60,7 +69,10 @@ impl NearestAttackableTargetGoal {
         random_interval: i32,
         must_see: bool,
         must_reach: bool,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self::new_with_options(
             random_interval,
@@ -75,7 +87,10 @@ impl NearestAttackableTargetGoal {
         random_interval: i32,
         must_see: bool,
         must_reach: bool,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
         search: TargetSearch,
     ) -> Self {
         Self {
@@ -209,7 +224,7 @@ mod tests {
         let (_world, hunter, nearer_pig, _farther_cow) =
             animal_fixture("nearest_attackable_selector");
         let mut goal =
-            NearestAttackableTargetGoal::new_with_interval(0, false, false, |target, _| {
+            NearestAttackableTargetGoal::new_with_interval(0, false, false, |_, target, _| {
                 target.as_animal().is_some()
             });
 
@@ -226,7 +241,7 @@ mod tests {
     fn selector_can_reject_all_candidates() {
         let (_world, hunter, _nearer_pig, _farther_cow) =
             animal_fixture("nearest_attackable_selector_rejects");
-        let mut goal = NearestAttackableTargetGoal::new(false, |_, _| false);
+        let mut goal = NearestAttackableTargetGoal::new(false, |_, _, _| false);
 
         assert!(!goal.can_use(hunter.as_ref()));
     }

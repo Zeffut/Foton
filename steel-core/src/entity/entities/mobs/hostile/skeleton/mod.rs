@@ -129,7 +129,7 @@ impl SkeletonEntity {
             targets.add_goal(1, HurtByTargetGoal::new());
             targets.add_goal(
                 2,
-                NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
+                NearestAttackableTargetGoal::new_for_players(true, |_, _, _| true),
             );
         }
 

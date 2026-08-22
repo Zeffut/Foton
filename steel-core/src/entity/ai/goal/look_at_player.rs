@@ -9,7 +9,8 @@ use crate::world::World;
 
 const DEFAULT_PROBABILITY: f32 = 0.02;
 
-type LookAtEntitySelector = Box<dyn Fn(&dyn LivingEntity, &World) -> bool + Send + Sync>;
+type LookAtEntitySelector =
+    Box<dyn Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool + Send + Sync>;
 
 enum LookAtTargetType {
     Player,
@@ -56,7 +57,10 @@ impl LookAtPlayerGoal {
     pub(crate) fn new_for_living_entities(
         look_distance: f64,
         probability: f32,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self::new_for_living_entities_with_controls(
             look_distance,
@@ -92,7 +96,10 @@ impl LookAtPlayerGoal {
         probability: f32,
         only_horizontal: bool,
         controls: GoalControls,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self {
             look_at: None,
@@ -136,7 +143,7 @@ impl Goal for LookAtPlayerGoal {
                         .inflate_xyz(self.look_distance, 3.0, self.look_distance);
                 world.nearest_entity_in_aabb_matching(&search_box, origin, |entity| {
                     entity.as_living_entity().is_some_and(|living| {
-                        selector(living, world.as_ref())
+                        selector(Some(mob), living, world.as_ref())
                             && self.look_at_context.test(world.as_ref(), Some(mob), living)
                     })
                 })
@@ -223,7 +230,7 @@ mod tests {
 
     #[test]
     fn look_at_player_goal_supports_selector_based_living_targets() {
-        let goal = LookAtPlayerGoal::new_for_living_entities(8.0, 1.0, |living, _| {
+        let goal = LookAtPlayerGoal::new_for_living_entities(8.0, 1.0, |_, living, _| {
             living.entity_type() == &vanilla_entities::PIG
         });
 

@@ -114,7 +114,7 @@ impl CreeperEntity {
             let mut targets = mob_base.target_selector().lock();
             targets.add_goal(
                 1,
-                NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
+                NearestAttackableTargetGoal::new_for_players(true, |_, _, _| true),
             );
             targets.add_goal(2, HurtByTargetGoal::new());
         }

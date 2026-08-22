@@ -150,7 +150,7 @@ impl WitherSkeletonEntity {
             targets.add_goal(1, HurtByTargetGoal::new());
             targets.add_goal(
                 2,
-                NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
+                NearestAttackableTargetGoal::new_for_players(true, |_, _, _| true),
             );
             // TODO: vanilla also targets AbstractPiglin, IronGolem, and baby
             // Turtle at priority 3; none of those mob types exist in Steel yet.

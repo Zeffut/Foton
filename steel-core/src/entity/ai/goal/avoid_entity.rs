@@ -23,7 +23,7 @@ impl AvoidEntityGoal {
             max_dist,
             walk_speed_modifier,
             sprint_speed_modifier,
-            |target, _| no_creative_or_spectator(target),
+            |_, target, _| no_creative_or_spectator(target),
         )
     }
 
@@ -32,7 +32,10 @@ impl AvoidEntityGoal {
         max_dist: f32,
         walk_speed_modifier: f64,
         sprint_speed_modifier: f64,
-        selector: impl Fn(&dyn LivingEntity, &World) -> bool + Send + Sync + 'static,
+        selector: impl Fn(Option<&dyn LivingEntity>, &dyn LivingEntity, &World) -> bool
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self {
             to_avoid: None,
