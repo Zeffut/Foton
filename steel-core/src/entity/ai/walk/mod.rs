@@ -5,6 +5,7 @@ mod evaluator;
 pub mod node_evaluator;
 mod path_evaluator;
 mod settings;
+mod swim_evaluator;
 
 pub use collision::WalkNodeCollision;
 pub use evaluator::NodeEvaluator;

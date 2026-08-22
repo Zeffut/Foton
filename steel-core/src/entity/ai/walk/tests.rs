@@ -8,7 +8,7 @@ use steel_utils::{BlockPos, BlockStateId, Direction, WorldAabb};
 
 use super::{
     MobPathSettings, WalkNodeEvaluator, WalkPathEvaluator,
-    node_evaluator::{AcceptedNodeRequest, WalkNeighbors},
+    node_evaluator::{AcceptedNodeRequest, Neighbors},
 };
 use crate::behavior::{BlockStateBehaviorExt as _, init_behaviors};
 use crate::entity::Mob as _;
@@ -626,7 +626,7 @@ const fn accepted_request(
 
 fn neighbor_positions(
     evaluator: &WalkNodeEvaluator,
-    neighbors: &WalkNeighbors,
+    neighbors: &Neighbors,
 ) -> Vec<(i32, i32, i32)> {
     neighbors
         .iter()

@@ -16,16 +16,20 @@ pub struct AcceptedNodeRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WalkNeighbors {
-    nodes: [Option<i32>; 8],
+/// The nodes reachable in one step.
+///
+/// Ten slots: the walking evaluator fills at most eight, but the swimming one
+/// adds all six faces plus four diagonals.
+pub struct Neighbors {
+    nodes: [Option<i32>; 10],
     len: usize,
 }
 
-impl WalkNeighbors {
+impl Neighbors {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            nodes: [None; 8],
+            nodes: [None; 10],
             len: 0,
         }
     }
@@ -44,13 +48,13 @@ impl WalkNeighbors {
         self.nodes[..self.len].iter().copied().flatten()
     }
 
-    const fn push(&mut self, node: i32) {
+    pub(super) const fn push(&mut self, node: i32) {
         self.nodes[self.len] = Some(node);
         self.len += 1;
     }
 }
 
-impl Default for WalkNeighbors {
+impl Default for Neighbors {
     fn default() -> Self {
         Self::new()
     }
@@ -159,9 +163,9 @@ impl WalkNodeEvaluator {
         context: &mut PathfindingContext<'_>,
         collision: &mut dyn WalkNodeCollision,
         pos_hash: i32,
-    ) -> WalkNeighbors {
+    ) -> Neighbors {
         let Some(pos) = self.node(pos_hash) else {
-            return WalkNeighbors::new();
+            return Neighbors::new();
         };
         let pos_x = pos.x;
         let pos_y = pos.y;
@@ -180,7 +184,7 @@ impl WalkNodeEvaluator {
         };
         let pos_height = self.get_floor_level(context, pos_block);
 
-        let mut neighbors = WalkNeighbors::new();
+        let mut neighbors = Neighbors::new();
         let mut reusable_neighbors = [None; 4];
         for (index, direction) in VANILLA_HORIZONTAL_DIRECTIONS.iter().copied().enumerate() {
             let (step_x, _, step_z) = direction.offset();
@@ -739,7 +743,7 @@ impl NodeEvaluator for WalkNodeEvaluator {
         context: &mut PathfindingContext<'_>,
         collision: &mut dyn WalkNodeCollision,
         pos_hash: i32,
-    ) -> WalkNeighbors {
+    ) -> Neighbors {
         Self::get_neighbors(self, context, collision, pos_hash)
     }
 

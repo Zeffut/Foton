@@ -4,7 +4,7 @@ use crate::entity::ai::node::{Node, NodeStore};
 use crate::entity::ai::path::PathfindingContext;
 
 use super::collision::WalkNodeCollision;
-use super::node_evaluator::WalkNeighbors;
+use super::node_evaluator::Neighbors;
 
 /// Decides which positions a mob can occupy and which it can step to.
 ///
@@ -25,7 +25,7 @@ pub trait NodeEvaluator {
         context: &mut PathfindingContext<'_>,
         collision: &mut dyn WalkNodeCollision,
         pos_hash: i32,
-    ) -> WalkNeighbors;
+    ) -> Neighbors;
 
     /// Returns the node behind `hash`, if the evaluator has seen it.
     fn node(&self, hash: i32) -> Option<&Node>;
