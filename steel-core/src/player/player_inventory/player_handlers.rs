@@ -185,20 +185,23 @@ impl Player {
         }
     }
 
-    /// Handles a container button click packet (e.g., enchanting table buttons).
+    /// Handles a container button click packet.
+    ///
+    /// Vanilla parity: `ServerGamePacketListenerImpl.handleContainerButtonClick`,
+    /// which is what an enchanting table's three offers, a stonecutter's recipe
+    /// list, a loom's patterns and a lectern's page arrows all arrive through.
     pub fn handle_container_button_click(&self, packet: SContainerButtonClick) {
-        log::debug!(
-            "Player {} clicked button {} in container {}",
-            self.gameprofile.name,
-            packet.button_id,
-            packet.container_id
-        );
-        // TODO: Implement container button click handling
-        // This is used for things like:
-        // - Enchanting table level selection
-        // - Stonecutter recipe selection
-        // - Loom pattern selection
-        // - Lectern page turning
+        if self.game_mode() == GameType::Spectator || self.get_health() <= 0.0 {
+            return;
+        }
+
+        let Ok(mut menu) = self.take_open_menu_for_callback(Some(packet.container_id)) else {
+            return;
+        };
+        if menu.still_valid(self) {
+            menu.click_menu_button(self, packet.button_id);
+        }
+        self.finish_open_menu_callback(menu);
     }
 
     /// Handles a container click packet (slot interaction).

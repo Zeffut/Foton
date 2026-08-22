@@ -65,6 +65,23 @@ pub trait MenuKind: ErasedType + Send + Sync {
         ClickOutcome::Fallthrough
     }
 
+    /// Handles a container button press.
+    ///
+    /// Vanilla parity: `AbstractContainerMenu.clickMenuButton`. This is how an
+    /// enchanting table's three offers arrive, and how a lectern turns a page:
+    /// the click carries a button id rather than a slot. Returns whether the
+    /// button was accepted, which vanilla uses to decide whether to resend the
+    /// menu.
+    fn on_button_click(
+        &mut self,
+        _behavior: &mut MenuBehavior,
+        _guard: &mut ContainerLockGuard,
+        _player: &Player,
+        _button: i32,
+    ) -> bool {
+        false
+    }
+
     /// Runs for each drag phase before default handling. Return
     /// [`ClickOutcome::Consume`] to cancel the drag.
     fn on_drag(

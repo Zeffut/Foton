@@ -235,6 +235,17 @@ pub struct Player {
     /// The Player's Experience
     pub experience: SyncMutex<Experience>,
 
+    /// Vanilla `Player.enchantmentSeed`.
+    ///
+    /// The three offers an enchanting table shows are drawn from this, so they
+    /// stay put while the player opens and closes the table and only change
+    /// once something is actually enchanted. That is what makes a bad set of
+    /// offers worth burning a cheap item on.
+    ///
+    /// TODO: vanilla persists this as `XpSeed`; Steel re-rolls it at login, so
+    /// the offers on a table survive a session but not a relog.
+    enchantment_seed: SyncMutex<i32>,
+
     /// Assigned groups, direct overrides, and the effective permission set.
     permissions: SyncMutex<PlayerPermissionState>,
 
@@ -525,6 +536,7 @@ impl Player {
             food_data: SyncMutex::new(FoodData::new()),
             health_sync: SyncMutex::new(HealthSyncState::new()),
             experience: SyncMutex::new(Experience::default()),
+            enchantment_seed: SyncMutex::new(rand::random()),
             permissions: SyncMutex::new(PlayerPermissionState::default()),
             seen_credits: SyncMutex::new(false),
             won_game: SyncMutex::new(false),

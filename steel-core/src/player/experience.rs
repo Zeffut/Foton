@@ -256,6 +256,24 @@ impl Player {
         }
     }
 
+    /// Returns the seed the enchanting table draws its offers from.
+    ///
+    /// Vanilla parity: `Player.getEnchantmentSeed`.
+    #[must_use]
+    pub(crate) fn enchantment_seed(&self) -> i32 {
+        *self.enchantment_seed.lock()
+    }
+
+    /// Spends levels on an enchantment and rerolls the offers.
+    ///
+    /// Vanilla parity: `Player.onEnchantmentPerformed`. Rerolling here rather
+    /// than on every table opening is what lets a player fix a bad set of
+    /// offers by enchanting something cheap.
+    pub(crate) fn on_enchantment_performed(&self, levels: i32) {
+        self.give_experience_levels(-levels);
+        *self.enchantment_seed.lock() = rand::random();
+    }
+
     /// Gives experience levels to this player.
     pub(crate) fn give_experience_levels(&self, levels: i32) {
         let level_up_sound = {

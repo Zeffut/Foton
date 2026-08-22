@@ -7,6 +7,7 @@ mod chiseled_bookshelf_block;
 mod crafting_table_block;
 mod dispense_behavior;
 mod dispenser_block;
+mod enchanting_table_block;
 mod furnace_block;
 mod hopper_block;
 
@@ -18,5 +19,6 @@ pub use chest_block::ChestBlock;
 pub use chiseled_bookshelf_block::ChiseledBookShelfBlock;
 pub use crafting_table_block::CraftingTableBlock;
 pub use dispenser_block::{DispenserBlock, DropperBlock};
+pub use enchanting_table_block::{EnchantingTableBlock, count_enchanting_power};
 pub use furnace_block::{BlastFurnaceBlock, FurnaceBlock, SmokerBlock};
 pub use hopper_block::HopperBlock;

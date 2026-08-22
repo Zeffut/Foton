@@ -205,6 +205,15 @@ impl Menu {
         kind.on_open(behavior, &mut guard, player);
     }
 
+    /// Passes a container button press to the kind.
+    ///
+    /// Vanilla parity: `AbstractContainerMenu.clickMenuButton`.
+    pub fn click_menu_button(&mut self, player: &Player, button: i32) -> bool {
+        let mut guard = self.behavior().lock_all_containers();
+        let Self { behavior, kind, .. } = self;
+        kind.on_button_click(behavior, &mut guard, player, button)
+    }
+
     /// Runs the kind's `on_tick` hook. Called once per server tick while open.
     pub fn on_tick(&mut self, player: &Player) {
         let mut guard = self.behavior().lock_all_containers();
