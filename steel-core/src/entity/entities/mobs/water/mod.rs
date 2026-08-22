@@ -4,5 +4,8 @@
 //! rather than walking, and drown in air instead of in water.
 
 mod cod;
+mod fish;
+mod salmon;
 
 pub use cod::CodEntity;
+pub use salmon::SalmonEntity;
