@@ -7,6 +7,7 @@
 use parking_lot::ArcMutexGuard;
 use parking_lot::RawMutex;
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -20,6 +21,13 @@ use crate::{
     player::{Player, player_inventory::PlayerInventory},
 };
 use steel_registry::item_stack::ItemStack;
+
+/// The containers one block exposes to automation.
+///
+/// A double chest is two independently lockable halves in Steel, so a single
+/// position can answer with two references that callers walk as one logical
+/// container.
+pub type AttachedContainers = SmallVec<[ContainerRef; 2]>;
 
 type ContainerChangedCallback = Arc<dyn Fn() + Send + Sync>;
 

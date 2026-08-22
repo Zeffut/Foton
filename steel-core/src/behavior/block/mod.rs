@@ -37,6 +37,7 @@ use crate::entity::ai::path::PathComputationType;
 use crate::entity::projectile::Projectile;
 use crate::entity::{Entity, InsideBlockEffectCollector, damage::DamageSource, entity_loot_ref};
 use crate::fluid::is_water_fluid;
+use crate::inventory::lock::{AttachedContainers, ContainerRef};
 use crate::physics::collide;
 use crate::player::Player;
 use crate::world::game_event::SharedGameEventListener;
@@ -1026,6 +1027,27 @@ pub trait BlockBehavior: Send + Sync {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         BlockEntityCreation::Unimplemented
+    }
+
+    /// Returns the containers automation sees at this block.
+    ///
+    /// Vanilla parity: `HopperBlockEntity.getBlockContainer`, which asks the
+    /// block first through `WorldlyContainerHolder` and otherwise takes the
+    /// block entity, with a special case that joins the two halves of a double
+    /// chest. Steel keeps the halves as separate lockable containers, so a
+    /// double chest answers with both in vanilla order and callers walk them as
+    /// one logical container.
+    fn get_attached_containers(
+        &self,
+        _state: BlockStateId,
+        world: &dyn LevelReader,
+        pos: BlockPos,
+    ) -> AttachedContainers {
+        world
+            .get_block_entity(pos)
+            .and_then(ContainerRef::from_block_entity)
+            .into_iter()
+            .collect()
     }
 
     /// Returns the server ticker selected by this live block state and entity type.

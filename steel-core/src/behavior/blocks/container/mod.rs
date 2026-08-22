@@ -5,6 +5,7 @@ mod chest_block;
 mod chiseled_bookshelf_block;
 mod crafting_table_block;
 mod furnace_block;
+mod hopper_block;
 
 pub use anvil_block::AnvilBlock;
 pub use barrel_block::BarrelBlock;
@@ -13,3 +14,4 @@ pub use chest_block::ChestBlock;
 pub use chiseled_bookshelf_block::ChiseledBookShelfBlock;
 pub use crafting_table_block::CraftingTableBlock;
 pub use furnace_block::{BlastFurnaceBlock, FurnaceBlock, SmokerBlock};
+pub use hopper_block::HopperBlock;

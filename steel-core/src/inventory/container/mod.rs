@@ -14,10 +14,76 @@ pub use simple::SimpleContainer;
 use std::mem;
 
 use steel_registry::item_stack::ItemStack;
-use steel_utils::ErasedType;
+use steel_utils::{Direction, ErasedType};
 
 /// Default distance buffer for container interaction range checks.
 pub const DEFAULT_DISTANCE_BUFFER: f32 = 4.0;
+
+/// The slots a container exposes to one face.
+///
+/// Vanilla parity: the `int[]` returned by `WorldlyContainer.getSlotsForFace`,
+/// kept allocation-free because a hopper asks for it on every transfer attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotsForFace {
+    /// Every slot, in order, for a container that ignores faces.
+    All(usize),
+    /// A fixed list, in the order the container wants the slots tried.
+    Explicit(&'static [usize]),
+}
+
+impl SlotsForFace {
+    /// Returns the slot at `index` in the exposed order.
+    #[must_use]
+    pub fn get(self, index: usize) -> Option<usize> {
+        match self {
+            Self::All(size) => (index < size).then_some(index),
+            Self::Explicit(slots) => slots.get(index).copied(),
+        }
+    }
+
+    /// Returns how many slots this face exposes.
+    #[must_use]
+    pub const fn len(self) -> usize {
+        match self {
+            Self::All(size) => size,
+            Self::Explicit(slots) => slots.len(),
+        }
+    }
+
+    /// Returns whether this face exposes no slot at all.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl IntoIterator for SlotsForFace {
+    type Item = usize;
+    type IntoIter = SlotsForFaceIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SlotsForFaceIter {
+            slots: self,
+            index: 0,
+        }
+    }
+}
+
+/// Iterator over the slots of a [`SlotsForFace`].
+pub struct SlotsForFaceIter {
+    slots: SlotsForFace,
+    index: usize,
+}
+
+impl Iterator for SlotsForFaceIter {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        let slot = self.slots.get(self.index)?;
+        self.index += 1;
+        Some(slot)
+    }
+}
 
 /// Something that contains items.
 /// I also use container interchangeably with inventory as they mean approximately the same thing.
@@ -127,6 +193,41 @@ pub trait Container: ErasedType + Send + Sync {
         _destination: &dyn Container,
         _slot: usize,
         _stack: &ItemStack,
+    ) -> bool {
+        true
+    }
+
+    /// Returns the slots automation reaches from `direction`.
+    ///
+    /// Vanilla parity: `WorldlyContainer.getSlotsForFace`. A container that does
+    /// not care about sides exposes every slot, which is what vanilla does for a
+    /// plain `Container`.
+    fn slots_for_face(&self, _direction: Direction) -> SlotsForFace {
+        SlotsForFace::All(self.get_container_size())
+    }
+
+    /// Returns whether automation may insert into `slot` through `direction`.
+    ///
+    /// Vanilla parity: `WorldlyContainer.canPlaceItemThroughFace`. `direction` is
+    /// `None` when the insertion has no face, which is the case for a hopper
+    /// filling itself.
+    fn can_place_item_through_face(
+        &self,
+        slot: usize,
+        stack: &ItemStack,
+        _direction: Option<Direction>,
+    ) -> bool {
+        self.can_place_item(slot, stack)
+    }
+
+    /// Returns whether automation may extract from `slot` through `direction`.
+    ///
+    /// Vanilla parity: `WorldlyContainer.canTakeItemThroughFace`.
+    fn can_take_item_through_face(
+        &self,
+        _slot: usize,
+        _stack: &ItemStack,
+        _direction: Direction,
     ) -> bool {
         true
     }

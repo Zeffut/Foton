@@ -10,6 +10,7 @@ mod daylight_detector;
 mod end_gateway;
 mod end_portal;
 mod furnace;
+mod hopper;
 mod piston_moving;
 mod potent_sulfur;
 mod raw;
@@ -29,6 +30,7 @@ pub use end_portal::EndPortalBlockEntity;
 pub use furnace::{
     FURNACE_SLOTS, FurnaceBlockEntity, FurnaceDataSlots, SLOT_FUEL, SLOT_INPUT, SLOT_RESULT,
 };
+pub use hopper::{HOPPER_SLOTS, HopperBlockEntity, HopperContainer, MOVE_ITEM_SPEED};
 pub use piston_moving::PistonMovingBlockEntity;
 pub use potent_sulfur::PotentSulfurBlockEntity;
 pub use raw::RawBlockEntity;

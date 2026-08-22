@@ -6,6 +6,7 @@
 
 use std::sync::{Arc, Weak};
 
+use smallvec::smallvec;
 use steel_macros::block_behavior;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
@@ -25,7 +26,7 @@ use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionRes
 use crate::block_entity::BLOCK_ENTITIES;
 use crate::fluid::get_fluid_state;
 use crate::inventory::container::{Container, calculate_redstone_signal_from_containers};
-use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
+use crate::inventory::lock::{AttachedContainers, ContainerLockGuard, ContainerRef};
 use crate::inventory::menu::kinds::{chest, double_chest};
 use crate::player::Player;
 use crate::world::{LevelReader, ScheduledTickAccess, World};
@@ -135,13 +136,19 @@ impl ChestBlock {
     /// The first element is always the half whose type is `Right`, matching
     /// vanilla's `DoubleBlockCombiner.BlockType.FIRST` ordering, so the slot
     /// order of the double menu is identical to vanilla.
+    ///
+    /// Vanilla parity: `ChestBlock.getContainer`. `override_blocked` is its
+    /// `overrideBlockedChest` flag, which hoppers set so a chest with a solid
+    /// block on top still accepts and gives up items even though no player can
+    /// open it.
     fn combine(
         &self,
         state: BlockStateId,
         world: &dyn LevelReader,
         pos: BlockPos,
+        override_blocked: bool,
     ) -> Option<(ContainerRef, Option<ContainerRef>)> {
-        if Self::is_chest_blocked_at(world, pos) {
+        if !override_blocked && Self::is_chest_blocked_at(world, pos) {
             return None;
         }
         let own = world
@@ -158,7 +165,7 @@ impl ChestBlock {
         if !self.chest_can_connect_to(neighbour_state)
             || neighbour_state.get_value(TYPE) != Self::opposite_type(&chest_type)
             || neighbour_state.get_value(FACING) != state.get_value(FACING)
-            || Self::is_chest_blocked_at(world, neighbour_pos)
+            || (!override_blocked && Self::is_chest_blocked_at(world, neighbour_pos))
         {
             return Some((own, None));
         }
@@ -253,7 +260,7 @@ impl BlockBehavior for ChestBlock {
         _hit_result: &BlockHitResult,
         _inv: &mut InventoryAccess,
     ) -> InteractionResult {
-        let Some((first, second)) = self.combine(state, world.as_ref(), pos) else {
+        let Some((first, second)) = self.combine(state, world.as_ref(), pos, false) else {
             // Blocked by the block above: vanilla silently refuses to open.
             return InteractionResult::Consume;
         };
@@ -291,6 +298,25 @@ impl BlockBehavior for ChestBlock {
         ))
     }
 
+    /// Vanilla parity: the `ChestBlock` special case of
+    /// `HopperBlockEntity.getBlockContainer`, which combines both halves and
+    /// ignores whatever is sitting on the lid.
+    fn get_attached_containers(
+        &self,
+        state: BlockStateId,
+        world: &dyn LevelReader,
+        pos: BlockPos,
+    ) -> AttachedContainers {
+        let Some((first, second)) = self.combine(state, world, pos, true) else {
+            return AttachedContainers::new();
+        };
+        if let Some(second) = second {
+            smallvec![first, second]
+        } else {
+            smallvec![first]
+        }
+    }
+
     fn has_analog_output_signal(&self, _state: BlockStateId) -> bool {
         true
     }
@@ -304,7 +330,7 @@ impl BlockBehavior for ChestBlock {
     ) -> i32 {
         // Vanilla reads the combined container, so a double chest measures all 54
         // slots as one, and a blocked chest reports nothing.
-        let Some((first, second)) = self.combine(state, world, pos) else {
+        let Some((first, second)) = self.combine(state, world, pos, false) else {
             return 0;
         };
 

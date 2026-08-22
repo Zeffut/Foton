@@ -540,16 +540,16 @@ fn insertion_rejects_an_entity_owned_by_another_chunk() {
     let chunk = FullChunkRef::from_full_context(&chunk_owner);
     let local_pos = BlockPos::new(0, 2, 0);
     let foreign_pos = BlockPos::new(16, 2, 0);
-    // Hopper has a vanilla block entity type but no Steel factory yet, so the
+    // Jigsaw has a vanilla block entity type but no Steel factory yet, so the
     // chunk keeps a pending marker instead of materializing an entity.
-    let deferred = vanilla_blocks::HOPPER.default_state();
+    let deferred = vanilla_blocks::JIGSAW.default_state();
     assert!(
         chunk
             .set_block_state(local_pos, deferred, UpdateFlags::UPDATE_NONE)
             .is_some()
     );
     let foreign: SharedBlockEntity = Arc::new(RawBlockEntity::new(
-        &vanilla_block_entity_types::HOPPER,
+        &vanilla_block_entity_types::JIGSAW,
         Weak::new(),
         foreign_pos,
         deferred,
@@ -600,9 +600,9 @@ fn stale_no_entity_promotion_cannot_consume_a_replacement_marker() {
     );
     chunk.set_pending_block_entity(pos);
 
-    // Hopper has no Steel block entity factory yet, so the replacement keeps the
+    // Jigsaw has no Steel block entity factory yet, so the replacement keeps the
     // pending marker rather than resolving to a concrete entity.
-    let deferred = vanilla_blocks::HOPPER.default_state();
+    let deferred = vanilla_blocks::JIGSAW.default_state();
     assert_eq!(
         chunk.set_block_state(pos, deferred, UpdateFlags::UPDATE_NONE),
         Some(moving_piston)

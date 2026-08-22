@@ -94,6 +94,16 @@ impl BlockEntityTicker {
         ptr::eq(actual, expected).then(|| Self::for_entity_tick(expected))
     }
 
+    /// Creates a custom callback only when Vanilla's requested type matches.
+    #[must_use]
+    pub fn for_matching_tick(
+        actual: BlockEntityTypeRef,
+        expected: BlockEntityTypeRef,
+        tick: fn(&Arc<World>, BlockPos, BlockStateId, &dyn BlockEntity),
+    ) -> Option<Self> {
+        ptr::eq(actual, expected).then(|| Self::new(expected, tick))
+    }
+
     /// Returns whether this ticker accepts the concrete block-entity type.
     #[must_use]
     pub fn accepts(self, block_entity_type: BlockEntityTypeRef) -> bool {

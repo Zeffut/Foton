@@ -25,11 +25,11 @@ use steel_registry::{
 };
 use steel_utils::types::UpdateFlags;
 use steel_utils::{
-    BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier, locks::SyncMutex,
+    BlockPos, BlockStateId, Direction, DowncastType, DowncastTypeKey, Identifier, locks::SyncMutex,
 };
 
 use crate::block_entity::{BlockEntity, BlockEntityBase};
-use crate::inventory::container::Container;
+use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
 
@@ -456,6 +456,23 @@ impl BlockEntity for FurnaceBlockEntity {
     }
 }
 
+/// Slots a hopper above a furnace may fill.
+///
+/// Vanilla parity: `AbstractFurnaceBlockEntity.SLOTS_FOR_UP`.
+static SLOTS_FOR_UP: [usize; 1] = [SLOT_INPUT];
+
+/// Slots a hopper below a furnace may drain, result first.
+///
+/// Vanilla parity: `AbstractFurnaceBlockEntity.SLOTS_FOR_DOWN`. The fuel slot
+/// comes second so a hopper empties the output before it ever reaches the
+/// bucket a lava bucket left behind.
+static SLOTS_FOR_DOWN: [usize; 2] = [SLOT_RESULT, SLOT_FUEL];
+
+/// Slots a hopper at the side of a furnace may reach.
+///
+/// Vanilla parity: `AbstractFurnaceBlockEntity.SLOTS_FOR_SIDES`.
+static SLOTS_FOR_SIDES: [usize; 1] = [SLOT_FUEL];
+
 impl Container for FurnaceContainer {
     fn items(&self) -> &[ItemStack] {
         &self.items
@@ -500,6 +517,30 @@ impl Container for FurnaceContainer {
             }
             _ => true,
         }
+    }
+
+    /// Vanilla parity: `AbstractFurnaceBlockEntity.getSlotsForFace`.
+    fn slots_for_face(&self, direction: Direction) -> SlotsForFace {
+        match direction {
+            Direction::Down => SlotsForFace::Explicit(&SLOTS_FOR_DOWN),
+            Direction::Up => SlotsForFace::Explicit(&SLOTS_FOR_UP),
+            _ => SlotsForFace::Explicit(&SLOTS_FOR_SIDES),
+        }
+    }
+
+    /// Vanilla parity: `AbstractFurnaceBlockEntity.canTakeItemThroughFace`. A
+    /// hopper underneath may only take the empty bucket back, never the fuel
+    /// the furnace is about to burn.
+    fn can_take_item_through_face(
+        &self,
+        slot: usize,
+        stack: &ItemStack,
+        direction: Direction,
+    ) -> bool {
+        if direction == Direction::Down && slot == SLOT_FUEL {
+            return stack.is(&vanilla_items::WATER_BUCKET) || stack.is(&vanilla_items::BUCKET);
+        }
+        true
     }
 
     fn get_max_stack_size(&self) -> i32 {
@@ -608,5 +649,45 @@ mod tests {
 
         assert!(furnace.items[SLOT_FUEL].is(&vanilla_items::WATER_BUCKET));
         assert!(furnace.items[SLOT_RESULT].is(&vanilla_items::SPONGE));
+    }
+    /// Vanilla parity: `AbstractFurnaceBlockEntity.getSlotsForFace`. This is
+    /// what makes a hopper on top load the input, one at the side load the fuel,
+    /// and one underneath drain the output.
+    #[test]
+    fn each_face_exposes_the_slots_vanilla_gives_it() {
+        let furnace = container(CookingKind::Smelting);
+
+        let up: Vec<usize> = furnace.slots_for_face(Direction::Up).into_iter().collect();
+        assert_eq!(up, vec![SLOT_INPUT]);
+
+        let down: Vec<usize> = furnace
+            .slots_for_face(Direction::Down)
+            .into_iter()
+            .collect();
+        assert_eq!(down, vec![SLOT_RESULT, SLOT_FUEL]);
+
+        for side in [
+            Direction::North,
+            Direction::South,
+            Direction::East,
+            Direction::West,
+        ] {
+            let slots: Vec<usize> = furnace.slots_for_face(side).into_iter().collect();
+            assert_eq!(slots, vec![SLOT_FUEL], "wrong slots for {side:?}");
+        }
+    }
+
+    /// Vanilla parity: `AbstractFurnaceBlockEntity.canTakeItemThroughFace`. A
+    /// hopper underneath may take the empty bucket back but never the coal.
+    #[test]
+    fn only_buckets_leave_the_fuel_slot_downwards() {
+        let furnace = container(CookingKind::Smelting);
+        let coal = ItemStack::new(&vanilla_items::COAL);
+        let bucket = ItemStack::new(&vanilla_items::BUCKET);
+
+        assert!(!furnace.can_take_item_through_face(SLOT_FUEL, &coal, Direction::Down));
+        assert!(furnace.can_take_item_through_face(SLOT_FUEL, &bucket, Direction::Down));
+        assert!(furnace.can_take_item_through_face(SLOT_RESULT, &coal, Direction::Down));
+        assert!(furnace.can_take_item_through_face(SLOT_FUEL, &coal, Direction::North));
     }
 }
