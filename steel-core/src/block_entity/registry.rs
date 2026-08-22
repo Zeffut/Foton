@@ -18,8 +18,8 @@ use super::SharedBlockEntity;
 use super::entities::{
     BarrelBlockEntity, BeehiveBlockEntity, BrushableBlockEntity, ChestBlockEntity,
     ChiseledBookShelfBlockEntity, ComparatorBlockEntity, DaylightDetectorBlockEntity,
-    EndGatewayBlockEntity, EndPortalBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
-    RawBlockEntity, SignBlockEntity,
+    EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, PistonMovingBlockEntity,
+    PotentSulfurBlockEntity, RawBlockEntity, SignBlockEntity,
 };
 use crate::world::World;
 
@@ -225,6 +225,19 @@ pub fn init_block_entities() {
 
         registry.register(&vanilla_block_entity_types::CHEST, |level, pos, state| {
             Arc::new(ChestBlockEntity::new(level, pos, state))
+        });
+
+        registry.register(&vanilla_block_entity_types::FURNACE, |level, pos, state| {
+            Arc::new(FurnaceBlockEntity::new(level, pos, state))
+        });
+
+        registry.register(
+            &vanilla_block_entity_types::BLAST_FURNACE,
+            |level, pos, state| Arc::new(FurnaceBlockEntity::new_blast_furnace(level, pos, state)),
+        );
+
+        registry.register(&vanilla_block_entity_types::SMOKER, |level, pos, state| {
+            Arc::new(FurnaceBlockEntity::new_smoker(level, pos, state))
         });
 
         registry.register(

@@ -127,6 +127,20 @@ impl RecipeRegistry {
             .copied()
     }
 
+    /// Finds a cooking recipe by its identifier, across every family.
+    ///
+    /// A furnace stores the recipe ids it has cooked so it can award their
+    /// experience later, and only has the id to go on at that point.
+    #[must_use]
+    pub fn find_cooking_recipe_by_id(&self, id: &Identifier) -> Option<&'static SmeltingRecipe> {
+        self.smelting_recipes
+            .iter()
+            .chain(&self.blasting_recipes)
+            .chain(&self.smoking_recipes)
+            .find(|recipe| &recipe.id == id)
+            .copied()
+    }
+
     /// Returns the number of recipes in one cooking family.
     #[must_use]
     pub const fn cooking_count(&self, kind: CookingKind) -> usize {
