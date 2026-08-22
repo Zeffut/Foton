@@ -35,8 +35,45 @@ pub fn chest(
     builder.route(chest, player.all(), FillDirection::Backward);
     builder.route(player.all(), chest, FillDirection::Forward);
 
-    builder.build(ChestKind { container })
+    builder.build(ChestKind {
+        container,
+        second_container: None,
+    })
 }
+
+/// Builds a double chest menu: two 27-slot halves presented as one 54-slot
+/// container, plus the player inventory.
+///
+/// Vanilla parity: `ChestBlock` combines two `ChestBlockEntity` halves through
+/// a `CompoundContainer`. Steel keeps the halves as two independently lockable
+/// containers and joins them at the menu layer instead, which preserves the
+/// per-container locking contract while exposing the same 54 logical slots.
+#[must_use]
+pub fn double_chest(
+    inventory: Shared<PlayerInventory>,
+    container_id: u8,
+    first: impl Into<ContainerRef>,
+    second: impl Into<ContainerRef>,
+) -> Menu {
+    let first = first.into();
+    let second = second.into();
+
+    let mut builder = MenuBuilder::new(&vanilla_menu_types::GENERIC_9X6, container_id);
+    let upper = builder.section(&first, CHEST_HALF_SLOTS);
+    let lower = builder.section(&second, CHEST_HALF_SLOTS);
+    let player = builder.player_inventory(&inventory);
+
+    builder.route([upper, lower], player.all(), FillDirection::Backward);
+    builder.route(player.all(), [upper, lower], FillDirection::Forward);
+
+    builder.build(ChestKind {
+        container: first,
+        second_container: Some(second),
+    })
+}
+
+/// Slots in a single chest half.
+const CHEST_HALF_SLOTS: usize = 27;
 
 /// Menu type for a chest of `rows` rows.
 ///
@@ -55,10 +92,12 @@ pub fn menu_type_for_rows(rows: usize) -> MenuTypeRef {
     }
 }
 
-/// Per-menu chest state: just the backing container for the validity check.
+/// Per-menu chest state: the backing container(s) for the validity check.
 pub struct ChestKind {
-    /// The backing container.
+    /// The backing container. For a double chest, this is the upper half.
     container: ContainerRef,
+    /// The lower half of a double chest, if any.
+    second_container: Option<ContainerRef>,
 }
 
 // SAFETY: This Steel-owned key uniquely identifies the concrete menu kind
@@ -69,9 +108,17 @@ unsafe impl steel_utils::DowncastType for ChestKind {
 }
 
 impl MenuKind for ChestKind {
-    /// Returns true if the backing container is still valid for the player.
+    /// Returns true if every backing container is still valid for the player.
+    ///
+    /// Vanilla parity: a double chest closes as soon as either half becomes
+    /// invalid.
     fn still_valid(&self, _behavior: &MenuBehavior, player: &Player) -> bool {
-        self.container.still_valid(player)
+        if !self.container.still_valid(player) {
+            return false;
+        }
+        self.second_container
+            .as_ref()
+            .is_none_or(|second| second.still_valid(player))
     }
 }
 
