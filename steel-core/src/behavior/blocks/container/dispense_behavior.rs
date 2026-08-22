@@ -10,13 +10,18 @@ use std::sync::{Arc, LazyLock};
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 use steel_protocol::packets::game::SoundSource;
+use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::vanilla_game_rules::TNT_EXPLODES;
-use steel_registry::{level_events, sound_events, vanilla_entities, vanilla_items};
-use steel_utils::{BlockPos, Direction, Identifier};
+use steel_registry::{level_events, sound_events, vanilla_blocks, vanilla_entities, vanilla_items};
+use steel_utils::types::UpdateFlags;
+use steel_utils::{BlockPos, BlockStateId, Direction, Downcast as _, Identifier, WorldAabb};
 
-use crate::entity::entities::{ArrowEntity, PrimedTntEntity};
+use crate::behavior::BLOCK_BEHAVIORS;
+use crate::behavior::blocks::FireBlock;
+use crate::entity::entities::{ArrowEntity, PrimedTntEntity, SheepEntity};
 use crate::entity::{Entity, Projectile as _, next_entity_id};
 use crate::world::World;
 
@@ -91,6 +96,12 @@ pub trait DispenseItemBehavior: Send + Sync {
     /// Acts on one item taken from the dispenser.
     fn execute(&self, source: &DispenseSource<'_>, stack: ItemStack) -> DispenseOutcome;
 }
+
+/// Whether a block is currently alight.
+const LIT: &BoolProperty = &BlockStateProperties::LIT;
+
+/// Whether a block is standing in water.
+const WATERLOGGED: &BoolProperty = &BlockStateProperties::WATERLOGGED;
 
 /// Distance in front of the block that projectiles and items appear at.
 ///
@@ -179,11 +190,150 @@ impl DispenseItemBehavior for TntDispenseBehavior {
     }
 }
 
+/// Grows whatever is in front of the dispenser.
+///
+/// Vanilla parity: the `Items.BONE_MEAL` entry of
+/// `DispenseItemBehavior.bootStrap`.
+///
+/// TODO: vanilla also falls back to `BoneMealItem.growWaterPlant`, which spreads
+/// seagrass and coral across open water; Steel has no equivalent yet, so bone
+/// meal aimed at water does nothing rather than doing the wrong thing.
+struct BoneMealDispenseBehavior;
+
+impl DispenseItemBehavior for BoneMealDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        let target = source.pos.relative(source.facing);
+        let state = source.world.get_block_state(target);
+        let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
+        let Some(bonemealable) = behavior.as_bonemealable() else {
+            return DispenseOutcome::Failed(stack);
+        };
+
+        if !bonemealable.is_valid_bonemeal_target(state, source.world.as_ref(), target) {
+            return DispenseOutcome::Failed(stack);
+        }
+
+        let mut rng = rand::rng();
+        if !bonemealable.is_bonemeal_success(state, source.world, &mut rng, target) {
+            // Vanilla still counts the attempt as a success and consumes the
+            // item; only the growth is left to the next try.
+            stack.shrink(1);
+            return DispenseOutcome::acted(stack);
+        }
+
+        bonemealable.perform_bonemeal(state, source.world, &mut rng, target);
+        source.world.level_event(
+            level_events::PARTICLES_AND_SOUND_PLANT_GROWTH,
+            target,
+            15,
+            None,
+        );
+        stack.shrink(1);
+        DispenseOutcome::acted(stack)
+    }
+}
+
+/// Sets fire to whatever is in front of the dispenser.
+///
+/// Vanilla parity: `FlintAndSteelDispenseItemBehavior`.
+///
+/// TODO: vanilla also lights sulfur cubes, which Steel has no entity for.
+struct FlintAndSteelDispenseBehavior;
+
+impl DispenseItemBehavior for FlintAndSteelDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        let target = source.pos.relative(source.facing);
+        let state = source.world.get_block_state(target);
+
+        let lit = if FireBlock::can_be_placed_at(source.world, target, source.facing) {
+            source.world.set_block(
+                target,
+                FireBlock::get_state(source.world.as_ref(), target),
+                UpdateFlags::UPDATE_ALL,
+            )
+        } else if can_be_lit(state) {
+            source
+                .world
+                .set_block(target, state.set_value(LIT, true), UpdateFlags::UPDATE_ALL)
+        } else if state.get_block() == &vanilla_blocks::TNT {
+            let _ = PrimedTntEntity::prime(source.world, target, None);
+            source.world.remove_block(target, false)
+        } else {
+            false
+        };
+
+        if !lit {
+            return DispenseOutcome::Failed(stack);
+        }
+
+        // Vanilla parity: the flint and steel wears out one point per use, and
+        // the dispenser keeps the broken remainder rather than a ghost item.
+        if stack.hurt_and_break(1, false) {
+            return DispenseOutcome::acted(ItemStack::empty());
+        }
+        DispenseOutcome::acted(stack)
+    }
+}
+
+/// Returns whether this block is something a flame can be set to.
+///
+/// Vanilla parity: the `CampfireBlock.canLight`, `CandleBlock.canLight` and
+/// `CandleCakeBlock.canLight` chain, which all come down to an unlit block that
+/// carries the lit property and is not standing in water.
+fn can_be_lit(state: BlockStateId) -> bool {
+    let unlit = state.try_get_value(LIT) == Some(false);
+    let dry = state.try_get_value(WATERLOGGED) != Some(true);
+    unlit && dry
+}
+
+/// Shears whatever is standing in front of the dispenser.
+///
+/// Vanilla parity: `ShearsDispenseItemBehavior`.
+///
+/// TODO: vanilla also shears a full beehive and carves a pumpkin; Steel has the
+/// beehive block but no honeycomb-dropping path to reuse here yet.
+struct ShearsDispenseBehavior;
+
+impl DispenseItemBehavior for ShearsDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        let target = source.pos.relative(source.facing);
+        let box_at_target = WorldAabb::new(
+            f64::from(target.x()),
+            f64::from(target.y()),
+            f64::from(target.z()),
+            f64::from(target.x()) + 1.0,
+            f64::from(target.y()) + 1.0,
+            f64::from(target.z()) + 1.0,
+        );
+
+        let sheared = source
+            .world
+            .get_entities_in_aabb(&box_at_target)
+            .into_iter()
+            .find_map(|entity| {
+                let sheep = entity.as_ref().downcast_ref::<SheepEntity>()?;
+                sheep.ready_for_shearing().then(|| {
+                    sheep.shear(source.world.as_ref(), &stack);
+                })
+            })
+            .is_some();
+
+        if !sheared {
+            return DispenseOutcome::Failed(stack);
+        }
+
+        if stack.hurt_and_break(1, false) {
+            return DispenseOutcome::acted(ItemStack::empty());
+        }
+        DispenseOutcome::acted(stack)
+    }
+}
+
 /// Every item the dispenser treats specially.
 ///
 /// Vanilla parity: `DispenserBlock.DISPENSER_REGISTRY`, filled by
-/// `DispenseItemBehavior.bootStrap`. Steel covers the two entries whose entities
-/// exist; the rest fall through to the default throw, which is also what vanilla
+/// `DispenseItemBehavior.bootStrap`. Steel covers the entries it has the systems
+/// for; the rest fall through to the default throw, which is also what vanilla
 /// does for an unregistered item.
 static DISPENSE_BEHAVIORS: LazyLock<FxHashMap<Identifier, Box<dyn DispenseItemBehavior>>> =
     LazyLock::new(|| {
@@ -196,6 +346,18 @@ static DISPENSE_BEHAVIORS: LazyLock<FxHashMap<Identifier, Box<dyn DispenseItemBe
         behaviors.insert(
             vanilla_items::TNT.key.clone(),
             Box::new(TntDispenseBehavior),
+        );
+        behaviors.insert(
+            vanilla_items::BONE_MEAL.key.clone(),
+            Box::new(BoneMealDispenseBehavior),
+        );
+        behaviors.insert(
+            vanilla_items::FLINT_AND_STEEL.key.clone(),
+            Box::new(FlintAndSteelDispenseBehavior),
+        );
+        behaviors.insert(
+            vanilla_items::SHEARS.key.clone(),
+            Box::new(ShearsDispenseBehavior),
         );
         behaviors
     });
@@ -214,13 +376,44 @@ mod tests {
     use steel_registry::init_vanilla_registry;
 
     use super::*;
+    use crate::behavior::init_behaviors;
     use crate::test_support::fresh_test_world;
 
     #[test]
-    fn arrows_and_tnt_are_the_registered_behaviors() {
+    fn every_item_steel_handles_specially_is_registered() {
         init_vanilla_registry();
-        assert!(dispense_behavior_for(&vanilla_items::ARROW).is_some());
-        assert!(dispense_behavior_for(&vanilla_items::TNT).is_some());
+        for item in [
+            &vanilla_items::ARROW,
+            &vanilla_items::TNT,
+            &vanilla_items::BONE_MEAL,
+            &vanilla_items::FLINT_AND_STEEL,
+            &vanilla_items::SHEARS,
+        ] {
+            assert!(
+                dispense_behavior_for(item).is_some(),
+                "{} should have a dispense behavior",
+                item.key
+            );
+        }
+    }
+
+    /// Vanilla parity: `CampfireBlock.canLight` and friends only light a block
+    /// that is unlit and out of the water.
+    #[test]
+    fn only_an_unlit_dry_block_can_be_lit() {
+        init_vanilla_registry();
+        init_behaviors();
+        let campfire = vanilla_blocks::CAMPFIRE.default_state();
+
+        assert!(!can_be_lit(campfire), "a campfire starts lit");
+        assert!(can_be_lit(campfire.set_value(LIT, false)));
+        assert!(!can_be_lit(
+            campfire.set_value(LIT, false).set_value(WATERLOGGED, true)
+        ));
+        assert!(
+            !can_be_lit(vanilla_blocks::STONE.default_state()),
+            "stone has no lit property to set"
+        );
     }
 
     /// Vanilla parity: an item with no entry takes the default throw, so the
