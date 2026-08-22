@@ -1,11 +1,13 @@
 //! Vanilla walk path-type classification.
 
 mod collision;
+mod evaluator;
 pub mod node_evaluator;
 mod path_evaluator;
 mod settings;
 
 pub use collision::WalkNodeCollision;
+pub use evaluator::NodeEvaluator;
 pub use node_evaluator::WalkNodeEvaluator;
 pub use path_evaluator::WalkPathEvaluator;
 use path_evaluator::does_block_have_partial_collision;

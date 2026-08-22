@@ -86,15 +86,15 @@ impl WalkNodeEvaluator {
         self.nodes.get(hash)
     }
 
-    pub(crate) fn node_mut(&mut self, hash: i32) -> Option<&mut Node> {
+    pub fn node_mut(&mut self, hash: i32) -> Option<&mut Node> {
         self.nodes.get_mut(hash)
     }
 
-    pub(crate) const fn nodes_mut(&mut self) -> &mut NodeStore {
+    pub const fn nodes_mut(&mut self) -> &mut NodeStore {
         &mut self.nodes
     }
 
-    pub(crate) fn reset_search_state(&mut self) {
+    pub fn reset_search_state(&mut self) {
         self.nodes.reset_search_state();
     }
 
@@ -157,7 +157,7 @@ impl WalkNodeEvaluator {
     pub fn get_neighbors(
         &mut self,
         context: &mut PathfindingContext<'_>,
-        collision: &mut impl WalkNodeCollision,
+        collision: &mut dyn WalkNodeCollision,
         pos_hash: i32,
     ) -> WalkNeighbors {
         let Some(pos) = self.node(pos_hash) else {
@@ -326,7 +326,7 @@ impl WalkNodeEvaluator {
     pub fn find_accepted_node(
         &mut self,
         context: &mut PathfindingContext<'_>,
-        collision: &mut impl WalkNodeCollision,
+        collision: &mut dyn WalkNodeCollision,
         request: AcceptedNodeRequest,
     ) -> Option<i32> {
         let x = request.pos.x();
@@ -558,7 +558,7 @@ impl WalkNodeEvaluator {
     fn try_jump_on(
         &mut self,
         context: &mut PathfindingContext<'_>,
-        collision: &mut impl WalkNodeCollision,
+        collision: &mut dyn WalkNodeCollision,
         request: AcceptedNodeRequest,
     ) -> Option<i32> {
         let x = request.pos.x();
@@ -663,7 +663,7 @@ impl WalkNodeEvaluator {
 
     fn can_reach_without_collision(
         &self,
-        collision: &mut impl WalkNodeCollision,
+        collision: &mut dyn WalkNodeCollision,
         target: i32,
     ) -> bool {
         let Some(node) = self.node(target) else {
@@ -727,4 +727,39 @@ impl WalkNodeEvaluator {
 
 const fn clockwise_direction_index(index: usize) -> usize {
     (index + 1) % VANILLA_HORIZONTAL_DIRECTIONS.len()
+}
+
+impl NodeEvaluator for WalkNodeEvaluator {
+    fn get_start(&mut self, context: &mut PathfindingContext<'_>) -> i32 {
+        Self::get_start(self, context)
+    }
+
+    fn get_neighbors(
+        &mut self,
+        context: &mut PathfindingContext<'_>,
+        collision: &mut dyn WalkNodeCollision,
+        pos_hash: i32,
+    ) -> WalkNeighbors {
+        Self::get_neighbors(self, context, collision, pos_hash)
+    }
+
+    fn node(&self, hash: i32) -> Option<&Node> {
+        Self::node(self, hash)
+    }
+
+    fn node_mut(&mut self, hash: i32) -> Option<&mut Node> {
+        Self::node_mut(self, hash)
+    }
+
+    fn nodes_mut(&mut self) -> &mut NodeStore {
+        Self::nodes_mut(self)
+    }
+
+    fn reset_search_state(&mut self) {
+        Self::reset_search_state(self);
+    }
+
+    fn clear_nodes(&mut self) {
+        Self::clear_nodes(self);
+    }
 }

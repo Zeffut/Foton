@@ -8,7 +8,7 @@ use steel_utils::BlockPos;
 
 use crate::entity::ai::path::{Path, PathType, PathTypeCache, PathfindingContext};
 use crate::entity::ai::pathfinder::{PathFinder, PathRequest};
-use crate::entity::ai::walk::{WalkNodeCollision, WalkNodeEvaluator};
+use crate::entity::ai::walk::{NodeEvaluator, WalkNodeCollision};
 use crate::world::LevelReader;
 
 const DIRECT_TARGET_REACHED_DISTANCE_SQR: f64 = 2.500_000_3e-7;
@@ -242,11 +242,11 @@ impl PathNavigation {
         self.path_finder.set_max_visited_nodes(max_visited_nodes);
     }
 
-    pub fn create_path(
+    pub fn create_path<E: NodeEvaluator + ?Sized>(
         &mut self,
-        evaluator: &mut WalkNodeEvaluator,
+        evaluator: &mut E,
         level: &dyn LevelReader,
-        collision: &mut impl WalkNodeCollision,
+        collision: &mut dyn WalkNodeCollision,
         request: NavigationPathRequest<'_>,
     ) -> Option<Path> {
         if let Some(path) = self.reusable_current_path(request.targets) {

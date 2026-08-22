@@ -6,7 +6,7 @@ use steel_utils::BlockPos;
 
 use crate::entity::ai::node::{Node, NodeHeap, Target};
 use crate::entity::ai::path::{Path, PathfindingContext};
-use crate::entity::ai::walk::{WalkNodeCollision, WalkNodeEvaluator};
+use crate::entity::ai::walk::{NodeEvaluator, WalkNodeCollision};
 
 const FUDGING: f32 = 1.5;
 
@@ -43,11 +43,11 @@ impl PathFinder {
     }
 
     #[must_use]
-    pub fn find_path(
+    pub fn find_path<E: NodeEvaluator + ?Sized>(
         &mut self,
-        evaluator: &mut WalkNodeEvaluator,
+        evaluator: &mut E,
         context: &mut PathfindingContext<'_>,
-        collision: &mut impl WalkNodeCollision,
+        collision: &mut dyn WalkNodeCollision,
         request: PathRequest<'_>,
     ) -> Option<Path> {
         let from = evaluator.get_start(context);
@@ -151,9 +151,9 @@ impl PathFinder {
         }
     }
 
-    fn prepare_search(
+    fn prepare_search<E: NodeEvaluator + ?Sized>(
         &mut self,
-        evaluator: &mut WalkNodeEvaluator,
+        evaluator: &mut E,
         from: i32,
         targets: &[BlockPos],
     ) -> Option<(NodePoint, Vec<PathTarget>)> {
@@ -196,8 +196,8 @@ impl PathFinder {
         best_h
     }
 
-    fn best_reached_path(
-        evaluator: &WalkNodeEvaluator,
+    fn best_reached_path<E: NodeEvaluator + ?Sized>(
+        evaluator: &E,
         targets: &[PathTarget],
         reached_targets: &[usize],
     ) -> Option<Path> {
@@ -221,7 +221,10 @@ impl PathFinder {
         best
     }
 
-    fn best_unreached_path(evaluator: &WalkNodeEvaluator, targets: &[PathTarget]) -> Option<Path> {
+    fn best_unreached_path<E: NodeEvaluator + ?Sized>(
+        evaluator: &E,
+        targets: &[PathTarget],
+    ) -> Option<Path> {
         let mut best = None;
         for target in targets {
             let Some(path) =
@@ -239,8 +242,8 @@ impl PathFinder {
         best
     }
 
-    fn reconstruct_path(
-        evaluator: &WalkNodeEvaluator,
+    fn reconstruct_path<E: NodeEvaluator + ?Sized>(
+        evaluator: &E,
         closest: Option<i32>,
         target: BlockPos,
         reached: bool,
