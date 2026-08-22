@@ -1,11 +1,11 @@
 //! TNT block behavior.
 //!
-//! Vanilla parity: `TntBlock`. A redstone signal turns the block into a
-//! [`PrimedTntEntity`] that detonates once its fuse burns out.
+//! Vanilla parity: `TntBlock`. A redstone signal, flint and steel or a fire
+//! charge turns the block into a [`PrimedTntEntity`] that detonates once its
+//! fuse burns out.
 //!
-//! TODO: also light TNT from flint and steel, a fire charge, a projectile on
-//! fire, and a neighboring explosion, matching `TntBlock.useItemOn`,
-//! `onCaughtFire`, `onProjectileHit` and `wasExploded`.
+//! TODO: also light TNT from a projectile on fire and a neighboring explosion,
+//! matching `TntBlock.onCaughtFire`, `onProjectileHit` and `wasExploded`.
 
 use std::sync::Arc;
 
@@ -14,13 +14,27 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::vanilla_game_rules::TNT_EXPLODES;
-use steel_registry::{sound_events, vanilla_blocks};
-use steel_utils::{BlockPos, BlockStateId, types::UpdateFlags};
+use steel_registry::{sound_events, vanilla_blocks, vanilla_items};
+use steel_utils::{
+    BlockPos, BlockStateId,
+    types::{InteractionHand, UpdateFlags},
+};
 
+use crate::behavior::InventoryAccess;
 use crate::behavior::block::BlockBehavior;
-use crate::behavior::context::BlockPlaceContext;
+use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::entity::Entity as _;
 use crate::entity::entities::PrimedTntEntity;
+use crate::player::Player;
 use crate::world::{SignalGetter as _, World};
+
+/// What the player used to light the TNT.
+enum Igniter {
+    /// Wears out by one point of durability.
+    FlintAndSteel,
+    /// Is consumed.
+    FireCharge,
+}
 
 /// Behavior for the TNT block.
 #[block_behavior]
@@ -86,6 +100,62 @@ impl BlockBehavior for TntBlock {
             return;
         }
         Self::prime_if_powered(world, pos);
+    }
+
+    /// Lights the TNT with flint and steel or a fire charge.
+    ///
+    /// Vanilla parity: `TntBlock.useItemOn`.
+    fn use_item_on(
+        &self,
+        _state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+        hand: InteractionHand,
+        _hit_result: &BlockHitResult,
+        inv: &mut InventoryAccess,
+    ) -> InteractionResult {
+        let igniter = inv.with_item(|stack| {
+            if stack.is(&vanilla_items::FLINT_AND_STEEL) {
+                Some(Igniter::FlintAndSteel)
+            } else if stack.is(&vanilla_items::FIRE_CHARGE) {
+                Some(Igniter::FireCharge)
+            } else {
+                None
+            }
+        });
+        let Some(igniter) = igniter else {
+            return InteractionResult::TryEmptyHandInteraction;
+        };
+
+        if !Self::prime(world, pos, Some(player.id())) {
+            return InteractionResult::Pass;
+        }
+        world.set_block(
+            pos,
+            vanilla_blocks::AIR.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        );
+
+        let infinite = player.has_infinite_materials();
+        match igniter {
+            // Flint and steel wears out; a fire charge is spent.
+            Igniter::FlintAndSteel => {
+                inv.with_inventory(|inventory| {
+                    inventory.hurt_item_in_hand(hand, 1, infinite);
+                });
+            }
+            Igniter::FireCharge => {
+                if !infinite {
+                    inv.with_item(|stack| {
+                        let remaining = stack.count() - 1;
+                        stack.set_count(remaining);
+                    });
+                }
+            }
+        }
+
+        InteractionResult::Success
     }
 
     fn handle_neighbor_changed(

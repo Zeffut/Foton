@@ -9,8 +9,9 @@ use std::sync::{Arc, Weak};
 use glam::DVec3;
 use steel_macros::entity_behavior;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_entity_data::ArrowEntityData;
-use steel_registry::{vanilla_damage_types, vanilla_entities};
+use steel_registry::{vanilla_damage_types, vanilla_entities, vanilla_items};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
@@ -19,6 +20,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, Projectile, ProjectileBase,
     RemovalReason, next_entity_id,
 };
+use crate::inventory::container::Container as _;
 use crate::physics::MoverType;
 use crate::world::World;
 
@@ -243,6 +245,27 @@ impl Entity for ArrowEntity {
 
     fn is_pickable(&self) -> bool {
         true
+    }
+
+    /// Lets a player collect an arrow that has landed.
+    ///
+    /// Vanilla parity: `AbstractArrow.playerTouch`. Only a stuck arrow can be
+    /// picked up, which is why one still in flight passes straight through.
+    fn player_touch(self: Arc<Self>, player: &Arc<crate::player::Player>) {
+        if !self.is_in_ground() {
+            return;
+        }
+
+        // TODO: honor the arrow's pickup mode, so creative-only and
+        // non-collectable arrows behave as in vanilla.
+        let mut stack = ItemStack::new(&vanilla_items::ARROW);
+        let before = stack.count();
+        player.inventory.lock().add(&mut stack);
+        if stack.count() == before {
+            return;
+        }
+
+        self.set_removed(RemovalReason::Discarded);
     }
 }
 
