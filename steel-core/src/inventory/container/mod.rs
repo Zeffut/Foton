@@ -340,18 +340,37 @@ fn matching_item_count(
 /// Signal strength from 0 to 15
 #[must_use]
 pub fn calculate_redstone_signal_from_container(container: &dyn Container) -> i32 {
-    let size = container.get_container_size();
+    calculate_redstone_signal_from_containers(&[container])
+}
+
+/// Calculates the comparator signal for several containers read as one.
+///
+/// Vanilla parity: `AbstractContainerMenu.getRedstoneSignalFromContainer` applied
+/// to a `CompoundContainer`. A double chest measures its 54 slots as a single
+/// container, so the halves must be averaged together rather than measured
+/// separately and combined afterwards.
+///
+/// # Returns
+/// Signal strength from 0 to 15.
+#[must_use]
+pub fn calculate_redstone_signal_from_containers(containers: &[&dyn Container]) -> i32 {
+    let size: usize = containers
+        .iter()
+        .map(|container| container.get_container_size())
+        .sum();
     if size == 0 {
         return 0;
     }
 
     let mut total_percent: f32 = 0.0;
 
-    for i in 0..size {
-        let item = container.get_item(i);
-        if !item.is_empty() {
-            let max_stack = container.get_max_stack_size_for_item(item);
-            total_percent += item.count() as f32 / max_stack as f32;
+    for container in containers {
+        for i in 0..container.get_container_size() {
+            let item = container.get_item(i);
+            if !item.is_empty() {
+                let max_stack = container.get_max_stack_size_for_item(item);
+                total_percent += item.count() as f32 / max_stack as f32;
+            }
         }
     }
 
