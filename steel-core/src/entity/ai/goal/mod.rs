@@ -33,6 +33,7 @@ mod try_find_water;
 mod water_avoiding_random_stroll;
 
 pub(crate) use breed_goal::BreedGoal;
+pub(crate) use climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal;
 pub(crate) use eat_block_goal::EatBlockGoal;
 pub(crate) use flee_sun::FleeSunGoal;
 pub(crate) use float_goal::FloatGoal;
@@ -44,6 +45,7 @@ pub(crate) use melee_attack::MeleeAttackGoal;
 pub(crate) use nearest_attackable_target::NearestAttackableTargetGoal;
 pub(crate) use panic_goal::PanicGoal;
 pub(crate) use random_look_around::RandomLookAroundGoal;
+pub(crate) use random_stroll::RandomStrollGoal;
 pub(crate) use restrict_sun::RestrictSunGoal;
 pub(crate) use selector::{Goal, GoalControl, GoalControls, GoalSelector};
 pub(crate) use tempt_goal::TemptGoal;
