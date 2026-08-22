@@ -36,16 +36,9 @@ pub(crate) use breed_goal::BreedGoal;
 pub(crate) use eat_block_goal::EatBlockGoal;
 pub(crate) use float_goal::FloatGoal;
 pub(crate) use follow_parent::FollowParentGoal;
-#[expect(
-    unused_imports,
-    reason = "target goals are consumed by mob goal registration modules"
-)]
 pub(crate) use hurt_by_target::HurtByTargetGoal;
 pub(crate) use look_at_player::LookAtPlayerGoal;
-#[expect(
-    unused_imports,
-    reason = "target goals are consumed by mob goal registration modules"
-)]
+pub(crate) use melee_attack::MeleeAttackGoal;
 pub(crate) use nearest_attackable_target::NearestAttackableTargetGoal;
 pub(crate) use panic_goal::PanicGoal;
 pub(crate) use random_look_around::RandomLookAroundGoal;
