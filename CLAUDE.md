@@ -153,6 +153,52 @@ Manques structurants : **aucun mob hostile** (seuls vache, cochon, mouton existe
 **pas de fourneau**, **pas de coffre**, craft limité à la table. La survie est donc
 impossible en l'état — c'est là que se trouve le travail à fort impact.
 
+## État d'avancement et chemin critique
+
+Mesuré le 22/08/2026 en croisant `classes.json` avec le code réel.
+
+| Catégorie | Couverture |
+|-----------|-----------|
+| Blocs     | 186 / 265 classes |
+| Items     | 30 / 70 classes |
+| Entités   | 4 / 142 classes |
+
+**Livré ici** : coffre (double coffre compris) ; cycle de consommation (manger et boire).
+
+**Systèmes déjà complets, à ne pas réécrire** — le piège serait de les reconstruire
+faute de les avoir cherchés :
+
+- Loot tables : moteur générique de 2 443 lignes (`steel-registry/src/loot_table/`),
+  déjà branché sur les blocs et les morts d'entités.
+- Dégâts, mort, respawn : complets (`player/mod.rs::die`, `player/lifecycle/respawn.rs`).
+- Expérience : `player/experience.rs`, formule vanilla exacte.
+- Sauvegarde : vrai format Anvil `.mca`.
+- Redstone : pistons avec structures collées, comparateurs, rails, observateurs.
+- Projectiles : moteur de 1 107 lignes (`entity/projectile/mod.rs`) — il manque les
+  types concrets (flèche, boule de neige), pas la physique.
+- Élevage : goal + ageable + animal génériques, branchés sur les 3 animaux existants.
+- IA de combat : `melee_attack.rs` (333 l.), `hurt_by_target.rs`, `nearest_attackable_target.rs`
+  sont **écrits et testés** mais jamais exportés ni consommés. `MeleeAttackGoal` n'est même
+  pas dans les `pub(crate) use` de `ai/goal/mod.rs`.
+
+**Chemin critique restant**, par dépendances :
+
+1. **Fourneau** — `classes.json` contient déjà `furnace`, `smoker`, `blast_furnace` :
+   créer les structs suffit. Deux fondations manquent d'abord :
+   la **table de burn time** (absente à 100 %, port de `FuelValues.vanillaBurnTimes`)
+   et les **recettes blasting/smoking** (les JSON existent dans le datapack builtin,
+   mais `steel-registry/build/recipes.rs` ne route que `crafting_shaped`,
+   `crafting_shapeless` et `smelting` — les autres tombent dans un `_ => {}`).
+2. **`World::explode`** — deux TODO l'attendent déjà (`respawn_anchor_block.rs`,
+   `bed_block.rs`) ; débloque TNT et le creeper.
+3. **Arc et flèches** — le moteur de projectiles fait déjà tout, il manque le câblage.
+4. **Table d'enchantement** — les effets et l'enclume sont finis, seule l'acquisition manque.
+5. **Mobs hostiles** — les goals existent ; le vrai chantier est le **spawn naturel**
+   (`NaturalSpawner`), qui n'a aucune fondation dans Steel.
+
+**Manques structurants pour une survie jouable** : aucun mob hostile, pas de fourneau,
+craft limité à la table, pas de potions bues ni lancées.
+
 ## Workflow git
 
 - **Une branche par sujet**, jamais de commit direct sur `master`
