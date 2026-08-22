@@ -26,6 +26,8 @@ Le workspace est **`/root/SteelMC` dans WSL2 (Ubuntu 26.04)**, jamais côté Win
 bash dev/doctor.sh          # vérifie que l'environnement est complet et cohérent
 bash dev/ci.sh              # rejoue toute la suite de vérification (~150 s)
 bash dev/sync-upstream.sh   # récupère les avancées de l'amont, puis vérifie
+bash dev/smoke-test.sh      # démarre le serveur et lui parle en protocole Minecraft
+python3 dev/coverage.py     # mesure la couverture réelle par rapport à vanilla
 ```
 
 Commandes brutes :
@@ -141,63 +143,60 @@ Méthode de travail : ouvrir la classe Java dans `minecraft-src/`, relever les m
 surchargées, transposer. Le trait `BlockBehavior` documente chaque méthode par son
 équivalent vanilla.
 
-## État de la couverture (22/08/2026)
+## État de la couverture
 
-| Catégorie | Classes couvertes |
-|-----------|-------------------|
-| Blocs     | 185 / 265 (70 %) |
-| Items     | 30 / 70 (43 %) |
-| Entités   | 4 / 142 (3 %) |
+Mesuré par `python3 dev/coverage.py`, qui croise `steel-core/build/classes.json`
+avec les structs portant `#[block_behavior]`, `#[item_behavior]` ou
+`#[entity_behavior]`. Relancer la commande plutôt que se fier au tableau.
 
-Manques structurants : **aucun mob hostile** (seuls vache, cochon, mouton existent),
-**pas de fourneau**, **pas de coffre**, craft limité à la table. La survie est donc
-impossible en l'état — c'est là que se trouve le travail à fort impact.
+| Catégorie | Couverture | Au départ du fork |
+|-----------|-----------|-------------------|
+| Blocs     | 193 / 265 (73 %) | 185 / 265 (70 %) |
+| Items     | 32 / 70 (46 %)   | 30 / 70 (43 %)   |
+| Entités   | 23 / 142 (16 %)  | 4 / 142 (3 %)    |
 
-## État d'avancement et chemin critique
+`dev/coverage.py --list entities` affiche le détail couvert / manquant.
 
-Mesuré le 22/08/2026 en croisant `classes.json` avec le code réel.
+## Systèmes livrés depuis le fork
 
-| Catégorie | Couverture |
-|-----------|-----------|
-| Blocs     | 186 / 265 classes |
-| Items     | 30 / 70 classes |
-| Entités   | 4 / 142 classes |
+- **Conteneurs** : coffre (double compris), fourneau / fumoir / haut-fourneau
+  avec table de burn time et recettes blasting + smoking, hopper avec accès par
+  face (port de `WorldlyContainer`).
+- **Combat et mobs hostiles** : zombie, squelette, creeper, araignée, husk,
+  araignée venimeuse, vagabond, avec explosions (`ServerExplosion`), flèches, arc,
+  combustion au soleil et effets de statut à l'impact.
+- **Spawn naturel** : `World::tick_natural_spawn`, listes pondérées par biome.
+- **Difficulté locale** : port de `DifficultyInstance`.
+- **Animaux** : poulet (ponte comprise) en plus des vache / cochon / mouton.
 
-**Livré ici** : coffre (double coffre compris) ; cycle de consommation (manger et boire).
+## Ce qui existe déjà — ne pas réécrire
 
-**Systèmes déjà complets, à ne pas réécrire** — le piège serait de les reconstruire
-faute de les avoir cherchés :
+Le piège serait de reconstruire ces systèmes faute de les avoir cherchés :
 
-- Loot tables : moteur générique de 2 443 lignes (`steel-registry/src/loot_table/`),
-  déjà branché sur les blocs et les morts d'entités.
-- Dégâts, mort, respawn : complets (`player/mod.rs::die`, `player/lifecycle/respawn.rs`).
-- Expérience : `player/experience.rs`, formule vanilla exacte.
-- Sauvegarde : vrai format Anvil `.mca`.
+- Loot tables : moteur générique (`steel-registry/src/loot_table/`), branché sur
+  les blocs, la mort des entités, la tonte et les cadeaux.
+- Dégâts, mort, respawn, expérience, sauvegarde Anvil `.mca`.
 - Redstone : pistons avec structures collées, comparateurs, rails, observateurs.
-- Projectiles : moteur de 1 107 lignes (`entity/projectile/mod.rs`) — il manque les
-  types concrets (flèche, boule de neige), pas la physique.
-- Élevage : goal + ageable + animal génériques, branchés sur les 3 animaux existants.
-- IA de combat : `melee_attack.rs` (333 l.), `hurt_by_target.rs`, `nearest_attackable_target.rs`
-  sont **écrits et testés** mais jamais exportés ni consommés. `MeleeAttackGoal` n'est même
-  pas dans les `pub(crate) use` de `ai/goal/mod.rs`.
+- Projectiles : moteur complet (`entity/projectile/mod.rs`).
+- Élevage : goals + `AgeableMob` + `Animal` génériques.
+- IA : `MeleeAttackGoal`, `HurtByTargetGoal`, `NearestAttackableTargetGoal`,
+  `FleeSunGoal`, `RestrictSunGoal`, `LeapAtTargetGoal`, tous exportés et utilisés.
+- Menus : coffre, double coffre, fourneau, hopper, enclume, craft, inventaire.
+- Effets de statut : `MobEffectInstance`, application et synchronisation.
 
-**Chemin critique restant**, par dépendances :
+## Chemin critique restant
 
-1. **Fourneau** — `classes.json` contient déjà `furnace`, `smoker`, `blast_furnace` :
-   créer les structs suffit. Deux fondations manquent d'abord :
-   la **table de burn time** (absente à 100 %, port de `FuelValues.vanillaBurnTimes`)
-   et les **recettes blasting/smoking** (les JSON existent dans le datapack builtin,
-   mais `steel-registry/build/recipes.rs` ne route que `crafting_shaped`,
-   `crafting_shapeless` et `smelting` — les autres tombent dans un `_ => {}`).
-2. **`World::explode`** — deux TODO l'attendent déjà (`respawn_anchor_block.rs`,
-   `bed_block.rs`) ; débloque TNT et le creeper.
-3. **Arc et flèches** — le moteur de projectiles fait déjà tout, il manque le câblage.
-4. **Table d'enchantement** — les effets et l'enclume sont finis, seule l'acquisition manque.
-5. **Mobs hostiles** — les goals existent ; le vrai chantier est le **spawn naturel**
-   (`NaturalSpawner`), qui n'a aucune fondation dans Steel.
-
-**Manques structurants pour une survie jouable** : aucun mob hostile, pas de fourneau,
-craft limité à la table, pas de potions bues ni lancées.
+1. **Mobs** — c'est le plus gros trou (119 classes manquantes). Chaque mob coûte
+   désormais peu : les goals, l'élevage et les effets existent. Manquent surtout
+   les navigations **volante** et **aquatique**, qui bloquent chauve-souris,
+   calmar, ghast, abeille, phantom, noyé.
+2. **Potions** — les effets sont là, il manque `PotionContents` sur les items,
+   la boisson, le jet, et l'alambic.
+3. **Conteneurs restants** — distributeur / dropper (nécessite le registre
+   `DispenseItemBehavior`), ender chest, shulker box, chest piégé.
+4. **Table d'enchantement** — les effets et l'enclume sont finis, seule
+   l'acquisition manque.
+5. **Villageois et commerce** — dépend du système de `Brain` / behaviors, absent.
 
 ## Workflow git
 
