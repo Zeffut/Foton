@@ -9,9 +9,11 @@ use steel_registry::fuel;
 use steel_registry::menu_type::MenuTypeRef;
 use steel_registry::vanilla_items;
 
+use crate::block_entity::SharedBlockEntity;
 use crate::block_entity::entities::FurnaceDataSlots;
 use crate::inventory::menu::builder::{DataSlot, SectionKind};
 use crate::inventory::prelude::*;
+use crate::inventory::slots::FurnaceResultSlot;
 use crate::player::player_inventory::PlayerInventory;
 
 /// Builds a furnace-style menu for `menu_type`.
@@ -25,6 +27,7 @@ pub fn furnace(
     container: impl Into<ContainerRef>,
     menu_type: MenuTypeRef,
     data: Arc<FurnaceDataSlots>,
+    block_entity: SharedBlockEntity,
 ) -> Menu {
     let container = container.into();
     let mut builder = MenuBuilder::new(menu_type, container_id);
@@ -40,7 +43,17 @@ pub fn furnace(
             fuel::is_fuel(stack) || stack.is(&vanilla_items::BUCKET)
         }),
     );
-    let result = builder.section_with(&container, 1, SectionKind::take_only());
+    let result = builder.section_with(
+        &container,
+        1,
+        SectionKind::custom(move |container, index| {
+            Box::new(FurnaceResultSlot::new(
+                container.clone(),
+                index,
+                Arc::clone(&block_entity),
+            ))
+        }),
+    );
     let player = builder.player_inventory(&inventory);
 
     let data_slots = [
