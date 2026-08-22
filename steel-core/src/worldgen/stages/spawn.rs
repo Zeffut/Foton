@@ -19,7 +19,7 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::entity_type::MobCategory;
 use steel_registry::vanilla_game_rules::SPAWN_MOBS;
 use steel_utils::random::Random as _;
-use steel_utils::random::worldgen_random::WorldgenRandom;
+use steel_utils::random::legacy_random::LegacyRandom;
 use steel_utils::{BlockPos, BlockStateId, ChunkPos};
 
 use crate::chunk::heightmap::HeightmapType;
@@ -97,12 +97,12 @@ fn spawn_mobs_for_chunk_generation(
     }
 
     // Vanilla parity: `spawnOriginalMobs` seeds a fresh random from the chunk
-    // corner, so the same seed always populates the same chunk the same way.
-    //
-    // TODO: vanilla backs this particular random with `LegacyRandomSource`,
-    // while Steel's `WorldgenRandom` is Xoroshiro-only. The rules and rates
-    // match; which animal lands on which block does not.
-    let mut random = WorldgenRandom::from_seed(0);
+    // corner, so the same seed always stocks the same chunk the same way. It
+    // builds that random over a `LegacyRandomSource`, not the Xoroshiro one
+    // feature decoration uses, and the two produce different sequences -- so
+    // this has to be the legacy generator to place animals where vanilla does.
+    // The seed it starts from is discarded by `set_decoration_seed`.
+    let mut random = LegacyRandom::from_seed(0);
     random.set_decoration_seed(world_seed, min_x, min_z);
 
     while random.next_f32() < biome.creature_spawn_probability {
@@ -133,7 +133,7 @@ fn biome_for_chunk(
 /// Vanilla parity: `WeightedList.getRandom`.
 fn pick_weighted<'entries>(
     candidates: &'entries [SpawnerData],
-    random: &mut WorldgenRandom,
+    random: &mut LegacyRandom,
 ) -> Option<&'entries SpawnerData> {
     let total: i32 = candidates.iter().map(|entry| entry.weight).sum();
     if total <= 0 {
@@ -161,7 +161,7 @@ fn place_pack(
     entry: &SpawnerData,
     min_x: i32,
     min_z: i32,
-    random: &mut WorldgenRandom,
+    random: &mut LegacyRandom,
 ) {
     let Some(entity_type) = REGISTRY.entity_types.by_key(&entry.entity_type) else {
         // Only entity types Steel implements can spawn; the rest wait for their
@@ -281,13 +281,13 @@ mod tests {
     #[test]
     fn weightless_lists_pick_nothing() {
         let candidates = [entry("cow", 0), entry("pig", 0)];
-        let mut random = WorldgenRandom::from_seed(1);
+        let mut random = LegacyRandom::from_seed(1);
         assert!(pick_weighted(&candidates, &mut random).is_none());
     }
 
     #[test]
     fn empty_lists_pick_nothing() {
-        let mut random = WorldgenRandom::from_seed(1);
+        let mut random = LegacyRandom::from_seed(1);
         assert!(pick_weighted(&[], &mut random).is_none());
     }
 
@@ -296,7 +296,7 @@ mod tests {
         // Nine to one, so the split has to be visible rather than merely
         // possible: a picker that ignored weights would land near even.
         let candidates = [entry("cow", 90), entry("pig", 10)];
-        let mut random = WorldgenRandom::from_seed(7);
+        let mut random = LegacyRandom::from_seed(7);
 
         let mut cows = 0;
         for _ in 0..1000 {
@@ -316,8 +316,8 @@ mod tests {
     fn the_same_chunk_is_always_stocked_the_same_way() {
         // Vanilla seeds this pass from the chunk corner so a world regenerates
         // identically. Two randoms seeded alike must agree.
-        let mut left = WorldgenRandom::from_seed(0);
-        let mut right = WorldgenRandom::from_seed(0);
+        let mut left = LegacyRandom::from_seed(0);
+        let mut right = LegacyRandom::from_seed(0);
         left.set_decoration_seed(1_234, 48, -96);
         right.set_decoration_seed(1_234, 48, -96);
 

@@ -47,6 +47,25 @@ impl LegacyRandom {
         self.next_gaussian = f64::NAN;
     }
 
+    /// Matches vanilla's `WorldgenRandom.setDecorationSeed`.
+    ///
+    /// Vanilla defines this on `WorldgenRandom`, which wraps whichever source it
+    /// was built with. Chunk-generation mob spawning builds it over a
+    /// `LegacyRandomSource`, so the method has to exist here too rather than
+    /// only on the Xoroshiro-backed `WorldgenRandom`; the arithmetic is the
+    /// same, and the sequence it produces is not.
+    pub fn set_decoration_seed(&mut self, seed: i64, block_x: i32, block_z: i32) -> i64 {
+        self.set_seed(seed);
+        let x_scale = self.next_i64() | 1;
+        let z_scale = self.next_i64() | 1;
+        let decoration_seed = i64::from(block_x)
+            .wrapping_mul(x_scale)
+            .wrapping_add(i64::from(block_z).wrapping_mul(z_scale))
+            ^ seed;
+        self.set_seed(decoration_seed);
+        decoration_seed
+    }
+
     /// Matches vanilla's `WorldgenRandom.setLargeFeatureSeed`.
     pub fn set_large_feature_seed(&mut self, seed: i64, chunk_x: i32, chunk_z: i32) {
         self.set_seed(seed);
@@ -530,5 +549,42 @@ mod test {
         for _ in 0..5 {
             assert_eq!(rng.next_i32(), expected.next_i32());
         }
+    }
+}
+
+#[cfg(test)]
+mod decoration_seed_tests {
+    use super::*;
+
+    #[test]
+    fn set_decoration_seed_matches_the_java_random_specification() {
+        // Expected values derived from java.util.Random's published LCG rather
+        // than from this implementation, so the two have to agree independently.
+        let mut random = LegacyRandom::from_seed(0);
+        let decoration_seed = random.set_decoration_seed(1_234, 48, -96);
+
+        assert_eq!(decoration_seed, -5_430_657_573_597_204_766);
+        let rolls: Vec<i32> = (0..5).map(|_| random.next_i32_bounded(1_000)).collect();
+        assert_eq!(rolls, vec![472, 198, 75, 885, 923]);
+    }
+
+    #[test]
+    fn the_same_corner_always_gives_the_same_seed() {
+        let mut left = LegacyRandom::from_seed(0);
+        let mut right = LegacyRandom::from_seed(0);
+        assert_eq!(
+            left.set_decoration_seed(99, 16, 32),
+            right.set_decoration_seed(99, 16, 32)
+        );
+    }
+
+    #[test]
+    fn neighboring_chunks_are_seeded_apart() {
+        let mut here = LegacyRandom::from_seed(0);
+        let mut next_door = LegacyRandom::from_seed(0);
+        assert_ne!(
+            here.set_decoration_seed(99, 16, 32),
+            next_door.set_decoration_seed(99, 32, 32)
+        );
     }
 }
