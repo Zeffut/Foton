@@ -1,9 +1,12 @@
-//! Squid entity.
+//! Glow squid entity.
 //!
-//! Vanilla parity: `Squid` and `AgeableWaterCreature`. A squid does not swim
-//! toward anything: its tentacles beat on a cycle, and once per beat it throws
-//! itself along whatever direction it last picked. That is why it drifts in
-//! pulses rather than gliding like a fish.
+//! Vanilla parity: `GlowSquid`, which extends `Squid` and changes four sounds,
+//! one particle, and the dark ticks it counts after being hurt. Everything else
+//! comes from [`super::squid_common`], which is what makes this file short.
+//!
+//! The dark ticks are the whole point of the mob: hurt one and it stops
+//! glowing for five seconds, so the light a cave gets from a shoal of them is
+//! something a player can put out.
 
 use std::sync::{Arc, Weak};
 
@@ -14,9 +17,8 @@ use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::sound_events;
-use steel_registry::vanilla_entity_data::SquidEntityData;
-use steel_registry::vanilla_particle_types;
+use steel_registry::vanilla_entity_data::GlowSquidEntityData;
+use steel_registry::{sound_events, vanilla_particle_types};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
@@ -34,93 +36,39 @@ use crate::entity::{
 use crate::physics::{MoveResult, MoverType};
 use crate::world::World;
 
-/// Volume a squid makes noise at.
-///
-/// Vanilla parity: `Squid.getSoundVolume`.
-const SQUID_SOUND_VOLUME: f32 = 0.4;
+/// Baby glow squid hitbox.
+const BABY_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.5, 0.5, 0.37);
+
+/// Volume a glow squid makes noise at.
+const SOUND_VOLUME: f32 = 0.4;
 
 /// Vanilla parity: `Squid.getDefaultGravity`.
-const SQUID_GRAVITY: f64 = 0.08;
+const GRAVITY: f64 = 0.08;
 
-/// Particles in one ink cloud.
+/// Ticks a glow squid stays dark after being hurt.
 ///
-/// Vanilla parity: the `30` iterations of `Squid.spawnInk`.
-const INK_PARTICLE_COUNT: i32 = 30;
+/// Vanilla parity: the `setDarkTicks(100)` of `GlowSquid.hurtServer`.
+const DARK_TICKS_ON_HURT: i32 = 100;
 
-/// Sideways scatter of each ink jet.
-///
-/// Vanilla parity: the `nextFloat() * 0.6 - 0.3` of the same loop.
-const INK_SCATTER: f64 = 0.6;
-
-/// Shortest distance an ink jet is thrown, for a grown squid.
-///
-/// Vanilla parity: the `0.3F` offset scale.
-const INK_REACH_ADULT: f64 = 0.3;
-
-/// Shortest distance an ink jet is thrown, for a baby.
-///
-/// Vanilla parity: the `0.1F` offset scale.
-const INK_REACH_BABY: f64 = 0.1;
-
-/// Extra distance an ink jet may travel beyond the minimum.
-///
-/// Vanilla parity: the `+ nextFloat() * 2.0F` of the same expression.
-const INK_REACH_SPREAD: f64 = 2.0;
-
-/// Speed the ink particles carry.
-///
-/// Vanilla parity: the `0.1F` speed argument of `sendParticles`.
-const INK_SPEED: f64 = 0.1;
-
-/// How fast a squid turns to face where it is drifting.
-///
-/// Vanilla parity: the `0.1F` interpolation of `Squid.aiStep`.
-const FACING_RESPONSIVENESS: f32 = 0.1;
-
-/// Squared distance within which a squid bolts from what hurt it.
-///
-/// Vanilla parity: the `distanceToSqr(entity) < 100.0` of `SquidFleeGoal`.
-const FLEE_TRIGGER_DISTANCE_SQR: f64 = 100.0;
-
-/// How hard a squid pushes away from what hurt it.
-///
-/// Vanilla parity: `SquidFleeGoal.SQUID_FLEE_SPEED`.
-const FLEE_SPEED: f64 = 3.0;
-
-/// Distance past which the flee push starts easing off.
-///
-/// Vanilla parity: `SquidFleeGoal.SQUID_FLEE_MIN_DISTANCE`.
-const FLEE_EASE_FROM: f64 = 5.0;
-
-/// Divisor turning the flee push into a per-tick movement vector.
-///
-/// Vanilla parity: the `/ 20.0` of `SquidFleeGoal.tick`.
-const FLEE_PUSH_DIVISOR: f64 = 20.0;
-
-/// Baby squid hitbox.
-///
-/// Vanilla parity: `Squid.BABY_DIMENSIONS`.
-const SQUID_BABY_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.5, 0.5, 0.37);
-
-/// A squid.
-#[entity_behavior(class = "Squid")]
-pub struct SquidEntity {
+/// A glow squid.
+#[entity_behavior(class = "GlowSquid")]
+pub struct GlowSquidEntity {
     base: EntityBase,
     entity_type: EntityTypeRef,
     living_base: LivingEntityBase,
     mob_base: MobBase,
     ageable_base: AgeableMobBase,
-    entity_data: SyncMutex<SquidEntityData>,
+    entity_data: SyncMutex<GlowSquidEntityData>,
     state: SyncMutex<SquidState>,
 }
 
-// SAFETY: This key is owned by Steel and uniquely identifies `SquidEntity`.
-unsafe impl DowncastType for SquidEntity {
-    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/squid");
+// SAFETY: This key is owned by Steel and uniquely identifies `GlowSquidEntity`.
+unsafe impl DowncastType for GlowSquidEntity {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/glow_squid");
 }
 
-impl SquidEntity {
-    /// Creates a squid at runtime.
+impl GlowSquidEntity {
+    /// Creates a glow squid at runtime.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {
         Self::new_with_base(
@@ -129,7 +77,7 @@ impl SquidEntity {
         )
     }
 
-    /// Creates a squid from saved base data.
+    /// Creates a glow squid from saved base data.
     #[must_use]
     pub fn from_saved(entity_type: EntityTypeRef, load: EntityBaseLoad) -> Self {
         Self::new_with_base(
@@ -142,12 +90,10 @@ impl SquidEntity {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
         let ageable_base = AgeableMobBase::new();
-        let mut entity_data = SquidEntityData::new();
+        let mut entity_data = GlowSquidEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 
         {
-            // Vanilla parity: `Squid.registerGoals`. The flee goal is not ported;
-            // see the module TODO.
             let mut goals = mob_base.goal_selector().lock();
             let hooks = squid_common::hooks_for::<Self>();
             goals.add_goal(0, SquidRandomMovementGoal::new(hooks));
@@ -164,9 +110,19 @@ impl SquidEntity {
             state: SyncMutex::new(SquidState::new()),
         }
     }
+
+    /// Returns how much longer this squid stays dark.
+    #[must_use]
+    pub fn dark_ticks_remaining(&self) -> i32 {
+        *self.entity_data.lock().dark_ticks_remaining.get()
+    }
+
+    fn set_dark_ticks(&self, ticks: i32) {
+        self.entity_data.lock().dark_ticks_remaining.set(ticks);
+    }
 }
 
-impl Entity for SquidEntity {
+impl Entity for GlowSquidEntity {
     fn base(&self) -> &EntityBase {
         &self.base
     }
@@ -189,15 +145,14 @@ impl Entity for SquidEntity {
         }
     }
 
-    /// Vanilla parity: `Squid.getDefaultGravity`.
     fn get_default_gravity(&self) -> f64 {
-        SQUID_GRAVITY
+        GRAVITY
     }
 
     fn dimensions_for_pose(&self, _pose: EntityPose) -> EntityDimensions {
         let scale = LivingEntity::get_scale(self);
         if AgeableMob::is_baby(self) {
-            SQUID_BABY_DIMENSIONS.scale(scale)
+            BABY_DIMENSIONS.scale(scale)
         } else {
             self.entity_type.dimensions.scale(scale)
         }
@@ -207,26 +162,26 @@ impl Entity for SquidEntity {
         SoundSource::Neutral
     }
 
-    /// Vanilla parity: `Squid.getMovementEmission`.
     fn movement_emission(&self) -> EntityMovementEmission {
         EntityMovementEmission::Events
     }
 
-    /// Vanilla parity: `Squid.playStepSound` does not exist; a squid has no feet.
     fn play_step_sound(&self, _pos: BlockPos, _block_state: BlockStateId) {}
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
         self.save_mob(nbt);
         self.save_ageable_mob(nbt);
+        nbt.insert("DarkTicksRemaining", self.dark_ticks_remaining());
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
         self.load_mob(nbt);
         self.load_ageable_mob(nbt);
+        self.set_dark_ticks(nbt.int("DarkTicksRemaining").unwrap_or(0));
     }
 }
 
-impl LivingEntity for SquidEntity {
+impl LivingEntity for GlowSquidEntity {
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }
@@ -246,29 +201,29 @@ impl LivingEntity for SquidEntity {
     }
 
     fn sound_volume(&self) -> f32 {
-        SQUID_SOUND_VOLUME
+        SOUND_VOLUME
     }
 
     fn hurt_sound(&self, _source: &DamageSource) -> Option<SoundEventRef> {
-        Some(&sound_events::ENTITY_SQUID_HURT)
+        Some(&sound_events::ENTITY_GLOW_SQUID_HURT)
     }
 
     fn death_sound(&self) -> Option<SoundEventRef> {
-        Some(&sound_events::ENTITY_SQUID_DEATH)
+        Some(&sound_events::ENTITY_GLOW_SQUID_DEATH)
     }
 
     fn server_ai_step(&self) {
         Mob::mob_server_ai_step(self);
     }
 
-    /// Vanilla parity: `Squid.hurtServer`, which inks only when something
-    /// actually attacked it, not when it drowns or starves.
+    /// Inks, and goes dark for five seconds.
     ///
-    /// Vanilla inks after the damage lands and reads `getLastHurtByMob`;
-    /// Steel has no post-damage hook, so this runs just before, reading the
-    /// damage source instead. Both come to the same thing: ink for a hit that
-    /// has an attacker behind it and got past the invulnerability window.
+    /// Vanilla parity: `GlowSquid.hurtServer` on top of `Squid.hurtServer`.
+    /// Going dark is what makes a shoal of these a light source a player can
+    /// switch off.
     fn before_actually_hurt(&self, source: &DamageSource, _amount: f32) {
+        self.set_dark_ticks(DARK_TICKS_ON_HURT);
+
         if source.causing_entity_id.is_none() {
             return;
         }
@@ -276,8 +231,8 @@ impl LivingEntity for SquidEntity {
             squid_common::spawn_ink(
                 self,
                 &world,
-                &sound_events::ENTITY_SQUID_SQUIRT,
-                &vanilla_particle_types::SQUID_INK,
+                &sound_events::ENTITY_GLOW_SQUID_SQUIRT,
+                &vanilla_particle_types::GLOW_SQUID_INK,
             );
         }
     }
@@ -288,21 +243,24 @@ impl LivingEntity for SquidEntity {
         if self.is_in_water() {
             squid_common::face_travel_direction(self);
         }
+
+        // Vanilla parity: `GlowSquid.aiStep` counts the darkness down.
+        let dark = self.dark_ticks_remaining();
+        if dark > 0 {
+            self.set_dark_ticks(dark - 1);
+        }
+
         AgeableMob::tick_ageable_mob(self);
         result
     }
 
-    /// Moves on nothing but its own momentum.
-    ///
-    /// Vanilla parity: `Squid.travel`, which throws away the travel input
-    /// entirely: a squid is carried by the shove its tentacles gave it, not by
-    /// anything the AI asks for this tick.
+    /// Vanilla parity: `Squid.travel`, which throws away the travel input.
     fn travel(&self, _input: DVec3) -> Option<MoveResult> {
         self.move_entity(MoverType::SelfMovement, self.velocity())
     }
 }
 
-impl SquidLike for SquidEntity {
+impl SquidLike for GlowSquidEntity {
     fn set_movement_vector(&self, movement_vector: DVec3) {
         self.state.lock().movement_vector = movement_vector;
     }
@@ -312,7 +270,7 @@ impl SquidLike for SquidEntity {
     }
 }
 
-impl AgeableMob for SquidEntity {
+impl AgeableMob for GlowSquidEntity {
     fn ageable_base(&self) -> &AgeableMobBase {
         &self.ageable_base
     }
@@ -338,21 +296,7 @@ impl AgeableMob for SquidEntity {
     }
 }
 
-impl Mob for SquidEntity {
-    /// Returns whether this mob accepts where the spawner put it.
-    ///
-    /// Vanilla parity: `WaterAnimal::checkSurfaceWaterAnimalSpawnRules`,
-    /// which keeps it in the top thirteen blocks of the sea.
-    fn check_spawn_rules(
-        &self,
-        world: &Arc<World>,
-        spawn_reason: EntitySpawnReason,
-        pos: BlockPos,
-    ) -> bool {
-        let _ = spawn_reason;
-        check_surface_water_animal_spawn_rules(world, pos)
-    }
-
+impl Mob for GlowSquidEntity {
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }
@@ -366,21 +310,33 @@ impl Mob for SquidEntity {
     }
 
     fn ambient_sound(&self) -> Option<SoundEventRef> {
-        Some(&sound_events::ENTITY_SQUID_AMBIENT)
+        Some(&sound_events::ENTITY_GLOW_SQUID_AMBIENT)
     }
 
-    /// Vanilla parity: `AgeableWaterCreature.getAmbientSoundInterval`.
     fn ambient_sound_interval(&self) -> i32 {
         AMBIENT_SOUND_INTERVAL
     }
 
-    /// Vanilla parity: `AgeableWaterCreature.getBaseExperienceReward`.
     fn base_experience_reward_mob(&self) -> i32 {
         1 + rand::random_range(0..3)
     }
 
-    /// Vanilla parity: `Squid.finalizeSpawn`, which passes the one-in-twenty
-    /// baby chance down to the shared ageable roll.
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `GlowSquid.checkGlowSquidSpawnRules` adds a darkness
+    /// test to the surface water rule, which is why they gather in flooded
+    /// caves rather than in open sea.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        _spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        use crate::world::LevelReader as _;
+        check_surface_water_animal_spawn_rules(world, pos)
+            && world.max_local_raw_brightness(pos, world.sky_darkening()) == 0
+    }
+
     fn finalize_spawn(
         &self,
         world: &Arc<World>,
@@ -402,4 +358,4 @@ impl Mob for SquidEntity {
     }
 }
 
-impl PathfinderMob for SquidEntity {}
+impl PathfinderMob for GlowSquidEntity {}
