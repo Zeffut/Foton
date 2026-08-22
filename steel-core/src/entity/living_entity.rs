@@ -777,7 +777,18 @@ pub trait LivingEntity: Entity {
     }
 
     /// Mirrors vanilla `LivingEntity.getDamageAfterMagicAbsorb`.
-    fn get_damage_after_magic_absorb(&self, source: &DamageSource, mut damage: f32) -> f32 {
+    /// Returns damage after enchantment protection.
+    ///
+    /// Override this to add a mob's own resistance, and call
+    /// [`Self::living_damage_after_magic_absorb`] from the override for the
+    /// shared behavior; Rust has no `super`, so the base body lives in its own
+    /// method.
+    fn get_damage_after_magic_absorb(&self, source: &DamageSource, damage: f32) -> f32 {
+        self.living_damage_after_magic_absorb(source, damage)
+    }
+
+    /// Shared body of vanilla `LivingEntity.getDamageAfterMagicAbsorb`.
+    fn living_damage_after_magic_absorb(&self, source: &DamageSource, mut damage: f32) -> f32 {
         if source.is(&vanilla_damage_type_tags::DamageTypeTag::BYPASSES_EFFECTS) {
             return damage;
         }
