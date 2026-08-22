@@ -29,6 +29,7 @@ use steel_utils::value_providers::IntProvider;
 use steel_utils::{BlockLocalAabb, BlockPos, BlockStateId, Identifier, WorldAabb, axis::Axis};
 
 use crate::behavior::BLOCK_BEHAVIORS;
+use crate::behavior::blocks::Infested;
 use crate::behavior::blocks::vegetation::bonemealable::Bonemealable;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::behavior::{InventoryAccess, PlacementSource};
@@ -1225,6 +1226,14 @@ pub trait BlockBehavior: Send + Sync {
 
     /// Returns the trait object for Blocks that have the Bonemealable trait implemented.
     fn as_bonemealable(&self) -> Option<&dyn Bonemealable> {
+        None
+    }
+
+    /// Returns the infested-block capability implemented by this block.
+    ///
+    /// Vanilla parity: the `instanceof InfestedBlock` checks scattered through
+    /// `Silverfish` and `InfestedBlock` itself.
+    fn as_infested(&self) -> Option<&dyn Infested> {
         None
     }
 

@@ -51,6 +51,9 @@ pub(crate) use selector::{Goal, GoalControl, GoalControls, GoalSelector};
 pub(crate) use tempt_goal::TemptGoal;
 pub(crate) use water_avoiding_random_stroll::WaterAvoidingRandomStrollGoal;
 
-pub(super) const fn reduced_tick_delay(ticks: i32) -> i32 {
+/// Halves a tick delay, rounding up.
+///
+/// Vanilla parity: `Goal.reducedTickDelay`.
+pub(crate) const fn reduced_tick_delay(ticks: i32) -> i32 {
     (ticks + 1) / 2
 }

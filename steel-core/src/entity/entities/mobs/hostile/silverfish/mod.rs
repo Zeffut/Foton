@@ -10,25 +10,29 @@ use std::sync::Weak;
 use glam::DVec3;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
-use steel_registry::blocks::BlockRef;
-use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
-use steel_registry::vanilla_blocks;
 use steel_registry::vanilla_damage_type_tags;
 use steel_registry::vanilla_entity_data::SilverfishEntityData;
+use steel_registry::vanilla_game_rules::MOB_GRIEFING;
 use steel_utils::locks::SyncMutex;
-use steel_utils::{BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey};
+use steel_utils::types::UpdateFlags;
+use steel_utils::{
+    BlockPos, BlockStateId, Direction, Downcast as _, DowncastType, DowncastTypeKey,
+};
 
+use crate::behavior::blocks::{
+    host_state_by_infested, infested_state_by_host, is_compatible_host_block,
+};
 use crate::entity::ai::goal::{
     ClimbOnTopOfPowderSnowGoal, FloatGoal, Goal, GoalControls, HurtByTargetGoal, MeleeAttackGoal,
-    NearestAttackableTargetGoal, RandomStrollGoal,
+    NearestAttackableTargetGoal, RandomStrollGoal, reduced_tick_delay,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData, LivingEntity,
-    LivingEntityBase, Mob, MobBase, PathfinderMob,
+    LivingEntityBase, Mob, MobBase, PathfinderMob, RemovalReason,
 };
 use crate::world::World;
 
@@ -50,6 +54,12 @@ const MERGE_STROLL_SPEED_MODIFIER: f64 = 1.0;
 /// eager than the `120`-tick default, which is why a silverfish never stands
 /// still for long.
 const MERGE_STROLL_INTERVAL_TICKS: i32 = 10;
+
+/// One attempt in this many ticks to burrow instead of wander.
+///
+/// Vanilla parity: the `reducedTickDelay(10)` bound of
+/// `SilverfishMergeWithStoneGoal.canUse`.
+const MERGE_ATTEMPT_INTERVAL_TICKS: i32 = 10;
 
 /// Ticks a silverfish waits after being hurt before it looks for a nearby
 /// infested block to wake up.
@@ -74,24 +84,6 @@ const STEP_SOUND_VOLUME: f32 = 0.15;
 ///
 /// Vanilla parity: the `1.0F` literal in `Silverfish.playStepSound`.
 const STEP_SOUND_PITCH: f32 = 1.0;
-
-/// Returns whether `block` is a vanilla `InfestedBlock` host — an ordinary
-/// block a silverfish can burrow into and later wake back up from.
-///
-/// Vanilla parity: `InfestedBlock.isCompatibleHostBlock`, which asks a map
-/// every `InfestedBlock` registers itself into. Steel has no `InfestedBlock`
-/// behavior yet, so the fixed host set is spelled out here; `classes.json`
-/// already carries the same pairing under `host_block`, which is where this
-/// should read from once that behavior exists.
-fn is_compatible_host_block(block: BlockRef) -> bool {
-    block == &vanilla_blocks::STONE
-        || block == &vanilla_blocks::COBBLESTONE
-        || block == &vanilla_blocks::STONE_BRICKS
-        || block == &vanilla_blocks::MOSSY_STONE_BRICKS
-        || block == &vanilla_blocks::CRACKED_STONE_BRICKS
-        || block == &vanilla_blocks::CHISELED_STONE_BRICKS
-        || block == &vanilla_blocks::DEEPSLATE
-}
 
 /// A silverfish.
 ///
@@ -192,46 +184,92 @@ impl SilverfishEntity {
     }
 }
 
-/// Wanders like vanilla `Silverfish.SilverfishMergeWithStoneGoal`, minus its
-/// burrow-into-stone branch.
+/// Wanders, and now and then disappears into a block of stone instead.
 ///
-/// Vanilla parity: `SilverfishMergeWithStoneGoal` extends `RandomStrollGoal`
-/// and, before wandering, rolls a `1`-in-`10` chance (gated on `mobGriefing`)
-/// to check a random neighboring block; if that block is a compatible
-/// `InfestedBlock` host the silverfish burrows into it (replacing the block
-/// and discarding itself) instead of wandering.
-///
-/// TODO: the burrow-into-stone branch is unimplemented — Steel has no
-/// `InfestedBlock` behavior, so there is no host-to-infested `BlockState`
-/// conversion to write and no infested block for the silverfish to disappear
-/// into. A silverfish running this goal only ever wanders.
+/// Vanilla parity: `Silverfish.SilverfishMergeWithStoneGoal`, a `RandomStrollGoal`
+/// that first rolls a one-in-ten chance to check a random neighboring block and
+/// burrow into it, which is how a silverfish vanishes into a wall.
 struct SilverfishMergeWithStoneGoal {
     stroll: RandomStrollGoal,
+    /// The neighbor picked for this attempt.
+    selected_direction: Option<Direction>,
+    /// Whether this run burrows instead of wandering.
+    do_merge: bool,
 }
 
 impl SilverfishMergeWithStoneGoal {
     const fn new(speed_modifier: f64) -> Self {
         Self {
             stroll: RandomStrollGoal::with_interval(speed_modifier, MERGE_STROLL_INTERVAL_TICKS),
+            selected_direction: None,
+            do_merge: false,
         }
+    }
+
+    /// Returns the block the silverfish would burrow into this attempt.
+    ///
+    /// Vanilla parity: the `BlockPos.containing(x, y + 0.5, z).relative(dir)` of
+    /// both `canUse` and `start`, which aims at the silverfish's own middle
+    /// rather than the block it stands on.
+    fn merge_target(mob: &dyn PathfinderMob, direction: Direction) -> BlockPos {
+        let position = mob.position();
+        BlockPos::from(position.with_y(position.y + 0.5)).relative(direction)
     }
 }
 
 impl Goal for SilverfishMergeWithStoneGoal {
     fn controls(&self) -> GoalControls {
-        self.stroll.controls()
+        GoalControls::MOVE
     }
 
+    /// Vanilla parity: `SilverfishMergeWithStoneGoal.canUse`.
     fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        if mob.target().is_some() || !mob.mob_base().navigation().lock().is_done() {
+            return false;
+        }
+
+        if let Some(world) = mob.level()
+            && world.get_game_rule(&MOB_GRIEFING)
+            && rand::random_range(0..reduced_tick_delay(MERGE_ATTEMPT_INTERVAL_TICKS)) == 0
+        {
+            let direction = Direction::random();
+            self.selected_direction = Some(direction);
+            let target = Self::merge_target(mob, direction);
+            if is_compatible_host_block(world.get_block_state(target)) {
+                self.do_merge = true;
+                return true;
+            }
+        }
+
+        self.do_merge = false;
         self.stroll.can_use(mob)
     }
 
+    /// Vanilla parity: `SilverfishMergeWithStoneGoal.canContinueToUse`. A burrow
+    /// finishes the moment it starts, so it never continues.
     fn can_continue_to_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        self.stroll.can_continue_to_use(mob)
+        !self.do_merge && self.stroll.can_continue_to_use(mob)
     }
 
+    /// Vanilla parity: `SilverfishMergeWithStoneGoal.start`.
     fn start(&mut self, mob: &dyn PathfinderMob) {
-        self.stroll.start(mob);
+        if !self.do_merge {
+            self.stroll.start(mob);
+            return;
+        }
+
+        let (Some(world), Some(direction)) = (mob.level(), self.selected_direction) else {
+            return;
+        };
+        let target = Self::merge_target(mob, direction);
+        let Some(infested) = infested_state_by_host(world.get_block_state(target)) else {
+            return;
+        };
+
+        world.set_block(target, infested, UpdateFlags::UPDATE_ALL);
+        // TODO: vanilla also plays `spawnAnim` here, the puff of particles that
+        // sells the silverfish squeezing into the block.
+        mob.set_removed(RemovalReason::Discarded);
     }
 
     fn stop(&mut self, mob: &dyn PathfinderMob) {
@@ -239,20 +277,36 @@ impl Goal for SilverfishMergeWithStoneGoal {
     }
 }
 
-/// Counts down after the silverfish is hurt, then (in vanilla) wakes a nearby
-/// infested block.
+/// Counts down after the silverfish is hurt, then calls the walls for help.
 ///
-/// Vanilla parity: `Silverfish.SilverfishWakeUpFriendsGoal`. The countdown
-/// itself, primed by [`SilverfishEntity::notify_friends_hurt`], behaves like
-/// vanilla; the search-and-convert step at the end does not run yet.
-///
-/// TODO: once the countdown reaches zero, vanilla scans roughly an
-/// `11 (Y) x 21 x 21` box centered on the silverfish for `InfestedBlock`s and
-/// either destroys one (spawning a fresh silverfish, if `mobGriefing` is on)
-/// or turns it back into its host block. Steel has no `InfestedBlock`
-/// equivalent (no host<->infested `BlockState` conversion) to perform that
-/// with, so this is a no-op once the countdown elapses.
+/// Vanilla parity: `Silverfish.SilverfishWakeUpFriendsGoal`. This is what turns
+/// one silverfish in a stronghold into a swarm.
 struct SilverfishWakeUpFriendsGoal;
+
+/// Vertical reach of the search for infested blocks, in blocks.
+///
+/// Vanilla parity: the `5` bound of the outer loop in
+/// `SilverfishWakeUpFriendsGoal.tick`.
+const WAKE_UP_VERTICAL_RANGE: i32 = 5;
+
+/// Horizontal reach of the search for infested blocks, in blocks.
+///
+/// Vanilla parity: the `10` bound of the two inner loops.
+const WAKE_UP_HORIZONTAL_RANGE: i32 = 10;
+
+/// Walks outward from zero the way vanilla's loops do: `0, 1, -1, 2, -2, ...`.
+///
+/// Vanilla writes this as `for (int i = 0; i <= n && i >= -n; i = (i <= 0 ? 1 : 0) - i)`,
+/// which searches nearest-first so a silverfish wakes the closest wall.
+fn alternating_offsets(range: i32) -> impl Iterator<Item = i32> {
+    (0..=range).flat_map(move |step| {
+        if step == 0 {
+            vec![0]
+        } else {
+            vec![step, -step]
+        }
+    })
+}
 
 impl Goal for SilverfishWakeUpFriendsGoal {
     fn controls(&self) -> GoalControls {
@@ -264,16 +318,50 @@ impl Goal for SilverfishWakeUpFriendsGoal {
             .is_some_and(|silverfish| *silverfish.look_for_friends.lock() > 0)
     }
 
+    /// Vanilla parity: `SilverfishWakeUpFriendsGoal.tick`.
     fn tick(&mut self, mob: &dyn PathfinderMob) {
         let Some(silverfish) = mob.downcast_ref::<SilverfishEntity>() else {
             return;
         };
-        let mut counter = silverfish.look_for_friends.lock();
-        *counter -= 1;
-        if *counter <= 0 {
-            *counter = 0;
-            // TODO: see the struct doc comment above — the neighbor scan and
-            // block conversion vanilla performs here are unimplemented.
+
+        let elapsed = {
+            let mut counter = silverfish.look_for_friends.lock();
+            *counter -= 1;
+            *counter <= 0
+        };
+        if !elapsed {
+            return;
+        }
+        *silverfish.look_for_friends.lock() = 0;
+
+        let Some(world) = mob.level() else {
+            return;
+        };
+        let griefing = world.get_game_rule(&MOB_GRIEFING);
+        let origin = mob.block_position();
+
+        // Vanilla nests the loops Y, X, Z and stops on a coin flip after every
+        // block it wakes, so a hurt silverfish usually frees one or two friends
+        // rather than the whole wall at once.
+        for y in alternating_offsets(WAKE_UP_VERTICAL_RANGE) {
+            for x in alternating_offsets(WAKE_UP_HORIZONTAL_RANGE) {
+                for z in alternating_offsets(WAKE_UP_HORIZONTAL_RANGE) {
+                    let pos = origin.offset(x, y, z);
+                    let Some(host) = host_state_by_infested(world.get_block_state(pos)) else {
+                        continue;
+                    };
+
+                    if griefing {
+                        world.destroy_block_by_entity(pos, true, mob.as_entity_event_source());
+                    } else {
+                        world.set_block(pos, host, UpdateFlags::UPDATE_ALL);
+                    }
+
+                    if rand::random::<bool>() {
+                        return;
+                    }
+                }
+            }
         }
     }
 }
@@ -422,7 +510,7 @@ impl PathfinderMob for SilverfishEntity {
             return 0.0;
         };
 
-        if is_compatible_host_block(world.get_block_state(pos.below()).get_block()) {
+        if is_compatible_host_block(world.get_block_state(pos.below())) {
             WALK_TARGET_HOST_BLOCK_VALUE
         } else {
             0.0
@@ -435,11 +523,18 @@ mod tests {
     use std::sync::{Arc, Weak};
 
     use glam::DVec3;
-    use steel_registry::{init_vanilla_registry, vanilla_damage_types, vanilla_entities};
+    use steel_registry::{
+        init_vanilla_registry, vanilla_blocks, vanilla_damage_types, vanilla_entities,
+    };
     use steel_utils::ChunkPos;
     use steel_utils::types::UpdateFlags;
 
     use super::*;
+    use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+    use steel_registry::blocks::properties::BlockStateProperties;
+    use steel_utils::axis::Axis;
+
+    use crate::behavior::init_behaviors;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     fn silverfish() -> SilverfishEntity {
@@ -486,12 +581,50 @@ mod tests {
         );
     }
 
+    /// The host set now comes from the `InfestedBlock` behaviors, which read it
+    /// from the same `host_block` pairing `classes.json` carries.
     #[test]
     fn is_compatible_host_block_matches_vanilla_host_set() {
         init_vanilla_registry();
-        assert!(is_compatible_host_block(&vanilla_blocks::STONE));
-        assert!(is_compatible_host_block(&vanilla_blocks::DEEPSLATE));
-        assert!(!is_compatible_host_block(&vanilla_blocks::DIRT));
+        init_behaviors();
+        assert!(is_compatible_host_block(
+            vanilla_blocks::STONE.default_state()
+        ));
+        assert!(is_compatible_host_block(
+            vanilla_blocks::DEEPSLATE.default_state()
+        ));
+        assert!(!is_compatible_host_block(
+            vanilla_blocks::DIRT.default_state()
+        ));
+    }
+
+    /// Vanilla parity: `InfestedBlock.infestedStateByHost` and
+    /// `hostStateByInfested`, which must round-trip.
+    #[test]
+    fn host_and_infested_states_round_trip() {
+        init_vanilla_registry();
+        init_behaviors();
+        let stone = vanilla_blocks::STONE.default_state();
+
+        let infested = infested_state_by_host(stone).expect("stone is a host block");
+        assert_eq!(infested.get_block().key, vanilla_blocks::INFESTED_STONE.key);
+        assert_eq!(host_state_by_infested(infested), Some(stone));
+    }
+
+    /// Deepslate is the only host that carries a property, and the axis has to
+    /// survive the swap in both directions.
+    #[test]
+    fn infested_deepslate_keeps_the_pillar_axis() {
+        init_vanilla_registry();
+        init_behaviors();
+        let axis = &BlockStateProperties::AXIS;
+        let deepslate = vanilla_blocks::DEEPSLATE
+            .default_state()
+            .set_value(axis, Axis::X);
+
+        let infested = infested_state_by_host(deepslate).expect("deepslate is a host block");
+        assert_eq!(infested.get_value(axis), Axis::X);
+        assert_eq!(host_state_by_infested(infested), Some(deepslate));
     }
 
     #[test]

@@ -18,13 +18,15 @@ pub use building::{
     AmethystBlock, AmethystClusterBlock, BarrierBlock, BedBlock, BrushableBlock,
     BuddingAmethystBlock, CampfireBlock, CauldronBlock, ComposterBlock, ConduitBlock, DoorBlock,
     DropExperienceBlock, FenceBlock, FenceGateBlock, GlazedTerracottaBlock, HayBlock,
-    HeavyCoreBlock, HoneyBlock, IceBlock, IronBarsBlock, LadderBlock, LavaCauldronBlock,
-    LayeredCauldronBlock, MagmaBlock, MudBlock, PotentSulfurBlock, PowderSnowBlock,
-    RotatedPillarBlock, ScaffoldingBlock, SlabBlock, SlimeBlock, SnowLayerBlock, SpongeBlock,
-    StairBlock, TrapDoorBlock, WallBlock, WaterloggedTransparentBlock, WeatherState,
-    WeatheringCopper, WeatheringCopperBarsBlock, WeatheringCopperDoorBlock,
-    WeatheringCopperFullBlock, WeatheringCopperGrateBlock, WeatheringCopperSlabBlock,
-    WeatheringCopperStairBlock, WeatheringCopperTrapDoorBlock, WebBlock, WetSpongeBlock,
+    HeavyCoreBlock, HoneyBlock, IceBlock, Infested, InfestedBlock, InfestedRotatedPillarBlock,
+    IronBarsBlock, LadderBlock, LavaCauldronBlock, LayeredCauldronBlock, MagmaBlock, MudBlock,
+    PotentSulfurBlock, PowderSnowBlock, RotatedPillarBlock, ScaffoldingBlock, SlabBlock,
+    SlimeBlock, SnowLayerBlock, SpongeBlock, StairBlock, TrapDoorBlock, WallBlock,
+    WaterloggedTransparentBlock, WeatherState, WeatheringCopper, WeatheringCopperBarsBlock,
+    WeatheringCopperDoorBlock, WeatheringCopperFullBlock, WeatheringCopperGrateBlock,
+    WeatheringCopperSlabBlock, WeatheringCopperStairBlock, WeatheringCopperTrapDoorBlock, WebBlock,
+    WetSpongeBlock, host_state_by_infested, infested_state_by_host, is_compatible_host_block,
+    spawn_infestation,
 };
 pub use colored::StainedGlassPaneBlock;
 pub use container::{

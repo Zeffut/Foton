@@ -18,6 +18,7 @@ mod hay_block;
 mod heavy_core;
 mod honey_block;
 mod ice_block;
+mod infested_block;
 mod ladder_block;
 mod lava_cauldron_block;
 mod magma_block;
@@ -58,6 +59,10 @@ pub use hay_block::HayBlock;
 pub use heavy_core::HeavyCoreBlock;
 pub use honey_block::HoneyBlock;
 pub use ice_block::IceBlock;
+pub use infested_block::{
+    Infested, InfestedBlock, InfestedRotatedPillarBlock, host_state_by_infested,
+    infested_state_by_host, is_compatible_host_block, spawn_infestation,
+};
 pub use ladder_block::LadderBlock;
 pub use lava_cauldron_block::LavaCauldronBlock;
 pub use magma_block::MagmaBlock;
