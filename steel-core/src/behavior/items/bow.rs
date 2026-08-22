@@ -9,11 +9,13 @@ use steel_macros::item_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_events;
+use steel_registry::vanilla_items;
 
 use crate::behavior::context::{InteractionResult, UseItemContext};
 use crate::behavior::item::ItemBehavior;
 use crate::entity::LivingEntity;
 use crate::entity::entities::ArrowEntity;
+use crate::inventory::container::Container as _;
 use crate::world::World;
 
 /// Ticks needed for a fully drawn bow.
@@ -32,6 +34,33 @@ const SHOT_POWER_SCALE: f32 = 3.0;
 
 /// Spread applied to the shot direction.
 const SHOT_UNCERTAINTY: f32 = 1.0;
+
+/// Returns whether the player carries at least one arrow.
+fn has_arrow(player: &crate::player::Player) -> bool {
+    let arrow = ItemStack::new(&vanilla_items::ARROW);
+    player.inventory.lock().find_slot_matching_item(&arrow) != -1
+}
+
+/// Removes one arrow from the player's inventory, reporting whether it succeeded.
+fn take_one_arrow(player: &crate::player::Player) -> bool {
+    let arrow = ItemStack::new(&vanilla_items::ARROW);
+    let mut inventory = player.inventory.lock();
+    let slot = inventory.find_slot_matching_item(&arrow);
+    if slot < 0 {
+        return false;
+    }
+
+    let slot = slot as usize;
+    let remaining = inventory.get_item(slot).count() - 1;
+    if remaining <= 0 {
+        inventory.set_item(slot, ItemStack::empty());
+    } else {
+        let mut stack = inventory.get_item(slot).clone();
+        stack.set_count(remaining);
+        inventory.set_item(slot, stack);
+    }
+    true
+}
 
 /// Behavior for the bow.
 #[item_behavior]
@@ -63,8 +92,10 @@ impl Default for BowItem {
 
 impl ItemBehavior for BowItem {
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
-        // TODO: vanilla refuses to draw when the player has no arrow and is not in
-        // creative mode. That needs Player::getProjectile, which does not exist yet.
+        // Vanilla parity: `BowItem.use` refuses to draw without ammunition.
+        if !context.player.has_infinite_materials() && !has_arrow(context.player) {
+            return InteractionResult::Fail;
+        }
         context.player.start_using_item(context.hand);
         InteractionResult::Consume
     }
@@ -83,9 +114,19 @@ impl ItemBehavior for BowItem {
         user: &dyn LivingEntity,
         time_left: i32,
     ) -> bool {
+        let Some(player) = user.as_player() else {
+            return false;
+        };
+
         let time_held = BOW_USE_DURATION - time_left;
         let power = Self::power_for_time(time_held);
         if power < MINIMUM_POWER {
+            return false;
+        }
+
+        // Vanilla consumes the arrow only when the shot actually leaves the bow.
+        let infinite = player.has_infinite_materials();
+        if !infinite && !take_one_arrow(player) {
             return false;
         }
 
@@ -102,9 +143,12 @@ impl ItemBehavior for BowItem {
             None,
         );
 
-        // TODO: consume one arrow from the inventory, damage the bow, apply the
-        // Power, Punch, Flame and Infinity enchantments, and mark a fully drawn
-        // shot as critical.
+        if let Some(hand) = player.active_item_use_hand() {
+            player.inventory.lock().hurt_item_in_hand(hand, 1, infinite);
+        }
+
+        // TODO: apply the Power, Punch, Flame and Infinity enchantments, and mark a
+        // fully drawn shot as critical.
         true
     }
 }
