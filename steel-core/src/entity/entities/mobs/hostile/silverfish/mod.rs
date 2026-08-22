@@ -31,8 +31,8 @@ use crate::entity::ai::goal::{
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData, LivingEntity,
-    LivingEntityBase, Mob, MobBase, PathfinderMob, RemovalReason,
+    Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntityStatus, EntitySyncedData,
+    LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, RemovalReason,
 };
 use crate::world::World;
 
@@ -267,8 +267,9 @@ impl Goal for SilverfishMergeWithStoneGoal {
         };
 
         world.set_block(target, infested, UpdateFlags::UPDATE_ALL);
-        // TODO: vanilla also plays `spawnAnim` here, the puff of particles that
-        // sells the silverfish squeezing into the block.
+        // Vanilla parity: `spawnAnim`, the same puff of particles the silverfish
+        // makes coming out, played on the way in.
+        mob.broadcast_entity_event(EntityStatus::Poof);
         mob.set_removed(RemovalReason::Discarded);
     }
 

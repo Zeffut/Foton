@@ -19,6 +19,7 @@ use steel_registry::entity_type::{
 use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_entity_data::ChickenEntityData;
+use steel_registry::vanilla_game_events;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::{
     REGISTRY, RegistryExt, RegistryReference, TaggedRegistryExt, sound_events, vanilla_loot_tables,
@@ -41,6 +42,7 @@ use crate::entity::{
 };
 use crate::physics::MoveResult;
 use crate::world::World;
+use crate::world::game_event::GameEventContext;
 
 const CHICKEN_BABY_PASSENGER_ATTACHMENTS: [EntityAttachmentPoint; 1] =
     [EntityAttachmentPoint::new(0.0, 0.375, 0.0)];
@@ -305,8 +307,16 @@ impl ChickenEntity {
                 dropped = true;
             }
         }
-        // TODO: vanilla also fires the ENTITY_PLACE game event here, which Steel
-        // cannot emit for an entity yet.
+        if dropped && let Some(world) = self.level() {
+            // Vanilla parity: the `gameEvent(GameEvent.ENTITY_PLACE)` of
+            // `Chicken.aiStep`, which is what lets a sculk sensor hear an egg
+            // land.
+            world.game_event_at(
+                &vanilla_game_events::ENTITY_PLACE,
+                self.position(),
+                &GameEventContext::new(Some(self as &dyn Entity), None),
+            );
+        }
         dropped
     }
 

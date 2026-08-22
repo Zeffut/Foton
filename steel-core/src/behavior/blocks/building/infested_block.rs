@@ -26,6 +26,7 @@ use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::BlockPlaceContext;
 use crate::entity::{ENTITIES, EntitySpawnReason, next_entity_id};
 use crate::world::World;
+use steel_utils::entity_events::EntityStatus;
 
 /// The shared capability of the blocks a silverfish can hide in.
 ///
@@ -183,12 +184,14 @@ pub fn spawn_infestation(world: &Arc<World>, pos: BlockPos) {
         let _ = mob.finalize_spawn(world, EntitySpawnReason::Triggered, None);
     }
 
-    if let Err(error) = world.try_add_entity(silverfish) {
+    if let Err(error) = world.try_add_entity(Arc::clone(&silverfish)) {
         log::debug!("infestation rejected at {pos:?}: {error}");
+        return;
     }
 
-    // TODO: vanilla also plays `spawnAnim`, the puff of particles that sells the
-    // silverfish bursting out; Steel has no entity-event particle burst yet.
+    // Vanilla parity: `spawnAnim`, the puff of particles that sells the
+    // silverfish bursting out of the stone.
+    silverfish.broadcast_entity_event(EntityStatus::Poof);
 }
 
 /// Returns whether `tool` keeps the silverfish inside.
