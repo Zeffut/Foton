@@ -27,6 +27,7 @@ bash dev/doctor.sh          # vérifie que l'environnement est complet et cohér
 bash dev/ci.sh              # rejoue toute la suite de vérification (~150 s)
 bash dev/sync-upstream.sh   # récupère les avancées de l'amont, puis vérifie
 bash dev/smoke-test.sh      # démarre le serveur et lui parle en protocole Minecraft
+bash dev/join-test.sh       # fait entrer un vrai client dans le monde (login → play)
 python3 dev/coverage.py     # mesure la couverture réelle par rapport à vanilla
 ```
 
