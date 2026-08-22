@@ -43,6 +43,15 @@ const ATTEMPTS_PER_PLAYER: u32 = 16;
 /// positions less often for the same rough rate.
 const SPAWN_INTERVAL_TICKS: u64 = 20;
 
+/// Ticks between attempts at the categories that stay loaded.
+///
+/// Vanilla parity: the `getGameTime() % 400L == 0L` of
+/// `ServerChunkCache.tickChunks`. Creatures are persistent, so vanilla offers
+/// them a turn only every four hundred ticks; that slow cadence is why the
+/// countryside does not silt up with cows, and why most animals a player meets
+/// were placed when the chunk was made rather than spawned later.
+const PERSISTENT_SPAWN_INTERVAL_TICKS: u64 = 400;
+
 /// Monsters allowed within the sampling radius of one player.
 ///
 /// Every other category's budget is derived from this one, so that the ratios
@@ -92,6 +101,7 @@ impl World {
             return;
         }
         let spawn_monsters = self.get_game_rule(&SPAWN_MONSTERS);
+        let spawn_persistent = tick_count.is_multiple_of(PERSISTENT_SPAWN_INTERVAL_TICKS);
 
         let mut player_positions = Vec::new();
         self.players.iter_players(|_, player| {
@@ -101,9 +111,13 @@ impl World {
 
         for origin in player_positions {
             for category in SPAWNABLE_CATEGORIES {
-                // Vanilla parity: `doMobSpawning` gates every category, but
-                // `doMobSpawning` alone is not enough for monsters.
-                if category == MobCategory::Monster && !spawn_monsters {
+                // Vanilla parity: `NaturalSpawner.getFilteredSpawningCategories`
+                // drops the monsters when `doMobSpawning` is off, and drops the
+                // persistent categories on every tick but the four-hundredth.
+                if !category.is_friendly() && !spawn_monsters {
+                    continue;
+                }
+                if category.is_persistent() && !spawn_persistent {
                     continue;
                 }
                 if self.mobs_near(origin, category) >= category_cap(category) {
@@ -253,6 +267,30 @@ mod tests {
     fn misc_never_spawns() {
         assert_eq!(category_cap(MobCategory::Misc), 0);
         assert!(!SPAWNABLE_CATEGORIES.contains(&MobCategory::Misc));
+    }
+
+    #[test]
+    fn persistent_categories_wait_four_hundred_ticks() {
+        // Creatures are the persistent category, and offering them a turn every
+        // cycle rather than every four hundred ticks would spawn twenty times
+        // the animals vanilla does.
+        assert!(MobCategory::Creature.is_persistent());
+        assert!(!MobCategory::Monster.is_persistent());
+        assert_eq!(
+            PERSISTENT_SPAWN_INTERVAL_TICKS % SPAWN_INTERVAL_TICKS,
+            0,
+            "the persistent cadence has to land on a spawn cycle or it never fires"
+        );
+    }
+
+    #[test]
+    fn every_category_is_either_friendly_or_a_monster() {
+        // The monster gate is written against `is_friendly` so that a category
+        // added later is refused by default rather than silently let through.
+        for category in SPAWNABLE_CATEGORIES {
+            let gated = !category.is_friendly();
+            assert_eq!(gated, category == MobCategory::Monster);
+        }
     }
 
     #[test]
