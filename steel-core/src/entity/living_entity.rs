@@ -538,6 +538,57 @@ pub trait LivingEntity: Entity {
         )
     }
 
+    /// Moves this entity to a spot near the given one, if a safe one is there.
+    ///
+    /// Vanilla parity: `LivingEntity.randomTeleport`. It walks down from the
+    /// requested height until it finds something to stand on, then refuses the
+    /// move if the entity would be inside a block or a liquid -- which is what
+    /// stops an enderman blinking into a wall or a lake and why teleports fail
+    /// as often as they land.
+    fn random_teleport(&self, target: DVec3) -> bool {
+        let Some(world) = self.level() else {
+            return false;
+        };
+
+        let origin = self.position();
+        let mut pos = BlockPos::containing(target.x, target.y, target.z);
+        if !world.has_full_chunk(ChunkPos::from_block_pos(pos)) {
+            return false;
+        }
+
+        let mut y = target.y;
+        let mut landed = false;
+        while !landed && pos.y() > world.get_min_y() {
+            let below = pos.below();
+            if world.get_block_state(below).blocks_motion() {
+                landed = true;
+            } else {
+                y -= 1.0;
+                pos = below;
+            }
+        }
+        if !landed {
+            return false;
+        }
+
+        let destination = DVec3::new(target.x, y, target.z);
+        if self.try_set_position(destination).is_err() {
+            return false;
+        }
+
+        let box_at = self.make_bounding_box_at(destination);
+        let clear = !crate::physics::collision::has_collision(
+            &crate::physics::collision::WorldCollisionProvider::new(&world),
+            box_at,
+        ) && !super::aabb_contains_any_liquid(&world, box_at);
+        if clear {
+            return true;
+        }
+
+        let _ = self.try_set_position(origin);
+        false
+    }
+
     /// Returns vanilla line-of-sight with explicit clip options.
     fn has_line_of_sight_with(
         &self,
@@ -3010,4 +3061,62 @@ pub(crate) fn shearing_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Size
         context = context.with_game_time(level.game_time());
     }
     loot_table.get_random_items(&mut context)
+}
+
+/// Returns whether `watcher` is looking straight at `watched`.
+///
+/// Vanilla parity: `LivingEntity.isLookingAtMe`, with the arguments the other
+/// way round because the ray is cast from the watcher and Rust cannot upcast
+/// `&Self` inside a trait default method.
+///
+/// The cone widens with distance when `adjust_for_distance` is set, so someone
+/// far away has to be more precisely on target than someone close. That is what
+/// makes an enderman across a field harder to provoke by accident than one
+/// standing beside you.
+#[must_use]
+pub fn is_looking_at(
+    watched: &dyn Entity,
+    watcher: &dyn LivingEntity,
+    cone_size: f64,
+    adjust_for_distance: bool,
+    see_through_transparent_blocks: bool,
+    gaze_heights: &[f64],
+) -> bool {
+    let look = watcher.look_angle().normalize();
+    let watcher_position = watcher.position();
+    let watcher_eye_y = watcher.get_eye_y();
+    let position = watched.position();
+
+    let block_shape = if see_through_transparent_blocks {
+        ClipBlockShape::Visual
+    } else {
+        ClipBlockShape::Collider
+    };
+
+    for &gaze_height in gaze_heights {
+        let towards = DVec3::new(
+            position.x - watcher_position.x,
+            gaze_height - watcher_eye_y,
+            position.z - watcher_position.z,
+        );
+        let distance = towards.length();
+        if distance <= 0.0 {
+            continue;
+        }
+
+        let widened = if adjust_for_distance {
+            cone_size / distance
+        } else {
+            cone_size
+        };
+        if look.dot(towards.normalize()) <= 1.0 - widened {
+            continue;
+        }
+
+        if watcher.has_line_of_sight_with(watched, block_shape, ClipFluid::None, gaze_height) {
+            return true;
+        }
+    }
+
+    false
 }
