@@ -28,10 +28,11 @@ use steel_registry::item_stack::ItemStack;
 use steel_registry::loot_table::LootTableRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_block_tags::BlockTag;
+use steel_registry::vanilla_entity_type_tags::EntityTypeTag;
 use steel_registry::vanilla_game_rules::ENTITY_DROPS;
 use steel_registry::{
-    REGISTRY, RegistryExt, sound_events, vanilla_attributes, vanilla_damage_types,
-    vanilla_entities, vanilla_game_events, vanilla_items,
+    REGISTRY, RegistryExt, TaggedRegistryExt as _, sound_events, vanilla_attributes,
+    vanilla_damage_types, vanilla_entities, vanilla_game_events, vanilla_items,
 };
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::{Difficulty, InteractionHand};
@@ -329,6 +330,11 @@ impl Default for MobBase {
     }
 }
 
+/// Ticks an undead mob burns for when caught in sunlight.
+///
+/// Vanilla parity: the `igniteForSeconds(8.0F)` of `Mob.burnUndead`.
+const DAYLIGHT_BURN_TICKS: i32 = 160;
+
 pub trait Mob: LivingEntity {
     fn mob_base(&self) -> &MobBase;
 
@@ -446,11 +452,44 @@ pub trait Mob: LivingEntity {
             return;
         }
 
+        self.burn_in_daylight();
+
         let ambient_sound_time = self.mob_base().get_and_increment_ambient_sound_time();
         if rand::random_range(0..1000) < ambient_sound_time {
             self.reset_ambient_sound_time();
             self.play_ambient_sound();
         }
+    }
+
+    /// Sets undead mobs alight when the sun reaches them.
+    ///
+    /// Vanilla parity: `Mob.burnUndead`, gated by the `burn_in_daylight` entity
+    /// tag, so the behavior is data-driven rather than hard-coded per mob.
+    fn burn_in_daylight(&self) {
+        if !REGISTRY
+            .entity_types
+            .is_in_tag(self.entity_type(), &EntityTypeTag::BURN_IN_DAYLIGHT)
+        {
+            return;
+        }
+        let Some(world) = self.level() else {
+            return;
+        };
+        if !world.is_bright_outside() {
+            return;
+        }
+
+        let pos = self.block_position();
+        if !world.can_see_sky(pos) || world.is_raining_at(pos) {
+            return;
+        }
+        if self.is_in_water() {
+            return;
+        }
+
+        // TODO: vanilla burns the mob's helmet instead when it wears one, and rolls
+        // against the local brightness rather than igniting outright.
+        self.set_remaining_fire_ticks(DAYLIGHT_BURN_TICKS);
     }
 
     fn finalize_spawn(
