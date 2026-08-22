@@ -54,12 +54,10 @@ impl AbstractFurnaceBlock {
     }
 
     /// Vanilla parity: `AbstractFurnaceBlock.getStateForPlacement`.
-    fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {
-        Some(
-            self.block
-                .default_state()
-                .set_value(FACING, context.horizontal_direction().opposite()),
-        )
+    fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> BlockStateId {
+        self.block
+            .default_state()
+            .set_value(FACING, context.horizontal_direction().opposite())
     }
 
     fn use_without_item(
@@ -122,21 +120,24 @@ impl AbstractFurnaceBlock {
     ) -> Option<BlockEntityTicker> {
         BlockEntityTicker::for_matching_entity_tick(block_entity_type, self.block_entity_type)
     }
+}
 
-    fn get_analog_output_signal(&self, world: &dyn LevelReader, pos: BlockPos) -> i32 {
-        let Some(container_ref) = world
-            .get_block_entity(pos)
-            .and_then(ContainerRef::from_block_entity)
-        else {
-            return 0;
-        };
-        let guard = ContainerLockGuard::lock_all(&[&container_ref]);
-        guard
-            .get(container_ref.container_id())
-            .map_or(0, |container| {
-                calculate_redstone_signal_from_container(container)
-            })
-    }
+/// Comparator output of the furnace at `pos`.
+///
+/// Vanilla parity: `AbstractFurnaceBlock.getAnalogOutputSignal`.
+fn analog_output_signal(world: &dyn LevelReader, pos: BlockPos) -> i32 {
+    let Some(container_ref) = world
+        .get_block_entity(pos)
+        .and_then(ContainerRef::from_block_entity)
+    else {
+        return 0;
+    };
+    let guard = ContainerLockGuard::lock_all(&[&container_ref]);
+    guard
+        .get(container_ref.container_id())
+        .map_or(0, |container| {
+            calculate_redstone_signal_from_container(container)
+        })
 }
 
 /// Declares one furnace variant and forwards its behavior to the shared base.
@@ -163,7 +164,7 @@ macro_rules! furnace_variant {
                 &self,
                 context: &BlockPlaceContext<'_>,
             ) -> Option<BlockStateId> {
-                self.inner.get_state_for_placement(context)
+                Some(self.inner.get_state_for_placement(context))
             }
 
             fn use_without_item(
@@ -207,7 +208,7 @@ macro_rules! furnace_variant {
                 pos: BlockPos,
                 _direction: Direction,
             ) -> i32 {
-                self.inner.get_analog_output_signal(world, pos)
+                analog_output_signal(world, pos)
             }
         }
     };

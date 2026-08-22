@@ -8,6 +8,7 @@
 //! players, the 128-block outer limit, the darkness test, and the biome's own
 //! weighted spawn list.
 
+use std::f64::consts::TAU;
 use std::sync::Arc;
 
 use glam::DVec3;
@@ -53,7 +54,7 @@ impl World {
     ///
     /// Vanilla parity: `NaturalSpawner.spawnForChunk`, applied per player.
     pub fn tick_natural_spawn(self: &Arc<Self>, tick_count: u64) {
-        if tick_count % SPAWN_INTERVAL_TICKS != 0 {
+        if !tick_count.is_multiple_of(SPAWN_INTERVAL_TICKS) {
             return;
         }
         if !self.get_game_rule(&SPAWN_MOBS) || !self.get_game_rule(&SPAWN_MONSTERS) {
@@ -98,7 +99,7 @@ impl World {
     ///
     /// Returns `None` when the sampled column has no ground a mob could stand on.
     fn pick_spawn_position(self: &Arc<Self>, origin: DVec3) -> Option<BlockPos> {
-        let angle = rand::random::<f64>() * std::f64::consts::TAU;
+        let angle = rand::random::<f64>() * TAU;
         let distance = (MAX_SPAWN_DISTANCE - MIN_SPAWN_DISTANCE)
             .mul_add(rand::random::<f64>(), MIN_SPAWN_DISTANCE);
         let x = distance.mul_add(angle.cos(), origin.x).floor() as i32;

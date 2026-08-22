@@ -318,7 +318,7 @@ mod tests {
 
         assert_eq!(smelted.cooking_time, 200);
         assert_eq!(blasted.cooking_time, 100);
-        assert!(smelted.result.item.key == blasted.result.item.key);
+        assert_eq!(smelted.result.item.key, blasted.result.item.key);
     }
 
     #[test]

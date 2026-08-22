@@ -8,10 +8,13 @@ use std::sync::Arc;
 
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
-use steel_registry::{vanilla_attributes, vanilla_damage_types};
-use steel_utils::{BlockPos, WorldAabb};
+use steel_registry::{vanilla_attributes, vanilla_blocks, vanilla_damage_types};
+use steel_utils::types::UpdateFlags;
+use steel_utils::{BlockPos, BlockStateId, WorldAabb};
 
+use crate::entity::Entity;
 use crate::entity::damage::DamageSource;
+use crate::fluid::get_fluid_state;
 use crate::world::World;
 use crate::world::raycast::{ClipBlockShape, ClipFluid};
 
@@ -132,9 +135,9 @@ impl World {
     fn explosion_resistance_at(
         self: &Arc<Self>,
         pos: BlockPos,
-        state: steel_utils::BlockStateId,
+        state: BlockStateId,
     ) -> Option<f32> {
-        let fluid = crate::fluid::get_fluid_state(self, pos);
+        let fluid = get_fluid_state(self, pos);
         if state.is_air() && fluid.is_empty() {
             return None;
         }
@@ -197,7 +200,7 @@ impl World {
                     living
                         .attributes()
                         .lock()
-                        .required_value(&vanilla_attributes::EXPLOSION_KNOCKBACK_RESISTANCE)
+                        .required_value(vanilla_attributes::EXPLOSION_KNOCKBACK_RESISTANCE)
                 });
                 let power = impact * (1.0 - resistance);
                 let knockback = direction.normalize() * power;
@@ -212,7 +215,7 @@ impl World {
     /// Vanilla parity: `ServerExplosion.getSeenPercent`. Vanilla samples a grid of
     /// points across the entity's bounding box and counts how many reach the center
     /// without crossing a block.
-    fn seen_percent(&self, center: DVec3, entity: &dyn crate::entity::Entity) -> f32 {
+    fn seen_percent(&self, center: DVec3, entity: &dyn Entity) -> f32 {
         let bb = entity.bounding_box();
         let step_x = 1.0 / ((bb.max_x() - bb.min_x()) * 2.0 + 1.0);
         let step_y = 1.0 / ((bb.max_y() - bb.min_y()) * 2.0 + 1.0);
@@ -272,8 +275,8 @@ impl World {
             }
             self.set_block(
                 *pos,
-                steel_registry::vanilla_blocks::FIRE.default_state(),
-                steel_utils::types::UpdateFlags::UPDATE_ALL,
+                vanilla_blocks::FIRE.default_state(),
+                UpdateFlags::UPDATE_ALL,
             );
         }
     }

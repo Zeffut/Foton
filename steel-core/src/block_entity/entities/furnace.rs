@@ -20,7 +20,8 @@ use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::blocks::properties::BlockStateProperties;
 use steel_registry::recipe::CookingKind;
 use steel_registry::{
-    REGISTRY, fuel, item_stack::ItemStack, vanilla_block_entity_types, vanilla_items,
+    REGISTRY, block_entity_type::BlockEntityType, fuel, item_stack::ItemStack,
+    vanilla_block_entity_types, vanilla_items,
 };
 use steel_utils::types::UpdateFlags;
 use steel_utils::{
@@ -216,7 +217,7 @@ impl FurnaceBlockEntity {
     /// Creates a furnace block entity of the given cooking family.
     #[must_use]
     pub fn new_of_kind(
-        block_entity_type: &'static steel_registry::block_entity_type::BlockEntityType,
+        block_entity_type: &'static BlockEntityType,
         kind: CookingKind,
         level: Weak<World>,
         pos: BlockPos,

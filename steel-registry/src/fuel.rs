@@ -5,9 +5,9 @@
 //! for items that a tag already covered, and the final `NON_FLAMMABLE_WOOD`
 //! removal drops crimson and warped wood again.
 
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use rustc_hash::FxHashMap;
 use steel_utils::Identifier;
 
 use crate::{
@@ -21,7 +21,7 @@ use crate::{
 const BASE_UNIT: i32 = 200;
 
 /// Burn time in ticks for every item that can fuel a furnace.
-static FUEL_VALUES: LazyLock<HashMap<Identifier, i32>> = LazyLock::new(build_vanilla_burn_times);
+static FUEL_VALUES: LazyLock<FxHashMap<Identifier, i32>> = LazyLock::new(build_vanilla_burn_times);
 
 /// Returns whether the stack can be used as furnace fuel.
 ///
@@ -49,8 +49,8 @@ pub fn burn_duration(stack: &ItemStack) -> i32 {
 ///
 /// The order of the statements mirrors `FuelValues.vanillaBurnTimes` exactly: a
 /// value inserted later replaces one inserted earlier for the same item.
-fn build_vanilla_burn_times() -> HashMap<Identifier, i32> {
-    let mut values = HashMap::new();
+fn build_vanilla_burn_times() -> FxHashMap<Identifier, i32> {
+    let mut values = FxHashMap::default();
 
     add_item(&mut values, &vanilla_items::LAVA_BUCKET, BASE_UNIT * 100);
     add_item(&mut values, &vanilla_items::COAL_BLOCK, BASE_UNIT * 8 * 10);
@@ -175,19 +175,19 @@ fn build_vanilla_burn_times() -> HashMap<Identifier, i32> {
 }
 
 /// Inserts one item, replacing any value a tag already assigned to it.
-fn add_item(values: &mut HashMap<Identifier, i32>, item: ItemRef, time: i32) {
+fn add_item(values: &mut FxHashMap<Identifier, i32>, item: ItemRef, time: i32) {
     values.insert(item.key.clone(), time);
 }
 
 /// Inserts every item carrying `tag`.
-fn add_tag(values: &mut HashMap<Identifier, i32>, tag: &Identifier, time: i32) {
+fn add_tag(values: &mut FxHashMap<Identifier, i32>, tag: &Identifier, time: i32) {
     for item in REGISTRY.items.iter_tag(tag) {
         values.insert(item.key.clone(), time);
     }
 }
 
 /// Drops every item carrying `tag`, whatever assigned it.
-fn remove_tag(values: &mut HashMap<Identifier, i32>, tag: &Identifier) {
+fn remove_tag(values: &mut FxHashMap<Identifier, i32>, tag: &Identifier) {
     for item in REGISTRY.items.iter_tag(tag) {
         values.remove(&item.key);
     }

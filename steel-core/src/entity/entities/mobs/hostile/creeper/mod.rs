@@ -162,17 +162,18 @@ impl CreeperEntity {
         let dir = self.swell_dir();
         let reached_max = {
             let mut swell = self.swell.lock();
-            if dir > 0 && *swell == 0 {
-                if let Some(world) = self.level() {
-                    world.play_sound_at(
-                        &sound_events::ENTITY_CREEPER_PRIMED,
-                        SoundSource::Hostile,
-                        self.position(),
-                        1.0,
-                        0.5,
-                        None,
-                    );
-                }
+            if dir > 0
+                && *swell == 0
+                && let Some(world) = self.level()
+            {
+                world.play_sound_at(
+                    &sound_events::ENTITY_CREEPER_PRIMED,
+                    SoundSource::Hostile,
+                    self.position(),
+                    1.0,
+                    0.5,
+                    None,
+                );
             }
 
             *swell = (*swell + dir).max(0);

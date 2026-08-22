@@ -95,9 +95,7 @@ impl Slot for FurnaceResultSlot {
     ) -> Option<ItemStack> {
         self.set_changed(guard);
 
-        let Some(furnace) = self.block_entity.downcast_ref::<FurnaceBlockEntity>() else {
-            return None;
-        };
+        let furnace = self.block_entity.downcast_ref::<FurnaceBlockEntity>()?;
         let experience = furnace.take_earned_experience();
         if experience <= 0.0 {
             return None;

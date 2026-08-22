@@ -16,6 +16,7 @@ use crate::behavior::item::ItemBehavior;
 use crate::entity::LivingEntity;
 use crate::entity::entities::ArrowEntity;
 use crate::inventory::container::Container as _;
+use crate::player::Player;
 use crate::world::World;
 
 /// Ticks needed for a fully drawn bow.
@@ -36,13 +37,13 @@ const SHOT_POWER_SCALE: f32 = 3.0;
 const SHOT_UNCERTAINTY: f32 = 1.0;
 
 /// Returns whether the player carries at least one arrow.
-fn has_arrow(player: &crate::player::Player) -> bool {
+fn has_arrow(player: &Player) -> bool {
     let arrow = ItemStack::new(&vanilla_items::ARROW);
     player.inventory.lock().find_slot_matching_item(&arrow) != -1
 }
 
 /// Removes one arrow from the player's inventory, reporting whether it succeeded.
-fn take_one_arrow(player: &crate::player::Player) -> bool {
+fn take_one_arrow(player: &Player) -> bool {
     let arrow = ItemStack::new(&vanilla_items::ARROW);
     let mut inventory = player.inventory.lock();
     let slot = inventory.find_slot_matching_item(&arrow);
