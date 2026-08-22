@@ -24,6 +24,7 @@ use steel_utils::{BlockPos, BlockStateId, Downcast as _, translations};
 use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 
+use super::dispense_behavior::{DispenseOutcome, DispenseSource, dispense_behavior_for};
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
@@ -263,11 +264,13 @@ impl DropperBlock {
 /// Vanilla parity: `DispenserBlock.dispenseFrom` with
 /// `DefaultDispenseItemBehavior`.
 ///
-/// TODO: vanilla looks the item up in `DispenserBlock.DISPENSER_REGISTRY` first,
-/// which is what makes a dispenser shoot arrows, place water, prime TNT, equip
-/// armor on the mob in front and hatch spawn eggs. Steel has no
-/// `DispenseItemBehavior` registry yet, so every item takes the default path and
-/// is simply thrown, exactly as vanilla does for an item with no entry.
+/// An item with no registered behavior is thrown, which is what vanilla does
+/// too.
+///
+/// TODO: Steel registers arrows and TNT so far. Vanilla also places water and
+/// lava, equips armor on the mob in front, shears sheep, spreads bone meal,
+/// hatches spawn eggs and launches boats and minecarts; each needs a system
+/// Steel does not have yet.
 fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
     let Some(block_entity) = world.get_block_entity(pos) else {
         return;
@@ -287,10 +290,40 @@ fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
     }
 
     let facing = state.get_value(FACING);
-    let thrown = stack.split(1);
-    spawn_dispensed_item(world, pos, facing, thrown);
-    dispenser.set_item(slot, stack);
-    play_dispense_effects(world, pos, facing);
+    let source = DispenseSource { world, pos, facing };
+
+    let Some(behavior) = dispense_behavior_for(stack.item()) else {
+        let thrown = stack.split(1);
+        spawn_dispensed_item(world, pos, facing, thrown);
+        dispenser.set_item(slot, stack);
+        play_dispense_effects(world, pos, facing);
+        return;
+    };
+
+    match behavior.execute(&source, stack) {
+        DispenseOutcome::Acted {
+            remainder,
+            sound_override,
+        } => {
+            dispenser.set_item(slot, remainder);
+            match sound_override {
+                Some(event) => {
+                    world.level_event(event, pos, 0, None);
+                    world.level_event(
+                        level_events::PARTICLES_SHOOT_SMOKE,
+                        pos,
+                        facing.get_3d_data_value(),
+                        None,
+                    );
+                }
+                None => play_dispense_effects(world, pos, facing),
+            }
+        }
+        DispenseOutcome::Failed(unchanged) => {
+            dispenser.set_item(slot, unchanged);
+            world.level_event(level_events::SOUND_DISPENSER_FAIL, pos, 0, None);
+        }
+    }
 }
 
 /// Hands one item to the container in front, or throws it when there is none.

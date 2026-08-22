@@ -53,6 +53,11 @@ sed -i \
   -e "s/^server_port = .*/server_port = $PORT/" \
   config/config.toml
 
+# Start from a clean world every time. A run killed mid-save leaves one that
+# stalls chunk scheduling on the next boot, which makes the test hang instead of
+# reporting anything useful.
+rm -rf saves
+
 echo "=== Booting (offline, port $PORT) ==="
 nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
 PID=$!
