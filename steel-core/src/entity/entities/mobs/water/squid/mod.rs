@@ -15,10 +15,11 @@ use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
+use steel_registry::particle_type::ParticleData;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
-use steel_registry::vanilla_damage_types;
 use steel_registry::vanilla_entity_data::SquidEntityData;
+use steel_registry::{vanilla_damage_types, vanilla_particle_types};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
@@ -103,6 +104,61 @@ const SQUID_SOUND_VOLUME: f32 = 0.4;
 /// Vanilla parity: `Squid.getDefaultGravity`.
 const SQUID_GRAVITY: f64 = 0.08;
 
+/// Particles in one ink cloud.
+///
+/// Vanilla parity: the `30` iterations of `Squid.spawnInk`.
+const INK_PARTICLE_COUNT: i32 = 30;
+
+/// Sideways scatter of each ink jet.
+///
+/// Vanilla parity: the `nextFloat() * 0.6 - 0.3` of the same loop.
+const INK_SCATTER: f64 = 0.6;
+
+/// Shortest distance an ink jet is thrown, for a grown squid.
+///
+/// Vanilla parity: the `0.3F` offset scale.
+const INK_REACH_ADULT: f64 = 0.3;
+
+/// Shortest distance an ink jet is thrown, for a baby.
+///
+/// Vanilla parity: the `0.1F` offset scale.
+const INK_REACH_BABY: f64 = 0.1;
+
+/// Extra distance an ink jet may travel beyond the minimum.
+///
+/// Vanilla parity: the `+ nextFloat() * 2.0F` of the same expression.
+const INK_REACH_SPREAD: f64 = 2.0;
+
+/// Speed the ink particles carry.
+///
+/// Vanilla parity: the `0.1F` speed argument of `sendParticles`.
+const INK_SPEED: f64 = 0.1;
+
+/// How fast a squid turns to face where it is drifting.
+///
+/// Vanilla parity: the `0.1F` interpolation of `Squid.aiStep`.
+const FACING_RESPONSIVENESS: f32 = 0.1;
+
+/// Squared distance within which a squid bolts from what hurt it.
+///
+/// Vanilla parity: the `distanceToSqr(entity) < 100.0` of `SquidFleeGoal`.
+const FLEE_TRIGGER_DISTANCE_SQR: f64 = 100.0;
+
+/// How hard a squid pushes away from what hurt it.
+///
+/// Vanilla parity: `SquidFleeGoal.SQUID_FLEE_SPEED`.
+const FLEE_SPEED: f64 = 3.0;
+
+/// Distance past which the flee push starts easing off.
+///
+/// Vanilla parity: `SquidFleeGoal.SQUID_FLEE_MIN_DISTANCE`.
+const FLEE_EASE_FROM: f64 = 5.0;
+
+/// Divisor turning the flee push into a per-tick movement vector.
+///
+/// Vanilla parity: the `/ 20.0` of `SquidFleeGoal.tick`.
+const FLEE_PUSH_DIVISOR: f64 = 20.0;
+
 /// Baby squid hitbox.
 ///
 /// Vanilla parity: `Squid.BABY_DIMENSIONS`.
@@ -139,6 +195,20 @@ pub struct SquidEntity {
 // SAFETY: This key is owned by Steel and uniquely identifies `SquidEntity`.
 unsafe impl DowncastType for SquidEntity {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/squid");
+}
+
+/// Wraps an angle into the shortest turn that reaches it.
+///
+/// Vanilla parity: `Mth.wrapDegrees`.
+fn wrap_degrees(degrees: f32) -> f32 {
+    let wrapped = degrees % 360.0;
+    if wrapped >= 180.0 {
+        wrapped - 360.0
+    } else if wrapped < -180.0 {
+        wrapped + 360.0
+    } else {
+        wrapped
+    }
 }
 
 /// Rolls the speed of one tentacle beat.
@@ -180,6 +250,7 @@ impl SquidEntity {
             // see the module TODO.
             let mut goals = mob_base.goal_selector().lock();
             goals.add_goal(0, SquidRandomMovementGoal);
+            goals.add_goal(1, SquidFleeGoal);
         }
 
         Self {
@@ -238,6 +309,79 @@ impl SquidEntity {
             }
         } else {
             self.set_velocity(self.velocity() * RECOVERY_DRAG);
+        }
+    }
+
+    /// Turns the squid to face the way it is drifting.
+    ///
+    /// Vanilla parity: the yaw interpolation of `Squid.aiStep`. This is not
+    /// only cosmetic: the yaw is synced, and the ink is thrown relative to it.
+    fn face_travel_direction(&self) {
+        let velocity = self.velocity();
+        if velocity.length_squared() < MOVEMENT_EPSILON {
+            return;
+        }
+
+        let (yaw, pitch) = self.rotation();
+        let wanted_yaw = -(velocity.x.atan2(velocity.z).to_degrees() as f32);
+        let horizontal = velocity.with_y(0.0).length();
+        let wanted_pitch = -(horizontal.atan2(velocity.y).to_degrees() as f32);
+
+        self.set_rotation((
+            FACING_RESPONSIVENESS.mul_add(wrap_degrees(wanted_yaw - yaw), yaw),
+            FACING_RESPONSIVENESS.mul_add(wrap_degrees(wanted_pitch - pitch), pitch),
+        ));
+    }
+
+    /// Rotates a vector out of the squid's own frame into the world's.
+    ///
+    /// Vanilla parity: `Squid.rotateVector`.
+    fn rotate_vector(&self, vector: DVec3) -> DVec3 {
+        let (yaw, pitch) = self.rotation();
+        let pitch_radians = f64::from(pitch).to_radians();
+        let yaw_radians = f64::from(-yaw).to_radians();
+
+        let (sin_pitch, cos_pitch) = pitch_radians.sin_cos();
+        let pitched = DVec3::new(
+            vector.x,
+            vector.y * cos_pitch - vector.z * sin_pitch,
+            vector.y * sin_pitch + vector.z * cos_pitch,
+        );
+
+        let (sin_yaw, cos_yaw) = yaw_radians.sin_cos();
+        DVec3::new(
+            pitched.z.mul_add(sin_yaw, pitched.x * cos_yaw),
+            pitched.y,
+            pitched.x.mul_add(-sin_yaw, pitched.z * cos_yaw),
+        )
+    }
+
+    /// Squirts a cloud of ink.
+    ///
+    /// Vanilla parity: `Squid.spawnInk`. The jets come out of the squid's
+    /// underside, wherever that happens to be pointing.
+    fn spawn_ink(&self, world: &Arc<World>) {
+        self.play_sound(&sound_events::ENTITY_SQUID_SQUIRT, 1.0, 1.0);
+
+        let origin = self.rotate_vector(DVec3::new(0.0, -1.0, 0.0)) + self.position();
+        let reach = if AgeableMob::is_baby(self) {
+            INK_REACH_BABY
+        } else {
+            INK_REACH_ADULT
+        };
+
+        for _ in 0..INK_PARTICLE_COUNT {
+            let scatter = || rand::random::<f64>().mul_add(INK_SCATTER, -INK_SCATTER / 2.0);
+            let direction = self.rotate_vector(DVec3::new(scatter(), -1.0, scatter()));
+            let jet = direction * rand::random::<f64>().mul_add(INK_REACH_SPREAD, reach);
+
+            world.send_particles(
+                ParticleData::simple(&vanilla_particle_types::SQUID_INK),
+                origin.with_y(origin.y + 0.5),
+                0,
+                jet,
+                INK_SPEED,
+            );
         }
     }
 
@@ -304,6 +448,55 @@ impl Goal for SquidRandomMovementGoal {
             rand::random::<f64>().mul_add(PUSH_VERTICAL_RANGE, PUSH_VERTICAL_MIN),
             angle.sin() * PUSH_HORIZONTAL,
         ));
+    }
+}
+
+/// Bolts away from whatever hurt the squid.
+///
+/// Vanilla parity: `Squid.SquidFleeGoal`.
+struct SquidFleeGoal;
+
+impl Goal for SquidFleeGoal {
+    fn controls(&self) -> GoalControls {
+        GoalControls::EMPTY
+    }
+
+    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        let Some(attacker) = mob.last_hurt_by_mob() else {
+            return false;
+        };
+        mob.is_in_water()
+            && attacker.position().distance_squared(mob.position()) < FLEE_TRIGGER_DISTANCE_SQR
+    }
+
+    fn requires_update_every_tick(&self) -> bool {
+        true
+    }
+
+    fn tick(&mut self, mob: &dyn PathfinderMob) {
+        let (Some(squid), Some(attacker)) =
+            (mob.downcast_ref::<SquidEntity>(), mob.last_hurt_by_mob())
+        else {
+            return;
+        };
+
+        let away = mob.position() - attacker.position();
+        let distance = away.length();
+        if distance <= 0.0 {
+            return;
+        }
+
+        // Vanilla eases the push off past five blocks, so a squid stops
+        // sprinting once it has put some water between them.
+        let mut speed = FLEE_SPEED;
+        if distance > FLEE_EASE_FROM {
+            speed -= (distance - FLEE_EASE_FROM) / FLEE_EASE_FROM;
+        }
+        if speed <= 0.0 {
+            return;
+        }
+
+        squid.set_movement_vector(away.normalize() * speed / FLEE_PUSH_DIVISOR);
     }
 }
 
@@ -402,9 +595,28 @@ impl LivingEntity for SquidEntity {
         Mob::mob_server_ai_step(self);
     }
 
+    /// Vanilla parity: `Squid.hurtServer`, which inks only when something
+    /// actually attacked it, not when it drowns or starves.
+    ///
+    /// Vanilla inks after the damage lands and reads `getLastHurtByMob`;
+    /// Steel has no post-damage hook, so this runs just before, reading the
+    /// damage source instead. Both come to the same thing: ink for a hit that
+    /// has an attacker behind it and got past the invulnerability window.
+    fn before_actually_hurt(&self, source: &DamageSource, _amount: f32) {
+        if source.causing_entity_id.is_none() {
+            return;
+        }
+        if let Some(world) = self.level() {
+            self.spawn_ink(&world);
+        }
+    }
+
     fn ai_step(&self) -> Option<MoveResult> {
         let result = self.default_ai_step();
         self.tick_tentacles();
+        if self.is_in_water() {
+            self.face_travel_direction();
+        }
         AgeableMob::tick_ageable_mob(self);
         result
     }
