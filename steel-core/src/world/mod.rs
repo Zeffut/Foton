@@ -109,6 +109,7 @@ mod block_updates;
 mod border;
 mod broadcasts;
 pub(crate) mod clock;
+pub mod difficulty;
 mod entity_management;
 mod environment;
 mod events;

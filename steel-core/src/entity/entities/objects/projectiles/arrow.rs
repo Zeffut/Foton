@@ -17,12 +17,13 @@ use steel_utils::{DowncastType, DowncastTypeKey};
 
 use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntitySyncedData, Projectile, ProjectileBase,
-    RemovalReason, next_entity_id,
+    Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, Projectile,
+    ProjectileBase, RemovalReason, SharedEntity, next_entity_id,
 };
 use crate::inventory::container::Container as _;
 use crate::physics::MoverType;
-use crate::world::World;
+use crate::player::Player;
+use crate::world::{ClipHitResult, World};
 
 /// Damage an arrow carries before speed is taken into account.
 ///
@@ -48,6 +49,18 @@ struct ArrowState {
     base_damage: f64,
     /// Ticks spent stuck in a block.
     life: i32,
+    /// Effects the arrow hands to whatever it hits.
+    effects: Vec<MobEffectInstance>,
+}
+
+impl ArrowState {
+    const fn new() -> Self {
+        Self {
+            base_damage: DEFAULT_BASE_DAMAGE,
+            life: 0,
+            effects: Vec::new(),
+        }
+    }
 }
 
 /// A flying arrow.
@@ -74,10 +87,7 @@ impl ArrowEntity {
             entity_type,
             entity_data: SyncMutex::new(ArrowEntityData::new()),
             projectile_base: ProjectileBase::new(),
-            state: SyncMutex::new(ArrowState {
-                base_damage: DEFAULT_BASE_DAMAGE,
-                life: 0,
-            }),
+            state: SyncMutex::new(ArrowState::new()),
         }
     }
 
@@ -89,10 +99,7 @@ impl ArrowEntity {
             entity_type,
             entity_data: SyncMutex::new(ArrowEntityData::new()),
             projectile_base: ProjectileBase::new(),
-            state: SyncMutex::new(ArrowState {
-                base_damage: DEFAULT_BASE_DAMAGE,
-                life: 0,
-            }),
+            state: SyncMutex::new(ArrowState::new()),
         }
     }
 
@@ -151,6 +158,32 @@ impl ArrowEntity {
             log::error!("failed to add arrow entity: {error}");
         }
         arrow
+    }
+
+    /// Adds an effect the arrow will apply to whatever it hits.
+    ///
+    /// Vanilla parity: `Arrow.addEffect`. Vanilla keeps the effect in the
+    /// arrow's `PotionContents` component and scales its duration by
+    /// `POTION_DURATION_SCALE`; Steel has no potion component on projectiles
+    /// yet, so effects are held on the entity and applied at full duration.
+    /// That matches the mobs that add effects directly, such as a stray's
+    /// slowness, and only diverges for the tipped arrows Steel cannot fire yet.
+    pub fn add_effect(&self, effect: MobEffectInstance) {
+        self.state.lock().effects.push(effect);
+    }
+
+    /// Hands the arrow's effects to a living target.
+    ///
+    /// Vanilla parity: `Arrow.doPostHurtEffects`.
+    fn do_post_hurt_effects(&self, target: &SharedEntity) {
+        let Some(living) = target.as_living_entity() else {
+            return;
+        };
+        // Cloned out of the lock: applying an effect reaches back into the world.
+        let effects = self.state.lock().effects.clone();
+        for effect in effects {
+            living.add_mob_effect(effect);
+        }
     }
 
     /// Returns whether the arrow is stuck in a block.
@@ -251,7 +284,7 @@ impl Entity for ArrowEntity {
     ///
     /// Vanilla parity: `AbstractArrow.playerTouch`. Only a stuck arrow can be
     /// picked up, which is why one still in flight passes straight through.
-    fn player_touch(self: Arc<Self>, player: &Arc<crate::player::Player>) {
+    fn player_touch(self: Arc<Self>, player: &Arc<Player>) {
         if !self.is_in_ground() {
             return;
         }
@@ -279,7 +312,7 @@ impl Projectile for ArrowEntity {
     /// Vanilla parity: `AbstractArrow.onHitEntity`. Damage is
     /// `ceil(speed * base_damage)`, so a fully drawn bow hurts far more than a
     /// spent arrow drifting to the ground.
-    fn on_hit_entity(&self, entity: &crate::entity::SharedEntity, _location: DVec3) {
+    fn on_hit_entity(&self, entity: &SharedEntity, _location: DVec3) {
         let speed = self.velocity().length();
         let damage = (speed * self.base_damage()).ceil().max(0.0);
 
@@ -294,6 +327,8 @@ impl Projectile for ArrowEntity {
             entity.hurt(&world, &source, damage as f32);
         }
 
+        self.do_post_hurt_effects(entity);
+
         // TODO: vanilla also sets the target's arrow count, applies piercing,
         // ignites the target when the arrow burns, and runs the weapon's
         // enchantment effects.
@@ -303,7 +338,7 @@ impl Projectile for ArrowEntity {
     /// Sticks the arrow into the block it hit.
     ///
     /// Vanilla parity: `AbstractArrow.onHitBlock`.
-    fn on_hit_block(&self, _hit: &crate::world::ClipHitResult) {
+    fn on_hit_block(&self, _hit: &ClipHitResult) {
         // TODO: vanilla snaps the arrow onto the face it struck; Steel has no
         // direct position setter on the entity trait, so it stops where it is.
         self.set_velocity(DVec3::ZERO);

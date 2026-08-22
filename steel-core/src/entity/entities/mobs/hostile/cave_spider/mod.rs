@@ -10,9 +10,10 @@ use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::sound_events;
 use steel_registry::vanilla_entity_data::CaveSpiderEntityData;
+use steel_registry::{sound_events, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
+use steel_utils::types::Difficulty;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
 use crate::entity::ai::goal::{
@@ -22,7 +23,7 @@ use crate::entity::ai::goal::{
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
-    MobBase, PathfinderMob,
+    MobBase, MobEffectInstance, PathfinderMob, SharedEntity,
 };
 use crate::world::World;
 
@@ -38,6 +39,12 @@ const LEAP_HEIGHT: f32 = 0.4;
 
 /// Speed multiplier while chasing.
 const ATTACK_SPEED_MODIFIER: f64 = 1.0;
+
+/// Seconds of poison a cave spider inflicts on normal difficulty.
+const POISON_SECONDS_NORMAL: i32 = 7;
+
+/// Seconds of poison a cave spider inflicts on hard difficulty.
+const POISON_SECONDS_HARD: i32 = 15;
 
 /// Speed multiplier while wandering.
 const STROLL_SPEED_MODIFIER: f64 = 0.8;
@@ -213,6 +220,32 @@ impl Mob for CaveSpiderEntity {
         Some(&sound_events::ENTITY_SPIDER_AMBIENT)
     }
 
+    /// Poisons the target after a successful hit.
+    ///
+    /// Vanilla parity: `CaveSpider.doHurtTarget`. Easy difficulty poisons nothing,
+    /// which is why a cave spider is merely annoying on peaceful settings.
+    fn do_hurt_target(&self, world: &World, target: &SharedEntity) -> bool {
+        if !Mob::mob_do_hurt_target(self, world, target) {
+            return false;
+        }
+        let Some(living) = target.as_living_entity() else {
+            return true;
+        };
+        let poison_seconds = match world.difficulty() {
+            Difficulty::Normal => POISON_SECONDS_NORMAL,
+            Difficulty::Hard => POISON_SECONDS_HARD,
+            Difficulty::Peaceful | Difficulty::Easy => 0,
+        };
+        if poison_seconds > 0 {
+            living.add_mob_effect(MobEffectInstance::with_duration(
+                vanilla_mob_effects::POISON,
+                poison_seconds * 20,
+                0,
+            ));
+        }
+        true
+    }
+
     fn mob_flags(&self) -> i8 {
         *self.entity_data.lock().mob().mob_flags.get()
     }
@@ -223,6 +256,3 @@ impl Mob for CaveSpiderEntity {
 }
 
 impl PathfinderMob for CaveSpiderEntity {}
-
-// TODO: vanilla cave spiders poison what they hit, which needs the mob-effect
-// application path.

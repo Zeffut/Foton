@@ -1179,8 +1179,18 @@ pub trait Mob: LivingEntity {
     }
 
     /// Handles vanilla `Mob.doHurtTarget`.
+    ///
+    /// Override this to add what a specific mob does on a landed hit, and call
+    /// [`Self::mob_do_hurt_target`] from the override for the shared behavior;
+    /// Rust has no `super`, so the base body lives in its own method.
     #[must_use]
     fn do_hurt_target(&self, world: &World, target: &SharedEntity) -> bool {
+        self.mob_do_hurt_target(world, target)
+    }
+
+    /// The shared part of vanilla `Mob.doHurtTarget`.
+    #[must_use]
+    fn mob_do_hurt_target(&self, world: &World, target: &SharedEntity) -> bool {
         let Some(attacker) = self.as_entity_event_source().as_living_entity() else {
             return false;
         };

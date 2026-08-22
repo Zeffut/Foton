@@ -11,8 +11,8 @@ use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::sound_events;
 use steel_registry::vanilla_entity_data::HuskEntityData;
+use steel_registry::{sound_events, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
@@ -23,7 +23,7 @@ use crate::entity::ai::goal::{
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
-    MobBase, PathfinderMob,
+    MobBase, MobEffectInstance, PathfinderMob, SharedEntity,
 };
 use crate::world::World;
 
@@ -36,6 +36,12 @@ const ATTACK_SPEED_MODIFIER: f64 = 1.0;
 ///
 /// Vanilla parity: `LookAtPlayerGoal(this, Player.class, 8.0F)`.
 const LOOK_AT_PLAYER_RANGE: f64 = 8.0;
+
+/// Hunger ticks a husk inflicts per whole point of local difficulty.
+///
+/// Vanilla parity: the `140 * (int) difficulty` of `Husk.doHurtTarget`, which
+/// reads the scaled local difficulty rather than the level setting.
+const HUNGER_TICKS_PER_DIFFICULTY: i32 = 140;
 
 /// Speed multiplier for aimless wandering.
 const STROLL_SPEED_MODIFIER: f64 = 1.0;
@@ -191,6 +197,31 @@ impl Mob for HuskEntity {
         Some(&sound_events::ENTITY_HUSK_AMBIENT)
     }
 
+    /// Leaves the target hungry after a successful hit.
+    ///
+    /// Vanilla parity: `Husk.doHurtTarget`, which only applies when the husk is
+    /// bare-handed and scales the duration with the difficulty.
+    fn do_hurt_target(&self, world: &World, target: &SharedEntity) -> bool {
+        if !Mob::mob_do_hurt_target(self, world, target) {
+            return false;
+        }
+        let Some(living) = target.as_living_entity() else {
+            return true;
+        };
+        let difficulty = world
+            .get_current_difficulty_at(self.block_position())
+            .effective_difficulty() as i32;
+        let hunger_ticks = HUNGER_TICKS_PER_DIFFICULTY * difficulty;
+        if hunger_ticks > 0 {
+            living.add_mob_effect(MobEffectInstance::with_duration(
+                vanilla_mob_effects::HUNGER,
+                hunger_ticks,
+                0,
+            ));
+        }
+        true
+    }
+
     fn mob_flags(&self) -> i8 {
         *self.entity_data.lock().mob().mob_flags.get()
     }
@@ -201,6 +232,3 @@ impl Mob for HuskEntity {
 }
 
 impl PathfinderMob for HuskEntity {}
-
-// TODO: vanilla husks inflict Hunger on hit, which needs the mob-effect
-// application path.

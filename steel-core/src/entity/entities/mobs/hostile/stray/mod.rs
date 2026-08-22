@@ -10,8 +10,8 @@ use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::sound_events;
 use steel_registry::vanilla_entity_data::StrayEntityData;
+use steel_registry::{sound_events, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
@@ -24,7 +24,7 @@ use crate::entity::damage::DamageSource;
 use crate::entity::entities::ArrowEntity;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
-    MobBase, PathfinderMob,
+    MobBase, MobEffectInstance, PathfinderMob,
 };
 use crate::world::World;
 
@@ -51,6 +51,12 @@ const ARROW_POWER: f32 = 1.6;
 ///
 /// Vanilla parity: `14 - difficulty * 4`, with difficulty 2.
 const ARROW_UNCERTAINTY: f32 = 6.0;
+
+/// Ticks of slowness a stray's arrow carries.
+///
+/// Vanilla parity: the `MobEffectInstance(MobEffects.SLOWNESS, 600)` of
+/// `Stray.getArrow`.
+const SLOWNESS_TICKS: i32 = 600;
 
 /// Speed multiplier while repositioning.
 const STROLL_SPEED_MODIFIER: f64 = 1.0;
@@ -138,7 +144,12 @@ impl StrayEntity {
         // TODO: vanilla reads the bow from the skeleton's hand and consumes a
         // projectile; Steel's skeletons are not equipped yet.
         let arrow = ArrowEntity::shoot_at(&world, self, target, ARROW_POWER, ARROW_UNCERTAINTY);
-        drop(arrow);
+        // Vanilla parity: `Stray.getArrow` tips every arrow with slowness.
+        arrow.add_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::SLOWNESS,
+            SLOWNESS_TICKS,
+            0,
+        ));
 
         world.play_sound_at(
             &sound_events::ENTITY_SKELETON_SHOOT,
@@ -300,6 +311,3 @@ impl Mob for StrayEntity {
 }
 
 impl PathfinderMob for StrayEntity {}
-
-// TODO: vanilla strays fire tipped arrows that slow their target, which needs
-// the mob-effect application path.
