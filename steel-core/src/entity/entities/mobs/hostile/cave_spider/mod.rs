@@ -16,9 +16,10 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::types::Difficulty;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
+use super::spider::SpiderTargetGoal;
 use crate::entity::ai::goal::{
     FloatGoal, HurtByTargetGoal, LeapAtTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
-    NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
+    RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::{
@@ -107,12 +108,7 @@ impl CaveSpiderEntity {
         {
             let mut targets = mob_base.target_selector().lock();
             targets.add_goal(1, HurtByTargetGoal::new());
-            // TODO: vanilla wraps this in SpiderTargetGoal, which stops a spider
-            // picking a fresh target in bright daylight.
-            targets.add_goal(
-                2,
-                NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
-            );
+            targets.add_goal(2, SpiderTargetGoal::new_for_players());
         }
 
         Self {

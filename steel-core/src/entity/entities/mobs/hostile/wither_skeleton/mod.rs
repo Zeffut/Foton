@@ -137,8 +137,8 @@ impl WitherSkeletonEntity {
             goals.add_goal(5, WaterAvoidingRandomStrollGoal::new(STROLL_SPEED_MODIFIER));
             goals.add_goal(6, LookAtPlayerGoal::new(LOOK_AT_PLAYER_RANGE));
             goals.add_goal(6, RandomLookAroundGoal::new());
-            // TODO: vanilla also flees wolves at priority 3 via AvoidEntityGoal,
-            // which the goal module does not export outside itself yet.
+            // TODO: vanilla also flees wolves at priority 3; the goal is
+            // available, the wolf is not.
         }
 
         {

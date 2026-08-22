@@ -16,15 +16,16 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
 use crate::entity::ai::goal::{
-    FloatGoal, HurtByTargetGoal, LeapAtTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
-    NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
+    FloatGoal, Goal, GoalControls, HurtByTargetGoal, LeapAtTargetGoal, LookAtPlayerGoal,
+    MeleeAttackGoal, NearestAttackableTargetGoal, RandomLookAroundGoal,
+    WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
     MobBase, PathfinderMob,
 };
-use crate::world::World;
+use crate::world::{LevelReader as _, World};
 
 /// Bit of the synced flags byte that marks a climbing spider.
 ///
@@ -44,6 +45,70 @@ const STROLL_SPEED_MODIFIER: f64 = 0.8;
 
 /// Distance at which a spider watches a player.
 const LOOK_AT_PLAYER_RANGE: f64 = 8.0;
+
+/// Brightness at which a spider stops looking for new prey.
+///
+/// Vanilla parity: the `>= 0.5F` of `Spider.SpiderTargetGoal.canUse`, which on
+/// the surface means roughly light level twelve. It is why a spider caught out
+/// at dawn keeps chasing what it already has but takes nothing new.
+const SPIDER_HOSTILE_BRIGHTNESS: f32 = 0.5;
+
+/// Picks targets only out of the light.
+///
+/// Vanilla parity: `Spider.SpiderTargetGoal`. It wraps the ordinary target
+/// search and refuses to start one in daylight; a spider that already has a
+/// target keeps it, which is what makes a daytime spider harmless until
+/// provoked.
+pub(super) struct SpiderTargetGoal {
+    inner: NearestAttackableTargetGoal,
+}
+
+impl SpiderTargetGoal {
+    /// Creates the daylight-gated target search for a spider.
+    pub(super) fn new_for_players() -> Self {
+        Self {
+            inner: NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
+        }
+    }
+}
+
+impl Goal for SpiderTargetGoal {
+    fn controls(&self) -> GoalControls {
+        self.inner.controls()
+    }
+
+    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        let Some(world) = mob.level() else {
+            return false;
+        };
+        if world.light_level_dependent_magic_value(mob.block_position())
+            >= SPIDER_HOSTILE_BRIGHTNESS
+        {
+            return false;
+        }
+        self.inner.can_use(mob)
+    }
+
+    fn can_continue_to_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        self.inner.can_continue_to_use(mob)
+    }
+
+    fn start(&mut self, mob: &dyn PathfinderMob) {
+        self.inner.start(mob);
+    }
+
+    fn stop(&mut self, mob: &dyn PathfinderMob) {
+        self.inner.stop(mob);
+    }
+
+    fn tick(&mut self, mob: &dyn PathfinderMob) {
+        self.inner.tick(mob);
+    }
+
+    fn requires_update_every_tick(&self) -> bool {
+        self.inner.requires_update_every_tick()
+    }
+}
 
 /// A spider.
 #[entity_behavior(class = "Spider")]
@@ -100,12 +165,7 @@ impl SpiderEntity {
         {
             let mut targets = mob_base.target_selector().lock();
             targets.add_goal(1, HurtByTargetGoal::new());
-            // TODO: vanilla wraps this in SpiderTargetGoal, which stops a spider
-            // picking a fresh target in bright daylight.
-            targets.add_goal(
-                2,
-                NearestAttackableTargetGoal::new_for_players(true, |_, _| true),
-            );
+            targets.add_goal(2, SpiderTargetGoal::new_for_players());
         }
 
         Self {
