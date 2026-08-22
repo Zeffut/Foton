@@ -46,6 +46,7 @@ pub(crate) use nearest_attackable_target::NearestAttackableTargetGoal;
 pub(crate) use panic_goal::PanicGoal;
 pub(crate) use random_look_around::RandomLookAroundGoal;
 pub(crate) use random_stroll::RandomStrollGoal;
+pub(crate) use random_swimming::RandomSwimmingGoal;
 pub(crate) use restrict_sun::RestrictSunGoal;
 pub(crate) use selector::{Goal, GoalControl, GoalControls, GoalSelector};
 pub(crate) use tempt_goal::TemptGoal;

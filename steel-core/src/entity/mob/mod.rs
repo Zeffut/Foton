@@ -9,8 +9,8 @@ use leash::{
     LEASH_TORSIONAL_ELASTICITY, LeashData, axis_specific_leash_elasticity,
     compute_elastic_interaction, leash_bounding_box_center, leash_holder_movement,
 };
-pub use pathfinder::PathfinderMob;
 use pathfinder::tick_path_navigation_target;
+pub use pathfinder::{NavigationKind, PathfinderMob};
 #[cfg(test)]
 use pathfinder::{find_ground_path_target_surface, path_end_node_can_reach_target};
 
@@ -1720,7 +1720,7 @@ fn home_radius_sqr(radius: i32) -> f64 {
     radius * radius
 }
 
-fn rotlerp(a: f32, b: f32, max: f32) -> f32 {
+pub(crate) fn rotlerp(a: f32, b: f32, max: f32) -> f32 {
     let mut diff = wrap_degrees(b - a);
     if diff > max {
         diff = max;

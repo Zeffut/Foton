@@ -149,10 +149,12 @@ pub trait PathfinderMob: Mob {
     fn can_update_path(&self) -> bool {
         can_update_path_for(
             self.navigation_kind(),
-            self.on_ground(),
-            self.is_in_water(),
-            self.is_in_lava(),
-            self.is_passenger(),
+            PathSupport {
+                on_ground: self.on_ground(),
+                in_water: self.is_in_water(),
+                in_lava: self.is_in_lava(),
+                is_passenger: self.is_passenger(),
+            },
         )
     }
 
@@ -391,17 +393,31 @@ pub trait PathfinderMob: Mob {
 /// around it; a swimmer needs to be in the water at all, unless it is the kind
 /// that leaves it.
 #[must_use]
-pub const fn can_update_path_for(
-    kind: NavigationKind,
-    on_ground: bool,
-    in_water: bool,
-    in_lava: bool,
-    is_passenger: bool,
-) -> bool {
+pub const fn can_update_path_for(kind: NavigationKind, support: PathSupport) -> bool {
     match kind {
-        NavigationKind::Ground => on_ground || in_water || in_lava || is_passenger,
-        NavigationKind::WaterBound { allow_breaching } => allow_breaching || in_water || in_lava,
+        NavigationKind::Ground => {
+            support.on_ground || support.in_water || support.in_lava || support.is_passenger
+        }
+        NavigationKind::WaterBound { allow_breaching } => {
+            allow_breaching || support.in_water || support.in_lava
+        }
     }
+}
+
+/// What a mob currently has to move against.
+///
+/// Grouped rather than passed loose so the four flags cannot be swapped by
+/// accident at a call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PathSupport {
+    /// Whether the mob is standing on something.
+    pub on_ground: bool,
+    /// Whether the mob is in water.
+    pub in_water: bool,
+    /// Whether the mob is in lava.
+    pub in_lava: bool,
+    /// Whether the mob is riding something.
+    pub is_passenger: bool,
 }
 
 pub(super) fn path_end_node_can_reach_target(path: &Path, target: BlockPos) -> bool {
@@ -459,7 +475,7 @@ pub(super) fn find_ground_path_target_surface(
 
 #[cfg(test)]
 mod navigation_kind_tests {
-    use super::{NavigationKind, can_update_path_for};
+    use super::{NavigationKind, PathSupport, can_update_path_for};
 
     const SWIMMER: NavigationKind = NavigationKind::WaterBound {
         allow_breaching: false,
@@ -473,31 +489,39 @@ mod navigation_kind_tests {
     fn a_walker_needs_ground_water_lava_or_a_ride() {
         assert!(can_update_path_for(
             NavigationKind::Ground,
-            true,
-            false,
-            false,
-            false
+            PathSupport {
+                on_ground: true,
+                in_water: false,
+                in_lava: false,
+                is_passenger: false,
+            }
         ));
         assert!(can_update_path_for(
             NavigationKind::Ground,
-            false,
-            true,
-            false,
-            false
+            PathSupport {
+                on_ground: false,
+                in_water: true,
+                in_lava: false,
+                is_passenger: false,
+            }
         ));
         assert!(can_update_path_for(
             NavigationKind::Ground,
-            false,
-            false,
-            true,
-            false
+            PathSupport {
+                on_ground: false,
+                in_water: false,
+                in_lava: true,
+                is_passenger: false,
+            }
         ));
         assert!(can_update_path_for(
             NavigationKind::Ground,
-            false,
-            false,
-            false,
-            true
+            PathSupport {
+                on_ground: false,
+                in_water: false,
+                in_lava: false,
+                is_passenger: true,
+            }
         ));
     }
 
@@ -507,10 +531,12 @@ mod navigation_kind_tests {
     fn a_falling_walker_cannot_repath() {
         assert!(!can_update_path_for(
             NavigationKind::Ground,
-            false,
-            false,
-            false,
-            false
+            PathSupport {
+                on_ground: false,
+                in_water: false,
+                in_lava: false,
+                is_passenger: false,
+            }
         ));
     }
 
@@ -518,14 +544,46 @@ mod navigation_kind_tests {
     /// bank is not enough for a fish.
     #[test]
     fn a_swimmer_needs_to_be_in_the_water() {
-        assert!(can_update_path_for(SWIMMER, false, true, false, false));
-        assert!(!can_update_path_for(SWIMMER, true, false, false, false));
-        assert!(!can_update_path_for(SWIMMER, false, false, false, true));
+        assert!(can_update_path_for(
+            SWIMMER,
+            PathSupport {
+                on_ground: false,
+                in_water: true,
+                in_lava: false,
+                is_passenger: false,
+            }
+        ));
+        assert!(!can_update_path_for(
+            SWIMMER,
+            PathSupport {
+                on_ground: true,
+                in_water: false,
+                in_lava: false,
+                is_passenger: false,
+            }
+        ));
+        assert!(!can_update_path_for(
+            SWIMMER,
+            PathSupport {
+                on_ground: false,
+                in_water: false,
+                in_lava: false,
+                is_passenger: true,
+            }
+        ));
     }
 
     /// A dolphin keeps pathing out of the water, which is how it jumps.
     #[test]
     fn a_breaching_swimmer_paths_anywhere() {
-        assert!(can_update_path_for(BREACHER, false, false, false, false));
+        assert!(can_update_path_for(
+            BREACHER,
+            PathSupport {
+                on_ground: false,
+                in_water: false,
+                in_lava: false,
+                is_passenger: false,
+            }
+        ));
     }
 }
