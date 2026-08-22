@@ -170,6 +170,14 @@ impl FoodData {
         );
     }
 
+    /// Applies a food item's nutrition and saturation directly.
+    ///
+    /// Vanilla parity: `FoodData.eat(FoodProperties)`. Unlike [`Self::eat`], the
+    /// saturation value is applied as-is instead of being derived from a modifier.
+    pub fn eat_food(&mut self, nutrition: i32, saturation: f32) {
+        self.add(nutrition, saturation);
+    }
+
     /// Runs one tick of the hunger system.
     /// Returns a [`FoodTickResult`] describing what happened this tick so the
     /// caller (`Player::tick`) can apply healing or starvation damage

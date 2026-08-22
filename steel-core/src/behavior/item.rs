@@ -4,12 +4,14 @@ use std::sync::Arc;
 
 use std::borrow::Cow;
 use steel_registry::data_components::vanilla_components::{
-    BLOCKS_ATTACKS, CONSUMABLE, KINETIC_WEAPON,
+    BLOCKS_ATTACKS, CONSUMABLE, FOOD, KINETIC_WEAPON,
 };
 
+use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::vanilla_components::ITEM_NAME;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
+use steel_registry::sound_events;
 use steel_registry::{REGISTRY, RegistryEntry, RegistryExt};
 use steel_utils::types::InteractionHand;
 use text_components::TextComponent;
@@ -22,6 +24,59 @@ use crate::player::{Player, player_inventory::EquipmentSwapResult};
 use crate::world::World;
 
 pub use steel_registry::data_components::vanilla_components::ItemUseAnimation;
+
+/// Applies the vanilla consume effects to `stack` and returns the resulting stack.
+///
+/// Vanilla parity: `Consumable.onConsume`. Shared by the instant path in
+/// `ItemBehavior::use_item` and by `ItemBehavior::finish_using`, so both apply
+/// exactly the same effects.
+fn apply_consume_effects(
+    stack: &mut ItemStack,
+    world: &Arc<World>,
+    user: &dyn LivingEntity,
+) -> ItemStack {
+    let Some(consumable) = stack.get(CONSUMABLE).cloned() else {
+        return stack.copy_with_count(stack.count());
+    };
+    let position = user.position();
+
+    // Vanilla `emitParticlesAndSounds`: NEUTRAL, volume 1.0, pitch triangle(1.0, 0.4).
+    if let Some(sound) = consumable.sound().registry_ref() {
+        let pitch = 0.4f32.mul_add(rand::random::<f32>() - rand::random::<f32>(), 1.0);
+        world.play_sound_at(sound, SoundSource::Neutral, position, 1.0, pitch, None);
+    }
+    // TODO: emit the consume particles once item-driven particles are supported.
+
+    // Vanilla dispatches to every `ConsumableListener` carried by the stack.
+    // `FoodProperties` is the only one Steel models today.
+    if let Some(player) = user.as_player()
+        && let Some(food) = stack.get(FOOD)
+    {
+        player
+            .food_data
+            .lock()
+            .eat_food(food.nutrition(), food.saturation());
+        let burp_pitch = 0.1f32.mul_add(rand::random::<f32>(), 0.9);
+        world.play_sound_at(
+            &sound_events::ENTITY_PLAYER_BURP,
+            SoundSource::Players,
+            position,
+            0.5,
+            burp_pitch,
+            None,
+        );
+    }
+
+    // TODO: apply `consumable.on_consume_effects()` once consume effects are wired up.
+    // TODO: emit the EAT / DRINK game event once game-event dispatch exists.
+
+    // Vanilla `ItemStack.consume` leaves creative-mode stacks untouched.
+    if user.has_infinite_materials() {
+        return stack.copy_with_count(stack.count());
+    }
+    // TODO: honor USE_REMAINDER so bowls and bottles are returned.
+    stack.copy_with_count(stack.count().saturating_sub(1))
+}
 
 /// Trait defining the behavior of an item.
 ///
@@ -52,7 +107,33 @@ pub trait ItemBehavior: Send + Sync {
 
     /// Called when this item is used (e.g. right click in air).
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
-        // TODO: Mirror Item.use/finishUsingItem for CONSUMABLE, BLOCKS_ATTACKS, and
+        // Vanilla parity: `Consumable.startConsuming`.
+        let consumable = context.inv.with_item(|item| item.get(CONSUMABLE).cloned());
+        if let Some(consumable) = consumable {
+            // Vanilla parity: `Consumable.canConsume`. Only food gates on hunger.
+            let can_consume = context.inv.with_item(|item| {
+                item.get(FOOD)
+                    .is_none_or(|food| context.player.can_eat(food.can_always_eat()))
+            });
+            if !can_consume {
+                return InteractionResult::Fail;
+            }
+
+            if consumable.consume_ticks() > 0 {
+                context.player.start_using_item(context.hand);
+                return InteractionResult::Consume;
+            }
+
+            // Consumables with no duration resolve on the spot.
+            let world = context.world;
+            let player = context.player;
+            context.inv.with_item(|item| {
+                *item = apply_consume_effects(item, world, player);
+            });
+            return InteractionResult::Consume;
+        }
+
+        // TODO: Mirror Item.use/finishUsingItem for BLOCKS_ATTACKS, and
         // KINETIC_WEAPON so specialized behaviors inherit the complete Vanilla base path.
         let Some(equippable) = context.inv.with_item(|item| item.get_equippable().cloned()) else {
             return InteractionResult::Pass;
@@ -133,9 +214,12 @@ pub trait ItemBehavior: Send + Sync {
     fn finish_using(
         &self,
         stack: &mut ItemStack,
-        _world: &Arc<World>,
-        _user: &dyn LivingEntity,
+        world: &Arc<World>,
+        user: &dyn LivingEntity,
     ) -> ItemStack {
+        if stack.has(CONSUMABLE) {
+            return apply_consume_effects(stack, world, user);
+        }
         stack.copy_with_count(stack.count())
     }
 
