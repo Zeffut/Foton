@@ -104,7 +104,7 @@ fn apply_consume_effects(
 ///
 /// Vanilla parity: `PotionContents.forEachEffect`, without the duration scale,
 /// which only differs from one outside the ominous-bottle path.
-fn potion_effects(
+pub fn potion_effects(
     contents: &steel_registry::data_components::PotionContents,
 ) -> Vec<(steel_registry::mob_effect::MobEffectRef, i32, i32)> {
     let mut effects = Vec::new();

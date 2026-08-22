@@ -618,6 +618,15 @@ pub trait LivingEntity: Entity {
         world.clip(start, end, block_shape, fluid).is_miss()
     }
 
+    /// Returns whether water hurts this entity.
+    ///
+    /// Vanilla parity: `LivingEntity.isSensitiveToWater`. Only a handful of
+    /// mobs say yes -- the enderman, the blaze, the snow golem, the strider --
+    /// and it is what makes a water bottle a weapon against them.
+    fn is_sensitive_to_water(&self) -> bool {
+        false
+    }
+
     /// Returns vanilla base living-entity invulnerability.
     fn default_is_invulnerable_to(&self, source: &DamageSource) -> bool {
         self.is_removed()

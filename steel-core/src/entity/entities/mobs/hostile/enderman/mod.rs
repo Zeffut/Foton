@@ -387,6 +387,11 @@ impl LivingEntity for EndermanEntity {
             .set(clamped);
     }
 
+    /// Vanilla parity: `EnderMan.isSensitiveToWater`.
+    fn is_sensitive_to_water(&self) -> bool {
+        true
+    }
+
     fn hurt_sound(&self, _source: &DamageSource) -> Option<SoundEventRef> {
         Some(&sound_events::ENTITY_ENDERMAN_HURT)
     }

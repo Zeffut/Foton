@@ -15,6 +15,8 @@ pub use mobs::water::{CodEntity, SalmonEntity, SquidEntity};
 pub use objects::display_ui::{BlockDisplayEntity, ItemFrameEntity, LeashFenceKnotEntity};
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
-pub use objects::projectiles::{ArrowEntity, EnderPearlEntity, FireworkRocketEntity};
+pub use objects::projectiles::{
+    ArrowEntity, EnderPearlEntity, FireworkRocketEntity, SplashPotionEntity,
+};
 pub use objects::vehicles::ChestMinecartEntity;
 pub use raw::RawEntity;
