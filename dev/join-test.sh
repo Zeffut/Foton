@@ -71,11 +71,11 @@ fi
 # Start from a clean world every time, so the test measures the server and not
 # whatever a previous run left behind.
 #
-# This is not just tidiness: one run against a reused world hung with the log
-# frozen on "Chunk scheduling epoch slow" and the client still waiting, and the
-# same code passed immediately on a fresh one. A hard SIGKILL mid-generation
-# does not reproduce it, so the trigger is still unknown; wiping keeps the test
-# deterministic while that stays open.
+# One run against a reused world once hung with the log frozen on "Chunk
+# scheduling epoch slow" and the client still waiting. That has never
+# reproduced: not from a SIGKILL mid-generation, and not from the clean stop,
+# hard kill and reload that dev/reload-test.sh now walks through on every run.
+# Reloading is covered there; wiping here keeps this test measuring one thing.
 rm -rf saves
 
 echo "=== Booting (offline, port $PORT) ==="
