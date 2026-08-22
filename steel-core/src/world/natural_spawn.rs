@@ -5,8 +5,8 @@
 //! candidate positions in the ring around each player instead, because chunk
 //! ticking does not expose the per-chunk mob accounting vanilla relies on. The
 //! observable rules that matter are reproduced: the 24-block exclusion around
-//! players, the 128-block outer limit, the darkness test, and the biome's own
-//! weighted spawn list.
+//! players, the 128-block outer limit, the per-category budget, where each kind
+//! of mob is allowed to stand, and the spawn rules the mob itself imposes.
 
 use std::f64::consts::TAU;
 use std::sync::Arc;
@@ -15,14 +15,14 @@ use glam::DVec3;
 use steel_registry::REGISTRY;
 use steel_registry::RegistryExt as _;
 use steel_registry::biome::SpawnerData;
-use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::entity_type::{EntityTypeRef, MobCategory};
 use steel_registry::vanilla_game_rules::{SPAWN_MOBS, SPAWN_MONSTERS};
 use steel_utils::{BlockPos, WorldAabb};
 
 use crate::entity::ENTITIES;
 use crate::entity::{Entity, EntitySpawnReason, next_entity_id};
-use crate::world::{LevelReader as _, World};
+use crate::world::World;
+use crate::world::spawn_placement::spawn_placement_for;
 
 /// Closest a mob may spawn to a player.
 ///
@@ -34,7 +34,7 @@ const MIN_SPAWN_DISTANCE: f64 = 24.0;
 /// Vanilla parity: `NaturalSpawner.SPAWN_DISTANCE_BLOCK`.
 const MAX_SPAWN_DISTANCE: f64 = 128.0;
 
-/// Candidate positions tried per player each spawn cycle.
+/// Candidate positions tried per category, per player, each spawn cycle.
 const ATTEMPTS_PER_PLAYER: u32 = 16;
 
 /// Ticks between spawn cycles.
@@ -45,9 +45,40 @@ const SPAWN_INTERVAL_TICKS: u64 = 20;
 
 /// Monsters allowed within the sampling radius of one player.
 ///
-/// Vanilla derives its cap from `MobCategory::max_instances_per_chunk` scaled by
-/// the number of spawnable chunks; this is the equivalent local budget.
-const MONSTER_CAP_PER_PLAYER: usize = 24;
+/// Every other category's budget is derived from this one, so that the ratios
+/// between categories stay vanilla's even though the absolute figure is Steel's
+/// own. See [`category_cap`].
+const MONSTER_CAP_PER_PLAYER: i32 = 24;
+
+/// Categories the spawner populates, in vanilla's declaration order.
+///
+/// `Misc` is absent: it is the category of boats and item frames, and vanilla
+/// gives it a negative per-chunk maximum precisely so that nothing spawns it.
+const SPAWNABLE_CATEGORIES: [MobCategory; 7] = [
+    MobCategory::Monster,
+    MobCategory::Creature,
+    MobCategory::Ambient,
+    MobCategory::Axolotls,
+    MobCategory::UndergroundWaterCreature,
+    MobCategory::WaterCreature,
+    MobCategory::WaterAmbient,
+];
+
+/// Returns how many mobs of `category` may live in one player's spawn ring.
+///
+/// Vanilla scales `MobCategory.getMaxInstancesPerChunk` by the number of
+/// spawnable chunks around the players. Steel samples a fixed ring instead, so
+/// the per-chunk density becomes a flat local budget: the monster figure is the
+/// one Steel already used, and every other category keeps vanilla's ratio to
+/// it. That is what makes a ring hold far more zombies than squid.
+fn category_cap(category: MobCategory) -> usize {
+    let max = category.max_instances_per_chunk();
+    if max <= 0 {
+        return 0;
+    }
+    let scaled = max * MONSTER_CAP_PER_PLAYER / MobCategory::Monster.max_instances_per_chunk();
+    scaled.max(1) as usize
+}
 
 impl World {
     /// Runs one natural spawning cycle.
@@ -57,9 +88,10 @@ impl World {
         if !tick_count.is_multiple_of(SPAWN_INTERVAL_TICKS) {
             return;
         }
-        if !self.get_game_rule(&SPAWN_MOBS) || !self.get_game_rule(&SPAWN_MONSTERS) {
+        if !self.get_game_rule(&SPAWN_MOBS) {
             return;
         }
+        let spawn_monsters = self.get_game_rule(&SPAWN_MONSTERS);
 
         let mut player_positions = Vec::new();
         self.players.iter_players(|_, player| {
@@ -68,19 +100,26 @@ impl World {
         });
 
         for origin in player_positions {
-            if self.monsters_near(origin) >= MONSTER_CAP_PER_PLAYER {
-                continue;
-            }
-            for _ in 0..ATTEMPTS_PER_PLAYER {
-                if let Some(pos) = self.pick_spawn_position(origin) {
-                    self.try_spawn_at(pos);
+            for category in SPAWNABLE_CATEGORIES {
+                // Vanilla parity: `doMobSpawning` gates every category, but
+                // `doMobSpawning` alone is not enough for monsters.
+                if category == MobCategory::Monster && !spawn_monsters {
+                    continue;
+                }
+                if self.mobs_near(origin, category) >= category_cap(category) {
+                    continue;
+                }
+                for _ in 0..ATTEMPTS_PER_PLAYER {
+                    if let Some(pos) = self.pick_spawn_position(origin) {
+                        self.try_spawn_at(pos, category);
+                    }
                 }
             }
         }
     }
 
-    /// Counts monsters already alive within the sampling radius.
-    fn monsters_near(self: &Arc<Self>, origin: DVec3) -> usize {
+    /// Counts mobs of `category` already alive within the sampling radius.
+    fn mobs_near(self: &Arc<Self>, origin: DVec3, category: MobCategory) -> usize {
         let aabb = WorldAabb::new(
             origin.x - MAX_SPAWN_DISTANCE,
             origin.y - MAX_SPAWN_DISTANCE,
@@ -91,13 +130,16 @@ impl World {
         );
         self.get_entities_in_aabb(&aabb)
             .iter()
-            .filter(|entity| entity.entity_type().mob_category == MobCategory::Monster)
+            .filter(|entity| entity.entity_type().mob_category == category)
             .count()
     }
 
     /// Picks a candidate position in the spawn ring around `origin`.
     ///
-    /// Returns `None` when the sampled column has no ground a mob could stand on.
+    /// Vanilla parity: `NaturalSpawner.getRandomPosWithin`, which picks a column
+    /// and a height without judging either. Whether the spot suits the mob is
+    /// decided later, by that mob's placement type, because the answer differs
+    /// for a cow and for a cod.
     fn pick_spawn_position(self: &Arc<Self>, origin: DVec3) -> Option<BlockPos> {
         let angle = rand::random::<f64>() * TAU;
         let distance = (MAX_SPAWN_DISTANCE - MIN_SPAWN_DISTANCE)
@@ -107,36 +149,20 @@ impl World {
 
         // Search a vertical band around the player rather than the whole column.
         let center_y = origin.y.floor() as i32;
-        for offset in -16..=16 {
-            let y = center_y + offset;
-            let pos = BlockPos::new(x, y, z);
-            if self.is_valid_spawn_position(pos) {
-                return Some(pos);
-            }
+        let y = center_y + rand::random_range(-16..=16);
+        if self.is_outside_build_height(y) {
+            return None;
         }
-        None
+        Some(BlockPos::new(x, y, z))
     }
 
-    /// Returns whether a mob fits at `pos` with solid ground beneath it.
-    fn is_valid_spawn_position(self: &Arc<Self>, pos: BlockPos) -> bool {
-        if self.is_outside_build_height(pos.y()) {
-            return false;
-        }
-        let below = self.get_block_state(pos.below());
-        if !below.is_solid() {
-            return false;
-        }
-        // A mob needs its own block and headroom, and must not spawn inside a block.
-        self.get_block_state(pos).is_air() && self.get_block_state(pos.above()).is_air()
-    }
-
-    /// Spawns one mob at `pos` when the light and distance rules allow it.
-    fn try_spawn_at(self: &Arc<Self>, pos: BlockPos) {
-        let center = DVec3::new(
-            f64::from(pos.x()) + 0.5,
-            f64::from(pos.y()),
-            f64::from(pos.z()) + 0.5,
-        );
+    /// Spawns one mob of `category` at `pos` when every rule allows it.
+    ///
+    /// Vanilla parity: `NaturalSpawner.spawnCategoryForPosition`, in the same
+    /// order: reject the position, pick the mob, then ask the mob.
+    fn try_spawn_at(self: &Arc<Self>, pos: BlockPos, category: MobCategory) {
+        let (center_x, center_y, center_z) = pos.get_bottom_center();
+        let center = DVec3::new(center_x, center_y, center_z);
 
         // Vanilla refuses any position closer than 24 blocks to a player.
         if let Some(distance_sqr) = self.nearest_player_distance_sqr(center)
@@ -145,49 +171,51 @@ impl World {
             return;
         }
 
-        if !self.is_dark_enough_to_spawn(pos) {
+        let Some(entity_type) = self.pick_mob_for(pos, category) else {
+            return;
+        };
+
+        if !spawn_placement_for(entity_type).is_spawn_position_ok(self, pos, entity_type) {
             return;
         }
 
-        let Some(entity_type) = self.pick_monster_for(pos) else {
-            return;
-        };
         let Some(entity) =
             ENTITIES.create(entity_type, next_entity_id(), center, Arc::downgrade(self))
         else {
             return;
         };
 
+        // Vanilla asks the entity type's registered predicate before creating
+        // anything. Steel has no path from a type to its behavior, so the mob is
+        // created and asked; one that answers no is dropped here, unspawned.
+        let Some(mob) = entity.as_mob() else {
+            return;
+        };
+        if !mob.check_spawn_rules(self, EntitySpawnReason::Natural, pos) {
+            return;
+        }
+
         // Vanilla parity: `NaturalSpawner.spawnCategoryForPosition` finalizes the
         // mob before it joins the world, which is what gives it its biome variant
         // and its spawn-time attributes. Steel spawns one mob at a time rather
         // than a pack, so there is no group data to thread from a previous mob.
-        if let Some(mob) = entity.as_mob() {
-            let _ = mob.finalize_spawn(self, EntitySpawnReason::Natural, None);
-        }
+        let _ = mob.finalize_spawn(self, EntitySpawnReason::Natural, None);
 
         if let Err(error) = self.try_add_entity(entity) {
             log::debug!("natural spawn rejected: {error}");
         }
     }
 
-    /// Returns whether `pos` is dark enough for a monster.
-    ///
-    /// Vanilla parity: `Monster.isDarkEnoughToSpawn`, without the dimension's
-    /// configurable light test.
-    fn is_dark_enough_to_spawn(self: &Arc<Self>, pos: BlockPos) -> bool {
-        // TODO: honor DimensionType.monsterSpawnBlockLightLimit and
-        // monsterSpawnLightTest instead of the fixed vanilla-overworld thresholds.
-        let sky_darkening = self.sky_darkening();
-        self.raw_brightness(pos, sky_darkening) <= rand::random_range(0..8)
-    }
-
-    /// Picks a monster from the biome's weighted spawn list.
+    /// Picks a mob of `category` from the biome's weighted spawn list.
     ///
     /// Vanilla parity: `NaturalSpawner.getRandomSpawnMobAt`.
-    fn pick_monster_for(self: &Arc<Self>, pos: BlockPos) -> Option<EntityTypeRef> {
+    fn pick_mob_for(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        category: MobCategory,
+    ) -> Option<EntityTypeRef> {
         let biome = self.biome_at(pos)?;
-        let candidates: &Vec<SpawnerData> = biome.spawners.get("monster")?;
+        let candidates: &Vec<SpawnerData> = biome.spawners.get(category.name())?;
 
         let total: i32 = candidates.iter().map(|entry| entry.weight).sum();
         if total <= 0 {
@@ -204,5 +232,36 @@ impl World {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_spawnable_category_gets_a_budget() {
+        for category in SPAWNABLE_CATEGORIES {
+            assert!(
+                category_cap(category) > 0,
+                "{category:?} would never spawn anything"
+            );
+        }
+    }
+
+    #[test]
+    fn misc_never_spawns() {
+        assert_eq!(category_cap(MobCategory::Misc), 0);
+        assert!(!SPAWNABLE_CATEGORIES.contains(&MobCategory::Misc));
+    }
+
+    #[test]
+    fn budgets_keep_vanillas_ordering_between_categories() {
+        // Vanilla lets a chunk hold seven times as many monsters as animals, and
+        // twice as many drifting fish as animals. The ring budgets are smaller
+        // but must not reshuffle that ordering.
+        assert!(category_cap(MobCategory::Monster) > category_cap(MobCategory::Ambient));
+        assert!(category_cap(MobCategory::Ambient) > category_cap(MobCategory::Creature));
+        assert!(category_cap(MobCategory::WaterAmbient) > category_cap(MobCategory::WaterCreature));
     }
 }

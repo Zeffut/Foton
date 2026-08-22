@@ -28,6 +28,7 @@ use crate::entity::ai::goal::{
 };
 use crate::entity::ai::path::PathType;
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_monster_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData, LivingEntity,
     LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob, SharedEntity, SpawnGroupData,
@@ -239,6 +240,19 @@ impl LivingEntity for WitherSkeletonEntity {
 }
 
 impl Mob for WitherSkeletonEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is
+    /// registered with in `SpawnPlacements`. It only appears in the dark.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_monster_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

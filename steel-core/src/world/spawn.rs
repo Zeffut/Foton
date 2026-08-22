@@ -187,6 +187,15 @@ impl World {
             .map(|first_available| first_available - 1)
     }
 
+    /// Returns the height of the world surface in this column.
+    ///
+    /// Vanilla parity: the y of `getHeightmapPos(Heightmap.Types.WORLD_SURFACE,
+    /// pos)`, which is how a mob tells underground from open air.
+    #[must_use]
+    pub(crate) fn world_surface_height(&self, pos: BlockPos) -> i32 {
+        self.heightmap_pos(HeightmapType::WorldSurface, pos).y()
+    }
+
     pub(super) fn heightmap_pos(&self, heightmap_type: HeightmapType, pos: BlockPos) -> BlockPos {
         BlockPos::new(
             pos.x(),

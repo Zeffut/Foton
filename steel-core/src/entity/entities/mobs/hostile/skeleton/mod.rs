@@ -15,17 +15,21 @@ use steel_registry::vanilla_entity_data::SkeletonEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, RangedBowAttackGoal, RestrictSunGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ArrowEntity;
+use crate::entity::spawn_rules::check_monster_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
     MobBase, PathfinderMob,
 };
 use crate::world::World;
+use std::sync::Arc;
+use steel_utils::BlockPos;
 
 /// Ticks between shots.
 ///
@@ -216,6 +220,19 @@ impl LivingEntity for SkeletonEntity {
 }
 
 impl Mob for SkeletonEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is
+    /// registered with in `SpawnPlacements`. It only appears in the dark.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_monster_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

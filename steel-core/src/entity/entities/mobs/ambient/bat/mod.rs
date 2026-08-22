@@ -20,7 +20,9 @@ use steel_registry::{level_events, sound_events};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
+use crate::entity::EntitySpawnReason;
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_bat_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData, LivingEntity,
     LivingEntityBase, LivingTravelInput, Mob, MobBase, PathfinderMob,
@@ -438,6 +440,19 @@ impl LivingEntity for BatEntity {
 }
 
 impl Mob for BatEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `Bat::checkBatSpawnRules`. Underground, dark, on a block
+    /// bats spawn on, and even then only half the time.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_bat_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

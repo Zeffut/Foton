@@ -129,6 +129,7 @@ mod signal_getter;
 mod sleep;
 mod sleep_status;
 mod spawn;
+pub mod spawn_placement;
 pub mod tick_scheduler;
 mod weather;
 mod world_entities;

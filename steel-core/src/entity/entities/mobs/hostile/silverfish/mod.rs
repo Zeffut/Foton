@@ -25,16 +25,19 @@ use steel_utils::{
 use crate::behavior::blocks::{
     host_state_by_infested, infested_state_by_host, is_compatible_host_block,
 };
+use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     ClimbOnTopOfPowderSnowGoal, FloatGoal, Goal, GoalControls, HurtByTargetGoal, MeleeAttackGoal,
     NearestAttackableTargetGoal, RandomStrollGoal, reduced_tick_delay,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_silverfish_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntityStatus, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, RemovalReason,
 };
 use crate::world::World;
+use std::sync::Arc;
 
 /// Speed multiplier while chasing.
 ///
@@ -470,6 +473,19 @@ impl LivingEntity for SilverfishEntity {
 }
 
 impl Mob for SilverfishEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `Silverfish::checkSilverfishSpawnRules`. Light does not
+    /// stop a silverfish, but a nearby player does.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_silverfish_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

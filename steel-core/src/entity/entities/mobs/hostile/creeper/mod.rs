@@ -15,17 +15,21 @@ use steel_registry::vanilla_entity_data::CreeperEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
     NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_monster_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
     MobBase, PathfinderMob, RemovalReason,
 };
 use crate::world::World;
 use crate::world::explosion::ExplosionBlockInteraction;
+use std::sync::Arc;
+use steel_utils::BlockPos;
 
 /// Ticks the fuse takes to fill.
 ///
@@ -306,6 +310,19 @@ impl LivingEntity for CreeperEntity {
 }
 
 impl Mob for CreeperEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is
+    /// registered with in `SpawnPlacements`. It only appears in the dark.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_monster_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

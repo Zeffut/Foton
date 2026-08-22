@@ -20,11 +20,13 @@ use crate::entity::ai::goal::{
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_monster_spawn_rules;
 use crate::entity::{
     AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, SpawnGroupData,
 };
 use crate::world::World;
+use steel_utils::BlockPos;
 
 /// Speed multiplier the zombie uses while chasing.
 ///
@@ -174,6 +176,19 @@ impl LivingEntity for ZombieEntity {
 }
 
 impl Mob for ZombieEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is
+    /// registered with in `SpawnPlacements`. It only appears in the dark.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_monster_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

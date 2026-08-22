@@ -51,6 +51,7 @@ use crate::entity::ai::walk::WalkPathEvaluator;
 use crate::entity::attribute::{AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::LeashFenceKnotEntity;
+use crate::entity::spawn_rules::check_mob_spawn_rules;
 use crate::entity::{
     Entity, EntitySpawnReason, LivingEntity, LivingTravelInput, RemovalReason, SharedEntity,
     SpawnGroupData, WeakEntity,
@@ -490,6 +491,22 @@ pub trait Mob: LivingEntity {
         // TODO: vanilla burns the mob's helmet instead when it wears one, and rolls
         // against the local brightness rather than igniting outright.
         self.set_remaining_fire_ticks(DAYLIGHT_BURN_TICKS);
+    }
+
+    /// Returns whether this mob accepts the spot the spawner picked for it.
+    ///
+    /// Vanilla parity: the predicate registered next to the entity type in
+    /// `SpawnPlacements`, defaulting to `Mob.checkMobSpawnRules`. Vanilla tests
+    /// it before creating anything; Steel creates the mob and asks it, because
+    /// nothing leads from an entity type to its behavior without an instance.
+    /// A mob that answers no is dropped, unspawned.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_mob_spawn_rules(world, spawn_reason, pos)
     }
 
     fn finalize_spawn(

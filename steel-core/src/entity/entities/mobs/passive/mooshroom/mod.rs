@@ -609,6 +609,21 @@ impl Animal for MushroomCowEntity {
 }
 
 impl Mob for MushroomCowEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `MushroomCow::checkMushroomSpawnRules`, reached through
+    /// this mob's own `check_animal_spawn_rules`, which already narrows the
+    /// ground to mycelium and the like. That is why mooshrooms stay on their
+    /// island.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        <Self as Animal>::check_animal_spawn_rules(world.as_ref(), spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

@@ -548,6 +548,20 @@ impl Animal for ChickenEntity {
 }
 
 impl Mob for ChickenEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `Animal::checkAnimalSpawnRules`. Animals want light
+    /// and a block their own tag allows, which is why a field fills with
+    /// cows by day and a cave never does.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        <Self as Animal>::check_animal_spawn_rules(world.as_ref(), spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

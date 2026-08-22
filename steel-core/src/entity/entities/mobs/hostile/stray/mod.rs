@@ -15,17 +15,21 @@ use steel_registry::{sound_events, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, RangedBowAttackGoal, RestrictSunGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ArrowEntity;
+use crate::entity::spawn_rules::check_stray_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
     MobBase, MobEffectInstance, PathfinderMob,
 };
 use crate::world::World;
+use std::sync::Arc;
+use steel_utils::BlockPos;
 
 /// Ticks between shots.
 ///
@@ -227,6 +231,19 @@ impl LivingEntity for StrayEntity {
 }
 
 impl Mob for StrayEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `Stray::checkStraySpawnRules`, which looks for sky past
+    /// any powder snow piled on top of the spot.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_stray_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

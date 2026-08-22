@@ -25,6 +25,7 @@ use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
 use crate::entity::ai::goal::{Goal, GoalControls};
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_surface_water_animal_spawn_rules;
 use crate::entity::{
     AgeableMob, AgeableMobBase, AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad,
     EntityMovementEmission, EntityPose, EntitySpawnReason, EntitySyncedData, LivingEntity,
@@ -658,6 +659,20 @@ impl AgeableMob for SquidEntity {
 }
 
 impl Mob for SquidEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `WaterAnimal::checkSurfaceWaterAnimalSpawnRules`,
+    /// which keeps it in the top thirteen blocks of the sea.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        let _ = spawn_reason;
+        check_surface_water_animal_spawn_rules(world, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

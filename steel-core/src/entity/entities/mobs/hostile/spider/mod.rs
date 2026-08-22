@@ -15,17 +15,21 @@ use steel_registry::vanilla_entity_data::SpiderEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
+use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LeapAtTargetGoal, LookAtPlayerGoal,
     MeleeAttackGoal, NearestAttackableTargetGoal, RandomLookAroundGoal,
     WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_monster_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
     MobBase, PathfinderMob,
 };
 use crate::world::{LevelReader as _, World};
+use std::sync::Arc;
+use steel_utils::BlockPos;
 
 /// Bit of the synced flags byte that marks a climbing spider.
 ///
@@ -257,6 +261,19 @@ impl LivingEntity for SpiderEntity {
 }
 
 impl Mob for SpiderEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is
+    /// registered with in `SpawnPlacements`. It only appears in the dark.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_monster_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

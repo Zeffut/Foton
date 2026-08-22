@@ -21,12 +21,14 @@ use crate::entity::ai::goal::{
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::spawn_rules::check_surface_monster_spawn_rules;
 use crate::entity::{
     AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob, SharedEntity,
     SpawnGroupData,
 };
 use crate::world::World;
+use steel_utils::BlockPos;
 
 /// Speed multiplier the zombie uses while chasing.
 ///
@@ -182,6 +184,20 @@ impl LivingEntity for HuskEntity {
 }
 
 impl Mob for HuskEntity {
+    /// Returns whether this mob accepts where the spawner put it.
+    ///
+    /// Vanilla parity: `Monster::checkSurfaceMonstersSpawnRules`. A husk needs
+    /// open sky above it, which is what keeps it in the desert rather than in
+    /// the caves under it.
+    fn check_spawn_rules(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        pos: BlockPos,
+    ) -> bool {
+        check_surface_monster_spawn_rules(world, spawn_reason, pos)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

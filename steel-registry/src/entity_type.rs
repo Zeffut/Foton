@@ -53,6 +53,24 @@ impl MobCategory {
         }
     }
 
+    /// The name this category carries in biome spawn lists.
+    ///
+    /// Vanilla parity: the `name` field of `MobCategory`, which is also its
+    /// serialized name and the key biomes file their spawners under.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Monster => "monster",
+            Self::Creature => "creature",
+            Self::Ambient => "ambient",
+            Self::Axolotls => "axolotls",
+            Self::UndergroundWaterCreature => "underground_water_creature",
+            Self::WaterCreature => "water_creature",
+            Self::WaterAmbient => "water_ambient",
+            Self::Misc => "misc",
+        }
+    }
+
     /// Whether this category counts as friendly for the spawn rules.
     ///
     /// Vanilla parity: the `isFriendly` field of `MobCategory`.
