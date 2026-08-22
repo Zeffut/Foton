@@ -1,5 +1,5 @@
 [files]
-extend-exclude = ["**/build_assets/**", "*.json"]
+extend-exclude = ["**/build_assets/**", "*.json", "CLAUDE.md"]
 
 [type.locale]
 extend-glob = ["**/locale.rs"]
