@@ -21,7 +21,7 @@ use steel_registry::vanilla_game_rules::{SPAWN_MOBS, SPAWN_MONSTERS};
 use steel_utils::{BlockPos, WorldAabb};
 
 use crate::entity::ENTITIES;
-use crate::entity::{Entity, next_entity_id};
+use crate::entity::{Entity, EntitySpawnReason, next_entity_id};
 use crate::world::{LevelReader as _, World};
 
 /// Closest a mob may spawn to a player.
@@ -157,6 +157,14 @@ impl World {
         else {
             return;
         };
+
+        // Vanilla parity: `NaturalSpawner.spawnCategoryForPosition` finalizes the
+        // mob before it joins the world, which is what gives it its biome variant
+        // and its spawn-time attributes. Steel spawns one mob at a time rather
+        // than a pack, so there is no group data to thread from a previous mob.
+        if let Some(mob) = entity.as_mob() {
+            let _ = mob.finalize_spawn(self, EntitySpawnReason::Natural, None);
+        }
 
         if let Err(error) = self.try_add_entity(entity) {
             log::debug!("natural spawn rejected: {error}");
