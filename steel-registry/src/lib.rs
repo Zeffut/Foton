@@ -56,6 +56,7 @@ pub mod equipment;
 pub mod feature;
 pub mod fluid;
 pub mod frog_variant;
+pub mod fuel;
 pub mod game_events;
 pub mod game_rules;
 pub mod instrument;
