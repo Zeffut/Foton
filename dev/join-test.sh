@@ -13,6 +13,10 @@ ROOT=$(pwd)
 PORT=25566
 RUN_DIR="$ROOT/run-offline"
 
+# Any fixed value works; this one is a plains start with water and a village in
+# range, which exercises terrain, structures and both spawn paths at once.
+WORLD_SEED=${WORLD_SEED:-8675309}
+
 echo "=== Building ==="
 if ! cargo build 2>&1 | tail -3; then
   echo "BUILD FAILED"
@@ -52,6 +56,17 @@ sed -i \
   -e 's/^enforce_secure_chat = .*/enforce_secure_chat = false/' \
   -e "s/^server_port = .*/server_port = $PORT/" \
   config/config.toml
+
+# Pin the seed. Without it every run generates different terrain, so what the
+# client sees around it -- chunks, structures, the animals a chunk was stocked
+# with -- changes from run to run and the test can only say "it did not crash".
+# Pinned, two runs of the same build are comparable, and a run that suddenly
+# stops showing livestock means the server changed rather than the world did.
+if grep -q '^seed = ' config/worlds.toml; then
+  sed -i "s/^seed = .*/seed = \"$WORLD_SEED\"/" config/worlds.toml
+else
+  sed -i "/^save_path = /a seed = \"$WORLD_SEED\"" config/worlds.toml
+fi
 
 # Start from a clean world every time, so the test measures the server and not
 # whatever a previous run left behind.
