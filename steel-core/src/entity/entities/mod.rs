@@ -4,7 +4,10 @@ pub mod mobs;
 pub mod objects;
 mod raw;
 
-pub use mobs::hostile::{CreeperEntity, HuskEntity, SkeletonEntity, SpiderEntity, ZombieEntity};
+pub use mobs::hostile::{
+    CaveSpiderEntity, CreeperEntity, HuskEntity, SkeletonEntity, SpiderEntity, StrayEntity,
+    ZombieEntity,
+};
 pub use mobs::passive::{CowEntity, PigEntity, SheepEntity};
 pub use objects::display_ui::{BlockDisplayEntity, ItemFrameEntity, LeashFenceKnotEntity};
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
