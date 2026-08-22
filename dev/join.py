@@ -20,6 +20,10 @@ PLAYER_NAME = "SmokeTester"
 PROTOCOL_VERSION = 776
 TIMEOUT_SECONDS = 30
 
+# A server with nothing left to say should be reported, not waited on. The play
+# phase is where a stall shows up, so it gets its own shorter patience.
+PLAY_SILENCE_TIMEOUT_SECONDS = 20
+
 # Packet ids, mirroring steel-registry/src/generated/vanilla_packets.rs.
 S_INTENTION = 0x00
 
@@ -215,6 +219,14 @@ def run_configuration(connection):
             registry_packets += 1
 
 
+def describe(seen):
+    """Renders what arrived, busiest first, so a stall says what it was doing."""
+    return ", ".join(
+        f"id {packet_id}x{count}"
+        for packet_id, count in sorted(seen.items(), key=lambda kv: -kv[1])[:8]
+    )
+
+
 def run_play(connection):
     """Plays far enough to prove the player is really in a loaded world.
 
@@ -225,9 +237,19 @@ def run_play(connection):
     joined = False
     positioned = False
     chunks = 0
+    seen = {}
 
     for _ in range(MAX_PLAY_PACKETS):
-        packet_id, payload = connection.receive()
+        try:
+            packet_id, payload = connection.receive()
+        except (OSError, EOFError) as error:
+            fail(
+                f"stopped receiving after {type(error).__name__}: {error} "
+                f"(joined={joined}, positioned={positioned}, chunks={chunks}; "
+                f"got {describe(seen)})"
+            )
+            return
+        seen[packet_id] = seen.get(packet_id, 0) + 1
 
         if packet_id == PLAY_C_LOGIN:
             entity_id = struct.unpack(">i", payload[:4])[0]
@@ -252,7 +274,8 @@ def run_play(connection):
 
     fail(
         f"never settled into the world "
-        f"(joined={joined}, positioned={positioned}, chunks={chunks})"
+        f"(joined={joined}, positioned={positioned}, chunks={chunks}; "
+        f"got {describe(seen)})"
     )
 
 
@@ -278,6 +301,7 @@ def main():
     run_configuration(connection)
 
     print("=== Play ===")
+    sock.settimeout(PLAY_SILENCE_TIMEOUT_SECONDS)
     run_play(connection)
 
     sock.close()

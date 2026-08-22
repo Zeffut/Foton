@@ -16,9 +16,8 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
 use crate::entity::ai::goal::{
-    FleeSunGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal,
-    NearestAttackableTargetGoal, RandomLookAroundGoal, RestrictSunGoal,
-    WaterAvoidingRandomStrollGoal,
+    FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
+    RandomLookAroundGoal, RangedBowAttackGoal, RestrictSunGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ArrowEntity;
@@ -39,9 +38,6 @@ const ATTACK_INTERVAL_TICKS: i32 = 20;
 /// Vanilla parity: the `attackRadius` of `RangedBowAttackGoal`.
 const ATTACK_RADIUS: f64 = 15.0;
 
-/// Ticks a target must stay visible before the skeleton commits to a shot.
-const SEEN_TIME_BEFORE_FIRING: i32 = 20;
-
 /// Speed of the arrows a skeleton fires.
 ///
 /// Vanilla parity: the `1.6F` velocity of `performRangedAttack`.
@@ -54,6 +50,12 @@ const ARROW_UNCERTAINTY: f32 = 6.0;
 
 /// Speed multiplier while repositioning.
 const STROLL_SPEED_MODIFIER: f64 = 1.0;
+
+/// Speed the archer closes the distance at.
+///
+/// Vanilla parity: the `1.0` speed modifier `AbstractSkeleton` builds its bow
+/// goal with.
+const BOW_APPROACH_SPEED: f64 = 1.0;
 
 /// Distance at which a skeleton watches a player.
 const LOOK_AT_PLAYER_RANGE: f64 = 8.0;
@@ -103,7 +105,15 @@ impl SkeletonEntity {
             let mut goals = mob_base.goal_selector().lock();
             goals.add_goal(2, RestrictSunGoal::new());
             goals.add_goal(3, FleeSunGoal::new(1.0));
-            goals.add_goal(4, RangedBowAttackGoal::new());
+            goals.add_goal(
+                4,
+                RangedBowAttackGoal::new(
+                    ATTACK_INTERVAL_TICKS,
+                    ATTACK_RADIUS,
+                    BOW_APPROACH_SPEED,
+                    fire_arrow,
+                ),
+            );
             goals.add_goal(5, WaterAvoidingRandomStrollGoal::new(STROLL_SPEED_MODIFIER));
             goals.add_goal(6, LookAtPlayerGoal::new(LOOK_AT_PLAYER_RANGE));
             goals.add_goal(6, RandomLookAroundGoal::new());
@@ -127,100 +137,32 @@ impl SkeletonEntity {
             entity_data: SyncMutex::new(entity_data),
         }
     }
-
-    /// Looses an arrow at `target`.
-    ///
-    /// Vanilla parity: `AbstractSkeleton.performRangedAttack`.
-    fn perform_ranged_attack(&self, target: DVec3) {
-        let Some(world) = self.level() else {
-            return;
-        };
-        // TODO: vanilla reads the bow from the skeleton's hand and consumes a
-        // projectile; Steel's skeletons are not equipped yet.
-        let arrow = ArrowEntity::shoot_at(&world, self, target, ARROW_POWER, ARROW_UNCERTAINTY);
-        drop(arrow);
-
-        world.play_sound_at(
-            &sound_events::ENTITY_SKELETON_SHOOT,
-            SoundSource::Hostile,
-            self.position(),
-            1.0,
-            0.4f32.mul_add(rand::random::<f32>(), 0.8).recip(),
-            None,
-        );
-    }
 }
 
-/// Keeps distance from the target and fires arrows at it.
+/// Looses an arrow at `target`.
 ///
-/// Vanilla parity: `RangedBowAttackGoal`.
-struct RangedBowAttackGoal {
-    /// Ticks until the next shot.
-    attack_time: i32,
-    /// Ticks the target has been continuously visible.
-    seen_time: i32,
-}
+///
+/// Vanilla parity: `AbstractSkeleton.performRangedAttack`.
+fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3) {
+    let Some(archer) = mob.downcast_ref::<SkeletonEntity>() else {
+        return;
+    };
+    let Some(world) = archer.level() else {
+        return;
+    };
+    // TODO: vanilla reads the bow from the skeleton's hand and consumes a
+    // projectile; Steel's skeletons are not equipped yet.
+    let arrow = ArrowEntity::shoot_at(&world, archer, target, ARROW_POWER, ARROW_UNCERTAINTY);
+    drop(arrow);
 
-impl RangedBowAttackGoal {
-    const fn new() -> Self {
-        Self {
-            attack_time: -1,
-            seen_time: 0,
-        }
-    }
-}
-
-impl Goal for RangedBowAttackGoal {
-    fn controls(&self) -> GoalControls {
-        GoalControls::MOVE | GoalControls::LOOK
-    }
-
-    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        mob.target().is_some()
-    }
-
-    fn stop(&mut self, _mob: &dyn PathfinderMob) {
-        self.seen_time = 0;
-        self.attack_time = -1;
-    }
-
-    fn requires_update_every_tick(&self) -> bool {
-        true
-    }
-
-    fn tick(&mut self, mob: &dyn PathfinderMob) {
-        let Some(target) = mob.target() else {
-            return;
-        };
-        let Some(skeleton) = mob.downcast_ref::<SkeletonEntity>() else {
-            return;
-        };
-
-        let target_position = target.position();
-        let distance_sqr = target_position.distance_squared(mob.position());
-        let in_range = distance_sqr <= ATTACK_RADIUS * ATTACK_RADIUS;
-
-        // Vanilla only fires once the target has stayed visible for a moment, which
-        // is what stops a skeleton snapping off a shot the instant it rounds a
-        // corner.
-        if in_range {
-            self.seen_time += 1;
-        } else {
-            self.seen_time = 0;
-        }
-
-        if !in_range || self.seen_time < SEEN_TIME_BEFORE_FIRING {
-            return;
-        }
-
-        if self.attack_time > 0 {
-            self.attack_time -= 1;
-            return;
-        }
-
-        skeleton.perform_ranged_attack(target_position);
-        self.attack_time = ATTACK_INTERVAL_TICKS;
-    }
+    world.play_sound_at(
+        &sound_events::ENTITY_SKELETON_SHOOT,
+        SoundSource::Hostile,
+        archer.position(),
+        1.0,
+        0.4f32.mul_add(rand::random::<f32>(), 0.8).recip(),
+        None,
+    );
 }
 
 impl Entity for SkeletonEntity {

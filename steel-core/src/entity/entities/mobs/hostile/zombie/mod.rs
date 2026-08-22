@@ -3,7 +3,7 @@
 //! Vanilla parity: `Zombie`. The first hostile mob in Steel: it hunts players,
 //! closes in and attacks in melee, and retaliates against whatever hurt it.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use glam::DVec3;
 use steel_macros::entity_behavior;
@@ -21,8 +21,8 @@ use crate::entity::ai::goal::{
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
-    MobBase, PathfinderMob,
+    AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
+    LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, SpawnGroupData,
 };
 use crate::world::World;
 
@@ -188,6 +188,23 @@ impl Mob for ZombieEntity {
 
     fn ambient_sound(&self) -> Option<SoundEventRef> {
         Some(&sound_events::ENTITY_ZOMBIE_AMBIENT)
+    }
+
+    /// Rolls whether this one spawned small.
+    ///
+    /// Vanilla parity: `Zombie.finalizeSpawn`, which gives one zombie in twenty
+    /// the baby form. Steel's zombies are not `AgeableMob`s, so the shared
+    /// group-data roll does not reach them and the chance is applied here.
+    fn finalize_spawn(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        group_data: Option<SpawnGroupData>,
+    ) -> Option<SpawnGroupData> {
+        if rand::random::<f32>() < AgeableMobGroupData::DEFAULT_BABY_SPAWN_CHANCE {
+            self.set_baby(true);
+        }
+        self.finalize_spawn_mob_base(world, spawn_reason, group_data)
     }
 
     fn mob_flags(&self) -> i8 {

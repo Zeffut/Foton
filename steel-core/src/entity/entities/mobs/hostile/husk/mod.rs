@@ -4,7 +4,7 @@
 //! it is absent from the `burn_in_daylight` tag, so it survives the morning
 //! without any code of its own.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use glam::DVec3;
 use steel_macros::entity_behavior;
@@ -22,8 +22,9 @@ use crate::entity::ai::goal::{
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
-    MobBase, MobEffectInstance, PathfinderMob, SharedEntity,
+    AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
+    LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob, SharedEntity,
+    SpawnGroupData,
 };
 use crate::world::World;
 
@@ -220,6 +221,23 @@ impl Mob for HuskEntity {
             ));
         }
         true
+    }
+
+    /// Rolls whether this one spawned small.
+    ///
+    /// Vanilla parity: `Zombie.finalizeSpawn`, which gives one zombie in twenty
+    /// the baby form. Steel's zombies are not `AgeableMob`s, so the shared
+    /// group-data roll does not reach them and the chance is applied here.
+    fn finalize_spawn(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        group_data: Option<SpawnGroupData>,
+    ) -> Option<SpawnGroupData> {
+        if rand::random::<f32>() < AgeableMobGroupData::DEFAULT_BABY_SPAWN_CHANCE {
+            self.set_baby(true);
+        }
+        self.finalize_spawn_mob_base(world, spawn_reason, group_data)
     }
 
     fn mob_flags(&self) -> i8 {
