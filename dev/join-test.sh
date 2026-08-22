@@ -53,9 +53,14 @@ sed -i \
   -e "s/^server_port = .*/server_port = $PORT/" \
   config/config.toml
 
-# Start from a clean world every time. A run killed mid-save leaves one that
-# stalls chunk scheduling on the next boot, which makes the test hang instead of
-# reporting anything useful.
+# Start from a clean world every time, so the test measures the server and not
+# whatever a previous run left behind.
+#
+# This is not just tidiness: one run against a reused world hung with the log
+# frozen on "Chunk scheduling epoch slow" and the client still waiting, and the
+# same code passed immediately on a fresh one. A hard SIGKILL mid-generation
+# does not reproduce it, so the trigger is still unknown; wiping keeps the test
+# deterministic while that stays open.
 rm -rf saves
 
 echo "=== Booting (offline, port $PORT) ==="
