@@ -8,6 +8,7 @@ pub use mobs::ambient::BatEntity;
 pub use mobs::hostile::{
     CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HuskEntity, SilverfishEntity,
     SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, WitherSkeletonEntity, ZombieEntity,
+    ZombifiedPiglinEntity,
 };
 pub use mobs::passive::{ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, SheepEntity};
 pub use mobs::water::{CodEntity, SalmonEntity, SquidEntity};

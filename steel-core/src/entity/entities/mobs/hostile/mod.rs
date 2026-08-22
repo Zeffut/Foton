@@ -12,6 +12,7 @@ mod spider;
 mod stray;
 mod wither_skeleton;
 mod zombie;
+mod zombified_piglin;
 
 pub use cave_spider::CaveSpiderEntity;
 pub use creeper::CreeperEntity;
@@ -25,3 +26,4 @@ pub use spider::SpiderEntity;
 pub use stray::StrayEntity;
 pub use wither_skeleton::WitherSkeletonEntity;
 pub use zombie::ZombieEntity;
+pub use zombified_piglin::ZombifiedPiglinEntity;
