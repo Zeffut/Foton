@@ -2,6 +2,7 @@
 
 mod cave_spider;
 mod creeper;
+mod drowned;
 mod enderman;
 mod husk;
 mod silverfish;
@@ -14,6 +15,7 @@ mod zombie;
 
 pub use cave_spider::CaveSpiderEntity;
 pub use creeper::CreeperEntity;
+pub use drowned::DrownedEntity;
 pub use enderman::EndermanEntity;
 pub use husk::HuskEntity;
 pub use silverfish::SilverfishEntity;
