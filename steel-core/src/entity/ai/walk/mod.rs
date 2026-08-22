@@ -13,6 +13,7 @@ pub use node_evaluator::WalkNodeEvaluator;
 pub use path_evaluator::WalkPathEvaluator;
 use path_evaluator::does_block_have_partial_collision;
 pub use settings::MobPathSettings;
+pub use swim_evaluator::SwimNodeEvaluator;
 
 use steel_math::fast_floor;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;

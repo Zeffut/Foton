@@ -11,7 +11,9 @@ use crate::entity::ai::navigation::{
     NavigationPathRequest, NavigationRecomputeRequest, NavigationTickContext,
 };
 use crate::entity::ai::path::Path;
-use crate::entity::ai::walk::{MobPathSettings, WalkNodeEvaluator};
+use crate::entity::ai::walk::{
+    MobPathSettings, NodeEvaluator, SwimNodeEvaluator, WalkNodeEvaluator,
+};
 use crate::entity::{Entity, LivingEntity, SharedEntity};
 use crate::physics::WorldCollisionProvider;
 use crate::world::{LevelReader, World};
@@ -95,6 +97,27 @@ fn ground_navigation_surface_y<M: Mob + ?Sized>(mob: &M, world: &World, can_floa
     surface
 }
 
+/// How a mob finds its way through the world.
+///
+/// Vanilla parity: the choice `Mob.createNavigation` makes between
+/// `GroundPathNavigation` and `WaterBoundPathNavigation`. Steel keeps one
+/// navigation and swaps the node evaluator, which is the only part that
+/// actually differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavigationKind {
+    /// Walks, climbs and jumps on land.
+    Ground,
+    /// Swims.
+    WaterBound {
+        /// Whether the mob may leave the water.
+        ///
+        /// Vanilla parity: the `allowBreaching` of
+        /// `WaterBoundPathNavigation.createPathFinder`, true only for the
+        /// dolphin.
+        allow_breaching: bool,
+    },
+}
+
 pub trait PathfinderMob: Mob {
     fn controlled_pathfinder_vehicle(&self) -> Option<SharedEntity> {
         let vehicle = self.controlled_mob_vehicle()?;
@@ -114,8 +137,23 @@ pub trait PathfinderMob: Mob {
             .has_line_of_sight(target.id(), || self.has_line_of_sight(target))
     }
 
+    /// Returns how this mob finds its way.
+    ///
+    /// Vanilla parity: `Mob.createNavigation`.
+    fn navigation_kind(&self) -> NavigationKind {
+        NavigationKind::Ground
+    }
+
+    /// Vanilla parity: `PathNavigation.canUpdatePath`, and
+    /// `WaterBoundPathNavigation.canUpdatePath` for a swimmer.
     fn can_update_path(&self) -> bool {
-        self.on_ground() || self.is_in_water() || self.is_in_lava() || self.is_passenger()
+        can_update_path_for(
+            self.navigation_kind(),
+            self.on_ground(),
+            self.is_in_water(),
+            self.is_in_lava(),
+            self.is_passenger(),
+        )
     }
 
     fn can_path_to_targets_below_surface(&self) -> bool {
@@ -316,7 +354,12 @@ pub trait PathfinderMob: Mob {
 
         let mob_position = self.block_position();
         let settings = MobPathSettings::from_mob(self);
-        let mut evaluator = WalkNodeEvaluator::new(settings);
+        let mut evaluator: Box<dyn NodeEvaluator> = match self.navigation_kind() {
+            NavigationKind::Ground => Box::new(WalkNodeEvaluator::new(settings)),
+            NavigationKind::WaterBound { allow_breaching } => {
+                Box::new(SwimNodeEvaluator::new(settings, allow_breaching))
+            }
+        };
         let collision_world =
             WorldCollisionProvider::for_path_navigation(world, self.as_entity_event_source());
         let mut collision = |aabb| {
@@ -328,7 +371,7 @@ pub trait PathfinderMob: Mob {
         };
 
         self.mob_base().navigation().lock().create_path(
-            &mut evaluator,
+            evaluator.as_mut(),
             world.as_ref(),
             &mut collision,
             NavigationPathRequest {
@@ -338,6 +381,26 @@ pub trait PathfinderMob: Mob {
                 reach_range,
             },
         )
+    }
+}
+
+/// Returns whether a mob in this state may look for a new path.
+///
+/// Vanilla parity: `PathNavigation.canUpdatePath` and its
+/// `WaterBoundPathNavigation` override. A walker needs something under it or
+/// around it; a swimmer needs to be in the water at all, unless it is the kind
+/// that leaves it.
+#[must_use]
+pub const fn can_update_path_for(
+    kind: NavigationKind,
+    on_ground: bool,
+    in_water: bool,
+    in_lava: bool,
+    is_passenger: bool,
+) -> bool {
+    match kind {
+        NavigationKind::Ground => on_ground || in_water || in_lava || is_passenger,
+        NavigationKind::WaterBound { allow_breaching } => allow_breaching || in_water || in_lava,
     }
 }
 
@@ -392,4 +455,77 @@ pub(super) fn find_ground_path_target_surface(
         column_pos = column_pos.above();
     }
     column_pos
+}
+
+#[cfg(test)]
+mod navigation_kind_tests {
+    use super::{NavigationKind, can_update_path_for};
+
+    const SWIMMER: NavigationKind = NavigationKind::WaterBound {
+        allow_breaching: false,
+    };
+    const BREACHER: NavigationKind = NavigationKind::WaterBound {
+        allow_breaching: true,
+    };
+
+    /// Vanilla parity: `PathNavigation.canUpdatePath`.
+    #[test]
+    fn a_walker_needs_ground_water_lava_or_a_ride() {
+        assert!(can_update_path_for(
+            NavigationKind::Ground,
+            true,
+            false,
+            false,
+            false
+        ));
+        assert!(can_update_path_for(
+            NavigationKind::Ground,
+            false,
+            true,
+            false,
+            false
+        ));
+        assert!(can_update_path_for(
+            NavigationKind::Ground,
+            false,
+            false,
+            true,
+            false
+        ));
+        assert!(can_update_path_for(
+            NavigationKind::Ground,
+            false,
+            false,
+            false,
+            true
+        ));
+    }
+
+    /// A walker in mid-air with nothing to ride cannot re-path, which is what
+    /// stops a falling mob from steering.
+    #[test]
+    fn a_falling_walker_cannot_repath() {
+        assert!(!can_update_path_for(
+            NavigationKind::Ground,
+            false,
+            false,
+            false,
+            false
+        ));
+    }
+
+    /// Vanilla parity: `WaterBoundPathNavigation.canUpdatePath`. Standing on the
+    /// bank is not enough for a fish.
+    #[test]
+    fn a_swimmer_needs_to_be_in_the_water() {
+        assert!(can_update_path_for(SWIMMER, false, true, false, false));
+        assert!(!can_update_path_for(SWIMMER, true, false, false, false));
+        assert!(!can_update_path_for(SWIMMER, false, false, false, true));
+    }
+
+    /// A dolphin keeps pathing out of the water, which is how it jumps.
+    #[test]
+    fn a_breaching_swimmer_paths_anywhere() {
+        assert!(can_update_path_for(BREACHER, false, false, false, false));
+    }
 }
