@@ -118,6 +118,23 @@ impl Enchantment {
         REGISTRY.items.is_in_tag(item, &tag)
     }
 
+    /// Checks whether an enchanting table may roll this onto the given item.
+    ///
+    /// Vanilla `Enchantment::isPrimaryItem`. An enchantment with no primary set
+    /// may be rolled onto anything it supports; one with a primary set is
+    /// narrowed to that list, which is how an enchantment stays off the table
+    /// while remaining applicable from a book at an anvil.
+    #[must_use]
+    pub fn is_primary_item(&self, item: ItemRef) -> bool {
+        let Some(primary) = self.primary_items else {
+            return true;
+        };
+        let Some(tag) = parse_tag_ref(primary) else {
+            return false;
+        };
+        REGISTRY.items.is_in_tag(item, &tag)
+    }
+
     /// Checks if two enchantments are compatible (neither's `exclusive_set` contains the other).
     #[must_use]
     pub fn are_compatible(a: EnchantmentRef, b: EnchantmentRef) -> bool {
