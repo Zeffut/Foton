@@ -4,6 +4,7 @@ pub mod mobs;
 pub mod objects;
 mod raw;
 
+pub use mobs::ambient::BatEntity;
 pub use mobs::hostile::{
     CaveSpiderEntity, CreeperEntity, HuskEntity, SilverfishEntity, SkeletonEntity, SpiderEntity,
     StrayEntity, WitherSkeletonEntity, ZombieEntity,
