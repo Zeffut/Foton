@@ -117,6 +117,7 @@ pub mod explosion;
 pub mod game_event;
 mod level_effects;
 mod level_reader;
+mod natural_spawn;
 mod player_index;
 pub(crate) mod player_spawn_finder;
 mod portals;
@@ -507,6 +508,7 @@ impl World {
         self.tick_sleeping_players();
         if runs_normally {
             self.tick_time();
+            self.tick_natural_spawn(tick_count);
         }
 
         let random_tick_speed = self.get_game_rule(&RANDOM_TICK_SPEED) as u32;

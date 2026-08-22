@@ -36,6 +36,38 @@ impl MobCategory {
     pub const fn no_despawn_distance(self) -> i32 {
         32
     }
+
+    /// Mobs of this category allowed per spawnable chunk.
+    ///
+    /// Vanilla parity: the `max` field of `MobCategory`. Natural spawning scales
+    /// this by how many chunks are loaded, so it is a density rather than a count.
+    #[must_use]
+    pub const fn max_instances_per_chunk(self) -> i32 {
+        match self {
+            Self::Monster => 70,
+            Self::Creature => 10,
+            Self::Ambient => 15,
+            Self::Axolotls | Self::UndergroundWaterCreature | Self::WaterCreature => 5,
+            Self::WaterAmbient => 20,
+            Self::Misc => -1,
+        }
+    }
+
+    /// Whether this category counts as friendly for the spawn rules.
+    ///
+    /// Vanilla parity: the `isFriendly` field of `MobCategory`.
+    #[must_use]
+    pub const fn is_friendly(self) -> bool {
+        !matches!(self, Self::Monster)
+    }
+
+    /// Whether mobs of this category persist rather than despawning freely.
+    ///
+    /// Vanilla parity: the `isPersistent` field of `MobCategory`.
+    #[must_use]
+    pub const fn is_persistent(self) -> bool {
+        matches!(self, Self::Creature | Self::Misc)
+    }
 }
 
 /// Vanilla attachment point kind used by `EntityDimensions`.
