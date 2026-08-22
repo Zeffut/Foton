@@ -109,9 +109,6 @@ impl ItemBehavior for SplashPotionItem {
 
 /// Lingering-potion behavior.
 // TODO: Implement inherited PotionItem.useOn water-to-mud conversion.
-// TODO: A lingering potion should leave an area-effect cloud rather than
-// splashing once; the cloud entity does not exist, so throwing one currently
-// behaves as a splash. That is wrong and visible, and it is the next piece.
 // TODO: Add the inherited water default instance when Steel has item-specific
 // default-stack factories.
 #[item_behavior]
@@ -120,5 +117,11 @@ pub struct LingeringPotionItem;
 impl ItemBehavior for LingeringPotionItem {
     fn get_name<'a>(&self, stack: &'a ItemStack) -> Cow<'a, TextComponent> {
         potion_name(stack)
+    }
+
+    /// Vanilla parity: `ThrowablePotionItem.use`. The thrown entity decides
+    /// whether it splashes or leaves a cloud, from the bottle it carries.
+    fn use_item(&self, context: &mut UseItemContext<'_>) -> InteractionResult {
+        throw_potion(context)
     }
 }

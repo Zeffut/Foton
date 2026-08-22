@@ -23,11 +23,13 @@ use steel_registry::level_events::{
     PARTICLES_INSTANT_POTION_SPLASH, PARTICLES_SPELL_POTION_SPLASH,
 };
 use steel_registry::vanilla_entity_data::SplashPotionEntityData;
-use steel_registry::{vanilla_damage_types, vanilla_items, vanilla_potions};
+use steel_registry::{vanilla_damage_types, vanilla_entities, vanilla_items, vanilla_potions};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey, WorldAabb};
 
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::AreaEffectCloudEntity;
+use crate::entity::next_entity_id;
 use crate::entity::projectile::{
     Projectile, ProjectileBase, ProjectileHit, ThrowableItemProjectile, ThrowableProjectile,
 };
@@ -145,6 +147,37 @@ impl SplashPotionEntity {
         }
     }
 
+    /// Returns whether this bottle leaves a cloud instead of splashing once.
+    fn lingers(&self) -> bool {
+        self.get_item().is(&vanilla_items::LINGERING_POTION)
+    }
+
+    /// Leaves a lingering cloud where the bottle broke.
+    ///
+    /// Vanilla parity: `ThrownLingeringPotion.onHitAsPotion`.
+    fn leave_cloud(&self, world: &Arc<World>, potion: &ItemStack) {
+        let Some(contents) = potion.get(POTION_CONTENTS) else {
+            return;
+        };
+        let effects = crate::behavior::potion_effects(contents);
+        if effects.is_empty() {
+            return;
+        }
+
+        let cloud = Arc::new(AreaEffectCloudEntity::new(
+            &vanilla_entities::AREA_EFFECT_CLOUD,
+            next_entity_id(),
+            self.position(),
+            Arc::downgrade(world),
+        ));
+        cloud.configure_as_lingering(effects);
+
+        let entity: SharedEntity = cloud;
+        if let Err(error) = world.try_add_entity(entity) {
+            log::debug!("failed to spawn area effect cloud: {error}");
+        }
+    }
+
     /// Applies the potion to everything in reach, weaker the further out.
     ///
     /// Vanilla parity: `ThrownSplashPotion.onHitAsPotion`.
@@ -245,6 +278,8 @@ impl Projectile for SplashPotionEntity {
 
         if is_water {
             self.splash_as_water(&world);
+        } else if self.lingers() {
+            self.leave_cloud(&world, &potion);
         } else {
             self.splash_as_potion(&world, &potion);
         }
