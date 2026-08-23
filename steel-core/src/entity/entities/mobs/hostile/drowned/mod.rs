@@ -435,7 +435,7 @@ impl LivingEntity for DrownedEntity {
         old_y: f64,
     ) -> Option<MoveResult> {
         if !self.is_under_water() || !self.wants_to_swim() {
-            return LivingEntity::travel_in_water(self, input, base_gravity, is_falling, old_y);
+            return self.living_travel_in_water(input, base_gravity, is_falling, old_y);
         }
 
         self.move_relative(SWIM_ACCELERATION, input);
@@ -515,5 +515,40 @@ impl PathfinderMob for DrownedEntity {
         } else {
             NavigationKind::Ground
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Weak;
+
+    use glam::DVec3;
+    use steel_registry::{init_vanilla_registry, vanilla_entities};
+
+    use super::*;
+
+    /// A drowned out of the water must fall through to the shared swim code.
+    ///
+    /// This used to read `LivingEntity::travel_in_water(self, ..)`, which in
+    /// Rust dispatches back into this very override rather than to the trait's
+    /// default -- so every drowned that surfaced recursed until the stack ran
+    /// out and took the server with it. If that ever comes back, this test does
+    /// not fail politely: it overflows, which is exactly the noise it should
+    /// make.
+    #[test]
+    fn a_surfaced_drowned_does_not_recurse_into_itself() {
+        init_vanilla_registry();
+        let drowned = DrownedEntity::new(
+            &vanilla_entities::DROWNED,
+            1,
+            DVec3::ZERO,
+            Weak::<World>::new(),
+        );
+
+        assert!(!drowned.is_under_water(), "the test needs a dry drowned");
+
+        // No world, so the move itself cannot complete; reaching this line at
+        // all is the assertion.
+        let _ = LivingEntity::travel_in_water(&drowned, DVec3::ZERO, 0.08, false, 0.0);
     }
 }
