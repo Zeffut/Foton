@@ -31,6 +31,52 @@ pub enum WeatherState {
     Oxidized = 3,
 }
 
+impl WeatherState {
+    /// Returns the stage after this one, clamped at fully oxidized.
+    ///
+    /// Vanilla parity: `WeatheringCopper.WeatherState.next`.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Unaffected => Self::Exposed,
+            Self::Exposed => Self::Weathered,
+            Self::Weathered | Self::Oxidized => Self::Oxidized,
+        }
+    }
+
+    /// Returns the stage before this one, clamped at fresh copper.
+    ///
+    /// Vanilla parity: `WeatheringCopper.WeatherState.previous`.
+    #[must_use]
+    pub const fn previous(self) -> Self {
+        match self {
+            Self::Unaffected | Self::Exposed => Self::Unaffected,
+            Self::Weathered => Self::Exposed,
+            Self::Oxidized => Self::Weathered,
+        }
+    }
+
+    /// Returns the stage with this ordinal, clamped at both ends.
+    ///
+    /// Vanilla parity: the `ByIdMap.continuous(..., CLAMP)` of
+    /// `WeatheringCopper.WeatherState.BY_ID`.
+    #[must_use]
+    pub const fn by_id(id: i32) -> Self {
+        match id {
+            ..=0 => Self::Unaffected,
+            1 => Self::Exposed,
+            2 => Self::Weathered,
+            _ => Self::Oxidized,
+        }
+    }
+
+    /// Returns this stage's ordinal.
+    #[must_use]
+    pub const fn id(self) -> i32 {
+        self as i32
+    }
+}
+
 /// Scan radius for neighbor copper blocks (Manhattan distance).
 const SCAN_DISTANCE: i32 = 4;
 
@@ -43,7 +89,7 @@ const BASE_CHANCE: f32 = 0.056_888_89;
 /// Add this as a field to block implementations that should support weathering.
 ///
 /// In `YourBlock::random_tick` call [`WeatheringCopper::change_over_time`]
-// TODO: Add weathering support for lanterns, chests, and golem statues.
+// TODO: Add weathering support for copper chests.
 pub struct WeatheringCopper {
     weather_state: WeatherState,
 }

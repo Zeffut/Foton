@@ -12,19 +12,26 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 23
+[blocks] 30
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
 CartographyTableBlock
-CarvedPumpkinBlock
 CommandBlock
-CopperGolemStatueBlock
+CopperChestBlock
 CreakingHeartBlock
 CryingObsidianBlock
+DriedGhastBlock
+FrostedIceBlock
 HalfTransparentBlock
 JigsawBlock
+LightBlock
+MangroveRootsBlock
+NetherrackBlock
+NyliumBlock
 SculkCatalystBlock
+ShelfBlock
+SoulSandBlock
 SpawnerBlock
 StainedGlassBlock
 StructureBlock
@@ -35,15 +42,30 @@ TintedGlassBlock
 TransparentBlock
 TrialSpawnerBlock
 VaultBlock
-WeatheringCopperGolemStatueBlock
+WeatheringCopperChestBlock
 
-[items] 4
+[items] 19
+ArrowItem
+BannerItem
+BundleItem
+DebugStickItem
+DiscFragmentItem
 EmptyMapItem
+EndCrystalItem
 FishingRodItem
+GameMasterBlockItem
 Item
+KnowledgeBookItem
 MapItem
+MobBucketItem
+ScaffoldingBlockItem
+SmithingTemplateItem
+SolidBucketItem
+SpectralArrowItem
+WritableBookItem
+WrittenBookItem
 
-[entities] 77
+[entities] 74
 Allay
 Armadillo
 Axolotl
@@ -55,7 +77,6 @@ BreezeWindCharge
 Camel
 CamelHusk
 Cat
-CopperGolem
 Creaking
 Dolphin
 Donkey
@@ -77,7 +98,6 @@ HappyGhast
 Hoglin
 Horse
 Illusioner
-IronGolem
 Llama
 LlamaSpit
 Mannequin
@@ -102,7 +122,6 @@ Ravager
 Shulker
 SkeletonHorse
 Sniffer
-SnowGolem
 SpectralArrow
 SulfurCube
 Tadpole

@@ -312,6 +312,18 @@ impl World {
         self.can_see_sky(pos)
     }
 
+    /// Returns the `gameplay/snow_golem_melts` environment attribute here.
+    ///
+    /// Vanilla parity: the dimension layer of `EnvironmentAttributeSystem`
+    /// followed by the biome layer, both of which override rather than blend a
+    /// plain boolean. The attribute defaults to `false`, the nether sets it, and
+    /// the hot biomes set it for the overworld.
+    pub fn snow_golem_melts_at(&self, pos: BlockPos) -> bool {
+        self.biome_at(pos)
+            .and_then(|biome| biome.snow_golem_melts)
+            .unwrap_or(self.dimension_type.snow_golem_melts)
+    }
+
     pub(crate) fn biome_at(&self, pos: BlockPos) -> Option<BiomeRef> {
         let biome_zoom_seed = obfuscate_biome_seed(self.seed());
         let mut missing_chunk = false;

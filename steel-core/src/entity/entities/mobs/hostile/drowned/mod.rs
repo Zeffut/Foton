@@ -19,6 +19,7 @@ use steel_registry::vanilla_entity_data::DrownedEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
     NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
@@ -518,6 +519,8 @@ impl PathfinderMob for DrownedEntity {
         }
     }
 }
+
+impl Enemy for DrownedEntity {}
 
 #[cfg(test)]
 mod tests {

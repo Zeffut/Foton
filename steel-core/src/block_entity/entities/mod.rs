@@ -9,6 +9,7 @@ mod brushable;
 mod chest;
 mod chiseled_bookshelf;
 mod comparator;
+mod copper_golem_statue;
 mod crafter;
 mod daylight_detector;
 mod decorated_pot;
@@ -47,6 +48,7 @@ pub use brushable::BrushableBlockEntity;
 pub use chest::{CHEST_SLOTS, ChestBlockEntity};
 pub use chiseled_bookshelf::{CHISELED_BOOKSHELF_SLOTS, ChiseledBookShelfBlockEntity};
 pub use comparator::ComparatorBlockEntity;
+pub use copper_golem_statue::CopperGolemStatueBlockEntity;
 pub use crafter::{
     CRAFTER_DATA_SLOTS, CRAFTER_HEIGHT, CRAFTER_SLOTS, CRAFTER_WIDTH, CrafterBlockEntity,
     CrafterContainer, CrafterDataSlots,

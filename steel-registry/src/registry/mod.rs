@@ -747,6 +747,7 @@ mod tests {
             temperature: 0.5,
             downfall: 0.0,
             temperature_modifier: TemperatureModifier::None,
+            snow_golem_melts: None,
             effects: BiomeEffects {
                 fog_color: 0,
                 sky_color: 0,

@@ -41,10 +41,11 @@ pub use container::{
 };
 pub use decoration::{
     BannerBlock, BellBlock, CakeBlock, CandleBlock, CandleCakeBlock, CeilingHangingSignBlock,
-    ChainBlock, DecoratedPotBlock, DriedGhastBlock, EndRodBlock, FlowerPotBlock, LanternBlock,
-    PiglinWallSkullBlock, PlayerHeadBlock, PlayerWallHeadBlock, SkullBlock, StandingSignBlock,
-    TorchBlock, WallBannerBlock, WallHangingSignBlock, WallSignBlock, WallSkullBlock,
-    WallTorchBlock, WeatheringCopperChainBlock, WeatheringLanternBlock, WitherSkullBlock,
+    ChainBlock, CopperGolemStatueBlock, DecoratedPotBlock, DriedGhastBlock, EndRodBlock,
+    FlowerPotBlock, LanternBlock, PiglinWallSkullBlock, PlayerHeadBlock, PlayerWallHeadBlock,
+    SkullBlock, StandingSignBlock, TorchBlock, WallBannerBlock, WallHangingSignBlock,
+    WallSignBlock, WallSkullBlock, WallTorchBlock, WeatheringCopperChainBlock,
+    WeatheringCopperGolemStatueBlock, WeatheringLanternBlock, WitherSkullBlock,
     WitherWallSkullBlock,
 };
 pub use eggs::{FrogspawnBlock, SnifferEggBlock, TurtleEggBlock};
@@ -71,8 +72,8 @@ pub use sculk::{
 pub(crate) use utils::multiface_face_property;
 pub use vegetation::{
     AttachedStemBlock, AzaleaBlock, BambooSaplingBlock, BambooStalkBlock, BeetrootBlock,
-    CactusBlock, CactusFlowerBlock, CarrotBlock, CocoaBlock, CoralBlock, CropBlock,
-    DoublePlantBlock, FlowerBlock, GrassBlock, MangroveLeavesBlock, MangroveRootsBlock,
+    CactusBlock, CactusFlowerBlock, CarrotBlock, CarvedPumpkinBlock, CocoaBlock, CoralBlock,
+    CropBlock, DoublePlantBlock, FlowerBlock, GrassBlock, MangroveLeavesBlock, MangroveRootsBlock,
     MultifaceBlock, MyceliumBlock, NetherSproutsBlock, NetherWartBlock, NetherrackBlock,
     NyliumBlock, PitcherCropBlock, PotatoBlock, PumpkinBlock, RootedDirtBlock, SeagrassBlock,
     SnowyBlock, StemBlock, SugarCaneBlock, SweetBerryBushBlock, TallFlowerBlock, TallGrassBlock,

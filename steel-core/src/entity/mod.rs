@@ -740,8 +740,10 @@ mod base;
 mod block_effects;
 mod callback;
 mod combat_rules;
+mod crackiness;
 pub mod damage;
 pub(crate) mod dismount_helper;
+mod enemy;
 pub mod entities;
 #[expect(
     clippy::module_inception,
@@ -788,6 +790,8 @@ pub use callback::{
     EntityChunkCallback, EntityLevelCallback, InactiveEntityCallback, NullEntityCallback,
     PlayerEntityCallback, RemovalReason,
 };
+pub use crackiness::{Crackiness, CrackinessLevel};
+pub use enemy::Enemy;
 pub(crate) use entity::apply_entity_look_at;
 pub use entity::{
     AcceptedClientMovement, AcceptedClientMovementOutcome, Entity, EntityEventSource,
@@ -816,6 +820,7 @@ pub use movement_sync::{
     EntityRotationSyncState, EntityVelocitySyncState, POSITION_SYNC_THRESHOLD,
     PackedEntityRotation, ServerEntityMovementSyncState, ServerEntityMovementSyncUpdate,
 };
+pub use neutral_mob::NeutralMob;
 pub use projectile::{
     EntityHitResult, HurtingProjectile, HurtingProjectileBase, INITIAL_ACCELERATION_POWER,
     Projectile, ProjectileBase, ProjectileDeflection, ProjectileEventSource, ProjectileHit,

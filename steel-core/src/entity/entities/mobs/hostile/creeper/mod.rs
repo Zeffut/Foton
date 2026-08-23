@@ -16,6 +16,7 @@ use steel_registry::vanilla_game_rules::{MOB_EXPLOSION_DROP_DECAY, MOB_GRIEFING}
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
@@ -357,3 +358,5 @@ impl Mob for CreeperEntity {
 }
 
 impl PathfinderMob for CreeperEntity {}
+
+impl Enemy for CreeperEntity {}

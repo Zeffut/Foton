@@ -25,6 +25,7 @@ use steel_utils::{
 use crate::behavior::blocks::{
     host_state_by_infested, infested_state_by_host, is_compatible_host_block,
 };
+use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     ClimbOnTopOfPowderSnowGoal, FloatGoal, Goal, GoalControls, HurtByTargetGoal, MeleeAttackGoal,
@@ -534,6 +535,8 @@ impl PathfinderMob for SilverfishEntity {
         }
     }
 }
+
+impl Enemy for SilverfishEntity {}
 
 #[cfg(test)]
 mod tests {

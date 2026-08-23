@@ -1454,6 +1454,41 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn LivingEntity>(self)
     }
 
+    /// Reacts to being struck by lightning.
+    ///
+    /// Mirrors vanilla `Entity.thunderHit`. Override this to charge, transform
+    /// or break, and call [`Self::entity_thunder_hit`] from the override for
+    /// the shared damage and ignition; Rust has no `super`, so the base body
+    /// lives in its own method.
+    fn thunder_hit(&self, world: &World, _bolt: &dyn Entity) {
+        self.entity_thunder_hit(world);
+    }
+
+    /// Runs the shared body of [`Self::thunder_hit`].
+    fn entity_thunder_hit(&self, world: &World) {
+        entities::objects::entity_thunder_hit(self.as_entity_event_source(), world);
+    }
+
+    /// Returns this entity as a neutral mob when it holds a grudge.
+    ///
+    /// Mirrors vanilla's `instanceof NeutralMob` branches.
+    fn as_neutral_mob(&self) -> Option<&dyn NeutralMob> {
+        try_as_dyn::<Self, dyn NeutralMob>(self)
+    }
+
+    /// Returns whether this entity is one of the hostile mobs.
+    ///
+    /// Mirrors vanilla's `instanceof Enemy` branches, which is how golems and
+    /// other defenders pick their targets.
+    fn is_enemy(&self) -> bool {
+        self.as_enemy().is_some()
+    }
+
+    /// Returns this entity as an enemy when it is a hostile mob.
+    fn as_enemy(&self) -> Option<&dyn Enemy> {
+        try_as_dyn::<Self, dyn Enemy>(self)
+    }
+
     /// Returns this entity as an item frame when it has item-frame behavior.
     ///
     /// Mirrors vanilla's `instanceof ItemFrame` branches.

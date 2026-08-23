@@ -15,6 +15,7 @@ use steel_registry::{sound_events, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
@@ -270,3 +271,5 @@ impl Mob for StrayEntity {
 }
 
 impl PathfinderMob for StrayEntity {}
+
+impl Enemy for StrayEntity {}

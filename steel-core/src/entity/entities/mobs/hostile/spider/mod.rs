@@ -15,6 +15,7 @@ use steel_registry::vanilla_entity_data::SpiderEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LeapAtTargetGoal, LookAtPlayerGoal,
@@ -300,3 +301,5 @@ impl Mob for SpiderEntity {
 }
 
 impl PathfinderMob for SpiderEntity {}
+
+impl Enemy for SpiderEntity {}

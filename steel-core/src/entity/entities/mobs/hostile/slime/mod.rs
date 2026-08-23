@@ -33,6 +33,7 @@ use crate::entity::damage::DamageSource;
 use crate::entity::spawn_rules::check_mob_spawn_rules;
 use steel_utils::{BlockPos, ChunkPos, DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData, LivingEntity,
     LivingEntityBase, Mob, MobBase, PathfinderMob, SpawnGroupData, next_entity_id,
@@ -400,6 +401,8 @@ impl CubeLike for SlimeEntity {
 }
 
 impl PathfinderMob for SlimeEntity {}
+
+impl Enemy for SlimeEntity {}
 
 #[cfg(test)]
 mod tests {

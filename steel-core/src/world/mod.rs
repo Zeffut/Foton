@@ -104,6 +104,8 @@ use crate::{
 
 mod block_entity_ticker;
 mod block_event;
+/// Matching multi-block shapes against the world.
+pub mod block_pattern;
 mod block_region;
 mod block_updates;
 mod border;
