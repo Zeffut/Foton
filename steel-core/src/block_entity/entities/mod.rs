@@ -7,6 +7,7 @@ mod brushable;
 mod chest;
 mod chiseled_bookshelf;
 mod comparator;
+mod crafter;
 mod daylight_detector;
 mod dispenser;
 mod end_gateway;
@@ -33,6 +34,10 @@ pub use brushable::BrushableBlockEntity;
 pub use chest::{CHEST_SLOTS, ChestBlockEntity};
 pub use chiseled_bookshelf::{CHISELED_BOOKSHELF_SLOTS, ChiseledBookShelfBlockEntity};
 pub use comparator::ComparatorBlockEntity;
+pub use crafter::{
+    CRAFTER_DATA_SLOTS, CRAFTER_HEIGHT, CRAFTER_SLOTS, CRAFTER_WIDTH, CrafterBlockEntity,
+    CrafterContainer, CrafterDataSlots,
+};
 pub use daylight_detector::DaylightDetectorBlockEntity;
 pub use dispenser::{DISPENSER_SLOTS, DispenserBlockEntity, DispenserContainer};
 pub use end_gateway::EndGatewayBlockEntity;

@@ -17,7 +17,7 @@ use steel_utils::{BlockPos, BlockStateId};
 use super::SharedBlockEntity;
 use super::entities::{
     BarrelBlockEntity, BeehiveBlockEntity, BrewingStandBlockEntity, BrushableBlockEntity,
-    ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity,
+    ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity, CrafterBlockEntity,
     DaylightDetectorBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
     FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
     PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, ShulkerBoxBlockEntity,
@@ -281,6 +281,10 @@ pub fn init_block_entities() {
 
         registry.register(&vanilla_block_entity_types::DROPPER, |level, pos, state| {
             Arc::new(DispenserBlockEntity::new_dropper(level, pos, state))
+        });
+
+        registry.register(&vanilla_block_entity_types::CRAFTER, |level, pos, state| {
+            Arc::new(CrafterBlockEntity::new(level, pos, state))
         });
 
         registry.register(&vanilla_block_entity_types::HOPPER, |level, pos, state| {

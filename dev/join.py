@@ -57,12 +57,18 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+
+# Vanilla parity: `ClickType`. Only the two this script sends are named.
+CLICK_PICKUP = 0
+CLICK_QUICK_MOVE = 1
 PLAY_C_SET_PASSENGERS = 107
 PLAY_C_SYSTEM_CHAT = 121
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
+PLAY_S_CONTAINER_CLICK = 18
 PLAY_S_CONTAINER_CLOSE = 19
+PLAY_S_CONTAINER_SLOT_STATE_CHANGED = 20
 PLAY_S_INTERACT = 26
 PLAY_S_USE_ITEM_ON = 66
 PLAY_S_USE_ITEM = 67
@@ -572,6 +578,20 @@ def run_directive(connection, directive):
         send_use_item_on(connection, x, y, z, face)
     elif parts[0] == "close":
         send_container_close(connection)
+    elif parts[0] == "click":
+        send_container_click(connection, int(parts[1]), CLICK_PICKUP)
+        print(f"  clicked slot {parts[1]}")
+    elif parts[0] == "shiftclick":
+        # Repeats so a whole stack can be spread out slot by slot, which is how
+        # a crafter grid gets filled: the crafter only takes one item per slot
+        # until every square is level, so one shift-click is not enough.
+        count = int(parts[2]) if len(parts) > 2 else 1
+        for _ in range(count):
+            send_container_click(connection, int(parts[1]), CLICK_QUICK_MOVE)
+        print(f"  shift-clicked slot {parts[1]} {count} time(s)")
+    elif parts[0] == "slotstate":
+        send_slot_state_changed(connection, int(parts[1]), parts[2] == "on")
+        print(f"  switched slot {parts[1]} {parts[2]}")
     elif parts[0] == "spawned":
         name = parts[1]
         if name in connection.entities:
@@ -619,6 +639,46 @@ def send_interact(connection, name, secondary):
     connection.send(PLAY_S_INTERACT, payload)
     verb = "sneak-right-clicked" if secondary else "right-clicked"
     print(f"  {verb} the {name} (entity {entity_id})")
+
+
+def send_container_click(connection, slot, click_type, button=0):
+    """Clicks a slot in the open screen.
+
+    The state id is sent as zero. The server only compares it to decide whether
+    to resend the whole screen afterwards, so a stale one costs a resync and
+    never rejects the click -- which is what lets this script click without
+    tracking the id.
+
+    The changed-slots map is left empty and the carried item absent: both are
+    the client's prediction of the outcome, and the server recomputes them.
+    """
+    if connection.open_container is None:
+        fail("nothing is open to click")
+    payload = (
+        varint(connection.open_container)
+        + varint(0)
+        + struct.pack(">hb", slot, button)
+        + varint(click_type)
+        + varint(0)
+        + b"\x00"
+    )
+    connection.send(PLAY_S_CONTAINER_CLICK, payload)
+
+
+def send_slot_state_changed(connection, slot, enabled):
+    """Switches one slot of the open screen on or off.
+
+    Only the crafter has slots that can be switched off; nothing else answers
+    this packet.
+    """
+    if connection.open_container is None:
+        fail("nothing is open to toggle")
+    payload = (
+        varint(slot)
+        + varint(connection.open_container)
+        + (b"\x01" if enabled else b"\x00")
+    )
+    connection.send(PLAY_S_CONTAINER_SLOT_STATE_CHANGED, payload)
 
 
 def send_container_close(connection):

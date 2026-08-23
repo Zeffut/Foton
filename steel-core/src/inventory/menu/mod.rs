@@ -214,6 +214,15 @@ impl Menu {
         kind.on_button_click(behavior, &mut guard, player, button)
     }
 
+    /// Passes a slot enable/disable toggle to the kind.
+    ///
+    /// Vanilla parity: `CrafterMenu.setSlotState`.
+    pub fn set_slot_state(&mut self, player: &Player, slot: usize, enabled: bool) {
+        let mut guard = self.behavior().lock_all_containers();
+        let Self { behavior, kind, .. } = self;
+        kind.on_slot_state_changed(behavior, &mut guard, player, slot, enabled);
+    }
+
     /// Runs the kind's `on_tick` hook. Called once per server tick while open.
     pub fn on_tick(&mut self, player: &Player) {
         let mut guard = self.behavior().lock_all_containers();

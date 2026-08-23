@@ -97,8 +97,11 @@ cannot.
       comparator with how far through the book the reader is. The bell rings
       -- but only when struck from a side it can actually swing towards, which
       is what the hit test is for, and once per redstone rising edge rather
-      than continuously. Still open:
-      cartography table, loom, beacon, crafter. Armor trims are the half of smithing
+      than continuously. The crafter crafts: nine slots that can each be
+      switched off, a comparator reading that counts a switched-off slot as
+      full, one craft per redstone rising edge, and the result pushed into
+      whatever container it faces or thrown if there is none. Still open:
+      cartography table, loom, beacon. Armor trims are the half of smithing
       that is not here: they need trim pattern and material registries and a
       `TRIM` component Steel does not have, so those eighteen recipes are
       still skipped -- deliberately now, rather than by omission. The
@@ -180,7 +183,10 @@ a furnace has no behavior. These scripts can:
   and read through the wall behind it by a comparator.
 - `dev/throw-test.sh` -- a snowball is thrown, flies and breaks, forty eggs
   hatch at least one chicken, and a bottle o' enchanting breaks into experience.
-- `dev/workstation-test.sh` -- right-clicking each workstation opens its menu.
+- `dev/workstation-test.sh` -- right-clicking each workstation opens its
+  menu, and the crafter runs a recipe end to end: a log shift-clicked into
+  the grid, a redstone pulse, and the grid empty again, all read off a
+  comparator.
   What they *do* is tested in Rust, where the computation lives: a recipe
   button and a slot click need container packets the scripted client cannot
   send.

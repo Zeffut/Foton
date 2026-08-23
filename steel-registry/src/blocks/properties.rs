@@ -335,6 +335,64 @@ pub enum FrontAndTop {
     SouthUp,
 }
 
+impl FrontAndTop {
+    /// The face the block points at.
+    ///
+    /// Vanilla parity: `FrontAndTop.front`.
+    #[must_use]
+    pub const fn front(&self) -> Direction {
+        match self {
+            Self::DownEast | Self::DownNorth | Self::DownSouth | Self::DownWest => Direction::Down,
+            Self::UpEast | Self::UpNorth | Self::UpSouth | Self::UpWest => Direction::Up,
+            Self::WestUp => Direction::West,
+            Self::EastUp => Direction::East,
+            Self::NorthUp => Direction::North,
+            Self::SouthUp => Direction::South,
+        }
+    }
+
+    /// The face that is "up" from the block's own point of view.
+    ///
+    /// Vanilla parity: `FrontAndTop.top`. For a block pointing along an axis
+    /// this is what fixes its roll -- a crafter facing down still has to know
+    /// which way round its grid sits.
+    #[must_use]
+    pub const fn top(&self) -> Direction {
+        match self {
+            Self::DownEast | Self::UpEast => Direction::East,
+            Self::DownNorth | Self::UpNorth => Direction::North,
+            Self::DownSouth | Self::UpSouth => Direction::South,
+            Self::DownWest | Self::UpWest => Direction::West,
+            Self::WestUp | Self::EastUp | Self::NorthUp | Self::SouthUp => Direction::Up,
+        }
+    }
+
+    /// Returns the orientation with this front and top.
+    ///
+    /// Vanilla parity: `FrontAndTop.fromFrontAndTop`, which throws on a pair
+    /// that names no orientation; only twelve of the thirty-six pairs do, since
+    /// front and top have to be perpendicular and a block facing sideways is
+    /// always top-up.
+    #[must_use]
+    pub const fn from_front_and_top(front: Direction, top: Direction) -> Option<Self> {
+        Some(match (front, top) {
+            (Direction::Down, Direction::East) => Self::DownEast,
+            (Direction::Down, Direction::North) => Self::DownNorth,
+            (Direction::Down, Direction::South) => Self::DownSouth,
+            (Direction::Down, Direction::West) => Self::DownWest,
+            (Direction::Up, Direction::East) => Self::UpEast,
+            (Direction::Up, Direction::North) => Self::UpNorth,
+            (Direction::Up, Direction::South) => Self::UpSouth,
+            (Direction::Up, Direction::West) => Self::UpWest,
+            (Direction::West, Direction::Up) => Self::WestUp,
+            (Direction::East, Direction::Up) => Self::EastUp,
+            (Direction::North, Direction::Up) => Self::NorthUp,
+            (Direction::South, Direction::Up) => Self::SouthUp,
+            _ => return None,
+        })
+    }
+}
+
 impl PropertyEnum for FrontAndTop {
     fn as_str(&self) -> &str {
         match self {

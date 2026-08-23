@@ -43,6 +43,21 @@ pub trait MenuKind: ErasedType + Send + Sync {
     ) {
     }
 
+    /// Switches one container slot on or off.
+    ///
+    /// Vanilla parity: `ServerGamePacketListenerImpl.handleContainerSlotStateChanged`,
+    /// which reaches `CrafterMenu.setSlotState`. The crafter is the only menu
+    /// that has switchable slots.
+    fn on_slot_state_changed(
+        &mut self,
+        _behavior: &mut MenuBehavior,
+        _guard: &mut ContainerLockGuard,
+        _player: &Player,
+        _slot: usize,
+        _enabled: bool,
+    ) {
+    }
+
     /// Runs once per tick per viewer while open, before changes are synced.
     fn on_tick(
         &mut self,

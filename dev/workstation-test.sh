@@ -1,10 +1,11 @@
 #!/bin/bash
 # Open every workstation a player can open.
 #
-# What these blocks *do* is tested in Rust, where the computation lives -- a
-# recipe button and a slot click need container packets the scripted client
-# cannot send. What only a real client can answer is whether right-clicking the
-# block reaches the behavior at all, which is what this covers.
+# Most of what these blocks *do* is tested in Rust, where the computation
+# lives. What only a real client can answer is whether right-clicking the block
+# reaches the behavior at all, which is what this covers -- plus, for the
+# crafter, the whole chain from a shift-clicked item to a crafted one coming
+# back out.
 #
 # Usage: bash dev/workstation-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -95,6 +96,39 @@ CMDS="$CMDS;;!close"
 
 CMDS="$CMDS;;execute if block 0 100 8 minecraft:bell[powered=true] run tellraw @s \"BELLRANG\""
 
+# The crafter, end to end, read entirely off block states: a log shift-clicked
+# into the grid, a redstone block beside it, and the grid empty again once the
+# craft has run. One log is enough because oak planks are a shapeless
+# one-ingredient recipe -- a nine-ingredient one could not be loaded by
+# shift-clicking, which fills a single slot.
+#
+# The comparator is the only way to see inside the grid. As with the jukebox,
+# its `facing` names the side it reads from, so a comparator south of the
+# crafter faces north. One filled slot out of nine reads 1.
+CMDS="$CMDS;;setblock 0 99 10 minecraft:stone"
+CMDS="$CMDS;;setblock 0 99 11 minecraft:stone"
+CMDS="$CMDS;;setblock 0 99 12 minecraft:stone"
+CMDS="$CMDS;;setblock 0 100 10 minecraft:crafter"
+CMDS="$CMDS;;setblock 0 100 11 minecraft:comparator[facing=north]"
+CMDS="$CMDS;;setblock 0 100 12 minecraft:redstone_wire"
+CMDS="$CMDS;;clear @s"
+CMDS="$CMDS;;give @s minecraft:oak_log 1"
+CMDS="$CMDS;;!hotbar 0"
+CMDS="$CMDS;;teleport @s 2 100 10"
+CMDS="$CMDS;;execute if block 0 100 12 minecraft:redstone_wire[power=0] run tellraw @s \"CRAFTERSTARTSEMPTY\""
+CMDS="$CMDS;;!useon 0 100 10 east"
+# Slot 36 is the first hotbar square, where a give lands.
+CMDS="$CMDS;;!shiftclick 36"
+CMDS="$CMDS;;!close"
+CMDS="$CMDS;;execute if block 0 100 12 minecraft:redstone_wire[power=1] run tellraw @s \"GRIDLOADED\""
+CMDS="$CMDS;;teleport @s 6 100 16"
+CMDS="$CMDS;;setblock 1 100 10 minecraft:redstone_block"
+CMDS="$CMDS;;execute if block 0 100 10 minecraft:crafter[triggered=true] run tellraw @s \"CRAFTERARMED\""
+# Two throwaway commands: the craft is scheduled four ticks out.
+CMDS="$CMDS;;time set day"
+CMDS="$CMDS;;time set day"
+CMDS="$CMDS;;execute if block 0 100 12 minecraft:redstone_wire[power=0] run tellraw @s \"GRIDEMPTIED\""
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -103,16 +137,20 @@ cleanup
 
 echo "=== what happened ==="
 grep -cE "a screen opened" join.log | sed 's/^/screens opened: /'
-grep "server says" join.log | grep -oE "BOOKWENTON|BELLRANG"
+grep "server says" join.log | grep -oE "BOOKWENTON|BELLRANG|CRAFTERSTARTSEMPTY|GRIDLOADED|CRAFTERARMED|GRIDEMPTIED"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 
 fail() { echo "########## WORKSTATION TEST FAILED ($1) ##########"; exit 1; }
+said() { grep "server says" join.log | grep -q "$1"; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
 screens=$(grep -c "a screen opened" join.log)
-[ "$screens" -eq 4 ] \
-  || fail "expected four workstations to open, got $screens"
-grep "server says" join.log | grep -q BOOKWENTON \
-  || fail "the book never went onto the lectern"
+[ "$screens" -eq 5 ]   || fail "expected five workstations to open, got $screens"
+said BOOKWENTON         || fail "the book never went onto the lectern"
+said BELLRANG           || fail "redstone did not ring the bell"
+said CRAFTERSTARTSEMPTY || fail "the comparator read something from an empty crafter"
+said GRIDLOADED         || fail "the log never reached the crafter grid"
+said CRAFTERARMED       || fail "redstone did not arm the crafter"
+said GRIDEMPTIED        || fail "the crafter never ran the recipe"
 echo "########## WORKSTATION TEST PASSED ##########"
