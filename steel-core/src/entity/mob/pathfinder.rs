@@ -202,16 +202,19 @@ pub trait PathfinderMob: Mob {
             return;
         };
         let game_time = world.game_time();
+        // `can_update_path` reads the navigation's float flag, so it has to be
+        // answered before the navigation lock is taken rather than inside it.
+        let can_update_path = self.can_update_path();
         let recompute_request = {
             let mut navigation = self.mob_base().navigation().lock();
             navigation.tick();
-            navigation.take_delayed_recompute_request(game_time, self.can_update_path())
+            navigation.take_delayed_recompute_request(game_time, can_update_path)
         };
         if let Some(request) = recompute_request {
             self.recompute_path(request);
         }
 
-        tick_path_navigation_target(self, &world, game_time, self.can_update_path());
+        tick_path_navigation_target(self, &world, game_time, can_update_path);
     }
 
     fn tick_pathfinder_goal_selectors(&self)

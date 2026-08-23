@@ -1047,6 +1047,7 @@ mod equipment_and_freezing;
 mod fall_and_fluids;
 mod living_state;
 mod movement;
+mod pets;
 mod portals;
 mod riding_and_leashes;
 mod travel;
