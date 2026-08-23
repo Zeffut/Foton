@@ -63,13 +63,12 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 30
+[items] 29
 ArmorStandItem
 ArrowItem
 BannerItem
 BottleItem
 BundleItem
-CrossbowItem
 DebugStickItem
 DiscFragmentItem
 EmptyMapItem
