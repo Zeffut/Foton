@@ -12,6 +12,7 @@ pub use mobs::hostile::{
     SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, WitchEntity,
     WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
+pub use mobs::neutral::WolfEntity;
 pub use mobs::passive::{
     ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, SheepEntity, StriderEntity,
 };

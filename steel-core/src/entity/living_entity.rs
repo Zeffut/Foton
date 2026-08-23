@@ -647,7 +647,16 @@ pub trait LivingEntity: Entity {
     ///
     /// `world` is the `ServerLevel` supplied by the vanilla caller. It may
     /// intentionally differ from the entity's attached world.
+    ///
+    /// Override this to add what a specific entity does when hurt, and call
+    /// [`Self::living_hurt_server`] from the override for the shared behavior;
+    /// Rust has no `super`, so the base body lives in its own method.
     fn hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
+        self.living_hurt_server(world, source, amount)
+    }
+
+    /// The shared part of vanilla `LivingEntity.hurtServer`.
+    fn living_hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         if self.is_invulnerable_to(world, source) {
             return false;
         }
@@ -819,7 +828,16 @@ pub trait LivingEntity: Entity {
     }
 
     /// Applies damage after vanilla reductions.
+    ///
+    /// Override this to intercept damage before it reaches health, and call
+    /// [`Self::living_actually_hurt`] from the override for the shared
+    /// behavior; Rust has no `super`, so the base body lives in its own method.
     fn actually_hurt(&self, world: &World, source: &DamageSource, amount: f32) {
+        self.living_actually_hurt(world, source, amount);
+    }
+
+    /// The shared part of vanilla `LivingEntity.actuallyHurt`.
+    fn living_actually_hurt(&self, world: &World, source: &DamageSource, amount: f32) {
         if self.is_invulnerable_to(world, source) {
             return;
         }

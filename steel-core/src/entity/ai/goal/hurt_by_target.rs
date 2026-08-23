@@ -4,7 +4,7 @@ use steel_utils::{DowncastTypeKey, WorldAabb};
 use super::selector::{Goal, GoalControls};
 use super::target_goal::{TargetGoalBase, follow_distance};
 use crate::entity::ai::targeting::TargetingConditions;
-use crate::entity::{PathfinderMob, SharedEntity};
+use crate::entity::{PathfinderMob, SharedEntity, TamableAnimal};
 
 const HURT_BY_UNSEEN_MEMORY_TICKS: i32 = 300;
 const ALERT_RANGE_Y: f64 = 10.0;
@@ -70,6 +70,9 @@ impl HurtByTargetGoal {
         .inflate_xyz(within, ALERT_RANGE_Y, within);
         let mob_type_key = mob.downcast_type_key();
         let mob_uuid = mob.uuid();
+        // Vanilla parity: the `tamableAnimal.getOwner() == other.getOwner()` of
+        // `alertOthers`. One player's wolves never join another player's fight.
+        let mob_owner = mob.as_tamable_animal().map(TamableAnimal::owner_uuid);
 
         for entity in world.get_entities_in_aabb_matching(&search_box, |entity| {
             if entity.uuid() == mob_uuid
@@ -85,7 +88,12 @@ impl HurtByTargetGoal {
                 return false;
             };
 
-            //TODO tamable animal owner check is required here
+            if let Some(mob_owner) = mob_owner
+                && entity.as_tamable_animal().map(TamableAnimal::owner_uuid) != Some(mob_owner)
+            {
+                return false;
+            }
+
             other.target().is_none() && !other.is_allied_to(hurt_by_mob.as_ref())
         }) {
             if let Some(other) = entity.as_mob() {

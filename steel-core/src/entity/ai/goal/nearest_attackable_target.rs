@@ -134,6 +134,25 @@ impl NearestAttackableTargetGoal {
     pub(crate) fn set_target(&mut self, target: Option<SharedEntity>) {
         self.target = target;
     }
+
+    /// Returns whether the target this goal picked still passes its conditions.
+    ///
+    /// Vanilla parity: the `this.targetConditions.test(level, mob, this.target)`
+    /// of `NonTameRandomTargetGoal.canContinueToUse`, which re-runs the whole
+    /// selector rather than the looser `TargetGoal` continuation test.
+    pub(crate) fn current_target_passes_conditions(&self, mob: &dyn PathfinderMob) -> bool {
+        let Some(world) = mob.level() else {
+            return false;
+        };
+        let Some(target) = self.target.as_ref().and_then(|t| t.as_living_entity()) else {
+            return false;
+        };
+
+        self.target_conditions
+            .clone()
+            .range(follow_distance(mob))
+            .test(world.as_ref(), Some(mob), target)
+    }
 }
 
 impl Goal for NearestAttackableTargetGoal {

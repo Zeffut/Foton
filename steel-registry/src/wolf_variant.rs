@@ -1,8 +1,12 @@
-use crate::shared_structs::{SpawnConditionEntry, insert_spawn_conditions};
+use crate::biome::BiomeRef;
+use crate::shared_structs::{
+    SpawnConditionEntry, insert_spawn_conditions, pick_spawn_conditioned_entry,
+};
 use rustc_hash::FxHashMap;
 use simdnbt::ToNbtTag;
 use simdnbt::owned::NbtTag;
 use steel_utils::Identifier;
+use steel_utils::random::Random;
 
 /// Represents a full wolf variant definition from a data pack JSON file.
 #[derive(Debug)]
@@ -62,6 +66,25 @@ impl WolfVariantRegistry {
             wolf_variants_by_key: FxHashMap::default(),
             allows_registering: true,
         }
+    }
+
+    /// Picks the variant a wolf spawning in `biome` should wear.
+    ///
+    /// Vanilla parity: `VariantUtils.selectVariantToSpawn` over
+    /// `Registries.WOLF_VARIANT`. Every wolf variant is conditioned on biome
+    /// alone, so the shared priority pick answers it exactly.
+    #[must_use]
+    pub fn select_spawn_variant(
+        &self,
+        biome: BiomeRef,
+        random: &mut impl Random,
+    ) -> Option<WolfVariantRef> {
+        pick_spawn_conditioned_entry(
+            self.iter().map(|(_, variant)| variant),
+            |variant| variant.spawn_conditions,
+            biome,
+            random,
+        )
     }
 }
 

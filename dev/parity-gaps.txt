@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 77
+[entities] 76
 Allay
 Armadillo
 Axolotl
@@ -141,7 +141,6 @@ Vindicator
 WanderingTrader
 Warden
 WitherBoss
-Wolf
 Zoglin
 ZombieHorse
 ZombieNautilus

@@ -1523,6 +1523,20 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn AgeableMob>(self)
     }
 
+    /// Returns this entity as a tameable animal when it can be tamed.
+    ///
+    /// Mirrors vanilla's frequent `instanceof TamableAnimal` branches.
+    fn as_tamable_animal(&self) -> Option<&dyn TamableAnimal> {
+        try_as_dyn::<Self, dyn TamableAnimal>(self)
+    }
+
+    /// Returns this entity as a neutral mob when it holds grudges.
+    ///
+    /// Mirrors vanilla's `instanceof NeutralMob` branches.
+    fn as_neutral_mob(&self) -> Option<&dyn crate::entity::neutral_mob::NeutralMob> {
+        try_as_dyn::<Self, dyn crate::entity::neutral_mob::NeutralMob>(self)
+    }
+
     /// Returns true for entities that implement vanilla item-steered boosts.
     fn is_item_steerable(&self) -> bool {
         self.as_item_steerable().is_some()

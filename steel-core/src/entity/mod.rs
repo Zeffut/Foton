@@ -740,6 +740,7 @@ mod base;
 mod block_effects;
 mod callback;
 mod combat_rules;
+mod crackiness;
 pub mod damage;
 pub(crate) mod dismount_helper;
 pub mod entities;
@@ -768,6 +769,7 @@ mod spawn;
 pub mod spawn_rules;
 mod storage;
 mod synced_data;
+mod tamable;
 mod ticking;
 mod tracker;
 
@@ -788,6 +790,7 @@ pub use callback::{
     EntityChunkCallback, EntityLevelCallback, InactiveEntityCallback, NullEntityCallback,
     PlayerEntityCallback, RemovalReason,
 };
+pub(crate) use crackiness::Crackiness;
 pub(crate) use entity::apply_entity_look_at;
 pub use entity::{
     AcceptedClientMovement, AcceptedClientMovementOutcome, Entity, EntityEventSource,
@@ -826,6 +829,9 @@ pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
 pub(crate) use spawn::{AgeableMobGroupData, EntitySpawnReason, SpawnGroupData};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
 pub use synced_data::{EntitySyncedData, LivingEntitySyncedData};
+pub(crate) use tamable::{
+    TELEPORT_WHEN_DISTANCE_IS_SQ, TamableAnimal, TamableAnimalBase, is_tamed,
+};
 pub(crate) use ticking::{
     snapshot_old_pos_and_rot_for_tick, tick_vehicle_passengers_with_ticked_if,
 };
