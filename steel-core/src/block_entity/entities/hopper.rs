@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, Weak},
 };
 
+use glam::DVec3;
 use simdnbt::ToNbtTag as _;
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
@@ -275,16 +276,28 @@ impl HopperBlockEntity {
     }
 
     /// Pulls one item down out of the container above.
-    ///
-    /// Vanilla parity: `HopperBlockEntity.tryTakeInItemFromSlot`, applied to
-    /// every slot the downward face exposes.
     fn take_from_containers(&self, world: &Arc<World>, sources: &[ContainerRef]) -> bool {
+        take_from_containers_into(world, sources, &self.container_ref)
+    }
+}
+
+/// Pulls one item down out of any of `sources` into `destination`.
+///
+/// Vanilla parity: `HopperBlockEntity.tryTakeInItemFromSlot`, applied to every
+/// slot the downward face exposes. Free rather than a method because the
+/// hopper minecart is a hopper too and owns no block entity.
+pub(crate) fn take_from_containers_into(
+    world: &Arc<World>,
+    sources: &[ContainerRef],
+    destination: &ContainerRef,
+) -> bool {
+    {
         let mut locked: Vec<ContainerRef> = sources.to_vec();
-        locked.push(self.container_ref.clone());
+        locked.push(destination.clone());
         let mut guard = ContainerLockGuard::lock_all(&locked);
 
-        let own_id = self.container_ref.container_id();
-        let own: AttachedContainers = smallvec![self.container_ref.clone()];
+        let own_id = destination.container_id();
+        let own: AttachedContainers = smallvec![destination.clone()];
         let game_time = world.game_time();
 
         for source in sources {
@@ -317,35 +330,42 @@ impl HopperBlockEntity {
                 restore_into_slot(&mut guard, source_id, slot, leftover);
             }
         }
-
-        false
     }
 
+    false
+}
+
+/// Swallows an item entity into `destination`, whole or as much as fits.
+///
+/// Vanilla parity: `HopperBlockEntity.addItem(Container, ItemEntity)`.
+pub(crate) fn swallow_item_entity(entity: &SharedEntity, destination: &ContainerRef) -> bool {
+    let Some(item_entity) = entity.as_ref().downcast_ref::<ItemEntity>() else {
+        return false;
+    };
+    let stack = item_entity.get_item();
+    if stack.is_empty() {
+        return false;
+    }
+
+    let own: AttachedContainers = smallvec![destination.clone()];
+    let mut guard = ContainerLockGuard::lock_all(&own);
+    let leftover = add_item(&mut guard, None, &own, stack, None, 0);
+    drop(guard);
+
+    if leftover.is_empty() {
+        item_entity.set_item(ItemStack::empty());
+        entity.set_removed(RemovalReason::Discarded);
+        return true;
+    }
+
+    item_entity.set_item(leftover);
+    false
+}
+
+impl HopperBlockEntity {
     /// Swallows an item entity whole, or as much of it as fits.
-    ///
-    /// Vanilla parity: `HopperBlockEntity.addItem(Container, ItemEntity)`.
     fn add_item_entity(&self, entity: &SharedEntity) -> bool {
-        let Some(item_entity) = entity.as_ref().downcast_ref::<ItemEntity>() else {
-            return false;
-        };
-        let stack = item_entity.get_item();
-        if stack.is_empty() {
-            return false;
-        }
-
-        let own: AttachedContainers = smallvec![self.container_ref.clone()];
-        let mut guard = ContainerLockGuard::lock_all(&own);
-        let leftover = add_item(&mut guard, None, &own, stack, None, 0);
-        drop(guard);
-
-        if leftover.is_empty() {
-            item_entity.set_item(ItemStack::empty());
-            entity.set_removed(RemovalReason::Discarded);
-            return true;
-        }
-
-        item_entity.set_item(leftover);
-        false
+        swallow_item_entity(entity, &self.container_ref)
     }
 }
 
@@ -582,6 +602,58 @@ pub fn insert_into_containers_at(
         mark_changed(&mut guard, &targets);
     }
     Some(leftover)
+}
+
+/// Takes one item into `destination` from around a point that is not on the
+/// block grid.
+///
+/// Vanilla parity: `HopperBlockEntity.suckInItems` for a `Hopper` whose
+/// `isGridAligned` is false -- which is the hopper minecart, and only it. A
+/// cart sits between blocks, so its reach is measured from where it actually
+/// is rather than from the block it happens to overlap.
+pub(crate) fn suck_into_at(
+    world: &Arc<World>,
+    level_pos: DVec3,
+    destination: &ContainerRef,
+) -> bool {
+    let above = BlockPos::new(
+        level_pos.x.floor() as i32,
+        (level_pos.y + 1.0).floor() as i32,
+        level_pos.z.floor() as i32,
+    );
+    let sources = attached_containers_at(world, above);
+    if !sources.is_empty() {
+        return take_from_containers_into(world, &sources, destination);
+    }
+
+    for entity in items_around(world, level_pos) {
+        if swallow_item_entity(&entity, destination) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Returns the item entities inside a loose hopper's reach.
+///
+/// Vanilla parity: `getItemsAtAndAbove` with the suck box moved to the
+/// hopper's own position rather than snapped to a block.
+fn items_around(world: &Arc<World>, level_pos: DVec3) -> Vec<SharedEntity> {
+    let aabb = WorldAabb::new(
+        level_pos.x - 0.5,
+        level_pos.y - 0.5 + SUCK_MIN_Y,
+        level_pos.z - 0.5,
+        level_pos.x + 0.5,
+        level_pos.y - 0.5 + SUCK_MAX_Y,
+        level_pos.z + 0.5,
+    );
+    world
+        .get_entities_in_aabb(&aabb)
+        .into_iter()
+        .filter(|entity| {
+            entity.is_alive() && entity.as_ref().downcast_ref::<ItemEntity>().is_some()
+        })
+        .collect()
 }
 
 /// Returns whether a full block above the hopper stops it picking items up.

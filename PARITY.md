@@ -192,6 +192,9 @@ a furnace has no behavior. These scripts can:
   and read through the wall behind it by a comparator.
 - `dev/throw-test.sh` -- a snowball is thrown, flies and breaks, forty eggs
   hatch at least one chicken, and a bottle o' enchanting breaks into experience.
+- `dev/hopper-minecart-test.sh` -- a cart parked under a loaded chest empties
+  it, read off the chest's comparator; the control cart on a powered activator
+  rail leaves its chest alone, which is the rule that is backwards on this cart.
 - `dev/furnace-minecart-test.sh` -- a fed cart drives itself down a track and
   comes to rest on a detector rail, which is the only part of it a command can
   read.

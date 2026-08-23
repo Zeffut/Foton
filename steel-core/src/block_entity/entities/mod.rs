@@ -53,6 +53,7 @@ pub use end_portal::EndPortalBlockEntity;
 pub use furnace::{
     FURNACE_SLOTS, FurnaceBlockEntity, FurnaceDataSlots, SLOT_FUEL, SLOT_INPUT, SLOT_RESULT,
 };
+pub(crate) use hopper::suck_into_at;
 pub use hopper::{
     HOPPER_SLOTS, HopperBlockEntity, HopperContainer, MOVE_ITEM_SPEED, insert_into_containers_at,
 };
