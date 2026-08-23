@@ -64,7 +64,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 31
+[items] 30
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -93,11 +93,10 @@ SolidBucketItem
 SpectralArrowItem
 SpyglassItem
 TridentItem
-WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 91
+[entities] 90
 Allay
 Armadillo
 ArmorStand
@@ -181,7 +180,6 @@ Villager
 Vindicator
 WanderingTrader
 Warden
-WindCharge
 WitherBoss
 WitherSkull
 Wolf
