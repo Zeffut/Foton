@@ -545,7 +545,7 @@ mod tests {
 
     use super::*;
     use crate::entity::next_entity_id;
-    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 
     fn stand(name: &'static str) -> ArmorStandEntity {
         init_vanilla_registry();
@@ -691,5 +691,62 @@ mod tests {
         assert!(!stand.is_pickable());
         assert!(stand.is_ignoring_block_triggers());
         assert!(stand.is_marker_armor_stand());
+    }
+    /// Right-clicking a stand with a helmet puts the helmet on its head, not
+    /// wherever the click happened to land. This is the one interaction the
+    /// whole entity exists for.
+    #[test]
+    fn a_helmet_goes_on_the_head() {
+        init_vanilla_registry();
+        let world = fresh_test_world("armor_stand_interact_helmet");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let stand = ArmorStandEntity::new(
+            &vanilla_entities::ARMOR_STAND,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        );
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "StandTester", 1).build();
+        player.inventory.lock().set_item_in_hand(
+            InteractionHand::MainHand,
+            ItemStack::new(&vanilla_items::IRON_HELMET),
+        );
+
+        let outcome = stand.interact(&player, InteractionHand::MainHand, DVec3::ZERO);
+
+        assert_eq!(outcome, InteractionResult::SuccessServer);
+        let mut worn = ItemStack::empty();
+        stand.with_equipment_slot(EquipmentSlot::Head, &mut |item| worn = item.clone());
+        assert!(
+            worn.is(&vanilla_items::IRON_HELMET),
+            "the helmet did not land on the head; it went somewhere else"
+        );
+    }
+
+    /// An armless stand refuses a sword outright rather than putting it
+    /// somewhere else.
+    #[test]
+    fn an_armless_stand_refuses_a_sword() {
+        init_vanilla_registry();
+        let world = fresh_test_world("armor_stand_interact_sword");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let stand = ArmorStandEntity::new(
+            &vanilla_entities::ARMOR_STAND,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        );
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "SwordTester", 1).build();
+        player.inventory.lock().set_item_in_hand(
+            InteractionHand::MainHand,
+            ItemStack::new(&vanilla_items::IRON_SWORD),
+        );
+
+        let outcome = stand.interact(&player, InteractionHand::MainHand, DVec3::ZERO);
+
+        assert_eq!(outcome, InteractionResult::Fail);
+        let mut held = ItemStack::empty();
+        stand.with_equipment_slot(EquipmentSlot::MainHand, &mut |item| held = item.clone());
+        assert!(held.is_empty(), "an armless stand took the sword anyway");
     }
 }

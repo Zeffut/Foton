@@ -57,6 +57,7 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+PLAY_C_SET_EQUIPMENT = 102
 PLAY_C_UPDATE_MOB_EFFECT = 132
 
 # Vanilla parity: `ClickType`. Only the two this script sends are named.
@@ -445,6 +446,8 @@ def run_play(connection, watch_seconds=0):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_SET_EQUIPMENT:
+            note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
@@ -530,6 +533,8 @@ def pump(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_SET_EQUIPMENT:
+            note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
@@ -660,6 +665,36 @@ def run_directive(connection, directive):
     return True
 
 
+def note_equipment(payload):
+    """Prints which slot of which entity the server just filled.
+
+    An armor stand's gear is server-side state with no command behind it, so
+    this packet is the only way to see that a right-click actually dressed it.
+    Only the slot is read: the item that follows needs the whole component
+    codec, and the slot alone answers the question.
+    """
+    entity_id, rest = read_varint(payload)
+    if not rest:
+        print(f"  entity {entity_id} had its equipment cleared")
+        return
+    # The ids on the wire are not the ones `EquipmentSlot` uses internally --
+    # see `vanilla_equipment_slot_id` in `c_set_equipment.rs`. Reading it with
+    # the internal table reports a helmet as an off-hand item, which looks
+    # exactly like a bug in whatever was being tested.
+    slot = rest[0] & 0x7F
+    names = {
+        0: "mainhand",
+        1: "offhand",
+        2: "feet",
+        3: "legs",
+        4: "chest",
+        5: "head",
+        6: "body",
+        7: "saddle",
+    }
+    print(f"  entity {entity_id} was equipped in {names.get(slot, slot)}")
+
+
 def note_mob_effect(payload):
     """Prints an effect the server just gave someone.
 
@@ -699,8 +734,8 @@ def send_interact(connection, name, secondary):
     if entity_id is None:
         fail(f"no {name} has spawned, so there is nothing to right-click")
     payload = varint(entity_id)
-    payload += varint(0)  # main hand
-    payload += b"\x00"  # a zero first byte is the whole of an empty LpVec3
+    payload += varint(0)  # action: interact
+    payload += b"\x00"  # the hand that action carries: main
     payload += b"\x01" if secondary else b"\x00"
     connection.send(PLAY_S_INTERACT, payload)
     verb = "sneak-right-clicked" if secondary else "right-clicked"
@@ -842,6 +877,8 @@ def watch_for_spawns(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_SET_EQUIPMENT:
+            note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
