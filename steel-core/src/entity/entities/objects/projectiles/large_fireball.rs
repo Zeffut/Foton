@@ -17,7 +17,7 @@ use steel_macros::entity_behavior;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_entity_data::FireballEntityData;
-use steel_registry::vanilla_game_rules::MOB_GRIEFING;
+use steel_registry::vanilla_game_rules::{MOB_EXPLOSION_DROP_DECAY, MOB_GRIEFING};
 use steel_registry::{vanilla_damage_types, vanilla_items};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
@@ -125,16 +125,14 @@ impl LargeFireballEntity {
     /// Vanilla parity: the explosion of `LargeFireball.onHit`, which passes
     /// `ExplosionInteraction.MOB` and the `mobGriefing` rule as the fire flag.
     ///
-    /// Deviations from vanilla, both from Steel's shared explosion API:
-    /// `ExplosionInteraction.MOB` resolves to `DESTROY_WITH_DECAY`, which thins
-    /// out the drops, and Steel has only a plain `Destroy` that drops
-    /// everything; and the blast is credited to the fireball rather than to the
-    /// ghast, because `World::hurt_entities_from_explosion` overwrites the
-    /// causing entity with the source entity id.
+    /// Deviation from vanilla, from Steel's shared explosion API: the blast is
+    /// credited to the fireball rather than to the ghast, because
+    /// `World::hurt_entities_from_explosion` overwrites the causing entity with
+    /// the source entity id.
     fn explode(&self, world: &Arc<World>) {
         let mob_griefing = world.get_game_rule(&MOB_GRIEFING);
         let interaction = if mob_griefing {
-            ExplosionBlockInteraction::Destroy
+            world.explosion_destroy_type(&MOB_EXPLOSION_DROP_DECAY)
         } else {
             ExplosionBlockInteraction::Keep
         };

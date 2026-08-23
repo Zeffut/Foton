@@ -1,4 +1,5 @@
-use super::{BlockStateId, DyeColor, Identifier, ItemStack, RngExt};
+use super::{BlockStateId, DyeColor, Identifier, ItemStack, REGISTRY, RegistryExt, RngExt};
+use crate::equipment::EquipmentSlot;
 
 /// Entity target for loot context lookups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,7 +150,7 @@ impl NumberProvider {
 }
 
 /// `java.lang.Math.round` semantics for a float.
-fn math_round(value: f32) -> i32 {
+pub(super) fn math_round(value: f32) -> i32 {
     (value + 0.5).floor() as i32
 }
 
@@ -182,6 +183,38 @@ impl NumberProviderRange {
             && value > max.get_simple(rng)
         {
             return false;
+        }
+        true
+    }
+
+    /// Check if a value is within this range, for callers with no RNG.
+    ///
+    /// Constant bounds need no randomness; a bound that is not constant cannot
+    /// be resolved here and rejects the value rather than guessing.
+    #[must_use]
+    pub fn test_without_random(&self, value: f32) -> bool {
+        const fn constant(provider: &NumberProvider) -> Option<f32> {
+            match provider {
+                NumberProvider::Constant(value) => Some(*value),
+                _ => None,
+            }
+        }
+
+        if let Some(min) = &self.min {
+            let Some(min) = constant(min) else {
+                return false;
+            };
+            if value < min {
+                return false;
+            }
+        }
+        if let Some(max) = &self.max {
+            let Some(max) = constant(max) else {
+                return false;
+            };
+            if value > max {
+                return false;
+            }
         }
         true
     }
@@ -279,7 +312,10 @@ pub struct WeatherState {
 
 /// A reference to an entity for loot context.
 /// This is intentionally opaque - the actual entity type depends on game implementation.
-#[derive(Debug, Clone, Copy)]
+///
+/// The default is an entity nothing is known about: every predicate that asks
+/// for a specific fact fails against it.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct EntityRef<'a> {
     /// Type identifier for the entity.
     pub entity_type: Option<&'a Identifier>,
@@ -294,6 +330,14 @@ pub struct EntityRef<'a> {
     /// Vanilla `minecraft:type_specific/sheep.sheared`. `None` when the entity is
     /// not a sheep, matching vanilla `SheepPredicate.matches`' non-sheep rejection.
     pub sheep_sheared: Option<bool>,
+    /// Vanilla `minecraft:components.chicken/variant`, `None` for non-chickens.
+    pub chicken_variant: Option<&'a Identifier>,
+    /// Vanilla `minecraft:components.mooshroom/variant` by serialized name,
+    /// `None` for non-mooshrooms.
+    pub mooshroom_variant: Option<&'static str>,
+    /// Vanilla `minecraft:type_specific/cube_mob.size`, `None` for anything that
+    /// is not a slime or magma cube.
+    pub cube_size: Option<i32>,
 }
 
 /// Entity flags for predicate checking.
@@ -315,6 +359,25 @@ pub struct EntityEquipmentRef<'a> {
     pub chest: Option<&'a ItemStack>,
     pub legs: Option<&'a ItemStack>,
     pub feet: Option<&'a ItemStack>,
+}
+
+impl<'a> EntityEquipmentRef<'a> {
+    /// The occupied slots, paired with the stack in them.
+    ///
+    /// Vanilla iterates `EquipmentSlot.VALUES` and skips empty stacks, which is
+    /// what `Enchantment.getSlotItems` relies on.
+    pub fn occupied_slots(&self) -> impl Iterator<Item = (EquipmentSlot, &'a ItemStack)> + '_ {
+        [
+            (EquipmentSlot::MainHand, self.mainhand),
+            (EquipmentSlot::OffHand, self.offhand),
+            (EquipmentSlot::Feet, self.feet),
+            (EquipmentSlot::Legs, self.legs),
+            (EquipmentSlot::Chest, self.chest),
+            (EquipmentSlot::Head, self.head),
+        ]
+        .into_iter()
+        .filter_map(|(slot, stack)| stack.map(|stack| (slot, stack)))
+    }
 }
 
 /// Damage source information for loot context.
@@ -472,6 +535,37 @@ impl<'a, R: rand::Rng> LootContext<'a, R> {
     pub fn get_enchantment_level_by_id(&self, enchantment: &Identifier) -> i32 {
         self.tool
             .map_or(0, |t| t.get_enchantment_level(enchantment))
+    }
+
+    /// Vanilla `EnchantmentHelper.getEnchantmentLevel(enchantment, livingEntity)`:
+    /// the best level of `enchantment` across the equipment slots that
+    /// enchantment is allowed to occupy.
+    ///
+    /// This is what the looting-style loot primitives read. They take the level
+    /// off the *killer*, not off `TOOL` -- an entity loot roll has no `TOOL`
+    /// parameter at all.
+    #[must_use]
+    pub fn get_entity_enchantment_level(
+        &self,
+        target: LootContextEntity,
+        enchantment: &Identifier,
+    ) -> i32 {
+        let Some(entity) = self.get_entity(target) else {
+            return 0;
+        };
+        let Some(equipment) = entity.equipment else {
+            return 0;
+        };
+        let Some(definition) = REGISTRY.enchantments.by_key(enchantment) else {
+            return 0;
+        };
+
+        equipment
+            .occupied_slots()
+            .filter(|(slot, _)| definition.slots.iter().any(|group| group.test(*slot)))
+            .map(|(_, stack)| stack.get_enchantment_level(enchantment))
+            .max()
+            .unwrap_or(0)
     }
 
     /// Get an entity reference by target.

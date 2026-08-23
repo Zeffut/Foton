@@ -12,6 +12,7 @@ use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
 use steel_registry::vanilla_entity_data::CreeperEntityData;
+use steel_registry::vanilla_game_rules::{MOB_EXPLOSION_DROP_DECAY, MOB_GRIEFING};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
@@ -209,7 +210,13 @@ impl CreeperEntity {
             self.position(),
             EXPLOSION_RADIUS * multiplier,
             false,
-            ExplosionBlockInteraction::Destroy,
+            // Vanilla `ExplosionInteraction.MOB`: mob griefing decides whether
+            // blocks break at all, and the decay rule whether their drops thin.
+            if world.get_game_rule(&MOB_GRIEFING) {
+                world.explosion_destroy_type(&MOB_EXPLOSION_DROP_DECAY)
+            } else {
+                ExplosionBlockInteraction::Keep
+            },
         );
         // TODO: vanilla also leaves a lingering cloud of whatever effects the
         // creeper carried.

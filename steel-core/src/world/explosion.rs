@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
+use steel_registry::game_rules::GameRule;
 use steel_registry::{vanilla_attributes, vanilla_blocks, vanilla_damage_types};
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, WorldAabb};
@@ -25,8 +26,33 @@ use crate::world::raycast::{ClipBlockShape, ClipFluid};
 pub enum ExplosionBlockInteraction {
     /// Leaves every block standing.
     Keep,
-    /// Breaks blocks and drops their loot.
+    /// Breaks blocks and drops all of their loot.
     Destroy,
+    /// Breaks blocks and thins their loot by the blast radius.
+    ///
+    /// The only thing this changes is that the block loot roll receives the
+    /// explosion radius, which is what `survives_explosion` and
+    /// `explosion_decay` read. Which of the two destroying modes a blast uses
+    /// is decided by the matching `*_explosion_drop_decay` game rule -- see
+    /// [`World::explosion_destroy_type`].
+    DestroyWithDecay,
+}
+
+impl ExplosionBlockInteraction {
+    /// Whether this interaction breaks the blocks the blast reaches.
+    #[must_use]
+    pub const fn destroys_blocks(self) -> bool {
+        matches!(self, Self::Destroy | Self::DestroyWithDecay)
+    }
+
+    /// The blast radius handed to the block loot roll, if drops decay.
+    #[must_use]
+    const fn loot_explosion_radius(self, radius: f32) -> Option<f32> {
+        match self {
+            Self::DestroyWithDecay => Some(radius),
+            Self::Keep | Self::Destroy => None,
+        }
+    }
 }
 
 /// Rays are cast from a 16x16x16 grid, using only its outer shell.
@@ -114,6 +140,19 @@ impl World {
         )
     }
 
+    /// Picks between plain destruction and destruction that decays drops.
+    ///
+    /// Vanilla parity: `ServerLevel.getDestroyType`. Each explosion source has
+    /// its own `*_explosion_drop_decay` game rule.
+    #[must_use]
+    pub fn explosion_destroy_type(&self, decay_rule: &GameRule<bool>) -> ExplosionBlockInteraction {
+        if self.get_game_rule(decay_rule) {
+            ExplosionBlockInteraction::DestroyWithDecay
+        } else {
+            ExplosionBlockInteraction::Destroy
+        }
+    }
+
     /// Detonates an explosion that leaves some blocks standing.
     ///
     /// Vanilla parity: the `Explosion.shouldBlockExplode` hook, which the
@@ -130,9 +169,13 @@ impl World {
         to_blow.retain(|pos| should_explode(*pos));
         self.hurt_entities_from_explosion(&spec, center);
 
-        if spec.interaction == ExplosionBlockInteraction::Destroy {
+        if spec.interaction.destroys_blocks() {
+            let loot_radius = spec.interaction.loot_explosion_radius(spec.radius);
+            let source_entity = spec
+                .source_entity_id
+                .and_then(|entity_id| self.get_entity_by_id(entity_id));
             for pos in &to_blow {
-                self.destroy_block(*pos, true);
+                self.destroy_block_from_explosion(*pos, source_entity.as_deref(), loot_radius);
             }
         }
 

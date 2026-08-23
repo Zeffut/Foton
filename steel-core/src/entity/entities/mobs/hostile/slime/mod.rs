@@ -244,6 +244,10 @@ impl Entity for SlimeEntity {
 }
 
 impl LivingEntity for SlimeEntity {
+    fn cube_loot_size(&self) -> Option<i32> {
+        Some(CubeLike::size(self))
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

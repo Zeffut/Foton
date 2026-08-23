@@ -11,6 +11,7 @@ use steel_registry::blocks::{
 };
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::item::BlockHitResult;
+use steel_registry::vanilla_game_rules::BLOCK_EXPLOSION_DROP_DECAY;
 use steel_registry::{
     sound_events, vanilla_blocks, vanilla_damage_types, vanilla_game_events, vanilla_items,
 };
@@ -27,7 +28,6 @@ use crate::{
     entity::damage::DamageSource,
     level_data::RespawnData,
     player::{Player, PlayerRespawnConfig},
-    world::explosion::ExplosionBlockInteraction,
     world::{LevelReader, World, game_event::GameEventContext},
 };
 
@@ -67,7 +67,7 @@ impl RespawnAnchorBlock {
             center,
             5.0,
             true,
-            ExplosionBlockInteraction::Destroy,
+            world.explosion_destroy_type(&BLOCK_EXPLOSION_DROP_DECAY),
         );
     }
 

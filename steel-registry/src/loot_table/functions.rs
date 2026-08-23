@@ -1,7 +1,7 @@
 use super::{
     DyeColor, EquipmentSlotGroup, Identifier, InstrumentRef, ItemStack, LootCondition, LootContext,
     LootContextEntity, LootEntry, NumberProvider, REGISTRY, RngExt, TaggedRegistryExt,
-    ToolPredicate,
+    ToolPredicate, math_round,
 };
 
 /// Options for selecting enchantments - either a tag reference or explicit list.
@@ -351,7 +351,13 @@ impl LootFunction {
                 enchantment,
                 formula,
             } => {
-                let level = ctx.get_enchantment_level_by_id(enchantment);
+                // Vanilla guards the whole body on the TOOL parameter being
+                // present. Without it the count is untouched and, just as
+                // importantly, no randomness is drawn.
+                let Some(tool) = ctx.tool else {
+                    return;
+                };
+                let level = tool.get_enchantment_level(enchantment);
                 item.count = formula.apply(item.count, level, ctx.rng);
             }
             LootFunction::EnchantedCountIncrease {
@@ -359,11 +365,19 @@ impl LootFunction {
                 count: provider,
                 limit,
             } => {
-                let level = ctx.get_enchantment_level_by_id(enchantment);
-                if level > 0 {
-                    let bonus = (provider.get_simple(ctx.rng) * level as f32).round() as i32;
-                    let bonus = if *limit > 0 { bonus.min(*limit) } else { bonus };
-                    item.count += bonus;
+                // Vanilla reads ATTACKING_ENTITY, not TOOL: looting sits on the
+                // killer's weapon, and an entity loot roll never sets TOOL.
+                let level =
+                    ctx.get_entity_enchantment_level(LootContextEntity::Killer, enchantment);
+                if level == 0 {
+                    return;
+                }
+                let addition = provider.get_simple(ctx.rng) * level as f32;
+                item.count += math_round(addition);
+                // `limit` clamps the resulting stack (vanilla `ItemStack.limitSize`),
+                // not the bonus that was just added.
+                if *limit > 0 {
+                    item.count = item.count.min(*limit);
                 }
             }
             LootFunction::LimitCount { min, max } => {
@@ -548,12 +562,11 @@ impl BonusFormula {
                 }
             }
             BonusFormula::UniformBonusCount { bonus_multiplier } => {
-                // Vanilla: count + random(0..bonusMultiplier * level + 1)
-                if level > 0 {
-                    count + rng.random_range(0..bonus_multiplier * level + 1)
-                } else {
-                    count
-                }
+                // Vanilla: count + random.nextInt(bonusMultiplier * level + 1),
+                // with no level-zero shortcut. The value is the same either way
+                // at level 0, but keeping the draw matches vanilla's shape for
+                // when loot rolls move onto a seeded vanilla RNG.
+                count + rng.random_range(0..bonus_multiplier * level + 1)
             }
             BonusFormula::BinomialWithBonusCount { extra, probability } => {
                 // Vanilla: for each of (level + extra) trials, probability p to add 1

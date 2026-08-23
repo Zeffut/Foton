@@ -434,6 +434,10 @@ impl Entity for ChickenEntity {
 }
 
 impl LivingEntity for ChickenEntity {
+    fn chicken_loot_variant(&self) -> Option<&'static Identifier> {
+        Some(&self.variant().key)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

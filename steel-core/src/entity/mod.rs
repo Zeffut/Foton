@@ -30,7 +30,7 @@ use steel_registry::game_events::GameEventRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::loot_table::{
-    DamageSourceInfo, EntityRef, EntityRefFlags, LootContext, LootTableRef,
+    DamageSourceInfo, EntityEquipmentRef, EntityRef, EntityRefFlags, LootContext, LootTableRef,
 };
 use steel_registry::mob_effect::MobEffectRef;
 use steel_registry::sound_event::SoundEventRef;
@@ -1327,7 +1327,64 @@ fn remove_after_changing_dimensions(entity: &dyn Entity) {
     }
 }
 
+/// Owned copy of an entity's equipment, taken so a loot context can borrow it.
+///
+/// A loot [`EntityRef`] borrows its equipment, but Steel keeps equipment behind
+/// a mutex. The stacks therefore have to be copied out from under the guard and
+/// kept alive by the caller for as long as the loot roll runs.
+pub(crate) struct LootEquipmentSnapshot {
+    mainhand: ItemStack,
+    offhand: ItemStack,
+    head: ItemStack,
+    chest: ItemStack,
+    legs: ItemStack,
+    feet: ItemStack,
+}
+
+impl LootEquipmentSnapshot {
+    /// Captures the equipment of `entity`, or `None` when it is not a living entity.
+    pub(crate) fn capture(entity: &dyn Entity) -> Option<Self> {
+        entity.as_living_entity().map(Self::capture_living)
+    }
+
+    pub(crate) fn capture_living<E: LivingEntity + ?Sized>(entity: &E) -> Self {
+        let equipment = entity.living_base().equipment().lock();
+        Self {
+            mainhand: equipment.get_ref(EquipmentSlot::MainHand).clone(),
+            offhand: equipment.get_ref(EquipmentSlot::OffHand).clone(),
+            head: equipment.get_ref(EquipmentSlot::Head).clone(),
+            chest: equipment.get_ref(EquipmentSlot::Chest).clone(),
+            legs: equipment.get_ref(EquipmentSlot::Legs).clone(),
+            feet: equipment.get_ref(EquipmentSlot::Feet).clone(),
+        }
+    }
+
+    /// Borrows the snapshot as loot-context equipment. Empty slots read as
+    /// absent, matching vanilla `Enchantment.getSlotItems`.
+    pub(crate) fn as_loot_ref(&self) -> EntityEquipmentRef<'_> {
+        fn occupied(stack: &ItemStack) -> Option<&ItemStack> {
+            (!stack.is_empty()).then_some(stack)
+        }
+
+        EntityEquipmentRef {
+            mainhand: occupied(&self.mainhand),
+            offhand: occupied(&self.offhand),
+            head: occupied(&self.head),
+            chest: occupied(&self.chest),
+            legs: occupied(&self.legs),
+            feet: occupied(&self.feet),
+        }
+    }
+}
+
 pub(crate) fn entity_loot_ref(entity: &dyn Entity) -> EntityRef<'_> {
+    entity_loot_ref_with_equipment(entity, None)
+}
+
+pub(crate) fn entity_loot_ref_with_equipment<'a>(
+    entity: &'a dyn Entity,
+    equipment: Option<&'a EntityEquipmentRef<'a>>,
+) -> EntityRef<'a> {
     let living_entity = entity.as_living_entity();
     let sheep = living_entity.and_then(LivingEntity::sheep_loot_state);
     EntityRef {
@@ -1339,11 +1396,14 @@ pub(crate) fn entity_loot_ref(entity: &dyn Entity) -> EntityRef<'_> {
             is_swimming: entity.is_swimming(),
             is_baby: living_entity.is_some_and(LivingEntity::is_baby),
         },
-        // TODO: Include equipment and custom name once loot contexts can snapshot entity data.
-        equipment: None,
+        equipment,
+        // TODO: Include custom name once loot contexts can snapshot entity data.
         custom_name: None,
         sheep_color: sheep.map(|(color, _)| color),
         sheep_sheared: sheep.map(|(_, sheared)| sheared),
+        chicken_variant: living_entity.and_then(LivingEntity::chicken_loot_variant),
+        mooshroom_variant: living_entity.and_then(LivingEntity::mooshroom_loot_variant),
+        cube_size: living_entity.and_then(LivingEntity::cube_loot_size),
     }
 }
 

@@ -105,8 +105,7 @@ fn test_pig_loot_drops_raw_porkchop_when_not_on_fire() {
         flags: EntityRefFlags::default(),
         equipment: None,
         custom_name: None,
-        sheep_color: None,
-        sheep_sheared: None,
+        ..EntityRef::default()
     };
 
     let mut ctx = LootContext::new(&mut rng).with_this_entity(pig);
@@ -169,8 +168,7 @@ fn sheared_predicate_rejects_non_sheep_entities() {
         flags: EntityRefFlags::default(),
         equipment: None,
         custom_name: None,
-        sheep_color: None,
-        sheep_sheared: None,
+        ..EntityRef::default()
     };
     let mut ctx = LootContext::new(&mut rng).with_this_entity(pig);
 
@@ -182,6 +180,10 @@ fn sheared_predicate_rejects_non_sheep_entities() {
             equipment: None,
             sheep_color: None,
             sheep_sheared: Some(false),
+            chicken_variant: None,
+            mooshroom_variant: None,
+            cube_size: None,
+            unsupported: &[],
         },
     };
     assert!(
@@ -203,8 +205,7 @@ fn test_pig_loot_smelt_condition_uses_entity_fire_flag() {
         },
         equipment: None,
         custom_name: None,
-        sheep_color: None,
-        sheep_sheared: None,
+        ..EntityRef::default()
     };
 
     let mut ctx = LootContext::new(&mut rng).with_this_entity(pig);
@@ -286,6 +287,353 @@ fn ominous_bottle_amplifier_function_clamps_to_persistent_range() {
             Some(expected)
         );
     }
+}
+
+/// A tool carrying `enchantment` at `level`, for the tool-sensitive conditions.
+fn enchanted_tool(
+    item: &'static crate::items::Item,
+    enchantment: &Identifier,
+    level: u32,
+) -> ItemStack {
+    let mut tool = ItemStack::new(item);
+    tool.set_enchantments(&[(enchantment.clone(), level)], false);
+    tool
+}
+
+/// A killer holding `weapon`, which is where the looting primitives look.
+fn killer_holding<'a>(
+    entity_type: &'a Identifier,
+    equipment: &'a EntityEquipmentRef<'a>,
+) -> EntityRef<'a> {
+    EntityRef {
+        entity_type: Some(entity_type),
+        flags: EntityRefFlags::default(),
+        equipment: Some(equipment),
+        custom_name: None,
+        ..EntityRef::default()
+    }
+}
+
+#[test]
+fn silk_touch_makes_diamond_ore_drop_the_ore_block() {
+    init_test_registries();
+    let tool = enchanted_tool(
+        &vanilla_items::DIAMOND_PICKAXE,
+        &crate::vanilla_enchantments::SILK_TOUCH.key,
+        1,
+    );
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng).with_tool(&tool);
+
+    let items = vanilla_loot_tables::BLOCKS_DIAMOND_ORE.get_random_items(&mut ctx);
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].item.key, Identifier::vanilla_static("diamond_ore"));
+}
+
+#[test]
+fn a_toolless_break_cannot_satisfy_a_tool_predicate() {
+    // Vanilla `MatchTool.test` is `tool != null && ...`, so a roll with no TOOL
+    // parameter fails even an empty predicate. Returning true here would hand
+    // silk-touch drops to explosions, pistons and water flow.
+    init_test_registries();
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng);
+
+    assert!(!LootCondition::MatchTool(ToolPredicate::Any).test(&mut ctx));
+    assert!(
+        !LootCondition::MatchTool(ToolPredicate::Item(Identifier::vanilla_static("shears")))
+            .test(&mut ctx)
+    );
+}
+
+#[test]
+fn fortune_multiplies_diamond_ore_drops() {
+    // `ore_drops` is `count * (max(0, nextInt(level + 2) - 1) + 1)`, so Fortune 3
+    // can quadruple a single diamond while an unenchanted pick never can.
+    init_test_registries();
+    let fortune = enchanted_tool(
+        &vanilla_items::DIAMOND_PICKAXE,
+        &crate::vanilla_enchantments::FORTUNE.key,
+        3,
+    );
+    let plain = ItemStack::new(&vanilla_items::DIAMOND_PICKAXE);
+
+    let mut best_with_fortune = 0;
+    let mut best_without = 0;
+    for seed in 0u64..200 {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng).with_tool(&fortune);
+        for item in vanilla_loot_tables::BLOCKS_DIAMOND_ORE.get_random_items(&mut ctx) {
+            best_with_fortune = best_with_fortune.max(item.count);
+        }
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng).with_tool(&plain);
+        for item in vanilla_loot_tables::BLOCKS_DIAMOND_ORE.get_random_items(&mut ctx) {
+            best_without = best_without.max(item.count);
+        }
+    }
+
+    assert_eq!(
+        best_without, 1,
+        "an unenchanted pick drops exactly one diamond"
+    );
+    assert!(
+        best_with_fortune > 1,
+        "Fortune 3 must sometimes drop more than one diamond, best was {best_with_fortune}"
+    );
+}
+
+#[test]
+fn apply_bonus_leaves_the_count_alone_without_a_tool() {
+    // Vanilla `ApplyBonusCount.run` guards its whole body on the TOOL parameter.
+    // `binomial_with_bonus_count` would otherwise grow the stack from its extra
+    // rounds even though nothing was holding a tool.
+    init_test_registries();
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng);
+    let mut item = ItemStack::with_count(&vanilla_items::DIAMOND, 1);
+
+    LootFunction::ApplyBonus {
+        enchantment: crate::vanilla_enchantments::FORTUNE.key.clone(),
+        formula: BonusFormula::BinomialWithBonusCount {
+            extra: 8,
+            probability: 1.0,
+        },
+    }
+    .apply(&mut item, &mut ctx);
+
+    assert_eq!(item.count, 1);
+}
+
+#[test]
+fn looting_on_the_killers_weapon_increases_mob_drops() {
+    // Vanilla `EnchantedCountIncreaseFunction` reads ATTACKING_ENTITY, not TOOL,
+    // because an entity loot roll never carries a tool at all. Reading the tool
+    // made every mob drop as if the killer had Looting 0.
+    init_test_registries();
+    let sword = enchanted_tool(
+        &vanilla_items::DIAMOND_SWORD,
+        &crate::vanilla_enchantments::LOOTING.key,
+        3,
+    );
+    let equipment = EntityEquipmentRef {
+        mainhand: Some(&sword),
+        offhand: None,
+        head: None,
+        chest: None,
+        legs: None,
+        feet: None,
+    };
+    let player_key = Identifier::vanilla_static("player");
+    let zombie_key = Identifier::vanilla_static("zombie");
+
+    let mut best_with_looting = 0;
+    let mut best_without = 0;
+    for seed in 0u64..200 {
+        let zombie = EntityRef {
+            entity_type: Some(&zombie_key),
+            flags: EntityRefFlags::default(),
+            equipment: None,
+            custom_name: None,
+            ..EntityRef::default()
+        };
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng)
+            .with_this_entity(zombie)
+            .with_killer_entity(killer_holding(&player_key, &equipment));
+        for item in vanilla_loot_tables::ENTITIES_ZOMBIE.get_random_items(&mut ctx) {
+            if item.item.key == Identifier::vanilla_static("rotten_flesh") {
+                best_with_looting = best_with_looting.max(item.count);
+            }
+        }
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng).with_this_entity(zombie);
+        for item in vanilla_loot_tables::ENTITIES_ZOMBIE.get_random_items(&mut ctx) {
+            if item.item.key == Identifier::vanilla_static("rotten_flesh") {
+                best_without = best_without.max(item.count);
+            }
+        }
+    }
+
+    assert_eq!(
+        best_without, 2,
+        "an unenchanted killer is capped by the table's own `set_count` of 0-2"
+    );
+    assert!(
+        best_with_looting > 2,
+        "Looting 3 must push rotten flesh past 2, best was {best_with_looting}"
+    );
+}
+
+#[test]
+fn enchanted_count_increase_limits_the_whole_stack_not_the_bonus() {
+    // Vanilla grows the stack and *then* calls `limitSize(limit)`. Clamping the
+    // bonus instead lets the total run past the limit by the original count.
+    init_test_registries();
+    let sword = enchanted_tool(
+        &vanilla_items::DIAMOND_SWORD,
+        &crate::vanilla_enchantments::LOOTING.key,
+        3,
+    );
+    let equipment = EntityEquipmentRef {
+        mainhand: Some(&sword),
+        offhand: None,
+        head: None,
+        chest: None,
+        legs: None,
+        feet: None,
+    };
+    let player_key = Identifier::vanilla_static("player");
+
+    let mut rng = test_rng();
+    let mut ctx =
+        LootContext::new(&mut rng).with_killer_entity(killer_holding(&player_key, &equipment));
+    let mut item = ItemStack::with_count(&vanilla_items::ROTTEN_FLESH, 3);
+
+    LootFunction::EnchantedCountIncrease {
+        enchantment: crate::vanilla_enchantments::LOOTING.key.clone(),
+        count: NumberProvider::Constant(2.0),
+        limit: 4,
+    }
+    .apply(&mut item, &mut ctx);
+
+    // 3 + round(2 * 3) = 9, limited to 4. Clamping the bonus would give 3 + 4 = 7.
+    assert_eq!(item.count, 4);
+}
+
+#[test]
+fn explosion_decay_thins_block_drops_only_when_a_radius_is_present() {
+    // The two halves of vanilla's DESTROY vs DESTROY_WITH_DECAY split: the same
+    // table keeps every drop without EXPLOSION_RADIUS and loses most of them
+    // with it.
+    init_test_registries();
+    let fortune = enchanted_tool(
+        &vanilla_items::DIAMOND_PICKAXE,
+        &crate::vanilla_enchantments::FORTUNE.key,
+        3,
+    );
+
+    let mut kept_without_radius = 0;
+    let mut kept_with_radius = 0;
+    for seed in 0u64..300 {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng).with_tool(&fortune);
+        kept_without_radius += vanilla_loot_tables::BLOCKS_DIAMOND_ORE
+            .get_random_items(&mut ctx)
+            .iter()
+            .map(|item| item.count)
+            .sum::<i32>();
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng)
+            .with_tool(&fortune)
+            .with_explosion(4.0);
+        kept_with_radius += vanilla_loot_tables::BLOCKS_DIAMOND_ORE
+            .get_random_items(&mut ctx)
+            .iter()
+            .map(|item| item.count)
+            .sum::<i32>();
+    }
+
+    assert!(
+        kept_without_radius > 300,
+        "no radius must keep every diamond"
+    );
+    assert!(
+        kept_with_radius * 2 < kept_without_radius,
+        "radius 4 keeps about a quarter of the drops, got {kept_with_radius} vs {kept_without_radius}"
+    );
+}
+
+#[test]
+fn chest_pool_weights_favor_the_heavier_entries() {
+    // `chests/simple_dungeon` pool 0 weights name tags at 20 and enchanted
+    // golden apples at 2, so the weighted pick has to reflect that ten-to-one
+    // ratio rather than treating entries uniformly.
+    init_test_registries();
+    let name_tag = Identifier::vanilla_static("name_tag");
+    let enchanted_apple = Identifier::vanilla_static("enchanted_golden_apple");
+
+    let mut name_tags = 0;
+    let mut enchanted_apples = 0;
+    for seed in 0u64..3000 {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng);
+        for item in vanilla_loot_tables::CHESTS_SIMPLE_DUNGEON.get_random_items(&mut ctx) {
+            if item.item.key == name_tag {
+                name_tags += 1;
+            } else if item.item.key == enchanted_apple {
+                enchanted_apples += 1;
+            }
+        }
+    }
+
+    assert!(
+        enchanted_apples > 0,
+        "the rare entry must still be reachable"
+    );
+    assert!(
+        name_tags > enchanted_apples * 3,
+        "weight 20 must beat weight 2 by a wide margin, got {name_tags} vs {enchanted_apples}"
+    );
+}
+
+#[test]
+fn an_unmodelled_entity_predicate_key_never_matches() {
+    // `entities/zombie` gates its red mushroom on riding a zombie horse, a
+    // vehicle predicate the generator cannot lower. Treating the unlowerable
+    // predicate as satisfied handed every zombie a red mushroom.
+    init_test_registries();
+    let zombie_key = Identifier::vanilla_static("zombie");
+    let red_mushroom = Identifier::vanilla_static("red_mushroom");
+
+    for seed in 0u64..200 {
+        let zombie = EntityRef {
+            entity_type: Some(&zombie_key),
+            ..EntityRef::default()
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut ctx = LootContext::new(&mut rng).with_this_entity(zombie);
+
+        for item in vanilla_loot_tables::ENTITIES_ZOMBIE.get_random_items(&mut ctx) {
+            assert_ne!(
+                item.item.key, red_mushroom,
+                "a zombie on foot must not drop the zombie-horse mushroom"
+            );
+        }
+    }
+}
+
+#[test]
+fn only_the_smallest_slime_drops_slime_balls() {
+    // The whole pool is gated on `type_specific/cube_mob.size == 1`, so a big
+    // slime yields nothing and only its smallest children pay out.
+    init_test_registries();
+    let slime_key = Identifier::vanilla_static("slime");
+
+    let mut small_drops = 0;
+    let mut large_drops = 0;
+    for seed in 0u64..200 {
+        for (size, counter) in [(1, &mut small_drops), (4, &mut large_drops)] {
+            let slime = EntityRef {
+                entity_type: Some(&slime_key),
+                cube_size: Some(size),
+                ..EntityRef::default()
+            };
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut ctx = LootContext::new(&mut rng).with_this_entity(slime);
+            *counter += vanilla_loot_tables::ENTITIES_SLIME
+                .get_random_items(&mut ctx)
+                .len();
+        }
+    }
+
+    assert!(small_drops > 0, "a size-1 slime must drop slime balls");
+    assert_eq!(large_drops, 0, "a size-4 slime must drop nothing itself");
 }
 
 #[test]

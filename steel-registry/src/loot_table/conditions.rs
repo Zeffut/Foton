@@ -143,6 +143,19 @@ pub struct EntityPredicate {
     pub sheep_color: Option<DyeColor>,
     /// Vanilla `minecraft:type_specific/sheep.sheared` check.
     pub sheep_sheared: Option<bool>,
+    /// Vanilla `minecraft:components.chicken/variant` check.
+    pub chicken_variant: Option<Identifier>,
+    /// Vanilla `minecraft:components.mooshroom/variant` check, by serialized
+    /// name (`red` / `brown`) since the variant is an enum, not a registry.
+    pub mooshroom_variant: Option<&'static str>,
+    /// Vanilla `minecraft:type_specific/cube_mob.size` check (slime, magma cube).
+    pub cube_size: Option<NumberProviderRange>,
+    /// Predicate keys the generator could not model, by name.
+    ///
+    /// A predicate Steel cannot evaluate must not silently pass -- that hands
+    /// out drops vanilla gates behind a state nobody checked. The build script
+    /// warns for each one; here they simply fail.
+    pub unsupported: &'static [&'static str],
 }
 
 /// Entity flags (`is_on_fire`, `is_sneaking`, etc.)
@@ -226,7 +239,10 @@ impl LootCondition {
                 unenchanted_chance,
                 enchanted_chance,
             } => {
-                let level = ctx.get_enchantment_level_by_id(enchantment);
+                // Vanilla reads ATTACKING_ENTITY and takes the level off the
+                // killer's equipment; an entity loot roll has no TOOL at all.
+                let level =
+                    ctx.get_entity_enchantment_level(LootContextEntity::Killer, enchantment);
                 let effective_chance = if level > 0 {
                     match enchanted_chance {
                         EnchantedChance::Constant(c) => *c,
@@ -241,12 +257,14 @@ impl LootCondition {
                 ctx.rng.random::<f32>() < effective_chance
             }
             LootCondition::MatchTool(predicate) => {
-                if let Some(tool) = ctx.tool {
-                    predicate.test(tool, ctx)
-                } else {
-                    // No tool in context - only passes if predicate is Any
-                    matches!(predicate, ToolPredicate::Any)
-                }
+                // Vanilla `MatchTool.test` is `tool != null && predicate.test(tool)`:
+                // a missing TOOL parameter fails outright, even for an empty
+                // predicate. Silk touch relies on this -- a toolless break (an
+                // explosion, a piston, water) must take the non-silk branch.
+                let Some(tool) = ctx.tool else {
+                    return false;
+                };
+                predicate.test(tool, ctx)
             }
             LootCondition::TableBonus {
                 enchantment,
@@ -366,6 +384,10 @@ fn tool_enchantment_matches(
 
 impl EntityPredicate {
     fn test<R: rand::Rng>(&self, entity: EntityRef<'_>, ctx: &LootContext<'_, R>) -> bool {
+        if !self.unsupported.is_empty() {
+            return false;
+        }
+
         if let Some(entity_type) = &self.entity_type
             && entity.entity_type != Some(entity_type)
         {
@@ -394,6 +416,29 @@ impl EntityPredicate {
             && entity.sheep_sheared != Some(*expected_sheared)
         {
             return false;
+        }
+
+        if let Some(expected_variant) = &self.chicken_variant
+            && entity.chicken_variant != Some(expected_variant)
+        {
+            return false;
+        }
+
+        if let Some(expected_variant) = self.mooshroom_variant
+            && entity.mooshroom_variant != Some(expected_variant)
+        {
+            return false;
+        }
+
+        if let Some(expected_size) = &self.cube_size {
+            // A non-cube entity has no size to compare, so it fails the way
+            // vanilla's `CubeMobPredicate` rejects a non-cube subject.
+            let Some(size) = entity.cube_size else {
+                return false;
+            };
+            if !expected_size.test_without_random(size as f32) {
+                return false;
+            }
         }
 
         true
