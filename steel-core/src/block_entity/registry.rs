@@ -21,8 +21,8 @@ use super::entities::{
     ComparatorBlockEntity, CrafterBlockEntity, DaylightDetectorBlockEntity,
     DecoratedPotBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
     FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
-    PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, ShulkerBoxBlockEntity,
-    SignBlockEntity, SkullBlockEntity,
+    PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, SculkSensorBlockEntity,
+    SculkShriekerBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity, SkullBlockEntity,
 };
 use crate::world::World;
 
@@ -230,6 +230,23 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
     registry.register(&vanilla_block_entity_types::SKULL, |level, pos, state| {
         Arc::new(SkullBlockEntity::new(level, pos, state))
     });
+
+    registry.register(
+        &vanilla_block_entity_types::SCULK_SENSOR,
+        |level, pos, state| Arc::new(SculkSensorBlockEntity::new(level, pos, state)),
+    );
+
+    // The calibrated sensor is the same storage under a second registered type, the way
+    // vanilla's `CalibratedSculkSensorBlockEntity` only replaces the vibration user.
+    registry.register(
+        &vanilla_block_entity_types::CALIBRATED_SCULK_SENSOR,
+        |level, pos, state| Arc::new(SculkSensorBlockEntity::new_calibrated(level, pos, state)),
+    );
+
+    registry.register(
+        &vanilla_block_entity_types::SCULK_SHRIEKER,
+        |level, pos, state| Arc::new(SculkShriekerBlockEntity::new(level, pos, state)),
+    );
 }
 
 /// Initializes the global block entity registry.
