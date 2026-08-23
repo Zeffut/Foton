@@ -10,6 +10,7 @@ use super::clock::WorldClockManager;
 const SKY_LIGHT_LEVEL_ATTRIBUTE: &str = "minecraft:gameplay/sky_light_level";
 const SUN_ANGLE_ATTRIBUTE: &str = "minecraft:visual/sun_angle";
 const TURTLE_EGG_HATCH_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/turtle_egg_hatch_chance";
+const CAT_WAKING_UP_GIFT_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/cat_waking_up_gift_chance";
 const DEFAULT_SKY_LIGHT_LEVEL: f32 = 15.0;
 const DEFAULT_SUN_ANGLE: f32 = 0.0;
 /// Vanilla `DimensionDefaults.TURTLE_EGG_HATCH_CHANCE`, which is also the
@@ -17,6 +18,10 @@ const DEFAULT_SUN_ANGLE: f32 = 0.0;
 /// vanilla dimension type overrides it, so every dimension starts here and only
 /// the overworld `day` timeline raises it.
 const DEFAULT_TURTLE_EGG_HATCH_CHANCE: f32 = 0.002;
+/// The declared default of `EnvironmentAttributes.CAT_WAKING_UP_GIFT_CHANCE`.
+/// No dimension type overrides it, so a cat only ever brings a gift where the
+/// overworld `day` timeline raises it -- at dawn, which is the whole point.
+const DEFAULT_CAT_WAKING_UP_GIFT_CHANCE: f32 = 0.0;
 /// The bounds of `AttributeRange.UNIT_FLOAT`.
 const MIN_UNIT_FLOAT: f32 = 0.0;
 const MAX_UNIT_FLOAT: f32 = 1.0;
@@ -78,6 +83,24 @@ pub(super) fn turtle_egg_hatch_chance(
         dimension_type,
         clock_manager,
         TURTLE_EGG_HATCH_CHANCE_ATTRIBUTE,
+    )
+    .clamp(MIN_UNIT_FLOAT, MAX_UNIT_FLOAT)
+}
+
+/// Returns the `gameplay/cat_waking_up_gift_chance` environment attribute.
+///
+/// The overworld `day` timeline raises this to 0.7 across the morning, which is
+/// what decides whether a cat that slept on its owner's bed leaves a present.
+#[must_use]
+pub(super) fn cat_waking_up_gift_chance(
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+) -> f32 {
+    apply_timeline_float_attribute(
+        DEFAULT_CAT_WAKING_UP_GIFT_CHANCE,
+        dimension_type,
+        clock_manager,
+        CAT_WAKING_UP_GIFT_CHANCE_ATTRIBUTE,
     )
     .clamp(MIN_UNIT_FLOAT, MAX_UNIT_FLOAT)
 }

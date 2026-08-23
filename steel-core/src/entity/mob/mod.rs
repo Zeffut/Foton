@@ -1345,6 +1345,33 @@ pub trait Mob: LivingEntity {
         self.set_velocity(DVec3::new(velocity.x * 0.6, velocity.y, velocity.z * 0.6));
     }
 
+    /// Turns toward `target`, no faster than the given limits.
+    ///
+    /// Vanilla parity: `Mob.lookAt(Entity, float, float)`. Unlike the look
+    /// control this applies at once, which is why vanilla uses it for a mob
+    /// that must be facing something by the end of the tick.
+    fn look_at(&self, target: &dyn Entity, max_y_rot_increase: f32, max_x_rot_increase: f32) {
+        let position = self.position();
+        let target_position = target.position();
+        let dx = target_position.x - position.x;
+        let dz = target_position.z - position.z;
+        let dy = if let Some(living) = target.as_living_entity() {
+            living.get_eye_y() - self.get_eye_y()
+        } else {
+            let target_box = target.bounding_box();
+            f64::midpoint(target_box.min(Axis::Y), target_box.max(Axis::Y)) - self.get_eye_y()
+        };
+
+        let horizontal = dx.hypot(dz);
+        let wanted_yaw = dz.atan2(dx).to_degrees() as f32 - 90.0;
+        let wanted_pitch = -(dy.atan2(horizontal).to_degrees()) as f32;
+        let (yaw, pitch) = self.rotation();
+        self.set_rotation((
+            rotlerp(yaw, wanted_yaw, max_y_rot_increase),
+            rotlerp(pitch, wanted_pitch, max_x_rot_increase),
+        ));
+    }
+
     /// Plays vanilla `LivingEntity.playAttackSound`.
     fn play_attack_sound(&self) {}
 

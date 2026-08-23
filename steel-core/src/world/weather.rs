@@ -267,6 +267,17 @@ impl World {
         environment::turtle_egg_hatch_chance(self.dimension_type, level_data.world_clocks())
     }
 
+    /// Returns the current vanilla `CAT_WAKING_UP_GIFT_CHANCE` environment
+    /// attribute.
+    ///
+    /// Vanilla reads this attribute at the cat's position; Steel resolves
+    /// environment attributes per dimension, and no vanilla source varies this
+    /// one within a dimension.
+    pub fn cat_waking_up_gift_chance(&self) -> f32 {
+        let level_data = self.level_data.read();
+        environment::cat_waking_up_gift_chance(self.dimension_type, level_data.world_clocks())
+    }
+
     /// Returns sky-layer light after the current sky darkening is subtracted.
     ///
     /// Mirrors vanilla `LevelReader.getEffectiveSkyBrightness` without allowing

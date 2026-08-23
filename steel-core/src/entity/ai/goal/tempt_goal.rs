@@ -14,6 +14,29 @@ const DEFAULT_STOP_DISTANCE: f64 = 2.5;
 
 type TemptItemPredicate = Box<dyn Fn(&ItemStack) -> bool + Send + Sync>;
 
+/// A subclass override of how easily the tempted mob is scared off.
+///
+/// Vanilla parity: the `TemptGoal.canScare` overrides of `Cat.CatTemptGoal` and
+/// `Ocelot.OcelotTemptGoal`, plus the `tick` override the cat pairs with it.
+/// Both need state of their own -- the cat remembers one chosen player -- so
+/// this is a trait rather than a bare closure.
+pub(crate) trait TemptScareRule: Send {
+    /// Runs after the goal's own tick.
+    ///
+    /// Vanilla parity: a `TemptGoal.tick` override.
+    fn tick(&mut self, _mob: &dyn PathfinderMob, _player: Option<&Arc<Player>>) {}
+
+    /// Decides vanilla `TemptGoal.canScare`.
+    ///
+    /// `base` is what the unmodified goal would answer.
+    fn can_scare(
+        &mut self,
+        mob: &dyn PathfinderMob,
+        player: Option<&Arc<Player>>,
+        base: bool,
+    ) -> bool;
+}
+
 pub struct TemptGoal {
     player: Option<Arc<Player>>,
     player_position: DVec3,
@@ -25,6 +48,7 @@ pub struct TemptGoal {
     items: TemptItemPredicate,
     can_scare: bool,
     stop_distance: f64,
+    scare_rule: Option<Box<dyn TemptScareRule>>,
 }
 
 impl TemptGoal {
@@ -55,7 +79,15 @@ impl TemptGoal {
             items: Box::new(items),
             can_scare,
             stop_distance,
+            scare_rule: None,
         }
+    }
+
+    /// Replaces vanilla `TemptGoal.canScare` with a subclass rule.
+    #[must_use]
+    pub(crate) fn with_scare_rule(mut self, rule: impl TemptScareRule + 'static) -> Self {
+        self.scare_rule = Some(Box::new(rule));
+        self
     }
 
     #[must_use]
@@ -67,8 +99,12 @@ impl TemptGoal {
         player.is_holding(&mut |item_stack| (self.items)(item_stack))
     }
 
-    const fn can_scare(&self) -> bool {
-        self.can_scare
+    fn can_scare(&mut self, mob: &dyn PathfinderMob) -> bool {
+        let base = self.can_scare;
+        let player = self.player.clone();
+        self.scare_rule
+            .as_mut()
+            .map_or(base, |rule| rule.can_scare(mob, player.as_ref(), base))
     }
 
     const fn targeting_conditions(range: f64) -> TargetingConditions {
@@ -133,7 +169,7 @@ impl Goal for TemptGoal {
     }
 
     fn can_continue_to_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        if self.can_scare() && !self.update_player_scare_state(mob) {
+        if self.can_scare(mob) && !self.update_player_scare_state(mob) {
             return false;
         }
 
@@ -155,7 +191,12 @@ impl Goal for TemptGoal {
     }
 
     fn tick(&mut self, mob: &dyn PathfinderMob) {
-        let Some(player) = &self.player else {
+        let player = self.player.clone();
+        if let Some(rule) = self.scare_rule.as_mut() {
+            rule.tick(mob, player.as_ref());
+        }
+
+        let Some(player) = player else {
             return;
         };
 

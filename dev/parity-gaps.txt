@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 76
+[entities] 74
 Allay
 Armadillo
 Axolotl
@@ -79,7 +79,6 @@ Breeze
 BreezeWindCharge
 Camel
 CamelHusk
-Cat
 CopperGolem
 Creaking
 Dolphin
@@ -110,7 +109,6 @@ MinecartCommandBlock
 MinecartSpawner
 Mule
 Nautilus
-Ocelot
 OminousItemSpawner
 Panda
 Parched
