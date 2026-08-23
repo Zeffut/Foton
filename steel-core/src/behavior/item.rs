@@ -18,6 +18,7 @@ use text_components::TextComponent;
 
 use crate::behavior::items::DefaultItemBehavior;
 use crate::behavior::{InteractionResult, UseItemContext, UseOnContext};
+use crate::block_entity::entities::{SignBlockEntity, SignText};
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
 use crate::player::{Player, player_inventory::EquipmentSwapResult};
@@ -122,6 +123,37 @@ pub fn potion_effects(contents: &PotionContents) -> Vec<(MobEffectRef, i32, i32)
     effects
 }
 
+/// An item that changes a sign's text when it is clicked on one.
+///
+/// Vanilla parity: the `SignApplicator` interface. The ink sacs, the dyes and
+/// honeycomb implement it and carry no `useOn` for signs of their own: the sign
+/// block drives them from `SignBlock.useItemOn`, which is also what enforces the
+/// waxed check and pays for the change out of the stack.
+pub trait SignApplicator {
+    /// Applies this item to one side of a sign, returning whether it changed.
+    ///
+    /// Vanilla parity: `SignApplicator.tryApplyToSign`. A no-op -- a second glow
+    /// ink sac on already glowing text -- is a refusal, and the caller then
+    /// neither consumes the item nor counts the interaction. Playing the sound
+    /// belongs to the implementation, as it does in vanilla.
+    fn try_apply_to_sign(
+        &self,
+        world: &Arc<World>,
+        sign: &SignBlockEntity,
+        is_front_text: bool,
+        stack: &ItemStack,
+        player: &Player,
+    ) -> bool;
+
+    /// Returns whether this item may be applied to the given side at all.
+    ///
+    /// Vanilla parity: `SignApplicator.canApplyToSign`, whose default refuses a
+    /// blank side -- there is nothing to recolor or make glow.
+    fn can_apply_to_sign(&self, text: &SignText, _stack: &ItemStack, _player: &Player) -> bool {
+        text.has_message()
+    }
+}
+
 /// Trait defining the behavior of an item.
 ///
 /// This trait handles dynamic/functional aspects of items:
@@ -147,6 +179,15 @@ pub trait ItemBehavior: Send + Sync {
     /// Called when this item is used on a block.
     fn use_on(&self, _context: &mut UseOnContext) -> InteractionResult {
         InteractionResult::Pass
+    }
+
+    /// Returns this behavior as a sign applicator, when it is one.
+    ///
+    /// Vanilla parity: the `itemStack.getItem() instanceof SignApplicator` test
+    /// in `SignBlock.useItemOn`. Steel has no class hierarchy to ask, so a
+    /// behavior that applies to signs says so here.
+    fn as_sign_applicator(&self) -> Option<&dyn SignApplicator> {
+        None
     }
 
     /// Called when this item is used (e.g. right click in air).

@@ -15,17 +15,19 @@ use steel_registry::blocks::properties::{
     BlockStateProperties, BoolProperty, Direction, EnumProperty, IntProperty,
 };
 use steel_registry::blocks::shapes::SupportType;
-use steel_registry::{vanilla_block_entity_types, vanilla_blocks};
+use steel_registry::{vanilla_block_entity_types, vanilla_blocks, vanilla_game_events};
+use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 
-use crate::behavior::InventoryAccess;
 use crate::behavior::block::{
     BlockBehavior, BlockEntityCreation, schedule_water_tick_if_waterlogged,
 };
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
-use crate::block_entity::{BlockEntityTicker, entities::SignBlockEntity};
+use crate::behavior::{ITEM_BEHAVIORS, InventoryAccess};
+use crate::block_entity::{BlockEntity as _, BlockEntityTicker, entities::SignBlockEntity};
 use crate::entity::Entity;
 use crate::player::Player;
+use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader, ScheduledTickAccess, World};
 
 /// Converts a rotation in degrees to a 16-segment rotation value (0-15).
@@ -202,27 +204,63 @@ fn can_wall_hanging_sign_survive(
     can_attach_clockwise || can_attach_counter
 }
 
-// TODO: Implement sign applicators (use_with_item):
-// - Dye items: Change sign text color (front or back based on player facing)
-//   - Check if sign is not waxed
-//   - Get the SignText for the side player is facing
-//   - If color differs from dye color, update it and consume the dye
-//   - Play DYE_USE sound
-// - Glow Ink Sac: Make sign text glow
-//   - Check if sign is not waxed
-//   - If text is not already glowing, set has_glowing_text = true
-//   - Consume the ink sac
-//   - Play GLOW_INK_SAC_USE sound
-// - Ink Sac: Remove glow from sign text
-//   - Check if sign is not waxed
-//   - If text is glowing, set has_glowing_text = false
-//   - Consume the ink sac
-//   - Play INK_SAC_USE sound
-// - Honeycomb: Wax the sign (prevents future edits)
-//   - If sign is not already waxed, set is_waxed = true
-//   - Consume the honeycomb
-//   - Play HONEYCOMB_WAX_ON sound
-//   - Spawn WAX_ON particles
+/// Lets the held item change the sign, when the item is a sign applicator.
+///
+/// Vanilla parity: `SignBlock.useItemOn`. The item itself decides what changes
+/// and plays its own sound; this is the half that guards the sign -- waxed, in
+/// use by someone else, blank -- and pays for the change.
+///
+/// Deviations, each a system Steel does not have yet:
+/// - vanilla calls `SignBlockEntity.executeClickCommandsIfPresent` on success.
+///   Steel's sign text carries no click events, so there is nothing to run.
+/// - vanilla awards `Stats.ITEM_USED`. Steel has no statistics registry.
+/// - vanilla's client-side arm has no counterpart; Steel is server only.
+fn try_apply_sign_applicator(
+    state: BlockStateId,
+    world: &Arc<World>,
+    pos: BlockPos,
+    player: &Player,
+    inv: &mut InventoryAccess,
+) -> InteractionResult {
+    let Some(block_entity) = world.get_block_entity(pos) else {
+        return InteractionResult::Pass;
+    };
+    let Some(sign) = block_entity.downcast_ref::<SignBlockEntity>() else {
+        return InteractionResult::Pass;
+    };
+
+    // Cloned rather than borrowed: the applicator only reads the stack, and
+    // holding the inventory lock across it would outlive its purpose.
+    let stack = inv.with_item(|item| item.clone());
+    let behavior = ITEM_BEHAVIORS.get_behavior(stack.item());
+    let Some(applicator) = behavior.as_sign_applicator() else {
+        return InteractionResult::TryEmptyHandInteraction;
+    };
+
+    let may_build = player.abilities.lock().may_build;
+    if !may_build || sign.is_waxed() || sign.is_other_player_editing(player.gameprofile.id) {
+        return InteractionResult::TryEmptyHandInteraction;
+    }
+
+    let is_front_text = is_facing_front_text(state, pos, player);
+    if !applicator.can_apply_to_sign(&sign.get_text(is_front_text), &stack, player)
+        || !applicator.try_apply_to_sign(world, sign, is_front_text, &stack, player)
+    {
+        return InteractionResult::TryEmptyHandInteraction;
+    }
+
+    world.game_event(
+        &vanilla_game_events::BLOCK_CHANGE,
+        pos,
+        &GameEventContext::new(Some(player), Some(sign.get_block_state())),
+    );
+    // Vanilla parity: `ItemStack.consume(1, player)`, which spares creative.
+    if !player.has_infinite_materials() {
+        inv.with_item(|item| item.shrink(1));
+    }
+
+    InteractionResult::Success
+}
 
 /// Attempts to open the sign editor for a player.
 ///
@@ -350,6 +388,19 @@ impl BlockBehavior for StandingSignBlock {
         )
     }
 
+    fn use_item_on(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+        _hand: InteractionHand,
+        _hit_result: &BlockHitResult,
+        inv: &mut InventoryAccess,
+    ) -> InteractionResult {
+        try_apply_sign_applicator(state, world, pos, player, inv)
+    }
+
     fn use_without_item(
         &self,
         state: BlockStateId,
@@ -444,6 +495,19 @@ impl BlockBehavior for WallSignBlock {
             block_entity_type,
             &vanilla_block_entity_types::SIGN,
         )
+    }
+
+    fn use_item_on(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+        _hand: InteractionHand,
+        _hit_result: &BlockHitResult,
+        inv: &mut InventoryAccess,
+    ) -> InteractionResult {
+        try_apply_sign_applicator(state, world, pos, player, inv)
     }
 
     fn use_without_item(
@@ -577,6 +641,19 @@ impl BlockBehavior for CeilingHangingSignBlock {
         )
     }
 
+    fn use_item_on(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+        _hand: InteractionHand,
+        _hit_result: &BlockHitResult,
+        inv: &mut InventoryAccess,
+    ) -> InteractionResult {
+        try_apply_sign_applicator(state, world, pos, player, inv)
+    }
+
     fn use_without_item(
         &self,
         state: BlockStateId,
@@ -691,6 +768,19 @@ impl BlockBehavior for WallHangingSignBlock {
         )
     }
 
+    fn use_item_on(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+        _hand: InteractionHand,
+        _hit_result: &BlockHitResult,
+        inv: &mut InventoryAccess,
+    ) -> InteractionResult {
+        try_apply_sign_applicator(state, world, pos, player, inv)
+    }
+
     fn use_without_item(
         &self,
         state: BlockStateId,
@@ -706,12 +796,25 @@ impl BlockBehavior for WallHangingSignBlock {
 
 #[cfg(test)]
 mod tests {
+    use glam::DVec3;
     use steel_registry::init_vanilla_registry;
+    use steel_registry::item_stack::ItemStack;
+    use steel_registry::{DyeColor, vanilla_items};
+    use steel_utils::ChunkPos;
+    use steel_utils::types::UpdateFlags;
+    use text_components::TextComponent;
 
     use super::*;
-    use crate::test_support::{TestLevel, fresh_test_world};
+    use crate::block_entity::entities::SignText;
+    use crate::bootstrap::init_globals_once;
+    use crate::test_support::{
+        TestLevel, TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk,
+    };
 
     const WATERLOGGED: &BoolProperty = &BlockStateProperties::WATERLOGGED;
+
+    const SIGN_POS: BlockPos = BlockPos::new(8, 64, 8);
+    const SIGN_PLAYER_ENTITY_ID: i32 = 4242;
 
     #[test]
     fn standing_sign_only_schedules_water_when_support_survives() {
@@ -808,5 +911,240 @@ mod tests {
                 )
                 .is_none()
         );
+    }
+
+    /// An oak sign standing in a loaded chunk, with a player next to it.
+    fn placed_sign(key: &'static str) -> (Arc<World>, Arc<Player>, BlockStateId) {
+        init_globals_once();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(SIGN_POS));
+        let state = vanilla_blocks::OAK_SIGN.default_state();
+        assert!(world.set_block(SIGN_POS, state, UpdateFlags::UPDATE_ALL));
+
+        let player =
+            TestPlayerBuilder::new(Arc::clone(&world), "SignTester", SIGN_PLAYER_ENTITY_ID).build();
+
+        (world, player, state)
+    }
+
+    /// The same sign with a line written on it.
+    ///
+    /// Both sides get one, because the default `canApplyToSign` refuses a blank
+    /// side and the player could be facing either one.
+    fn written_sign(key: &'static str) -> (Arc<World>, Arc<Player>, BlockStateId) {
+        let (world, player, state) = placed_sign(key);
+        let sign = world
+            .get_block_entity(SIGN_POS)
+            .expect("placing an oak sign creates its block entity");
+        let sign = sign
+            .downcast_ref::<SignBlockEntity>()
+            .expect("an oak sign carries a sign block entity");
+        for front in [true, false] {
+            let mut text = SignText::new();
+            text.set_message(0, TextComponent::plain("hello"));
+            sign.set_text(text, front);
+        }
+
+        (world, player, state)
+    }
+
+    /// Reads back whether the sign at [`SIGN_POS`] is waxed.
+    fn sign_is_waxed(world: &Arc<World>) -> bool {
+        let sign = world.get_block_entity(SIGN_POS).expect("sign block entity");
+        sign.downcast_ref::<SignBlockEntity>()
+            .expect("a sign")
+            .is_waxed()
+    }
+
+    /// Runs the four-argument `use_item_on` with `item` in the player's hand.
+    fn click_sign_holding(
+        world: &Arc<World>,
+        player: &Player,
+        state: BlockStateId,
+        item: ItemStack,
+    ) -> InteractionResult {
+        player.inventory.lock().set_selected_item(item);
+        let mut inv =
+            InventoryAccess::new(Arc::clone(&player.inventory), InteractionHand::MainHand);
+        let (x, y, z) = SIGN_POS.get_center();
+        StandingSignBlock::new(&vanilla_blocks::OAK_SIGN).use_item_on(
+            state,
+            world,
+            SIGN_POS,
+            player,
+            InteractionHand::MainHand,
+            &BlockHitResult {
+                location: DVec3::new(x, y, z),
+                direction: Direction::Up,
+                block_pos: SIGN_POS,
+                miss: false,
+                inside: false,
+                world_border_hit: false,
+            },
+            &mut inv,
+        )
+    }
+
+    /// Reads back the side of the sign the player is standing in front of.
+    fn faced_text(world: &Arc<World>, player: &Player, state: BlockStateId) -> SignText {
+        let sign = world.get_block_entity(SIGN_POS).expect("sign block entity");
+        let sign = sign.downcast_ref::<SignBlockEntity>().expect("a sign");
+        sign.get_text(is_facing_front_text(state, SIGN_POS, player))
+    }
+
+    #[test]
+    fn a_glow_ink_sac_makes_the_sign_text_glow_and_is_spent() {
+        let (world, player, state) = written_sign("sign_glow_ink_applies");
+        assert!(!faced_text(&world, &player, state).has_glowing_text);
+
+        let held = ItemStack::with_count(&vanilla_items::GLOW_INK_SAC, 2);
+        assert_eq!(
+            click_sign_holding(&world, &player, state, held),
+            InteractionResult::Success
+        );
+        assert!(faced_text(&world, &player, state).has_glowing_text);
+        assert_eq!(player.inventory.lock().get_selected_item().count(), 1);
+    }
+
+    #[test]
+    fn a_second_glow_ink_sac_on_glowing_text_changes_nothing_and_is_kept() {
+        let (world, player, state) = written_sign("sign_glow_ink_is_idempotent");
+        let held = ItemStack::with_count(&vanilla_items::GLOW_INK_SAC, 2);
+        assert_eq!(
+            click_sign_holding(&world, &player, state, held.clone()),
+            InteractionResult::Success
+        );
+
+        assert_eq!(
+            click_sign_holding(&world, &player, state, held),
+            InteractionResult::TryEmptyHandInteraction
+        );
+        assert_eq!(player.inventory.lock().get_selected_item().count(), 2);
+    }
+
+    #[test]
+    fn an_ink_sac_takes_the_glow_back_off() {
+        let (world, player, state) = written_sign("sign_ink_removes_glow");
+        assert_eq!(
+            click_sign_holding(
+                &world,
+                &player,
+                state,
+                ItemStack::new(&vanilla_items::GLOW_INK_SAC),
+            ),
+            InteractionResult::Success
+        );
+        assert!(faced_text(&world, &player, state).has_glowing_text);
+
+        assert_eq!(
+            click_sign_holding(
+                &world,
+                &player,
+                state,
+                ItemStack::new(&vanilla_items::INK_SAC),
+            ),
+            InteractionResult::Success
+        );
+        assert!(!faced_text(&world, &player, state).has_glowing_text);
+    }
+
+    #[test]
+    fn a_waxed_sign_refuses_both_ink_sacs() {
+        let (world, player, state) = written_sign("sign_waxed_refuses_ink");
+        {
+            let sign = world.get_block_entity(SIGN_POS).expect("sign block entity");
+            let sign = sign.downcast_ref::<SignBlockEntity>().expect("a sign");
+            assert!(sign.wax());
+        }
+
+        for item in [&vanilla_items::GLOW_INK_SAC, &vanilla_items::INK_SAC] {
+            let held = ItemStack::with_count(item, 3);
+            assert_eq!(
+                click_sign_holding(&world, &player, state, held),
+                InteractionResult::TryEmptyHandInteraction
+            );
+            assert!(!faced_text(&world, &player, state).has_glowing_text);
+            assert_eq!(player.inventory.lock().get_selected_item().count(), 3);
+        }
+    }
+
+    #[test]
+    fn a_dye_recolors_the_sign_text() {
+        let (world, player, state) = written_sign("sign_dye_recolors");
+        assert_eq!(faced_text(&world, &player, state).color, DyeColor::Black);
+
+        assert_eq!(
+            click_sign_holding(
+                &world,
+                &player,
+                state,
+                ItemStack::new(&vanilla_items::RED_DYE),
+            ),
+            InteractionResult::Success
+        );
+        assert_eq!(faced_text(&world, &player, state).color, DyeColor::Red);
+    }
+
+    #[test]
+    fn an_item_that_is_no_sign_applicator_falls_through_to_the_editor() {
+        let (world, player, state) = written_sign("sign_plain_item_falls_through");
+        assert_eq!(
+            click_sign_holding(
+                &world,
+                &player,
+                state,
+                ItemStack::new(&vanilla_items::STONE)
+            ),
+            InteractionResult::TryEmptyHandInteraction
+        );
+    }
+
+    /// A blank sign has nothing to make glow, but it can still be sealed.
+    ///
+    /// This is the split between the default `canApplyToSign` and honeycomb's
+    /// override of it.
+    #[test]
+    fn a_blank_sign_refuses_ink_but_accepts_honeycomb() {
+        let (world, player, state) = placed_sign("sign_blank_refuses_ink");
+        assert_eq!(
+            click_sign_holding(
+                &world,
+                &player,
+                state,
+                ItemStack::new(&vanilla_items::GLOW_INK_SAC),
+            ),
+            InteractionResult::TryEmptyHandInteraction
+        );
+        assert!(!faced_text(&world, &player, state).has_glowing_text);
+
+        assert_eq!(
+            click_sign_holding(
+                &world,
+                &player,
+                state,
+                ItemStack::new(&vanilla_items::HONEYCOMB),
+            ),
+            InteractionResult::Success
+        );
+        assert!(sign_is_waxed(&world));
+    }
+
+    /// Honeycomb waxes signs through the applicator path, not through its own
+    /// `use_on`: once the sign block claims `use_item_on`, the item's `use_on`
+    /// is never reached for a sign.
+    #[test]
+    fn honeycomb_waxes_a_sign_through_the_applicator_path() {
+        let (world, player, state) = written_sign("sign_honeycomb_waxes");
+        assert!(!sign_is_waxed(&world));
+        assert_eq!(
+            click_sign_holding(
+                &world,
+                &player,
+                state,
+                ItemStack::new(&vanilla_items::HONEYCOMB),
+            ),
+            InteractionResult::Success
+        );
+        assert!(sign_is_waxed(&world));
     }
 }

@@ -68,7 +68,39 @@ impl SignText {
         }
     }
 
+    /// Turns the glow on or off, reporting whether the flag actually moved.
+    ///
+    /// Vanilla parity: `SignText.setHasGlowingText`, which hands back the same
+    /// text object when the flag already matches. That identity is how vanilla's
+    /// caller learns nothing happened; Steel's `SignText` is edited in place, so
+    /// the answer is returned instead.
+    pub const fn set_has_glowing_text(&mut self, has_glowing_text: bool) -> bool {
+        if self.has_glowing_text == has_glowing_text {
+            return false;
+        }
+        self.has_glowing_text = has_glowing_text;
+        true
+    }
+
+    /// Recolors the text, reporting whether the color actually changed.
+    ///
+    /// Vanilla parity: `SignText.setColor`, with the same identity convention as
+    /// [`Self::set_has_glowing_text`].
+    pub fn set_color(&mut self, color: DyeColor) -> bool {
+        if self.color == color {
+            return false;
+        }
+        self.color = color;
+        true
+    }
+
     /// Checks if any line has text content.
+    ///
+    /// Vanilla parity: `SignText.hasMessage(Player)`.
+    ///
+    /// Deviation: vanilla reads the filtered or the raw lines depending on the
+    /// player's chat filtering setting. Steel's `SignText` keeps no filtered
+    /// copy of the lines, so there is no player to consult.
     #[must_use]
     pub fn has_message(&self) -> bool {
         self.messages.iter().any(|msg| {
@@ -223,12 +255,18 @@ impl SignBlockEntity {
     }
 
     /// Makes this sign waxed, returning whether its state changed.
+    ///
+    /// Vanilla parity: `SignBlockEntity.setWaxed(true)`, which marks the entity
+    /// updated so the new state reaches everyone watching.
     pub fn wax(&self) -> bool {
-        let mut sign = self.sign.lock();
-        if sign.is_waxed {
-            return false;
+        {
+            let mut sign = self.sign.lock();
+            if sign.is_waxed {
+                return false;
+            }
+            sign.is_waxed = true;
         }
-        sign.is_waxed = true;
+        self.mark_updated();
         true
     }
 
@@ -240,6 +278,46 @@ impl SignBlockEntity {
         } else {
             sign.back_text = text;
         }
+    }
+
+    /// Edits one side's text, returning whether anything changed.
+    ///
+    /// Vanilla parity: `SignBlockEntity.updateText` together with `setText`.
+    /// Vanilla's `SignText` is immutable and its setters return the same object
+    /// when the value already matches, so `setText`'s identity check is what
+    /// makes a no-op edit -- a second glow ink sac on already glowing text --
+    /// report no change. Steel's `SignText` is edited in place, so `edit` says
+    /// so itself. A real change marks the entity updated, as vanilla does.
+    pub fn update_text(&self, edit: impl FnOnce(&mut SignText) -> bool, front: bool) -> bool {
+        {
+            let mut sign = self.sign.lock();
+            let text = if front {
+                &mut sign.front_text
+            } else {
+                &mut sign.back_text
+            };
+            if !edit(text) {
+                return false;
+            }
+        }
+        self.mark_updated();
+        true
+    }
+
+    /// Persists this sign and pushes it to everyone who can see it.
+    ///
+    /// Vanilla parity: `SignBlockEntity.markUpdated`, which is `setChanged`
+    /// followed by `Level.sendBlockUpdated`. Steel sends block entity data as
+    /// its own packet, so the second half is `broadcast_block_entity_update`.
+    fn mark_updated(&self) {
+        self.set_changed();
+        let Some(world) = self.get_level() else {
+            return;
+        };
+        let Some(nbt) = self.get_update_tag() else {
+            return;
+        };
+        world.broadcast_block_entity_update(self.get_block_pos(), self.get_type(), nbt);
     }
 }
 

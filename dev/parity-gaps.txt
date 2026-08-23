@@ -64,7 +64,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 30
+[items] 28
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -77,8 +77,6 @@ EmptyMapItem
 EndCrystalItem
 FishingRodItem
 GameMasterBlockItem
-GlowInkSacItem
-InkSacItem
 InstrumentItem
 Item
 KnowledgeBookItem
