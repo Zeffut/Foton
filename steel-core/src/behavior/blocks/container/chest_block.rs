@@ -21,6 +21,7 @@ use steel_registry::fluid::FluidStateExt;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
 use steel_registry::vanilla_block_entity_types;
+use steel_registry::vanilla_block_tags::BlockTag;
 use steel_utils::{BlockPos, BlockStateId, translations};
 use text_components::TextComponent;
 
@@ -43,6 +44,8 @@ use crate::world::{LevelReader, ScheduledTickAccess, World};
 #[block_behavior]
 pub struct ChestBlock {
     block: BlockRef,
+    /// Which chests this one pairs with.
+    pairing: ChestPairing,
     /// Which block entity to create.
     ///
     /// Vanilla parity: `ChestBlock.blockEntityType`, whose only reason to be
@@ -51,9 +54,23 @@ pub struct ChestBlock {
     block_entity_type: BlockEntityTypeRef,
 }
 
-const FACING: &EnumProperty<Direction> = &BlockStateProperties::HORIZONTAL_FACING;
-const TYPE: &EnumProperty<ChestType> = &BlockStateProperties::CHEST_TYPE;
+pub(super) const FACING: &EnumProperty<Direction> = &BlockStateProperties::HORIZONTAL_FACING;
+pub(super) const TYPE: &EnumProperty<ChestType> = &BlockStateProperties::CHEST_TYPE;
 const WATERLOGGED: &BoolProperty = &BlockStateProperties::WATERLOGGED;
+
+/// Which blocks a chest is willing to pair with.
+///
+/// Vanilla parity: `ChestBlock.chestCanConnectTo`, which the copper chests
+/// override so a chest pairs with any other copper chest rather than only with
+/// its own block. That override is what lets an exposed chest pair with an
+/// oxidized one and drag the pair down to the lower oxidation stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChestPairing {
+    /// The base rule: only the very same block.
+    SameBlock,
+    /// The copper rule: anything in the copper chest tag that has a chest type.
+    CopperChests,
+}
 
 /// Rows of nine slots in a single chest.
 const CHEST_ROWS: usize = 3;
@@ -74,6 +91,20 @@ impl ChestBlock {
     pub const fn new(block: BlockRef) -> Self {
         Self {
             block,
+            pairing: ChestPairing::SameBlock,
+            block_entity_type: &vanilla_block_entity_types::CHEST,
+        }
+    }
+
+    /// Creates the chest behavior a copper chest is built on.
+    ///
+    /// Vanilla parity: `CopperChestBlock`, which is a `ChestBlock` on the plain
+    /// chest block entity that pairs across the whole copper chest tag.
+    #[must_use]
+    pub const fn copper(block: BlockRef) -> Self {
+        Self {
+            block,
+            pairing: ChestPairing::CopperChests,
             block_entity_type: &vanilla_block_entity_types::CHEST,
         }
     }
@@ -84,7 +115,12 @@ impl ChestBlock {
     /// chest stays silent and the right half plays for both, shifted half a
     /// block toward its partner, so one chest makes one sound from the middle
     /// of the pair rather than two from its ends.
-    fn play_lid(world: &Arc<World>, pos: BlockPos, state: BlockStateId, sound: SoundEventRef) {
+    pub(super) fn play_lid(
+        world: &Arc<World>,
+        pos: BlockPos,
+        state: BlockStateId,
+        sound: SoundEventRef,
+    ) {
         let chest_type = state.get_value(TYPE);
         if chest_type == ChestType::Left {
             return;
@@ -119,6 +155,7 @@ impl ChestBlock {
     pub const fn trapped(block: BlockRef) -> Self {
         Self {
             block,
+            pairing: ChestPairing::SameBlock,
             block_entity_type: &vanilla_block_entity_types::TRAPPED_CHEST,
         }
     }
@@ -126,14 +163,20 @@ impl ChestBlock {
     /// Returns whether the given state is a chest this one can pair with.
     ///
     /// Vanilla parity: `ChestBlock.chestCanConnectTo`.
-    fn chest_can_connect_to(&self, state: BlockStateId) -> bool {
-        state.get_block() == self.block
+    pub(super) fn chest_can_connect_to(&self, state: BlockStateId) -> bool {
+        match self.pairing {
+            ChestPairing::SameBlock => state.get_block() == self.block,
+            ChestPairing::CopperChests => {
+                state.get_block().has_tag(&BlockTag::COPPER_CHESTS)
+                    && state.try_get_value(TYPE).is_some()
+            }
+        }
     }
 
     /// Returns the direction of the paired half, for a non-single chest.
     ///
     /// Vanilla parity: `ChestBlock.getConnectedDirection`.
-    fn connected_direction(state: BlockStateId) -> Direction {
+    pub(super) fn connected_direction(state: BlockStateId) -> Direction {
         let facing = state.get_value(FACING);
         if state.get_value(TYPE) == ChestType::Left {
             facing.rotate_y_clockwise()

@@ -50,6 +50,7 @@ mod leaf_litter_block;
 mod leaves_block;
 mod lily_pad_block;
 mod mangrove_propagule_block;
+mod mangrove_roots_block;
 mod mossy_carpet_block;
 pub(crate) mod multiface_block;
 mod mushroom_block;
@@ -59,6 +60,8 @@ mod nether_roots_block;
 mod nether_sprouts;
 mod nether_vines;
 mod nether_wart;
+mod netherrack_block;
+mod nylium_block;
 mod pitcher_crop;
 mod pointed_dripstone_block;
 mod potato;
@@ -136,6 +139,7 @@ pub use leaves_block::{
 };
 pub use lily_pad_block::LilyPadBlock;
 pub use mangrove_propagule_block::MangrovePropaguleBlock;
+pub use mangrove_roots_block::MangroveRootsBlock;
 pub use mossy_carpet_block::MossyCarpetBlock;
 pub use multiface_block::MultifaceBlock;
 pub(crate) use multiface_block::{MultifaceSpreadPos, MultifaceSpreadType, multiface_spread_pos};
@@ -145,6 +149,8 @@ pub use nether_fungus_block::NetherFungusBlock;
 pub use nether_roots_block::NetherRootsBlock;
 pub use nether_sprouts::NetherSproutsBlock;
 pub use nether_wart::NetherWartBlock;
+pub use netherrack_block::NetherrackBlock;
+pub use nylium_block::NyliumBlock;
 pub use pitcher_crop::PitcherCropBlock;
 pub use pointed_dripstone_block::{
     PointedDripstoneBlock, SulfurSpikeBlock, find_stalactite_tip_above_cauldron,

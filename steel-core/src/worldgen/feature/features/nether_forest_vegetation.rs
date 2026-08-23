@@ -4,19 +4,21 @@ use super::super::prelude::*;
 use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
-    pub(in crate::worldgen::feature) fn place_nether_forest_vegetation_feature(
-        region: &mut WorldGenRegion<'_>,
+    /// Takes any `LevelAccessor` rather than only a worldgen region: bone meal
+    /// on nylium places this feature in a live world.
+    pub(crate) fn place_nether_forest_vegetation_feature(
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &NetherForestVegetationConfiguration,
         origin: BlockPos,
     ) -> bool {
-        let below_state = region.block_state(origin.below());
+        let below_state = level.get_block_state(origin.below());
         if !below_state.get_block().has_tag(&BlockTag::NYLIUM) {
             return false;
         }
 
-        if origin.y() < region.min_y() + 1 || origin.y() + 1 > region.max_y_exclusive() - 1 {
+        if origin.y() < level.min_y() + 1 || origin.y() + 1 > level.max_y_exclusive() - 1 {
             return false;
         }
 
@@ -31,18 +33,18 @@ impl FeatureDecorationRunner {
                     - random.next_i32_bounded(config.spread_width),
             );
             let state = Self::sample_block_state_provider(
-                region,
+                level,
                 registry,
                 random,
                 &config.state_provider,
                 final_pos,
             );
             let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
-            if region.block_state(final_pos).is_air()
-                && final_pos.y() > region.min_y()
-                && behavior.can_survive(state, region, final_pos)
+            if level.get_block_state(final_pos).is_air()
+                && final_pos.y() > level.min_y()
+                && behavior.can_survive(state, level, final_pos)
             {
-                let _ = region.set_block_state(final_pos, state, UpdateFlags::UPDATE_CLIENTS);
+                let _ = level.set_block_state(final_pos, state, UpdateFlags::UPDATE_CLIENTS);
                 placed += 1;
             }
         }

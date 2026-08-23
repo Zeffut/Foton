@@ -2,7 +2,6 @@
 
 use std::sync::{Arc, Weak};
 
-use glam::DVec3;
 use steel_macros::block_behavior;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
@@ -17,6 +16,7 @@ use steel_registry::{
 use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 
+use super::selectable_slot;
 use crate::behavior::{
     BlockBehavior, BlockEntityCreation, BlockHitResult, BlockPlaceContext, InteractionResult,
     InventoryAccess, PlacementSource,
@@ -40,10 +40,9 @@ pub struct ChiseledBookShelfBlock {
 const HORIZONTAL_FACING: &EnumProperty<Direction> = &BlockStateProperties::HORIZONTAL_FACING;
 
 impl ChiseledBookShelfBlock {
-    const PIXELS_PER_BLOCK_EDGE: f32 = 16.0;
     const BOOKS_PER_INTERACTION: i32 = 1;
-    const COLUMN_COUNT: i32 = 3;
-    const ROW_COUNT: i32 = 2;
+    const COLUMN_COUNT: usize = 3;
+    const ROW_COUNT: usize = 2;
     const SOUND_VOLUME: f32 = 1.0;
     const SOUND_PITCH: f32 = 1.0;
     const NO_COMPARATOR_OUTPUT: i32 = 0;
@@ -55,35 +54,15 @@ impl ChiseledBookShelfBlock {
         Self { block }
     }
 
-    fn section_index(normalized_coordinate: f64, section_count: i32) -> usize {
-        let targeted_pixel = normalized_coordinate as f32 * Self::PIXELS_PER_BLOCK_EDGE;
-        let section_size = Self::PIXELS_PER_BLOCK_EDGE / section_count as f32;
-        ((targeted_pixel / section_size).floor() as i32).clamp(0, section_count - 1) as usize
-    }
-
+    /// Vanilla parity: the `SelectableSlotContainer.getHitSlot` the chiseled
+    /// bookshelf inherits, read as two rows of three.
     fn hit_slot(state: BlockStateId, hit_result: &BlockHitResult) -> Option<usize> {
-        let facing = state.get_value(HORIZONTAL_FACING);
-        if hit_result.direction != facing {
-            return None;
-        }
-
-        let hit_face_origin = hit_result.direction.relative(hit_result.block_pos);
-        let relative_hit = hit_result.location
-            - DVec3::new(
-                f64::from(hit_face_origin.x()),
-                f64::from(hit_face_origin.y()),
-                f64::from(hit_face_origin.z()),
-            );
-        let horizontal_fraction = match facing {
-            Direction::North => 1.0 - relative_hit.x,
-            Direction::South => relative_hit.x,
-            Direction::West => relative_hit.z,
-            Direction::East => 1.0 - relative_hit.z,
-            Direction::Down | Direction::Up => return None,
-        };
-        let row = Self::section_index(1.0 - relative_hit.y, Self::ROW_COUNT);
-        let column = Self::section_index(horizontal_fraction, Self::COLUMN_COUNT);
-        Some(column + row * Self::COLUMN_COUNT as usize)
+        selectable_slot::hit_slot(
+            hit_result,
+            state.get_value(HORIZONTAL_FACING),
+            Self::ROW_COUNT,
+            Self::COLUMN_COUNT,
+        )
     }
 
     fn insert_sound(item: &ItemStack) -> SoundEventRef {
@@ -286,6 +265,7 @@ impl BlockBehavior for ChiseledBookShelfBlock {
 mod tests {
     use std::sync::Arc;
 
+    use glam::DVec3;
     use steel_registry::ItemStackTemplate;
     use steel_registry::blocks::shapes::is_shape_full_block;
     use steel_registry::data_components::components::ItemContainerContents;
@@ -307,7 +287,7 @@ mod tests {
     const INTERACTION_FACING: Direction = Direction::South;
     const COMPONENT_PLACER_FACING: Direction = Direction::South;
     const ARBITRARY_COMPARATOR_QUERY_DIRECTION: Direction = Direction::North;
-    const BLOCK_EDGE_IN_PIXELS: f64 = ChiseledBookShelfBlock::PIXELS_PER_BLOCK_EDGE as f64;
+    const BLOCK_EDGE_IN_PIXELS: f64 = selectable_slot::PIXELS_PER_BLOCK_EDGE as f64;
     const LEFT_COLUMN_HIT: f64 = 2.5 / BLOCK_EDGE_IN_PIXELS;
     const MIDDLE_COLUMN_HIT: f64 = 7.5 / BLOCK_EDGE_IN_PIXELS;
     const RIGHT_COLUMN_HIT: f64 = 13.0 / BLOCK_EDGE_IN_PIXELS;
@@ -398,7 +378,7 @@ mod tests {
             let state = state_facing(facing);
             for (column, horizontal_fraction) in column_hits.into_iter().enumerate() {
                 let top_slot = column;
-                let bottom_slot = column + ChiseledBookShelfBlock::COLUMN_COUNT as usize;
+                let bottom_slot = column + ChiseledBookShelfBlock::COLUMN_COUNT;
                 assert_hit_targets_slot(
                     state,
                     &bookshelf_hit(facing, horizontal_fraction, TOP_ROW_HIT),
