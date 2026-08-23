@@ -28,7 +28,7 @@ use crate::{
     entity::damage::DamageSource,
     level_data::RespawnData,
     player::{Player, PlayerRespawnConfig},
-    world::explosion::{ExplosionBlockInteraction, ExplosionSpec},
+    world::explosion::ExplosionSpec,
     world::{LevelReader, World, game_event::GameEventContext},
 };
 

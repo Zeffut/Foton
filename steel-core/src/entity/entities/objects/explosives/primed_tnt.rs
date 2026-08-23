@@ -19,7 +19,7 @@ use crate::entity::{
 };
 use crate::physics::MoverType;
 use crate::world::World;
-use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
+use crate::world::explosion::ExplosionSpec;
 
 /// Ticks a fuse burns for when TNT is lit normally.
 ///
