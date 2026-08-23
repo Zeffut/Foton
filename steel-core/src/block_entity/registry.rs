@@ -18,10 +18,11 @@ use super::SharedBlockEntity;
 use super::entities::{
     BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity,
     BrewingStandBlockEntity, BrushableBlockEntity, ChestBlockEntity, ChiseledBookShelfBlockEntity,
-    ComparatorBlockEntity, CrafterBlockEntity, DaylightDetectorBlockEntity, DispenserBlockEntity,
-    EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
-    JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
-    RawBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
+    ComparatorBlockEntity, CrafterBlockEntity, DaylightDetectorBlockEntity,
+    DecoratedPotBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
+    FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
+    PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, ShulkerBoxBlockEntity,
+    SignBlockEntity,
 };
 use crate::world::World;
 
@@ -202,11 +203,12 @@ impl BlockEntityRegistryLock {
 /// Access via deref: `BLOCK_ENTITIES.create(type, pos, state)`
 pub static BLOCK_ENTITIES: BlockEntityRegistryLock = BlockEntityRegistryLock(OnceLock::new());
 
-/// Registers the block entities behind the workstations.
+/// Registers the block entities that arrived after the first wave.
 ///
 /// Split out of `init_block_entities` only to keep that function under the
-/// line limit; there is nothing these two share beyond being late arrivals.
-fn register_workstations(registry: &mut BlockEntityRegistry) {
+/// line limit; there is nothing these share beyond being late arrivals, which
+/// is why the name says when rather than what.
+fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
     registry.register(&vanilla_block_entity_types::BANNER, |level, pos, state| {
         Arc::new(BannerBlockEntity::new(level, pos, state))
     });
@@ -218,6 +220,11 @@ fn register_workstations(registry: &mut BlockEntityRegistry) {
     registry.register(&vanilla_block_entity_types::CRAFTER, |level, pos, state| {
         Arc::new(CrafterBlockEntity::new(level, pos, state))
     });
+
+    registry.register(
+        &vanilla_block_entity_types::DECORATED_POT,
+        |level, pos, state| Arc::new(DecoratedPotBlockEntity::new(level, pos, state)),
+    );
 }
 
 /// Initializes the global block entity registry.
@@ -301,7 +308,7 @@ pub fn init_block_entities() {
             Arc::new(DispenserBlockEntity::new_dropper(level, pos, state))
         });
 
-        register_workstations(&mut registry);
+        register_late_arrivals(&mut registry);
 
         registry.register(&vanilla_block_entity_types::HOPPER, |level, pos, state| {
             Arc::new(HopperBlockEntity::new(level, pos, state))

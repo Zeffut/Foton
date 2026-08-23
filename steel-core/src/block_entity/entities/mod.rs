@@ -11,6 +11,7 @@ mod chiseled_bookshelf;
 mod comparator;
 mod crafter;
 mod daylight_detector;
+mod decorated_pot;
 mod dispenser;
 mod end_gateway;
 mod end_portal;
@@ -47,6 +48,9 @@ pub use crafter::{
     CrafterContainer, CrafterDataSlots,
 };
 pub use daylight_detector::DaylightDetectorBlockEntity;
+pub use decorated_pot::{
+    DECORATED_POT_SLOTS, DecoratedPotBlockEntity, EVENT_POT_WOBBLES, WobbleStyle,
+};
 pub use dispenser::{DISPENSER_SLOTS, DispenserBlockEntity, DispenserContainer};
 pub use end_gateway::EndGatewayBlockEntity;
 pub use end_portal::EndPortalBlockEntity;
