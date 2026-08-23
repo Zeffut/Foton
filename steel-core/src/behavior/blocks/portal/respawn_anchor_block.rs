@@ -27,7 +27,7 @@ use crate::{
     entity::damage::DamageSource,
     level_data::RespawnData,
     player::{Player, PlayerRespawnConfig},
-    world::explosion::ExplosionBlockInteraction,
+    world::explosion::{ExplosionBlockInteraction, ExplosionSpec},
     world::{LevelReader, World, game_event::GameEventContext},
 };
 
@@ -62,12 +62,15 @@ impl RespawnAnchorBlock {
         );
         let damage_source = DamageSource::environment(&vanilla_damage_types::BAD_RESPAWN_POINT);
         world.explode(
-            None,
-            Some(damage_source),
+            ExplosionSpec::new(
+                None,
+                None,
+                Some(damage_source),
+                5.0,
+                true,
+                ExplosionBlockInteraction::Destroy,
+            ),
             center,
-            5.0,
-            true,
-            ExplosionBlockInteraction::Destroy,
         );
     }
 

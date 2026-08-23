@@ -167,6 +167,7 @@ impl TntMinecartEntity {
             ExplosionSpec::new(
                 Some(self.id()),
                 None,
+                None,
                 power as f32,
                 false,
                 ExplosionBlockInteraction::Destroy,

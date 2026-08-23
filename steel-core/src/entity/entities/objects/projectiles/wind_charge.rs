@@ -218,7 +218,8 @@ impl WindChargeEntity {
     fn explode(&self, world: &Arc<World>, position: DVec3) {
         world.explode_sparing(
             ExplosionSpec {
-                source_entity_id: Some(self.id()),
+                direct_entity_id: Some(self.id()),
+                causing_entity_id: self.get_owner().map(|owner| owner.id()),
                 // Vanilla parity: `WindCharge.explode` passes a null damage source.
                 damage_source: None,
                 radius: BURST_RADIUS,

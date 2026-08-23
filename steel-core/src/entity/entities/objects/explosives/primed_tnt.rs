@@ -18,7 +18,7 @@ use crate::entity::{
 };
 use crate::physics::MoverType;
 use crate::world::World;
-use crate::world::explosion::ExplosionBlockInteraction;
+use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
 
 /// Ticks a fuse burns for when TNT is lit normally.
 ///
@@ -152,12 +152,15 @@ impl PrimedTntEntity {
             position.z,
         );
         world.explode(
-            Some(self.id()),
-            None,
+            ExplosionSpec::new(
+                Some(self.id()),
+                self.state.lock().owner_id,
+                None,
+                power,
+                false,
+                ExplosionBlockInteraction::Destroy,
+            ),
             center,
-            power,
-            false,
-            ExplosionBlockInteraction::Destroy,
         );
     }
 }

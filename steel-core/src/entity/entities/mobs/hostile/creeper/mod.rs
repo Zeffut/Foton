@@ -27,7 +27,7 @@ use crate::entity::{
     MobBase, PathfinderMob, RemovalReason,
 };
 use crate::world::World;
-use crate::world::explosion::ExplosionBlockInteraction;
+use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
 use std::sync::Arc;
 use steel_utils::BlockPos;
 
@@ -203,13 +203,18 @@ impl CreeperEntity {
             return;
         };
         let multiplier = if self.is_powered() { 2.0 } else { 1.0 };
+        // A creeper is its own cause: vanilla's `getIndirectSourceEntity`
+        // returns the source unchanged when it is a living entity.
         world.explode(
-            Some(self.id()),
-            None,
+            ExplosionSpec::new(
+                Some(self.id()),
+                Some(self.id()),
+                None,
+                EXPLOSION_RADIUS * multiplier,
+                false,
+                ExplosionBlockInteraction::Destroy,
+            ),
             self.position(),
-            EXPLOSION_RADIUS * multiplier,
-            false,
-            ExplosionBlockInteraction::Destroy,
         );
         // TODO: vanilla also leaves a lingering cloud of whatever effects the
         // creeper carried.

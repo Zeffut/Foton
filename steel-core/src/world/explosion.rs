@@ -38,12 +38,24 @@ const RAY_STEP_COST: f32 = 0.225_000_01;
 
 /// An explosion, apart from where it lands.
 ///
-/// Only [`World::explode_sparing`] takes this: the plain
-/// [`World::explode`] keeps its arguments loose because every caller but one
-/// passes them straight through.
+/// Both [`World::explode`] and [`World::explode_sparing`] take one. It used to
+/// be the sparing variant's alone, with the plain one keeping its arguments
+/// loose; splitting the source entity into vanilla's direct/causing pair
+/// pushed that list past what one call can carry legibly.
 pub struct ExplosionSpec {
-    /// The entity that set it off, if any.
-    pub source_entity_id: Option<i32>,
+    /// The entity the blast came out of, if any: the TNT, the fireball, the
+    /// creeper.
+    ///
+    /// Vanilla parity: `Explosion.getDirectSourceEntity`.
+    pub direct_entity_id: Option<i32>,
+    /// Who is ultimately to blame, if anyone: the player who lit the TNT, the
+    /// ghast that spat the fireball, or the creeper itself.
+    ///
+    /// Vanilla parity: `Explosion.getIndirectSourceEntity`, which is a switch
+    /// over the source's class. Steel has no class hierarchy to switch on, so
+    /// each caller passes its own answer -- a primed TNT its owner, a
+    /// projectile its living shooter, a living entity itself.
+    pub causing_entity_id: Option<i32>,
     /// What the blast hurts entities with.
     pub damage_source: Option<DamageSource>,
     /// How far it reaches.
@@ -68,14 +80,16 @@ impl ExplosionSpec {
     /// An ordinary blast: it hurts, and it shoves as hard as TNT.
     #[must_use]
     pub const fn new(
-        source_entity_id: Option<i32>,
+        direct_entity_id: Option<i32>,
+        causing_entity_id: Option<i32>,
         damage_source: Option<DamageSource>,
         radius: f32,
         fire: bool,
         interaction: ExplosionBlockInteraction,
     ) -> Self {
         Self {
-            source_entity_id,
+            direct_entity_id,
+            causing_entity_id,
             damage_source,
             radius,
             fire,
@@ -86,32 +100,36 @@ impl ExplosionSpec {
     }
 }
 
+/// The damage a blast deals when its caller does not name one.
+///
+/// Vanilla parity: `DamageSources.explosion(entity, cause)`, which picks
+/// `player_explosion` when the blast is attributed to someone and `explosion`
+/// when it is not. The two are not interchangeable: only `player_explosion` is
+/// in `can_break_armor_stand`, and it carries the `explosion.player` death
+/// message. Despite the name it is not about players -- vanilla's
+/// `getIndirectSourceEntity` returns a living source unchanged, so a creeper is
+/// its own cause and its blast is a `player_explosion` too. A TNT nobody lit is
+/// the ordinary kind.
+#[must_use]
+fn default_explosion_damage_source(
+    direct_entity_id: Option<i32>,
+    causing_entity_id: Option<i32>,
+) -> DamageSource {
+    DamageSource::environment(
+        if direct_entity_id.is_some() && causing_entity_id.is_some() {
+            &vanilla_damage_types::PLAYER_EXPLOSION
+        } else {
+            &vanilla_damage_types::EXPLOSION
+        },
+    )
+}
+
 impl World {
     /// Detonates an explosion and returns the positions it destroyed.
     ///
     /// Vanilla parity: `ServerExplosion.explode`.
-    pub fn explode(
-        self: &Arc<Self>,
-        source_entity_id: Option<i32>,
-        damage_source: Option<DamageSource>,
-        center: DVec3,
-        radius: f32,
-        fire: bool,
-        interaction: ExplosionBlockInteraction,
-    ) -> Vec<BlockPos> {
-        self.explode_sparing(
-            ExplosionSpec {
-                source_entity_id,
-                damage_source,
-                radius,
-                fire,
-                interaction,
-                damages_entities: true,
-                knockback_multiplier: 1.0,
-            },
-            center,
-            &|_pos| true,
-        )
+    pub fn explode(self: &Arc<Self>, spec: ExplosionSpec, center: DVec3) -> Vec<BlockPos> {
+        self.explode_sparing(spec, center, &|_pos| true)
     }
 
     /// Detonates an explosion that leaves some blocks standing.
@@ -228,7 +246,8 @@ impl World {
     ///
     /// Vanilla parity: `ServerExplosion.hurtEntities`.
     fn hurt_entities_from_explosion(self: &Arc<Self>, spec: &ExplosionSpec, center: DVec3) {
-        let (source_entity_id, radius) = (spec.source_entity_id, spec.radius);
+        let (direct_entity_id, causing_entity_id) = (spec.direct_entity_id, spec.causing_entity_id);
+        let radius = spec.radius;
         if radius < 1.0e-5 {
             return;
         }
@@ -245,14 +264,19 @@ impl World {
         let mut damage_source = spec
             .damage_source
             .clone()
-            .unwrap_or_else(|| DamageSource::environment(&vanilla_damage_types::EXPLOSION));
-        damage_source = damage_source.with_source_position(center);
-        if let Some(id) = source_entity_id {
-            damage_source = damage_source.with_causing_entity(id).with_direct_entity(id);
+            .unwrap_or_else(|| default_explosion_damage_source(direct_entity_id, causing_entity_id))
+            .with_source_position(center);
+        if let Some(id) = direct_entity_id {
+            damage_source = damage_source.with_direct_entity(id);
+        }
+        if let Some(id) = causing_entity_id {
+            damage_source = damage_source.with_causing_entity(id);
         }
 
         for entity in self.get_entities_in_aabb(&aabb) {
-            if Some(entity.id()) == source_entity_id {
+            // Vanilla parity: `hurtEntities` asks the level for everything
+            // *except* the source, so a blast never hits what it came out of.
+            if Some(entity.id()) == direct_entity_id {
                 continue;
             }
             let distance = entity.position().distance(center) / reach;
@@ -356,5 +380,58 @@ impl World {
                 UpdateFlags::UPDATE_ALL,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_explosion_damage_source;
+
+    /// A blast somebody is answerable for is a different damage type from one
+    /// nobody is, and the difference is load-bearing: `player_explosion` is in
+    /// `can_break_armor_stand` and `explosion` is not.
+    #[test]
+    fn an_attributed_blast_and_an_unattributed_one_are_different_damage_types() {
+        let attributed = default_explosion_damage_source(Some(7), Some(3));
+        let unattributed = default_explosion_damage_source(Some(7), None);
+        assert_eq!(attributed.damage_type.key.path, "player_explosion");
+        assert_eq!(unattributed.damage_type.key.path, "explosion");
+    }
+
+    /// A blast with no entity at all -- a respawn anchor, a bed -- is the
+    /// ordinary kind, never the attributed one.
+    #[test]
+    fn a_blast_with_no_entity_behind_it_is_the_ordinary_kind() {
+        let source = default_explosion_damage_source(None, None);
+        assert_eq!(source.damage_type.key.path, "explosion");
+    }
+
+    /// The shooter is answerable for a fireball, but the fireball is what
+    /// arrived. Vanilla keeps the two apart, and `DamageSource::is_direct`
+    /// reads exactly that difference -- before this pair existed every blast
+    /// claimed to be direct.
+    #[test]
+    fn a_shot_blast_credits_the_shooter_without_claiming_to_be_direct() {
+        let source = default_explosion_damage_source(Some(41), Some(9))
+            .with_direct_entity(41)
+            .with_causing_entity(9);
+        assert_eq!(source.direct_entity_id, Some(41));
+        assert_eq!(source.causing_entity_id, Some(9));
+        assert!(
+            !source.is_direct(),
+            "a shot blast reported itself as direct"
+        );
+    }
+
+    /// A creeper is its own cause, so its blast is attributed and direct at
+    /// once. This is the case that makes the `player_explosion` name
+    /// misleading, and it is worth pinning so nobody "fixes" it back.
+    #[test]
+    fn a_creeper_is_its_own_cause_and_its_blast_is_both_attributed_and_direct() {
+        let source = default_explosion_damage_source(Some(5), Some(5))
+            .with_direct_entity(5)
+            .with_causing_entity(5);
+        assert_eq!(source.damage_type.key.path, "player_explosion");
+        assert!(source.is_direct(), "a creeper's own blast was not direct");
     }
 }

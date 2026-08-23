@@ -29,7 +29,7 @@ use crate::entity::{
     MobEffectInstance, Projectile, ProjectileBase, ProjectileHit, RemovalReason, SharedEntity,
 };
 use crate::world::World;
-use crate::world::explosion::ExplosionBlockInteraction;
+use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
 
 /// Velocity a charged skull keeps each tick.
 ///
@@ -267,12 +267,15 @@ impl Projectile for WitherSkullEntity {
             ExplosionBlockInteraction::Keep
         };
         world.explode(
-            Some(self.id()),
-            None,
+            ExplosionSpec::new(
+                Some(self.id()),
+                self.get_owner().map(|owner| owner.id()),
+                None,
+                EXPLOSION_RADIUS,
+                false,
+                interaction,
+            ),
             self.position(),
-            EXPLOSION_RADIUS,
-            false,
-            interaction,
         );
         self.set_removed(RemovalReason::Discarded);
     }

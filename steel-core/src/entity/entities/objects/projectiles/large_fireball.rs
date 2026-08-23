@@ -28,7 +28,7 @@ use crate::entity::{
     Projectile, ProjectileBase, ProjectileHit, RemovalReason, SharedEntity,
 };
 use crate::world::World;
-use crate::world::explosion::ExplosionBlockInteraction;
+use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
 
 /// Blast power a fireball carries unless something says otherwise.
 ///
@@ -139,12 +139,15 @@ impl LargeFireballEntity {
             ExplosionBlockInteraction::Keep
         };
         world.explode(
-            Some(self.id()),
-            None,
+            ExplosionSpec::new(
+                Some(self.id()),
+                self.get_owner().map(|owner| owner.id()),
+                None,
+                self.explosion_power() as f32,
+                mob_griefing,
+                interaction,
+            ),
             self.position(),
-            self.explosion_power() as f32,
-            mob_griefing,
-            interaction,
         );
     }
 }
