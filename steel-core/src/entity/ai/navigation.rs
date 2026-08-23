@@ -703,14 +703,7 @@ fn block_center(pos: BlockPos) -> DVec3 {
 }
 
 fn path_move_target(path: &Path, mob_bounding_box_width: f64) -> Option<DVec3> {
-    path.next_node().map(|node| {
-        let offset = f64::from(fast_floor(mob_bounding_box_width + 1.0)) * 0.5;
-        DVec3::new(
-            f64::from(node.x) + offset,
-            f64::from(node.y),
-            f64::from(node.z) + offset,
-        )
-    })
+    path.next_entity_pos(mob_bounding_box_width)
 }
 
 const fn can_cut_corner(path_type: PathType) -> bool {

@@ -420,6 +420,11 @@ impl LivingEntity for EndermanEntity {
 }
 
 impl Mob for EndermanEntity {
+    /// Vanilla parity: `EnderMan` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

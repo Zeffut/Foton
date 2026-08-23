@@ -1,3 +1,5 @@
+use crate::entity::entities::RabbitVariant;
+
 /// Vanilla `EntitySpawnReason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntitySpawnReason {
@@ -37,6 +39,56 @@ impl EntitySpawnReason {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpawnGroupData {
     AgeableMob(AgeableMobGroupData),
+    /// Vanilla `Rabbit.RabbitGroupData`, which is an `AgeableMobGroupData` that
+    /// also carries the variant every rabbit of the group is born with.
+    Rabbit(RabbitGroupData),
+}
+
+impl SpawnGroupData {
+    /// Returns the ageable layer every group data kind extends.
+    #[must_use]
+    pub const fn ageable(&self) -> &AgeableMobGroupData {
+        match self {
+            Self::AgeableMob(group_data) => group_data,
+            Self::Rabbit(group_data) => &group_data.ageable,
+        }
+    }
+
+    /// Returns the ageable layer for mutation.
+    #[must_use]
+    pub const fn ageable_mut(&mut self) -> &mut AgeableMobGroupData {
+        match self {
+            Self::AgeableMob(group_data) => group_data,
+            Self::Rabbit(group_data) => &mut group_data.ageable,
+        }
+    }
+}
+
+/// Vanilla `Rabbit.RabbitGroupData`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RabbitGroupData {
+    ageable: AgeableMobGroupData,
+    variant: RabbitVariant,
+}
+
+impl RabbitGroupData {
+    /// Creates group data for a rabbit spawn group.
+    ///
+    /// Vanilla parity: `RabbitGroupData(variant)` calls `super(1.0F)`, so every
+    /// rabbit after the first in a group rolls a guaranteed baby chance.
+    #[must_use]
+    pub const fn new(variant: RabbitVariant) -> Self {
+        Self {
+            ageable: AgeableMobGroupData::with_baby_spawn_chance(1.0),
+            variant,
+        }
+    }
+
+    /// Returns the variant shared by the group.
+    #[must_use]
+    pub const fn variant(self) -> RabbitVariant {
+        self.variant
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

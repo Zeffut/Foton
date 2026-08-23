@@ -240,6 +240,11 @@ impl LivingEntity for WitherSkeletonEntity {
 }
 
 impl Mob for WitherSkeletonEntity {
+    /// Vanilla parity: `WitherSkeleton` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is

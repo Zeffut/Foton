@@ -352,6 +352,17 @@ pub trait Mob: LivingEntity {
         is_saddled
     }
 
+    /// Returns whether this mob is a vanilla `Monster`.
+    ///
+    /// Vanilla parity: the `instanceof Monster` tests that goals such as
+    /// `Rabbit.RabbitAvoidEntityGoal` and `Fox` use. Steel has no entity class
+    /// hierarchy, so each mob that vanilla derives from `Monster` says so here.
+    /// A slime is deliberately not one: vanilla derives it from `AbstractCubeMob`
+    /// and only tags it `Enemy`, which is why a rabbit never flees a slime.
+    fn is_monster(&self) -> bool {
+        false
+    }
+
     fn custom_server_ai_step(&self) {}
 
     /// Runs vanilla `Mob.ate`, invoked after an eating goal resolves a block.
@@ -1405,6 +1416,15 @@ pub trait Mob: LivingEntity {
     }
 
     fn set_wanted_position(&self, position: DVec3, speed_modifier: f64) {
+        self.default_set_wanted_position(position, speed_modifier);
+    }
+
+    /// The body of [`Self::set_wanted_position`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob whose move control overrides
+    /// `setWantedPosition` -- the rabbit, which forces a swim speed -- calls
+    /// this for the rest.
+    fn default_set_wanted_position(&self, position: DVec3, speed_modifier: f64) {
         if let Some(vehicle) = self.controlled_mob_vehicle()
             && let Some(mob) = vehicle.as_mob()
         {
@@ -1458,6 +1478,15 @@ pub trait Mob: LivingEntity {
     }
 
     fn tick_move_control(&self) {
+        self.default_tick_move_control();
+    }
+
+    /// The body of [`Self::tick_move_control`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob whose move control only prefixes the base
+    /// tick -- the rabbit, which picks its jump speed first -- calls this for
+    /// the rest.
+    fn default_tick_move_control(&self) {
         let move_control = {
             let mut controls = self.mob_base().controls().lock();
             let move_control = controls.move_control;

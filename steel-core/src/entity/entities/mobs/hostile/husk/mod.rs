@@ -184,6 +184,11 @@ impl LivingEntity for HuskEntity {
 }
 
 impl Mob for HuskEntity {
+    /// Vanilla parity: `Husk` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: `Monster::checkSurfaceMonstersSpawnRules`. A husk needs

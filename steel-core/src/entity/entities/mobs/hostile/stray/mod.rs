@@ -231,6 +231,11 @@ impl LivingEntity for StrayEntity {
 }
 
 impl Mob for StrayEntity {
+    /// Vanilla parity: `Stray` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: `Stray::checkStraySpawnRules`, which looks for sky past

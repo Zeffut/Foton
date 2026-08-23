@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 77
+[entities] 76
 Allay
 Armadillo
 Axolotl
@@ -122,7 +122,6 @@ Pillager
 Player
 PolarBear
 Pufferfish
-Rabbit
 Ravager
 Shulker
 SkeletonHorse

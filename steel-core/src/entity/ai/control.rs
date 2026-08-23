@@ -130,6 +130,24 @@ impl JumpControl {
         self.jump = true;
     }
 
+    /// Returns whether a jump is pending without consuming it.
+    ///
+    /// Vanilla parity: `Rabbit.RabbitJumpControl.wantJump`, which reads the
+    /// protected `jump` field of its superclass.
+    #[must_use]
+    pub const fn want_jump(self) -> bool {
+        self.jump
+    }
+
+    /// Clears a pending jump without touching `LivingEntity.jumping`.
+    ///
+    /// Vanilla parity: the `this.jump = false` of
+    /// `Rabbit.RabbitJumpControl.tick`, which replaces the base `tick` outright
+    /// so a rabbit that is not jumping is never told to stop jumping.
+    pub const fn clear_jump(&mut self) {
+        self.jump = false;
+    }
+
     pub const fn tick(&mut self) -> bool {
         let jump = self.jump;
         self.jump = false;
@@ -140,6 +158,36 @@ impl JumpControl {
 impl Default for JumpControl {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The extra state a rabbit's jump control keeps on top of [`JumpControl`].
+///
+/// Vanilla parity: `Rabbit.RabbitJumpControl`. Vanilla swaps the whole control
+/// object out on the mob; Steel keeps one [`JumpControl`] in [`MobControls`] and
+/// lets the rabbit hold this beside it, so the shared control set stays the same
+/// for every other mob. The `tick` half lives on the rabbit because it calls
+/// back into `Rabbit.startJumping`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RabbitJumpControl {
+    can_jump: bool,
+}
+
+impl RabbitJumpControl {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { can_jump: false }
+    }
+
+    /// Vanilla parity: `Rabbit.RabbitJumpControl.canJump`.
+    #[must_use]
+    pub const fn can_jump(self) -> bool {
+        self.can_jump
+    }
+
+    /// Vanilla parity: `Rabbit.RabbitJumpControl.setCanJump`.
+    pub const fn set_can_jump(&mut self, can_jump: bool) {
+        self.can_jump = can_jump;
     }
 }
 

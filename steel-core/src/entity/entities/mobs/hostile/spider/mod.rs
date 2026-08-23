@@ -261,6 +261,11 @@ impl LivingEntity for SpiderEntity {
 }
 
 impl Mob for SpiderEntity {
+    /// Vanilla parity: `Spider` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is

@@ -447,6 +447,11 @@ impl LivingEntity for DrownedEntity {
 }
 
 impl Mob for DrownedEntity {
+    /// Vanilla parity: `Drowned` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }
