@@ -31,7 +31,7 @@ started; the second is where `dev/parity-gaps.txt` stands now.
 |---|---|---|
 | blocks | 63 | 36 |
 | items | 38 | 19 |
-| entities | 142 | 86 |
+| entities | 142 | 72 |
 
 **Entities are still where the distance is**, and most of what remains there is
 mobs. Two thirds of the item gap and nearly half the block gap have gone.
@@ -200,15 +200,22 @@ cannot.
 - [ ] **Villager, trading, iron golem.** One mob unlocks a whole economy, and
       the zombie villager behind it.
 - [ ] **Mounts**: horse, donkey, mule, skeleton horse, llama, camel.
-- [ ] **The rest of the passive roster**: cat, ocelot, fox, rabbit, panda,
-      goat, turtle, dolphin, parrot, bee, axolotl, frog, sniffer, armadillo.
+- [x] **The tameable pets**: wolf, cat, ocelot, parrot, fox, on a shared
+      `TamableAnimal` layer. Named gaps live in the source: no polar bear,
+      turtle or village for the fox's three remaining goals; no spawn-group
+      data, so a wolf pack and a fox litter re-read the biome instead of
+      inheriting one coat; and a shoulder-riding parrot is returned to the
+      world on logout rather than saved with its owner.
+- [ ] **The rest of the passive roster**: rabbit, panda, goat, turtle, dolphin,
+      bee, axolotl, frog, sniffer, armadillo.
 - [ ] **The rest of the hostile roster**: blaze, ghast, phantom, guardian,
       shulker, piglin and brute, hoglin, endermite, vex, breeze, creaking.
 - [ ] **Raids**: evoker, vindicator, pillager, ravager, illusioner.
 
-Ghast and phantom need flying navigation, which does not exist yet; that is one
-piece of work that unlocks several mobs at once, and should come before the
-mobs that need it.
+Flying navigation now exists -- `FlyNodeEvaluator`, `NavigationKind::Flying`
+and `FlyingMoveControl` arrived with the parrot -- so ghast, phantom and bee are
+no longer blocked on it. Aquatic navigation is the equivalent piece still
+missing.
 
 ### 3. The end of the game
 
