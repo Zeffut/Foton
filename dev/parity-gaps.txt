@@ -97,10 +97,9 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 91
+[entities] 90
 Allay
 Armadillo
-ArmorStand
 Axolotl
 Bee
 Blaze

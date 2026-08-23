@@ -1,7 +1,12 @@
 import io
+import os
 import re
 
-ROOT = "/root/SteelMC/"
+# The repository this script belongs to, rather than a fixed path: it also
+# runs from a git worktree, and a hard-coded root made a worktree read the
+# main checkout's generated file and write the main checkout's ledger --
+# silently producing a ledger for the wrong tree.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
 GEN = ROOT + "steel-core/src/behavior/generated/parity.rs"
 LEDGER = ROOT + "dev/parity-gaps.txt"
 
