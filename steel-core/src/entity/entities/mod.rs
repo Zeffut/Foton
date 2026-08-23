@@ -6,9 +6,9 @@ mod raw;
 
 pub use mobs::ambient::BatEntity;
 pub use mobs::hostile::{
-    CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HuskEntity, SilverfishEntity,
-    SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, WitchEntity, WitherSkeletonEntity,
-    ZombieEntity, ZombifiedPiglinEntity,
+    CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HuskEntity, MagmaCubeEntity,
+    SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, WitchEntity,
+    WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 pub use mobs::passive::{
     ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, SheepEntity, StriderEntity,

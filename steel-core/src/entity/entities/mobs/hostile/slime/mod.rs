@@ -1,15 +1,12 @@
 //! Slime entity.
 //!
-//! Vanilla parity: `Slime` and the `AbstractCubeMob` it inherits nearly
-//! everything from. A slime does not walk: it hops, steering by turning in
-//! place between hops, and it is the size that decides everything else -- its
-//! health, its speed, its hitbox, whether it hurts on contact, and how many
-//! smaller slimes it leaves behind.
+//! Vanilla parity: `Slime`, which is `AbstractCubeMob` plus four sounds and a
+//! spawn rule. The hopping, the size arithmetic and the splitting all live in
+//! [`super::cube_common`], which is what makes this file short.
 //!
-//! Steel has no swappable move control, so vanilla's `CubeMobMoveControl` lives
-//! here as an override of [`Mob::tick_move_control`] over state the goals set.
-//! The shape is the same: the goals ask for a direction and a speed, and the
-//! control decides when to jump.
+//! What is genuinely the slime's own is where it appears: swamps at night, and
+//! one chunk in ten deep underground. The second is why slime farms are dug
+//! where they are.
 
 use std::sync::{Arc, Weak};
 
@@ -19,20 +16,23 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_data::EntityPose;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::sound_event::SoundEventRef;
+use steel_registry::sound_events;
 use steel_registry::vanilla_biome_tags::BiomeTag;
 use steel_registry::vanilla_entity_data::SlimeEntityData;
-use steel_registry::{sound_events, vanilla_attributes};
 use steel_utils::locks::SyncMutex;
 use steel_utils::random::Random as _;
 use steel_utils::random::legacy_random::LegacyRandom;
-use steel_utils::{BlockPos, ChunkPos, Downcast as _, DowncastType, DowncastTypeKey};
 
+use super::cube_common::{
+    self, CubeAttackGoal, CubeFloatGoal, CubeKeepOnJumpingGoal, CubeLike, CubeRandomDirectionGoal,
+    CubeState,
+};
 use crate::entity::SharedEntity;
-use crate::entity::ai::goal::{Goal, GoalControls, HurtByTargetGoal, NearestAttackableTargetGoal};
+use crate::entity::ai::goal::{HurtByTargetGoal, NearestAttackableTargetGoal};
 use crate::entity::damage::DamageSource;
-use crate::entity::living_base::LivingTravelInput;
-use crate::entity::mob::rotlerp;
 use crate::entity::spawn_rules::check_mob_spawn_rules;
+use steel_utils::{BlockPos, ChunkPos, DowncastType, DowncastTypeKey};
+
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData, LivingEntity,
     LivingEntityBase, Mob, MobBase, PathfinderMob, SpawnGroupData, next_entity_id,
@@ -40,37 +40,6 @@ use crate::entity::{
 use crate::player::Player;
 use crate::world::{LevelReader as _, World};
 use steel_utils::types::Difficulty;
-
-/// Largest size a slime may be set to.
-///
-/// Vanilla parity: the `Mth.clamp(size, 1, 127)` of `setSize`.
-const MAX_SIZE: i32 = 127;
-
-/// Size at or below which a slime is harmless and squeaks.
-///
-/// Vanilla parity: `AbstractCubeMob.isTiny`.
-const TINY_SIZE: i32 = 1;
-
-/// Speed a slime of size one moves at.
-///
-/// Vanilla parity: the `0.2F` base of `setSize`.
-const BASE_SPEED: f64 = 0.2;
-
-/// Extra speed each size step adds.
-///
-/// Vanilla parity: the `0.1F * size` of `setSize`. A big slime is genuinely
-/// faster than a small one, which is why they are dangerous in the open.
-const SPEED_PER_SIZE: f64 = 0.1;
-
-/// How far a slime turns toward its target each tick while chasing.
-///
-/// Vanilla parity: the `10.0F` of `lookAt(target, 10.0F, 10.0F)`.
-const LOOK_TURN_RATE: f32 = 10.0;
-
-/// How far a slime turns toward its chosen heading each tick.
-///
-/// Vanilla parity: the `90.0F` of `CubeMobMoveControl.tick`.
-const TURN_RATE: f32 = 90.0;
 
 /// Height below which a slime spawns in a slime chunk.
 ///
@@ -108,21 +77,6 @@ pub struct SlimeEntity {
     cube: SyncMutex<CubeState>,
 }
 
-/// The hopping state vanilla splits between the mob and its move control.
-#[derive(Debug, Default)]
-struct CubeState {
-    /// Whether the slime was on the ground last tick, for the squash sound.
-    was_on_ground: bool,
-    /// Heading the goals have asked for, in degrees.
-    wanted_y_rot: f32,
-    /// Whether the slime is chasing something, which shortens the hop delay.
-    is_aggressive: bool,
-    /// Speed multiplier the goals have asked for, if any.
-    wanted_movement: Option<f64>,
-    /// Ticks until the next hop.
-    jump_delay: i32,
-}
-
 // SAFETY: This key is owned by Steel and uniquely identifies `SlimeEntity`.
 unsafe impl DowncastType for SlimeEntity {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/slime");
@@ -158,10 +112,11 @@ impl SlimeEntity {
             // Vanilla parity: the goal order of `AbstractCubeMob.registerGoals`
             // with `Slime.addBehaviourGoals` slotted in at two.
             let mut goals = mob_base.goal_selector().lock();
-            goals.add_goal(1, SlimeFloatGoal);
-            goals.add_goal(2, SlimeAttackGoal::default());
-            goals.add_goal(4, SlimeRandomDirectionGoal::default());
-            goals.add_goal(5, SlimeKeepOnJumpingGoal);
+            let hooks = cube_common::hooks_for::<Self>();
+            goals.add_goal(1, CubeFloatGoal::new(hooks));
+            goals.add_goal(2, CubeAttackGoal::new(hooks));
+            goals.add_goal(4, CubeRandomDirectionGoal::new(hooks));
+            goals.add_goal(5, CubeKeepOnJumpingGoal::new(hooks));
         }
 
         {
@@ -188,111 +143,6 @@ impl SlimeEntity {
             mob_base,
             entity_data: SyncMutex::new(entity_data),
             cube: SyncMutex::new(CubeState::default()),
-        }
-    }
-
-    /// Returns this slime's size.
-    #[must_use]
-    pub fn size(&self) -> i32 {
-        *self.entity_data.lock().abstract_cube_mob().id_size.get()
-    }
-
-    /// Returns whether this slime is the smallest kind.
-    ///
-    /// Vanilla parity: `AbstractCubeMob.isTiny`.
-    #[must_use]
-    pub fn is_tiny(&self) -> bool {
-        self.size() <= TINY_SIZE
-    }
-
-    /// Sets the size, and with it the health, speed and hitbox it decides.
-    ///
-    /// Vanilla parity: `AbstractCubeMob.setSize`.
-    pub fn set_size(&self, size: i32, update_health: bool) {
-        let size = size.clamp(1, MAX_SIZE);
-        self.entity_data
-            .lock()
-            .abstract_cube_mob_mut()
-            .id_size
-            .set(size);
-        self.refresh_dimensions();
-
-        {
-            let mut attributes = self.attributes().lock();
-            attributes.set_base_value(vanilla_attributes::MAX_HEALTH, f64::from(size * size));
-            attributes.set_base_value(
-                vanilla_attributes::MOVEMENT_SPEED,
-                SPEED_PER_SIZE.mul_add(f64::from(size), BASE_SPEED),
-            );
-        }
-
-        if update_health {
-            self.set_health(self.get_max_health());
-        }
-    }
-
-    /// Returns whether this slime hurts what it touches.
-    ///
-    /// Vanilla parity: `AbstractCubeMob.isDealsDamage`. A tiny slime is
-    /// harmless, which is the whole reason players let them pile up.
-    #[must_use]
-    fn deals_damage(&self) -> bool {
-        !self.is_tiny()
-    }
-
-    /// Hurts a target the slime is touching.
-    ///
-    /// Vanilla parity: `AbstractCubeMob.dealDamage`.
-    fn deal_damage(&self, world: &Arc<World>, target: &SharedEntity) {
-        if !Entity::is_alive(self) {
-            return;
-        }
-        let Some(living) = target.as_living_entity() else {
-            return;
-        };
-        if !self.is_within_melee_attack_range(living) || !self.has_line_of_sight(target.as_ref()) {
-            return;
-        }
-        if self.mob_do_hurt_target(world, target) {
-            self.play_sound(&sound_events::ENTITY_SLIME_ATTACK, 1.0, 1.0);
-        }
-    }
-
-    /// Splits into smaller slimes.
-    ///
-    /// Vanilla parity: the `remove` override of `AbstractCubeMob`. The children
-    /// are placed on the corners of the parent's footprint, which is why a big
-    /// slime bursts outward rather than stacking.
-    fn split_on_death(&self, world: &Arc<World>) {
-        let size = self.size();
-        if size <= 1 {
-            return;
-        }
-
-        let half = size / 2;
-        // Vanilla parity: `getSplitCount`, two to four children.
-        let count = 2 + rand::random_range(0..3);
-        let width = f64::from(self.dimensions_for_pose(self.pose()).width);
-        let offset = width / 2.0;
-        let origin = self.position();
-
-        for index in 0..count {
-            let dx = (f64::from(index % 2) - 0.5) * offset;
-            let dz = (f64::from(index / 2) - 0.5) * offset;
-            let position = DVec3::new(origin.x + dx, origin.y + 0.5, origin.z + dz);
-
-            let child = Arc::new(Self::new(
-                self.entity_type,
-                next_entity_id(),
-                position,
-                Arc::downgrade(world),
-            ));
-            child.set_size(half, true);
-            child.set_rotation((rand::random::<f32>() * 360.0, 0.0));
-
-            if let Err(error) = world.try_add_entity(child) {
-                log::debug!("slime split rejected: {error}");
-            }
         }
     }
 }
@@ -361,151 +211,6 @@ fn is_slime_chunk(chunk: ChunkPos, seed: i64) -> bool {
     random.next_i32_bounded(10) == 0
 }
 
-/// Hops out of water or lava.
-///
-/// Vanilla parity: `AbstractCubeMob.CubeMobFloatGoal`.
-struct SlimeFloatGoal;
-
-impl Goal for SlimeFloatGoal {
-    fn controls(&self) -> GoalControls {
-        GoalControls::JUMP | GoalControls::MOVE
-    }
-
-    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        mob.is_in_water() || mob.is_in_lava()
-    }
-
-    fn requires_update_every_tick(&self) -> bool {
-        true
-    }
-
-    fn tick(&mut self, mob: &dyn PathfinderMob) {
-        if rand::random::<f32>() < 0.8 {
-            mob.jump_control_jump();
-        }
-        if let Some(slime) = mob.downcast_ref::<SlimeEntity>() {
-            slime.cube.lock().wanted_movement = Some(1.2);
-        }
-    }
-}
-
-/// Faces whatever the slime is chasing and hops at it.
-///
-/// Vanilla parity: `AbstractCubeMob.CubeMobAttackGoal`.
-#[derive(Default)]
-struct SlimeAttackGoal {
-    grow_tired_timer: i32,
-}
-
-impl Goal for SlimeAttackGoal {
-    fn controls(&self) -> GoalControls {
-        GoalControls::LOOK
-    }
-
-    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        mob.target().is_some()
-    }
-
-    fn start(&mut self, _mob: &dyn PathfinderMob) {
-        self.grow_tired_timer = 300;
-    }
-
-    fn can_continue_to_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        if mob.target().is_none() {
-            return false;
-        }
-        self.grow_tired_timer -= 1;
-        self.grow_tired_timer > 0
-    }
-
-    fn requires_update_every_tick(&self) -> bool {
-        true
-    }
-
-    fn tick(&mut self, mob: &dyn PathfinderMob) {
-        let Some(target) = mob.target() else {
-            return;
-        };
-        let Some(slime) = mob.downcast_ref::<SlimeEntity>() else {
-            return;
-        };
-
-        // Vanilla parity: `lookAt(target, 10.0F, 10.0F)`, a rate-limited turn
-        // rather than a snap, and then the move control is handed whatever yaw
-        // that reached. Snapping here would let a slime pivot instantly.
-        let to_target = target.position() - slime.position();
-        let wanted = -(to_target.x.atan2(to_target.z).to_degrees() as f32);
-        let (yaw, pitch) = slime.rotation();
-        let turned = rotlerp(yaw, wanted, LOOK_TURN_RATE);
-        slime.set_rotation((turned, pitch));
-
-        let mut cube = slime.cube.lock();
-        cube.wanted_y_rot = turned;
-        cube.is_aggressive = slime.deals_damage();
-    }
-}
-
-/// Picks a new heading every couple of seconds.
-///
-/// Vanilla parity: `AbstractCubeMob.CubeMobRandomDirectionGoal`.
-#[derive(Default)]
-struct SlimeRandomDirectionGoal {
-    chosen_degrees: f32,
-    next_randomize_time: i32,
-}
-
-impl Goal for SlimeRandomDirectionGoal {
-    fn controls(&self) -> GoalControls {
-        GoalControls::LOOK
-    }
-
-    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        mob.target().is_none() && (mob.on_ground() || mob.is_in_water() || mob.is_in_lava())
-    }
-
-    fn tick(&mut self, mob: &dyn PathfinderMob) {
-        self.next_randomize_time -= 1;
-        if self.next_randomize_time <= 0 {
-            self.next_randomize_time = 40 + rand::random_range(0..60);
-            self.chosen_degrees = rand::random_range(0..360) as f32;
-        }
-
-        if let Some(slime) = mob.downcast_ref::<SlimeEntity>() {
-            let mut cube = slime.cube.lock();
-            cube.wanted_y_rot = self.chosen_degrees;
-            cube.is_aggressive = false;
-        }
-    }
-}
-
-/// Keeps the slime hopping when nothing else asks it to.
-///
-/// Vanilla parity: `AbstractCubeMob.CubeMobKeepOnJumpingGoal`.
-struct SlimeKeepOnJumpingGoal;
-
-impl Goal for SlimeKeepOnJumpingGoal {
-    fn controls(&self) -> GoalControls {
-        GoalControls::JUMP | GoalControls::MOVE
-    }
-
-    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        !mob.is_passenger()
-    }
-
-    fn requires_update_every_tick(&self) -> bool {
-        true
-    }
-
-    fn tick(&mut self, mob: &dyn PathfinderMob) {
-        if let Some(slime) = mob.downcast_ref::<SlimeEntity>() {
-            let mut cube = slime.cube.lock();
-            if cube.wanted_movement.is_none() {
-                cube.wanted_movement = Some(1.0);
-            }
-        }
-    }
-}
-
 impl Entity for SlimeEntity {
     fn base(&self) -> &EntityBase {
         &self.base
@@ -519,88 +224,22 @@ impl Entity for SlimeEntity {
         Some(&self.entity_data)
     }
 
-    /// Vanilla parity: the hitbox of `AbstractCubeMob.getDefaultDimensions`,
-    /// which is the type's own scaled by the size.
     fn dimensions_for_pose(&self, _pose: EntityPose) -> EntityDimensions {
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "size is clamped to 127 and scales a hitbox"
-        )]
-        let scale = self.size() as f32;
-        self.entity_type.dimensions.scale(scale)
+        cube_common::dimensions_for_size(self)
     }
 
     fn base_tick(&self) {
         Mob::base_tick_mob(self);
-
-        // Vanilla parity: the squash on landing of `AbstractCubeMob.tick`. The
-        // sound is the observable half; the squish animation is client-side.
-        let on_ground = self.on_ground();
-        let landed = {
-            let mut cube = self.cube.lock();
-            let landed = on_ground && !cube.was_on_ground;
-            cube.was_on_ground = on_ground;
-            landed
-        };
-        if landed {
-            let sound = if self.is_tiny() {
-                &sound_events::ENTITY_SLIME_SQUISH_SMALL
-            } else {
-                &sound_events::ENTITY_SLIME_SQUISH
-            };
-            self.play_sound(sound, self.sound_volume(), self.sound_pitch());
-        }
+        cube_common::tick_landing(self);
     }
 
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
     }
 
-    /// Vanilla parity: `AbstractCubeMob.playerTouch`.
     fn player_touch(self: Arc<Self>, player: &Arc<Player>) {
-        if !self.deals_damage() {
-            return;
-        }
-        let Some(world) = self.level() else {
-            return;
-        };
         let target: SharedEntity = player.clone();
-        self.deal_damage(&world, &target);
-    }
-}
-
-impl SlimeEntity {
-    /// Vanilla parity: `AbstractCubeMob.getSoundVolume`.
-    fn sound_volume(&self) -> f32 {
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "size is clamped to 127 and scales a volume"
-        )]
-        let size = self.size() as f32;
-        0.4 * size
-    }
-
-    /// Vanilla parity: `AbstractCubeMob.getSoundPitch`.
-    fn sound_pitch(&self) -> f32 {
-        let adjuster = if self.is_tiny() { 1.4 } else { 0.8 };
-        (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.2, 1.0) * adjuster
-    }
-
-    /// Vanilla parity: `AbstractCubeMob.getJumpDelay`.
-    #[expect(
-        clippy::unused_self,
-        reason = "mirrors an overridable vanilla method; a magma cube will want its own"
-    )]
-    fn jump_delay(&self) -> i32 {
-        rand::random_range(0..20) + 10
-    }
-
-    /// Clears the walking input, which is how a slime waits between hops.
-    ///
-    /// Vanilla parity: the `xxa = 0; zza = 0` of `CubeMobMoveControl.tick`.
-    fn stop_traveling(&self) {
-        let input = self.travel_input();
-        self.set_travel_input(LivingTravelInput::new(0.0, input.vertical(), 0.0));
+        cube_common::player_touch(self.as_ref(), &target);
     }
 }
 
@@ -650,7 +289,7 @@ impl LivingEntity for SlimeEntity {
             return;
         }
         if let Some(world) = self.level() {
-            self.split_on_death(&world);
+            cube_common::split_on_death(self, &world);
         }
         self.living_die(source);
     }
@@ -669,74 +308,8 @@ impl Mob for SlimeEntity {
         PathfinderMob::tick_pathfinder_path_navigation(self);
     }
 
-    /// Turns in place and hops, instead of walking a path.
-    ///
-    /// Vanilla parity: `AbstractCubeMob.CubeMobMoveControl.tick`. A slime only
-    /// moves while airborne, so the hop cadence is its speed; chasing shortens
-    /// the delay to a third, which is what makes a hunting slime close in.
     fn tick_move_control(&self) {
-        let (wanted_y_rot, is_aggressive, wanted_movement) = {
-            let mut cube = self.cube.lock();
-            (
-                cube.wanted_y_rot,
-                cube.is_aggressive,
-                cube.wanted_movement.take(),
-            )
-        };
-
-        let (yaw, pitch) = self.rotation();
-        let turned = rotlerp(yaw, wanted_y_rot, TURN_RATE);
-        self.set_rotation((turned, pitch));
-        self.set_y_head_rot(turned);
-        self.set_y_body_rot(turned);
-
-        let Some(speed_modifier) = wanted_movement else {
-            self.stop_traveling();
-            return;
-        };
-
-        let movement_speed = self
-            .attributes()
-            .lock()
-            .required_value(vanilla_attributes::MOVEMENT_SPEED);
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "movement speed is a small attribute value"
-        )]
-        let speed = (speed_modifier * movement_speed) as f32;
-
-        if !self.on_ground() {
-            self.set_mob_speed(speed);
-            return;
-        }
-
-        let jump_now = {
-            let mut cube = self.cube.lock();
-            cube.jump_delay -= 1;
-            if cube.jump_delay <= 0 {
-                cube.jump_delay = self.jump_delay();
-                if is_aggressive {
-                    cube.jump_delay /= 3;
-                }
-                true
-            } else {
-                false
-            }
-        };
-
-        if jump_now {
-            self.set_mob_speed(speed);
-            self.jump_control_jump();
-            let sound = if self.is_tiny() {
-                &sound_events::ENTITY_SLIME_JUMP_SMALL
-            } else {
-                &sound_events::ENTITY_SLIME_JUMP
-            };
-            self.play_sound(sound, self.sound_volume(), self.sound_pitch());
-        } else {
-            self.stop_traveling();
-            self.set_mob_speed(0.0);
-        }
+        cube_common::tick_move_control(self);
     }
 
     fn ambient_sound(&self) -> Option<SoundEventRef> {
@@ -763,14 +336,7 @@ impl Mob for SlimeEntity {
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
         let result = self.finalize_spawn_mob_base(world, spawn_reason, group_data);
-
-        let mut size_scale = rand::random_range(0..3);
-        let difficulty = world.get_current_difficulty_at(self.block_position());
-        if size_scale < 2 && rand::random::<f32>() < 0.5 * difficulty.special_multiplier() {
-            size_scale += 1;
-        }
-        self.set_size(1 << size_scale, true);
-
+        cube_common::set_spawn_size(self, world);
         result
     }
 
@@ -780,6 +346,52 @@ impl Mob for SlimeEntity {
 
     fn set_mob_flags(&self, flags: i8) {
         self.entity_data.lock().mob_mut().mob_flags.set(flags);
+    }
+}
+
+impl CubeLike for SlimeEntity {
+    fn cube_state(&self) -> &SyncMutex<CubeState> {
+        &self.cube
+    }
+
+    fn size(&self) -> i32 {
+        *self.entity_data.lock().abstract_cube_mob().id_size.get()
+    }
+
+    fn store_size(&self, size: i32) {
+        self.entity_data
+            .lock()
+            .abstract_cube_mob_mut()
+            .id_size
+            .set(size);
+    }
+
+    fn jump_sound(&self) -> SoundEventRef {
+        if self.is_tiny() {
+            &sound_events::ENTITY_SLIME_JUMP_SMALL
+        } else {
+            &sound_events::ENTITY_SLIME_JUMP
+        }
+    }
+
+    fn squish_sound(&self) -> SoundEventRef {
+        if self.is_tiny() {
+            &sound_events::ENTITY_SLIME_SQUISH_SMALL
+        } else {
+            &sound_events::ENTITY_SLIME_SQUISH
+        }
+    }
+
+    fn split_child(&self, position: DVec3, world: &Arc<World>) -> SharedEntity {
+        let child = Arc::new(Self::new(
+            self.entity_type,
+            next_entity_id(),
+            position,
+            Arc::downgrade(world),
+        ));
+        child.set_size(self.size() / 2, true);
+        child.set_rotation((rand::random::<f32>() * 360.0, 0.0));
+        child
     }
 }
 

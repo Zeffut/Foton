@@ -62,7 +62,7 @@ fi
 # Cross into the Nether, then put striders on the ground next to the player.
 # `execute in` is what a player would use; the teleport is the portal's job on
 # a real server, and it exercises the same dimension-change path.
-export JOIN_COMMANDS='execute in minecraft:the_nether run teleport @s 0 80 0;;summon minecraft:strider 2 80 0;;summon minecraft:strider -2 80 0;;summon minecraft:strider 0 80 2'
+export JOIN_COMMANDS='execute in minecraft:the_nether run teleport @s 0 80 0;;summon minecraft:strider 2 80 0;;summon minecraft:strider -2 80 0;;summon minecraft:magma_cube 0 80 2;;summon minecraft:magma_cube 0 80 -2'
 JOIN_WATCH_SECONDS=$WATCH python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
 
@@ -71,7 +71,7 @@ cleanup
 echo "=== join.log ==="
 cat join.log
 echo "=== server ==="
-sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "strider|nether|unknown|incorrect|error|panic" | tail -15
+sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "summoned|changed world|unknown|incorrect|error|panic" | tail -15
 if [ $STATUS -ne 0 ]; then
   echo "########## NETHER TEST FAILED (the client never settled) ##########"
   exit $STATUS
@@ -82,9 +82,11 @@ if ! sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -q "changed world to min
   echo "########## NETHER TEST FAILED (never crossed dimensions) ##########"
   exit 1
 fi
-if ! grep -q "strider x" join.log; then
-  echo "########## NETHER TEST FAILED (the client was never told about a strider) ##########"
-  exit 1
-fi
+for mob in strider magma_cube; do
+  if ! grep -q "$mob x" join.log; then
+    echo "########## NETHER TEST FAILED (the client was never told about a $mob) ##########"
+    exit 1
+  fi
+done
 
 echo "########## NETHER TEST PASSED ##########"

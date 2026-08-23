@@ -2,9 +2,11 @@
 
 mod cave_spider;
 mod creeper;
+mod cube_common;
 mod drowned;
 mod enderman;
 mod husk;
+mod magma_cube;
 mod silverfish;
 mod skeleton;
 mod slime;
@@ -20,6 +22,7 @@ pub use creeper::CreeperEntity;
 pub use drowned::DrownedEntity;
 pub use enderman::EndermanEntity;
 pub use husk::HuskEntity;
+pub use magma_cube::MagmaCubeEntity;
 pub use silverfish::SilverfishEntity;
 pub use skeleton::SkeletonEntity;
 pub use slime::SlimeEntity;

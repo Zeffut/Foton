@@ -2158,7 +2158,15 @@ pub trait LivingEntity: Entity {
     }
 
     /// Mirrors vanilla `LivingEntity.jumpInLiquid()`.
-    fn jump_in_liquid(&self, _fluid_tag: &Identifier) {
+    fn jump_in_liquid(&self, fluid_tag: &Identifier) {
+        self.living_jump_in_liquid(fluid_tag);
+    }
+
+    /// The body of [`Self::jump_in_liquid`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only wants to intercept one fluid --
+    /// the magma cube, which swims up through lava -- calls this for the rest.
+    fn living_jump_in_liquid(&self, _fluid_tag: &Identifier) {
         self.set_velocity(self.velocity() + DVec3::new(0.0, f64::from(0.04_f32), 0.0));
     }
 
