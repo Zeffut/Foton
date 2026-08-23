@@ -1,7 +1,8 @@
 use steel_registry::enchantment_effect::{
-    DamageSourcePredicate, EnchantmentEffectComponent, EnchantmentEffectRequirements,
-    EnchantmentEntityEffect, EnchantmentEntityTarget, EnchantmentTarget, EntityPredicate,
-    EntityTypePredicate, EntityTypeSpecificPredicate, EntityVehiclePredicate, MobEffectSelection,
+    CrossbowChargingSounds, DamageSourcePredicate, EnchantmentEffectComponent,
+    EnchantmentEffectRequirements, EnchantmentEntityEffect, EnchantmentEntityTarget,
+    EnchantmentTarget, EntityPredicate, EntityTypePredicate, EntityTypeSpecificPredicate,
+    EntityVehiclePredicate, MobEffectSelection,
 };
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
@@ -106,6 +107,130 @@ impl<'a> EnchantmentPostAttackContext<'a> {
             EnchantmentTarget::Victim => Some(self.victim),
         }
     }
+}
+
+/// Runs every unconditional value effect an item's enchantments declare for
+/// `component`.
+///
+/// Vanilla parity: the `EnchantmentHelper.runIterationOnItem` core shared by
+/// `processProjectileCount`, `processProjectileSpread`, `processAmmoUse` and
+/// `modifyCrossbowChargingTime`. Vanilla checks each effect's requirements
+/// against a `LootContext` built from the shooter; Steel only builds
+/// enchantment requirement contexts around a `DamageSource`, so a conditional
+/// effect is skipped here rather than guessed at. Every vanilla enchantment
+/// that reaches this path unconditionally -- Quick Charge, Multishot,
+/// Piercing -- therefore applies in full. Infinity is the exception: its
+/// `ammo_use` effect is gated on a `match_tool` predicate, so a bow does not
+/// yet keep its arrow through [`process_ammo_use`].
+fn apply_unconditional_value_effects(
+    item: &ItemStack,
+    component: EnchantmentEffectComponent,
+    input: f32,
+) -> f32 {
+    let Some(enchantments) = item.get_enchantments() else {
+        return input;
+    };
+
+    let mut value = input;
+    for (key, level) in enchantments.iter() {
+        if *level == 0 {
+            continue;
+        }
+        let Some(enchantment) = REGISTRY.enchantments.by_key(key) else {
+            continue;
+        };
+        let level = *level as i32;
+
+        for effect in enchantment.effects.value_effects(component) {
+            if !effect.is_unconditional() {
+                continue;
+            }
+            if let Some(updated) = effect.effect.process_without_random(level, value) {
+                value = updated;
+            }
+        }
+
+        // Vanilla stores `crossbow_charge_time` as a single effect rather than
+        // a list, which `single_value_effect` exposes separately.
+        if let Some(effect) = enchantment.effects.single_value_effect(component)
+            && let Some(updated) = effect.process_without_random(level, value)
+        {
+            value = updated;
+        }
+    }
+
+    value
+}
+
+/// Returns vanilla `EnchantmentHelper.modifyCrossbowChargingTime`, in seconds.
+pub(crate) fn modify_crossbow_charging_time(crossbow: &ItemStack, time: f32) -> f32 {
+    apply_unconditional_value_effects(
+        crossbow,
+        EnchantmentEffectComponent::CrossbowChargeTime,
+        time,
+    )
+    .max(0.0)
+}
+
+/// Returns vanilla `EnchantmentHelper.processProjectileCount`.
+pub(crate) fn process_projectile_count(weapon: &ItemStack, count: i32) -> i32 {
+    let modified = apply_unconditional_value_effects(
+        weapon,
+        EnchantmentEffectComponent::ProjectileCount,
+        count as f32,
+    );
+    (modified as i32).max(0)
+}
+
+/// Returns vanilla `EnchantmentHelper.processProjectileSpread`, in degrees.
+pub(crate) fn process_projectile_spread(weapon: &ItemStack, angle: f32) -> f32 {
+    apply_unconditional_value_effects(weapon, EnchantmentEffectComponent::ProjectileSpread, angle)
+        .max(0.0)
+}
+
+/// Returns vanilla `EnchantmentHelper.processAmmoUse`.
+pub(crate) fn process_ammo_use(weapon: &ItemStack, amount: i32) -> i32 {
+    let modified = apply_unconditional_value_effects(
+        weapon,
+        EnchantmentEffectComponent::AmmoUse,
+        amount as f32,
+    );
+    modified as i32
+}
+
+/// Returns the charging sounds declared by the highest-level enchantment that
+/// declares any.
+///
+/// Vanilla parity: `EnchantmentHelper.pickHighestLevel` applied to
+/// `EnchantmentEffectComponents.CROSSBOW_CHARGING_SOUNDS`. The level indexes
+/// into the enchantment's own list, so Quick Charge III picks its third entry.
+pub(crate) fn pick_crossbow_charging_sounds(
+    crossbow: &ItemStack,
+) -> Option<&'static CrossbowChargingSounds> {
+    let enchantments = crossbow.get_enchantments()?;
+
+    let mut highest: Option<(&'static [CrossbowChargingSounds], u32)> = None;
+    for (key, level) in enchantments.iter() {
+        if *level == 0 {
+            continue;
+        }
+        // Vanilla `getHighestLevel` only replaces its candidate on a strictly
+        // higher level that actually carries the component.
+        if highest.is_some_and(|(_, found)| found >= *level) {
+            continue;
+        }
+        let Some(enchantment) = REGISTRY.enchantments.by_key(key) else {
+            continue;
+        };
+        let sounds = enchantment.effects.crossbow_charging_sounds;
+        if sounds.is_empty() {
+            continue;
+        }
+        highest = Some((sounds, *level));
+    }
+
+    let (sounds, level) = highest?;
+    sounds.get((level as usize).min(sounds.len()).saturating_sub(1))
 }
 
 pub(crate) fn modify_damage(
