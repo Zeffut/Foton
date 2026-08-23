@@ -23,6 +23,9 @@ replaceables = "replaceables"
 undescore = "undescore"
 # Vanilla block tag name minecraft:convertable_to_mud
 convertable = "convertable"
+# Mojang spelling in ThrownTrident.isAcceptibleReturnOwner.
+acceptible = "acceptible"
+Acceptible = "Acceptible"
 
 [default]
 locale = "en-us"

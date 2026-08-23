@@ -47,6 +47,7 @@ mod standing_and_wall_block_item;
 mod throwable_items;
 mod throwable_potion;
 mod tipped_arrow;
+mod trident;
 mod wind_charge;
 
 mod flint_and_steel;
@@ -94,4 +95,5 @@ pub use standing_and_wall_block_item::StandingAndWallBlockItem;
 pub use throwable_items::{EggItem, ExperienceBottleItem, SnowballItem};
 pub use throwable_potion::{LingeringPotionItem, SplashPotionItem};
 pub use tipped_arrow::TippedArrowItem;
+pub use trident::TridentItem;
 pub use wind_charge::WindChargeItem;

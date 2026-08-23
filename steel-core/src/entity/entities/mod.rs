@@ -23,7 +23,7 @@ pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
     ArrowEntity, EnderPearlEntity, ExperienceBottleEntity, FireworkRocketEntity, SnowballEntity,
-    SplashPotionEntity, ThrownEggEntity, WindChargeEntity,
+    SplashPotionEntity, ThrownEggEntity, ThrownTridentEntity, TridentPickup, WindChargeEntity,
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
