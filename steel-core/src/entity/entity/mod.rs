@@ -2096,6 +2096,30 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         self.fluid_contact().lava_height() > 0.0
     }
 
+    /// Returns true if rain is falling on this entity.
+    ///
+    /// Mirrors vanilla `Entity.isInRain`, which samples the weather both at the
+    /// entity's block position and at the top of its bounding box so a tall
+    /// entity standing half under cover still counts as rained on.
+    fn is_in_rain(&self) -> bool {
+        let Some(world) = self.level() else {
+            return false;
+        };
+
+        let pos = self.block_position();
+        world.is_raining_at(pos)
+            || world.is_raining_at(BlockPos::new(
+                pos.x(),
+                self.bounding_box().max_y().floor() as i32,
+                pos.z(),
+            ))
+    }
+
+    /// Mirrors vanilla `Entity.isInWaterOrRain`.
+    fn is_in_water_or_rain(&self) -> bool {
+        self.is_in_water() || self.is_in_rain()
+    }
+
     /// Returns true if this entity's eyes are currently inside water.
     fn is_eye_in_water(&self) -> bool {
         self.fluid_contact().eye_in_water()

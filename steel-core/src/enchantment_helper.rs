@@ -5,6 +5,7 @@ use steel_registry::enchantment_effect::{
 };
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
+use steel_registry::sound_event::SoundEventRef;
 use steel_registry::{REGISTRY, RegistryExt, TaggedRegistryExt, vanilla_entities};
 
 use crate::entity::damage::DamageSource;
@@ -430,6 +431,62 @@ pub(crate) fn on_projectile_spawned(
             }
         }
     }
+}
+
+/// Mirrors vanilla `EnchantmentHelper.getTridentSpinAttackStrength`.
+///
+/// Riptide is the only vanilla source of `trident_spin_attack_strength`, and it
+/// declares the effect unconditionally, so the holder's random source vanilla
+/// threads through `modifyTridentSpinAttackStrength` never changes the result.
+pub(crate) fn get_trident_spin_attack_strength(trident: &ItemStack) -> f32 {
+    trident.apply_unconditional_enchantment_value_effects(
+        EnchantmentEffectComponent::TridentSpinAttackStrength,
+        0.0,
+    )
+}
+
+/// Mirrors vanilla `EnchantmentHelper.getTridentReturnToOwnerAcceleration`.
+///
+/// Deviation: vanilla evaluates each effect's requirements against the trident
+/// entity through a loot context. Loyalty, the only vanilla enchantment with a
+/// `trident_return_acceleration` effect, is unconditional, so this reads the
+/// unconditional effects only; a data pack that gates the effect on the trident
+/// would be ignored rather than evaluated wrongly.
+pub(crate) fn get_trident_return_to_owner_acceleration(weapon: &ItemStack) -> i32 {
+    let acceleration = weapon.apply_unconditional_enchantment_value_effects(
+        EnchantmentEffectComponent::TridentReturnAcceleration,
+        0.0,
+    );
+    (acceleration as i32).max(0)
+}
+
+/// Mirrors vanilla `EnchantmentHelper.pickHighestLevel` for the `trident_sound`
+/// component: the highest-level enchantment that carries a sound list wins, and
+/// its level indexes into that list.
+pub(crate) fn pick_trident_sound(trident: &ItemStack) -> Option<SoundEventRef> {
+    let enchantments = trident.get_enchantments()?;
+    let mut picked: Option<(&'static [SoundEventRef], u32)> = None;
+
+    for (key, level) in enchantments.iter() {
+        if *level == 0 {
+            continue;
+        }
+        if picked.is_some_and(|(_, best)| best >= *level) {
+            continue;
+        }
+        let Some(enchantment) = REGISTRY.enchantments.by_key(key) else {
+            continue;
+        };
+        let sounds = enchantment.effects.trident_sound;
+        if !sounds.is_empty() {
+            picked = Some((sounds, *level));
+        }
+    }
+
+    let (sounds, level) = picked?;
+    // Vanilla `pickHighestLevel`: `list.get(min(level, list.size()) - 1)`.
+    let index = (level as usize).min(sounds.len()).saturating_sub(1);
+    sounds.get(index).copied()
 }
 
 pub(crate) fn do_post_piercing_attack_effects(world: &World, user: &dyn LivingEntity) {

@@ -63,7 +63,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 30
+[items] 29
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -90,12 +90,11 @@ SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
 SpyglassItem
-TridentItem
 WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 89
+[entities] 88
 Allay
 Armadillo
 Axolotl
@@ -168,7 +167,6 @@ SulfurCube
 Tadpole
 TextDisplay
 ThrownLingeringPotion
-ThrownTrident
 TraderLlama
 TropicalFish
 Turtle
