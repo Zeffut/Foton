@@ -15,11 +15,11 @@ use steel_protocol::packets::game::{
     SAcceptTeleportation, SAttack, SChangeDifficulty, SChangeGameMode, SChat, SChatAck,
     SChatCommand, SChatSessionUpdate, SChunkBatchReceived, SClientCommand, SClientTickEnd,
     SCommandSuggestion, SContainerButtonClick, SContainerClick, SContainerClose,
-    SContainerSlotStateChanged, SInteract, SMovePlayer, SMovePlayerPos, SMovePlayerPosRot,
-    SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock, SPlayerAbilities,
-    SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem, SSetBeacon,
-    SSetCarriedItem, SSetCreativeModeSlot, SSignUpdate, SSpectatorAction, SSwing, SUseItem,
-    SUseItemOn,
+    SContainerSlotStateChanged, SEditBook, SInteract, SMovePlayer, SMovePlayerPos,
+    SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
+    SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem,
+    SSelectBundleItem, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot, SSignUpdate,
+    SSpectatorAction, SSwing, SUseItem, SUseItemOn,
 };
 
 use steel_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
@@ -89,6 +89,8 @@ enum ScheduledPlayPacketKind {
     ContainerClick(SContainerClick),
     ContainerClose(SContainerClose),
     ContainerSlotStateChanged(SContainerSlotStateChanged),
+    EditBook(SEditBook),
+    SelectBundleItem(SSelectBundleItem),
     SetBeacon(SSetBeacon),
     SetCreativeModeSlot(SSetCreativeModeSlot),
     PlayerInput(SPlayerInput),
@@ -162,6 +164,8 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::CommandSuggestion(_)
             | ScheduledPlayPacketKind::ContainerClose(_)
             | ScheduledPlayPacketKind::SetCreativeModeSlot(_)
+            | ScheduledPlayPacketKind::EditBook(_)
+            | ScheduledPlayPacketKind::SelectBundleItem(_)
             | ScheduledPlayPacketKind::PlayerInput(_)
             | ScheduledPlayPacketKind::PlayerAbilities(_)
             | ScheduledPlayPacketKind::SetCarriedItem(_)
@@ -237,7 +241,7 @@ impl ScheduledPlayPacket {
     /// Routes the packets a player sends while a menu is open.
     ///
     /// Split out of `handle` because the match there is long enough already;
-    /// these five all reach the same open menu and belong together.
+    /// these all reach the same open menu and belong together.
     fn handle_menu(kind: ScheduledPlayPacketKind, player: &Arc<Player>) {
         match kind {
             ScheduledPlayPacketKind::ContainerButtonClick(packet) => {
@@ -251,6 +255,10 @@ impl ScheduledPlayPacket {
             }
             ScheduledPlayPacketKind::ContainerSlotStateChanged(packet) => {
                 player.handle_container_slot_state_changed(packet);
+            }
+            ScheduledPlayPacketKind::EditBook(packet) => player.handle_edit_book(packet),
+            ScheduledPlayPacketKind::SelectBundleItem(packet) => {
+                player.handle_select_bundle_item(packet);
             }
             ScheduledPlayPacketKind::SetBeacon(packet) => {
                 player.handle_set_beacon(packet);
@@ -315,6 +323,8 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::ContainerClick(_)
             | ScheduledPlayPacketKind::ContainerClose(_)
             | ScheduledPlayPacketKind::ContainerSlotStateChanged(_)
+            | ScheduledPlayPacketKind::EditBook(_)
+            | ScheduledPlayPacketKind::SelectBundleItem(_)
             | ScheduledPlayPacketKind::SetBeacon(_) => Self::handle_menu(kind, &player),
             ScheduledPlayPacketKind::SetCreativeModeSlot(packet) => {
                 player.handle_set_creative_mode_slot(packet);
@@ -742,6 +752,12 @@ impl JavaConnection {
                     SContainerSlotStateChanged::read_packet(data)?,
                 ))
             }
+            play::S_EDIT_BOOK => scheduled(ScheduledPlayPacketKind::EditBook(
+                SEditBook::read_packet(data)?,
+            )),
+            play::S_BUNDLE_ITEM_SELECTED => scheduled(ScheduledPlayPacketKind::SelectBundleItem(
+                SSelectBundleItem::read_packet(data)?,
+            )),
             play::S_SET_BEACON => scheduled(ScheduledPlayPacketKind::SetBeacon(
                 SSetBeacon::read_packet(data)?,
             )),

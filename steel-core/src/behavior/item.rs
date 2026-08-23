@@ -9,19 +9,24 @@ use steel_registry::data_components::vanilla_components::{
 
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::vanilla_components::ITEM_NAME;
+use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::sound_events;
 use steel_registry::{REGISTRY, RegistryEntry, RegistryExt};
-use steel_utils::BlockStateId;
 use steel_utils::types::InteractionHand;
+use steel_utils::{BlockPos, BlockStateId};
 use text_components::TextComponent;
 
 use crate::behavior::items::DefaultItemBehavior;
 use crate::behavior::{InteractionResult, UseItemContext, UseOnContext};
 use crate::block_entity::entities::{SignBlockEntity, SignText};
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::ItemEntity;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
+use crate::inventory::click::MouseButton;
+use crate::inventory::lock::ContainerLockGuard;
+use crate::inventory::slots::slot::Slot;
 use crate::player::{Player, player_inventory::EquipmentSwapResult};
 use crate::world::World;
 use steel_registry::data_components::PotionContents;
@@ -220,6 +225,85 @@ pub trait ItemBehavior: Send + Sync {
 
         true
     }
+
+    /// Returns the arrow entity this item becomes when a weapon fires it.
+    ///
+    /// Vanilla parity: the entity built by `ArrowItem.createArrow`. `None` means
+    /// the item is not an `ArrowItem`, which is what makes
+    /// `ProjectileWeaponItem.createProjectile` fall back to `Items.ARROW`.
+    fn arrow_entity_type(&self) -> Option<EntityTypeRef> {
+        None
+    }
+
+    /// Returns whether holding this item lets `user` break `state`.
+    ///
+    /// Vanilla parity: `Item.canDestroyBlock`. The default refuses only when a
+    /// tool opts out of creative-mode block breaking; the debug stick refuses
+    /// always and uses the call as its left-click hook.
+    fn can_destroy_block(
+        &self,
+        stack: &mut ItemStack,
+        _state: BlockStateId,
+        _world: &Arc<World>,
+        _pos: BlockPos,
+        user: &dyn LivingEntity,
+    ) -> bool {
+        stack.can_destroy_blocks_in_creative() || !user.has_infinite_materials()
+    }
+
+    /// Returns whether this item may be put inside a bundle or a shulker box.
+    ///
+    /// Vanilla parity: `Item.canFitInsideContainerItems`.
+    fn can_fit_inside_container_items(&self) -> bool {
+        true
+    }
+
+    /// Handles a click that carries this item onto `slot`, returning whether it
+    /// replaced the menu's normal pickup handling.
+    ///
+    /// Vanilla parity: `Item.overrideStackedOnOther`, reached from
+    /// `AbstractContainerMenu.tryItemClickBehaviourOverride` with the carried
+    /// stack as `self`.
+    fn override_stacked_on_other(
+        &self,
+        _stack: &mut ItemStack,
+        _slot: &dyn Slot,
+        _guard: &mut ContainerLockGuard,
+        _button: MouseButton,
+        _player: &Player,
+    ) -> bool {
+        false
+    }
+
+    /// Handles a click that carries `carried` onto this item, returning whether
+    /// it replaced the menu's normal pickup handling.
+    ///
+    /// Vanilla parity: `Item.overrideOtherStackedOnMe`, where `stack` is the
+    /// clicked slot's live item -- Vanilla mutates it in place, and so does
+    /// this, including on the paths that return `false`.
+    ///
+    /// Steel deviation, twice over. Vanilla passes both the carried stack and a
+    /// `SlotAccess` onto it, but its one call site supplies the menu's carried
+    /// stack for both, so Steel takes it once. And Vanilla passes the whole
+    /// `Slot`, of which the implementations only ask `allowModification`; Steel
+    /// passes that answer instead so the live stack can be borrowed at the same
+    /// time.
+    fn override_other_stacked_on_me(
+        &self,
+        _stack: &mut ItemStack,
+        _carried: &mut ItemStack,
+        _allow_modification: bool,
+        _button: MouseButton,
+        _player: &Player,
+    ) -> bool {
+        false
+    }
+
+    /// Called when the item entity carrying this stack is destroyed.
+    ///
+    /// Vanilla parity: `Item.onDestroyed`, which container items use to spill
+    /// what they hold instead of taking it with them.
+    fn on_destroyed(&self, _entity: &ItemEntity) {}
 
     /// Returns this behavior as a sign applicator, when it is one.
     ///

@@ -9,14 +9,18 @@ use steel_macros::item_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_events;
-use steel_registry::vanilla_items;
+use steel_registry::vanilla_entities;
+use steel_registry::vanilla_item_tags::ItemTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _};
 
 use crate::behavior::context::{InteractionResult, UseItemContext};
 use crate::behavior::item::ItemBehavior;
+use crate::behavior::items::arrow_entity_type_for;
 use crate::entity::LivingEntity;
 use crate::entity::entities::ArrowEntity;
 use crate::inventory::container::Container as _;
 use crate::player::Player;
+use crate::player::player_inventory::PlayerInventory;
 use crate::world::World;
 
 /// Ticks needed for a fully drawn bow.
@@ -36,22 +40,32 @@ const SHOT_POWER_SCALE: f32 = 3.0;
 /// Spread applied to the shot direction.
 const SHOT_UNCERTAINTY: f32 = 1.0;
 
-/// Returns whether the player carries at least one arrow.
-fn has_arrow(player: &Player) -> bool {
-    let arrow = ItemStack::new(&vanilla_items::ARROW);
-    player.inventory.lock().find_slot_matching_item(&arrow) != -1
+/// Returns the first inventory slot holding ammunition a bow accepts.
+///
+/// Vanilla parity: `Player.getProjectile` against
+/// `BowItem.getAllSupportedProjectiles`, which is the `#minecraft:arrows` tag.
+fn find_arrow_slot(player: &Player) -> Option<usize> {
+    let inventory = player.inventory.lock();
+    (0..PlayerInventory::INVENTORY_SIZE).find(|slot| {
+        let item = inventory.get_item(*slot);
+        !item.is_empty() && REGISTRY.items.is_in_tag(item.item(), &ItemTag::ARROWS)
+    })
 }
 
-/// Removes one arrow from the player's inventory, reporting whether it succeeded.
-fn take_one_arrow(player: &Player) -> bool {
-    let arrow = ItemStack::new(&vanilla_items::ARROW);
-    let mut inventory = player.inventory.lock();
-    let slot = inventory.find_slot_matching_item(&arrow);
-    if slot < 0 {
-        return false;
-    }
+/// Returns whether the player carries at least one arrow.
+fn has_arrow(player: &Player) -> bool {
+    find_arrow_slot(player).is_some()
+}
 
-    let slot = slot as usize;
+/// Removes one arrow from the player's inventory and returns what was taken.
+fn take_one_arrow(player: &Player) -> Option<ItemStack> {
+    let slot = find_arrow_slot(player)?;
+    let mut inventory = player.inventory.lock();
+
+    let taken = {
+        let stack = inventory.get_item(slot);
+        stack.copy_with_count(1)
+    };
     let remaining = inventory.get_item(slot).count() - 1;
     if remaining <= 0 {
         inventory.set_item(slot, ItemStack::empty());
@@ -60,7 +74,7 @@ fn take_one_arrow(player: &Player) -> bool {
         stack.set_count(remaining);
         inventory.set_item(slot, stack);
     }
-    true
+    Some(taken)
 }
 
 /// Behavior for the bow.
@@ -126,13 +140,32 @@ impl ItemBehavior for BowItem {
         }
 
         // Vanilla consumes the arrow only when the shot actually leaves the bow.
+        // A creative player keeps the stack but still fires whichever arrow the
+        // inventory offers, as `Player.getProjectile` does.
         let infinite = player.has_infinite_materials();
-        if !infinite && !take_one_arrow(player) {
-            return false;
-        }
+        let ammo = if infinite {
+            find_arrow_slot(player).map(|slot| {
+                let inventory = player.inventory.lock();
+                let stack = inventory.get_item(slot);
+                stack.copy_with_count(1)
+            })
+        } else {
+            let Some(ammo) = take_one_arrow(player) else {
+                return false;
+            };
+            Some(ammo)
+        };
+        let entity_type = ammo
+            .as_ref()
+            .map_or_else(|| &vanilla_entities::ARROW, arrow_entity_type_for);
 
-        let arrow =
-            ArrowEntity::shoot_from(world, user, power * SHOT_POWER_SCALE, SHOT_UNCERTAINTY);
+        let arrow = ArrowEntity::shoot_from(
+            world,
+            user,
+            entity_type,
+            power * SHOT_POWER_SCALE,
+            SHOT_UNCERTAINTY,
+        );
         drop(arrow);
 
         world.play_sound_at(

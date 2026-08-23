@@ -17,6 +17,8 @@ use steel_registry::{
 };
 
 use crate::{
+    behavior::ITEM_BEHAVIORS,
+    behavior::items::BundleItem,
     inventory::{
         click::{DragKind, MouseButton, QuickCraft, can_item_quick_replace},
         lock::{ContainerId, ContainerLockGuard, ContainerRef},
@@ -703,6 +705,70 @@ impl MenuBehavior {
     }
 
     /// Handles a pickup click (left/right click to pick up or place items).
+    /// Lets the carried item, then the clicked one, take over a pickup click.
+    ///
+    /// Vanilla parity: `AbstractContainerMenu.tryItemClickBehaviourOverride`.
+    /// Vanilla first tests each stack with `ItemStack.isItemEnabled`; Steel
+    /// registers only enabled items, so that test is always true here.
+    pub(crate) fn try_item_click_behavior_override(
+        &mut self,
+        slot_index: usize,
+        button: MouseButton,
+        player: &Player,
+    ) -> bool {
+        let mut guard = self.lock_all_containers();
+        let slot = &*self.slots[slot_index];
+
+        // An empty stack resolves to air, whose behavior declines both hooks --
+        // which is exactly what Vanilla's dispatch through `Items.AIR` does.
+        let mut carried = mem::take(&mut self.carried);
+        let handled = ITEM_BEHAVIORS
+            .get_behavior(carried.item())
+            .override_stacked_on_other(&mut carried, slot, &mut guard, button, player);
+        if handled {
+            self.carried = carried;
+            slot.set_changed(&mut guard);
+            return true;
+        }
+
+        // Vanilla hands the hook the slot's live stack: a bundle records which
+        // item it will hand out next even on the clicks it declines to handle.
+        let allow_modification = slot.allow_modification(&guard, player);
+        let clicked = slot.get_item_mut(&mut guard);
+        let clicked_item = clicked.item();
+        let handled = ITEM_BEHAVIORS
+            .get_behavior(clicked_item)
+            .override_other_stacked_on_me(
+                clicked,
+                &mut carried,
+                allow_modification,
+                button,
+                player,
+            );
+        if handled {
+            slot.set_changed(&mut guard);
+        }
+        self.carried = carried;
+        handled
+    }
+
+    /// Points the bundle in `slot_index` at the stack it should hand out next.
+    ///
+    /// Vanilla parity: `AbstractContainerMenu.setSelectedBundleItemIndex`. The
+    /// selection lives outside the component's codecs, so nothing is sent back.
+    pub(crate) fn set_selected_bundle_item_index(
+        &self,
+        slot_index: usize,
+        selected_item_index: i32,
+    ) {
+        let Some(slot) = self.slots.get(slot_index) else {
+            return;
+        };
+        let mut guard = self.lock_all_containers();
+        let stack = slot.get_item_mut(&mut guard);
+        BundleItem::toggle_selected_item(stack, selected_item_index);
+    }
+
     pub(crate) fn do_pickup(&mut self, slot_index: usize, button: MouseButton, player: &Player) {
         let mut guard = self.lock_all_containers();
 

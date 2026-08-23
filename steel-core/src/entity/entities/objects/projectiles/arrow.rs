@@ -107,12 +107,13 @@ impl ArrowEntity {
     pub fn shoot_from(
         world: &Arc<World>,
         shooter: &dyn Entity,
+        entity_type: EntityTypeRef,
         power: f32,
         uncertainty: f32,
     ) -> Arc<Self> {
         let position = shooter.position().with_y(shooter.get_eye_y() - 0.1);
         let arrow = Arc::new(Self::new(
-            &vanilla_entities::ARROW,
+            entity_type,
             next_entity_id(),
             position,
             Arc::downgrade(world),

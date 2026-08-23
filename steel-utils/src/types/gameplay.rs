@@ -185,6 +185,17 @@ pub enum InteractionHand {
     OffHand,
 }
 
+impl InteractionHand {
+    /// Returns the enum ordinal Vanilla writes with `FriendlyByteBuf.writeEnum`.
+    #[must_use]
+    pub const fn id(self) -> i32 {
+        match self {
+            Self::MainHand => 0,
+            Self::OffHand => 1,
+        }
+    }
+}
+
 impl ReadFrom for InteractionHand {
     fn read(data: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let id = VarInt::read(data)?.0;
@@ -193,6 +204,12 @@ impl ReadFrom for InteractionHand {
             1 => Ok(InteractionHand::OffHand),
             _ => Err(io::Error::other("Invalid InteractionHand id")),
         }
+    }
+}
+
+impl WriteTo for InteractionHand {
+    fn write(&self, writer: &mut impl Write) -> io::Result<()> {
+        VarInt(self.id()).write(writer)
     }
 }
 

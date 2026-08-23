@@ -17,6 +17,7 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 use uuid::Uuid;
 
+use crate::behavior::ITEM_BEHAVIORS;
 use crate::entity::damage::DamageSource;
 
 use crate::entity::{
@@ -697,7 +698,10 @@ impl Entity for ItemEntity {
             state.health
         };
         if new_health <= 0 {
-            // TODO: Call item.onDestroyed() when implemented
+            // Vanilla parity: `ItemEntity.hurtServer` gives the item a chance to
+            // spill what it carries before the entity goes away.
+            let item = self.get_item();
+            ITEM_BEHAVIORS.get_behavior(item.item()).on_destroyed(self);
             self.set_removed(RemovalReason::Killed);
         }
         true

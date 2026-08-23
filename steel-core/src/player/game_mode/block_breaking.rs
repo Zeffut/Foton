@@ -340,8 +340,9 @@ impl BlockBreakingManager {
     fn destroy_block(&self, player: &Player, world: &Arc<World>, pos: BlockPos) -> bool {
         let state = world.get_block_state(pos);
 
-        // Check if player's tool can destroy this block
-        // TODO: Implement canDestroyBlock check for adventure mode
+        if !item_can_destroy_block(player, world, pos, state) {
+            return false;
+        }
 
         // Get block info
         let Some(_block) = REGISTRY.blocks.by_state_id(state) else {
@@ -555,4 +556,36 @@ fn drop_block_loot(
     BLOCK_BEHAVIORS
         .get_behavior(state.get_block())
         .spawn_after_break(state, world, pos, tool, true);
+}
+
+/// Runs the held item's veto on breaking `state`.
+///
+/// Vanilla parity: the `ItemStack.canDestroyBlock` guard opening
+/// `ServerPlayerGameMode.destroyBlock`. Vanilla mutates the live stack; Steel
+/// works on a copy so the hook never runs while the inventory lock is held,
+/// and writes it back only when the item actually changed it.
+fn item_can_destroy_block(
+    player: &Player,
+    world: &Arc<World>,
+    pos: BlockPos,
+    state: BlockStateId,
+) -> bool {
+    let mut held = {
+        let inventory = player.inventory.lock();
+        let item = inventory.get_item_in_hand(InteractionHand::MainHand);
+        item.copy_with_count(item.count())
+    };
+    let before = held.clone();
+
+    let allowed = ITEM_BEHAVIORS
+        .get_behavior(held.item())
+        .can_destroy_block(&mut held, state, world, pos, player);
+
+    if held != before {
+        player
+            .inventory
+            .lock()
+            .set_item_in_hand(InteractionHand::MainHand, held);
+    }
+    allowed
 }

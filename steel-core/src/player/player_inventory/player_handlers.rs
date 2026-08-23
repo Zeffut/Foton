@@ -2,11 +2,18 @@ use std::{f32::consts::TAU, mem, sync::Arc};
 
 use glam::DVec3;
 use steel_protocol::packets::game::{
-    CContainerClose, COpenScreen, CSetPlayerInventory, ClickType, SContainerButtonClick,
-    SContainerClick, SContainerClose, SContainerSlotStateChanged, SRenameItem, SSetBeacon,
-    SSetCarriedItem, SSetCreativeModeSlot,
+    CContainerClose, COpenBook, COpenScreen, CSetPlayerInventory, ClickType, SContainerButtonClick,
+    SContainerClick, SContainerClose, SContainerSlotStateChanged, SEditBook, SRenameItem,
+    SSelectBundleItem, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot,
+};
+use steel_registry::data_components::components::{
+    Filterable, WritableBookContent, WrittenBookContent,
+};
+use steel_registry::data_components::vanilla_components::{
+    WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
 use steel_registry::item_stack::ItemStack;
+use steel_registry::vanilla_items;
 use steel_utils::{
     Downcast as _,
     locks::Shared,
@@ -35,6 +42,128 @@ use super::{
 };
 
 impl Player {
+    /// Opens the reader for a signed book held in `hand`.
+    ///
+    /// Vanilla parity: `ServerPlayer.openItemGui`, which does nothing for a
+    /// book that carries no `written_book_content`.
+    ///
+    /// Steel gap: Vanilla first calls `WrittenBookContent.resolveForItem`, which
+    /// expands selectors and scores inside a command-written book and rewrites
+    /// the component as resolved. Steel has no command-source text resolution,
+    /// so a book written by a player -- always already resolved -- opens
+    /// correctly while one written by `/give` shows its pages unexpanded.
+    pub fn open_item_gui(&self, stack: &ItemStack, hand: InteractionHand) {
+        if !stack.has(WRITTEN_BOOK_CONTENT) {
+            return;
+        }
+        self.send_packet(COpenBook { hand });
+    }
+
+    /// Applies a book-and-quill edit, signing the book when a title came with it.
+    ///
+    /// Vanilla parity: `ServerGamePacketListenerImpl.handleEditBook`.
+    pub fn handle_edit_book(&self, packet: SEditBook) {
+        let Ok(slot) = usize::try_from(packet.slot) else {
+            return;
+        };
+        if !PlayerInventory::is_hotbar_slot(slot) && slot != PlayerInventory::SLOT_OFFHAND {
+            return;
+        }
+
+        // Vanilla runs the pages through the server's `TextFilter` first and
+        // resumes on the main thread. Steel has no filter service, so both
+        // branches of `filterableFromOutgoing` collapse to a pass-through.
+        match packet.title {
+            Some(title) => self.sign_book(&title, packet.pages, slot),
+            None => self.update_book_contents(packet.pages, slot),
+        }
+    }
+
+    /// Vanilla parity: `ServerGamePacketListenerImpl.updateBookContents`.
+    fn update_book_contents(&self, pages: Vec<String>, slot: usize) {
+        let pages = pages.into_iter().map(Filterable::pass_through).collect();
+        let contents = match WritableBookContent::new(pages) {
+            Ok(contents) => contents,
+            Err(error) => {
+                log::debug!(
+                    "Player {} sent unusable book pages: {error}",
+                    self.gameprofile.name
+                );
+                return;
+            }
+        };
+
+        let mut inventory = self.inventory.lock();
+        let carried = inventory.get_item_mut(slot);
+        if !carried.has(WRITABLE_BOOK_CONTENT) {
+            return;
+        }
+        carried.set(WRITABLE_BOOK_CONTENT, contents);
+    }
+
+    /// Vanilla parity: `ServerGamePacketListenerImpl.signBook`.
+    fn sign_book(&self, title: &str, pages: Vec<String>, slot: usize) {
+        let pages = pages
+            .into_iter()
+            .map(|page| Filterable::pass_through(TextComponent::plain(page)))
+            .collect();
+        let contents = match WrittenBookContent::new(
+            Filterable::pass_through(title.to_owned()),
+            self.gameprofile.name.clone(),
+            0,
+            pages,
+            true,
+        ) {
+            Ok(contents) => contents,
+            Err(error) => {
+                log::debug!(
+                    "Player {} sent an unusable book signature: {error}",
+                    self.gameprofile.name
+                );
+                return;
+            }
+        };
+
+        let mut inventory = self.inventory.lock();
+        let carried = inventory.get_item(slot);
+        if !carried.has(WRITABLE_BOOK_CONTENT) {
+            return;
+        }
+
+        // Vanilla parity: `ItemStack.transmuteCopy` keeps the count and every
+        // component the quill carried, then swaps the two book components.
+        let mut written = ItemStack::with_count_and_patch(
+            &vanilla_items::WRITTEN_BOOK,
+            carried.count(),
+            carried.components_patch().clone(),
+        );
+        written.remove(WRITABLE_BOOK_CONTENT);
+        written.set(WRITTEN_BOOK_CONTENT, contents);
+        inventory.set_item(slot, written);
+    }
+
+    /// Points the bundle in `slot_id` at the stack it hands out next.
+    ///
+    /// Vanilla parity: `ServerGamePacketListenerImpl.handleBundleItemSelectedPacket`.
+    pub fn handle_select_bundle_item(&self, packet: SSelectBundleItem) {
+        let Ok(slot_index) = usize::try_from(packet.slot_id) else {
+            return;
+        };
+
+        match self.take_open_menu_for_callback(None) {
+            Ok(menu) => {
+                menu.set_selected_bundle_item_index(slot_index, packet.selected_item_index);
+                self.finish_open_menu_callback(menu);
+            }
+            Err(OpenMenuUnavailable::Closed) => {
+                self.inventory_menu
+                    .lock()
+                    .set_selected_bundle_item_index(slot_index, packet.selected_item_index);
+            }
+            Err(OpenMenuUnavailable::Unavailable) => {}
+        }
+    }
+
     fn take_open_menu_for_callback(
         &self,
         expected_container_id: Option<i32>,
