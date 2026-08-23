@@ -12,11 +12,10 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 49
+[blocks] 33
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
-CalibratedSculkSensorBlock
 CartographyTableBlock
 CarvedPumpkinBlock
 CommandBlock
@@ -25,25 +24,15 @@ CopperGolemStatueBlock
 CreakingHeartBlock
 CryingObsidianBlock
 DriedGhastBlock
-FrogspawnBlock
 FrostedIceBlock
 HalfTransparentBlock
 JigsawBlock
 LightBlock
-LightningRodBlock
 MangroveRootsBlock
 NetherrackBlock
 NyliumBlock
-PiglinWallSkullBlock
-PlayerHeadBlock
-PlayerWallHeadBlock
-SculkBlock
 SculkCatalystBlock
-SculkSensorBlock
-SculkShriekerBlock
 ShelfBlock
-SkullBlock
-SnifferEggBlock
 SoulSandBlock
 SpawnerBlock
 StainedGlassBlock
@@ -54,48 +43,32 @@ TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
 TrialSpawnerBlock
-TurtleEggBlock
 VaultBlock
-WallSkullBlock
 WeatheringCopperChestBlock
 WeatheringCopperGolemStatueBlock
-WeatheringLightningRodBlock
-WitherSkullBlock
-WitherWallSkullBlock
 
-[items] 30
-ArmorStandItem
+[items] 19
 ArrowItem
 BannerItem
-BottleItem
 BundleItem
-CrossbowItem
 DebugStickItem
 DiscFragmentItem
 EmptyMapItem
 EndCrystalItem
 FishingRodItem
 GameMasterBlockItem
-GlowInkSacItem
-InkSacItem
-InstrumentItem
 Item
 KnowledgeBookItem
-LeadItem
 MapItem
 MobBucketItem
 ScaffoldingBlockItem
-ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
-SpyglassItem
-TridentItem
-WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 84
+[entities] 77
 Allay
 Armadillo
 Axolotl
@@ -129,14 +102,10 @@ HappyGhast
 Hoglin
 Horse
 Illusioner
-Interaction
 IronGolem
-ItemDisplay
-LightningBolt
 Llama
 LlamaSpit
 Mannequin
-Marker
 MinecartCommandBlock
 MinecartSpawner
 Mule
@@ -162,9 +131,7 @@ SnowGolem
 SpectralArrow
 SulfurCube
 Tadpole
-TextDisplay
 ThrownLingeringPotion
-ThrownTrident
 TraderLlama
 TropicalFish
 Turtle
@@ -173,7 +140,6 @@ Villager
 Vindicator
 WanderingTrader
 Warden
-WindCharge
 WitherBoss
 Wolf
 Zoglin
