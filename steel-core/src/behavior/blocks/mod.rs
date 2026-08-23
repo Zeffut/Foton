@@ -11,6 +11,7 @@ mod falling;
 mod fluid;
 mod portal;
 mod redstone;
+mod sculk;
 mod utils;
 pub mod vegetation;
 
@@ -58,6 +59,10 @@ pub use redstone::{
     WeatheringCopperBulbBlock, WeightedPressurePlateBlock, rail_shape_at,
 };
 pub(crate) use redstone::{MAX_REDSTONE_SIGNAL, MIN_REDSTONE_SIGNAL};
+pub use sculk::{
+    CalibratedSculkSensorBlock, SculkBlock, SculkSensorBlock, SculkShriekerBlock,
+    can_activate_sculk_sensor, deactivate_sculk_sensor, sculk_sensor_phase, try_resonate_vibration,
+};
 pub(crate) use utils::multiface_face_property;
 pub use vegetation::{
     AttachedStemBlock, AzaleaBlock, BambooSaplingBlock, BambooStalkBlock, BeetrootBlock,

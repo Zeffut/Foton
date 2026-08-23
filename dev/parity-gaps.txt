@@ -12,11 +12,10 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 49
+[blocks] 45
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
-CalibratedSculkSensorBlock
 CartographyTableBlock
 CarvedPumpkinBlock
 CommandBlock
@@ -37,10 +36,7 @@ NyliumBlock
 PiglinWallSkullBlock
 PlayerHeadBlock
 PlayerWallHeadBlock
-SculkBlock
 SculkCatalystBlock
-SculkSensorBlock
-SculkShriekerBlock
 ShelfBlock
 SkullBlock
 SnifferEggBlock

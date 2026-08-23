@@ -13,6 +13,8 @@ BlockBehaviour = "BlockBehaviour"
 behaviour = "behaviour"
 interruptable = "interruptable"
 neighbour = "neighbour"
+# The camel-case half of a Vanilla method name (SculkSensorBlock.updateNeighbours).
+Neighbours = "Neighbours"
 # Vanilla stronghold piece-type IDs (shs, shsd, shrc, ...).
 shs = "shs"
 # Vanilla carver tag name (minecraft:overworld_carver_replaceables).
