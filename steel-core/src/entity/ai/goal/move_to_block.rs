@@ -29,6 +29,7 @@ pub struct MoveToBlockGoal {
     vertical_search_start: i32,
     accepted_distance: f64,
     recalculate_path_interval: i32,
+    fixed_start_interval: Option<i32>,
 }
 
 impl MoveToBlockGoal {
@@ -67,6 +68,7 @@ impl MoveToBlockGoal {
             vertical_search_start: 0,
             accepted_distance: DEFAULT_ACCEPTED_DISTANCE,
             recalculate_path_interval: DEFAULT_RECALCULATE_PATH_INTERVAL,
+            fixed_start_interval: None,
         }
     }
 
@@ -88,6 +90,16 @@ impl MoveToBlockGoal {
         recalculate_path_interval: i32,
     ) -> Self {
         self.recalculate_path_interval = recalculate_path_interval;
+        self
+    }
+
+    /// Fixes the gap between two searches instead of randomizing it.
+    ///
+    /// Vanilla parity: a `nextStartTick` override that returns a constant, as
+    /// `CatLieOnBedGoal` does with its 40 ticks.
+    #[must_use]
+    pub(crate) const fn with_fixed_start_interval(mut self, start_interval: i32) -> Self {
+        self.fixed_start_interval = Some(start_interval);
         self
     }
 
@@ -129,10 +141,12 @@ impl MoveToBlockGoal {
         self.try_ticks
     }
 
-    /// Vanilla parity: the static `MoveToBlockGoal.nextStartTick(Mob)`, which
-    /// shares its name with the field above in Java but cannot here.
-    fn roll_next_start_tick(_mob: &dyn PathfinderMob) -> i32 {
-        reduced_tick_delay(INTERVAL_TICKS + rand::random_range(0..200))
+    /// Vanilla parity: the static `MoveToBlockGoal.nextStartTick(Mob)`, unless
+    /// a subclass pins the interval the way `Cat.CatSitOnBlockGoal` does. It
+    /// shares its name with the field accessor above in Java but cannot here.
+    fn roll_next_start_tick(&self) -> i32 {
+        self.fixed_start_interval
+            .unwrap_or_else(|| reduced_tick_delay(INTERVAL_TICKS + rand::random_range(0..200)))
     }
 
     fn move_mob_to_block(&self, mob: &dyn PathfinderMob) {
@@ -181,7 +195,7 @@ impl Goal for MoveToBlockGoal {
             return false;
         }
 
-        self.next_start_tick = Self::roll_next_start_tick(mob);
+        self.next_start_tick = self.roll_next_start_tick();
         let Some(world) = mob.level() else {
             return false;
         };

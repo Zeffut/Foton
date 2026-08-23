@@ -20,6 +20,7 @@ pub mod player_data;
 pub mod player_data_storage;
 pub mod player_inventory;
 mod profile;
+mod shoulder;
 mod sleep;
 mod sleep_state;
 mod tick_state;
@@ -46,6 +47,7 @@ pub use profile::{
     GameProfile, GameProfileAction, KnownPlayer, KnownPlayers, ProfileLookupError,
     is_valid_player_name, offline_uuid,
 };
+use shoulder::ShoulderEntities;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use sleep_state::PlayerSleepState;
 use std::mem::replace;
@@ -229,6 +231,12 @@ pub struct Player {
     tick_state: SyncMutex<PlayerTickState>,
     /// Vanilla sleep/wake animation counter.
     sleep_state: SyncMutex<PlayerSleepState>,
+
+    /// Entities riding on this player's shoulders.
+    ///
+    /// Vanilla parity: the `shoulderEntityLeft`/`shoulderEntityRight` pair
+    /// of `ServerPlayer`.
+    shoulder_entities: ShoulderEntities,
     /// Persisted personal bed or respawn-anchor target.
     respawn_config: SyncMutex<Option<PlayerRespawnConfig>>,
 
@@ -549,6 +557,7 @@ impl Player {
             item_cooldowns: SyncMutex::new(ItemCooldowns::default()),
             tick_state: SyncMutex::new(PlayerTickState::new()),
             sleep_state: SyncMutex::new(PlayerSleepState::new()),
+            shoulder_entities: ShoulderEntities::new(),
             respawn_config: SyncMutex::new(None),
             abilities: SyncMutex::new(Abilities::default()),
             block_breaking: SyncMutex::new(BlockBreakingManager::new()),
@@ -790,7 +799,8 @@ impl Player {
             }
         }
 
-        // TODO: reset player noActionTime and remove shoulder entities.
+        // TODO: reset player noActionTime.
+        self.remove_entities_on_shoulder();
         if self.get_health() <= 0.0 {
             return false;
         }
@@ -1836,6 +1846,9 @@ impl LivingEntity for Player {
 
         let result = self.default_ai_step();
         self.set_y_head_rot(self.rotation().0);
+        // Vanilla parity: the `handleShoulderEntities` at the end of
+        // `Player.aiStep`.
+        self.handle_shoulder_entities();
         result
     }
 

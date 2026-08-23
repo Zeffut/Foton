@@ -1,7 +1,14 @@
+use std::cmp::Ordering;
+use std::str::FromStr;
+
 use rustc_hash::FxHashMap;
 use simdnbt::ToNbtTag;
 use simdnbt::owned::NbtTag;
 use steel_utils::Identifier;
+use steel_utils::random::Random;
+
+use crate::biome::BiomeRef;
+use crate::{REGISTRY, TaggedRegistryExt};
 
 /// Represents a full cat variant definition from a data pack JSON file.
 #[derive(Debug)]
@@ -25,6 +32,37 @@ pub enum SpawnCondition {
     Structure { structures: &'static str },
     MoonBrightness { min: Option<f32>, max: Option<f32> },
     Biome { biomes: &'static str },
+}
+
+impl SpawnConditionEntry {
+    /// Returns whether this entry admits a cat spawning in `biome`.
+    ///
+    /// Vanilla parity: `SpawnCondition.test` against a `SpawnContext`. Steel can
+    /// answer the biome condition and the unconditioned entry.
+    ///
+    /// **Gap**: a `minecraft:structure` condition never matches, because Steel
+    /// has no structure-at-position lookup, and a `minecraft:moon_brightness`
+    /// condition never matches, because 26.2 moved day time into the world-clock
+    /// registry and Steel exposes no moon phase from it. Today that only costs
+    /// the `all_black` variant, which vanilla awards inside a swamp hut or under
+    /// a moon at least 0.9 bright.
+    #[must_use]
+    pub fn matches_biome(&self, biome: BiomeRef) -> bool {
+        match &self.condition {
+            None => true,
+            Some(SpawnCondition::Biome { biomes }) => biome_target_matches(biomes, biome),
+            Some(SpawnCondition::Structure { .. } | SpawnCondition::MoonBrightness { .. }) => false,
+        }
+    }
+}
+
+/// Returns whether a `#tag` or direct biome reference names `biome`.
+fn biome_target_matches(target: &str, biome: BiomeRef) -> bool {
+    if let Some(tag) = target.strip_prefix('#') {
+        return Identifier::from_str(tag).is_ok_and(|tag| REGISTRY.biomes.is_in_tag(biome, &tag));
+    }
+
+    Identifier::from_str(target).is_ok_and(|key| biome.key == key)
 }
 
 impl ToNbtTag for &CatVariant {
@@ -89,6 +127,48 @@ impl CatVariantRegistry {
             cat_variants_by_key: FxHashMap::default(),
             allows_registering: true,
         }
+    }
+
+    /// Picks the variant a cat spawning in `biome` should wear.
+    ///
+    /// Vanilla parity: `VariantUtils.selectVariantToSpawn` over
+    /// `Registries.CAT_VARIANT`, using `PriorityProvider.pick` semantics --
+    /// highest matching priority wins, ties are broken uniformly.
+    #[must_use]
+    pub fn select_spawn_variant(
+        &self,
+        biome: BiomeRef,
+        random: &mut impl Random,
+    ) -> Option<CatVariantRef> {
+        let mut selected = Vec::new();
+        let mut highest_priority = i32::MIN;
+
+        for (_, variant) in self.iter() {
+            for entry in variant.spawn_conditions {
+                if !entry.matches_biome(biome) {
+                    continue;
+                }
+
+                match entry.priority.cmp(&highest_priority) {
+                    Ordering::Greater => {
+                        selected.clear();
+                        selected.push(variant);
+                        highest_priority = entry.priority;
+                    }
+                    Ordering::Equal => selected.push(variant),
+                    Ordering::Less => {}
+                }
+            }
+        }
+
+        let bound = i32::try_from(selected.len()).ok()?;
+        if bound == 0 {
+            return None;
+        }
+
+        selected
+            .get(random.next_i32_bounded(bound) as usize)
+            .copied()
     }
 }
 

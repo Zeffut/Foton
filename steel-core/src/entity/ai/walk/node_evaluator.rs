@@ -4,6 +4,22 @@ use super::*;
 pub struct WalkNodeEvaluator {
     settings: MobPathSettings,
     nodes: NodeStore,
+    path_type_mode: PathTypeMode,
+}
+
+/// How one block is classified for a mob.
+///
+/// Vanilla parity: the `NodeEvaluator.getPathType` override. A walker answers
+/// with `WalkNodeEvaluator.getPathTypeStatic`; a flier answers with
+/// `FlyNodeEvaluator.getPathType`, which turns open air above something solid
+/// into a perch. The bounding-box scan below has to see the right one, which is
+/// why the mode lives on the evaluator rather than at the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathTypeMode {
+    /// Vanilla parity: `WalkNodeEvaluator.getPathType`.
+    Walk,
+    /// Vanilla parity: `FlyNodeEvaluator.getPathType`.
+    Fly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -18,10 +34,10 @@ pub struct AcceptedNodeRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// The nodes reachable in one step.
 ///
-/// Ten slots: the walking evaluator fills at most eight, but the swimming one
-/// adds all six faces plus four diagonals.
+/// Twenty-six slots: the walking evaluator fills at most eight and the swimming
+/// one ten, but a flier may step to every cell of the cube around it.
 pub struct Neighbors {
-    nodes: [Option<i32>; 10],
+    nodes: [Option<i32>; 26],
     len: usize,
 }
 
@@ -29,7 +45,7 @@ impl Neighbors {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            nodes: [None; 10],
+            nodes: [None; 26],
             len: 0,
         }
     }
@@ -73,6 +89,31 @@ impl WalkNodeEvaluator {
         Self {
             settings,
             nodes: NodeStore::new(),
+            path_type_mode: PathTypeMode::Walk,
+        }
+    }
+
+    /// Switches how a single block is classified.
+    #[must_use]
+    pub const fn with_path_type_mode(mut self, path_type_mode: PathTypeMode) -> Self {
+        self.path_type_mode = path_type_mode;
+        self
+    }
+
+    /// Classifies one block for this mob.
+    ///
+    /// Vanilla parity: the virtual `NodeEvaluator.getPathType`.
+    #[must_use]
+    pub fn path_type(
+        &self,
+        context: &mut PathfindingContext<'_>,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> PathType {
+        match self.path_type_mode {
+            PathTypeMode::Walk => WalkPathEvaluator::path_type(context, x, y, z),
+            PathTypeMode::Fly => fly_path_type(context, x, y, z),
         }
     }
 
@@ -303,7 +344,7 @@ impl WalkNodeEvaluator {
             }
         }
 
-        let current_node_path_type = WalkPathEvaluator::path_type(context, x, y, z);
+        let current_node_path_type = self.path_type(context, x, y, z);
         if self.settings.entity_width() > 1 {
             let current_is_cheaper =
                 self.settings.pathfinding_malus(current_node_path_type) < highest_malus;
@@ -407,8 +448,7 @@ impl WalkNodeEvaluator {
         for dx in 0..self.settings.entity_width() {
             for dy in 0..self.settings.entity_height() {
                 for dz in 0..self.settings.entity_depth() {
-                    let mut block_type =
-                        WalkPathEvaluator::path_type(context, x + dx, y + dy, z + dz);
+                    let mut block_type = self.path_type(context, x + dx, y + dy, z + dz);
                     block_type =
                         self.adjust_path_type_for_mob(context, block_type, &mut mob_on_rail);
                     block_types.insert(block_type);
@@ -443,13 +483,13 @@ impl WalkNodeEvaluator {
         if mob_on_rail.is_none() {
             let mob_position = self.settings.mob_position();
             *mob_on_rail = Some(
-                WalkPathEvaluator::path_type(
+                self.path_type(
                     context,
                     mob_position.x(),
                     mob_position.y(),
                     mob_position.z(),
                 ) == PathType::Rail
-                    || WalkPathEvaluator::path_type(
+                    || self.path_type(
                         context,
                         mob_position.x(),
                         mob_position.y() - 1,
@@ -497,7 +537,11 @@ impl WalkNodeEvaluator {
         .find(|pos| self.can_start_at(context, *pos))
     }
 
-    fn get_start_node(&mut self, context: &mut PathfindingContext<'_>, pos: BlockPos) -> i32 {
+    pub(super) fn get_start_node(
+        &mut self,
+        context: &mut PathfindingContext<'_>,
+        pos: BlockPos,
+    ) -> i32 {
         let path_type = self.get_path_type_of_mob(context, pos.x(), pos.y(), pos.z());
         let cost_malus = self.settings.pathfinding_malus(path_type);
         let node = self.nodes.get_node(pos.x(), pos.y(), pos.z());

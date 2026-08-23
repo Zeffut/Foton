@@ -31,9 +31,11 @@ started; the second is where `dev/parity-gaps.txt` stands now.
 |---|---|---|
 | blocks | 63 | 20 |
 | items | 38 | 4 |
-| entities | 142 | 74 |
+| entities | 142 | 62 |
 
-**Entities are all that is left of any size**, and nearly all of it is mobs.
+**Entities are all that is left of any size**, and nearly all of it is mobs --
+though the tameable pets, the passive animals and the golems have taken a third
+of that column since the last count.
 The item column is down to four, three of which are blocked on a map system
 that does not exist and one of which -- vanilla's plain `Item` -- needs
 nothing.

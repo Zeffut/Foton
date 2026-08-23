@@ -12,10 +12,11 @@ pub use mobs::hostile::{
     SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, WitchEntity,
     WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
-pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity};
+pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::passive::{
-    ChickenEntity, CowEntity, GoatEntity, MushroomCowEntity, PigEntity, PolarBearEntity,
-    RabbitEntity, RabbitVariant, SheepEntity, StriderEntity, TurtleEntity,
+    CatEntity, ChickenEntity, CowEntity, FoxEntity, FoxVariant, GoatEntity, MushroomCowEntity,
+    OcelotEntity, ParrotEntity, ParrotVariant, PigEntity, PolarBearEntity, RabbitEntity,
+    RabbitVariant, SheepEntity, StriderEntity, TurtleEntity,
 };
 pub use mobs::water::{
     CodEntity, DolphinEntity, GlowSquidEntity, PufferfishEntity, SalmonEntity, SquidEntity,

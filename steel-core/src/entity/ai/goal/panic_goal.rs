@@ -18,22 +18,46 @@ const WATER_CHECK_DISTANCE_VERTICAL: i32 = 1;
 /// bear only at the environment, because it fights back against everything else.
 type PanicCausingDamageTypes = Box<dyn Fn(&dyn PathfinderMob) -> Identifier + Send + Sync>;
 
+/// An extra condition a subclass puts in front of `PanicGoal.shouldPanic`.
+///
+/// Vanilla parity: the `shouldPanic` overrides that read `... && super.shouldPanic()`,
+/// which is why this narrows the goal rather than replacing its damage test.
+type PanicFilter = Box<dyn Fn(&dyn PathfinderMob) -> bool + Send>;
+
 pub struct PanicGoal {
     wanted_position: Option<DVec3>,
     speed_modifier: f64,
     is_running: bool,
     panic_causing_damage_types: Option<PanicCausingDamageTypes>,
+    panic_filter: Option<PanicFilter>,
 }
 
 impl PanicGoal {
     #[must_use]
     pub(crate) const fn new(speed_modifier: f64) -> Self {
+        // No stored tag: `should_panic` falls back to `PANIC_CAUSES`, which is
+        // what this constructor would otherwise have to box a closure to say.
         Self {
             wanted_position: None,
             speed_modifier,
             is_running: false,
             panic_causing_damage_types: None,
+            panic_filter: None,
         }
+    }
+
+    /// Creates a panic goal that only the given damage types set off.
+    ///
+    /// Vanilla parity: the `PanicGoal(mob, speedModifier, panicCausingDamageTypes)`
+    /// constructor, which is how a wolf panics at drowning but not at a punch.
+    #[must_use]
+    pub(crate) fn with_damage_types(
+        speed_modifier: f64,
+        panic_causing_damage_types: Identifier,
+    ) -> Self {
+        Self::with_panic_causing_damage_types(speed_modifier, move |_| {
+            panic_causing_damage_types.clone()
+        })
     }
 
     /// Creates a panic goal that runs from something other than the usual.
@@ -49,7 +73,21 @@ impl PanicGoal {
             speed_modifier,
             is_running: false,
             panic_causing_damage_types: Some(Box::new(panic_causing_damage_types)),
+            panic_filter: None,
         }
+    }
+
+    /// Adds a condition that must also hold before the mob panics.
+    ///
+    /// Vanilla parity: a `shouldPanic` override that narrows rather than
+    /// replaces the base test, as `Fox.FoxPanicGoal` does with `!isDefending()`.
+    #[must_use]
+    pub(crate) fn with_panic_filter(
+        mut self,
+        filter: impl Fn(&dyn PathfinderMob) -> bool + Send + 'static,
+    ) -> Self {
+        self.panic_filter = Some(Box::new(filter));
+        self
     }
 
     #[must_use]
@@ -57,8 +95,15 @@ impl PanicGoal {
         self.is_running
     }
 
-    /// Vanilla parity: the protected `PanicGoal.shouldPanic`.
+    /// Vanilla parity: the protected `PanicGoal.shouldPanic`, and the
+    /// subclass overrides that narrow it before deferring to it.
     pub(crate) fn should_panic(&self, mob: &dyn PathfinderMob) -> bool {
+        if let Some(filter) = &self.panic_filter
+            && !filter(mob)
+        {
+            return false;
+        }
+
         let tag = match &self.panic_causing_damage_types {
             Some(damage_types) => damage_types(mob),
             None => vanilla_damage_type_tags::DamageTypeTag::PANIC_CAUSES,
@@ -174,7 +219,6 @@ mod tests {
     fn panic_goal_uses_vanilla_panic_damage_tag() {
         init_vanilla_registry();
         let pig = PigEntity::new(&vanilla_entities::PIG, 1, DVec3::ZERO, Weak::new());
-
         let goal = PanicGoal::new(1.25);
 
         assert!(!goal.should_panic(&pig));
@@ -192,5 +236,26 @@ mod tests {
             2.0
         ));
         assert!(goal.should_panic(&pig));
+    }
+
+    /// Vanilla parity: the `PanicGoal(mob, speed, PANIC_ENVIRONMENTAL_CAUSES)`
+    /// a wolf registers, which is why hitting a tamed wolf makes it fight back
+    /// rather than bolt.
+    #[test]
+    fn a_narrowed_panic_goal_ignores_damage_outside_its_tag() {
+        init_vanilla_registry();
+        let pig = PigEntity::new(&vanilla_entities::PIG, 1, DVec3::ZERO, Weak::new());
+        let goal = PanicGoal::with_damage_types(
+            1.0,
+            vanilla_damage_type_tags::DamageTypeTag::PANIC_ENVIRONMENTAL_CAUSES,
+        );
+
+        assert!(pig.hurt_server(
+            test_world(),
+            &DamageSource::environment(&vanilla_damage_types::PLAYER_ATTACK),
+            2.0
+        ));
+
+        assert!(!goal.should_panic(&pig));
     }
 }

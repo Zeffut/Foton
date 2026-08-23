@@ -770,6 +770,7 @@ mod spawn;
 pub mod spawn_rules;
 mod storage;
 mod synced_data;
+mod tamable;
 mod ticking;
 mod tracker;
 
@@ -812,7 +813,7 @@ pub use manager::{
     AddEntityError, ChunkEntityLoadResult, EntityLifecycleChanges, EntityMoveError,
     EntityMoveUpdate, EntityOwnership, EntityVisibility, WorldEntityManager,
 };
-pub(crate) use mob::{Mob, MobBase, PathfinderMob};
+pub(crate) use mob::{Mob, MobBase, MoveControlKind, NavigationKind, PathfinderMob};
 pub use movement_sync::{
     EntityMovementSyncPacket, EntityMovementSyncPackets, EntityMovementSyncState,
     EntityMovementSyncUpdate, EntityPositionRotSyncPacket, EntityPositionSyncDecision,
@@ -831,6 +832,9 @@ pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
 pub(crate) use spawn::{AgeableMobGroupData, EntitySpawnReason, SpawnGroupData};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
 pub use synced_data::{EntitySyncedData, LivingEntitySyncedData};
+pub(crate) use tamable::{
+    TELEPORT_WHEN_DISTANCE_IS_SQ, TamableAnimal, TamableAnimalBase, is_tamed,
+};
 pub(crate) use ticking::{
     snapshot_old_pos_and_rot_for_tick, tick_vehicle_passengers_with_ticked_if,
 };

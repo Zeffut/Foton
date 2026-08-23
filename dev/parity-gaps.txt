@@ -40,7 +40,7 @@ FishingRodItem
 Item
 MapItem
 
-[entities] 67
+[entities] 62
 Allay
 Armadillo
 Axolotl
@@ -51,7 +51,6 @@ Breeze
 BreezeWindCharge
 Camel
 CamelHusk
-Cat
 Creaking
 Donkey
 ElderGuardian
@@ -61,7 +60,6 @@ Evoker
 EvokerFangs
 EyeOfEnder
 FishingHook
-Fox
 Frog
 Ghast
 Giant
@@ -78,11 +76,9 @@ MinecartCommandBlock
 MinecartSpawner
 Mule
 Nautilus
-Ocelot
 OminousItemSpawner
 Panda
 Parched
-Parrot
 Phantom
 Piglin
 PiglinBrute
@@ -103,7 +99,6 @@ Vindicator
 WanderingTrader
 Warden
 WitherBoss
-Wolf
 Zoglin
 ZombieHorse
 ZombieNautilus

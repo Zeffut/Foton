@@ -406,6 +406,9 @@ impl Server {
             return None;
         }
 
+        // The riders have to reach the world before the player leaves it.
+        player.drop_shoulder_entities_on_disconnect();
+
         let world = player.get_world();
         let (player, domain, player_data) = world.detach_player_for_disconnect(Arc::clone(&player));
 

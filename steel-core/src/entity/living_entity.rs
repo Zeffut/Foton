@@ -675,11 +675,15 @@ pub trait LivingEntity: Entity {
     /// Override this to add what a specific entity does when it is hurt, and
     /// call [`Self::living_hurt_server`] from the override for the shared
     /// behavior; Rust has no `super`, so the base body lives in its own method.
+    /// Override this to add what a specific entity does when hurt, and call
+    /// [`Self::living_hurt_server`] from the override for the shared behavior;
+    /// Rust has no `super`, so the base body lives in its own method.
     fn hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         self.living_hurt_server(world, source, amount)
     }
 
     /// Runs the shared body of [`Self::hurt_server`].
+    /// The shared part of vanilla `LivingEntity.hurtServer`.
     fn living_hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         if self.is_invulnerable_to(world, source) {
             return false;
@@ -854,6 +858,7 @@ pub trait LivingEntity: Entity {
     /// Applies damage after vanilla reductions.
     ///
     /// Override this to react to landed damage, and call
+    /// Override this to intercept damage before it reaches health, and call
     /// [`Self::living_actually_hurt`] from the override for the shared
     /// behavior; Rust has no `super`, so the base body lives in its own method.
     fn actually_hurt(&self, world: &World, source: &DamageSource, amount: f32) {
@@ -861,6 +866,7 @@ pub trait LivingEntity: Entity {
     }
 
     /// Runs the shared body of [`Self::actually_hurt`].
+    /// The shared part of vanilla `LivingEntity.actuallyHurt`.
     fn living_actually_hurt(&self, world: &World, source: &DamageSource, amount: f32) {
         if self.is_invulnerable_to(world, source) {
             return;
@@ -1049,7 +1055,15 @@ pub trait LivingEntity: Entity {
     }
 
     /// Runs the currently implemented subset of vanilla `LivingEntity.dropAllDeathLoot`.
+    /// Override this to drop what a specific mob carries, and call
+    /// [`Self::living_drop_all_death_loot`] from the override for the
+    /// shared behavior; Rust has no `super`.
     fn drop_all_death_loot(&self, source: &DamageSource) {
+        self.living_drop_all_death_loot(source);
+    }
+
+    /// The shared part of vanilla `LivingEntity.dropAllDeathLoot`.
+    fn living_drop_all_death_loot(&self, source: &DamageSource) {
         let Some(world) = self.level() else {
             return;
         };
