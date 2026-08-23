@@ -39,6 +39,13 @@ struct RecipeJson {
     // Cooking recipe fields
     #[serde(default)]
     ingredient: Option<Value>,
+    // Smithing recipe fields
+    #[serde(default)]
+    template: Option<Value>,
+    #[serde(default)]
+    base: Option<Value>,
+    #[serde(default)]
+    addition: Option<Value>,
     #[serde(default)]
     cookingtime: Option<i32>,
     #[serde(default)]
@@ -126,6 +133,16 @@ struct ShapelessRecipeData {
     ident: Ident,
     category: TokenStream,
     ingredient_data: Vec<ParsedIngredient>,
+    result_item_ident: Ident,
+    result_count: i32,
+}
+
+struct SmithingRecipeData {
+    name: String,
+    ident: Ident,
+    template: ParsedIngredient,
+    base: ParsedIngredient,
+    addition: ParsedIngredient,
     result_item_ident: Ident,
     result_count: i32,
 }
@@ -268,6 +285,101 @@ fn parse_shapeless_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<Shap
         result_item_ident,
         result_count: result.count,
     })
+}
+
+/// Parses a smithing transformation from JSON.
+///
+/// Only `smithing_transform` is read. `smithing_trim` needs trim pattern and
+/// material registries Steel does not have, so those eighteen recipes are
+/// still skipped -- deliberately, rather than by omission.
+fn parse_smithing_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<SmithingRecipeData> {
+    let base = recipe.base.as_ref()?;
+    let result = recipe.result.as_ref()?;
+
+    let result_item_id = result.id.strip_prefix("minecraft:").unwrap_or(&result.id);
+
+    Some(SmithingRecipeData {
+        name: recipe_name.to_string(),
+        ident: Ident::new(&recipe_name.to_snake_case(), Span::call_site()),
+        template: recipe
+            .template
+            .as_ref()
+            .map_or(ParsedIngredient::Empty, parse_ingredient),
+        base: parse_ingredient(base),
+        addition: recipe
+            .addition
+            .as_ref()
+            .map_or(ParsedIngredient::Empty, parse_ingredient),
+        result_item_ident: Ident::new(&result_item_id.to_shouty_snake_case(), Span::call_site()),
+        result_count: result.count,
+    })
+}
+
+/// Generates the creator functions, struct fields, field initializers and
+/// registration calls for the smithing family.
+fn smithing_tokens(
+    recipes: &[SmithingRecipeData],
+) -> (
+    Vec<TokenStream>,
+    Vec<TokenStream>,
+    Vec<TokenStream>,
+    Vec<TokenStream>,
+) {
+    let creator_fns = recipes
+        .iter()
+        .map(|r| {
+            let fn_ident = Ident::new(&format!("create_smithing_{}", r.ident), Span::call_site());
+            let name = &r.name;
+            let template = generate_ingredient_tokens(&r.template);
+            let base = generate_ingredient_tokens(&r.base);
+            let addition = generate_ingredient_tokens(&r.addition);
+            let result_item_ident = &r.result_item_ident;
+            let result_count = r.result_count;
+
+            quote! {
+                #[inline(never)]
+                fn #fn_ident() -> SmithingTransformRecipe {
+                    SmithingTransformRecipe {
+                        id: Identifier::vanilla_static(#name),
+                        template: #template,
+                        base: #base,
+                        addition: #addition,
+                        result: RecipeResult {
+                            item: &*vanilla_items::#result_item_ident,
+                            count: #result_count,
+                        },
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let fields = recipes
+        .iter()
+        .map(|r| {
+            let ident = &r.ident;
+            quote! { pub #ident: SmithingTransformRecipe, }
+        })
+        .collect();
+
+    let field_inits = recipes
+        .iter()
+        .map(|r| {
+            let ident = &r.ident;
+            let fn_ident = Ident::new(&format!("create_smithing_{}", r.ident), Span::call_site());
+            quote! { #ident: #fn_ident(), }
+        })
+        .collect();
+
+    let registers = recipes
+        .iter()
+        .map(|r| {
+            let ident = &r.ident;
+            quote! { registry.register_smithing(&RECIPES.smithing.#ident); }
+        })
+        .collect();
+
+    (creator_fns, fields, field_inits, registers)
 }
 
 /// Parses a stonecutting recipe from JSON.
@@ -494,37 +606,31 @@ pub(crate) fn build() -> TokenStream {
     let recipe_dir = "../steel-utils/build_assets/builtin_datapacks/minecraft/recipe";
     println!("cargo:rerun-if-changed={recipe_dir}");
 
-    let mut shaped_recipes: Vec<ShapedRecipeData> = Vec::new();
-    let mut shapeless_recipes: Vec<ShapelessRecipeData> = Vec::new();
-    let mut smelting_recipes: Vec<SmeltingRecipeData> = Vec::new();
-    let mut blasting_recipes: Vec<SmeltingRecipeData> = Vec::new();
-    let mut smoking_recipes: Vec<SmeltingRecipeData> = Vec::new();
-    let mut stonecutting_recipes: Vec<StonecuttingRecipeData> = Vec::new();
+    let mut collected = Collected::default();
 
     // Read all recipe files
-    fn read_recipes(
-        dir: &Path,
-        shaped: &mut Vec<ShapedRecipeData>,
-        shapeless: &mut Vec<ShapelessRecipeData>,
-        smelting: &mut Vec<SmeltingRecipeData>,
-        blasting: &mut Vec<SmeltingRecipeData>,
-        smoking: &mut Vec<SmeltingRecipeData>,
-        stonecutting: &mut Vec<StonecuttingRecipeData>,
-    ) {
+    /// Everything one pass over the recipe directory fills in.
+    ///
+    /// A bag rather than eight out-parameters: every new recipe kind added one
+    /// more argument, and the signature had outgrown being read.
+    #[derive(Default)]
+    struct Collected {
+        shaped: Vec<ShapedRecipeData>,
+        shapeless: Vec<ShapelessRecipeData>,
+        smelting: Vec<SmeltingRecipeData>,
+        blasting: Vec<SmeltingRecipeData>,
+        smoking: Vec<SmeltingRecipeData>,
+        stonecutting: Vec<StonecuttingRecipeData>,
+        smithing: Vec<SmithingRecipeData>,
+    }
+
+    fn read_recipes(dir: &Path, into: &mut Collected) {
         for entry in fs::read_dir(dir).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
 
             if path.is_dir() {
-                read_recipes(
-                    &path,
-                    shaped,
-                    shapeless,
-                    smelting,
-                    blasting,
-                    smoking,
-                    stonecutting,
-                );
+                read_recipes(&path, into);
             } else if path.extension().and_then(|s| s.to_str()) == Some("json") {
                 let recipe_name = path
                     .file_stem()
@@ -544,50 +650,56 @@ pub(crate) fn build() -> TokenStream {
                 match recipe.recipe_type.as_str() {
                     "minecraft:crafting_shaped" => {
                         if let Some(r) = parse_shaped_recipe(recipe_name, &recipe) {
-                            shaped.push(r);
+                            into.shaped.push(r);
                         }
                     }
                     "minecraft:crafting_shapeless" => {
                         if let Some(r) = parse_shapeless_recipe(recipe_name, &recipe) {
-                            shapeless.push(r);
+                            into.shapeless.push(r);
                         }
                     }
                     "minecraft:smelting" => {
                         if let Some(r) = parse_smelting_recipe(recipe_name, &recipe, 200) {
-                            smelting.push(r);
+                            into.smelting.push(r);
                         }
                     }
                     "minecraft:blasting" => {
                         if let Some(r) = parse_smelting_recipe(recipe_name, &recipe, 100) {
-                            blasting.push(r);
+                            into.blasting.push(r);
                         }
                     }
                     "minecraft:smoking" => {
                         if let Some(r) = parse_smelting_recipe(recipe_name, &recipe, 100) {
-                            smoking.push(r);
+                            into.smoking.push(r);
                         }
                     }
                     "minecraft:stonecutting" => {
                         if let Some(r) = parse_stonecutting_recipe(recipe_name, &recipe) {
-                            stonecutting.push(r);
+                            into.stonecutting.push(r);
                         }
                     }
-                    // Skip other recipe types for now (smithing, transmute, etc.)
+                    "minecraft:smithing_transform" => {
+                        if let Some(r) = parse_smithing_recipe(recipe_name, &recipe) {
+                            into.smithing.push(r);
+                        }
+                    }
+                    // Skip other recipe types for now (smithing_trim, transmute, etc.)
                     _ => {}
                 }
             }
         }
     }
 
-    read_recipes(
-        Path::new(recipe_dir),
-        &mut shaped_recipes,
-        &mut shapeless_recipes,
-        &mut smelting_recipes,
-        &mut blasting_recipes,
-        &mut smoking_recipes,
-        &mut stonecutting_recipes,
-    );
+    read_recipes(Path::new(recipe_dir), &mut collected);
+    let Collected {
+        shaped: shaped_recipes,
+        shapeless: shapeless_recipes,
+        smelting: smelting_recipes,
+        blasting: blasting_recipes,
+        smoking: smoking_recipes,
+        stonecutting: stonecutting_recipes,
+        smithing: smithing_recipes,
+    } = collected;
 
     // Generate individual creator functions for each shaped recipe.
     // Each function creates just one recipe in its own stack frame,
@@ -741,12 +853,15 @@ pub(crate) fn build() -> TokenStream {
         stonecutting_field_inits,
         stonecutting_registers,
     ) = stonecutting_tokens(&stonecutting_recipes);
+    let (smithing_creator_fns, smithing_fields, smithing_field_inits, smithing_registers) =
+        smithing_tokens(&smithing_recipes);
 
     quote! {
         use crate::{
             recipe::{
                 CraftingCategory, Ingredient, RecipeRegistry, RecipeResult,
-                ShapedRecipe, ShapelessRecipe, SmeltingRecipe, StonecuttingRecipe,
+                ShapedRecipe, ShapelessRecipe, SmeltingRecipe, SmithingTransformRecipe,
+                StonecuttingRecipe,
             },
             vanilla_items,
         };
@@ -784,6 +899,10 @@ pub(crate) fn build() -> TokenStream {
             #(#stonecutting_fields)*
         }
 
+        pub struct SmithingRecipes {
+            #(#smithing_fields)*
+        }
+
         pub struct Recipes {
             pub shaped: ShapedRecipes,
             pub shapeless: ShapelessRecipes,
@@ -791,6 +910,7 @@ pub(crate) fn build() -> TokenStream {
             pub blasting: BlastingRecipes,
             pub smoking: SmokingRecipes,
             pub stonecutting: StonecuttingRecipes,
+            pub smithing: SmithingRecipes,
         }
 
         // Individual recipe creator functions.
@@ -810,6 +930,7 @@ pub(crate) fn build() -> TokenStream {
         #(#blasting_creator_fns)*
         #(#smoking_creator_fns)*
         #(#stonecutting_creator_fns)*
+        #(#smithing_creator_fns)*
 
         impl Recipes {
             fn init() -> Self {
@@ -832,6 +953,9 @@ pub(crate) fn build() -> TokenStream {
                     stonecutting: StonecuttingRecipes {
                         #(#stonecutting_field_inits)*
                     },
+                    smithing: SmithingRecipes {
+                        #(#smithing_field_inits)*
+                    },
                 }
             }
         }
@@ -846,6 +970,7 @@ pub(crate) fn build() -> TokenStream {
             #(#blasting_registers)*
             #(#smoking_registers)*
             #(#stonecutting_registers)*
+            #(#smithing_registers)*
         }
     }
 }

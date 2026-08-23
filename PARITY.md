@@ -91,9 +91,13 @@ cannot.
       been skipping outright, and the menu lets a player pick one of the many
       cuts an input offers. The grindstone strips enchantments, keeps the
       curses, welds two damaged tools into a better one, and pays the
-      experience back. Still open: smithing table, cartography table, loom,
-      lectern, bell, beacon, crafter -- of which smithing and loom also need
-      recipe kinds the build script still skips.
+      experience back. The smithing table upgrades to netherite and carries
+      the tool's enchantments across. Still open: cartography table, loom,
+      lectern, bell, beacon, crafter. Armor trims are the half of smithing
+      that is not here: they need trim pattern and material registries and a
+      `TRIM` component Steel does not have, so those eighteen recipes are
+      still skipped -- deliberately now, rather than by omission. The
+      cartography table is blocked outright: Steel has no maps at all.
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
       can now right-click a block at all.
 - [~] **Tools that act**: snowball, egg and bottle o' enchanting done -- all

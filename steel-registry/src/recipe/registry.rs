@@ -5,6 +5,7 @@ use steel_utils::Identifier;
 
 use super::cooking::{CookingKind, SmeltingRecipe};
 use super::crafting::{CraftingInput, CraftingRecipe, ShapedRecipe, ShapelessRecipe};
+use super::smithing::SmithingTransformRecipe;
 use super::stonecutting::StonecuttingRecipe;
 use crate::item_stack::ItemStack;
 
@@ -18,6 +19,9 @@ pub struct RecipeRegistry {
     shaped_recipes: Vec<&'static ShapedRecipe>,
     /// All shapeless crafting recipes (for type-specific iteration).
     shapeless_recipes: Vec<&'static ShapelessRecipe>,
+    /// Every smithing table transformation.
+    smithing_recipes: Vec<&'static SmithingTransformRecipe>,
+
     /// Every stonecutter recipe, in registration order.
     ///
     /// Order matters here in a way it does not for the other kinds: the
@@ -50,6 +54,7 @@ impl RecipeRegistry {
             recipes_by_key: FxHashMap::default(),
             shaped_recipes: Vec::new(),
             shapeless_recipes: Vec::new(),
+            smithing_recipes: Vec::new(),
             stonecutting_recipes: Vec::new(),
             smelting_recipes: Vec::new(),
             blasting_recipes: Vec::new(),
@@ -82,6 +87,29 @@ impl RecipeRegistry {
         self.recipes_by_id
             .push(Box::leak(Box::new(CraftingRecipe::Shapeless(recipe))));
         self.shapeless_recipes.push(recipe);
+    }
+
+    /// Registers a smithing table transformation.
+    pub fn register_smithing(&mut self, recipe: &'static SmithingTransformRecipe) {
+        self.smithing_recipes.push(recipe);
+    }
+
+    /// Returns the transformation these three slots make, if any.
+    ///
+    /// Vanilla parity: `RecipeManager.getRecipeFor(SMITHING, ...)`. Unlike a
+    /// stonecutter, at most one smithing recipe can match, so this returns the
+    /// first rather than the list.
+    #[must_use]
+    pub fn smithing_recipe_for(
+        &self,
+        template: &ItemStack,
+        base: &ItemStack,
+        addition: &ItemStack,
+    ) -> Option<&'static SmithingTransformRecipe> {
+        self.smithing_recipes
+            .iter()
+            .find(|recipe| recipe.matches(template, base, addition))
+            .copied()
     }
 
     /// Registers a stonecutter recipe.

@@ -14,6 +14,7 @@ mod grindstone_block;
 mod hopper_block;
 mod jukebox_block;
 mod shulker_box_block;
+mod smithing_table_block;
 mod stonecutter_block;
 mod trapped_chest_block;
 
@@ -32,5 +33,6 @@ pub use grindstone_block::GrindstoneBlock;
 pub use hopper_block::HopperBlock;
 pub use jukebox_block::JukeboxBlock;
 pub use shulker_box_block::ShulkerBoxBlock;
+pub use smithing_table_block::SmithingTableBlock;
 pub use stonecutter_block::StonecutterBlock;
 pub use trapped_chest_block::TrappedChestBlock;

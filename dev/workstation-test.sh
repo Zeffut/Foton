@@ -57,6 +57,8 @@ CMDS="$CMDS;;setblock 0 99 0 minecraft:stone"
 CMDS="$CMDS;;setblock 0 99 2 minecraft:stone"
 CMDS="$CMDS;;setblock 0 100 0 minecraft:stonecutter"
 CMDS="$CMDS;;setblock 0 100 2 minecraft:grindstone"
+CMDS="$CMDS;;setblock 0 99 4 minecraft:stone"
+CMDS="$CMDS;;setblock 0 100 4 minecraft:smithing_table"
 CMDS="$CMDS;;clear @s"
 CMDS="$CMDS;;!hotbar 0"
 
@@ -66,6 +68,10 @@ CMDS="$CMDS;;!close"
 
 CMDS="$CMDS;;teleport @s 1 100 2"
 CMDS="$CMDS;;!useon 0 100 2 east"
+CMDS="$CMDS;;!close"
+
+CMDS="$CMDS;;teleport @s 1 100 4"
+CMDS="$CMDS;;!useon 0 100 4 east"
 CMDS="$CMDS;;!close"
 
 export JOIN_COMMANDS="$CMDS"
@@ -83,6 +89,6 @@ fail() { echo "########## WORKSTATION TEST FAILED ($1) ##########"; exit 1; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
 screens=$(grep -c "a screen opened" join.log)
-[ "$screens" -eq 2 ] \
-  || fail "expected the stonecutter and the grindstone to open, got $screens"
+[ "$screens" -eq 3 ] \
+  || fail "expected the stonecutter, grindstone and smithing table to open, got $screens"
 echo "########## WORKSTATION TEST PASSED ##########"

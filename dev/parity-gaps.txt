@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 56
+[blocks] 55
 AirBlock
 BeaconBlock
 BellBlock
@@ -49,7 +49,6 @@ SculkSensorBlock
 SculkShriekerBlock
 ShelfBlock
 SkullBlock
-SmithingTableBlock
 SnifferEggBlock
 SoulSandBlock
 SpawnerBlock
