@@ -373,7 +373,7 @@ mod tests {
 
     use super::*;
     use crate::behavior::init_behaviors;
-    use crate::entity::{AgeableMob, EntityBase};
+    use crate::entity::{AgeableMob, EntityBase, init_entities};
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     struct StepEntity {
@@ -538,7 +538,7 @@ mod tests {
     fn a_hatched_egg_leaves_a_baby_turtle_that_remembers_the_nest() {
         init_vanilla_registry();
         init_behaviors();
-        crate::entity::init_entities();
+        init_entities();
         let world = fresh_test_world("turtle_egg_hatch");
         let pos = BlockPos::new(8, 64, 8);
         insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));

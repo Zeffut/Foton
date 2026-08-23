@@ -859,7 +859,7 @@ impl Goal for TurtlePanicGoal {
     }
 
     fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        if !PanicGoal::should_panic(mob) {
+        if !self.inner.should_panic(mob) {
             return false;
         }
 

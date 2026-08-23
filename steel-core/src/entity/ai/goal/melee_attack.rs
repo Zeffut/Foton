@@ -57,15 +57,22 @@ impl MeleeAttackGoal {
         }
     }
 
-    const fn reset_attack_cooldown(&mut self) {
+    /// Vanilla parity: the protected `MeleeAttackGoal.resetAttackCooldown`.
+    pub(crate) const fn reset_attack_cooldown(&mut self) {
         self.ticks_until_next_attack = Self::attack_interval();
     }
 
-    const fn is_time_to_attack(&self) -> bool {
+    /// Vanilla parity: the protected `MeleeAttackGoal.isTimeToAttack`.
+    pub(crate) const fn is_time_to_attack(&self) -> bool {
         self.ticks_until_next_attack <= 0
     }
 
-    fn can_perform_attack(&self, mob: &dyn PathfinderMob, target: &dyn LivingEntity) -> bool {
+    /// Vanilla parity: the protected `MeleeAttackGoal.canPerformAttack`.
+    pub(crate) fn can_perform_attack(
+        &self,
+        mob: &dyn PathfinderMob,
+        target: &dyn LivingEntity,
+    ) -> bool {
         self.is_time_to_attack()
             && mob.is_within_melee_attack_range(target)
             && mob.has_line_of_sight_cached(target)
@@ -201,9 +208,22 @@ impl Goal for MeleeAttackGoal {
     }
 
     fn tick(&mut self, mob: &dyn PathfinderMob) {
-        let Some(target) = mob.target() else {
+        let Some(target) = self.tick_without_attack(mob) else {
             return;
         };
+        self.check_and_perform_attack(mob, &target);
+    }
+}
+
+impl MeleeAttackGoal {
+    /// Runs everything `MeleeAttackGoal.tick` does except the attack itself.
+    ///
+    /// Vanilla splits this the other way round, with `checkAndPerformAttack` as
+    /// the overridable tail. Rust has no `super`, so a mob that replaces the
+    /// attack -- the polar bear, which rears up instead -- calls this and then
+    /// does its own.
+    pub(crate) fn tick_without_attack(&mut self, mob: &dyn PathfinderMob) -> Option<SharedEntity> {
+        let target = mob.target()?;
 
         let target_position = target.position();
         mob.mob_base().controls().lock().look_control.set_look_at(
@@ -219,7 +239,7 @@ impl Goal for MeleeAttackGoal {
         }
 
         self.ticks_until_next_attack = (self.ticks_until_next_attack - 1).max(0);
-        self.check_and_perform_attack(mob, &target);
+        Some(target)
     }
 }
 

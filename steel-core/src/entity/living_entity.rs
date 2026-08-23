@@ -1185,21 +1185,7 @@ pub trait LivingEntity: Entity {
 
         self.propagate_fall_to_passengers(effective_fall_distance, damage_modifier, source);
 
-        let attributes = self.attributes().lock();
-        let safe_fall_distance = attributes
-            .get_value(vanilla_attributes::SAFE_FALL_DISTANCE)
-            .unwrap_or(vanilla_attributes::SAFE_FALL_DISTANCE.default_value);
-        let fall_damage_multiplier = attributes
-            .get_value(vanilla_attributes::FALL_DAMAGE_MULTIPLIER)
-            .unwrap_or(vanilla_attributes::FALL_DAMAGE_MULTIPLIER.default_value);
-        drop(attributes);
-
-        let damage = LivingEntityBase::calculate_fall_damage(
-            effective_fall_distance,
-            damage_modifier,
-            safe_fall_distance,
-            fall_damage_multiplier,
-        );
+        let damage = self.calculate_fall_damage(effective_fall_distance, damage_modifier);
         if damage <= 0 {
             return false;
         }
@@ -1211,6 +1197,33 @@ pub trait LivingEntity: Entity {
             self.hurt(&world, source, damage as f32);
         }
         true
+    }
+
+    /// Returns how much damage a fall of this distance does.
+    ///
+    /// Vanilla parity: the protected `LivingEntity.calculateFallDamage`, which
+    /// a goat overrides to subtract ten from every fall.
+    fn calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.default_calculate_fall_damage(fall_distance, damage_modifier)
+    }
+
+    /// The body of [`Self::calculate_fall_damage`], callable from an override.
+    fn default_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        let attributes = self.attributes().lock();
+        let safe_fall_distance = attributes
+            .get_value(vanilla_attributes::SAFE_FALL_DISTANCE)
+            .unwrap_or(vanilla_attributes::SAFE_FALL_DISTANCE.default_value);
+        let fall_damage_multiplier = attributes
+            .get_value(vanilla_attributes::FALL_DAMAGE_MULTIPLIER)
+            .unwrap_or(vanilla_attributes::FALL_DAMAGE_MULTIPLIER.default_value);
+        drop(attributes);
+
+        LivingEntityBase::calculate_fall_damage(
+            fall_distance,
+            damage_modifier,
+            safe_fall_distance,
+            fall_damage_multiplier,
+        )
     }
 
     /// Gets the entity's armor value from the attribute system.

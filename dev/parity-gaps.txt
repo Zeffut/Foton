@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 75
+[entities] 73
 Allay
 Armadillo
 Axolotl
@@ -96,7 +96,6 @@ Frog
 Ghast
 Giant
 GlowItemFrame
-Goat
 Guardian
 HappyGhast
 Hoglin
@@ -120,7 +119,6 @@ Piglin
 PiglinBrute
 Pillager
 Player
-PolarBear
 Pufferfish
 Ravager
 Shulker

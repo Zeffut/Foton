@@ -13,8 +13,8 @@ pub use mobs::hostile::{
     WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 pub use mobs::passive::{
-    ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, RabbitEntity, RabbitVariant,
-    SheepEntity, StriderEntity, TurtleEntity,
+    ChickenEntity, CowEntity, GoatEntity, MushroomCowEntity, PigEntity, PolarBearEntity,
+    RabbitEntity, RabbitVariant, SheepEntity, StriderEntity, TurtleEntity,
 };
 pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
 pub use objects::display_ui::{

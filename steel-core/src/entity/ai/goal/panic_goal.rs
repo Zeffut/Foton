@@ -1,7 +1,7 @@
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::vanilla_damage_type_tags;
-use steel_utils::BlockPos;
+use steel_utils::{BlockPos, Identifier};
 
 use super::random_pos::default_random_pos;
 use super::selector::{Goal, GoalControls};
@@ -11,10 +11,18 @@ use crate::fluid::FluidStateExt as _;
 
 const WATER_CHECK_DISTANCE_VERTICAL: i32 = 1;
 
+/// Which damage makes this mob run.
+///
+/// Vanilla parity: the `Function<PathfinderMob, TagKey<DamageType>>` of the
+/// third `PanicGoal` constructor. A polar bear cub panics at anything; a grown
+/// bear only at the environment, because it fights back against everything else.
+type PanicCausingDamageTypes = Box<dyn Fn(&dyn PathfinderMob) -> Identifier + Send + Sync>;
+
 pub struct PanicGoal {
     wanted_position: Option<DVec3>,
     speed_modifier: f64,
     is_running: bool,
+    panic_causing_damage_types: Option<PanicCausingDamageTypes>,
 }
 
 impl PanicGoal {
@@ -24,6 +32,23 @@ impl PanicGoal {
             wanted_position: None,
             speed_modifier,
             is_running: false,
+            panic_causing_damage_types: None,
+        }
+    }
+
+    /// Creates a panic goal that runs from something other than the usual.
+    ///
+    /// Vanilla parity: the `TagKey<DamageType>` and `Function` constructors.
+    #[must_use]
+    pub(crate) fn with_panic_causing_damage_types(
+        speed_modifier: f64,
+        panic_causing_damage_types: impl Fn(&dyn PathfinderMob) -> Identifier + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            wanted_position: None,
+            speed_modifier,
+            is_running: false,
+            panic_causing_damage_types: Some(Box::new(panic_causing_damage_types)),
         }
     }
 
@@ -33,9 +58,13 @@ impl PanicGoal {
     }
 
     /// Vanilla parity: the protected `PanicGoal.shouldPanic`.
-    pub(crate) fn should_panic(mob: &dyn PathfinderMob) -> bool {
+    pub(crate) fn should_panic(&self, mob: &dyn PathfinderMob) -> bool {
+        let tag = match &self.panic_causing_damage_types {
+            Some(damage_types) => damage_types(mob),
+            None => vanilla_damage_type_tags::DamageTypeTag::PANIC_CAUSES,
+        };
         mob.last_damage_source()
-            .is_some_and(|source| source.is(&vanilla_damage_type_tags::DamageTypeTag::PANIC_CAUSES))
+            .is_some_and(|source| source.is(&tag))
     }
 
     /// Vanilla parity: writing the protected `posX`/`posY`/`posZ` fields, as
@@ -65,7 +94,7 @@ impl Goal for PanicGoal {
     }
 
     fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
-        if !Self::should_panic(mob) {
+        if !self.should_panic(mob) {
             return false;
         }
 
@@ -146,20 +175,22 @@ mod tests {
         init_vanilla_registry();
         let pig = PigEntity::new(&vanilla_entities::PIG, 1, DVec3::ZERO, Weak::new());
 
-        assert!(!PanicGoal::should_panic(&pig));
+        let goal = PanicGoal::new(1.25);
+
+        assert!(!goal.should_panic(&pig));
 
         assert!(pig.hurt_server(
             test_world(),
             &DamageSource::environment(&vanilla_damage_types::GENERIC),
             1.0
         ));
-        assert!(!PanicGoal::should_panic(&pig));
+        assert!(!goal.should_panic(&pig));
 
         assert!(pig.hurt_server(
             test_world(),
             &DamageSource::environment(&vanilla_damage_types::PLAYER_ATTACK),
             2.0
         ));
-        assert!(PanicGoal::should_panic(&pig));
+        assert!(goal.should_panic(&pig));
     }
 }

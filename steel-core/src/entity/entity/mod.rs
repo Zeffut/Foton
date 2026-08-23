@@ -1,5 +1,6 @@
 use super::*;
 use crate::entity::entities::default_thunder_hit;
+use crate::entity::neutral_mob::NeutralMob;
 
 /// Final state accepted from a client-authored movement packet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1510,6 +1511,13 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Mirrors vanilla's frequent `instanceof Animal` branches.
     fn as_animal(&self) -> Option<&dyn Animal> {
         try_as_dyn::<Self, dyn Animal>(self)
+    }
+
+    /// Returns this entity as a neutral mob when it holds grudges.
+    ///
+    /// Mirrors vanilla's `instanceof NeutralMob` branches.
+    fn as_neutral_mob(&self) -> Option<&dyn NeutralMob> {
+        try_as_dyn::<Self, dyn NeutralMob>(self)
     }
 
     /// Returns true for entities that implement vanilla ageable-mob behavior.
