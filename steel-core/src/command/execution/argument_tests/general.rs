@@ -122,7 +122,7 @@ fn block_predicate_argument_parses_blocks_tags_properties_and_nbt() {
     };
     let Some(oak_x) = steel_registry::REGISTRY
         .blocks
-        .state_id_from_block_defaulted_properties(&vanilla_blocks::OAK_LOG, [("axis", "x")])
+        .state_id_from_block_properties(&vanilla_blocks::OAK_LOG, [("axis", "x")])
     else {
         panic!("oak log x state should exist");
     };

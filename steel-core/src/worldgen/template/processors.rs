@@ -631,7 +631,7 @@ impl StructureTemplate {
 
         registry
             .blocks
-            .state_id_from_block_defaulted_properties(block, parsed_properties)
+            .state_id_from_block_properties(block, parsed_properties)
     }
 
     pub(super) fn read_block_identifier_prefix(value: &str) -> Option<(&str, &str)> {

@@ -134,7 +134,7 @@ impl FeatureDecorationRunner {
 
         let Some(new_state) = registry
             .blocks
-            .state_id_from_block_properties(block, &properties)
+            .state_id_from_block_properties(block, properties.iter().copied())
         else {
             panic!(
                 "randomized int provider produced invalid value {value} for property {property} on {}",

@@ -591,8 +591,8 @@ impl BlockRegistry {
     ///
     /// Returns `None` if the block key is unknown or if any property name/value is invalid.
     ///
-    /// Properties can be provided in any order. Missing properties will use the block's
-    /// default values (typically index 0 for each property).
+    /// Properties can be provided in any order; the ones left out keep the value
+    /// they have in the block's default state.
     #[must_use]
     pub fn state_id_from_properties(
         &self,
@@ -600,37 +600,24 @@ impl BlockRegistry {
         properties: &[(&str, &str)],
     ) -> Option<BlockStateId> {
         let block = self.by_key(key)?;
-        self.state_id_from_block_properties(block, properties)
+        self.state_id_from_block_properties(block, properties.iter().copied())
     }
 
-    /// Gets the state ID for a block with the given properties.
+    /// Gets the state ID for a block by applying `properties` over that block's
+    /// default state.
+    ///
+    /// Vanilla parity: `BlockStateParser` and `NbtUtils.readBlockState` both start
+    /// from `defaultBlockState()` and set only the properties they were given, so a
+    /// property nobody mentioned keeps its default -- **not** the first of its
+    /// possible values. Seeding from the first value instead is silently wrong for
+    /// every block whose default is not its first state: `/setblock oak_log` would
+    /// lay the log on its side, and `/setblock redstone_lamp` would place one
+    /// already lit.
     ///
     /// Returns `None` if the block is not registered or if any property
     /// name/value is invalid.
     #[must_use]
-    pub fn state_id_from_block_properties(
-        &self,
-        block: BlockRef,
-        properties: &[(&str, &str)],
-    ) -> Option<BlockStateId> {
-        let block_id = self.try_block_index(block)?;
-        let base_state_id = self.block_to_base_state[block_id];
-
-        let mut property_indices = vec![0usize; block.properties.len()];
-        Self::apply_property_overrides(block, &mut property_indices, properties.iter().copied())?;
-
-        Some(BlockStateId(
-            base_state_id + Self::encode_property_indices(block, &property_indices),
-        ))
-    }
-
-    /// Gets the state ID for a block by applying properties over that block's
-    /// registered default state.
-    ///
-    /// Returns `None` if the block is not registered or if any property
-    /// name/value is invalid.
-    #[must_use]
-    pub fn state_id_from_block_defaulted_properties<'a>(
+    pub fn state_id_from_block_properties<'a>(
         &self,
         block: BlockRef,
         properties: impl IntoIterator<Item = (&'a str, &'a str)>,
@@ -1046,7 +1033,7 @@ impl BlockRegistry {
             .filter(|(name, _)| target.properties.iter().any(|p| p.get_name() == *name))
             .copied()
             .collect();
-        self.state_id_from_block_defaulted_properties(target, matching)
+        self.state_id_from_block_properties(target, matching)
             .unwrap_or_else(|| self.get_default_state_id(target))
     }
 }
@@ -1239,7 +1226,7 @@ mod tests {
         let registry = create_test_registry();
         let key = Identifier::vanilla_static("redstone_wire");
 
-        // Only specify some properties - others should default to index 0
+        // Only specify some properties - the rest keep their default.
         let partial_props = [("power", "10"), ("east", "side")];
 
         let state_id = registry
@@ -1255,19 +1242,20 @@ mod tests {
         let east = retrieved.iter().find(|(n, _)| *n == "east").unwrap();
         assert_eq!(east.1, "side");
 
-        // Unspecified properties should be at index 0 (first value in enum)
+        // Unspecified properties keep the default, which for a redstone wire is
+        // "none" -- not "up", the first of the possible values.
         let north = retrieved.iter().find(|(n, _)| *n == "north").unwrap();
-        assert_eq!(north.1, "up"); // Index 0 is "up" for RedstoneSide
+        assert_eq!(north.1, "none");
     }
 
     #[test]
-    fn test_state_id_from_block_defaulted_properties_keeps_missing_defaults() {
+    fn test_state_id_from_block_properties_keeps_missing_defaults() {
         let registry = create_test_registry();
         let key = Identifier::vanilla_static("redstone_wire");
         let block = registry.by_key(&key).expect("redstone_wire should exist");
 
         let state_id = registry
-            .state_id_from_block_defaulted_properties(block, [("power", "10")])
+            .state_id_from_block_properties(block, [("power", "10")])
             .expect("Should find state");
 
         let retrieved = registry.get_properties(state_id);
@@ -1286,24 +1274,83 @@ mod tests {
         let registry = create_test_registry();
         let key = Identifier::vanilla_static("redstone_wire");
 
-        // Empty properties - should get base state with all defaults at index 0
+        // No properties at all is the block's default state, exactly what
+        // `/setblock minecraft:redstone_wire` has to place.
         let state_id = registry
             .state_id_from_properties(&key, &[])
             .expect("Should find state");
 
-        let retrieved = registry.get_properties(state_id);
+        assert_eq!(
+            state_id,
+            registry
+                .get_default_state_id(registry.by_key(&key).expect("redstone_wire should exist")),
+        );
 
-        // All should be at index 0
+        let retrieved = registry.get_properties(state_id);
         for (name, value) in &retrieved {
             match *name {
                 "east" | "north" | "south" | "west" => {
-                    assert_eq!(*value, "up", "Empty props should use index 0 = 'up'");
+                    assert_eq!(*value, "none", "an unplaced wire connects to nothing");
                 }
                 "power" => {
-                    assert_eq!(*value, "0", "Empty props should use index 0 = '0'");
+                    assert_eq!(*value, "0");
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// A property nobody mentioned must keep its default, not fall back to the
+    /// first of its possible values.
+    ///
+    /// These four blocks are the ones where the difference shows: each has a
+    /// default that is *not* its first state, so seeding from index 0 lays an
+    /// oak log on its side, opens a barrel, and lights a redstone lamp -- which
+    /// is exactly what `/setblock` did before this was pinned down.
+    #[test]
+    fn omitted_properties_keep_the_default_not_the_first_value() {
+        let registry = create_test_registry();
+
+        for (block_name, property, default_value, first_value) in [
+            ("oak_log", "axis", "y", "x"),
+            ("redstone_lamp", "lit", "false", "true"),
+            ("barrel", "open", "false", "true"),
+            ("redstone_wire", "north", "none", "up"),
+        ] {
+            let key = Identifier::vanilla_static(block_name);
+            let block = registry.by_key(&key).expect("block should exist");
+
+            // The two values really are different, or this block proves nothing.
+            let possible = block
+                .properties
+                .iter()
+                .find(|candidate| candidate.get_name() == property)
+                .expect("property should exist");
+            assert_eq!(
+                possible.value_name_from_index(0),
+                first_value,
+                "{block_name}: first value of {property} is no longer {first_value},                  so this block no longer tells the two apart"
+            );
+            assert_ne!(default_value, first_value);
+
+            let state = registry
+                .state_id_from_properties(&key, &[])
+                .expect("empty properties should resolve");
+            assert_eq!(
+                state,
+                registry.get_default_state_id(block),
+                "{block_name}: no properties given should be the default state"
+            );
+
+            let actual = registry.get_properties(state);
+            let (_, value) = actual
+                .iter()
+                .find(|(name, _)| *name == property)
+                .expect("property should be present");
+            assert_eq!(
+                *value, default_value,
+                "{block_name}: {property} fell back to the first value instead of the default"
+            );
         }
     }
 
@@ -1376,7 +1423,7 @@ mod tests {
             "Should return None for invalid property on propertyless block"
         );
 
-        let result = registry.state_id_from_block_defaulted_properties(stone, [("power", "1")]);
+        let result = registry.state_id_from_block_properties(stone, [("power", "1")]);
         assert!(
             result.is_none(),
             "Should return None for invalid defaulted property on propertyless block"

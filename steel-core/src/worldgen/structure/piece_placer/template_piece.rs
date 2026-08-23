@@ -764,7 +764,7 @@ impl StructurePiecePlacer {
 
     fn dried_ghast_state(registry: &Registry, rotation: Rotation) -> BlockStateId {
         let facing = rotation.rotate(Direction::North);
-        let Some(state) = registry.blocks.state_id_from_block_defaulted_properties(
+        let Some(state) = registry.blocks.state_id_from_block_properties(
             &vanilla_blocks::DRIED_GHAST,
             [("facing", facing.as_str())],
         ) else {

@@ -39,7 +39,7 @@ pub(crate) fn load(encoded: BorrowedNbtCompound<'_, '_>) -> Option<BlockStateId>
         }
     }
 
-    REGISTRY.blocks.state_id_from_block_defaulted_properties(
+    REGISTRY.blocks.state_id_from_block_properties(
         block,
         properties
             .iter()

@@ -75,7 +75,7 @@ fn set_block(
             // Get the block state id
             let Some(block_state_id) = REGISTRY
                 .blocks
-                .state_id_from_block_properties(block, &properties_vec)
+                .state_id_from_block_properties(block, properties_vec.iter().copied())
             else {
                 return Err(CommandSyntaxError::dynamic(
                     "This Block is not registered or a property name/value is invalid.",

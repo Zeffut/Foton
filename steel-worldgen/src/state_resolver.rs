@@ -60,7 +60,7 @@ impl WorldgenStateResolver {
     ) -> BlockStateId {
         let Some(state) = registry
             .blocks
-            .state_id_from_block_defaulted_properties(block, data_properties)
+            .state_id_from_block_properties(block, data_properties)
         else {
             panic!("{context} references unknown or invalid state {block_name}");
         };
