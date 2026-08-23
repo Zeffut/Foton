@@ -1,4 +1,5 @@
 use super::*;
+use crate::entity::neutral_mob::NeutralMob;
 
 /// Final state accepted from a client-authored movement packet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1466,7 +1467,7 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
 
     /// Runs the shared body of [`Self::thunder_hit`].
     fn entity_thunder_hit(&self, world: &World) {
-        entities::objects::entity_thunder_hit(self.as_entity_event_source(), world);
+        entities::objects::default_thunder_hit(self.as_entity_event_source(), world);
     }
 
     /// Returns this entity as a neutral mob when it holds a grudge.
@@ -1742,6 +1743,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Sets the entity's rotation as (yaw, pitch) in degrees.
     fn set_rotation(&self, rotation: (f32, f32)) {
         self.base().set_rotation(rotation);
+    }
+
+    /// Returns whether this entity moved sideways at all on the last tick.
+    ///
+    /// Vanilla parity: `Entity.hasMovedHorizontallyRecently`, which is how a
+    /// dolphin tells a boat that is being rowed from one that is drifting.
+    fn has_moved_horizontally_recently(&self) -> bool {
+        let known_speed = self.base().known_speed();
+        known_speed.x.hypot(known_speed.z).abs() > 1.0e-5
     }
 
     /// Gets the nearest horizontal direction to the entity's yaw (horizontal rotation).

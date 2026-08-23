@@ -4,7 +4,13 @@ use steel_utils::{DowncastTypeKey, WorldAabb};
 use super::selector::{Goal, GoalControls};
 use super::target_goal::{TargetGoalBase, follow_distance};
 use crate::entity::ai::targeting::TargetingConditions;
-use crate::entity::{PathfinderMob, SharedEntity};
+use crate::entity::{Mob, PathfinderMob, SharedEntity};
+
+/// Extra condition an alerted mob must meet.
+///
+/// Vanilla parity: overriding the protected `HurtByTargetGoal.alertOther`, as
+/// the polar bear does to leave the cubs out of it.
+type AlertFilter = Box<dyn Fn(&dyn Mob) -> bool + Send + Sync>;
 
 const HURT_BY_UNSEEN_MEMORY_TICKS: i32 = 300;
 const ALERT_RANGE_Y: f64 = 10.0;
@@ -16,6 +22,7 @@ pub(crate) struct HurtByTargetGoal {
     ignore_damage_types: Vec<DowncastTypeKey>,
     alert_same_type: bool,
     ignore_alert_types: Vec<DowncastTypeKey>,
+    alert_filter: Option<AlertFilter>,
 }
 
 impl HurtByTargetGoal {
@@ -30,7 +37,20 @@ impl HurtByTargetGoal {
             ignore_damage_types: Vec::new(),
             alert_same_type: false,
             ignore_alert_types: Vec::new(),
+            alert_filter: None,
         }
+    }
+
+    /// Restricts which same-type mobs an alert reaches.
+    ///
+    /// Vanilla parity: overriding `HurtByTargetGoal.alertOther`.
+    #[must_use]
+    pub(crate) fn with_alert_filter(
+        mut self,
+        filter: impl Fn(&dyn Mob) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.alert_filter = Some(Box::new(filter));
+        self
     }
 
     #[must_use]
@@ -52,7 +72,9 @@ impl HurtByTargetGoal {
         self
     }
 
-    fn alert_others(&self, mob: &dyn PathfinderMob, hurt_by_mob: &SharedEntity) {
+    /// Vanilla parity: the protected `HurtByTargetGoal.alertOthers`, which a
+    /// hurt polar bear cub calls directly rather than through `setAlertOthers`.
+    pub(crate) fn alert_others(&self, mob: &dyn PathfinderMob, hurt_by_mob: &SharedEntity) {
         let Some(world) = mob.level() else {
             return;
         };
@@ -84,6 +106,12 @@ impl HurtByTargetGoal {
             let Some(other) = entity.as_mob() else {
                 return false;
             };
+
+            if let Some(filter) = &self.alert_filter
+                && !filter(other)
+            {
+                return false;
+            }
 
             //TODO tamable animal owner check is required here
             other.target().is_none() && !other.is_allied_to(hurt_by_mob.as_ref())

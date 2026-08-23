@@ -71,6 +71,9 @@ impl ResetUniversalAngerTargetGoal {
 }
 
 impl Goal for ResetUniversalAngerTargetGoal {
+    /// Vanilla parity: `ResetUniversalAngerTargetGoal` never calls `setFlags`,
+    /// so it holds no control at all. Claiming `TARGET` would let the
+    /// `HurtByTargetGoal` that provoked the mob block the reset outright.
     fn controls(&self) -> GoalControls {
         GoalControls::EMPTY
     }

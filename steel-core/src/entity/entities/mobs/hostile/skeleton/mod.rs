@@ -221,6 +221,11 @@ impl LivingEntity for SkeletonEntity {
 }
 
 impl Mob for SkeletonEntity {
+    /// Vanilla parity: `Skeleton` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is

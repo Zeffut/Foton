@@ -474,6 +474,11 @@ impl LivingEntity for SilverfishEntity {
 }
 
 impl Mob for SilverfishEntity {
+    /// Vanilla parity: `Silverfish` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: `Silverfish::checkSilverfishSpawnRules`. Light does not

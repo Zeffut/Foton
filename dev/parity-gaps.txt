@@ -40,7 +40,7 @@ FishingRodItem
 Item
 MapItem
 
-[entities] 74
+[entities] 67
 Allay
 Armadillo
 Axolotl
@@ -53,7 +53,6 @@ Camel
 CamelHusk
 Cat
 Creaking
-Dolphin
 Donkey
 ElderGuardian
 EnderDragon
@@ -67,7 +66,6 @@ Frog
 Ghast
 Giant
 GlowItemFrame
-Goat
 Guardian
 HappyGhast
 Hoglin
@@ -90,9 +88,6 @@ Piglin
 PiglinBrute
 Pillager
 Player
-PolarBear
-Pufferfish
-Rabbit
 Ravager
 Shulker
 SkeletonHorse
@@ -102,8 +97,6 @@ SulfurCube
 Tadpole
 ThrownLingeringPotion
 TraderLlama
-TropicalFish
-Turtle
 Vex
 Villager
 Vindicator

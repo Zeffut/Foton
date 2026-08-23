@@ -1,3 +1,5 @@
+use crate::entity::entities::{RabbitVariant, TropicalFishVariant};
+
 /// Vanilla `EntitySpawnReason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntitySpawnReason {
@@ -37,6 +39,83 @@ impl EntitySpawnReason {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpawnGroupData {
     AgeableMob(AgeableMobGroupData),
+    /// Vanilla `Rabbit.RabbitGroupData`, which is an `AgeableMobGroupData` that
+    /// also carries the variant every rabbit of the group is born with.
+    Rabbit(RabbitGroupData),
+    /// Vanilla `TropicalFish.TropicalFishGroupData`, which carries the variant
+    /// a shoal shares. Vanilla derives it from
+    /// `AbstractSchoolingFish.SchoolSpawnGroupData` and so also carries the
+    /// school leader; Steel has no schooling fish, so that half is absent.
+    TropicalFish(TropicalFishGroupData),
+}
+
+impl SpawnGroupData {
+    /// Returns the ageable layer, for the kinds that extend one.
+    #[must_use]
+    pub const fn ageable(&self) -> Option<&AgeableMobGroupData> {
+        match self {
+            Self::AgeableMob(group_data) => Some(group_data),
+            Self::Rabbit(group_data) => Some(&group_data.ageable),
+            Self::TropicalFish(_) => None,
+        }
+    }
+
+    /// Returns the ageable layer for mutation.
+    #[must_use]
+    pub const fn ageable_mut(&mut self) -> Option<&mut AgeableMobGroupData> {
+        match self {
+            Self::AgeableMob(group_data) => Some(group_data),
+            Self::Rabbit(group_data) => Some(&mut group_data.ageable),
+            Self::TropicalFish(_) => None,
+        }
+    }
+}
+
+/// Vanilla `TropicalFish.TropicalFishGroupData`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TropicalFishGroupData {
+    variant: TropicalFishVariant,
+}
+
+impl TropicalFishGroupData {
+    /// Creates group data for a shoal of tropical fish.
+    #[must_use]
+    pub const fn new(variant: TropicalFishVariant) -> Self {
+        Self { variant }
+    }
+
+    /// Returns the variant the shoal shares.
+    #[must_use]
+    pub const fn variant(self) -> TropicalFishVariant {
+        self.variant
+    }
+}
+
+/// Vanilla `Rabbit.RabbitGroupData`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RabbitGroupData {
+    ageable: AgeableMobGroupData,
+    variant: RabbitVariant,
+}
+
+impl RabbitGroupData {
+    /// Creates group data for a rabbit spawn group.
+    ///
+    /// Vanilla parity: `RabbitGroupData(variant)` calls `super(1.0F)`, so every
+    /// rabbit after the first in a group rolls a guaranteed baby chance.
+    #[must_use]
+    pub const fn new(variant: RabbitVariant) -> Self {
+        Self {
+            ageable: AgeableMobGroupData::with_baby_spawn_chance(1.0),
+            variant,
+        }
+    }
+
+    /// Returns the variant shared by the group.
+    #[must_use]
+    pub const fn variant(self) -> RabbitVariant {
+        self.variant
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

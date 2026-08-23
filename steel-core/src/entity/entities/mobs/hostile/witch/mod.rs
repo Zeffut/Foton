@@ -429,6 +429,11 @@ impl LivingEntity for WitchEntity {
 }
 
 impl Mob for WitchEntity {
+    /// Vanilla parity: `Witch` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

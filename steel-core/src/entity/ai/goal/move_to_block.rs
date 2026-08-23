@@ -105,12 +105,33 @@ impl MoveToBlockGoal {
         self.block_pos
     }
 
+    /// Vanilla parity: the protected `MoveToBlockGoal.nextStartTick` field, read
+    /// by `Rabbit.RaidGardenGoal.canUse`.
+    #[must_use]
+    pub(crate) const fn next_start_tick(&self) -> i32 {
+        self.next_start_tick
+    }
+
+    /// Vanilla parity: the same field, written by `Rabbit.RaidGardenGoal.tick`.
+    pub(crate) const fn set_next_start_tick(&mut self, next_start_tick: i32) {
+        self.next_start_tick = next_start_tick;
+    }
+
     #[must_use]
     pub(crate) const fn is_reached_target(&self) -> bool {
         self.reached_target
     }
 
-    fn next_start_tick(_mob: &dyn PathfinderMob) -> i32 {
+    /// Vanilla parity: the protected `MoveToBlockGoal.tryTicks` field, which
+    /// subclasses such as `Turtle.TurtleGoToWaterGoal` read to give up.
+    #[must_use]
+    pub(crate) const fn try_ticks(&self) -> i32 {
+        self.try_ticks
+    }
+
+    /// Vanilla parity: the static `MoveToBlockGoal.nextStartTick(Mob)`, which
+    /// shares its name with the field above in Java but cannot here.
+    fn roll_next_start_tick(_mob: &dyn PathfinderMob) -> i32 {
         reduced_tick_delay(INTERVAL_TICKS + rand::random_range(0..200))
     }
 
@@ -160,7 +181,7 @@ impl Goal for MoveToBlockGoal {
             return false;
         }
 
-        self.next_start_tick = Self::next_start_tick(mob);
+        self.next_start_tick = Self::roll_next_start_tick(mob);
         let Some(world) = mob.level() else {
             return false;
         };

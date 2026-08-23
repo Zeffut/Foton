@@ -323,6 +323,11 @@ impl LivingEntity for CreeperEntity {
 }
 
 impl Mob for CreeperEntity {
+    /// Vanilla parity: `Creeper` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is

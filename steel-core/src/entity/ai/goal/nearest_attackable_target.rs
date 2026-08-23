@@ -20,6 +20,7 @@ pub(crate) struct NearestAttackableTargetGoal {
     target: Option<SharedEntity>,
     target_conditions: TargetingConditions,
     search: TargetSearch,
+    follow_distance_scale: f64,
 }
 
 impl NearestAttackableTargetGoal {
@@ -99,7 +100,20 @@ impl NearestAttackableTargetGoal {
             target: None,
             target_conditions: TargetingConditions::for_combat().selector(selector),
             search,
+            follow_distance_scale: 1.0,
         }
+    }
+
+    /// Narrows or widens how far this goal looks.
+    ///
+    /// Vanilla parity: overriding the protected
+    /// `NearestAttackableTargetGoal.getFollowDistance`, as
+    /// `PolarBear.PolarBearAttackPlayersGoal` does with `* 0.5`.
+    #[must_use]
+    pub(crate) const fn with_follow_distance_scale(mut self, scale: f64) -> Self {
+        self.follow_distance_scale = scale;
+        self.target_goal.set_follow_distance_scale(scale);
+        self
     }
 
     fn find_target(&mut self, mob: &dyn PathfinderMob) {
@@ -108,7 +122,7 @@ impl NearestAttackableTargetGoal {
             return;
         };
 
-        let follow = follow_distance(mob);
+        let follow = follow_distance(mob) * self.follow_distance_scale;
         let position = mob.position();
         let origin = DVec3::new(position.x, mob.get_eye_y(), position.z);
         let target_conditions = self.target_conditions.clone().range(follow);

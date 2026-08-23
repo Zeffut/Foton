@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use glam::DVec3;
 use steel_macros::block_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::BlockRef;
@@ -14,14 +15,15 @@ use steel_registry::{
     REGISTRY, level_events, sound_events, vanilla_entities, vanilla_game_events, vanilla_game_rules,
 };
 use steel_utils::types::UpdateFlags;
-use steel_utils::{BlockPos, BlockStateId};
+use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 
 use crate::behavior::block::{
     BlockBehavior, EntityFallDamage, EntityFallOnContext, default_can_be_replaced,
 };
 use crate::behavior::context::BlockPlaceContext;
 use crate::block_entity::SharedBlockEntity;
-use crate::entity::Entity;
+use crate::entity::entities::TurtleEntity;
+use crate::entity::{AgeableMob as _, ENTITIES, Entity, next_entity_id};
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader, World};
@@ -50,6 +52,19 @@ const FALL_ON_RANDOMNESS: i32 = 3;
 /// The `data` of the `onPlace` sand-placement level event.
 const PLACEMENT_PARTICLE_COUNT: i32 = 15;
 
+/// Age a hatchling starts at, one Minecraft day short of adulthood.
+///
+/// Vanilla parity: the `setAge(-24000)` of `TurtleEggBlock.randomTick`.
+const TURTLE_HATCH_AGE: i32 = -24_000;
+/// Where in the block the first hatchling appears.
+///
+/// Vanilla parity: the `0.3` of the same line.
+const TURTLE_HATCH_OFFSET: f64 = 0.3;
+/// How far apart the hatchlings of one cluster are placed.
+///
+/// Vanilla parity: the `i * 0.2` of the same line.
+const TURTLE_HATCH_SPACING: f64 = 0.2;
+
 impl TurtleEggBlock {
     /// Creates a turtle egg behavior.
     #[must_use]
@@ -58,7 +73,7 @@ impl TurtleEggBlock {
     }
 
     /// Vanilla `TurtleEggBlock.isSand`.
-    fn is_sand(world: &dyn LevelReader, pos: BlockPos) -> bool {
+    pub(crate) fn is_sand(world: &dyn LevelReader, pos: BlockPos) -> bool {
         world
             .get_block_state(pos)
             .get_block()
@@ -66,7 +81,7 @@ impl TurtleEggBlock {
     }
 
     /// Vanilla `TurtleEggBlock.onSand`.
-    fn on_sand(world: &dyn LevelReader, pos: BlockPos) -> bool {
+    pub(crate) fn on_sand(world: &dyn LevelReader, pos: BlockPos) -> bool {
         Self::is_sand(world, pos.below())
     }
 
@@ -159,6 +174,40 @@ impl TurtleEggBlock {
             &GameEventContext::new(None, Some(state)),
         );
         world.destroy_block_effect(pos, u32::from(state.0), None);
+    }
+
+    /// Hatches one egg of a cluster into a baby turtle.
+    ///
+    /// Vanilla parity: the loop body of `TurtleEggBlock.randomTick`. The
+    /// hatchling is a full day old in negative age, and the block it came out
+    /// of becomes the beach it will return to when it is ready to lay.
+    fn hatch_turtle(world: &Arc<World>, pos: BlockPos, index: u8) {
+        let position = DVec3::new(
+            f64::from(pos.x()) + TURTLE_HATCH_OFFSET + f64::from(index) * TURTLE_HATCH_SPACING,
+            f64::from(pos.y()),
+            f64::from(pos.z()) + TURTLE_HATCH_OFFSET,
+        );
+        let Some(entity) = ENTITIES.create(
+            &vanilla_entities::TURTLE,
+            next_entity_id(),
+            position,
+            Arc::downgrade(world),
+        ) else {
+            return;
+        };
+
+        let Some(turtle) = entity.downcast_ref::<TurtleEntity>() else {
+            log::error!("turtle egg hatched a non-turtle entity");
+            return;
+        };
+        turtle.set_age(TURTLE_HATCH_AGE);
+        turtle.set_home_pos(pos);
+        turtle.set_rotation((0.0, 0.0));
+        turtle.set_old_position_to_current();
+
+        if let Err(error) = world.try_add_entity(Arc::clone(&entity)) {
+            log::error!("failed to add hatched turtle at {pos:?}: {error}");
+        }
     }
 
     /// Vanilla `TurtleEggBlock.shouldUpdateHatchLevel`.
@@ -307,12 +356,9 @@ impl BlockBehavior for TurtleEggBlock {
             &GameEventContext::new(None, Some(state)),
         );
 
-        for _ in 0..state.get_value(EGGS) {
+        for index in 0..state.get_value(EGGS) {
             world.destroy_block_effect(pos, u32::from(state.0), None);
-            // Vanilla spawns one baby `Turtle` per egg here, aged -24000, with
-            // its home position set to this block. Steel has no `Turtle`
-            // entity, so the eggs vanish without hatching anything; the spawn
-            // belongs on this line once `EntityTypes.TURTLE` is implemented.
+            Self::hatch_turtle(world, pos, index);
         }
     }
 }
@@ -327,7 +373,7 @@ mod tests {
 
     use super::*;
     use crate::behavior::init_behaviors;
-    use crate::entity::EntityBase;
+    use crate::entity::{AgeableMob, EntityBase, init_entities};
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     struct StepEntity {
@@ -486,6 +532,29 @@ mod tests {
             world.get_block_state(pos).get_block(),
             &vanilla_blocks::TURTLE_EGG
         );
+    }
+
+    #[test]
+    fn a_hatched_egg_leaves_a_baby_turtle_that_remembers_the_nest() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_entities();
+        let world = fresh_test_world("turtle_egg_hatch");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+
+        TurtleEggBlock::hatch_turtle(&world, pos, 0);
+
+        let search = steel_utils::WorldAabb::new(7.0, 63.0, 7.0, 10.0, 66.0, 10.0);
+        let hatched = world.get_entities_in_aabb(&search);
+        let turtle = hatched
+            .iter()
+            .find_map(|entity| entity.downcast_ref::<TurtleEntity>())
+            .expect("the egg should have hatched exactly one turtle");
+
+        assert_eq!(turtle.get_age(), TURTLE_HATCH_AGE);
+        assert!(AgeableMob::is_baby(turtle));
+        assert_eq!(turtle.home_pos(), pos);
     }
 
     #[test]

@@ -205,6 +205,11 @@ impl LivingEntity for CaveSpiderEntity {
 }
 
 impl Mob for CaveSpiderEntity {
+    /// Vanilla parity: `CaveSpider` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is

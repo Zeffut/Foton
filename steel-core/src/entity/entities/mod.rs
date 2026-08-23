@@ -14,9 +14,13 @@ pub use mobs::hostile::{
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity};
 pub use mobs::passive::{
-    ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, SheepEntity, StriderEntity,
+    ChickenEntity, CowEntity, GoatEntity, MushroomCowEntity, PigEntity, PolarBearEntity,
+    RabbitEntity, RabbitVariant, SheepEntity, StriderEntity, TurtleEntity,
 };
-pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
+pub use mobs::water::{
+    CodEntity, DolphinEntity, GlowSquidEntity, PufferfishEntity, SalmonEntity, SquidEntity,
+    TropicalFishEntity, TropicalFishPattern, TropicalFishVariant,
+};
 pub use objects::display_ui::{
     BlockDisplayEntity, InteractionEntity, ItemDisplayEntity, ItemFrameEntity,
     LeashFenceKnotEntity, PaintingEntity, TextDisplayEntity,
@@ -33,5 +37,5 @@ pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
     HopperMinecartEntity, MinecartEntity, RaftEntity, TntMinecartEntity,
 };
-pub use objects::{AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity};
+pub use objects::{AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity, default_thunder_hit};
 pub use raw::RawEntity;

@@ -153,8 +153,9 @@ impl WitherSkeletonEntity {
                 2,
                 NearestAttackableTargetGoal::new_for_players(true, |_, _, _| true),
             );
-            // TODO: vanilla also targets AbstractPiglin, IronGolem, and baby
-            // Turtle at priority 3; none of those mob types exist in Steel yet.
+            // TODO: vanilla also targets AbstractPiglin and IronGolem, neither of
+            // which exists in Steel yet, and baby Turtle on land at priority 3
+            // (`AbstractSkeleton.java`), which is now implementable.
         }
 
         Self {
@@ -241,6 +242,11 @@ impl LivingEntity for WitherSkeletonEntity {
 }
 
 impl Mob for WitherSkeletonEntity {
+    /// Vanilla parity: `WitherSkeleton` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: the `Monster::checkMonsterSpawnRules` this mob is

@@ -1,5 +1,7 @@
 //! Path type, cache, and malus state used by vanilla mob pathfinding.
 
+use glam::DVec3;
+use steel_math::fast_floor;
 use steel_utils::{BlockPos, BlockStateId, PackedBlockPos};
 
 use crate::entity::ai::node::Node;
@@ -143,6 +145,22 @@ impl Path {
     #[must_use]
     pub fn next_node(&self) -> Option<&Node> {
         self.node(self.next_node_index)
+    }
+
+    /// Returns where a mob of this width should stand on the next node.
+    ///
+    /// Vanilla parity: `Path.getNextEntityPos`, which centers the node on the
+    /// mob's footprint rather than on the block.
+    #[must_use]
+    pub fn next_entity_pos(&self, mob_bounding_box_width: f64) -> Option<DVec3> {
+        self.next_node().map(|node| {
+            let offset = f64::from(fast_floor(mob_bounding_box_width + 1.0)) * 0.5;
+            DVec3::new(
+                f64::from(node.x) + offset,
+                f64::from(node.y),
+                f64::from(node.z) + offset,
+            )
+        })
     }
 
     #[must_use]

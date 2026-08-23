@@ -304,6 +304,11 @@ impl LivingEntity for ZombifiedPiglinEntity {
 }
 
 impl Mob for ZombifiedPiglinEntity {
+    /// Vanilla parity: `ZombifiedPiglin` derives from `Monster`.
+    fn is_monster(&self) -> bool {
+        true
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }
