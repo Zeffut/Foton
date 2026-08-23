@@ -17,6 +17,7 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_entity_data::AbstractBoatEntityData;
+use steel_registry::vanilla_game_events;
 use steel_utils::locks::{Shared, SyncMutex};
 use steel_utils::types::InteractionHand;
 use steel_utils::{DowncastType, DowncastTypeKey};
@@ -31,6 +32,7 @@ use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::inventory::menu::kinds::chest;
 use crate::player::Player;
 use crate::world::World;
+use crate::world::game_event::GameEventContext;
 
 /// Slots a chest boat carries.
 ///
@@ -255,6 +257,18 @@ macro_rules! open_chest_impl {
                 player.open_menu(self.name(), move |context| {
                     chest(inventory, context.container_id, container, CHEST_BOAT_ROWS)
                 });
+
+                // Vanilla parity: the `gameEvent(CONTAINER_OPEN, player)` of
+                // `AbstractChestBoat.interact`, credited to the player rather
+                // than the boat, which is what a sculk sensor listens for.
+                if let Some(world) = self.level() {
+                    world.game_event_at(
+                        &vanilla_game_events::CONTAINER_OPEN,
+                        self.position(),
+                        &GameEventContext::new(Some(player as &dyn Entity), None),
+                    );
+                }
+
                 InteractionResult::Success
             }
         }

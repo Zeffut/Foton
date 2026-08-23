@@ -37,7 +37,7 @@ pub use powered_block::PoweredBlock;
 pub use pressure_plate::{
     PressurePlateBlock, PressurePlateSensitivity, WeightedPressurePlateBlock,
 };
-pub use rail::{DetectorRailBlock, PoweredRailBlock, RailBlock};
+pub use rail::{DetectorRailBlock, PoweredRailBlock, RailBlock, rail_shape_at};
 pub use redstone_lamp_block::RedstoneLampBlock;
 pub use redstone_ore_block::RedStoneOreBlock;
 pub use redstone_torch_block::{RedstoneTorchBlock, RedstoneWallTorchBlock};

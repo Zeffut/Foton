@@ -53,7 +53,7 @@ pub use redstone::{
     PoweredBlock, PoweredRailBlock, PressurePlateBlock, PressurePlateSensitivity, RailBlock,
     RedStoneOreBlock, RedStoneWireBlock, RedstoneLampBlock, RedstoneTorchBlock,
     RedstoneWallTorchBlock, RepeaterBlock, TargetBlock, TntBlock, TripWireBlock, TripWireHookBlock,
-    WeatheringCopperBulbBlock, WeightedPressurePlateBlock,
+    WeatheringCopperBulbBlock, WeightedPressurePlateBlock, rail_shape_at,
 };
 pub(crate) use redstone::{MAX_REDSTONE_SIGNAL, MIN_REDSTONE_SIGNAL};
 pub(crate) use utils::multiface_face_property;

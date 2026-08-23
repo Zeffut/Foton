@@ -22,6 +22,6 @@ pub use objects::projectiles::{
     ArrowEntity, EnderPearlEntity, FireworkRocketEntity, SplashPotionEntity,
 };
 pub use objects::vehicles::{
-    BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, RaftEntity,
+    BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, MinecartEntity, RaftEntity,
 };
 pub use raw::RawEntity;

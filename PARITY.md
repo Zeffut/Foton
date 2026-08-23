@@ -57,7 +57,15 @@ cannot.
       second seat, and the fact that a boat cannot be broken at all, which is
       also why a chest boat never spills its contents -- there is no way to
       destroy one yet.
-- [ ] **Minecarts** (6 entries). Rails already work; the carts do not exist.
+- [~] **Minecarts** (6 entity entries, 6 item entries). The plain cart rolls:
+      a powered rail launches it, it coasts and slows, it follows a curve
+      without anything looking for one, a detector rail notices it pass, the
+      item puts one on a rail and refuses anything else, and a player can ride
+      it. This is vanilla's old physics, the one a world runs with
+      `minecart_improvements` off. Still open: the five variants (chest,
+      furnace, hopper, TNT, spawner, command block), and
+      `pushAndPickupEntities` -- a cart passes through everything, because
+      Steel has no entity push.
 - [x] **Storage that travels**: shulker box (17), ender chest and trapped
       chest. The trapped chest needed the container opener count first --
       without it its signal is always zero and it is a chest that costs a
@@ -122,6 +130,9 @@ a furnace has no behavior. These scripts can:
 - `dev/boat-test.sh` -- a boat put on water is still on it afterwards.
 - `dev/ride-test.sh` -- right-clicking a boat puts the player in it, sneaking
   does not, and a chest boat opens its chest on a sneak and boards on a click.
+- `dev/minecart-test.sh` -- a cart launched by a powered rail runs a line, takes
+  a corner, stops on a detector rail that notices it, is placed from the item
+  onto a rail and nowhere else, and carries a player.
 - `dev/openers-test.sh` -- an open trapped chest powers redstone and a
   closed one stops, a plain chest powers nothing, a chest under a solid
   block refuses to open, and a barrel looks open while somebody is in it.

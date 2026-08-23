@@ -73,7 +73,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 36
+[items] 35
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -97,7 +97,6 @@ ItemFrameItem
 KnowledgeBookItem
 LeadItem
 MapItem
-MinecartItem
 MobBucketItem
 ScaffoldingBlockItem
 ShearsItem
@@ -111,7 +110,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 98
+[entities] 97
 Allay
 Armadillo
 ArmorStand
@@ -156,7 +155,6 @@ Llama
 LlamaSpit
 Mannequin
 Marker
-Minecart
 MinecartCommandBlock
 MinecartFurnace
 MinecartHopper
