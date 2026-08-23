@@ -12,26 +12,17 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 30
+[blocks] 20
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
 CartographyTableBlock
 CommandBlock
-CopperChestBlock
 CreakingHeartBlock
 CryingObsidianBlock
-DriedGhastBlock
-FrostedIceBlock
 HalfTransparentBlock
 JigsawBlock
-LightBlock
-MangroveRootsBlock
-NetherrackBlock
-NyliumBlock
 SculkCatalystBlock
-ShelfBlock
-SoulSandBlock
 SpawnerBlock
 StainedGlassBlock
 StructureBlock
@@ -42,28 +33,12 @@ TintedGlassBlock
 TransparentBlock
 TrialSpawnerBlock
 VaultBlock
-WeatheringCopperChestBlock
 
-[items] 19
-ArrowItem
-BannerItem
-BundleItem
-DebugStickItem
-DiscFragmentItem
+[items] 4
 EmptyMapItem
-EndCrystalItem
 FishingRodItem
-GameMasterBlockItem
 Item
-KnowledgeBookItem
 MapItem
-MobBucketItem
-ScaffoldingBlockItem
-SmithingTemplateItem
-SolidBucketItem
-SpectralArrowItem
-WritableBookItem
-WrittenBookItem
 
 [entities] 74
 Allay
