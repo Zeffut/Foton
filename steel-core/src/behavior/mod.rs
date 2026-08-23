@@ -49,6 +49,11 @@ pub mod item_behaviors;
 
 #[expect(warnings)]
 #[rustfmt::skip]
+#[path = "generated/parity.rs"]
+pub mod parity;
+
+#[expect(warnings)]
+#[rustfmt::skip]
 #[path = "generated/strippables.rs"]
 pub mod strippables;
 
@@ -215,4 +220,51 @@ pub fn init_behaviors() {
         register_item_behaviors(&mut item_behaviors);
         item_behaviors
     });
+}
+
+#[cfg(test)]
+mod parity_ledger_tests {
+    use super::parity::{
+        UNCLAIMED_BLOCK_CLASSES, UNCLAIMED_ENTITY_CLASSES, UNCLAIMED_ITEM_CLASSES,
+    };
+
+    /// The committed record of what vanilla Steel does not implement.
+    const LEDGER: &str = include_str!("../../../dev/parity-gaps.txt");
+
+    fn ledger_section(name: &str) -> Vec<&'static str> {
+        let mut lines = LEDGER
+            .lines()
+            .skip_while(|line| !line.starts_with(&format!("[{name}]")));
+        lines.next();
+        lines
+            .take_while(|line| !line.trim().is_empty())
+            .map(str::trim)
+            .collect()
+    }
+
+    /// Every gap is written down, and every line written down is still a gap.
+    ///
+    /// The generator skips a class it finds no behavior struct for, silently.
+    /// That is how all three furnaces went unregistered while their behavior sat
+    /// in the tree fully written: a macro hid the struct from the scanner, so
+    /// right-clicking a furnace did nothing and smelting was unreachable, and
+    /// nothing anywhere said so.
+    ///
+    /// If this fails, the fix is to look at what changed and then run
+    /// `python3 dev/update-parity-gaps.py`. Do not update the file without
+    /// reading the diff: a line appearing means something stopped working.
+    #[test]
+    fn parity_ledger_matches_the_generated_gaps() {
+        for (name, generated) in [
+            ("blocks", UNCLAIMED_BLOCK_CLASSES),
+            ("items", UNCLAIMED_ITEM_CLASSES),
+            ("entities", UNCLAIMED_ENTITY_CLASSES),
+        ] {
+            let recorded = ledger_section(name);
+            assert_eq!(
+                recorded, generated,
+                "the {name} parity ledger is out of date"
+            );
+        }
+    }
 }
