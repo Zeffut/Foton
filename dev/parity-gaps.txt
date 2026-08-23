@@ -72,7 +72,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 32
+[items] 31
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -83,7 +83,6 @@ DebugStickItem
 DiscFragmentItem
 EmptyMapItem
 EndCrystalItem
-ExperienceBottleItem
 FishingRodItem
 GameMasterBlockItem
 GlowInkSacItem
@@ -106,7 +105,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 95
+[entities] 94
 Allay
 Armadillo
 ArmorStand
@@ -183,7 +182,6 @@ SpectralArrow
 SulfurCube
 Tadpole
 TextDisplay
-ThrownExperienceBottle
 ThrownLingeringPotion
 ThrownTrident
 TraderLlama

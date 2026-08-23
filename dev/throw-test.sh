@@ -96,6 +96,19 @@ CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;execute if entity @e[type=minecraft:chicken] run tellraw @s \"ACHICKENHATCHED\""
 
+# A bottle o' enchanting breaks into experience wherever it lands.
+CMDS="$CMDS;;clear @s"
+CMDS="$CMDS;;kill @e[type=minecraft:experience_orb]"
+CMDS="$CMDS;;execute unless entity @e[type=minecraft:experience_orb] run tellraw @s \"NOORBSYET\""
+CMDS="$CMDS;;give @s minecraft:experience_bottle 16"
+CMDS="$CMDS;;!hotbar 0"
+CMDS="$CMDS;;!useitemx 4 0 80"
+CMDS="$CMDS;;time set day"
+# Asked of the client, not the server: an orb is drawn to a nearby player and
+# swallowed within a tick or two, so "is one lying there" is a race even though
+# "was one ever made" is not.
+CMDS="$CMDS;;!spawned experience_orb"
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -104,7 +117,7 @@ cleanup
 
 echo "=== what happened ==="
 grep -E "server says|saw a snowball" join.log \
-  | grep -oE "NOSNOWBALLYET|NOCHICKENYET|saw a snowball spawn|SNOWBALLSBROKE|ACHICKENHATCHED"
+  | grep -oE "NOSNOWBALLYET|NOCHICKENYET|saw a snowball spawn|SNOWBALLSBROKE|ACHICKENHATCHED|NOORBSYET"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 
@@ -117,4 +130,6 @@ said NOCHICKENYET    || fail "a chicken existed before any egg was thrown"
 grep -q "the client saw a snowball spawn" join.log \n  || fail "throwing a snowball spawned nothing"
 said SNOWBALLSBROKE  || fail "the snowballs never broke; they are still lying about"
 said ACHICKENHATCHED || fail "forty eggs hatched nothing"
+said NOORBSYET       || fail "experience orbs were lying about before any bottle"
+grep -q "the client saw a experience_orb spawn" join.log \n  || fail "the bottles broke into no experience"
 echo "########## THROW TEST PASSED ##########"

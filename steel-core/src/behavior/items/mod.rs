@@ -72,6 +72,6 @@ pub use shovel::ShovelItem;
 pub use sign_item::{HangingSignItem, SignItem};
 pub use spawn_egg::SpawnEggItem;
 pub use standing_and_wall_block_item::StandingAndWallBlockItem;
-pub use throwable_items::{EggItem, SnowballItem};
+pub use throwable_items::{EggItem, ExperienceBottleItem, SnowballItem};
 pub use throwable_potion::{LingeringPotionItem, SplashPotionItem};
 pub use tipped_arrow::TippedArrowItem;
