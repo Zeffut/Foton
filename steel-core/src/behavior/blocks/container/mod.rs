@@ -1,5 +1,6 @@
 mod anvil_block;
 mod barrel_block;
+mod beacon_block;
 mod beehive_block;
 mod brewing_stand_block;
 mod chest_block;
@@ -22,6 +23,7 @@ mod trapped_chest_block;
 
 pub use anvil_block::AnvilBlock;
 pub use barrel_block::BarrelBlock;
+pub use beacon_block::BeaconBlock;
 pub use beehive_block::BeehiveBlock;
 pub use brewing_stand_block::BrewingStandBlock;
 pub use chest_block::ChestBlock;

@@ -285,7 +285,7 @@ impl Player {
             .collect()
     }
 
-    pub(in crate::player) fn send_mob_effect_sync_packet(&self, packet: MobEffectSyncPacket) {
+    pub(crate) fn send_mob_effect_sync_packet(&self, packet: MobEffectSyncPacket) {
         match packet {
             MobEffectSyncPacket::Update(packet) => self.send_packet(packet),
             MobEffectSyncPacket::Remove(packet) => self.send_packet(packet),

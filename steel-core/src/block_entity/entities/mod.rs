@@ -1,6 +1,7 @@
 //! Block entity implementations.
 
 mod barrel;
+mod beacon;
 mod beehive;
 mod brewing_stand;
 mod brushable;
@@ -23,6 +24,11 @@ mod shulker_box;
 mod sign;
 
 pub use barrel::{BARREL_SLOTS, BarrelBlockEntity};
+pub use beacon::{
+    BEACON_DATA_SLOTS, BeaconBlockEntity, BeaconDataSlots, LEVELS_NEEDED_FOR_SECONDARY, MAX_LEVELS,
+    count_pyramid_levels, decode_effect, effect_duration_ticks, effect_from_holder_id,
+    effect_range, encode_effect, required_levels_for, should_apply_this_tick, validate_effects,
+};
 pub use beehive::{
     BEEHIVE_MAX_OCCUPANTS, BEEHIVE_MIN_OCCUPATION_TICKS_NECTARLESS, BeehiveBlockEntity,
 };

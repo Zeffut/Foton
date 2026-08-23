@@ -1317,6 +1317,43 @@ pub trait LivingEntity: Entity {
         self.living_base().remove_mob_effect(effect)
     }
 
+    /// Sends every mob-effect change queued since the last tick.
+    ///
+    /// Vanilla parity: `ServerPlayer.onEffectAdded` and `onEffectUpdated`,
+    /// which send the owner its own packet with the blend flag set, plus the
+    /// entity tracker, which sends everyone else theirs without it. Steel
+    /// queues both on the entity; this is the one place mobs and players both
+    /// pass through, so it is where the queue is emptied.
+    ///
+    /// Without this an effect is real on the server -- the attribute modifiers
+    /// apply, the damage lands -- but the client never hears about it, so
+    /// there is no icon, no particles and no potion swirl.
+    fn sync_dirty_mob_effects(&self) {
+        let changes = self.living_base().drain_dirty_mob_effects();
+        if changes.is_empty() {
+            return;
+        }
+        let Some(world) = self.level() else {
+            return;
+        };
+
+        let entity_id = self.id();
+        let chunk = ChunkPos::from_entity_pos(self.position());
+        for change in changes {
+            if let Some(player) = self.as_player() {
+                player.send_mob_effect_sync_packet(change.packet(entity_id, true));
+            }
+            match change.packet(entity_id, false) {
+                MobEffectSyncPacket::Update(packet) => {
+                    world.broadcast_to_nearby(chunk, packet, Some(entity_id));
+                }
+                MobEffectSyncPacket::Remove(packet) => {
+                    world.broadcast_to_nearby(chunk, packet, Some(entity_id));
+                }
+            }
+        }
+    }
+
     /// Ticks vanilla server-side mob-effect behavior and durations.
     fn tick_mob_effects(&self) {
         let world = self.level();
@@ -1337,6 +1374,8 @@ pub trait LivingEntity: Entity {
 
             self.living_base().tick_mob_effect_duration(effect.effect());
         }
+
+        self.sync_dirty_mob_effects();
     }
 
     /// Returns whether vanilla effects keep this entity from drowning.

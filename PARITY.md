@@ -100,8 +100,12 @@ cannot.
       than continuously. The crafter crafts: nine slots that can each be
       switched off, a comparator reading that counts a switched-off slot as
       full, one craft per redstone rising edge, and the result pushed into
-      whatever container it faces or thrown if there is none. Still open:
-      cartography table, loom, beacon. Armor trims are the half of smithing
+      whatever container it faces or thrown if there is none. The beacon
+      counts its pyramid, checks the sky above it is clear, and hands its two
+      effects to everyone in range every four seconds -- which needed the
+      `SetBeacon` packet, which Steel had a number for and nothing behind.
+      Still open:
+      cartography table, loom. Armor trims are the half of smithing
       that is not here: they need trim pattern and material registries and a
       `TRIM` component Steel does not have, so those eighteen recipes are
       still skipped -- deliberately now, rather than by omission. The
@@ -183,6 +187,9 @@ a furnace has no behavior. These scripts can:
   and read through the wall behind it by a comparator.
 - `dev/throw-test.sh` -- a snowball is thrown, flies and breaks, forty eggs
   hatch at least one chicken, and a bottle o' enchanting breaks into experience.
+- `dev/beacon-test.sh` -- a beacon with no pyramid refuses the effect and
+  hands the payment back; one with a pyramid takes it and the effect reaches
+  the player. Read off the effect packet, since no command can see any of it.
 - `dev/workstation-test.sh` -- right-clicking each workstation opens its
   menu, and the crafter runs a recipe end to end: a log shift-clicked into
   the grid, a redstone pulse, and the grid empty again, all read off a

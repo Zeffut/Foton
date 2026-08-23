@@ -3,8 +3,8 @@ use std::{f32::consts::TAU, mem, sync::Arc};
 use glam::DVec3;
 use steel_protocol::packets::game::{
     CContainerClose, COpenScreen, CSetPlayerInventory, ClickType, SContainerButtonClick,
-    SContainerClick, SContainerClose, SContainerSlotStateChanged, SRenameItem, SSetCarriedItem,
-    SSetCreativeModeSlot,
+    SContainerClick, SContainerClose, SContainerSlotStateChanged, SRenameItem, SSetBeacon,
+    SSetCarriedItem, SSetCreativeModeSlot,
 };
 use steel_registry::item_stack::ItemStack;
 use steel_utils::{
@@ -392,6 +392,25 @@ impl Player {
             }
             Err(OpenMenuUnavailable::Closed) => {
                 log::debug!("slot state change without an open menu");
+            }
+            Err(OpenMenuUnavailable::Unavailable) => {}
+        }
+    }
+
+    /// Handles the two effects a player picked in a beacon menu.
+    ///
+    /// Vanilla parity: `ServerGamePacketListenerImpl.handleSetBeaconPacket`,
+    /// which reaches `BeaconMenu.updateEffects`.
+    pub fn handle_set_beacon(self: &Arc<Self>, packet: SSetBeacon) {
+        match self.take_open_menu_for_callback(None) {
+            Ok(mut menu) => {
+                if menu.still_valid(self) {
+                    menu.set_beacon_effects(self, packet.primary, packet.secondary);
+                }
+                self.finish_open_menu_callback(menu);
+            }
+            Err(OpenMenuUnavailable::Closed) => {
+                log::debug!("beacon effects set without an open menu");
             }
             Err(OpenMenuUnavailable::Unavailable) => {}
         }

@@ -57,6 +57,7 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+PLAY_C_UPDATE_MOB_EFFECT = 132
 
 # Vanilla parity: `ClickType`. Only the two this script sends are named.
 CLICK_PICKUP = 0
@@ -69,6 +70,7 @@ PLAY_S_SET_CARRIED_ITEM = 53
 PLAY_S_CONTAINER_CLICK = 18
 PLAY_S_CONTAINER_CLOSE = 19
 PLAY_S_CONTAINER_SLOT_STATE_CHANGED = 20
+PLAY_S_SET_BEACON = 52
 PLAY_S_INTERACT = 26
 PLAY_S_USE_ITEM_ON = 66
 PLAY_S_USE_ITEM = 67
@@ -336,6 +338,37 @@ def entity_names():
 ENTITY_NAMES = entity_names()
 
 
+def mob_effect_names():
+    """Maps mob-effect registry ids to names, the same way entity ids are read.
+
+    The ids are registration order in `vanilla_mob_effects.rs`, which is what
+    the `SetBeacon` packet and the effect packet both carry.
+    """
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "steel-registry",
+        "src",
+        "generated",
+        "vanilla_mob_effects.rs",
+    )
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            source = handle.read()
+    except OSError:
+        return {}
+    return {
+        index: name
+        for index, name in enumerate(
+            re.findall(r'Identifier :: vanilla_static \("([a-z_]+)"\)', source)
+        )
+    }
+
+
+MOB_EFFECT_NAMES = mob_effect_names()
+MOB_EFFECT_IDS = {name: index for index, name in MOB_EFFECT_NAMES.items()}
+
+
 def describe_spawns(spawned):
     if not spawned:
         return "nothing"
@@ -411,6 +444,8 @@ def run_play(connection, watch_seconds=0):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
+            note_mob_effect(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
@@ -494,6 +529,8 @@ def pump(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
+            note_mob_effect(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
@@ -589,6 +626,18 @@ def run_directive(connection, directive):
         for _ in range(count):
             send_container_click(connection, int(parts[1]), CLICK_QUICK_MOVE)
         print(f"  shift-clicked slot {parts[1]} {count} time(s)")
+    elif parts[0] == "wait":
+        # Some blocks only act on a slow beat -- a beacon recounts its pyramid
+        # every four seconds -- and a settle between commands is far shorter
+        # than that.
+        seconds = float(parts[1])
+        if not pump(connection, seconds, {}):
+            fail("the connection dropped while waiting")
+        print(f"  waited {seconds}s")
+    elif parts[0] == "setbeacon":
+        secondary = parts[2] if len(parts) > 2 else None
+        send_set_beacon(connection, parts[1], secondary)
+        print(f"  asked the beacon for {parts[1]} and {secondary}")
     elif parts[0] == "slotstate":
         send_slot_state_changed(connection, int(parts[1]), parts[2] == "on")
         print(f"  switched slot {parts[1]} {parts[2]}")
@@ -605,6 +654,19 @@ def run_directive(connection, directive):
     else:
         fail(f"unknown directive {directive}")
     return True
+
+
+def note_mob_effect(payload):
+    """Prints an effect the server just gave someone.
+
+    Nothing else says a beacon worked: the effect is server-side state, and no
+    command reads it back.
+    """
+    _entity_id, rest = read_varint(payload)
+    effect_id, rest = read_varint(rest)
+    amplifier, _rest = read_varint(rest)
+    name = MOB_EFFECT_NAMES.get(effect_id, f"effect {effect_id}")
+    print(f"  got the effect {name} at amplifier {amplifier}")
 
 
 def report_passengers(payload):
@@ -681,6 +743,25 @@ def send_slot_state_changed(connection, slot, enabled):
     connection.send(PLAY_S_CONTAINER_SLOT_STATE_CHANGED, payload)
 
 
+def send_set_beacon(connection, primary, secondary):
+    """Picks the two effects in an open beacon menu.
+
+    The ids are plain mob-effect registry ids -- the beacon's *data slots* use
+    the same ids offset by one, which is a distinction worth keeping straight.
+    """
+    if connection.open_container is None:
+        fail("nothing is open to set effects on")
+
+    def holder(name):
+        if name is None:
+            return b"\x00"
+        if name not in MOB_EFFECT_IDS:
+            fail(f"unknown mob effect {name}")
+        return b"\x01" + varint(MOB_EFFECT_IDS[name])
+
+    connection.send(PLAY_S_SET_BEACON, holder(primary) + holder(secondary))
+
+
 def send_container_close(connection):
     """Shuts the open screen, as pressing escape does.
 
@@ -743,6 +824,8 @@ def watch_for_spawns(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
+            note_mob_effect(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)

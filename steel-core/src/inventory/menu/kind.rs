@@ -58,6 +58,21 @@ pub trait MenuKind: ErasedType + Send + Sync {
     ) {
     }
 
+    /// Applies the two effects a player picked in a beacon menu.
+    ///
+    /// Vanilla parity: `BeaconMenu.updateEffects`. The beacon is the only menu
+    /// this reaches; the ids are mob-effect registry ids offset by one, so
+    /// zero means "no effect".
+    fn on_set_beacon_effects(
+        &mut self,
+        _behavior: &mut MenuBehavior,
+        _guard: &mut ContainerLockGuard,
+        _player: &Player,
+        _primary: Option<i32>,
+        _secondary: Option<i32>,
+    ) {
+    }
+
     /// Runs once per tick per viewer while open, before changes are synced.
     fn on_tick(
         &mut self,

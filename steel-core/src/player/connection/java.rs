@@ -17,8 +17,9 @@ use steel_protocol::packets::game::{
     SCommandSuggestion, SContainerButtonClick, SContainerClick, SContainerClose,
     SContainerSlotStateChanged, SInteract, SMovePlayer, SMovePlayerPos, SMovePlayerPosRot,
     SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock, SPlayerAbilities,
-    SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem, SSetCarriedItem,
-    SSetCreativeModeSlot, SSignUpdate, SSpectatorAction, SSwing, SUseItem, SUseItemOn,
+    SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem, SSetBeacon,
+    SSetCarriedItem, SSetCreativeModeSlot, SSignUpdate, SSpectatorAction, SSwing, SUseItem,
+    SUseItemOn,
 };
 
 use steel_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
@@ -88,6 +89,7 @@ enum ScheduledPlayPacketKind {
     ContainerClick(SContainerClick),
     ContainerClose(SContainerClose),
     ContainerSlotStateChanged(SContainerSlotStateChanged),
+    SetBeacon(SSetBeacon),
     SetCreativeModeSlot(SSetCreativeModeSlot),
     PlayerInput(SPlayerInput),
     PlayerCommand(SPlayerCommand),
@@ -199,6 +201,8 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::MovePlayer(_)
             | ScheduledPlayPacketKind::MoveVehicle(_)
             | ScheduledPlayPacketKind::ContainerClick(_)
+            | ScheduledPlayPacketKind::ContainerSlotStateChanged(_)
+            | ScheduledPlayPacketKind::SetBeacon(_)
             | ScheduledPlayPacketKind::RenameItem(_)
             | ScheduledPlayPacketKind::UseItemOn(_)
             | ScheduledPlayPacketKind::UseItem(_)
@@ -211,8 +215,7 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::Attack(_)
             | ScheduledPlayPacketKind::Interact(_)
             | ScheduledPlayPacketKind::CustomPayload(_)
-            | ScheduledPlayPacketKind::ContainerButtonClick(_)
-            | ScheduledPlayPacketKind::ContainerSlotStateChanged(_) => {
+            | ScheduledPlayPacketKind::ContainerButtonClick(_) => {
                 ScheduledPacketExecution::Exclusive
             }
         }
@@ -231,12 +234,38 @@ impl ScheduledPlayPacket {
         )
     }
 
+    /// Routes the packets a player sends while a menu is open.
+    ///
+    /// Split out of `handle` because the match there is long enough already;
+    /// these five all reach the same open menu and belong together.
+    fn handle_menu(kind: ScheduledPlayPacketKind, player: &Arc<Player>) {
+        match kind {
+            ScheduledPlayPacketKind::ContainerButtonClick(packet) => {
+                player.handle_container_button_click(packet);
+            }
+            ScheduledPlayPacketKind::ContainerClick(packet) => {
+                player.handle_container_click(packet);
+            }
+            ScheduledPlayPacketKind::ContainerClose(packet) => {
+                player.handle_container_close(packet);
+            }
+            ScheduledPlayPacketKind::ContainerSlotStateChanged(packet) => {
+                player.handle_container_slot_state_changed(packet);
+            }
+            ScheduledPlayPacketKind::SetBeacon(packet) => {
+                player.handle_set_beacon(packet);
+            }
+            _ => unreachable!("handle_menu only takes the menu packets"),
+        }
+    }
+
     pub(crate) fn handle(self, player: Arc<Player>, server: &Arc<Server>) {
         if !player.has_joined_world() && !self.can_process_before_join() {
             return;
         }
 
-        match self.0 {
+        let kind = self.0;
+        match kind {
             ScheduledPlayPacketKind::AcceptTeleportation(packet) => {
                 player.handle_accept_teleportation(packet);
             }
@@ -282,18 +311,11 @@ impl ScheduledPlayPacket {
                     player.send_packet(CCommandSuggestions::new(packet.id, 0, 0, Vec::new()));
                 }
             }
-            ScheduledPlayPacketKind::ContainerButtonClick(packet) => {
-                player.handle_container_button_click(packet);
-            }
-            ScheduledPlayPacketKind::ContainerClick(packet) => {
-                player.handle_container_click(packet);
-            }
-            ScheduledPlayPacketKind::ContainerClose(packet) => {
-                player.handle_container_close(packet);
-            }
-            ScheduledPlayPacketKind::ContainerSlotStateChanged(packet) => {
-                player.handle_container_slot_state_changed(packet);
-            }
+            ScheduledPlayPacketKind::ContainerButtonClick(_)
+            | ScheduledPlayPacketKind::ContainerClick(_)
+            | ScheduledPlayPacketKind::ContainerClose(_)
+            | ScheduledPlayPacketKind::ContainerSlotStateChanged(_)
+            | ScheduledPlayPacketKind::SetBeacon(_) => Self::handle_menu(kind, &player),
             ScheduledPlayPacketKind::SetCreativeModeSlot(packet) => {
                 player.handle_set_creative_mode_slot(packet);
             }
@@ -720,6 +742,9 @@ impl JavaConnection {
                     SContainerSlotStateChanged::read_packet(data)?,
                 ))
             }
+            play::S_SET_BEACON => scheduled(ScheduledPlayPacketKind::SetBeacon(
+                SSetBeacon::read_packet(data)?,
+            )),
             play::S_SET_CREATIVE_MODE_SLOT => {
                 scheduled(ScheduledPlayPacketKind::SetCreativeModeSlot(
                     SSetCreativeModeSlot::read_packet(data)?,

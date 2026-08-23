@@ -16,12 +16,12 @@ use steel_utils::{BlockPos, BlockStateId};
 
 use super::SharedBlockEntity;
 use super::entities::{
-    BarrelBlockEntity, BeehiveBlockEntity, BrewingStandBlockEntity, BrushableBlockEntity,
-    ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity, CrafterBlockEntity,
-    DaylightDetectorBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
-    FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
-    PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, ShulkerBoxBlockEntity,
-    SignBlockEntity,
+    BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity, BrewingStandBlockEntity,
+    BrushableBlockEntity, ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity,
+    CrafterBlockEntity, DaylightDetectorBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity,
+    EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity,
+    LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity,
+    ShulkerBoxBlockEntity, SignBlockEntity,
 };
 use crate::world::World;
 
@@ -202,6 +202,20 @@ impl BlockEntityRegistryLock {
 /// Access via deref: `BLOCK_ENTITIES.create(type, pos, state)`
 pub static BLOCK_ENTITIES: BlockEntityRegistryLock = BlockEntityRegistryLock(OnceLock::new());
 
+/// Registers the block entities behind the workstations.
+///
+/// Split out of `init_block_entities` only to keep that function under the
+/// line limit; there is nothing these two share beyond being late arrivals.
+fn register_workstations(registry: &mut BlockEntityRegistry) {
+    registry.register(&vanilla_block_entity_types::BEACON, |level, pos, state| {
+        Arc::new(BeaconBlockEntity::new(level, pos, state))
+    });
+
+    registry.register(&vanilla_block_entity_types::CRAFTER, |level, pos, state| {
+        Arc::new(CrafterBlockEntity::new(level, pos, state))
+    });
+}
+
 /// Initializes the global block entity registry.
 ///
 /// This should be called after the main registry is frozen. Repeated calls are a no-op.
@@ -283,9 +297,7 @@ pub fn init_block_entities() {
             Arc::new(DispenserBlockEntity::new_dropper(level, pos, state))
         });
 
-        registry.register(&vanilla_block_entity_types::CRAFTER, |level, pos, state| {
-            Arc::new(CrafterBlockEntity::new(level, pos, state))
-        });
+        register_workstations(&mut registry);
 
         registry.register(&vanilla_block_entity_types::HOPPER, |level, pos, state| {
             Arc::new(HopperBlockEntity::new(level, pos, state))

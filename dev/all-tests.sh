@@ -14,7 +14,7 @@ for test in dev/join-test.sh dev/sapling-test.sh dev/container-test.sh \
             dev/flowerpot-test.sh dev/enderchest-test.sh dev/spawnegg-test.sh \
             dev/boat-test.sh dev/openers-test.sh dev/ride-test.sh \
             dev/minecart-test.sh dev/jukebox-test.sh dev/frame-test.sh \
-            dev/throw-test.sh dev/workstation-test.sh \
+            dev/throw-test.sh dev/workstation-test.sh dev/beacon-test.sh \
             dev/nether-test.sh dev/reload-test.sh; do
   name=$(basename "$test")
   if bash "$test" > "/tmp/$name.out" 2>&1; then

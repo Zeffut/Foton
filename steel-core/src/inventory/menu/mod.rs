@@ -223,6 +223,20 @@ impl Menu {
         kind.on_slot_state_changed(behavior, &mut guard, player, slot, enabled);
     }
 
+    /// Passes a beacon's chosen effects to the kind.
+    ///
+    /// Vanilla parity: `BeaconMenu.updateEffects`.
+    pub fn set_beacon_effects(
+        &mut self,
+        player: &Player,
+        primary: Option<i32>,
+        secondary: Option<i32>,
+    ) {
+        let mut guard = self.behavior().lock_all_containers();
+        let Self { behavior, kind, .. } = self;
+        kind.on_set_beacon_effects(behavior, &mut guard, player, primary, secondary);
+    }
+
     /// Runs the kind's `on_tick` hook. Called once per server tick while open.
     pub fn on_tick(&mut self, player: &Player) {
         let mut guard = self.behavior().lock_all_containers();
