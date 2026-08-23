@@ -332,8 +332,16 @@ pub trait Projectile: Entity + ProjectileEventSource {
         true
     }
 
-    /// Returns vanilla `Projectile.canHitEntity`.
+    /// Returns vanilla `Projectile.canHitEntity`. Subclasses override this and
+    /// call [`Projectile::projectile_can_hit_entity`] for the base test
+    /// (`super.canHitEntity()`).
     fn can_hit_entity(&self, entity: &dyn Entity) -> bool {
+        self.projectile_can_hit_entity(entity)
+    }
+
+    /// The base `Projectile.canHitEntity` test. Not meant to be overridden --
+    /// override [`Projectile::can_hit_entity`] and delegate here instead.
+    fn projectile_can_hit_entity(&self, entity: &dyn Entity) -> bool {
         if !entity.can_be_hit_by_projectile() {
             return false;
         }
@@ -408,8 +416,29 @@ pub trait Projectile: Entity + ProjectileEventSource {
         self.set_rotation((yaw, pitch));
     }
 
-    /// Applies a Vanilla projectile deflection.
+    /// Applies a Vanilla projectile deflection. Subclasses override this and
+    /// call [`Projectile::projectile_deflect`] for the base behavior
+    /// (`super.deflect()`).
     fn deflect(
+        &self,
+        deflection: ProjectileDeflection,
+        deflecting_entity: Option<&dyn Entity>,
+        new_owner_uuid: Option<Uuid>,
+        new_owner_entity: Option<&SharedEntity>,
+        by_attack: bool,
+    ) -> bool {
+        self.projectile_deflect(
+            deflection,
+            deflecting_entity,
+            new_owner_uuid,
+            new_owner_entity,
+            by_attack,
+        )
+    }
+
+    /// The base `Projectile.deflect` implementation. Not meant to be
+    /// overridden -- override [`Projectile::deflect`] and delegate here instead.
+    fn projectile_deflect(
         &self,
         deflection: ProjectileDeflection,
         deflecting_entity: Option<&dyn Entity>,
