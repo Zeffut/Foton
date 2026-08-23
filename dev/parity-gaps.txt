@@ -64,11 +64,10 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 31
+[items] 29
 ArmorStandItem
 ArrowItem
 BannerItem
-BottleItem
 BundleItem
 CrossbowItem
 DebugStickItem
@@ -87,7 +86,6 @@ LeadItem
 MapItem
 MobBucketItem
 ScaffoldingBlockItem
-ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
