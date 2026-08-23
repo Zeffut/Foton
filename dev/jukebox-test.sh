@@ -53,6 +53,10 @@ fi
 # reads it too. `music_disc_13` has comparator output 1 in vanilla, which is
 # what makes the comparator answer different from the lamp's.
 CMDS='gamemode creative'
+# One throwaway command first: the very first `setblock` of a run can land
+# before the chunk around the player is ready, and then the floor under the
+# jukebox is never built and the ejected disc falls out of the world.
+CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;setblock 0 99 0 minecraft:stone"
 CMDS="$CMDS;;setblock 0 100 0 minecraft:jukebox"
 CMDS="$CMDS;;setblock 1 100 0 minecraft:redstone_lamp"
@@ -86,10 +90,10 @@ CMDS="$CMDS;;!useon 0 100 0 up"
 CMDS="$CMDS;;execute if block 0 100 0 minecraft:jukebox[has_record=false] run tellraw @s \"DISCCAMEOUT\""
 CMDS="$CMDS;;execute if block 1 100 0 minecraft:redstone_lamp[lit=false] run tellraw @s \"LAMPWENTOFF\""
 # The ejected disc becomes an item entity. Where it ends up is not asserted:
-# it leaves with a random nudge and rolls, and pinning it to a radius made this
-# test fail about one run in six for reasons that had nothing to do with the
-# jukebox. Nothing else in this test drops anything, so the existence of an
-# item entity is specific enough to mean the disc came out.
+# it leaves with a random nudge and rolls, so a radius would be asserting the
+# item physics rather than the jukebox. Nothing else in this test drops
+# anything, so the existence of an item entity is specific enough to mean the
+# disc came out.
 CMDS="$CMDS;;execute if entity @e[type=minecraft:item] run tellraw @s \"DISCBECAMEANITEM\""
 
 export JOIN_COMMANDS="$CMDS"

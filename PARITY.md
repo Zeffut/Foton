@@ -84,9 +84,12 @@ cannot.
       can now right-click a block at all.
 - [ ] **Tools that act**: shears, fishing rod, flint and steel's siblings,
       snowball, egg, experience bottle, ender pearl's siblings.
-- [~] **Decoration a player places**: flower pot (39) done -- a plant goes in
-      and comes back out. Still open: item frame, painting, armor stand,
-      banner (16), skull (9).
+- [~] **Decoration a player places**: flower pot (39) and item frame done -- a
+      plant goes in and comes back out, and a frame hangs, holds an item, turns
+      it, and reads out to a comparator. Still open: glow item frame (the
+      entity is a separate vanilla class Steel does not have), painting (same),
+      armor stand, banner (16), skull (9). A frame does not drop what is in it
+      when broken, and does not fall off when its wall goes.
 
 ### 2. The living world
 
@@ -141,6 +144,8 @@ a furnace has no behavior. These scripts can:
   onto a rail and nowhere else, and carries a player.
 - `dev/jukebox-test.sh` -- a disc goes into a jukebox and comes back out, the
   block powers a lamp only while it plays, and a comparator reads the record.
+- `dev/frame-test.sh` -- an item frame is hung from the item, filled, turned,
+  and read through the wall behind it by a comparator.
 - `dev/openers-test.sh` -- an open trapped chest powers redstone and a
   closed one stops, a plain chest powers nothing, a chest under a solid
   block refuses to open, and a barrel looks open while somebody is in it.

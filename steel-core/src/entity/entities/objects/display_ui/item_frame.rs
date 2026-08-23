@@ -1,4 +1,4 @@
-//! Minimal persistent item-frame entity used by structure generation.
+//! The item frame.
 
 use std::sync::Weak;
 
@@ -6,24 +6,32 @@ use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_macros::entity_behavior;
+use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::vanilla_components::MAP_ID;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
-use steel_registry::vanilla_blocks;
+use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_entity_data::ItemFrameEntityData;
+use steel_registry::{sound_events, vanilla_blocks, vanilla_game_events};
 use steel_utils::locks::SyncMutex;
+use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, Direction, DowncastType, DowncastTypeKey, WorldAabb, axis::Axis};
 
+use crate::behavior::InteractionResult;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData, ItemFrame,
 };
+use crate::player::Player;
 use crate::world::World;
+use crate::world::game_event::GameEventContext;
 
-/// Item frame state needed by end-city structure markers.
+/// An item frame.
 ///
-/// This intentionally implements only placement, synced item/facing data,
-/// persistence, and comparator integration. Interaction, drops, map tracking,
-/// and support checks belong to the full item-frame entity implementation.
+/// Vanilla parity: `ItemFrame`. A frame holds one item, turns it eight ways,
+/// and reports the rotation to a comparator. Not implemented: drops when the
+/// frame is broken, map tracking, and the support check that makes a frame pop
+/// off when the wall behind it goes -- the frame is placed against a solid
+/// block and then stays there.
 #[entity_behavior(class = "ItemFrame")]
 pub struct ItemFrameEntity {
     base: EntityBase,
@@ -36,6 +44,12 @@ pub struct ItemFrameEntity {
 unsafe impl DowncastType for ItemFrameEntity {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/item_frame");
 }
+
+/// How many ways round a framed item can sit.
+///
+/// Vanilla parity: the `% 8` shared by `ItemFrame.setRotation` and its
+/// comparator output.
+const ROTATION_STEPS: i32 = 8;
 
 impl ItemFrameEntity {
     /// Creates a fresh item frame from the generic entity factory path.
@@ -129,6 +143,31 @@ impl ItemFrameEntity {
         self.base
             .set_rotation(Self::rotation_for_direction(direction));
         self.recalculate_position();
+    }
+
+    /// Plays one of the frame's own sounds at the frame.
+    fn play_frame_sound(&self, sound: SoundEventRef) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        world.play_sound_at(sound, SoundSource::Neutral, self.position(), 1.0, 1.0, None);
+    }
+
+    /// Tells the world the frame changed.
+    ///
+    /// Vanilla parity: the `gameEvent(BLOCK_CHANGE, player)` of
+    /// `ItemFrame.interact`, plus the comparator update -- a frame's signal is
+    /// its rotation, so turning the item is a redstone change.
+    fn frame_changed(&self, player: &Player) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        world.game_event_at(
+            &vanilla_game_events::BLOCK_CHANGE,
+            self.position(),
+            &GameEventContext::new(Some(player as &dyn Entity), None),
+        );
+        world.update_neighbor_for_output_signal(*self.block_pos.lock(), &vanilla_blocks::AIR);
     }
 
     fn recalculate_position(&self) {
@@ -242,6 +281,51 @@ impl Entity for ItemFrameEntity {
 
     fn is_pickable(&self) -> bool {
         true
+    }
+
+    /// Fills the frame, or turns what is already in it.
+    ///
+    /// Vanilla parity: `ItemFrame.interact`. The same click does two different
+    /// things depending on whether the frame is empty, which is what lets a
+    /// player set a rotation without a second gesture -- and what a comparator
+    /// beside the frame is reading.
+    fn interact(
+        &self,
+        player: &Player,
+        hand: InteractionHand,
+        _location: DVec3,
+    ) -> InteractionResult {
+        let frame_is_empty = self.entity_data.lock().item.get().is_empty();
+
+        if frame_is_empty {
+            let held = {
+                let inventory = player.inventory.lock();
+                let stack = inventory.get_item_in_hand(hand);
+                stack.copy_with_count(1)
+            };
+            if held.is_empty() || self.is_removed() {
+                return InteractionResult::Pass;
+            }
+
+            self.set_item(held);
+            self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_ADD_ITEM);
+            self.frame_changed(player);
+
+            if !player.has_infinite_materials() {
+                let mut inventory = player.inventory.lock();
+                inventory.get_item_in_hand_mut(hand).shrink(1);
+            }
+            return InteractionResult::Success;
+        }
+
+        {
+            let mut entity_data = self.entity_data.lock();
+            let next = (*entity_data.rotation.get() + 1).rem_euclid(ROTATION_STEPS);
+            entity_data.rotation.set(next);
+        }
+        self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_ROTATE_ITEM);
+        self.frame_changed(player);
+        InteractionResult::Success
     }
 
     fn synced_data(&self) -> Option<&dyn EntitySyncedData> {
