@@ -24,18 +24,27 @@ all found while writing this:
 - **Entity coverage is per registry entry, not per class.** Nine boat woods are
   one `Boat` class but nine things a player can hold.
 
-What the corrected numbers say:
+What the corrected numbers say. The first column is where this measurement
+started; the second is where `dev/parity-gaps.txt` stands now.
 
-| | entries with a behavior | of total | genuinely missing classes |
-|---|---|---|---|
-| blocks | 841 | 1196 | 62 |
-| items | (see note) | 1537 | 38 |
-| entities | 40 | 158 | 102 |
+| missing classes | at first measurement | now |
+|---|---|---|
+| blocks | 63 | 58 |
+| items | 38 | 31 |
+| entities | 142 | 94 |
 
 Blocks are close. Items are mostly `BlockItem`, which the item codegen handles
-separately from behaviors. **Entities are where the distance is**, and inside
-entities the distance is concentrated: 20 of the 118 missing entries are boats
-and rafts, 6 are minecarts, 5 are the horse family.
+separately from behaviors. **Entities are where the distance is**, though much
+less than it was: boats, rafts, chest boats, the minecart and the chest
+minecart, snowballs, eggs and bottles have all landed since.
+
+A pattern worth naming, because it has now come up five times: the expensive
+half of a feature was often already written and simply unreachable. Rails
+worked and nothing ran on them. `handle_move_vehicle` was complete and no
+player could board a boat. The item frame had synced data, persistence and a
+comparator output, and no item to hang one. `MoveToBlockGoal` was written and
+never exported. Before adding anything, it is worth checking whether the thing
+already exists and is merely orphaned.
 
 ## The order
 
@@ -118,6 +127,13 @@ mobs that need it.
   registries that come from SteelExtractor, an external tool not in this
   repository. `AGENTS.md` forbids hand-writing extracted data, so these cannot
   be done here. Every `TODO: award stat ...` in the tree is waiting on this.
+
+## Running all of it
+
+`bash dev/all-tests.sh` runs every in-world test once, in sequence, and prints
+a tally. They are run one at a time on purpose: each starts its own server on
+its own port, but two at once still tread on each other's run directories and
+on the machine, and the failures that produces look exactly like real ones.
 
 ## Keeping this honest
 
