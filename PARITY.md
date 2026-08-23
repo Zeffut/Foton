@@ -55,8 +55,10 @@ cannot.
       and refuse cleanly), the `SPaddleBoat` packet so rowing animates, and the
       second seat.
 - [ ] **Minecarts** (6 entries). Rails already work; the carts do not exist.
-- [~] **Storage that travels**: shulker box (17) done -- contents survive being
-      broken and come back when placed. Still open: ender chest, trapped chest.
+- [~] **Storage that travels**: shulker box (17) and ender chest done. Still
+      open: trapped chest, which needs the container opener count first --
+      without it the signal is always zero and it is a chest that costs a
+      tripwire hook.
 - [ ] **Workstations**: grindstone, stonecutter, smithing table, cartography
       table, loom, lectern, jukebox, bell, beacon, crafter.
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
@@ -110,6 +112,7 @@ a furnace has no behavior. These scripts can:
 - `dev/sapling-test.sh` -- a planted sapling becomes a tree.
 - `dev/container-test.sh` -- placed container blocks have block entities.
 - `dev/flowerpot-test.sh` -- a flower goes into a pot and comes back out.
+- `dev/enderchest-test.sh` -- right-clicking an ender chest opens a container.
 - `dev/spawnegg-test.sh` -- a spawn egg used by hand makes the mob.
 - `dev/boat-test.sh` -- a boat put on water is still on it afterwards.
 

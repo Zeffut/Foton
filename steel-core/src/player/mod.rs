@@ -71,6 +71,15 @@ use steel_registry::{
     vanilla_game_events,
 };
 use steel_utils::{entity_events::EntityStatus, locks::Shared};
+
+use crate::inventory::container::SimpleContainer;
+
+/// Slots in a player's ender chest.
+///
+/// Vanilla parity: `PlayerEnderChestContainer`, three rows like a small
+/// chest.
+pub const ENDER_CHEST_SLOTS: usize = 27;
+
 use tick_state::PlayerTickState;
 use uuid::Uuid;
 
@@ -187,6 +196,13 @@ pub struct Player {
 
     /// The player's inventory container (shared with `inventory_menu`).
     pub inventory: Shared<PlayerInventory>,
+
+    /// The twenty-seven slots every ender chest in the world opens.
+    ///
+    /// Vanilla parity: `Player.enderChestInventory`. It belongs to the player,
+    /// not to any block, which is why it lives here and travels with them
+    /// between worlds and through death.
+    pub ender_chest: Shared<SimpleContainer>,
 
     /// Logical inventory slots that must be resent directly to this player's client.
     inventory_sync: SyncMutex<PlayerInventorySyncState>,
@@ -479,6 +495,9 @@ impl Player {
     ) -> Self {
         // Create a single shared inventory container used by both the player and inventory menu
         let inventory = Arc::new(SyncMutex::new(PlayerInventory::new()));
+        // Vanilla parity: `Player.enderChestInventory`, twenty-seven slots
+        // that belong to the player rather than to any block.
+        let ender_chest = Arc::new(SyncMutex::new(SimpleContainer::new(ENDER_CHEST_SLOTS)));
 
         let pos = DVec3::new(0.0, 0.0, 0.0);
 
@@ -520,6 +539,7 @@ impl Player {
             )),
             game_modes: SyncMutex::new(PlayerGameModeState::new(GameType::Survival)),
             inventory: inventory.clone(),
+            ender_chest,
             inventory_sync: SyncMutex::new(PlayerInventorySyncState::new()),
             last_item_in_main_hand: SyncMutex::new(ItemStack::empty()),
             inventory_menu: SyncMutex::new(inventory_menu(inventory)),

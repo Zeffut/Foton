@@ -56,6 +56,7 @@ PLAY_C_DISCONNECT = 32
 PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
+PLAY_C_OPEN_SCREEN = 59
 PLAY_C_SYSTEM_CHAT = 121
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
@@ -379,6 +380,11 @@ def run_play(connection, watch_seconds=0):
             # they then click out of interaction range.
             teleport_id, _ = read_varint(payload)
             connection.send(PLAY_S_ACCEPT_TELEPORTATION, varint(teleport_id))
+        elif packet_id == PLAY_C_OPEN_SCREEN:
+            # A container that opens is a container whose behavior ran. No
+            # command can right-click a block, so this is the only way to see
+            # it happen.
+            print("  a screen opened")
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -450,6 +456,11 @@ def pump(connection, seconds, spawned):
             # they then click out of interaction range.
             teleport_id, _ = read_varint(payload)
             connection.send(PLAY_S_ACCEPT_TELEPORTATION, varint(teleport_id))
+        elif packet_id == PLAY_C_OPEN_SCREEN:
+            # A container that opens is a container whose behavior ran. No
+            # command can right-click a block, so this is the only way to see
+            # it happen.
+            print("  a screen opened")
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -566,6 +577,11 @@ def watch_for_spawns(connection, seconds, spawned):
             # they then click out of interaction range.
             teleport_id, _ = read_varint(payload)
             connection.send(PLAY_S_ACCEPT_TELEPORTATION, varint(teleport_id))
+        elif packet_id == PLAY_C_OPEN_SCREEN:
+            # A container that opens is a container whose behavior ran. No
+            # command can right-click a block, so this is the only way to see
+            # it happen.
+            print("  a screen opened")
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:

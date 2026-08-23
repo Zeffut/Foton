@@ -86,6 +86,8 @@ struct PlayerDataFile {
     prev_game_mode: Option<i32>,
     abilities: AbilitiesFile,
     inventory: Vec<SlotFile>,
+    /// Ender chest slots, saved beside the inventory.
+    ender_items: Vec<SlotFile>,
     selected_slot: i32,
     world: String,
     food_level: i32,
@@ -588,6 +590,14 @@ impl FilePlayerDataStorage {
 
 impl PlayerDataFile {
     fn from_persistent(data: &PersistentPlayerData) -> io::Result<Self> {
+        let mut ender_items = Vec::with_capacity(data.ender_items.len());
+        for slot in &data.ender_items {
+            ender_items.push(SlotFile {
+                slot: slot.slot,
+                item_nbt: item_to_nbt_bytes(&slot.item)?,
+            });
+        }
+
         let mut inventory = Vec::with_capacity(data.inventory.len());
         for slot in &data.inventory {
             inventory.push(SlotFile {
@@ -621,6 +631,7 @@ impl PlayerDataFile {
                 walking_speed: data.abilities.walking_speed,
             },
             inventory,
+            ender_items,
             selected_slot: data.selected_slot,
             world: data.world.clone(),
             food_level: data.food_level,
@@ -665,6 +676,14 @@ impl PlayerDataFile {
             ));
         }
 
+        let mut ender_items = Vec::with_capacity(self.ender_items.len());
+        for slot in self.ender_items {
+            ender_items.push(PersistentSlot {
+                slot: slot.slot,
+                item: item_from_nbt_bytes(&slot.item_nbt)?,
+            });
+        }
+
         let mut inventory = Vec::with_capacity(self.inventory.len());
         for slot in self.inventory {
             inventory.push(PersistentSlot {
@@ -697,6 +716,7 @@ impl PlayerDataFile {
                 walking_speed: self.abilities.walking_speed,
             },
             inventory,
+            ender_items,
             selected_slot: self.selected_slot,
             world: self.world,
             food_level: self.food_level,
@@ -863,6 +883,7 @@ mod tests {
         env,
         time::{SystemTime, UNIX_EPOCH},
     };
+    use steel_registry::{init_vanilla_registry, vanilla_items};
 
     fn temp_storage_root(name: &str) -> PathBuf {
         let suffix = SystemTime::now()
@@ -870,6 +891,34 @@ mod tests {
             .expect("system clock should be after unix epoch")
             .as_nanos();
         env::temp_dir().join(format!("steelmc-player-storage-{name}-{suffix}"))
+    }
+
+    /// An ender chest's contents survive the save format.
+    ///
+    /// This is the half of the block a running server cannot show: the client
+    /// cannot click inventory slots and Steel has no `/item` command, so the
+    /// only way to prove the contents belong to the player rather than to the
+    /// block is to write them out and read them back.
+    #[test]
+    fn ender_chest_items_survive_a_save_and_load() {
+        init_vanilla_registry();
+
+        let mut data = sample_player_file(PLAYER_DATA_VERSION);
+        data.ender_items = vec![SlotFile {
+            slot: 5,
+            item_nbt: item_to_nbt_bytes(&ItemStack::with_count(&vanilla_items::DIAMOND, 7))
+                .expect("a diamond encodes"),
+        }];
+
+        let restored = data
+            .into_persistent()
+            .expect("the file reads back at the current version");
+
+        assert_eq!(restored.ender_items.len(), 1, "the slot was lost");
+        let slot = &restored.ender_items[0];
+        assert_eq!(slot.slot, 5, "the slot index moved");
+        assert!(slot.item.is(&vanilla_items::DIAMOND), "the item changed");
+        assert_eq!(slot.item.count(), 7, "the stack changed size");
     }
 
     fn sample_player_file(data_version: i32) -> PlayerDataFile {
@@ -898,6 +947,7 @@ mod tests {
                 walking_speed: 0.1,
             },
             inventory: Vec::new(),
+            ender_items: Vec::new(),
             selected_slot: 4,
             world: "lobby:void".to_owned(),
             food_level: 20,
