@@ -19,8 +19,9 @@ use super::entities::{
     BarrelBlockEntity, BeehiveBlockEntity, BrewingStandBlockEntity, BrushableBlockEntity,
     ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity,
     DaylightDetectorBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
-    FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, PistonMovingBlockEntity,
-    PotentSulfurBlockEntity, RawBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
+    FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
+    PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, ShulkerBoxBlockEntity,
+    SignBlockEntity,
 };
 use crate::world::World;
 
@@ -249,6 +250,10 @@ pub fn init_block_entities() {
 
         registry.register(&vanilla_block_entity_types::JUKEBOX, |level, pos, state| {
             Arc::new(JukeboxBlockEntity::new(level, pos, state))
+        });
+
+        registry.register(&vanilla_block_entity_types::LECTERN, |level, pos, state| {
+            Arc::new(LecternBlockEntity::new(level, pos, state))
         });
 
         registry.register(&vanilla_block_entity_types::FURNACE, |level, pos, state| {

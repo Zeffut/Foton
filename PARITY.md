@@ -92,8 +92,10 @@ cannot.
       cuts an input offers. The grindstone strips enchantments, keeps the
       curses, welds two damaged tools into a better one, and pays the
       experience back. The smithing table upgrades to netherite and carries
-      the tool's enchantments across. Still open: cartography table, loom,
-      lectern, bell, beacon, crafter. Armor trims are the half of smithing
+      the tool's enchantments across. A lectern takes a book, turns its
+      pages, pulses redstone from the block below on every turn, and answers a
+      comparator with how far through the book the reader is. Still open:
+      cartography table, loom, bell, beacon, crafter. Armor trims are the half of smithing
       that is not here: they need trim pattern and material registries and a
       `TRIM` component Steel does not have, so those eighteen recipes are
       still skipped -- deliberately now, rather than by omission. The
