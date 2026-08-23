@@ -12,10 +12,9 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 54
+[blocks] 53
 AirBlock
 BeaconBlock
-BellBlock
 Block
 BonemealableFeaturePlacerBlock
 CalibratedSculkSensorBlock

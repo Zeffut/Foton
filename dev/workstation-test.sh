@@ -61,6 +61,12 @@ CMDS="$CMDS;;setblock 0 99 4 minecraft:stone"
 CMDS="$CMDS;;setblock 0 100 4 minecraft:smithing_table"
 CMDS="$CMDS;;setblock 0 99 6 minecraft:stone"
 CMDS="$CMDS;;setblock 0 100 6 minecraft:lectern"
+# A bell, with a lever beside it: redstone rings it once on the rising edge
+# and flips the block's `powered` state, which is the only part of ringing a
+# server can be asked about -- the swing itself is a client animation.
+CMDS="$CMDS;;setblock 0 99 8 minecraft:stone"
+CMDS="$CMDS;;setblock 0 100 8 minecraft:bell"
+CMDS="$CMDS;;setblock 1 100 8 minecraft:redstone_block"
 CMDS="$CMDS;;clear @s"
 CMDS="$CMDS;;!hotbar 0"
 
@@ -87,6 +93,8 @@ CMDS="$CMDS;;clear @s"
 CMDS="$CMDS;;!useon 0 100 6 east"
 CMDS="$CMDS;;!close"
 
+CMDS="$CMDS;;execute if block 0 100 8 minecraft:bell[powered=true] run tellraw @s \"BELLRANG\""
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -95,7 +103,7 @@ cleanup
 
 echo "=== what happened ==="
 grep -cE "a screen opened" join.log | sed 's/^/screens opened: /'
-grep "server says" join.log | grep -oE "BOOKWENTON"
+grep "server says" join.log | grep -oE "BOOKWENTON|BELLRANG"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 

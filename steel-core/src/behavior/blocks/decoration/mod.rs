@@ -1,4 +1,6 @@
 mod banner_block;
+mod bell_block;
+pub use bell_block::BellBlock;
 mod cake_block;
 mod candle_block;
 mod candle_cake_block;

@@ -37,10 +37,10 @@ pub use container::{
     count_enchanting_power, signal_lectern_page_change, take_book_from,
 };
 pub use decoration::{
-    BannerBlock, CakeBlock, CandleBlock, CandleCakeBlock, CeilingHangingSignBlock, ChainBlock,
-    EndRodBlock, FlowerPotBlock, LanternBlock, StandingSignBlock, TorchBlock, WallBannerBlock,
-    WallHangingSignBlock, WallSignBlock, WallTorchBlock, WeatheringCopperChainBlock,
-    WeatheringLanternBlock,
+    BannerBlock, BellBlock, CakeBlock, CandleBlock, CandleCakeBlock, CeilingHangingSignBlock,
+    ChainBlock, EndRodBlock, FlowerPotBlock, LanternBlock, StandingSignBlock, TorchBlock,
+    WallBannerBlock, WallHangingSignBlock, WallSignBlock, WallTorchBlock,
+    WeatheringCopperChainBlock, WeatheringLanternBlock,
 };
 pub use falling::{ConcretePowderBlock, DragonEggBlock, FallingBlock, SandBlock};
 pub use fluid::{BubbleColumnBlock, LiquidBlock};

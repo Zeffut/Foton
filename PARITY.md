@@ -94,8 +94,11 @@ cannot.
       experience back. The smithing table upgrades to netherite and carries
       the tool's enchantments across. A lectern takes a book, turns its
       pages, pulses redstone from the block below on every turn, and answers a
-      comparator with how far through the book the reader is. Still open:
-      cartography table, loom, bell, beacon, crafter. Armor trims are the half of smithing
+      comparator with how far through the book the reader is. The bell rings
+      -- but only when struck from a side it can actually swing towards, which
+      is what the hit test is for, and once per redstone rising edge rather
+      than continuously. Still open:
+      cartography table, loom, beacon, crafter. Armor trims are the half of smithing
       that is not here: they need trim pattern and material registries and a
       `TRIM` component Steel does not have, so those eighteen recipes are
       still skipped -- deliberately now, rather than by omission. The
