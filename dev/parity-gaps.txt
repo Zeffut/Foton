@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 49
+[blocks] 46
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
@@ -25,7 +25,6 @@ CopperGolemStatueBlock
 CreakingHeartBlock
 CryingObsidianBlock
 DriedGhastBlock
-FrogspawnBlock
 FrostedIceBlock
 HalfTransparentBlock
 JigsawBlock
@@ -43,7 +42,6 @@ SculkSensorBlock
 SculkShriekerBlock
 ShelfBlock
 SkullBlock
-SnifferEggBlock
 SoulSandBlock
 SpawnerBlock
 StainedGlassBlock
@@ -54,7 +52,6 @@ TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
 TrialSpawnerBlock
-TurtleEggBlock
 VaultBlock
 WallSkullBlock
 WeatheringCopperChestBlock
