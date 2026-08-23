@@ -135,6 +135,17 @@ impl LeashFenceKnotEntity {
             return Some(knot);
         }
 
+        Self::create_knot(world, pos)
+    }
+
+    /// Spawns a fresh leash knot at `pos` without looking for an existing one.
+    ///
+    /// Vanilla parity: `LeashFenceKnotEntity.createKnot`. Vanilla returns the
+    /// knot unconditionally because `addFreshEntity` cannot fail; Steel returns
+    /// `None` when the entity cannot join the world, which happens when the
+    /// chunk is not loaded for entities.
+    #[must_use]
+    pub fn create_knot(world: &Arc<World>, pos: BlockPos) -> Option<SharedEntity> {
         let knot: SharedEntity = Arc::new(Self::new_attached(
             &vanilla_entities::LEASH_KNOT,
             next_entity_id(),
@@ -147,6 +158,13 @@ impl LeashFenceKnotEntity {
         }
 
         Some(knot)
+    }
+
+    /// Plays the sound of a lead being tied to this knot.
+    ///
+    /// Vanilla parity: `LeashFenceKnotEntity.playPlacementSound`.
+    pub fn play_placement_sound(&self) {
+        self.play_sound(&sound_events::ITEM_LEAD_TIED, 1.0, 1.0);
     }
 
     fn should_check_survival(&self) -> bool {

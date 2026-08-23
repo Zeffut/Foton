@@ -63,7 +63,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 30
+[items] 29
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -81,7 +81,6 @@ InkSacItem
 InstrumentItem
 Item
 KnowledgeBookItem
-LeadItem
 MapItem
 MobBucketItem
 ScaffoldingBlockItem
