@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 51
+[blocks] 50
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
@@ -32,7 +32,6 @@ HalfTransparentBlock
 JigsawBlock
 LightBlock
 LightningRodBlock
-LoomBlock
 MangroveRootsBlock
 NetherrackBlock
 NyliumBlock

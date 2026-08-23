@@ -5,6 +5,7 @@ mod armor_slot;
 mod crafting_slots;
 mod furnace_slots;
 mod grindstone_slots;
+mod loom_slots;
 mod normal_slot;
 mod restricted_slot;
 mod result_handler;
@@ -20,6 +21,10 @@ pub use furnace_slots::FurnaceResultSlot;
 pub use grindstone_slots::{
     GRINDSTONE_ADDITIONAL, GRINDSTONE_INPUT, GrindstoneHandler, grindstone_accepts,
     grindstone_result,
+};
+pub use loom_slots::{
+    LOOM_BANNER, LOOM_DYE, LOOM_PATTERN, LoomHandler, PATTERN_NOT_SET, is_banner, is_dye_item,
+    is_pattern_item, selectable_patterns,
 };
 pub use normal_slot::NormalSlot;
 pub use restricted_slot::*;

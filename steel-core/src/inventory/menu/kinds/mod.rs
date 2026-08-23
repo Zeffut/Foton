@@ -14,6 +14,7 @@ mod grindstone_menu;
 mod hopper_menu;
 mod inventory_menu;
 mod lectern_menu;
+mod loom_menu;
 mod smithing_menu;
 mod stonecutter_menu;
 
@@ -31,5 +32,6 @@ pub use grindstone_menu::{GrindstoneKind, grindstone};
 pub use hopper_menu::{HopperKind, hopper};
 pub use inventory_menu::{INVENTORY_MENU_CONTAINER_ID, InventoryKind, inventory_menu};
 pub use lectern_menu::{LecternKind, lectern};
+pub use loom_menu::{LoomKind, loom};
 pub use smithing_menu::{SmithingKind, smithing};
 pub use stonecutter_menu::{StonecutterKind, stonecutter};

@@ -67,6 +67,7 @@ PLAY_C_SYSTEM_CHAT = 121
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
+PLAY_S_CONTAINER_BUTTON_CLICK = 17
 PLAY_S_CONTAINER_CLICK = 18
 PLAY_S_CONTAINER_CLOSE = 19
 PLAY_S_CONTAINER_SLOT_STATE_CHANGED = 20
@@ -615,6 +616,9 @@ def run_directive(connection, directive):
         send_use_item_on(connection, x, y, z, face)
     elif parts[0] == "close":
         send_container_close(connection)
+    elif parts[0] == "button":
+        send_container_button_click(connection, int(parts[1]))
+        print(f"  pressed button {parts[1]}")
     elif parts[0] == "click":
         send_container_click(connection, int(parts[1]), CLICK_PICKUP)
         print(f"  clicked slot {parts[1]}")
@@ -701,6 +705,20 @@ def send_interact(connection, name, secondary):
     connection.send(PLAY_S_INTERACT, payload)
     verb = "sneak-right-clicked" if secondary else "right-clicked"
     print(f"  {verb} the {name} (entity {entity_id})")
+
+
+def send_container_button_click(connection, button):
+    """Presses one of a menu's own buttons.
+
+    Not a slot click: the enchantment table's three offers, the lectern's page
+    arrows and the loom's pattern grid all arrive this way.
+    """
+    if connection.open_container is None:
+        fail("nothing is open to press a button in")
+    connection.send(
+        PLAY_S_CONTAINER_BUTTON_CLICK,
+        varint(connection.open_container) + varint(button),
+    )
 
 
 def send_container_click(connection, slot, click_type, button=0):

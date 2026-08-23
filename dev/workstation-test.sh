@@ -129,6 +129,24 @@ CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;execute if block 0 100 12 minecraft:redstone_wire[power=0] run tellraw @s \"GRIDEMPTIED\""
 
+# The loom. What it makes is covered by unit tests -- no command can read a
+# banner's pattern layers back, and the result never becomes a block -- so what
+# this adds is the packet path: the menu opens, three restricted slots take
+# their items by shift-click, and a pattern button press reaches the handler.
+CMDS="$CMDS;;setblock 0 99 14 minecraft:stone"
+CMDS="$CMDS;;setblock 0 100 14 minecraft:loom"
+CMDS="$CMDS;;clear @s"
+CMDS="$CMDS;;give @s minecraft:white_banner 1"
+CMDS="$CMDS;;give @s minecraft:red_dye 1"
+CMDS="$CMDS;;teleport @s 1 100 14"
+CMDS="$CMDS;;!useon 0 100 14 east"
+# Slots 4 to 39 are the player inventory; 31 and 32 are the first two hotbar
+# squares, where the two gives landed.
+CMDS="$CMDS;;!shiftclick 31"
+CMDS="$CMDS;;!shiftclick 32"
+CMDS="$CMDS;;!button 0"
+CMDS="$CMDS;;!close"
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -146,7 +164,8 @@ said() { grep "server says" join.log | grep -q "$1"; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
 screens=$(grep -c "a screen opened" join.log)
-[ "$screens" -eq 5 ]   || fail "expected five workstations to open, got $screens"
+[ "$screens" -eq 6 ] \
+  || fail "expected six workstations to open, got $screens"
 said BOOKWENTON         || fail "the book never went onto the lectern"
 said BELLRANG           || fail "redstone did not ring the bell"
 said CRAFTERSTARTSEMPTY || fail "the comparator read something from an empty crafter"

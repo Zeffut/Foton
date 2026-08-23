@@ -104,8 +104,11 @@ cannot.
       counts its pyramid, checks the sky above it is clear, and hands its two
       effects to everyone in range every four seconds -- which needed the
       `SetBeacon` packet, which Steel had a number for and nothing behind.
-      Still open:
-      cartography table, loom. Armor trims are the half of smithing
+      The loom stamps banners: a banner, a dye and an optional pattern item,
+      with the pattern picked from whatever that item offers -- everything it
+      needs was already in the registry, so the note that called it blocked
+      was simply wrong. Still open:
+      cartography table. Armor trims are the half of smithing
       that is not here: they need trim pattern and material registries and a
       `TRIM` component Steel does not have, so those eighteen recipes are
       still skipped -- deliberately now, rather than by omission. The
@@ -193,7 +196,9 @@ a furnace has no behavior. These scripts can:
 - `dev/workstation-test.sh` -- right-clicking each workstation opens its
   menu, and the crafter runs a recipe end to end: a log shift-clicked into
   the grid, a redstone pulse, and the grid empty again, all read off a
-  comparator.
+  comparator. The loom's own stamping is covered by unit tests rather than
+  here -- no command reads a banner's pattern layers back, and the result
+  never becomes a block.
   What they *do* is tested in Rust, where the computation lives: a recipe
   button and a slot click need container packets the scripted client cannot
   send.
