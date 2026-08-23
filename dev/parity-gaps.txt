@@ -12,11 +12,10 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 46
+[blocks] 33
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
-CalibratedSculkSensorBlock
 CartographyTableBlock
 CarvedPumpkinBlock
 CommandBlock
@@ -29,19 +28,11 @@ FrostedIceBlock
 HalfTransparentBlock
 JigsawBlock
 LightBlock
-LightningRodBlock
 MangroveRootsBlock
 NetherrackBlock
 NyliumBlock
-PiglinWallSkullBlock
-PlayerHeadBlock
-PlayerWallHeadBlock
-SculkBlock
 SculkCatalystBlock
-SculkSensorBlock
-SculkShriekerBlock
 ShelfBlock
-SkullBlock
 SoulSandBlock
 SpawnerBlock
 StainedGlassBlock
@@ -53,46 +44,31 @@ TintedGlassBlock
 TransparentBlock
 TrialSpawnerBlock
 VaultBlock
-WallSkullBlock
 WeatheringCopperChestBlock
 WeatheringCopperGolemStatueBlock
-WeatheringLightningRodBlock
-WitherSkullBlock
-WitherWallSkullBlock
 
-[items] 30
-ArmorStandItem
+[items] 19
 ArrowItem
 BannerItem
-BottleItem
 BundleItem
-CrossbowItem
 DebugStickItem
 DiscFragmentItem
 EmptyMapItem
 EndCrystalItem
 FishingRodItem
 GameMasterBlockItem
-GlowInkSacItem
-InkSacItem
-InstrumentItem
 Item
 KnowledgeBookItem
-LeadItem
 MapItem
 MobBucketItem
 ScaffoldingBlockItem
-ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
-SpyglassItem
-TridentItem
-WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 85
+[entities] 82
 Allay
 Armadillo
 Axolotl
@@ -129,7 +105,6 @@ Horse
 Illusioner
 IronGolem
 LargeFireball
-LightningBolt
 Llama
 LlamaSpit
 Mannequin
@@ -161,7 +136,6 @@ SpectralArrow
 SulfurCube
 Tadpole
 ThrownLingeringPotion
-ThrownTrident
 TraderLlama
 TropicalFish
 Turtle
@@ -170,7 +144,6 @@ Villager
 Vindicator
 WanderingTrader
 Warden
-WindCharge
 WitherBoss
 WitherSkull
 Wolf
