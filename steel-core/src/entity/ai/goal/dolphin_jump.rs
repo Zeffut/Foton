@@ -109,7 +109,6 @@ impl Goal for DolphinJumpGoal {
                 ),
         );
         mob.mob_base().navigation().lock().stop();
-        self.breached = false;
     }
 
     fn stop(&mut self, mob: &dyn PathfinderMob) {
@@ -117,11 +116,9 @@ impl Goal for DolphinJumpGoal {
         mob.set_rotation((yaw, 0.0));
     }
 
-    fn requires_update_every_tick(&self) -> bool {
-        true
-    }
-
     fn tick(&mut self, mob: &dyn PathfinderMob) {
+        // Vanilla never clears `breached`, so the jump sound plays once for the
+        // life of the goal rather than once per leap.
         let already_breached = self.breached;
         if !already_breached && let Some(world) = mob.level() {
             self.breached = world

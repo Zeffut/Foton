@@ -123,7 +123,11 @@ impl Goal for AvoidEntityGoal {
     }
 }
 
-fn no_creative_or_spectator(target: &dyn LivingEntity) -> bool {
+/// Vanilla parity: `EntitySelector.NO_CREATIVE_OR_SPECTATOR`, which the
+/// five-argument `AvoidEntityGoal` constructor passes as its
+/// `predicateOnAvoidEntity`. A goal that supplies its own selector has to keep
+/// this itself, or the mob will flee a creative-mode player.
+pub(crate) fn no_creative_or_spectator(target: &dyn LivingEntity) -> bool {
     target
         .as_player()
         .is_none_or(|player| !target.is_spectator() && !player.has_infinite_materials())

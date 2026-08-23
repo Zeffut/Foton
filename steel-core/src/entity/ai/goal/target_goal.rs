@@ -20,6 +20,7 @@ pub(super) struct TargetGoalBase {
     unseen_ticks: i32,
     target_mob: Option<SharedEntity>,
     unseen_memory_ticks: i32,
+    follow_distance_scale: f64,
 }
 
 impl TargetGoalBase {
@@ -33,7 +34,16 @@ impl TargetGoalBase {
             unseen_ticks: 0,
             target_mob: None,
             unseen_memory_ticks: DEFAULT_UNSEEN_MEMORY_TICKS,
+            follow_distance_scale: 1.0,
         }
+    }
+
+    /// Narrows or widens how far this goal holds on to a target.
+    ///
+    /// Vanilla parity: overriding the protected `TargetGoal.getFollowDistance`,
+    /// which gates both acquiring a target and keeping it.
+    pub(super) const fn set_follow_distance_scale(&mut self, scale: f64) {
+        self.follow_distance_scale = scale;
     }
 
     pub(super) const fn set_unseen_memory_ticks(&mut self, unseen_memory_ticks: i32) {
@@ -56,7 +66,7 @@ impl TargetGoalBase {
             return false;
         }
 
-        let follow_distance = follow_distance(mob);
+        let follow_distance = follow_distance(mob) * self.follow_distance_scale;
         if mob.position().distance_squared(target.position()) > follow_distance * follow_distance {
             return false;
         }

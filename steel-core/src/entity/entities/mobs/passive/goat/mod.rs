@@ -501,10 +501,14 @@ impl AgeableMob for GoatEntity {
     }
 
     /// Vanilla parity: `Goat.ageBoundaryReached`, which is where a kid's weaker
-    /// butt comes from. Vanilla drops the `refreshDimensions` of the base
-    /// method here, so a goat's hitbox only follows its age through
-    /// `getAgeScale`.
+    /// butt comes from.
+    ///
+    /// Vanilla's own `ageBoundaryReached` only dismounts a grown goat from a
+    /// boat it no longer fits in, and the hitbox is refreshed separately from
+    /// `AgeableMob.onSyncedDataUpdated`. Steel folds that refresh into this
+    /// hook, so the override still has to run it.
     fn age_boundary_changed(&self, baby: bool) {
+        self.refresh_dimensions();
         let damage = if baby {
             BABY_ATTACK_DAMAGE
         } else {
@@ -648,13 +652,14 @@ impl Mob for GoatEntity {
             return InteractionResult::Success;
         }
 
-        let item_stack = {
-            let inventory = player.inventory.lock();
-            let item_stack = inventory.get_item_in_hand(hand);
-            item_stack.copy_with_count(item_stack.count())
-        };
         let interaction_result = Animal::mob_interact_animal(self, player, hand);
-        if interaction_result.consumes_action() && Self::is_food(&item_stack) {
+        // Vanilla holds a live reference to the held stack, so feeding the last
+        // item leaves it empty and this second sound does not play.
+        let still_holding_food = {
+            let inventory = player.inventory.lock();
+            Self::is_food(inventory.get_item_in_hand(hand))
+        };
+        if interaction_result.consumes_action() && still_holding_food {
             self.play_eating_sound();
         }
 

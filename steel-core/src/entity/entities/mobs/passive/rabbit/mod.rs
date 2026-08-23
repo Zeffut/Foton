@@ -40,6 +40,7 @@ use crate::entity::ai::goal::{
     AvoidEntityGoal, BreedGoal, ClimbOnTopOfPowderSnowGoal, FloatGoal, Goal, GoalControls,
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, MoveToBlockGoal,
     NearestAttackableTargetGoal, PanicGoal, TemptGoal, WaterAvoidingRandomStrollGoal,
+    no_creative_or_spectator,
 };
 use crate::entity::attribute::{AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
@@ -822,7 +823,6 @@ impl Mob for RabbitEntity {
                 self.check_landing_delay();
             }
 
-            let mut pounced = false;
             if self.variant() == RabbitVariant::Evil && self.state.lock().jump_delay_ticks == 0 {
                 let target = self.target();
                 if let Some(target) = target
@@ -839,10 +839,8 @@ impl Mob for RabbitEntity {
                     self.set_wanted_position(target_position, speed_modifier);
                     self.start_jumping();
                     self.state.lock().was_on_ground = true;
-                    pounced = true;
                 }
             }
-            let _ = pounced;
 
             let (want_jump, can_jump) = (
                 self.mob_base().controls().lock().jump_control.want_jump(),
@@ -1005,7 +1003,10 @@ impl RabbitAvoidEntityGoal {
                 max_dist,
                 FLEE_SPEED_MOD,
                 FLEE_SPEED_MOD,
-                move |_, target, _| matches(target),
+                // The five-argument vanilla constructor supplies
+                // `NO_CREATIVE_OR_SPECTATOR` on top of the class test, so a
+                // rabbit ignores a creative-mode player.
+                move |_, target, _| no_creative_or_spectator(target) && matches(target),
             ),
         }
     }

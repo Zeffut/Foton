@@ -112,6 +112,7 @@ impl NearestAttackableTargetGoal {
     #[must_use]
     pub(crate) const fn with_follow_distance_scale(mut self, scale: f64) -> Self {
         self.follow_distance_scale = scale;
+        self.target_goal.set_follow_distance_scale(scale);
         self
     }
 

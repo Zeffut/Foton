@@ -148,8 +148,9 @@ impl DrownedEntity {
             // player is in the water with it. That is why they wait out the day
             // on the sea floor and come for you the moment you swim.
             targets.add_goal(2, DrownedTargetGoal::new());
-            // TODO: vanilla also targets villagers, iron golems, axolotls and
-            // baby turtles; none of those exist yet.
+            // TODO: vanilla also targets villagers, iron golems and axolotls,
+            // none of which exist yet, and baby turtles on land at priority 5
+            // (`Drowned.java`), which is now implementable.
         }
 
         Self {

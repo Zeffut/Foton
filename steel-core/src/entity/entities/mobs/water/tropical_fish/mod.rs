@@ -497,6 +497,12 @@ impl Entity for TropicalFishEntity {
         }
     }
 
+    /// Vanilla parity: `WaterAnimal.isPushedByFluid`; a fish holds its line in
+    /// a current rather than being swept along by it.
+    fn is_pushed_by_fluid(&self) -> bool {
+        false
+    }
+
     fn sound_source(&self) -> SoundSource {
         SoundSource::Neutral
     }
@@ -645,6 +651,11 @@ impl Mob for TropicalFishEntity {
 
     fn ambient_sound(&self) -> Option<SoundEventRef> {
         Some(&sound_events::ENTITY_TROPICAL_FISH_AMBIENT)
+    }
+
+    /// Vanilla parity: `WaterAnimal.getBaseExperienceReward`.
+    fn base_experience_reward_mob(&self) -> i32 {
+        1 + rand::random_range(0..3)
     }
 
     fn ambient_sound_interval(&self) -> i32 {

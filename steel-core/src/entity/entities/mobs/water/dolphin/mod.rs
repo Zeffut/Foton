@@ -185,6 +185,11 @@ impl DolphinEntity {
             .pathfinding_malus()
             .lock()
             .set(PathType::Water, 0.0);
+        // Vanilla parity: `setCanPickUpLoot(true)`. `Dolphin.pickUpItem` itself
+        // is not ported: Steel has no `Mob.pickUpItem` hook, so nothing walks a
+        // mob over a dropped item and puts it in its hand. Until that exists a
+        // dolphin swims to a toy and mouths at it without picking it up, and
+        // the carrying half of `PlayWithItemsGoal` never runs.
         *mob_base.can_pick_up_loot().lock() = true;
         let mut entity_data = DolphinEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
@@ -226,6 +231,10 @@ impl DolphinEntity {
         }
         {
             let mut targets = mob_base.target_selector().lock();
+            // Vanilla writes `new HurtByTargetGoal(this, Guardian.class)`, whose
+            // varargs are the damage sources to ignore: a dolphin does not
+            // retaliate against a guardian, it flees one. Steel has no guardian
+            // entity to name in that list yet, so nothing is ignored here.
             targets.add_goal(1, HurtByTargetGoal::new().set_alert_others([]));
         }
 
@@ -545,6 +554,11 @@ impl Mob for DolphinEntity {
         })
     }
 
+    /// Vanilla parity: `AgeableWaterCreature.getBaseExperienceReward`.
+    fn base_experience_reward_mob(&self) -> i32 {
+        1 + rand::random_range(0..3)
+    }
+
     /// Vanilla parity: `AgeableWaterCreature.getAmbientSoundInterval`.
     fn ambient_sound_interval(&self) -> i32 {
         120
@@ -724,10 +738,6 @@ impl Goal for DolphinSwimWithPlayerGoal {
         mob.mob_base().navigation().lock().stop();
     }
 
-    fn requires_update_every_tick(&self) -> bool {
-        true
-    }
-
     fn tick(&mut self, mob: &dyn PathfinderMob) {
         let Some(player) = self.player.clone() else {
             return;
@@ -865,10 +875,6 @@ impl Goal for PlayWithItemsGoal {
         Self::throw_toy(mob, held);
         Self::clear_held_item(mob);
         self.cooldown = mob.tick_count() + rand::random_range(0..PLAY_ITEM_MAX_COOLDOWN);
-    }
-
-    fn requires_update_every_tick(&self) -> bool {
-        true
     }
 
     fn tick(&mut self, mob: &dyn PathfinderMob) {

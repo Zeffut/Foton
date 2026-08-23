@@ -3,6 +3,7 @@ use std::sync::Arc;
 use glam::DVec3;
 use steel_utils::Downcast as _;
 
+use super::reduced_tick_delay;
 use super::selector::{Goal, GoalControls};
 use crate::entity::{Entity, PathfinderMob};
 use crate::physics::MoverType;
@@ -13,6 +14,9 @@ use crate::player::Player;
 /// Vanilla parity: the `inflate(5.0)` of `FollowPlayerRiddenEntityGoal`.
 const SEARCH_RANGE: f64 = 5.0;
 /// Ticks between two repaths.
+///
+/// Vanilla parity: `adjustedTickDelay(10)`. This goal does not require an
+/// update every tick, so the adjustment halves it.
 const RECALC_INTERVAL_TICKS: i32 = 10;
 /// How close the mob has to get before it starts running ahead.
 const SWITCH_TO_LEADING_DISTANCE: f64 = 4.0;
@@ -67,7 +71,11 @@ impl FollowPlayerRiddenEntityGoal {
 
     /// Vanilla parity: the `getEntitiesOfClass(entityTypeToFollow, ...)` search
     /// both `canUse` and `start` run.
-    fn find_driver(&self, mob: &dyn PathfinderMob) -> Option<Arc<Player>> {
+    fn find_driver(
+        &self,
+        mob: &dyn PathfinderMob,
+        mut accept: impl FnMut(&Player) -> bool,
+    ) -> Option<Arc<Player>> {
         let world = mob.level()?;
         let search_box = mob.bounding_box().inflate(SEARCH_RANGE);
         for entity in world.get_entities_in_aabb_matching(&search_box, |entity| {
@@ -76,11 +84,19 @@ impl FollowPlayerRiddenEntityGoal {
             let Some(passenger) = entity.controlling_passenger() else {
                 continue;
             };
-            let player_position = passenger.position();
-            if passenger.downcast_ref::<Player>().is_some() {
-                return world.nearest_player(player_position, 1.0, |candidate| {
-                    candidate.uuid() == passenger.uuid()
-                });
+            if passenger.downcast_ref::<Player>().is_none() {
+                continue;
+            }
+
+            let driver = world.nearest_player(passenger.position(), 1.0, |candidate| {
+                candidate.uuid() == passenger.uuid()
+            });
+            // Vanilla walks every vehicle in the box rather than stopping at the
+            // first, so a moored boat beside a rowed one does not hide it.
+            if let Some(driver) = driver
+                && accept(&driver)
+            {
+                return Some(driver);
             }
         }
 
@@ -106,8 +122,8 @@ impl Goal for FollowPlayerRiddenEntityGoal {
             return true;
         }
 
-        self.find_driver(mob)
-            .is_some_and(|player| player.has_moved_horizontally_recently())
+        self.find_driver(mob, Player::has_moved_horizontally_recently)
+            .is_some()
     }
 
     fn can_continue_to_use(&mut self, _mob: &dyn PathfinderMob) -> bool {
@@ -117,17 +133,13 @@ impl Goal for FollowPlayerRiddenEntityGoal {
     }
 
     fn start(&mut self, mob: &dyn PathfinderMob) {
-        self.following = self.find_driver(mob);
+        self.following = self.find_driver(mob, |_| true);
         self.time_to_recalc_path = 0;
         self.stage = Stage::GoToEntity;
     }
 
     fn stop(&mut self, _mob: &dyn PathfinderMob) {
         self.following = None;
-    }
-
-    fn requires_update_every_tick(&self) -> bool {
-        true
     }
 
     fn tick(&mut self, mob: &dyn PathfinderMob) {
@@ -155,7 +167,7 @@ impl Goal for FollowPlayerRiddenEntityGoal {
         if self.time_to_recalc_path > 0 {
             return;
         }
-        self.time_to_recalc_path = RECALC_INTERVAL_TICKS;
+        self.time_to_recalc_path = reduced_tick_delay(RECALC_INTERVAL_TICKS);
 
         let distance = mob.position().distance(following.position());
         match self.stage {

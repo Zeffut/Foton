@@ -49,6 +49,7 @@ use crate::entity::{
     EntitySpawnReason, EntitySyncedData, LivingEntity, LivingEntityBase, LivingEntitySyncedData,
     Mob, MobBase, MoveResult, PathfinderMob, SpawnGroupData,
 };
+use crate::fluid::FluidStateExt as _;
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
@@ -800,8 +801,9 @@ impl PathfinderMob for TurtleEntity {
             return 0.0;
         };
 
-        if !self.is_going_home() && world.get_block_state(pos).get_block() == &vanilla_blocks::WATER
-        {
+        // Vanilla asks the fluid state here, not the block, so a waterlogged
+        // block counts as water to a turtle looking for a way out to sea.
+        if !self.is_going_home() && world.get_block_state(pos).get_fluid_state().is_water() {
             return 10.0;
         }
 
