@@ -82,8 +82,9 @@ cannot.
       lectern, bell, beacon, crafter.
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
       can now right-click a block at all.
-- [ ] **Tools that act**: shears, fishing rod, flint and steel's siblings,
-      snowball, egg, experience bottle, ender pearl's siblings.
+- [~] **Tools that act**: snowball and egg done -- both fly, both break, and
+      one egg in eight hatches a chick. Still open: shears, fishing rod,
+      trident, crossbow, experience bottle, wind charge.
 - [~] **Decoration a player places**: flower pot (39) and item frame done -- a
       plant goes in and comes back out, and a frame hangs, holds an item, turns
       it, and reads out to a comparator. Still open: glow item frame (the
@@ -146,6 +147,8 @@ a furnace has no behavior. These scripts can:
   block powers a lamp only while it plays, and a comparator reads the record.
 - `dev/frame-test.sh` -- an item frame is hung from the item, filled, turned,
   and read through the wall behind it by a comparator.
+- `dev/throw-test.sh` -- a snowball is thrown, flies and breaks, and forty eggs
+  hatch at least one chicken.
 - `dev/openers-test.sh` -- an open trapped chest powers redstone and a
   closed one stops, a plain chest powers nothing, a chest under a solid
   block refuses to open, and a barrel looks open while somebody is in it.

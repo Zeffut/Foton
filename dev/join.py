@@ -88,9 +88,14 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # starting with `!` is a client action rather than a chat command:
 # `!hotbar <slot>` selects a hotbar slot, `!useon <x> <y> <z> [face]`
 # right-clicks a block face, `!useitem [yaw] [pitch]` right-clicks
-# without one, `!close` shuts whatever screen is open, and
+# without one, `!useitemx <n> [yaw] [pitch]` does that n times in a row
+# without waiting between them -- which is what makes a one-in-eight chance
+# testable -- `!close` shuts whatever screen is open, and
 # `!useentity <type>` / `!sneakuse <type>` right-click the last entity of
-# that type to spawn, with and without sneaking. Those are the only way to reach an item's `use_on` and
+# that type to spawn, with and without sneaking, and `!spawned <type>` reports
+# whether the client has ever been told one appeared -- which answers "did this
+# exist at all" without depending on it still existing when the question is
+# asked. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
@@ -554,12 +559,25 @@ def run_directive(connection, directive):
         yaw = float(parts[1]) if len(parts) > 1 else 0.0
         pitch = float(parts[2]) if len(parts) > 2 else 40.0
         send_use_item(connection, yaw, pitch)
+    elif parts[0] == "useitemx":
+        count = int(parts[1])
+        yaw = float(parts[2]) if len(parts) > 2 else 0.0
+        pitch = float(parts[3]) if len(parts) > 3 else 40.0
+        for _ in range(count):
+            send_use_item(connection, yaw, pitch)
+        print(f"  used the held item {count} times")
     elif parts[0] == "useon":
         x, y, z = (int(part) for part in parts[1:4])
         face = parts[4] if len(parts) > 4 else "up"
         send_use_item_on(connection, x, y, z, face)
     elif parts[0] == "close":
         send_container_close(connection)
+    elif parts[0] == "spawned":
+        name = parts[1]
+        if name in connection.entities:
+            print(f"  the client saw a {name} spawn")
+        else:
+            print(f"  no {name} has spawned")
     elif parts[0] == "useentity":
         send_interact(connection, parts[1], secondary=False)
     elif parts[0] == "sneakuse":

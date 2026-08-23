@@ -72,7 +72,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 34
+[items] 32
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -81,7 +81,6 @@ BundleItem
 CrossbowItem
 DebugStickItem
 DiscFragmentItem
-EggItem
 EmptyMapItem
 EndCrystalItem
 ExperienceBottleItem
@@ -99,7 +98,6 @@ MobBucketItem
 ScaffoldingBlockItem
 ShearsItem
 SmithingTemplateItem
-SnowballItem
 SolidBucketItem
 SpectralArrowItem
 SpyglassItem
@@ -108,7 +106,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 97
+[entities] 95
 Allay
 Armadillo
 ArmorStand
@@ -181,12 +179,10 @@ SkeletonHorse
 SmallFireball
 Sniffer
 SnowGolem
-Snowball
 SpectralArrow
 SulfurCube
 Tadpole
 TextDisplay
-ThrownEgg
 ThrownExperienceBottle
 ThrownLingeringPotion
 ThrownTrident
