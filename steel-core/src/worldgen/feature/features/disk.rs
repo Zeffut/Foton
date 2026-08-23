@@ -69,13 +69,13 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn mark_above_for_postprocessing(
-        region: &WorldGenRegion<'_>,
+        region: &impl LevelAccessor,
         pos: BlockPos,
     ) {
         let mut mark_pos = pos;
         for _ in 0..2 {
             mark_pos = mark_pos.above();
-            if region.block_state(mark_pos).is_air() {
+            if region.get_block_state(mark_pos).is_air() {
                 return;
             }
             region.mark_pos_for_postprocessing(mark_pos);

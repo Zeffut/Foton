@@ -1482,6 +1482,18 @@ impl ScheduledTickAccess for WorldGenRegion<'_> {
 }
 
 impl LevelAccessor for WorldGenRegion<'_> {
+    fn heightmap_at(&self, heightmap_type: HeightmapType, x: i32, z: i32) -> i32 {
+        self.height_at(heightmap_type, x, z)
+    }
+
+    fn can_write_to_chunk(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        Self::can_write_to_chunk(self, chunk_x, chunk_z)
+    }
+
+    fn mark_pos_for_postprocessing(&self, pos: BlockPos) {
+        Self::mark_pos_for_postprocessing(self, pos);
+    }
+
     fn set_block_state(&self, pos: BlockPos, state: BlockStateId, flags: UpdateFlags) -> bool {
         WorldGenRegion::set_block_state(self, pos, state, flags)
     }

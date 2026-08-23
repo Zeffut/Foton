@@ -56,6 +56,7 @@ PLAY_C_DISCONNECT = 32
 PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
+PLAY_C_SYSTEM_CHAT = 121
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
@@ -364,6 +365,8 @@ def run_play(connection, watch_seconds=0):
             chunks += 1
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_SYSTEM_CHAT:
+            note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
@@ -393,6 +396,23 @@ def run_play(connection, watch_seconds=0):
     )
 
 
+def note_system_chat(payload):
+    """Prints anything the server says in chat.
+
+    A command's own output is the only way a scripted client can read the world
+    back -- `execute if block ... run tellraw @s` turns a block query into a
+    line here -- so every test that checks an effect rather than a packet count
+    goes through this.
+    """
+    # The component is NBT, and the readable part of a plain string component
+    # is the string itself; pulling the printable runs out is enough to assert
+    # on without a full NBT reader.
+    text = bytes(byte if 32 <= byte < 127 else 0x20 for byte in payload).decode("ascii")
+    words = [word for word in text.split() if len(word) >= 4]
+    if words:
+        print(f"  server says: {' '.join(words)}")
+
+
 def pump(connection, seconds, spawned):
     """Keeps the connection alive for `seconds`, recording anything that spawns."""
     deadline = time.monotonic() + seconds
@@ -410,6 +430,8 @@ def pump(connection, seconds, spawned):
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_SYSTEM_CHAT:
+            note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
@@ -451,6 +473,8 @@ def watch_for_spawns(connection, seconds, spawned):
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_SYSTEM_CHAT:
+            note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:

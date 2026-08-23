@@ -14,39 +14,39 @@ mod trunk;
 
 impl FeatureDecorationRunner {
     pub(crate) fn place_tree_feature(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
         origin: BlockPos,
-        biome_zoom_seed: i64,
+        ground_features: &mut Vec<BlockPos>,
     ) -> bool {
         let mut placement = TreePlacement::default();
-        let placed = Self::do_place_tree(region, registry, random, config, origin, &mut placement);
+        let placed = Self::do_place_tree(level, registry, random, config, origin, &mut placement);
         if !placed || (placement.trunks.is_empty() && placement.foliage.is_empty()) {
             return false;
         }
 
         if !config.decorators.is_empty() {
             Self::place_tree_decorators(
-                region,
+                level,
                 registry,
                 random,
                 &config.decorators,
                 &mut placement,
-                biome_zoom_seed,
+                ground_features,
             );
         }
 
         let Some(bounds) = TreeBounds::from_placement(&placement) else {
             return false;
         };
-        Self::update_tree_leaves(region, bounds, &placement);
+        Self::update_tree_leaves(level, bounds, &placement);
         true
     }
 
     fn do_place_tree(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -61,12 +61,12 @@ impl FeatureDecorationRunner {
         let min_y = origin.y().min(trunk_origin.y());
         let max_y = origin.y().max(trunk_origin.y()) + tree_height + 1;
 
-        if min_y < region.min_y() + 1 || max_y > region.max_y_exclusive() {
+        if min_y < level.min_y() + 1 || max_y > level.max_y_exclusive() {
             return false;
         }
 
         let clipped_tree_height =
-            Self::max_free_tree_height(region, tree_height, trunk_origin, config);
+            Self::max_free_tree_height(level, tree_height, trunk_origin, config);
         let min_clipped_height = Self::tree_min_clipped_height(&config.minimum_size);
         if clipped_tree_height < tree_height
             && min_clipped_height.is_none_or(|height| clipped_tree_height < height)
@@ -76,7 +76,7 @@ impl FeatureDecorationRunner {
 
         if config.root_placer.is_some()
             && !Self::place_tree_roots(
-                region,
+                level,
                 registry,
                 random,
                 origin,
@@ -89,7 +89,7 @@ impl FeatureDecorationRunner {
         }
 
         let foliage_attachments = Self::place_tree_trunk(
-            region,
+            level,
             registry,
             random,
             clipped_tree_height,
@@ -99,7 +99,7 @@ impl FeatureDecorationRunner {
         );
         for foliage_attachment in foliage_attachments {
             Self::create_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -143,7 +143,7 @@ impl FeatureDecorationRunner {
     }
 
     fn max_free_tree_height(
-        region: &WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         max_tree_height: i32,
         tree_pos: BlockPos,
         config: &TreeConfiguration,
@@ -153,8 +153,8 @@ impl FeatureDecorationRunner {
             for x in -radius..=radius {
                 for z in -radius..=radius {
                     let pos = tree_pos.offset(x, y, z);
-                    if !Self::tree_trunk_placer_is_free(region, pos, &config.trunk_placer)
-                        || (!config.ignore_vines && Self::tree_is_vine(region, pos))
+                    if !Self::tree_trunk_placer_is_free(level, pos, &config.trunk_placer)
+                        || (!config.ignore_vines && Self::tree_is_vine(level, pos))
                     {
                         return y - 2;
                     }
@@ -165,29 +165,29 @@ impl FeatureDecorationRunner {
         max_tree_height
     }
 
-    fn tree_valid_pos(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
-        let state = region.block_state(pos);
+    fn tree_valid_pos(level: &impl LevelAccessor, pos: BlockPos) -> bool {
+        let state = level.get_block_state(pos);
         state.is_air() || state.get_block().has_tag(&BlockTag::REPLACEABLE_BY_TREES)
     }
 
     fn tree_trunk_placer_is_free(
-        region: &WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         pos: BlockPos,
         trunk_placer: &TrunkPlacer,
     ) -> bool {
-        let state = region.block_state(pos);
-        Self::tree_valid_pos_for_trunk_placer(region, pos, trunk_placer)
+        let state = level.get_block_state(pos);
+        Self::tree_valid_pos_for_trunk_placer(level, pos, trunk_placer)
             || state.get_block().has_tag(&BlockTag::LOGS)
     }
 
     fn tree_valid_pos_for_trunk_placer(
-        region: &WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         pos: BlockPos,
         trunk_placer: &TrunkPlacer,
     ) -> bool {
         match trunk_placer {
             TrunkPlacer::UpwardsBranching(placer) => {
-                Self::tree_valid_pos_or_tag(region, pos, &placer.can_grow_through)
+                Self::tree_valid_pos_or_tag(level, pos, &placer.can_grow_through)
             }
             TrunkPlacer::Straight(_)
             | TrunkPlacer::Forking(_)
@@ -196,30 +196,30 @@ impl FeatureDecorationRunner {
             | TrunkPlacer::DarkOak(_)
             | TrunkPlacer::MegaJungle(_)
             | TrunkPlacer::Bending(_)
-            | TrunkPlacer::Cherry(_) => Self::tree_valid_pos(region, pos),
+            | TrunkPlacer::Cherry(_) => Self::tree_valid_pos(level, pos),
         }
     }
 
-    fn tree_valid_pos_or_tag(region: &WorldGenRegion<'_>, pos: BlockPos, tag: &Identifier) -> bool {
-        let state = region.block_state(pos);
+    fn tree_valid_pos_or_tag(level: &impl LevelAccessor, pos: BlockPos, tag: &Identifier) -> bool {
+        let state = level.get_block_state(pos);
         let block = state.get_block();
         state.is_air() || block.has_tag(&BlockTag::REPLACEABLE_BY_TREES) || block.has_tag(tag)
     }
 
-    fn tree_is_air_or_leaves(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
-        let state = region.block_state(pos);
+    fn tree_is_air_or_leaves(level: &impl LevelAccessor, pos: BlockPos) -> bool {
+        let state = level.get_block_state(pos);
         state.is_air() || state.get_block().has_tag(&BlockTag::LEAVES)
     }
 
-    fn tree_is_vine(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
-        region.block_state(pos).get_block() == &vanilla_blocks::VINE
+    fn tree_is_vine(level: &impl LevelAccessor, pos: BlockPos) -> bool {
+        level.get_block_state(pos).get_block() == &vanilla_blocks::VINE
     }
 
-    fn set_tree_block(region: &mut WorldGenRegion<'_>, pos: BlockPos, state: BlockStateId) {
+    fn set_tree_block(level: &impl LevelAccessor, pos: BlockPos, state: BlockStateId) {
         let flags = UpdateFlags::UPDATE_NEIGHBORS
             | UpdateFlags::UPDATE_CLIENTS
             | UpdateFlags::UPDATE_KNOWN_SHAPE;
-        let _ = region.set_block_state(pos, state, flags);
+        let _ = level.set_block_state(pos, state, flags);
     }
 }
 
@@ -239,29 +239,24 @@ struct TreePlacement {
 }
 
 impl TreePlacement {
-    fn set_root(&mut self, region: &mut WorldGenRegion<'_>, pos: BlockPos, state: BlockStateId) {
+    fn set_root(&mut self, level: &impl LevelAccessor, pos: BlockPos, state: BlockStateId) {
         self.roots.insert(pos);
-        FeatureDecorationRunner::set_tree_block(region, pos, state);
+        FeatureDecorationRunner::set_tree_block(level, pos, state);
     }
 
-    fn set_trunk(&mut self, region: &mut WorldGenRegion<'_>, pos: BlockPos, state: BlockStateId) {
+    fn set_trunk(&mut self, level: &impl LevelAccessor, pos: BlockPos, state: BlockStateId) {
         self.trunks.insert(pos);
-        FeatureDecorationRunner::set_tree_block(region, pos, state);
+        FeatureDecorationRunner::set_tree_block(level, pos, state);
     }
 
-    fn set_foliage(&mut self, region: &mut WorldGenRegion<'_>, pos: BlockPos, state: BlockStateId) {
+    fn set_foliage(&mut self, level: &impl LevelAccessor, pos: BlockPos, state: BlockStateId) {
         self.foliage.insert(pos);
-        FeatureDecorationRunner::set_tree_block(region, pos, state);
+        FeatureDecorationRunner::set_tree_block(level, pos, state);
     }
 
-    fn set_decoration(
-        &mut self,
-        region: &mut WorldGenRegion<'_>,
-        pos: BlockPos,
-        state: BlockStateId,
-    ) {
+    fn set_decoration(&mut self, level: &impl LevelAccessor, pos: BlockPos, state: BlockStateId) {
         self.decorations.insert(pos);
-        FeatureDecorationRunner::set_tree_block(region, pos, state);
+        FeatureDecorationRunner::set_tree_block(level, pos, state);
     }
 }
 

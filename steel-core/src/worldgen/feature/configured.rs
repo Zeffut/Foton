@@ -1139,14 +1139,63 @@ fn place_tree(
     let ConfiguredFeatureKind::Tree(config) = kind else {
         panic!("tree placer received wrong configured feature kind");
     };
-    FeatureDecorationRunner::place_tree_feature(
+
+    // The tree itself is written against `LevelAccessor` so a sapling can grow
+    // one in a live world. The pale moss patch under a pale oak is a nested
+    // configured feature, and this dispatcher is the only thing that can place
+    // one, so the tree reports where it wanted them and they are placed here.
+    let mut ground_features = Vec::new();
+    let placed = FeatureDecorationRunner::place_tree_feature(
         context.region,
         context.registry,
         context.random,
         config,
         context.origin,
-        context.biome_zoom_seed,
-    )
+        &mut ground_features,
+    );
+
+    if placed {
+        place_tree_ground_features(context, &ground_features);
+    }
+
+    placed
+}
+
+/// Places the moss patches a tree's decorators asked for.
+///
+/// The tree code runs over any `LevelAccessor` so a sapling can grow one, and a
+/// nested configured feature can only be placed from this dispatcher, so the
+/// decorators hand back where they wanted one and this puts it there.
+fn place_tree_ground_features(
+    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+    origins: &[BlockPos],
+) {
+    if origins.is_empty() {
+        return;
+    }
+
+    let pale_moss_patch_key = Identifier::vanilla_static("pale_moss_patch");
+    let Some(pale_moss_patch) = context
+        .registry
+        .configured_features
+        .by_key(&pale_moss_patch_key)
+    else {
+        panic!(
+            "pale moss tree decorator references unknown configured feature {pale_moss_patch_key}"
+        );
+    };
+    let kind = pale_moss_patch.kind.clone();
+
+    for origin in origins {
+        FeatureDecorationRunner::place_configured_feature_kind(
+            context.region,
+            context.registry,
+            context.random,
+            &kind,
+            *origin,
+            context.biome_zoom_seed,
+        );
+    }
 }
 
 fn place_fallen_tree(
@@ -1156,14 +1205,19 @@ fn place_fallen_tree(
     let ConfiguredFeatureKind::FallenTree(config) = kind else {
         panic!("fallen_tree placer received wrong configured feature kind");
     };
-    FeatureDecorationRunner::place_fallen_tree_feature(
+    // A fallen log carries stump and log decorators, which can ask for a
+    // ground feature exactly as a standing tree's can; see `place_tree`.
+    let mut ground_features = Vec::new();
+    let placed = FeatureDecorationRunner::place_fallen_tree_feature(
         context.region,
         context.registry,
         context.random,
         config,
         context.origin,
-        context.biome_zoom_seed,
-    )
+        &mut ground_features,
+    );
+    place_tree_ground_features(context, &ground_features);
+    placed
 }
 
 fn place_fossil(

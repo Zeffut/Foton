@@ -57,7 +57,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn create_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -69,7 +69,7 @@ impl FeatureDecorationRunner {
     ) {
         match &config.foliage_placer {
             FoliagePlacer::Blob(placer) => Self::create_blob_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -80,7 +80,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::Bush(_) => Self::create_bush_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -90,7 +90,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::Fancy(_) => Self::create_fancy_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -100,7 +100,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::Pine(_) => Self::create_pine_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -110,7 +110,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::Spruce(_) => Self::create_spruce_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -120,7 +120,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::MegaPine(_) => Self::create_mega_pine_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -130,7 +130,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::Acacia(_) => Self::create_acacia_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -140,7 +140,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::DarkOak(_) => Self::create_dark_oak_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -149,7 +149,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::Jungle(_) => Self::create_jungle_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -159,7 +159,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::RandomSpread(placer) => Self::create_random_spread_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -170,7 +170,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             FoliagePlacer::Cherry(placer) => Self::create_cherry_tree_foliage(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -184,7 +184,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_fancy_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -201,7 +201,7 @@ impl FeatureDecorationRunner {
                 leaf_radius
             };
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -215,7 +215,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_jungle_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -234,7 +234,7 @@ impl FeatureDecorationRunner {
         for y in (offset - leaf_height..=offset).rev() {
             let current_radius = leaf_radius + attachment.radius_offset + 1 - y;
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -248,7 +248,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_random_spread_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -264,12 +264,12 @@ impl FeatureDecorationRunner {
                 random.next_i32_bounded(foliage_height) - random.next_i32_bounded(foliage_height),
                 random.next_i32_bounded(leaf_radius) - random.next_i32_bounded(leaf_radius),
             );
-            let _ = Self::try_place_tree_leaf(region, registry, random, config, pos, placement);
+            let _ = Self::try_place_tree_leaf(level, registry, random, config, pos, placement);
         }
     }
 
     fn create_cherry_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -283,7 +283,7 @@ impl FeatureDecorationRunner {
         let foliage_pos = attachment.pos.above_n(offset);
         let current_radius = leaf_radius + attachment.radius_offset - 1;
         Self::place_tree_leaves_row(
-            region,
+            level,
             registry,
             random,
             config,
@@ -294,7 +294,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_tree_leaves_row(
-            region,
+            level,
             registry,
             random,
             config,
@@ -307,7 +307,7 @@ impl FeatureDecorationRunner {
 
         for y in (0..=foliage_height - 5).rev() {
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -320,7 +320,7 @@ impl FeatureDecorationRunner {
         }
 
         Self::place_tree_leaves_row_with_hanging_leaves_below(
-            region,
+            level,
             registry,
             random,
             config,
@@ -333,7 +333,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_tree_leaves_row_with_hanging_leaves_below(
-            region,
+            level,
             registry,
             random,
             config,
@@ -348,7 +348,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_dark_oak_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -360,7 +360,7 @@ impl FeatureDecorationRunner {
         let pos = attachment.pos.above_n(offset);
         if attachment.double_trunk {
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -371,7 +371,7 @@ impl FeatureDecorationRunner {
                 placement,
             );
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -382,7 +382,7 @@ impl FeatureDecorationRunner {
                 placement,
             );
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -394,7 +394,7 @@ impl FeatureDecorationRunner {
             );
             if random.next_bool() {
                 Self::place_tree_leaves_row(
-                    region,
+                    level,
                     registry,
                     random,
                     config,
@@ -407,7 +407,7 @@ impl FeatureDecorationRunner {
             }
         } else {
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -418,7 +418,7 @@ impl FeatureDecorationRunner {
                 placement,
             );
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -432,7 +432,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_mega_pine_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -459,7 +459,7 @@ impl FeatureDecorationRunner {
             };
             let row_origin = BlockPos::new(attachment.pos.x(), y, attachment.pos.z());
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -474,7 +474,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_bush_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -487,7 +487,7 @@ impl FeatureDecorationRunner {
         for y in (offset - foliage_height..=offset).rev() {
             let current_radius = leaf_radius + attachment.radius_offset - 1 - y;
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -501,7 +501,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_pine_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -514,7 +514,7 @@ impl FeatureDecorationRunner {
         let mut current_radius = 0;
         for y in (offset - foliage_height..=offset).rev() {
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -533,7 +533,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_spruce_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -549,7 +549,7 @@ impl FeatureDecorationRunner {
 
         for y in (-foliage_height..=offset).rev() {
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -570,7 +570,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_blob_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -584,7 +584,7 @@ impl FeatureDecorationRunner {
         for y in (offset - foliage_height..=offset).rev() {
             let current_radius = (leaf_radius + attachment.radius_offset - 1 - y / 2).max(0);
             Self::place_tree_leaves_row(
-                region,
+                level,
                 registry,
                 random,
                 config,
@@ -598,7 +598,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_acacia_tree_foliage(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -610,7 +610,7 @@ impl FeatureDecorationRunner {
         let offset = Self::tree_foliage_offset(random, &config.foliage_placer);
         let foliage_pos = attachment.pos.above_n(offset);
         Self::place_tree_leaves_row(
-            region,
+            level,
             registry,
             random,
             config,
@@ -621,7 +621,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_tree_leaves_row(
-            region,
+            level,
             registry,
             random,
             config,
@@ -632,7 +632,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_tree_leaves_row(
-            region,
+            level,
             registry,
             random,
             config,
@@ -661,7 +661,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_tree_leaves_row(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -685,7 +685,7 @@ impl FeatureDecorationRunner {
                 ) {
                     let pos = origin.offset(dx, y, dz);
                     let _ =
-                        Self::try_place_tree_leaf(region, registry, random, config, pos, placement);
+                        Self::try_place_tree_leaf(level, registry, random, config, pos, placement);
                 }
             }
         }
@@ -696,7 +696,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla foliage row helper"
     )]
     fn place_tree_leaves_row_with_hanging_leaves_below(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -709,7 +709,7 @@ impl FeatureDecorationRunner {
         placement: &mut TreePlacement,
     ) {
         Self::place_tree_leaves_row(
-            region,
+            level,
             registry,
             random,
             config,
@@ -739,7 +739,7 @@ impl FeatureDecorationRunner {
                 let leaves_above = placement.foliage.contains(pos.above());
                 if leaves_above
                     && Self::try_place_hanging_leaf_extension(
-                        region,
+                        level,
                         registry,
                         random,
                         config,
@@ -750,7 +750,7 @@ impl FeatureDecorationRunner {
                     )
                 {
                     let _ = Self::try_place_hanging_leaf_extension(
-                        region,
+                        level,
                         registry,
                         random,
                         config,
@@ -768,7 +768,7 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_hanging_leaf_extension(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
@@ -781,7 +781,7 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        Self::try_place_tree_leaf(region, registry, random, config, pos, placement)
+        Self::try_place_tree_leaf(level, registry, random, config, pos, placement)
     }
 
     const fn direction_is_positive(direction: Direction) -> bool {
@@ -949,14 +949,14 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_tree_leaf(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &TreeConfiguration,
         pos: BlockPos,
         placement: &mut TreePlacement,
     ) -> bool {
-        let current_state = region.block_state(pos);
+        let current_state = level.get_block_state(pos);
         let is_persistent = current_state
             .try_get_value(&BlockStateProperties::PERSISTENT)
             .unwrap_or(false);
@@ -969,14 +969,14 @@ impl FeatureDecorationRunner {
         }
 
         let foliage_state = Self::sample_block_state_provider(
-            region,
+            level,
             registry,
             random,
             &config.foliage_provider,
             pos,
         );
-        let foliage_state = Self::copy_waterlogged_from(region, pos, foliage_state);
-        placement.set_foliage(region, pos, foliage_state);
+        let foliage_state = Self::copy_waterlogged_from(level, pos, foliage_state);
+        placement.set_foliage(level, pos, foliage_state);
         true
     }
 }

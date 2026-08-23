@@ -19,23 +19,23 @@ const BEEHIVE_SPAWN_DIRECTIONS: [Direction; 3] =
 
 impl FeatureDecorationRunner {
     pub(super) fn place_tree_decorators(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         decorators: &[TreeDecorator],
         placement: &mut TreePlacement,
-        biome_zoom_seed: i64,
+        ground_features: &mut Vec<BlockPos>,
     ) {
         for decorator in decorators {
             match decorator {
                 TreeDecorator::AlterGround { provider } => {
                     Self::place_alter_ground_tree_decorator(
-                        region, registry, random, provider, placement,
+                        level, registry, random, provider, placement,
                     );
                 }
                 TreeDecorator::Beehive { probability } => {
                     Self::place_beehive_tree_decorator(
-                        region,
+                        level,
                         registry,
                         random,
                         *probability,
@@ -44,7 +44,7 @@ impl FeatureDecorationRunner {
                 }
                 TreeDecorator::Cocoa { probability } => {
                     Self::place_cocoa_tree_decorator(
-                        region,
+                        level,
                         registry,
                         random,
                         *probability,
@@ -52,24 +52,24 @@ impl FeatureDecorationRunner {
                     );
                 }
                 TreeDecorator::LeaveVine { probability } => {
-                    Self::place_leave_vine_tree_decorator(region, random, *probability, placement);
+                    Self::place_leave_vine_tree_decorator(level, random, *probability, placement);
                 }
                 TreeDecorator::TrunkVine => {
-                    Self::place_trunk_vine_tree_decorator(region, random, placement);
+                    Self::place_trunk_vine_tree_decorator(level, random, placement);
                 }
                 TreeDecorator::PlaceOnGround(decorator) => {
                     Self::place_on_ground_tree_decorator(
-                        region, registry, random, decorator, placement,
+                        level, registry, random, decorator, placement,
                     );
                 }
                 TreeDecorator::AttachedToLeaves(decorator) => {
                     Self::place_attached_to_leaves_tree_decorator(
-                        region, registry, random, decorator, placement,
+                        level, registry, random, decorator, placement,
                     );
                 }
                 TreeDecorator::AttachedToLogs(decorator) => {
                     Self::place_attached_to_logs_tree_decorator(
-                        region, registry, random, decorator, placement,
+                        level, registry, random, decorator, placement,
                     );
                 }
                 TreeDecorator::PaleMoss {
@@ -78,19 +78,19 @@ impl FeatureDecorationRunner {
                     ground_probability,
                 } => {
                     Self::place_pale_moss_tree_decorator(
-                        region,
+                        level,
                         registry,
                         random,
                         *leaves_probability,
                         *trunk_probability,
                         *ground_probability,
                         placement,
-                        biome_zoom_seed,
+                        ground_features,
                     );
                 }
                 TreeDecorator::CreakingHeart { probability } => {
                     Self::place_creaking_heart_tree_decorator(
-                        region,
+                        level,
                         registry,
                         random,
                         *probability,
@@ -102,7 +102,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_alter_ground_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         provider: &BlockStateProvider,
@@ -116,7 +116,7 @@ impl FeatureDecorationRunner {
 
         for pos in positions.into_iter().filter(|pos| pos.y() == min_y) {
             Self::place_alter_ground_circle(
-                region,
+                level,
                 registry,
                 random,
                 provider,
@@ -124,7 +124,7 @@ impl FeatureDecorationRunner {
                 placement,
             );
             Self::place_alter_ground_circle(
-                region,
+                level,
                 registry,
                 random,
                 provider,
@@ -132,7 +132,7 @@ impl FeatureDecorationRunner {
                 placement,
             );
             Self::place_alter_ground_circle(
-                region,
+                level,
                 registry,
                 random,
                 provider,
@@ -140,7 +140,7 @@ impl FeatureDecorationRunner {
                 placement,
             );
             Self::place_alter_ground_circle(
-                region,
+                level,
                 registry,
                 random,
                 provider,
@@ -154,7 +154,7 @@ impl FeatureDecorationRunner {
                 let z = placement_offset / 8;
                 if x == 0 || x == 7 || z == 0 || z == 7 {
                     Self::place_alter_ground_circle(
-                        region,
+                        level,
                         registry,
                         random,
                         provider,
@@ -167,7 +167,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_alter_ground_circle(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         provider: &BlockStateProvider,
@@ -178,7 +178,7 @@ impl FeatureDecorationRunner {
             for z in -2i32..=2 {
                 if x.abs() != 2 || z.abs() != 2 {
                     Self::place_alter_ground_block_at(
-                        region,
+                        level,
                         registry,
                         random,
                         provider,
@@ -191,7 +191,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_alter_ground_block_at(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         provider: &BlockStateProvider,
@@ -201,20 +201,20 @@ impl FeatureDecorationRunner {
         for y in (-3..=2).rev() {
             let cursor = pos.above_n(y);
             if let Some(state) = Self::sample_block_state_provider_optional(
-                region, registry, random, provider, cursor,
+                level, registry, random, provider, cursor,
             ) {
-                placement.set_decoration(region, cursor, state);
+                placement.set_decoration(level, cursor, state);
                 break;
             }
 
-            if !region.block_state(cursor).is_air() && y < 0 {
+            if !level.get_block_state(cursor).is_air() && y < 0 {
                 break;
             }
         }
     }
 
     fn place_on_ground_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         decorator: &PlaceOnGroundDecorator,
@@ -253,7 +253,7 @@ impl FeatureDecorationRunner {
                 random.next_i32_between(min_z, max_z),
             );
             Self::attempt_place_tree_ground_decorator(
-                region,
+                level,
                 registry,
                 random,
                 &decorator.block_state_provider,
@@ -264,7 +264,7 @@ impl FeatureDecorationRunner {
     }
 
     fn attempt_place_tree_ground_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         provider: &BlockStateProvider,
@@ -272,30 +272,30 @@ impl FeatureDecorationRunner {
         placement: &mut TreePlacement,
     ) {
         let above = pos.above();
-        let above_state = region.block_state(above);
+        let above_state = level.get_block_state(above);
         if !above_state.is_air() && above_state.get_block() != &vanilla_blocks::VINE {
             return;
         }
-        if !region.block_state(pos).is_solid_render() {
+        if !level.get_block_state(pos).is_solid_render() {
             return;
         }
-        if region.height_at(HeightmapType::MotionBlockingNoLeaves, pos.x(), pos.z()) > above.y() {
+        if level.heightmap_at(HeightmapType::MotionBlockingNoLeaves, pos.x(), pos.z()) > above.y() {
             return;
         }
 
-        let state = Self::sample_block_state_provider(region, registry, random, provider, above);
-        placement.set_decoration(region, above, state);
+        let state = Self::sample_block_state_provider(level, registry, random, provider, above);
+        placement.set_decoration(level, above, state);
     }
 
     fn place_trunk_vine_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         random: &mut WorldgenRandom,
         placement: &mut TreePlacement,
     ) {
         for log in Self::sorted_tree_positions(&placement.trunks) {
             if random.next_i32_bounded(3) > 0 {
                 Self::try_place_tree_vine(
-                    region,
+                    level,
                     placement,
                     log.relative(Direction::West),
                     Direction::East,
@@ -303,7 +303,7 @@ impl FeatureDecorationRunner {
             }
             if random.next_i32_bounded(3) > 0 {
                 Self::try_place_tree_vine(
-                    region,
+                    level,
                     placement,
                     log.relative(Direction::East),
                     Direction::West,
@@ -311,7 +311,7 @@ impl FeatureDecorationRunner {
             }
             if random.next_i32_bounded(3) > 0 {
                 Self::try_place_tree_vine(
-                    region,
+                    level,
                     placement,
                     log.relative(Direction::North),
                     Direction::South,
@@ -319,7 +319,7 @@ impl FeatureDecorationRunner {
             }
             if random.next_i32_bounded(3) > 0 {
                 Self::try_place_tree_vine(
-                    region,
+                    level,
                     placement,
                     log.relative(Direction::South),
                     Direction::North,
@@ -329,7 +329,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_leave_vine_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         random: &mut WorldgenRandom,
         probability: f32,
         placement: &mut TreePlacement,
@@ -337,7 +337,7 @@ impl FeatureDecorationRunner {
         for leaf in Self::sorted_tree_positions(&placement.foliage) {
             if random.next_f32() < probability {
                 Self::try_place_hanging_tree_vine(
-                    region,
+                    level,
                     placement,
                     leaf.relative(Direction::West),
                     Direction::East,
@@ -345,7 +345,7 @@ impl FeatureDecorationRunner {
             }
             if random.next_f32() < probability {
                 Self::try_place_hanging_tree_vine(
-                    region,
+                    level,
                     placement,
                     leaf.relative(Direction::East),
                     Direction::West,
@@ -353,7 +353,7 @@ impl FeatureDecorationRunner {
             }
             if random.next_f32() < probability {
                 Self::try_place_hanging_tree_vine(
-                    region,
+                    level,
                     placement,
                     leaf.relative(Direction::North),
                     Direction::South,
@@ -361,7 +361,7 @@ impl FeatureDecorationRunner {
             }
             if random.next_f32() < probability {
                 Self::try_place_hanging_tree_vine(
-                    region,
+                    level,
                     placement,
                     leaf.relative(Direction::South),
                     Direction::North,
@@ -371,26 +371,26 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_hanging_tree_vine(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         placement: &mut TreePlacement,
         pos: BlockPos,
         vine_face: Direction,
     ) {
-        if !Self::try_place_tree_vine(region, placement, pos, vine_face) {
+        if !Self::try_place_tree_vine(level, placement, pos, vine_face) {
             return;
         }
 
         let mut pos = pos.below();
         let mut max_length = 4;
-        while region.block_state(pos).is_air() && max_length > 0 {
-            Self::place_tree_vine(region, placement, pos, vine_face);
+        while level.get_block_state(pos).is_air() && max_length > 0 {
+            Self::place_tree_vine(level, placement, pos, vine_face);
             pos = pos.below();
             max_length -= 1;
         }
     }
 
     fn place_cocoa_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         probability: f32,
@@ -413,7 +413,7 @@ impl FeatureDecorationRunner {
                 }
 
                 let cocoa_pos = log.relative(direction.opposite());
-                if !region.block_state(cocoa_pos).is_air() {
+                if !level.get_block_state(cocoa_pos).is_air() {
                     continue;
                 }
 
@@ -423,32 +423,32 @@ impl FeatureDecorationRunner {
                     .get_default_state_id(&vanilla_blocks::COCOA)
                     .set_value(&BlockStateProperties::AGE_2, age)
                     .set_value(&BlockStateProperties::HORIZONTAL_FACING, direction);
-                placement.set_decoration(region, cocoa_pos, cocoa_state);
+                placement.set_decoration(level, cocoa_pos, cocoa_state);
             }
         }
     }
 
     fn try_place_tree_vine(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         placement: &mut TreePlacement,
         pos: BlockPos,
         vine_face: Direction,
     ) -> bool {
-        if !region.block_state(pos).is_air() {
+        if !level.get_block_state(pos).is_air() {
             return false;
         }
 
-        Self::place_tree_vine(region, placement, pos, vine_face);
+        Self::place_tree_vine(level, placement, pos, vine_face);
         true
     }
 
     fn place_tree_vine(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         placement: &mut TreePlacement,
         pos: BlockPos,
         vine_face: Direction,
     ) {
-        placement.set_decoration(region, pos, Self::vine_state_for_face(vine_face));
+        placement.set_decoration(level, pos, Self::vine_state_for_face(vine_face));
     }
 
     fn lowest_tree_trunks_or_roots(placement: &TreePlacement) -> Vec<BlockPos> {
@@ -468,7 +468,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_beehive_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         probability: f32,
@@ -501,9 +501,9 @@ impl FeatureDecorationRunner {
 
         Self::shuffle_tree_positions(random, &mut hive_placements);
         let hive_pos = hive_placements.into_iter().find(|pos| {
-            region.block_state(*pos).is_air()
-                && region
-                    .block_state(pos.relative(BEEHIVE_WORLDGEN_FACING))
+            level.get_block_state(*pos).is_air()
+                && level
+                    .get_block_state(pos.relative(BEEHIVE_WORLDGEN_FACING))
                     .is_air()
         });
         let Some(hive_pos) = hive_pos else {
@@ -517,9 +517,9 @@ impl FeatureDecorationRunner {
                 &BlockStateProperties::HORIZONTAL_FACING,
                 BEEHIVE_WORLDGEN_FACING,
             );
-        placement.set_decoration(region, hive_pos, hive_state);
+        placement.set_decoration(level, hive_pos, hive_state);
 
-        let Some(block_entity) = region.block_entity(hive_pos) else {
+        let Some(block_entity) = level.get_block_entity(hive_pos) else {
             return;
         };
         let Some(beehive) = block_entity.downcast_ref::<BeehiveBlockEntity>() else {
@@ -533,7 +533,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_attached_to_leaves_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         decorator: &AttachedToLeavesDecorator,
@@ -549,7 +549,7 @@ impl FeatureDecorationRunner {
             if blacklist.contains(&place_pos)
                 || random.next_f32() >= decorator.probability
                 || !Self::tree_decorator_has_required_empty_blocks(
-                    region,
+                    level,
                     leaf,
                     direction,
                     decorator.required_empty_blocks,
@@ -565,18 +565,18 @@ impl FeatureDecorationRunner {
                 decorator.exclusion_radius_y,
             );
             let state = Self::sample_block_state_provider(
-                region,
+                level,
                 registry,
                 random,
                 &decorator.block_provider,
                 place_pos,
             );
-            placement.set_decoration(region, place_pos, state);
+            placement.set_decoration(level, place_pos, state);
         }
     }
 
     fn place_attached_to_logs_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         decorator: &AttachedToLogsDecorator,
@@ -588,31 +588,32 @@ impl FeatureDecorationRunner {
         for log in logs {
             let direction = Self::random_tree_decorator_direction(random, &decorator.directions);
             let place_pos = log.relative(direction);
-            if random.next_f32() > decorator.probability || !region.block_state(place_pos).is_air()
+            if random.next_f32() > decorator.probability
+                || !level.get_block_state(place_pos).is_air()
             {
                 continue;
             }
 
             let state = Self::sample_block_state_provider(
-                region,
+                level,
                 registry,
                 random,
                 &decorator.block_provider,
                 place_pos,
             );
-            placement.set_decoration(region, place_pos, state);
+            placement.set_decoration(level, place_pos, state);
         }
     }
 
     fn place_pale_moss_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
-        registry: &Registry,
+        level: &impl LevelAccessor,
+        _registry: &Registry,
         random: &mut WorldgenRandom,
         leaves_probability: f32,
         trunk_probability: f32,
         ground_probability: f32,
         placement: &mut TreePlacement,
-        biome_zoom_seed: i64,
+        ground_features: &mut Vec<BlockPos>,
     ) {
         let mut shuffled_logs = Self::sorted_tree_positions(&placement.trunks);
         Self::shuffle_tree_positions(random, &mut shuffled_logs);
@@ -620,29 +621,20 @@ impl FeatureDecorationRunner {
             return;
         };
 
+        // Vanilla places the `pale_moss_patch` configured feature here. The
+        // configured-feature dispatcher is written against `WorldGenRegion`, and
+        // this decorator now also runs over a live world -- a pale oak grown
+        // from a sapling -- so the position is handed back instead and the
+        // caller places it if it can. See `place_tree_feature`.
         if random.next_f32() < ground_probability {
-            let pale_moss_patch_key = Identifier::vanilla_static("pale_moss_patch");
-            let Some(pale_moss_patch) = registry.configured_features.by_key(&pale_moss_patch_key)
-            else {
-                panic!(
-                    "pale moss tree decorator references unknown configured feature {pale_moss_patch_key}"
-                );
-            };
-            Self::place_configured_feature_kind(
-                region,
-                registry,
-                random,
-                &pale_moss_patch.kind,
-                origin.above(),
-                biome_zoom_seed,
-            );
+            ground_features.push(origin.above());
         }
 
         for log in Self::sorted_tree_positions(&placement.trunks) {
             if random.next_f32() < trunk_probability {
                 let down = log.below();
-                if region.block_state(down).is_air() {
-                    Self::add_pale_moss_hanger(region, random, down, placement);
+                if level.get_block_state(down).is_air() {
+                    Self::add_pale_moss_hanger(level, random, down, placement);
                 }
             }
         }
@@ -650,15 +642,15 @@ impl FeatureDecorationRunner {
         for leaf in Self::sorted_tree_positions(&placement.foliage) {
             if random.next_f32() < leaves_probability {
                 let down = leaf.below();
-                if region.block_state(down).is_air() {
-                    Self::add_pale_moss_hanger(region, random, down, placement);
+                if level.get_block_state(down).is_air() {
+                    Self::add_pale_moss_hanger(level, random, down, placement);
                 }
             }
         }
     }
 
     fn place_creaking_heart_tree_decorator(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         probability: f32,
@@ -672,8 +664,8 @@ impl FeatureDecorationRunner {
         Self::shuffle_tree_positions(random, &mut heart_placements);
         let Some(target_pos) = heart_placements.into_iter().find(|pos| {
             Self::VANILLA_DIRECTION_VALUES.iter().all(|direction| {
-                region
-                    .block_state(pos.relative(*direction))
+                level
+                    .get_block_state(pos.relative(*direction))
                     .get_block()
                     .has_tag(&BlockTag::LOGS)
             })
@@ -689,16 +681,16 @@ impl FeatureDecorationRunner {
                 CreakingHeartState::Dormant,
             )
             .set_value(&BlockStateProperties::NATURAL, true);
-        placement.set_decoration(region, target_pos, state);
+        placement.set_decoration(level, target_pos, state);
     }
 
     fn add_pale_moss_hanger(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         random: &mut WorldgenRandom,
         mut pos: BlockPos,
         placement: &mut TreePlacement,
     ) {
-        while region.block_state(pos.below()).is_air() {
+        while level.get_block_state(pos.below()).is_air() {
             if random.next_f32() < 0.5 {
                 break;
             }
@@ -706,25 +698,25 @@ impl FeatureDecorationRunner {
             let state = vanilla_blocks::PALE_HANGING_MOSS
                 .default_state()
                 .set_value(&BlockStateProperties::TIP, false);
-            placement.set_decoration(region, pos, state);
+            placement.set_decoration(level, pos, state);
             pos = pos.below();
         }
 
         let state = vanilla_blocks::PALE_HANGING_MOSS
             .default_state()
             .set_value(&BlockStateProperties::TIP, true);
-        placement.set_decoration(region, pos, state);
+        placement.set_decoration(level, pos, state);
     }
 
     fn tree_decorator_has_required_empty_blocks(
-        region: &WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         leaf: BlockPos,
         direction: Direction,
         required_empty_blocks: i32,
     ) -> bool {
         (1..=required_empty_blocks).all(|offset| {
-            region
-                .block_state(leaf.relative_n(direction, offset))
+            level
+                .get_block_state(leaf.relative_n(direction, offset))
                 .is_air()
         })
     }

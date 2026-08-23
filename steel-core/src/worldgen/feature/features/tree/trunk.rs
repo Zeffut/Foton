@@ -62,7 +62,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -72,7 +72,7 @@ impl FeatureDecorationRunner {
     ) -> Vec<FoliageAttachment> {
         match &config.trunk_placer {
             TrunkPlacer::Straight(_) => Self::place_straight_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -81,7 +81,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::Forking(_) => Self::place_forking_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -90,7 +90,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::Giant(_) => Self::place_giant_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -99,7 +99,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::Fancy(_) => Self::place_fancy_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -108,7 +108,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::DarkOak(_) => Self::place_dark_oak_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -117,7 +117,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::MegaJungle(_) => Self::place_mega_jungle_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -126,7 +126,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::Bending(placer) => Self::place_bending_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -136,7 +136,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::UpwardsBranching(placer) => Self::place_upwards_branching_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -146,7 +146,7 @@ impl FeatureDecorationRunner {
                 placement,
             ),
             TrunkPlacer::Cherry(placer) => Self::place_cherry_tree_trunk(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -159,7 +159,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_straight_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -167,11 +167,11 @@ impl FeatureDecorationRunner {
         config: &TreeConfiguration,
         placement: &mut TreePlacement,
     ) -> Vec<FoliageAttachment> {
-        Self::place_below_trunk_block(region, registry, random, origin.below(), config, placement);
+        Self::place_below_trunk_block(level, registry, random, origin.below(), config, placement);
 
         for y in 0..tree_height {
             let pos = origin.above_n(y);
-            let _ = Self::place_tree_log(region, registry, random, pos, config, placement);
+            let _ = Self::place_tree_log(level, registry, random, pos, config, placement);
         }
 
         vec![FoliageAttachment {
@@ -182,7 +182,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_forking_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -190,7 +190,7 @@ impl FeatureDecorationRunner {
         config: &TreeConfiguration,
         placement: &mut TreePlacement,
     ) -> Vec<FoliageAttachment> {
-        Self::place_below_trunk_block(region, registry, random, origin.below(), config, placement);
+        Self::place_below_trunk_block(level, registry, random, origin.below(), config, placement);
 
         let mut attachments = Vec::new();
         let lean_direction = Self::random_horizontal_direction(random);
@@ -210,7 +210,7 @@ impl FeatureDecorationRunner {
             }
 
             let pos = BlockPos::new(trunk_x, y, trunk_z);
-            if Self::place_tree_log(region, registry, random, pos, config, placement) {
+            if Self::place_tree_log(level, registry, random, pos, config, placement) {
                 foliage_y = Some(y + 1);
             }
         }
@@ -238,7 +238,7 @@ impl FeatureDecorationRunner {
                     trunk_x += dx;
                     trunk_z += dz;
                     let pos = BlockPos::new(trunk_x, y, trunk_z);
-                    if Self::place_tree_log(region, registry, random, pos, config, placement) {
+                    if Self::place_tree_log(level, registry, random, pos, config, placement) {
                         foliage_y = Some(y + 1);
                     }
                 }
@@ -260,7 +260,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_giant_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -269,9 +269,9 @@ impl FeatureDecorationRunner {
         placement: &mut TreePlacement,
     ) -> Vec<FoliageAttachment> {
         let below = origin.below();
-        Self::place_below_trunk_block(region, registry, random, below, config, placement);
+        Self::place_below_trunk_block(level, registry, random, below, config, placement);
         Self::place_below_trunk_block(
-            region,
+            level,
             registry,
             random,
             below.relative(Direction::East),
@@ -279,7 +279,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_below_trunk_block(
-            region,
+            level,
             registry,
             random,
             below.relative(Direction::South),
@@ -287,7 +287,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_below_trunk_block(
-            region,
+            level,
             registry,
             random,
             below.offset(1, 0, 1),
@@ -297,7 +297,7 @@ impl FeatureDecorationRunner {
 
         for y in 0..tree_height {
             let _ = Self::place_tree_log_if_free(
-                region,
+                level,
                 registry,
                 random,
                 origin.above_n(y),
@@ -306,7 +306,7 @@ impl FeatureDecorationRunner {
             );
             if y < tree_height - 1 {
                 let _ = Self::place_tree_log_if_free(
-                    region,
+                    level,
                     registry,
                     random,
                     origin.offset(1, y, 0),
@@ -314,7 +314,7 @@ impl FeatureDecorationRunner {
                     placement,
                 );
                 let _ = Self::place_tree_log_if_free(
-                    region,
+                    level,
                     registry,
                     random,
                     origin.offset(1, y, 1),
@@ -322,7 +322,7 @@ impl FeatureDecorationRunner {
                     placement,
                 );
                 let _ = Self::place_tree_log_if_free(
-                    region,
+                    level,
                     registry,
                     random,
                     origin.offset(0, y, 1),
@@ -340,7 +340,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_mega_jungle_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -349,7 +349,7 @@ impl FeatureDecorationRunner {
         placement: &mut TreePlacement,
     ) -> Vec<FoliageAttachment> {
         let mut attachments = Self::place_giant_tree_trunk(
-            region,
+            level,
             registry,
             random,
             tree_height,
@@ -368,7 +368,7 @@ impl FeatureDecorationRunner {
                 branch_x = (1.5_f32 + angle.cos() * branch_step as f32) as i32;
                 branch_z = (1.5_f32 + angle.sin() * branch_step as f32) as i32;
                 let pos = origin.offset(branch_x, branch_height - 3 + branch_step / 2, branch_z);
-                let _ = Self::place_tree_log(region, registry, random, pos, config, placement);
+                let _ = Self::place_tree_log(level, registry, random, pos, config, placement);
             }
 
             attachments.push(FoliageAttachment {
@@ -383,7 +383,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_bending_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -395,7 +395,7 @@ impl FeatureDecorationRunner {
         let direction = Self::random_horizontal_direction(random);
         let log_height = tree_height - 1;
         let mut pos = origin;
-        Self::place_below_trunk_block(region, registry, random, origin.below(), config, placement);
+        Self::place_below_trunk_block(level, registry, random, origin.below(), config, placement);
         let mut foliage_points = Vec::new();
 
         for y in 0..=log_height {
@@ -403,7 +403,7 @@ impl FeatureDecorationRunner {
                 pos = pos.relative(direction);
             }
 
-            let _ = Self::place_tree_log(region, registry, random, pos, config, placement);
+            let _ = Self::place_tree_log(level, registry, random, pos, config, placement);
 
             if y >= placer.min_height_for_leaves {
                 foliage_points.push(FoliageAttachment {
@@ -418,7 +418,7 @@ impl FeatureDecorationRunner {
 
         let bend_length = placer.bend_length.sample(random);
         for _ in 0..=bend_length {
-            let _ = Self::place_tree_log(region, registry, random, pos, config, placement);
+            let _ = Self::place_tree_log(level, registry, random, pos, config, placement);
             foliage_points.push(FoliageAttachment {
                 pos,
                 radius_offset: 0,
@@ -431,7 +431,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_upwards_branching_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -446,7 +446,7 @@ impl FeatureDecorationRunner {
             let current_height = origin.y() + height_pos;
             let log_pos = BlockPos::new(origin.x(), current_height, origin.z());
             if Self::place_tree_log_growing_through(
-                region,
+                level,
                 registry,
                 random,
                 log_pos,
@@ -461,7 +461,7 @@ impl FeatureDecorationRunner {
                 let branch_pos = 0.max(branch_len - placer.extra_branch_length.sample(random) - 1);
                 let branch_steps = placer.extra_branch_steps.sample(random);
                 Self::place_upwards_branching_tree_branch(
-                    region,
+                    level,
                     registry,
                     random,
                     tree_height,
@@ -491,7 +491,7 @@ impl FeatureDecorationRunner {
 
     #[expect(clippy::too_many_arguments, reason = "mirrors vanilla branch state")]
     fn place_upwards_branching_tree_branch(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -519,7 +519,7 @@ impl FeatureDecorationRunner {
                 height_along_branch = placement_height;
                 let branch_log_pos = BlockPos::new(log_x, placement_height, log_z);
                 if Self::place_tree_log_growing_through(
-                    region,
+                    level,
                     registry,
                     random,
                     branch_log_pos,
@@ -557,7 +557,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_cherry_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -566,7 +566,7 @@ impl FeatureDecorationRunner {
         placer: &CherryTrunkPlacer,
         placement: &mut TreePlacement,
     ) -> Vec<FoliageAttachment> {
-        Self::place_below_trunk_block(region, registry, random, origin.below(), config, placement);
+        Self::place_below_trunk_block(level, registry, random, origin.below(), config, placement);
         let first_branch_offset =
             0.max(tree_height - 1 + placer.branch_start_offset_from_top.sample(random));
         let second_branch_provider = placer
@@ -591,7 +591,7 @@ impl FeatureDecorationRunner {
 
         for y in 0..trunk_height {
             let _ = Self::place_tree_log(
-                region,
+                level,
                 registry,
                 random,
                 origin.above_n(y),
@@ -612,7 +612,7 @@ impl FeatureDecorationRunner {
         let tree_direction = Self::random_horizontal_direction(random);
         let sideways_axis = tree_direction.get_axis();
         attachments.push(Self::generate_cherry_tree_branch(
-            region,
+            level,
             registry,
             random,
             tree_height,
@@ -627,7 +627,7 @@ impl FeatureDecorationRunner {
         ));
         if has_both_side_branches {
             attachments.push(Self::generate_cherry_tree_branch(
-                region,
+                level,
                 registry,
                 random,
                 tree_height,
@@ -647,7 +647,7 @@ impl FeatureDecorationRunner {
 
     #[expect(clippy::too_many_arguments, reason = "mirrors vanilla branch state")]
     fn generate_cherry_tree_branch(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -674,7 +674,7 @@ impl FeatureDecorationRunner {
         for _ in 0..steps_horizontally {
             log_pos = log_pos.relative(branch_direction);
             let _ = Self::place_tree_log_with_axis(
-                region,
+                level,
                 registry,
                 random,
                 log_pos,
@@ -709,10 +709,10 @@ impl FeatureDecorationRunner {
             };
 
             if grow_vertically {
-                let _ = Self::place_tree_log(region, registry, random, log_pos, config, placement);
+                let _ = Self::place_tree_log(level, registry, random, log_pos, config, placement);
             } else {
                 let _ = Self::place_tree_log_with_axis(
-                    region,
+                    level,
                     registry,
                     random,
                     log_pos,
@@ -725,7 +725,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_dark_oak_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -735,9 +735,9 @@ impl FeatureDecorationRunner {
     ) -> Vec<FoliageAttachment> {
         let mut attachments = Vec::new();
         let below = origin.below();
-        Self::place_below_trunk_block(region, registry, random, below, config, placement);
+        Self::place_below_trunk_block(level, registry, random, below, config, placement);
         Self::place_below_trunk_block(
-            region,
+            level,
             registry,
             random,
             below.relative(Direction::East),
@@ -745,7 +745,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_below_trunk_block(
-            region,
+            level,
             registry,
             random,
             below.relative(Direction::South),
@@ -753,7 +753,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::place_below_trunk_block(
-            region,
+            level,
             registry,
             random,
             below.offset(1, 0, 1),
@@ -780,10 +780,10 @@ impl FeatureDecorationRunner {
             }
 
             let pos = BlockPos::new(trunk_x, y + y_offset, trunk_z);
-            if Self::tree_is_air_or_leaves(region, pos) {
-                let _ = Self::place_tree_log(region, registry, random, pos, config, placement);
+            if Self::tree_is_air_or_leaves(level, pos) {
+                let _ = Self::place_tree_log(level, registry, random, pos, config, placement);
                 let _ = Self::place_tree_log(
-                    region,
+                    level,
                     registry,
                     random,
                     pos.relative(Direction::East),
@@ -791,7 +791,7 @@ impl FeatureDecorationRunner {
                     placement,
                 );
                 let _ = Self::place_tree_log(
-                    region,
+                    level,
                     registry,
                     random,
                     pos.relative(Direction::South),
@@ -799,7 +799,7 @@ impl FeatureDecorationRunner {
                     placement,
                 );
                 let _ = Self::place_tree_log(
-                    region,
+                    level,
                     registry,
                     random,
                     pos.offset(1, 0, 1),
@@ -827,7 +827,7 @@ impl FeatureDecorationRunner {
                 let branch_length = random.next_i32_bounded(3) + 2;
                 for branch_y in 0..branch_length {
                     let pos = BlockPos::new(x + ox, foliage_y - branch_y - 1, z + oz);
-                    let _ = Self::place_tree_log(region, registry, random, pos, config, placement);
+                    let _ = Self::place_tree_log(level, registry, random, pos, config, placement);
                 }
 
                 attachments.push(FoliageAttachment {
@@ -842,7 +842,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_fancy_tree_trunk(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         tree_height: i32,
@@ -852,7 +852,7 @@ impl FeatureDecorationRunner {
     ) -> Vec<FoliageAttachment> {
         let height = tree_height + 2;
         let trunk_height = fast_floor(f64::from(height) * FANCY_TRUNK_HEIGHT_SCALE);
-        Self::place_below_trunk_block(region, registry, random, origin.below(), config, placement);
+        Self::place_below_trunk_block(level, registry, random, origin.below(), config, placement);
 
         let clusters_per_y = 1.min(fast_floor(
             FANCY_CLUSTER_DENSITY_MAGIC + (f64::from(height) / 13.0).powi(2),
@@ -880,7 +880,7 @@ impl FeatureDecorationRunner {
                     let check_start = origin.offset(fast_floor(x), relative_y - 1, fast_floor(z));
                     let check_end = check_start.above_n(5);
                     if Self::make_fancy_tree_limb(
-                        region,
+                        level,
                         registry,
                         random,
                         check_start,
@@ -900,7 +900,7 @@ impl FeatureDecorationRunner {
                         };
                         let check_branch_base = BlockPos::new(origin.x(), branch_top, origin.z());
                         if Self::make_fancy_tree_limb(
-                            region,
+                            level,
                             registry,
                             random,
                             check_branch_base,
@@ -925,7 +925,7 @@ impl FeatureDecorationRunner {
         }
 
         Self::make_fancy_tree_limb(
-            region,
+            level,
             registry,
             random,
             origin,
@@ -935,7 +935,7 @@ impl FeatureDecorationRunner {
             placement,
         );
         Self::make_fancy_tree_branches(
-            region,
+            level,
             registry,
             random,
             height,
@@ -953,7 +953,7 @@ impl FeatureDecorationRunner {
     }
 
     fn make_fancy_tree_limb(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         start_pos: BlockPos,
@@ -975,7 +975,7 @@ impl FeatureDecorationRunner {
         if steps == 0 {
             if do_place {
                 let _ = Self::place_fancy_tree_log(
-                    region,
+                    level,
                     registry,
                     random,
                     start_pos,
@@ -1001,9 +1001,9 @@ impl FeatureDecorationRunner {
             if do_place {
                 let axis = Self::fancy_tree_log_axis(start_pos, pos);
                 let _ = Self::place_fancy_tree_log(
-                    region, registry, random, pos, axis, config, placement,
+                    level, registry, random, pos, axis, config, placement,
                 );
-            } else if !Self::tree_trunk_placer_is_free(region, pos, &config.trunk_placer) {
+            } else if !Self::tree_trunk_placer_is_free(level, pos, &config.trunk_placer) {
                 return false;
             }
         }
@@ -1036,7 +1036,7 @@ impl FeatureDecorationRunner {
     }
 
     fn make_fancy_tree_branches(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         height: i32,
@@ -1051,7 +1051,7 @@ impl FeatureDecorationRunner {
                 && Self::trim_fancy_tree_branch(height, end_coord.branch_base - origin.y())
             {
                 Self::make_fancy_tree_limb(
-                    region,
+                    level,
                     registry,
                     random,
                     base_coord,
@@ -1065,7 +1065,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_tree_log_with_axis(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
@@ -1073,24 +1073,19 @@ impl FeatureDecorationRunner {
         config: &TreeConfiguration,
         placement: &mut TreePlacement,
     ) -> bool {
-        if !Self::tree_valid_pos(region, pos) {
+        if !Self::tree_valid_pos(level, pos) {
             return false;
         }
 
-        let state = Self::sample_block_state_provider(
-            region,
-            registry,
-            random,
-            &config.trunk_provider,
-            pos,
-        );
+        let state =
+            Self::sample_block_state_provider(level, registry, random, &config.trunk_provider, pos);
         let state = Self::with_axis_if_present(state, axis);
-        placement.set_trunk(region, pos, state);
+        placement.set_trunk(level, pos, state);
         true
     }
 
     fn place_fancy_tree_log(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
@@ -1098,7 +1093,7 @@ impl FeatureDecorationRunner {
         config: &TreeConfiguration,
         placement: &mut TreePlacement,
     ) -> bool {
-        Self::place_tree_log_with_axis(region, registry, random, pos, axis, config, placement)
+        Self::place_tree_log_with_axis(level, registry, random, pos, axis, config, placement)
     }
 
     fn with_axis_if_present(state: BlockStateId, axis: Axis) -> BlockStateId {
@@ -1127,7 +1122,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_below_trunk_block(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
@@ -1135,7 +1130,7 @@ impl FeatureDecorationRunner {
         placement: &mut TreePlacement,
     ) {
         let Some(state) = Self::sample_block_state_provider_optional(
-            region,
+            level,
             registry,
             random,
             &config.below_trunk_provider,
@@ -1143,49 +1138,44 @@ impl FeatureDecorationRunner {
         ) else {
             return;
         };
-        placement.set_trunk(region, pos, state);
+        placement.set_trunk(level, pos, state);
     }
 
     fn place_tree_log(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         config: &TreeConfiguration,
         placement: &mut TreePlacement,
     ) -> bool {
-        if !Self::tree_valid_pos(region, pos) {
+        if !Self::tree_valid_pos(level, pos) {
             return false;
         }
 
-        let state = Self::sample_block_state_provider(
-            region,
-            registry,
-            random,
-            &config.trunk_provider,
-            pos,
-        );
-        placement.set_trunk(region, pos, state);
+        let state =
+            Self::sample_block_state_provider(level, registry, random, &config.trunk_provider, pos);
+        placement.set_trunk(level, pos, state);
         true
     }
 
     fn place_tree_log_if_free(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         config: &TreeConfiguration,
         placement: &mut TreePlacement,
     ) -> bool {
-        if !Self::tree_trunk_placer_is_free(region, pos, &config.trunk_placer) {
+        if !Self::tree_trunk_placer_is_free(level, pos, &config.trunk_placer) {
             return false;
         }
 
-        Self::place_tree_log(region, registry, random, pos, config, placement)
+        Self::place_tree_log(level, registry, random, pos, config, placement)
     }
 
     fn place_tree_log_growing_through(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
@@ -1193,18 +1183,13 @@ impl FeatureDecorationRunner {
         config: &TreeConfiguration,
         placement: &mut TreePlacement,
     ) -> bool {
-        if !Self::tree_valid_pos_or_tag(region, pos, can_grow_through) {
+        if !Self::tree_valid_pos_or_tag(level, pos, can_grow_through) {
             return false;
         }
 
-        let state = Self::sample_block_state_provider(
-            region,
-            registry,
-            random,
-            &config.trunk_provider,
-            pos,
-        );
-        placement.set_trunk(region, pos, state);
+        let state =
+            Self::sample_block_state_provider(level, registry, random, &config.trunk_provider, pos);
+        placement.set_trunk(level, pos, state);
         true
     }
 }

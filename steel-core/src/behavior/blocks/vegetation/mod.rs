@@ -81,6 +81,7 @@ mod tall_flower_block;
 mod tall_grass_block;
 mod tall_seagrass_block;
 mod torchflower;
+mod tree_grower;
 mod twisting_vines_block;
 mod twisting_vines_plant_block;
 mod vegetation_block;

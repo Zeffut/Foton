@@ -25,7 +25,7 @@ impl FeatureDecorationRunner {
         }
 
         if Self::is_double_plant_block(state_to_place.get_block()) {
-            if !region.block_state(origin.above()).is_air() {
+            if !region.get_block_state(origin.above()).is_air() {
                 return false;
             }
             Self::place_double_plant(region, state_to_place, origin);
@@ -36,7 +36,7 @@ impl FeatureDecorationRunner {
         }
 
         if config.schedule_tick {
-            let placed_state = region.block_state(origin);
+            let placed_state = region.get_block_state(origin);
             let _ = region.schedule_block_tick_default(origin, placed_state.get_block(), 1);
         }
 
@@ -81,7 +81,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn copy_waterlogged_from(
-        region: &WorldGenRegion<'_>,
+        region: &impl LevelAccessor,
         pos: BlockPos,
         state: BlockStateId,
     ) -> BlockStateId {
@@ -92,7 +92,7 @@ impl FeatureDecorationRunner {
             return state;
         }
 
-        let waterlogged = get_fluid_state_from_block(region.block_state(pos)).is_water();
+        let waterlogged = get_fluid_state_from_block(region.get_block_state(pos)).is_water();
         state.set_value(&BlockStateProperties::WATERLOGGED, waterlogged)
     }
 
@@ -119,7 +119,7 @@ impl FeatureDecorationRunner {
         pos: BlockPos,
     ) -> BlockStateId {
         let above = pos.above();
-        let above_previous_state = region.block_state(above);
+        let above_previous_state = region.get_block_state(above);
         let is_mossy_carpet_above =
             above_previous_state.get_block() == &vanilla_blocks::PALE_MOSS_CARPET;
         if (!is_mossy_carpet_above
@@ -157,7 +157,7 @@ impl FeatureDecorationRunner {
         direction_towards_neighbor: Direction,
     ) -> bool {
         let neighbor_pos = pos.relative(direction_towards_neighbor);
-        let neighbor_state = region.block_state(neighbor_pos);
+        let neighbor_state = region.get_block_state(neighbor_pos);
         let support_direction = direction_towards_neighbor.opposite();
         shapes::is_offset_face_full(
             neighbor_state.get_support_shape_at(neighbor_pos),

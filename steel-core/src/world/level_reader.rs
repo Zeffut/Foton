@@ -4,6 +4,7 @@
 //! `canSurvive` should depend on the world-reading surface, not on the concrete
 //! `World` type. `World` and `WorldGenRegion` both implement this trait.
 
+use crate::chunk::heightmap::HeightmapType;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::Direction;
@@ -176,6 +177,35 @@ pub trait LevelAccessor: ScheduledTickAccess {
         reason = "worldgen and test level surfaces do not emit game events"
     )]
     fn game_event(&self, event: GameEventRef, pos: BlockPos, context: &GameEventContext<'_>) {}
+
+    /// Returns the heightmap value at a column, or the floor when unknown.
+    ///
+    /// A worldgen region always has heightmaps; a live world has them only for
+    /// loaded chunks, and answers with the build floor otherwise, which is what
+    /// a feature reads as "nothing here".
+    fn heightmap_at(&self, heightmap_type: HeightmapType, x: i32, z: i32) -> i32;
+
+    /// Returns whether this surface accepts writes in the given chunk.
+    ///
+    /// Vanilla parity: `WorldGenRegion.ensureCanWrite`, the write-radius guard
+    /// that keeps a feature from reaching into a chunk the current generation
+    /// step has not locked. A live world has no such radius -- a tree grown
+    /// from a sapling may cross a chunk border like any other block change --
+    /// so the default is yes.
+    fn can_write_to_chunk(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        let _ = (chunk_x, chunk_z);
+        true
+    }
+
+    /// Marks a position for the chunk's post-processing pass.
+    ///
+    /// Vanilla parity: `WorldGenLevel.markPosForPostprocessing`, which queues a
+    /// block to be re-ticked once the chunk finishes generating. A live world
+    /// has already finished, and its `set_block` runs the update itself, so the
+    /// default does nothing.
+    fn mark_pos_for_postprocessing(&self, pos: BlockPos) {
+        let _ = pos;
+    }
 }
 
 #[cfg(test)]

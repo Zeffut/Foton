@@ -22,7 +22,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_tree_roots(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -34,7 +34,7 @@ impl FeatureDecorationRunner {
             return true;
         };
         Self::place_mangrove_tree_roots(
-            region,
+            level,
             registry,
             random,
             origin,
@@ -45,7 +45,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_mangrove_tree_roots(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -56,7 +56,7 @@ impl FeatureDecorationRunner {
         let mut column_pos = origin;
         while column_pos.y() < trunk_origin.y() {
             if !Self::can_place_mangrove_tree_root(
-                region,
+                level,
                 column_pos,
                 &placer.mangrove_root_placement,
             ) {
@@ -71,7 +71,7 @@ impl FeatureDecorationRunner {
             let root_pos = trunk_origin.relative(direction);
             let mut positions_in_direction = Vec::new();
             if !Self::simulate_mangrove_tree_roots(
-                region,
+                level,
                 random,
                 root_pos,
                 direction,
@@ -88,14 +88,14 @@ impl FeatureDecorationRunner {
         }
 
         for root_pos in root_positions {
-            Self::place_mangrove_tree_root(region, registry, random, root_pos, placer, placement);
+            Self::place_mangrove_tree_root(level, registry, random, root_pos, placer, placement);
         }
 
         true
     }
 
     fn simulate_mangrove_tree_roots(
-        region: &WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         random: &mut WorldgenRandom,
         root_pos: BlockPos,
         direction: Direction,
@@ -118,10 +118,10 @@ impl FeatureDecorationRunner {
             root_origin,
             placement,
         ) {
-            if Self::can_place_mangrove_tree_root(region, pos, placement) {
+            if Self::can_place_mangrove_tree_root(level, pos, placement) {
                 root_positions.push(pos);
                 if !Self::simulate_mangrove_tree_roots(
-                    region,
+                    level,
                     random,
                     pos,
                     direction,
@@ -167,16 +167,16 @@ impl FeatureDecorationRunner {
     }
 
     fn can_place_mangrove_tree_root(
-        region: &WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
 
         pos: BlockPos,
         placement: &MangroveRootPlacement,
     ) -> bool {
-        Self::tree_valid_pos_or_tag(region, pos, &placement.can_grow_through)
+        Self::tree_valid_pos_or_tag(level, pos, &placement.can_grow_through)
     }
 
     fn place_mangrove_tree_root(
-        region: &mut WorldGenRegion<'_>,
+        level: &impl LevelAccessor,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
@@ -185,43 +185,43 @@ impl FeatureDecorationRunner {
     ) {
         if Self::block_matches_identifiers(
             registry,
-            region.block_state(pos),
+            level.get_block_state(pos),
             &placer.mangrove_root_placement.muddy_roots_in,
         ) {
             let state = Self::sample_block_state_provider(
-                region,
+                level,
                 registry,
                 random,
                 &placer.mangrove_root_placement.muddy_roots_provider,
                 pos,
             );
-            let state = Self::copy_waterlogged_from(region, pos, state);
-            placement.set_root(region, pos, state);
+            let state = Self::copy_waterlogged_from(level, pos, state);
+            placement.set_root(level, pos, state);
             return;
         }
 
-        if !Self::can_place_mangrove_tree_root(region, pos, &placer.mangrove_root_placement) {
+        if !Self::can_place_mangrove_tree_root(level, pos, &placer.mangrove_root_placement) {
             return;
         }
 
         let state =
-            Self::sample_block_state_provider(region, registry, random, &placer.root_provider, pos);
-        let state = Self::copy_waterlogged_from(region, pos, state);
-        placement.set_root(region, pos, state);
+            Self::sample_block_state_provider(level, registry, random, &placer.root_provider, pos);
+        let state = Self::copy_waterlogged_from(level, pos, state);
+        placement.set_root(level, pos, state);
 
         let above = pos.above();
         if random.next_f32() < placer.above_root_placement.above_root_placement_chance
-            && region.block_state(above).is_air()
+            && level.get_block_state(above).is_air()
         {
             let state = Self::sample_block_state_provider(
-                region,
+                level,
                 registry,
                 random,
                 &placer.above_root_placement.above_root_provider,
                 above,
             );
-            let state = Self::copy_waterlogged_from(region, above, state);
-            placement.set_root(region, above, state);
+            let state = Self::copy_waterlogged_from(level, above, state);
+            placement.set_root(level, above, state);
         }
     }
 

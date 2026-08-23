@@ -17,6 +17,7 @@ use toml::map::Map;
 use crate::chunk::Chunk;
 use crate::chunk::chunk_holder::{ChunkHolder, TickingReadiness};
 use crate::chunk::chunk_ticket_manager::ChunkTicketLevel;
+use crate::chunk::heightmap::HeightmapType;
 use crate::chunk::section::{ChunkSection, Sections};
 use crate::chunk::status::ChunkStatus;
 use crate::entity::Entity;
@@ -354,6 +355,10 @@ impl ScheduledTickAccess for TestLevel {
 }
 
 impl LevelAccessor for TestLevel {
+    fn heightmap_at(&self, _heightmap_type: HeightmapType, _x: i32, _z: i32) -> i32 {
+        self.min_y()
+    }
+
     fn set_block_state(&self, pos: BlockPos, state: BlockStateId, flags: UpdateFlags) -> bool {
         self.set_test_block(pos, state);
         self.placed_blocks

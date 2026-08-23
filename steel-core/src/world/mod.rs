@@ -789,4 +789,8 @@ impl LevelAccessor for Arc<World> {
     fn game_event(&self, event: GameEventRef, pos: BlockPos, context: &GameEventContext<'_>) {
         World::game_event(self, event, pos, context);
     }
+
+    fn heightmap_at(&self, heightmap_type: HeightmapType, x: i32, z: i32) -> i32 {
+        World::height_at(self, heightmap_type, x, z).unwrap_or_else(|| self.get_min_y())
+    }
 }
