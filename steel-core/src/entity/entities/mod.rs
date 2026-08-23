@@ -14,8 +14,8 @@ pub use mobs::hostile::{
 };
 pub use mobs::neutral::WolfEntity;
 pub use mobs::passive::{
-    CatEntity, ChickenEntity, CowEntity, MushroomCowEntity, OcelotEntity, ParrotEntity,
-    ParrotVariant, PigEntity, SheepEntity, StriderEntity,
+    CatEntity, ChickenEntity, CowEntity, FoxEntity, FoxVariant, MushroomCowEntity, OcelotEntity,
+    ParrotEntity, ParrotVariant, PigEntity, SheepEntity, StriderEntity,
 };
 pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
 pub use objects::display_ui::{

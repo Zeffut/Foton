@@ -3,6 +3,7 @@
 mod cat;
 mod chicken;
 mod cow;
+mod fox;
 mod mooshroom;
 mod ocelot;
 mod parrot;
@@ -13,6 +14,7 @@ mod strider;
 pub use cat::CatEntity;
 pub use chicken::ChickenEntity;
 pub use cow::CowEntity;
+pub use fox::{FoxEntity, FoxVariant};
 pub use mooshroom::MushroomCowEntity;
 pub use ocelot::OcelotEntity;
 pub use parrot::{ParrotEntity, ParrotVariant};

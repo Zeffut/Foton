@@ -18,6 +18,12 @@ const PATH_RECALC_FAILED_MOVE_PENALTY: i32 = 15;
 const PATHED_TARGET_RECALC_DISTANCE_SQR: f64 = 1.0;
 const RANDOM_PATH_RECALC_CHANCE: f32 = 0.05;
 
+/// A subclass override of what one landed swing does.
+///
+/// Vanilla parity: a `MeleeAttackGoal.checkAndPerformAttack` override, as
+/// `Fox.FoxMeleeAttackGoal` uses to bite instead of swinging.
+type MeleeAttackOverride = Box<dyn Fn(&dyn PathfinderMob, &SharedEntity) + Send>;
+
 pub(crate) struct MeleeAttackGoal {
     speed_modifier: f64,
     following_target_even_if_not_seen: bool,
@@ -26,6 +32,7 @@ pub(crate) struct MeleeAttackGoal {
     ticks_until_next_path_recalculation: i32,
     ticks_until_next_attack: i32,
     last_can_use_check: i64,
+    attack_override: Option<MeleeAttackOverride>,
 }
 
 impl MeleeAttackGoal {
@@ -39,7 +46,21 @@ impl MeleeAttackGoal {
             ticks_until_next_path_recalculation: 0,
             ticks_until_next_attack: 0,
             last_can_use_check: 0,
+            attack_override: None,
         }
+    }
+
+    /// Replaces what a landed swing does.
+    ///
+    /// Vanilla parity: a `checkAndPerformAttack` override. The cooldown and
+    /// the reach test stay with the goal; only the hit itself changes.
+    #[must_use]
+    pub(crate) fn with_attack_override(
+        mut self,
+        perform: impl Fn(&dyn PathfinderMob, &SharedEntity) + Send + 'static,
+    ) -> Self {
+        self.attack_override = Some(Box::new(perform));
+        self
     }
 
     fn check_and_perform_attack(&mut self, mob: &dyn PathfinderMob, target: &SharedEntity) {
@@ -51,6 +72,11 @@ impl MeleeAttackGoal {
         }
 
         self.reset_attack_cooldown();
+        if let Some(perform) = &self.attack_override {
+            perform(mob, target);
+            return;
+        }
+
         mob.swing(InteractionHand::MainHand, false);
         if let Some(world) = mob.level() {
             let _ = mob.do_hurt_target(&world, target);

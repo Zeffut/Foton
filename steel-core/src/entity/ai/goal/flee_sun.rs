@@ -22,7 +22,9 @@ impl FleeSunGoal {
         }
     }
 
-    fn set_wanted_pos(&mut self, mob: &dyn PathfinderMob, level: &World) -> bool {
+    /// Vanilla parity: the protected `FleeSunGoal.setWantedPos`, which the fox
+    /// subclass calls from its own `canUse`.
+    pub(crate) fn set_wanted_pos(&mut self, mob: &dyn PathfinderMob, level: &World) -> bool {
         let Some(pos) = get_hide_pos(mob, level) else {
             return false;
         };

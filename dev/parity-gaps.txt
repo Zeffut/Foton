@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 73
+[entities] 72
 Allay
 Armadillo
 Axolotl
@@ -90,7 +90,6 @@ Evoker
 EvokerFangs
 EyeOfEnder
 FishingHook
-Fox
 Frog
 Ghast
 Giant

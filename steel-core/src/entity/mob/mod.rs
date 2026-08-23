@@ -29,14 +29,14 @@ use steel_registry::loot_table::LootTableRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_entity_type_tags::EntityTypeTag;
-use steel_registry::vanilla_game_rules::ENTITY_DROPS;
+use steel_registry::vanilla_game_rules::{ENTITY_DROPS, MOB_GRIEFING};
 use steel_registry::{
     REGISTRY, RegistryExt, TaggedRegistryExt as _, sound_events, vanilla_attributes,
     vanilla_damage_types, vanilla_entities, vanilla_game_events, vanilla_items,
 };
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::{Difficulty, InteractionHand};
-use steel_utils::{BlockPos, Identifier, WorldAabb, axis::Axis};
+use steel_utils::{BlockPos, Downcast as _, Identifier, WorldAabb, axis::Axis};
 
 use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext, ITEM_BEHAVIORS, InteractionResult};
 use crate::enchantment_helper::{self, EnchantmentDamageContext, EnchantmentPostAttackContext};
@@ -50,7 +50,7 @@ use crate::entity::ai::sensing::Sensing;
 use crate::entity::ai::walk::WalkPathEvaluator;
 use crate::entity::attribute::{AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
-use crate::entity::entities::LeashFenceKnotEntity;
+use crate::entity::entities::{ItemEntity, LeashFenceKnotEntity};
 use crate::entity::spawn_rules::check_mob_spawn_rules;
 use crate::entity::{
     Entity, EntitySpawnReason, LivingEntity, LivingTravelInput, RemovalReason, SharedEntity,
@@ -1482,8 +1482,68 @@ pub trait Mob: LivingEntity {
         ));
     }
 
+    /// How far around itself a mob reaches for dropped items.
+    ///
+    /// Vanilla parity: `Mob.getPickupReach`, whose `ITEM_PICKUP_REACH` is one
+    /// block sideways and none vertically.
+    fn pickup_reach(&self) -> DVec3 {
+        DVec3::new(1.0, 0.0, 1.0)
+    }
+
+    /// Returns vanilla `Mob.canHoldItem`.
+    fn can_hold_item(&self, _item_stack: &ItemStack) -> bool {
+        true
+    }
+
+    /// Returns vanilla `Mob.wantsToPickUp`.
+    fn wants_to_pick_up(&self, world: &World, item_stack: &ItemStack) -> bool {
+        world.get_game_rule(&MOB_GRIEFING)
+            && Mob::can_pick_up_loot(self)
+            && self.can_hold_item(item_stack)
+    }
+
+    /// Takes one dropped item off the ground.
+    ///
+    /// Vanilla parity: `Mob.pickUpItem`.
+    ///
+    /// TODO: The vanilla body equips the stack through `equipItemIfPossible`.
+    /// Steel has no `getEquipmentSlotForItem` yet, so only mobs that override
+    /// this -- the fox -- pick anything up. Nothing regresses: before this loop
+    /// existed no Steel mob picked up items at all.
+    fn pick_up_item(&self, _world: &Arc<World>, _item_entity: &SharedEntity) {}
+
+    /// Runs the item-pickup half of vanilla `Mob.aiStep`.
+    fn pick_up_nearby_items(&self) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        if !Mob::can_pick_up_loot(self)
+            || !Entity::is_alive(self)
+            || !world.get_game_rule(&MOB_GRIEFING)
+        {
+            return;
+        }
+
+        let reach = self.pickup_reach();
+        let search = self.bounding_box().inflate_xyz(reach.x, reach.y, reach.z);
+        let items = world.get_entities_in_aabb_matching(&search, |entity| {
+            let Some(item_entity) = entity.downcast_ref::<ItemEntity>() else {
+                return false;
+            };
+            !entity.is_removed()
+                && !item_entity.get_item().is_empty()
+                && !item_entity.has_pickup_delay()
+                && self.wants_to_pick_up(world.as_ref(), &item_entity.get_item())
+        });
+
+        for item in items {
+            self.pick_up_item(&world, &item);
+        }
+    }
+
     fn mob_server_ai_step(&self) {
         self.increment_no_action_time();
+        self.pick_up_nearby_items();
         self.mob_base().sensing().lock().tick();
         if self.tick_count() % 5 == 0 {
             self.update_control_flags();
@@ -1505,7 +1565,15 @@ pub trait Mob: LivingEntity {
         tick_path_navigation_target(self, &world, game_time, true);
     }
 
+    /// Override this to gate the move control, and call
+    /// [`Self::default_tick_move_control`] from the override; Rust has no
+    /// `super`, so the base body lives in its own method.
     fn tick_move_control(&self) {
+        self.default_tick_move_control();
+    }
+
+    /// The shared part of vanilla `MoveControl.tick`.
+    fn default_tick_move_control(&self) {
         let move_control = {
             let mut controls = self.mob_base().controls().lock();
             let move_control = controls.move_control;
@@ -1714,7 +1782,22 @@ pub trait Mob: LivingEntity {
         }
     }
 
+    /// Override this to gate the look control, and call
+    /// [`Self::default_tick_look_control`] from the override.
     fn tick_look_control(&self) {
+        self.default_tick_look_control();
+    }
+
+    /// Returns whether an idle look control levels the mob's pitch out.
+    ///
+    /// Vanilla parity: `LookControl.resetXRotOnTick`, which only the fox
+    /// overrides -- to keep a crouching or pouncing nose down.
+    fn look_control_resets_pitch(&self) -> bool {
+        true
+    }
+
+    /// The shared part of vanilla `LookControl.tick`.
+    fn default_tick_look_control(&self) {
         let look_control = {
             let mut controls = self.mob_base().controls().lock();
             let look_control = controls.look_control;
@@ -1723,7 +1806,9 @@ pub trait Mob: LivingEntity {
         };
 
         let mut rotation = self.rotation();
-        rotation.1 = 0.0;
+        if self.look_control_resets_pitch() {
+            rotation.1 = 0.0;
+        }
         if look_control.is_looking_at_target() {
             let position = self.position();
             let wanted_position = look_control.wanted_position();

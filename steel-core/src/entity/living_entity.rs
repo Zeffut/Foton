@@ -1025,7 +1025,15 @@ pub trait LivingEntity: Entity {
     }
 
     /// Runs the currently implemented subset of vanilla `LivingEntity.dropAllDeathLoot`.
+    /// Override this to drop what a specific mob carries, and call
+    /// [`Self::living_drop_all_death_loot`] from the override for the
+    /// shared behavior; Rust has no `super`.
     fn drop_all_death_loot(&self, source: &DamageSource) {
+        self.living_drop_all_death_loot(source);
+    }
+
+    /// The shared part of vanilla `LivingEntity.dropAllDeathLoot`.
+    fn living_drop_all_death_loot(&self, source: &DamageSource) {
         let Some(world) = self.level() else {
             return;
         };
