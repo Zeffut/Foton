@@ -21,20 +21,15 @@ use steel_registry::vanilla_entity_data::AbstractBoatEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
-use super::boat_common::{self, BOAT_GRAVITY, BoatLike, BoatState, MAX_PASSENGERS};
+use steel_utils::types::InteractionHand;
+
+use super::boat_common::{
+    self, BOAT_GRAVITY, BOAT_RIDE_HEIGHT, BoatLike, BoatState, MAX_PASSENGERS, RAFT_RIDE_HEIGHT,
+};
+use crate::behavior::InteractionResult;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData};
+use crate::player::Player;
 use crate::world::World;
-
-/// How high a rider sits in a boat, as a share of its height.
-///
-/// Vanilla parity: `Boat.rideHeight`.
-const BOAT_RIDE_HEIGHT: f64 = 1.0 / 3.0;
-
-/// How high a rider sits on a raft.
-///
-/// Vanilla parity: `Raft.rideHeight`. A raft has no hull, so the rider sits
-/// almost on top of it.
-const RAFT_RIDE_HEIGHT: f64 = 0.888_888_9;
 
 /// Declares one boat shape.
 ///
@@ -122,6 +117,18 @@ macro_rules! boat_body {
 
             fn sound_source(&self) -> SoundSource {
                 SoundSource::Neutral
+            }
+
+            /// Vanilla parity: `AbstractBoat.interact`, the right-click that
+            /// puts a player in the boat. Without it a boat floats, drifts and
+            /// accepts a steering packet it will never be sent.
+            fn interact(
+                &self,
+                player: &Player,
+                _hand: InteractionHand,
+                _location: DVec3,
+            ) -> InteractionResult {
+                boat_common::interact_boat(self, player)
             }
 
             /// Vanilla parity: `AbstractBoat.canAddPassenger`, which refuses a

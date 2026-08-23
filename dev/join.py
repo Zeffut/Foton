@@ -57,11 +57,13 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+PLAY_C_SET_PASSENGERS = 107
 PLAY_C_SYSTEM_CHAT = 121
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
 PLAY_S_CONTAINER_CLOSE = 19
+PLAY_S_INTERACT = 26
 PLAY_S_USE_ITEM_ON = 66
 PLAY_S_USE_ITEM = 67
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
@@ -86,7 +88,9 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # starting with `!` is a client action rather than a chat command:
 # `!hotbar <slot>` selects a hotbar slot, `!useon <x> <y> <z> [face]`
 # right-clicks a block face, `!useitem [yaw] [pitch]` right-clicks
-# without one, and `!close` shuts whatever screen is open. Those are the only way to reach an item's `use_on` and
+# without one, `!close` shuts whatever screen is open, and
+# `!useentity <type>` / `!sneakuse <type>` right-click the last entity of
+# that type to spawn, with and without sneaking. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
@@ -128,6 +132,9 @@ class Connection:
         # The container id of the screen the server last opened, so `!close`
         # can shut that exact one.
         self.open_container = None
+        # The id of the last entity spawned of each type name, so `!useentity`
+        # can right-click one without the test having to guess a number.
+        self.entities = {}
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -276,15 +283,15 @@ def acknowledge_chunk_batch(connection):
     )
 
 
-def read_add_entity_type(payload):
-    """Returns the entity type id out of a play AddEntity packet.
+def read_add_entity(payload):
+    """Returns `(entity id, type id)` out of a play AddEntity packet.
 
-    The packet opens with the entity id, a raw sixteen-byte UUID, then the type,
-    which is all this needs; the position and rotation that follow are ignored.
+    The packet opens with the entity id, a raw sixteen-byte UUID, then the type;
+    the position and rotation that follow are ignored.
     """
-    _entity_id, rest = read_varint(payload)
+    entity_id, rest = read_varint(payload)
     entity_type, _rest = read_varint(rest[16:])
-    return entity_type
+    return entity_id, entity_type
 
 
 def entity_names():
@@ -361,8 +368,11 @@ def run_play(connection, watch_seconds=0):
         seen[packet_id] = seen.get(packet_id, 0) + 1
 
         if packet_id == PLAY_C_ADD_ENTITY:
-            spawn_type = read_add_entity_type(payload)
+            entity_id, spawn_type = read_add_entity(payload)
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
+            name = ENTITY_NAMES.get(spawn_type)
+            if name:
+                connection.entities[name] = entity_id
 
         if packet_id == PLAY_C_LOGIN:
             entity_id = struct.unpack(">i", payload[:4])[0]
@@ -390,6 +400,9 @@ def run_play(connection, watch_seconds=0):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_SET_PASSENGERS:
+            # Who is riding what. Nothing else says a player actually boarded.
+            report_passengers(payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -451,8 +464,11 @@ def pump(connection, seconds, spawned):
             break
 
         if packet_id == PLAY_C_ADD_ENTITY:
-            spawn_type = read_add_entity_type(payload)
+            entity_id, spawn_type = read_add_entity(payload)
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
+            name = ENTITY_NAMES.get(spawn_type)
+            if name:
+                connection.entities[name] = entity_id
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
         elif packet_id == PLAY_C_PLAYER_POSITION:
@@ -467,6 +483,9 @@ def pump(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_SET_PASSENGERS:
+            # Who is riding what. Nothing else says a player actually boarded.
+            report_passengers(payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -541,9 +560,47 @@ def run_directive(connection, directive):
         send_use_item_on(connection, x, y, z, face)
     elif parts[0] == "close":
         send_container_close(connection)
+    elif parts[0] == "useentity":
+        send_interact(connection, parts[1], secondary=False)
+    elif parts[0] == "sneakuse":
+        send_interact(connection, parts[1], secondary=True)
     else:
         fail(f"unknown directive {directive}")
     return True
+
+
+def report_passengers(payload):
+    """Prints the vehicle and its riders out of a SetPassengers packet."""
+    vehicle, rest = read_varint(payload)
+    count, rest = read_varint(rest)
+    riders = []
+    for _ in range(count):
+        rider, rest = read_varint(rest)
+        riders.append(rider)
+    if riders:
+        print(f"  entity {vehicle} is carrying {riders}")
+    else:
+        print(f"  entity {vehicle} is carrying nobody")
+
+
+def send_interact(connection, name, secondary):
+    """Right-clicks the last entity spawned of type `name`.
+
+    An entity interaction has no command behind it, so a boat that cannot be
+    boarded and a boat that can look exactly alike from the outside without
+    this. `secondary` is the sneak that vanilla reads to tell "ride this" from
+    "open this".
+    """
+    entity_id = connection.entities.get(name)
+    if entity_id is None:
+        fail(f"no {name} has spawned, so there is nothing to right-click")
+    payload = varint(entity_id)
+    payload += varint(0)  # main hand
+    payload += b"\x00"  # a zero first byte is the whole of an empty LpVec3
+    payload += b"\x01" if secondary else b"\x00"
+    connection.send(PLAY_S_INTERACT, payload)
+    verb = "sneak-right-clicked" if secondary else "right-clicked"
+    print(f"  {verb} the {name} (entity {entity_id})")
 
 
 def send_container_close(connection):
@@ -589,8 +646,11 @@ def watch_for_spawns(connection, seconds, spawned):
             break
 
         if packet_id == PLAY_C_ADD_ENTITY:
-            spawn_type = read_add_entity_type(payload)
+            entity_id, spawn_type = read_add_entity(payload)
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
+            name = ENTITY_NAMES.get(spawn_type)
+            if name:
+                connection.entities[name] = entity_id
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
         elif packet_id == PLAY_C_PLAYER_POSITION:
@@ -605,6 +665,9 @@ def watch_for_spawns(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_SET_PASSENGERS:
+            # Who is riding what. Nothing else says a player actually boarded.
+            report_passengers(payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:

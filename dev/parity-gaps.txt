@@ -111,7 +111,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 100
+[entities] 98
 Allay
 Armadillo
 ArmorStand
@@ -124,8 +124,6 @@ BreezeWindCharge
 Camel
 CamelHusk
 Cat
-ChestBoat
-ChestRaft
 CopperGolem
 Creaking
 Dolphin

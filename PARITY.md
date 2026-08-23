@@ -48,12 +48,15 @@ cannot.
 
 - [x] **Smelting.** Furnace, smoker, blast furnace had no behavior.
 - [x] **Renewable wood.** Saplings never grew.
-- [~] **Boats and rafts** (20 entity entries, 20 item entries). `Boat` and
-      `Raft` float, carry riders, are steered by the rider's client, and can be
-      placed from the item -- a player can cross water. Still open: `ChestBoat`
-      and `ChestRaft` (ten entity entries, and a container; their items exist
-      and refuse cleanly), the `SPaddleBoat` packet so rowing animates, and the
-      second seat.
+- [~] **Boats and rafts** (30 entity entries, 30 item entries). `Boat`,
+      `Raft`, `ChestBoat` and `ChestRaft` float, are placed from the item, and
+      are boarded by right-clicking -- until that last part landed a boat could
+      be built and steered but never got in, because nothing turned a
+      right-click into a rider. A chest boat's twenty-seven slots open on a
+      sneak. Still open: the `SPaddleBoat` packet so rowing animates, the
+      second seat, and the fact that a boat cannot be broken at all, which is
+      also why a chest boat never spills its contents -- there is no way to
+      destroy one yet.
 - [ ] **Minecarts** (6 entries). Rails already work; the carts do not exist.
 - [x] **Storage that travels**: shulker box (17), ender chest and trapped
       chest. The trapped chest needed the container opener count first --
@@ -117,6 +120,8 @@ a furnace has no behavior. These scripts can:
 - `dev/enderchest-test.sh` -- right-clicking an ender chest opens a container.
 - `dev/spawnegg-test.sh` -- a spawn egg used by hand makes the mob.
 - `dev/boat-test.sh` -- a boat put on water is still on it afterwards.
+- `dev/ride-test.sh` -- right-clicking a boat puts the player in it, sneaking
+  does not, and a chest boat opens its chest on a sneak and boards on a click.
 - `dev/openers-test.sh` -- an open trapped chest powers redstone and a
   closed one stops, a plain chest powers nothing, a chest under a solid
   block refuses to open, and a barrel looks open while somebody is in it.

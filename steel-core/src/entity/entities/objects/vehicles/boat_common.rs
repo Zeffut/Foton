@@ -19,9 +19,11 @@ use steel_registry::vanilla_blocks;
 use steel_utils::BlockPos;
 use steel_utils::locks::SyncMutex;
 
+use crate::behavior::InteractionResult;
 use crate::entity::Entity;
 use crate::fluid::{FluidStateExt as _, get_height};
 use crate::physics::MoverType;
+use crate::player::Player;
 use crate::world::{LevelReader as _, World};
 
 /// How long a submerged boat carries its passengers before throwing them out.
@@ -31,6 +33,17 @@ const TIME_TO_EJECT_TICKS: f32 = 60.0;
 
 /// Vanilla parity: `AbstractBoat.getDefaultGravity`.
 pub(super) const BOAT_GRAVITY: f64 = 0.04;
+
+/// How high a rider sits in a boat, as a share of its height.
+///
+/// Vanilla parity: `Boat.rideHeight`.
+pub(super) const BOAT_RIDE_HEIGHT: f64 = 1.0 / 3.0;
+
+/// How high a rider sits on a raft.
+///
+/// Vanilla parity: `Raft.rideHeight`. A raft has no hull, so the rider sits
+/// almost on top of it.
+pub(super) const RAFT_RIDE_HEIGHT: f64 = 0.888_888_9;
 
 /// How much of its speed a boat keeps each tick in water.
 const WATER_DRAG: f64 = 0.9;
@@ -112,6 +125,33 @@ pub(super) trait BoatLike: Entity {
     ///
     /// Vanilla parity: `AbstractBoat.rideHeight`, the one thing a raft changes.
     fn ride_height(&self, dimensions: EntityDimensions) -> f64;
+}
+
+/// Boards a player, or refuses to.
+///
+/// Vanilla parity: `AbstractBoat.interact`. Sneaking passes rather than
+/// boarding, which is what leaves room for a chest boat to be opened instead,
+/// and a boat that has spent three seconds upside down will not take a rider
+/// at all -- otherwise a player could climb into a boat that is already
+/// throwing its passengers out.
+pub(super) fn interact_boat<B: BoatLike>(boat: &B, player: &Player) -> InteractionResult {
+    if player.is_secondary_use_active() {
+        return InteractionResult::Pass;
+    }
+    if boat.boat_state().lock().out_of_control_ticks >= TIME_TO_EJECT_TICKS {
+        return InteractionResult::Pass;
+    }
+    let Some(world) = boat.level() else {
+        return InteractionResult::Pass;
+    };
+    let Some(vehicle) = world.get_entity_by_id(boat.id()) else {
+        return InteractionResult::Pass;
+    };
+    if player.start_riding(&vehicle) {
+        InteractionResult::Success
+    } else {
+        InteractionResult::Pass
+    }
 }
 
 /// Runs one tick of a boat's own physics.
