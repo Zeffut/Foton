@@ -128,7 +128,7 @@ impl JukeboxBlockEntity {
             );
         }
         self.state.lock().song = Some(song);
-        self.notify_neighbors(world);
+        self.on_song_changed(world);
     }
 
     /// Throws the disc back out.
@@ -146,7 +146,7 @@ impl JukeboxBlockEntity {
         self.stop(world);
         self.set_has_record(world, false);
         world.drop_item_stack(self.base.pos().above(), item);
-        self.notify_neighbors(world);
+        self.on_song_changed(world);
     }
 
     /// Stops whatever is playing.
@@ -169,7 +169,7 @@ impl JukeboxBlockEntity {
             &GameEventContext::new(None, None),
         );
         world.level_event(level_events::SOUND_STOP_JUKEBOX_SONG, pos, 0, None);
-        self.notify_neighbors(world);
+        self.on_song_changed(world);
     }
 
     /// Flips the `has_record` property, which is what makes the model change.
@@ -191,10 +191,16 @@ impl JukeboxBlockEntity {
         );
     }
 
-    /// Vanilla parity: `JukeboxBlockEntity.onSongChanged`.
-    fn notify_neighbors(&self, world: &Arc<World>) {
+    /// Tells the world the song changed.
+    ///
+    /// Vanilla parity: `JukeboxBlockEntity.onSongChanged`, which is both halves
+    /// -- the neighbor update that a comparator reads, and the `setChanged`
+    /// that marks the chunk for saving. Without the second the disc inside can
+    /// be lost when the world is written out.
+    fn on_song_changed(&self, world: &Arc<World>) {
         let pos = self.base.pos();
         world.update_neighbors_at(pos, world.get_block_state(pos).get_block());
+        self.base.set_changed();
     }
 }
 

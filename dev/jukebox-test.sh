@@ -58,14 +58,13 @@ CMDS="$CMDS;;setblock 0 100 0 minecraft:jukebox"
 CMDS="$CMDS;;setblock 1 100 0 minecraft:redstone_lamp"
 # A comparator reading the jukebox and feeding dust. Its `facing` names the
 # side it reads from, not the side it feeds, so a comparator north of the
-# jukebox faces south to read it. This is the
-# jukebox's other answer: the lamp only knows whether music is playing,
-# while the comparator says which record it is. `music_disc_13` reads 1.
+# jukebox faces south to read it. This is the jukebox's other answer: the lamp
+# only knows whether music is playing, while the comparator says which record
+# it is. `music_disc_13` reads 1.
 CMDS="$CMDS;;setblock 0 99 -1 minecraft:stone"
 CMDS="$CMDS;;setblock 0 99 -2 minecraft:stone"
 CMDS="$CMDS;;setblock 0 100 -1 minecraft:comparator[facing=south]"
 CMDS="$CMDS;;setblock 0 100 -2 minecraft:redstone_wire"
-CMDS="$CMDS;;teleback"
 CMDS="$CMDS;;teleport @s 2 100 0"
 
 CMDS="$CMDS;;execute if block 0 100 0 minecraft:jukebox[has_record=false] run tellraw @s \"STARTSEMPTY\""
@@ -86,7 +85,12 @@ CMDS="$CMDS;;execute if block 0 100 -2 minecraft:redstone_wire[power=1] run tell
 CMDS="$CMDS;;!useon 0 100 0 up"
 CMDS="$CMDS;;execute if block 0 100 0 minecraft:jukebox[has_record=false] run tellraw @s \"DISCCAMEOUT\""
 CMDS="$CMDS;;execute if block 1 100 0 minecraft:redstone_lamp[lit=false] run tellraw @s \"LAMPWENTOFF\""
-CMDS="$CMDS;;execute if entity @e[type=minecraft:item,x=0,y=101,z=0,distance=..3] run tellraw @s \"DISCISONTHEGROUND\""
+# The ejected disc becomes an item entity. Where it ends up is not asserted:
+# it leaves with a random nudge and rolls, and pinning it to a radius made this
+# test fail about one run in six for reasons that had nothing to do with the
+# jukebox. Nothing else in this test drops anything, so the existence of an
+# item entity is specific enough to mean the disc came out.
+CMDS="$CMDS;;execute if entity @e[type=minecraft:item] run tellraw @s \"DISCBECAMEANITEM\""
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
@@ -96,7 +100,7 @@ cleanup
 
 echo "=== what happened ==="
 grep "server says" join.log \
-  | grep -oE "STARTSEMPTY|LAMPSTARTSOFF|DISCWENTIN|LAMPCAMEON|DISCCAMEOUT|LAMPWENTOFF|DISCISONTHEGROUND|DUSTSTARTSDARK|COMPARATORREADSONE"
+  | grep -oE "STARTSEMPTY|LAMPSTARTSOFF|DUSTSTARTSDARK|DISCWENTIN|LAMPCAMEON|COMPARATORREADSONE|DISCCAMEOUT|LAMPWENTOFF|DISCBECAMEANITEM"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 
@@ -112,5 +116,5 @@ said DUSTSTARTSDARK    || fail "the comparator read something from an empty juke
 said COMPARATORREADSONE || fail "the comparator did not read the disc"
 said DISCCAMEOUT       || fail "right-clicking a full jukebox did not eject the disc"
 said LAMPWENTOFF       || fail "the jukebox kept powering redstone after the disc came out"
-said DISCISONTHEGROUND || fail "the ejected disc did not land as an item"
+said DISCBECAMEANITEM  || fail "the ejected disc did not become an item"
 echo "########## JUKEBOX TEST PASSED ##########"
