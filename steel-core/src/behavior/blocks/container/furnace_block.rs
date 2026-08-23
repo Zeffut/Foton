@@ -140,15 +140,16 @@ fn analog_output_signal(world: &dyn LevelReader, pos: BlockPos) -> i32 {
         })
 }
 
-/// Declares one furnace variant and forwards its behavior to the shared base.
+/// Forwards one furnace variant's behavior to the shared base.
+///
+/// The struct itself is declared outside this macro on purpose: the block
+/// behavior codegen finds behaviors by scanning for `#[block_behavior]` on a
+/// named struct, and a `pub struct $name` inside a macro is invisible to it.
+/// A behavior it cannot see is silently never registered -- which is exactly
+/// what happened to all three furnaces, so right-clicking one did nothing and
+/// smelting was unreachable.
 macro_rules! furnace_variant {
-    ($name:ident, $be_type:expr, $menu_type:expr, $title:expr, $doc:literal) => {
-        #[doc = $doc]
-        #[block_behavior]
-        pub struct $name {
-            inner: AbstractFurnaceBlock,
-        }
-
+    ($name:ident, $be_type:expr, $menu_type:expr, $title:expr) => {
         impl $name {
             #[doc = "Creates the behavior for this block."]
             #[must_use]
@@ -214,26 +215,41 @@ macro_rules! furnace_variant {
     };
 }
 
+/// Behavior for the furnace block.
+#[block_behavior]
+pub struct FurnaceBlock {
+    inner: AbstractFurnaceBlock,
+}
+
+/// Behavior for the smoker block, which cooks food twice as fast.
+#[block_behavior]
+pub struct SmokerBlock {
+    inner: AbstractFurnaceBlock,
+}
+
+/// Behavior for the blast furnace block, which smelts ore twice as fast.
+#[block_behavior]
+pub struct BlastFurnaceBlock {
+    inner: AbstractFurnaceBlock,
+}
+
 furnace_variant!(
     FurnaceBlock,
     &vanilla_block_entity_types::FURNACE,
     &vanilla_menu_types::FURNACE,
-    translations::CONTAINER_FURNACE.msg(),
-    "Behavior for the furnace block."
+    translations::CONTAINER_FURNACE.msg()
 );
 
 furnace_variant!(
     SmokerBlock,
     &vanilla_block_entity_types::SMOKER,
     &vanilla_menu_types::SMOKER,
-    translations::CONTAINER_SMOKER.msg(),
-    "Behavior for the smoker block, which cooks food twice as fast."
+    translations::CONTAINER_SMOKER.msg()
 );
 
 furnace_variant!(
     BlastFurnaceBlock,
     &vanilla_block_entity_types::BLAST_FURNACE,
     &vanilla_menu_types::BLAST_FURNACE,
-    translations::CONTAINER_BLAST_FURNACE.msg(),
-    "Behavior for the blast furnace block, which smelts ore twice as fast."
+    translations::CONTAINER_BLAST_FURNACE.msg()
 );
