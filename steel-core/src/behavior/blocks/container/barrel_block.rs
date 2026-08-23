@@ -4,11 +4,14 @@
 
 use std::sync::{Arc, Weak};
 
+use glam::DVec3;
 use steel_macros::block_behavior;
+use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::blocks::properties::BoolProperty;
 use steel_registry::blocks::properties::{BlockStateProperties, Direction, EnumProperty};
+use steel_registry::sound_event::SoundEventRef;
 use steel_registry::{sound_events, vanilla_block_entity_types};
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, translations};
@@ -38,11 +41,32 @@ const FACING: &EnumProperty<Direction> = &BlockStateProperties::FACING;
 /// Whether the barrel is being looked into.
 const OPEN: &BoolProperty = &BlockStateProperties::OPEN;
 
-/// Pitch of the lid.
+/// How loud the lid is.
 ///
-/// Vanilla randomizes this a little; Steel plays the middle of that range
-/// until block sounds carry a random pitch.
-const LID_PITCH: f32 = 1.0;
+/// Vanilla parity: the `0.5F` of `BarrelBlockEntity.playSound`.
+const LID_VOLUME: f32 = 0.5;
+
+/// Plays the lid half a block out from the face the barrel opens through.
+///
+/// Vanilla parity: `BarrelBlockEntity.playSound`. The offset is audible: a
+/// barrel in a wall should sound from the side you can reach, not from inside
+/// the wall.
+fn play_lid(world: &Arc<World>, pos: BlockPos, state: BlockStateId, sound: SoundEventRef) {
+    let (step_x, step_y, step_z) = state.get_value(FACING).offset();
+    let position = DVec3::new(
+        f64::from(pos.x()) + 0.5 + f64::from(step_x) / 2.0,
+        f64::from(pos.y()) + 0.5 + f64::from(step_y) / 2.0,
+        f64::from(pos.z()) + 0.5 + f64::from(step_z) / 2.0,
+    );
+    world.play_sound_at(
+        sound,
+        SoundSource::Blocks,
+        position,
+        LID_VOLUME,
+        rand::random::<f32>().mul_add(0.1, 0.9),
+        None,
+    );
+}
 
 impl BarrelBlock {
     /// Creates a new barrel block behavior.
@@ -91,19 +115,19 @@ impl BlockBehavior for BarrelBlock {
         InteractionResult::Success
     }
 
-    /// Vanilla parity: `BarrelBlockEntity.updateBlockState` on open.
+    /// Vanilla parity: the `onOpen` of `BarrelBlockEntity.openersCounter`.
     ///
     /// The `open` property is the only thing that makes a barrel look open, so
     /// without it a player has no idea anyone is in theirs.
     fn on_container_open(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {
+        play_lid(world, pos, state, &sound_events::BLOCK_BARREL_OPEN);
         world.set_block(pos, state.set_value(OPEN, true), UpdateFlags::UPDATE_ALL);
-        world.play_block_sound(&sound_events::BLOCK_BARREL_OPEN, pos, 0.5, LID_PITCH, None);
     }
 
-    /// Vanilla parity: `BarrelBlockEntity.updateBlockState` on close.
+    /// Vanilla parity: the `onClose` of `BarrelBlockEntity.openersCounter`.
     fn on_container_close(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {
+        play_lid(world, pos, state, &sound_events::BLOCK_BARREL_CLOSE);
         world.set_block(pos, state.set_value(OPEN, false), UpdateFlags::UPDATE_ALL);
-        world.play_block_sound(&sound_events::BLOCK_BARREL_CLOSE, pos, 0.5, LID_PITCH, None);
     }
 
     fn new_block_entity(

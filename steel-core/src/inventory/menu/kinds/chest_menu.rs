@@ -11,6 +11,7 @@ use steel_registry::vanilla_menu_types;
 use std::iter;
 
 use crate::block_entity::BlockEntityBase;
+use crate::entity::Entity as _;
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
 
@@ -125,18 +126,26 @@ impl ChestKind {
 }
 
 impl MenuKind for ChestKind {
-    /// Vanilla parity: `ChestBlockEntity.startOpen`.
+    /// Vanilla parity: `ChestBlockEntity.startOpen`, which ignores spectators
+    /// -- a spectator looking into a chest must not raise its lid or power a
+    /// trapped chest, because nobody can see them do it.
     fn on_open(
         &mut self,
         _behavior: &mut MenuBehavior,
         _guard: &mut ContainerLockGuard,
-        _player: &Player,
+        player: &Player,
     ) {
+        if player.is_spectator() {
+            return;
+        }
         self.for_each_owner(BlockEntityBase::increment_openers);
     }
 
     /// Vanilla parity: `ChestBlockEntity.stopOpen`.
-    fn removed(&mut self, _behavior: &mut MenuBehavior, _player: &Player) {
+    fn removed(&mut self, _behavior: &mut MenuBehavior, player: &Player) {
+        if player.is_spectator() {
+            return;
+        }
         self.for_each_owner(BlockEntityBase::decrement_openers);
     }
 

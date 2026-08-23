@@ -59,19 +59,29 @@ CMDS='gamemode creative'
 CMDS="$CMDS;;teleport @s 0 101 0"
 CMDS="$CMDS;;setblock 0 100 0 minecraft:trapped_chest"
 CMDS="$CMDS;;setblock 1 100 0 minecraft:redstone_lamp"
+# Dust beside it, on a block of its own: a wire asks the block a different
+# question than a lamp does, and a trapped chest that lights a lamp but leaves
+# the dust dark is the classic way to get this half right. Dust needs
+# something solid underneath or it pops straight off, and a missing wire makes
+# every question about it answer the wrong way.
+CMDS="$CMDS;;setblock 0 99 -1 minecraft:stone"
+CMDS="$CMDS;;setblock 0 100 -1 minecraft:redstone_wire"
 CMDS="$CMDS;;setblock 5 100 0 minecraft:chest"
 CMDS="$CMDS;;setblock 6 100 0 minecraft:redstone_lamp"
 CMDS="$CMDS;;setblock 0 100 4 minecraft:trapped_chest"
 CMDS="$CMDS;;setblock 0 101 4 minecraft:stone"
 CMDS="$CMDS;;teleport @s 3 100 1"
 CMDS="$CMDS;;execute if block 1 100 0 minecraft:redstone_lamp[lit=false] run tellraw @s \"LAMPSTARTSOFF\""
+CMDS="$CMDS;;execute if block 0 100 -1 minecraft:redstone_wire[power=0] run tellraw @s \"DUSTSTARTSDARK\""
 CMDS="$CMDS;;clear @s"
 CMDS="$CMDS;;!hotbar 0"
 CMDS="$CMDS;;!useon 0 100 0 east"
 CMDS="$CMDS;;execute if block 1 100 0 minecraft:redstone_lamp[lit=true] run tellraw @s \"LAMPCAMEON\""
+CMDS="$CMDS;;execute if block 0 100 -1 minecraft:redstone_wire[power=1] run tellraw @s \"DUSTGOTPOWER\""
 # closing it has to take the signal away again
 CMDS="$CMDS;;!close"
 CMDS="$CMDS;;execute if block 1 100 0 minecraft:redstone_lamp[lit=false] run tellraw @s \"LAMPWENTOFF\""
+CMDS="$CMDS;;execute if block 0 100 -1 minecraft:redstone_wire[power=0] run tellraw @s \"DUSTWENTDARK\""
 # a plain chest, opened the same way, powers nothing at all
 CMDS="$CMDS;;!useon 5 100 0 west"
 CMDS="$CMDS;;execute if block 6 100 0 minecraft:redstone_lamp[lit=false] run tellraw @s \"CONTROLSTAYSOFF\""
@@ -106,10 +116,13 @@ said() { grep "server says" join.log | grep -q "$1"; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
 said LAMPSTARTSOFF   || fail "the lamp was lit before anyone opened anything"
+said DUSTSTARTSDARK  || fail "the dust was powered before anyone opened anything"
 screens=$(grep -c 'a screen opened' join.log)
 [ "$screens" -eq 3 ]   || fail "expected two chests and a barrel to open and the buried chest not to, got $screens"
 said LAMPCAMEON      || fail "opening the trapped chest powered nothing"
+said DUSTGOTPOWER    || fail "the lamp lit but the dust beside the chest stayed dark"
 said LAMPWENTOFF     || fail "closing the trapped chest left the signal on"
+said DUSTWENTDARK    || fail "the dust stayed powered after the chest closed"
 said CONTROLSTAYSOFF || fail "a plain chest powered redstone too"
 said BARRELSTARTSSHUT || fail "the barrel was already open"
 said BARRELLOOKSOPEN  || fail "opening the barrel left it looking shut"

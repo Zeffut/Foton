@@ -49,9 +49,12 @@ pub(crate) use storage::{
     DetachedBlockEntity, LifecycleDispatchers,
 };
 
+use steel_registry::vanilla_game_events;
+
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::inventory::lock::ContainerRef;
 use crate::player::Player;
+use crate::world::game_event::GameEventContext;
 
 use crate::world::World;
 use crate::world::game_event::SharedGameEventListener;
@@ -244,13 +247,17 @@ impl BlockEntityBase {
 
     /// Records one fewer.
     ///
-    /// Vanilla parity: `ContainerOpenersCounter.decrementOpeners`.
+    /// Vanilla parity: `ContainerOpenersCounter.decrementOpeners`, with one
+    /// deliberate difference. Vanilla lets the count go negative and repairs it
+    /// from `scheduleRecheck`, which recounts the players actually standing
+    /// near the block; Steel has no such recheck yet, so a close for a menu the
+    /// server already dropped would leave a chest needing that many extra opens
+    /// before it looked open again. Clamping here cannot make a container look
+    /// wrong, only stop it from getting stuck.
     pub fn decrement_openers(&self) {
         let previous = self.open_count.fetch_sub(1, Ordering::Relaxed);
         let current = (previous - 1).max(0);
         if previous <= 0 {
-            // Nothing was open; keep the count from going negative, which would
-            // leave a chest stuck shut for as many opens as it went under.
             self.open_count.store(0, Ordering::Relaxed);
             return;
         }
@@ -267,8 +274,18 @@ impl BlockEntityBase {
 
         if previous == 0 && current > 0 {
             behavior.on_container_open(&world, pos, state);
+            world.game_event(
+                &vanilla_game_events::CONTAINER_OPEN,
+                pos,
+                &GameEventContext::new(None, None),
+            );
         } else if previous > 0 && current == 0 {
             behavior.on_container_close(&world, pos, state);
+            world.game_event(
+                &vanilla_game_events::CONTAINER_CLOSE,
+                pos,
+                &GameEventContext::new(None, None),
+            );
         }
 
         behavior.on_opener_count_changed(&world, pos, state, previous, current);

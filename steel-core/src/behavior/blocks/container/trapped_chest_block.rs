@@ -130,14 +130,21 @@ impl BlockBehavior for TrappedChestBlock {
         true
     }
 
-    /// Vanilla parity: `TrappedChestBlock.getSignal`, one level of signal per
+    /// Vanilla parity: `TrappedChestBlock.ownSignal`, one level of signal per
     /// player looking inside, up to fifteen.
-    fn get_signal(
+    ///
+    /// This is `own_signal` rather than `get_signal` because that is the one
+    /// vanilla overrides. `get_signal` falls back to `own_signal`, so this
+    /// covers both, whereas overriding only `get_signal` would leave
+    /// `get_best_own_or_neighbour_signal` reading zero. Nothing asks that
+    /// question of a trapped chest today -- wire reaches this through
+    /// `get_signal` either way -- so the difference is not observable yet; it
+    /// is written the vanilla way so it stays right when something does.
+    fn get_own_signal(
         &self,
         _state: BlockStateId,
         world: &dyn LevelReader,
         pos: BlockPos,
-        _direction: Direction,
         _context: SignalQueryContext,
     ) -> i32 {
         Self::viewers(world, pos).clamp(0, MAX_SIGNAL)

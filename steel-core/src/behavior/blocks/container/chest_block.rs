@@ -6,8 +6,11 @@
 
 use std::sync::{Arc, Weak};
 
+use glam::DVec3;
+
 use smallvec::smallvec;
 use steel_macros::block_behavior;
+use steel_protocol::packets::game::SoundSource;
 use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
@@ -15,6 +18,8 @@ use steel_registry::blocks::properties::{
     BlockStateProperties, BoolProperty, ChestType, Direction, EnumProperty,
 };
 use steel_registry::fluid::FluidStateExt;
+use steel_registry::sound_event::SoundEventRef;
+use steel_registry::sound_events;
 use steel_registry::vanilla_block_entity_types;
 use steel_utils::{BlockPos, BlockStateId, translations};
 use text_components::TextComponent;
@@ -53,6 +58,16 @@ const WATERLOGGED: &BoolProperty = &BlockStateProperties::WATERLOGGED;
 /// Rows of nine slots in a single chest.
 const CHEST_ROWS: usize = 3;
 
+/// How loud the lid is.
+///
+/// Vanilla parity: the `0.5F` of `ChestBlockEntity.playSound`.
+const LID_VOLUME: f32 = 0.5;
+
+/// Vanilla parity: the `random.nextFloat() * 0.1F + 0.9F` every lid uses.
+fn lid_pitch() -> f32 {
+    rand::random::<f32>().mul_add(0.1, 0.9)
+}
+
 impl ChestBlock {
     /// Creates a new chest block behavior for the given block.
     #[must_use]
@@ -61,6 +76,39 @@ impl ChestBlock {
             block,
             block_entity_type: &vanilla_block_entity_types::CHEST,
         }
+    }
+
+    /// Plays the lid at the place vanilla plays it.
+    ///
+    /// Vanilla parity: `ChestBlockEntity.playSound`. The left half of a double
+    /// chest stays silent and the right half plays for both, shifted half a
+    /// block toward its partner, so one chest makes one sound from the middle
+    /// of the pair rather than two from its ends.
+    fn play_lid(world: &Arc<World>, pos: BlockPos, state: BlockStateId, sound: SoundEventRef) {
+        let chest_type = state.get_value(TYPE);
+        if chest_type == ChestType::Left {
+            return;
+        }
+
+        let mut position = DVec3::new(
+            f64::from(pos.x()) + 0.5,
+            f64::from(pos.y()) + 0.5,
+            f64::from(pos.z()) + 0.5,
+        );
+        if chest_type == ChestType::Right {
+            let (step_x, step_z) = Self::connected_direction(state).offset_xz();
+            position.x += f64::from(step_x) * 0.5;
+            position.z += f64::from(step_z) * 0.5;
+        }
+
+        world.play_sound_at(
+            sound,
+            SoundSource::Blocks,
+            position,
+            LID_VOLUME,
+            lid_pitch(),
+            None,
+        );
     }
 
     /// Creates the chest behavior a trapped chest is built on.
@@ -338,6 +386,16 @@ impl BlockBehavior for ChestBlock {
         } else {
             smallvec![first]
         }
+    }
+
+    /// Vanilla parity: the `onOpen` of `ChestBlockEntity.openersCounter`.
+    fn on_container_open(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {
+        Self::play_lid(world, pos, state, &sound_events::BLOCK_CHEST_OPEN);
+    }
+
+    /// Vanilla parity: the `onClose` of `ChestBlockEntity.openersCounter`.
+    fn on_container_close(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {
+        Self::play_lid(world, pos, state, &sound_events::BLOCK_CHEST_CLOSE);
     }
 
     fn has_analog_output_signal(&self, _state: BlockStateId) -> bool {
