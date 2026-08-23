@@ -9,6 +9,7 @@ use glam::DVec3;
 use steel_macros::entity_behavior;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::vanilla_entity_data::PrimedTntEntityData;
+use steel_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use steel_registry::{vanilla_blocks, vanilla_entities};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
@@ -158,7 +159,7 @@ impl PrimedTntEntity {
                 None,
                 power,
                 false,
-                ExplosionBlockInteraction::Destroy,
+                world.explosion_destroy_type(&TNT_EXPLOSION_DROP_DECAY),
             ),
             center,
         );

@@ -470,6 +470,10 @@ impl Entity for MushroomCowEntity {
 }
 
 impl LivingEntity for MushroomCowEntity {
+    fn mooshroom_loot_variant(&self) -> Option<&'static str> {
+        Some(self.variant().serialized_name())
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

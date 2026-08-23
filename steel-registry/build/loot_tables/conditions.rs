@@ -159,6 +159,10 @@ pub(super) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
                             equipment: None,
                             sheep_color: None,
                             sheep_sheared: None,
+                            chicken_variant: None,
+                            mooshroom_variant: None,
+                            cube_size: None,
+                            unsupported: &[],
                         }
                     }
                 }
@@ -170,6 +174,10 @@ pub(super) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
                         equipment: None,
                         sheep_color: None,
                         sheep_sheared: None,
+                        chicken_variant: None,
+                        mooshroom_variant: None,
+                        cube_size: None,
+                        unsupported: &[],
                     }
                 }
             };

@@ -17,7 +17,7 @@ use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::vanilla_entity_data::WitherSkullEntityData;
-use steel_registry::vanilla_game_rules::MOB_GRIEFING;
+use steel_registry::vanilla_game_rules::{MOB_EXPLOSION_DROP_DECAY, MOB_GRIEFING};
 use steel_registry::{vanilla_damage_types, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::Difficulty;
@@ -262,7 +262,7 @@ impl Projectile for WitherSkullEntity {
         // through the `mobGriefing` rule; the fire flag is hard false, so a
         // skull never leaves flames the way a ghast's fireball does.
         let interaction = if world.get_game_rule(&MOB_GRIEFING) {
-            ExplosionBlockInteraction::Destroy
+            world.explosion_destroy_type(&MOB_EXPLOSION_DROP_DECAY)
         } else {
             ExplosionBlockInteraction::Keep
         };

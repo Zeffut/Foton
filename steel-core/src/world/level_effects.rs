@@ -264,12 +264,37 @@ impl World {
         self.destroy_block_with_limit_and_entity(pos, drop_items, recursion_left, None)
     }
 
+    /// Destroys a block as part of an explosion, thinning its drops when the
+    /// blast decays them.
+    ///
+    /// Vanilla parity: `BlockBehaviour.onExplosionHit`. `explosion_radius` is
+    /// `Some` only for `DESTROY_WITH_DECAY`.
+    pub(super) fn destroy_block_from_explosion(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        entity: Option<&dyn Entity>,
+        explosion_radius: Option<f32>,
+    ) -> bool {
+        self.destroy_block_inner(pos, true, 512, entity, explosion_radius)
+    }
+
     pub(super) fn destroy_block_with_limit_and_entity(
         self: &Arc<Self>,
         pos: BlockPos,
         drop_items: bool,
         recursion_left: i32,
         entity: Option<&dyn Entity>,
+    ) -> bool {
+        self.destroy_block_inner(pos, drop_items, recursion_left, entity, None)
+    }
+
+    fn destroy_block_inner(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        drop_items: bool,
+        recursion_left: i32,
+        entity: Option<&dyn Entity>,
+        explosion_radius: Option<f32>,
     ) -> bool {
         let state = self.get_block_state(pos);
         if state.is_air() {
@@ -283,7 +308,7 @@ impl World {
         }
 
         if drop_items {
-            self.drop_resources_with_entity(state, pos, entity);
+            self.drop_resources_with_entity(state, pos, entity, explosion_radius);
             // TODO: block entity drops
         }
 
@@ -309,7 +334,7 @@ impl World {
     /// fortune/silk touch.
     // TODO: block entity and entity drops
     pub fn drop_resources(self: &Arc<Self>, state: BlockStateId, pos: BlockPos) {
-        self.drop_resources_with_entity(state, pos, None);
+        self.drop_resources_with_entity(state, pos, None, None);
     }
 
     pub(super) fn drop_resources_with_entity(
@@ -317,8 +342,11 @@ impl World {
         state: BlockStateId,
         pos: BlockPos,
         entity: Option<&dyn Entity>,
+        explosion_radius: Option<f32>,
     ) {
-        let context = BlockLootContext::new(self, pos).with_entity(entity);
+        let context = BlockLootContext::new(self, pos)
+            .with_entity(entity)
+            .with_explosion_radius(explosion_radius);
         for item in context.get_drops(state) {
             if !item.is_empty() {
                 self.pop_resource(pos, item);
@@ -350,17 +378,23 @@ impl World {
             return Vec::new();
         };
 
+        // Vanilla's block param set makes TOOL *required* and passes
+        // `ItemStack.EMPTY` when nothing broke the block by hand. Conditions and
+        // functions distinguish "empty tool" from "no tool at all", so a block
+        // roll must always carry one -- only entity rolls leave it unset.
+        let no_tool = ItemStack::empty();
         let mut rng = rand::rng();
         let mut ctx = LootContext::new(&mut rng)
             .with_luck(context.luck())
             .with_block_state(state)
+            .with_tool(context.tool().unwrap_or(&no_tool))
             .with_origin(
                 f64::from(context.pos().x()),
                 f64::from(context.pos().y()),
                 f64::from(context.pos().z()),
             );
-        if let Some(tool) = context.tool() {
-            ctx = ctx.with_tool(tool);
+        if let Some(radius) = context.explosion_radius() {
+            ctx = ctx.with_explosion(radius);
         }
         if let Some(entity) = context.entity() {
             ctx = ctx.with_this_entity(entity_loot_ref(entity));

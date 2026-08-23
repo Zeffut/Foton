@@ -20,13 +20,14 @@ use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::vanilla_block_tags::BlockTag;
+use steel_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use steel_registry::{REGISTRY, TaggedRegistryExt as _, sound_events};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, DowncastType, DowncastTypeKey};
 
 use super::minecart_common::{self, MinecartLike, MinecartState};
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, RemovalReason};
-use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
+use crate::world::explosion::ExplosionSpec;
 use crate::world::{LevelReader as _, World};
 
 /// Vanilla parity: `AbstractMinecart.getDefaultGravity`.
@@ -170,7 +171,7 @@ impl TntMinecartEntity {
                 None,
                 power as f32,
                 false,
-                ExplosionBlockInteraction::Destroy,
+                world.explosion_destroy_type(&TNT_EXPLOSION_DROP_DECAY),
             ),
             self.position(),
             &spare_rails,

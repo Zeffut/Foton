@@ -1,8 +1,11 @@
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+
 use super::{
     BlockPredicateJson, DamageSourcePredicateJson, EnchantmentOptionsJson, EntityEquipmentJson,
     EntityFlagsJson, EntityPredicateJson, EquipmentSlotJson, FromStr, Ident, Identifier,
-    LocationPredicateJson, NumberProviderJson, PredicateJson, Span, ToShoutySnakeCase, TokenStream,
-    quote,
+    IntBoundJson, LocationPredicateJson, NumberProviderJson, PredicateJson, Span,
+    ToShoutySnakeCase, TokenStream, quote,
 };
 
 pub(super) fn generate_number_provider(value: &NumberProviderJson) -> TokenStream {
@@ -357,6 +360,56 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
         .and_then(|sheep| sheep.sheared)
         .map_or_else(|| quote! { None }, |sheared| quote! { Some(#sheared) });
 
+    let chicken_variant = predicate
+        .components
+        .as_ref()
+        .and_then(|components| components.chicken_variant.as_deref())
+        .map_or_else(
+            || quote! { None },
+            |variant| {
+                let variant = variant.strip_prefix("minecraft:").unwrap_or(variant);
+                quote! { Some(Identifier::vanilla_static(#variant)) }
+            },
+        );
+
+    let mooshroom_variant = predicate
+        .components
+        .as_ref()
+        .and_then(|components| components.mooshroom_variant.as_deref())
+        .map_or_else(
+            || quote! { None },
+            |variant| {
+                let variant = variant.strip_prefix("minecraft:").unwrap_or(variant);
+                quote! { Some(#variant) }
+            },
+        );
+
+    let cube_size = predicate
+        .cube_mob_type_specific
+        .as_ref()
+        .and_then(|cube| cube.size.as_ref())
+        .map_or_else(
+            || quote! { None },
+            |size| {
+                let range = generate_int_bound(size);
+                quote! { Some(#range) }
+            },
+        );
+
+    // A predicate key the generator cannot lower must be visible: it is warned
+    // about at build time and fails at evaluation time, never silently passes.
+    let mut unsupported: Vec<String> = predicate.unmodeled.keys().cloned().collect();
+    if let Some(components) = &predicate.components {
+        unsupported.extend(
+            components
+                .unmodeled
+                .keys()
+                .map(|key| format!("minecraft:components -> {key}")),
+        );
+    }
+    unsupported.sort();
+    warn_unsupported_predicate_keys(&unsupported);
+
     quote! {
         EntityPredicate {
             entity_type: #entity_type,
@@ -364,7 +417,56 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             equipment: #equipment,
             sheep_color: #sheep_color,
             sheep_sheared: #sheep_sheared,
+            chicken_variant: #chicken_variant,
+            mooshroom_variant: #mooshroom_variant,
+            cube_size: #cube_size,
+            unsupported: &[#(#unsupported),*],
         }
+    }
+}
+
+/// Warns once per distinct predicate key the generator cannot lower.
+///
+/// The same key shows up in many tables, so the raw list would bury the signal.
+fn warn_unsupported_predicate_keys(keys: &[String]) {
+    thread_local! {
+        static SEEN: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+    }
+
+    SEEN.with_borrow_mut(|seen| {
+        for key in keys {
+            if seen.insert(key.clone()) {
+                println!(
+                    "cargo:warning=Loot entity predicate key `{key}` is not modeled; \
+                     every predicate using it will fail rather than match."
+                );
+            }
+        }
+    });
+}
+
+/// Lowers a vanilla `IntRange` into a [`NumberProviderRange`].
+fn generate_int_bound(bound: &IntBoundJson) -> TokenStream {
+    match bound {
+        IntBoundJson::Exact(value) => {
+            let value = *value as f32;
+            quote! { NumberProviderRange::exact(#value) }
+        }
+        IntBoundJson::Range { min, max } => match (min, max) {
+            (Some(min), Some(max)) => {
+                let (min, max) = (*min as f32, *max as f32);
+                quote! { NumberProviderRange::between(#min, #max) }
+            }
+            (Some(min), None) => {
+                let min = *min as f32;
+                quote! { NumberProviderRange::at_least(#min) }
+            }
+            (None, Some(max)) => {
+                let max = *max as f32;
+                quote! { NumberProviderRange::at_most(#max) }
+            }
+            (None, None) => quote! { NumberProviderRange { min: None, max: None } },
+        },
     }
 }
 

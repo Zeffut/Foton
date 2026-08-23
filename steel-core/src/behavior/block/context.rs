@@ -107,6 +107,7 @@ pub struct BlockLootContext<'a> {
     entity: Option<&'a dyn Entity>,
     tool: Option<&'a ItemStack>,
     luck: f32,
+    explosion_radius: Option<f32>,
 }
 
 impl<'a> BlockLootContext<'a> {
@@ -119,6 +120,7 @@ impl<'a> BlockLootContext<'a> {
             entity: None,
             tool: None,
             luck: 0.0,
+            explosion_radius: None,
         }
     }
 
@@ -140,6 +142,17 @@ impl<'a> BlockLootContext<'a> {
     #[must_use]
     pub const fn with_luck(mut self, luck: f32) -> Self {
         self.luck = luck;
+        self
+    }
+
+    /// Adds the blast radius that thins this block's drops.
+    ///
+    /// Vanilla parity: `BlockBehaviour.onExplosionHit` only sets
+    /// `LootContextParams.EXPLOSION_RADIUS` for `DESTROY_WITH_DECAY`, which is
+    /// what makes `survives_explosion` and `explosion_decay` bite.
+    #[must_use]
+    pub const fn with_explosion_radius(mut self, radius: Option<f32>) -> Self {
+        self.explosion_radius = radius;
         self
     }
 
@@ -171,6 +184,10 @@ impl<'a> BlockLootContext<'a> {
 
     pub(crate) const fn luck(&self) -> f32 {
         self.luck
+    }
+
+    pub(crate) const fn explosion_radius(&self) -> Option<f32> {
+        self.explosion_radius
     }
 }
 

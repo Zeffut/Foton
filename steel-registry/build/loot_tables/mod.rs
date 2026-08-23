@@ -292,6 +292,13 @@ struct EntityPredicateJson {
     /// registry-style flat key, not a nested object.
     #[serde(rename = "minecraft:type_specific/sheep", default)]
     sheep_type_specific: Option<SheepTypeSpecificJson>,
+    /// `minecraft:type_specific/cube_mob`, shared by slime and magma cube.
+    #[serde(rename = "minecraft:type_specific/cube_mob", default)]
+    cube_mob_type_specific: Option<CubeMobTypeSpecificJson>,
+    /// Everything this generator does not model, kept so the predicate can be
+    /// marked unsupported instead of quietly matching anything.
+    #[serde(flatten)]
+    unmodeled: FxHashMap<String, serde_json::Value>,
 }
 
 /// Entity data-component predicates (`minecraft:components`).
@@ -299,6 +306,33 @@ struct EntityPredicateJson {
 struct EntityComponentsJson {
     #[serde(rename = "minecraft:sheep/color", default)]
     sheep_color: Option<String>,
+    #[serde(rename = "minecraft:chicken/variant", default)]
+    chicken_variant: Option<String>,
+    #[serde(rename = "minecraft:mooshroom/variant", default)]
+    mooshroom_variant: Option<String>,
+    #[serde(flatten)]
+    unmodeled: FxHashMap<String, serde_json::Value>,
+}
+
+/// `minecraft:type_specific/cube_mob`: an int or an int range on `size`.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct CubeMobTypeSpecificJson {
+    #[serde(default)]
+    size: Option<IntBoundJson>,
+}
+
+/// An `IntRange`: either a bare integer or `{min, max}`.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum IntBoundJson {
+    Exact(i32),
+    Range {
+        #[serde(default)]
+        min: Option<i32>,
+        #[serde(default)]
+        max: Option<i32>,
+    },
 }
 
 /// Type-specific entity predicates (`minecraft:type_specific/sheep`).
@@ -564,8 +598,8 @@ pub(crate) fn build() -> TokenStream {
             DamageTagPredicate, DyeColor, EnchantedChance, EnchantmentOptions, EntityEquipment,
             EntityFlags, EntityPredicate, EquipmentSlotGroup, InstrumentOptions, LocationPredicate,
             LootCondition, LootContextEntity, LootEntry, LootFunction, LootPool, LootTable,
-            LootTableRef, LootTableRegistry, LootType, NameTarget, NumberProvider, PropertyCheck,
-            StewEffect, ToolPredicate,
+            LootTableRef, LootTableRegistry, LootType, NameTarget, NumberProvider,
+            NumberProviderRange, PropertyCheck, StewEffect, ToolPredicate,
         };
         use steel_utils::Identifier;
     });

@@ -294,6 +294,24 @@ pub trait LivingEntity: Entity {
         None
     }
 
+    /// Returns `minecraft:components.chicken/variant` for the loot context,
+    /// when this entity is a chicken.
+    fn chicken_loot_variant(&self) -> Option<&'static Identifier> {
+        None
+    }
+
+    /// Returns `minecraft:components.mooshroom/variant` for the loot context by
+    /// its serialized name, when this entity is a mooshroom.
+    fn mooshroom_loot_variant(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Returns `minecraft:type_specific/cube_mob.size` for the loot context,
+    /// when this entity is a slime or a magma cube.
+    fn cube_loot_size(&self) -> Option<i32> {
+        None
+    }
+
     /// Returns vanilla `LivingEntity.getSoundVolume`.
     fn sound_volume(&self) -> f32 {
         1.0
@@ -3074,10 +3092,42 @@ fn death_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
     };
 
     let position = entity.position();
-    let this_entity = living_entity_loot_ref(entity);
-    let causing_entity = causing_entity.as_deref().map(entity_loot_ref);
-    let direct_entity = direct_entity.as_deref().map(entity_loot_ref);
-    let last_damage_player = last_damage_player.as_deref().map(entity_loot_ref);
+
+    // Equipment has to be snapshotted before the refs are built: looting reads
+    // the killer's weapon, and the smelting predicates read the direct
+    // attacker's, so those stacks must outlive the roll.
+    let this_equipment = LootEquipmentSnapshot::capture_living(entity);
+    let causing_equipment = causing_entity
+        .as_deref()
+        .and_then(LootEquipmentSnapshot::capture);
+    let direct_equipment = direct_entity
+        .as_deref()
+        .and_then(LootEquipmentSnapshot::capture);
+    let player_equipment = last_damage_player
+        .as_deref()
+        .and_then(LootEquipmentSnapshot::capture);
+
+    let this_equipment = this_equipment.as_loot_ref();
+    let causing_equipment = causing_equipment
+        .as_ref()
+        .map(LootEquipmentSnapshot::as_loot_ref);
+    let direct_equipment = direct_equipment
+        .as_ref()
+        .map(LootEquipmentSnapshot::as_loot_ref);
+    let player_equipment = player_equipment
+        .as_ref()
+        .map(LootEquipmentSnapshot::as_loot_ref);
+
+    let this_entity = living_entity_loot_ref_with_equipment(entity, Some(&this_equipment));
+    let causing_entity = causing_entity
+        .as_deref()
+        .map(|entity| entity_loot_ref_with_equipment(entity, causing_equipment.as_ref()));
+    let direct_entity = direct_entity
+        .as_deref()
+        .map(|entity| entity_loot_ref_with_equipment(entity, direct_equipment.as_ref()));
+    let last_damage_player_ref = last_damage_player
+        .as_deref()
+        .map(|entity| entity_loot_ref_with_equipment(entity, player_equipment.as_ref()));
     let damage_source = DamageSourceInfo {
         damage_type: Some(&source.damage_type.key),
         tags: &[],
@@ -3096,14 +3146,26 @@ fn death_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
     if let Some(entity) = direct_entity {
         context = context.with_direct_killer_entity(entity);
     }
-    if let Some(entity) = last_damage_player {
+    if let Some(entity) = last_damage_player_ref {
         context = context.with_last_damage_player(entity);
+        // Vanilla `dropFromLootTable` pairs LAST_DAMAGE_PLAYER with
+        // `withLuck(killerPlayer.getLuck())`.
+        if let Some(player) = last_damage_player.as_deref().and_then(Entity::as_player) {
+            context = context.with_luck(player.get_luck());
+        }
     }
 
     loot_table.get_random_items(&mut context)
 }
 
 fn living_entity_loot_ref<E: LivingEntity + ?Sized>(entity: &E) -> EntityRef<'_> {
+    living_entity_loot_ref_with_equipment(entity, None)
+}
+
+fn living_entity_loot_ref_with_equipment<'a, E: LivingEntity + ?Sized>(
+    entity: &'a E,
+    equipment: Option<&'a EntityEquipmentRef<'a>>,
+) -> EntityRef<'a> {
     let sheep = entity.sheep_loot_state();
     EntityRef {
         entity_type: Some(&entity.entity_type().key),
@@ -3114,11 +3176,14 @@ fn living_entity_loot_ref<E: LivingEntity + ?Sized>(entity: &E) -> EntityRef<'_>
             is_swimming: entity.is_swimming(),
             is_baby: entity.is_baby(),
         },
-        // TODO: Include equipment and custom name once loot contexts can snapshot entity data.
-        equipment: None,
+        equipment,
+        // TODO: Include custom name once loot contexts can snapshot entity data.
         custom_name: None,
         sheep_color: sheep.map(|(color, _)| color),
         sheep_sheared: sheep.map(|(_, sheared)| sheared),
+        chicken_variant: entity.chicken_loot_variant(),
+        mooshroom_variant: entity.mooshroom_loot_variant(),
+        cube_size: entity.cube_loot_size(),
     }
 }
 
