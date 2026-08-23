@@ -12,6 +12,7 @@ mod ender_chest_block;
 mod furnace_block;
 mod hopper_block;
 mod shulker_box_block;
+mod trapped_chest_block;
 
 pub use anvil_block::AnvilBlock;
 pub use barrel_block::BarrelBlock;
@@ -26,3 +27,4 @@ pub use ender_chest_block::EnderChestBlock;
 pub use furnace_block::{BlastFurnaceBlock, FurnaceBlock, SmokerBlock};
 pub use hopper_block::HopperBlock;
 pub use shulker_box_block::ShulkerBoxBlock;
+pub use trapped_chest_block::TrappedChestBlock;

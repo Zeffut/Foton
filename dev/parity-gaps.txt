@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 60
+[blocks] 59
 AirBlock
 BeaconBlock
 BellBlock
@@ -63,7 +63,6 @@ TestBlock
 TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
-TrappedChestBlock
 TrialSpawnerBlock
 TurtleEggBlock
 VaultBlock

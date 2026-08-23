@@ -233,6 +233,20 @@ pub fn init_block_entities() {
             |level, pos, state| Arc::new(ShulkerBoxBlockEntity::new(level, pos, state)),
         );
 
+        // A trapped chest is a chest whose block reports how many players have
+        // it open, so the storage behind it is the same.
+        registry.register(
+            &vanilla_block_entity_types::TRAPPED_CHEST,
+            |level, pos, state| {
+                Arc::new(ChestBlockEntity::with_type(
+                    &vanilla_block_entity_types::TRAPPED_CHEST,
+                    level,
+                    pos,
+                    state,
+                ))
+            },
+        );
+
         registry.register(&vanilla_block_entity_types::FURNACE, |level, pos, state| {
             Arc::new(FurnaceBlockEntity::new(level, pos, state))
         });

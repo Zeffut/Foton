@@ -8,6 +8,7 @@ use std::sync::{Arc, Weak};
 
 use smallvec::smallvec;
 use steel_macros::block_behavior;
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::blocks::properties::{
@@ -37,6 +38,12 @@ use crate::world::{LevelReader, ScheduledTickAccess, World};
 #[block_behavior]
 pub struct ChestBlock {
     block: BlockRef,
+    /// Which block entity to create.
+    ///
+    /// Vanilla parity: `ChestBlock.blockEntityType`, whose only reason to be
+    /// overridable is the trapped chest -- which is a chest in every other
+    /// respect, pairing and blocking included.
+    block_entity_type: BlockEntityTypeRef,
 }
 
 const FACING: &EnumProperty<Direction> = &BlockStateProperties::HORIZONTAL_FACING;
@@ -50,7 +57,22 @@ impl ChestBlock {
     /// Creates a new chest block behavior for the given block.
     #[must_use]
     pub const fn new(block: BlockRef) -> Self {
-        Self { block }
+        Self {
+            block,
+            block_entity_type: &vanilla_block_entity_types::CHEST,
+        }
+    }
+
+    /// Creates the chest behavior a trapped chest is built on.
+    ///
+    /// Vanilla parity: `TrappedChestBlock`, which is a `ChestBlock` that
+    /// answers `TRAPPED_CHEST` to `blockEntityType`.
+    #[must_use]
+    pub const fn trapped(block: BlockRef) -> Self {
+        Self {
+            block,
+            block_entity_type: &vanilla_block_entity_types::TRAPPED_CHEST,
+        }
     }
 
     /// Returns whether the given state is a chest this one can pair with.
@@ -277,9 +299,10 @@ impl BlockBehavior for ChestBlock {
             ),
         }
 
-        // TODO: Award stat OPEN_CHEST, anger nearby piglins, and drive the open
-        // count through a shared ContainerOpenersCounter so the lid animation and
-        // open/close sounds play. Barrel carries the same gap.
+        // The open count, and with it the lid animation and the open/close
+        // sounds, is driven by the menu through `BlockEntityBase`.
+        // TODO: Award stat OPEN_CHEST and anger nearby piglins; Steel has
+        // neither a statistics registry nor piglins.
 
         InteractionResult::Success
     }
@@ -291,7 +314,7 @@ impl BlockBehavior for ChestBlock {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         BlockEntityCreation::from_registered_factory(BLOCK_ENTITIES.create(
-            &vanilla_block_entity_types::CHEST,
+            self.block_entity_type,
             level,
             pos,
             state,

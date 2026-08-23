@@ -168,6 +168,14 @@ impl ContainerRef {
         self.id
     }
 
+    /// Returns the block entity that owns this container, if one does.
+    ///
+    /// A menu needs this to tell the block that somebody is looking inside.
+    #[must_use]
+    pub fn owner_block_entity(&self) -> Option<Arc<BlockEntityBase>> {
+        self.owner.as_ref().map(|owner| owner.block_entity.clone())
+    }
+
     /// Checks container access without locking its item storage.
     #[must_use]
     pub fn still_valid(&self, player: &Player) -> bool {

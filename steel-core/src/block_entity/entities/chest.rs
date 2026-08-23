@@ -12,6 +12,7 @@ use std::{
 use simdnbt::ToNbtTag;
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_block_entity_types;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, locks::SyncMutex};
@@ -53,12 +54,23 @@ impl ChestBlockEntity {
     /// Creates a new chest block entity.
     #[must_use]
     pub fn new(level: Weak<World>, pos: BlockPos, state: BlockStateId) -> Self {
-        let base = Arc::new(BlockEntityBase::new(
-            &vanilla_block_entity_types::CHEST,
-            level,
-            pos,
-            state,
-        ));
+        Self::with_type(&vanilla_block_entity_types::CHEST, level, pos, state)
+    }
+
+    /// Creates a chest block entity of a given type.
+    ///
+    /// Vanilla parity: `TrappedChestBlockEntity`, which exists only to carry a
+    /// different block entity type -- the storage is identical. The type is not
+    /// cosmetic: `BlockEntityBase::new` refuses a type that does not match the
+    /// block, which is what caught this being hard-coded.
+    #[must_use]
+    pub fn with_type(
+        block_entity_type: BlockEntityTypeRef,
+        level: Weak<World>,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> Self {
+        let base = Arc::new(BlockEntityBase::new(block_entity_type, level, pos, state));
         let container = Arc::new(SyncMutex::new(ChestContainer {
             items: vec![ItemStack::empty(); CHEST_SLOTS],
         }));

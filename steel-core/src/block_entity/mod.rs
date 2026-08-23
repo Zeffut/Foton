@@ -32,7 +32,7 @@ use std::{
     ptr,
     sync::{
         Arc, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicI32, Ordering},
     },
 };
 
@@ -49,6 +49,7 @@ pub(crate) use storage::{
     DetachedBlockEntity, LifecycleDispatchers,
 };
 
+use crate::behavior::BLOCK_BEHAVIORS;
 use crate::inventory::lock::ContainerRef;
 use crate::player::Player;
 
@@ -154,6 +155,14 @@ pub struct BlockEntityBase {
     /// Lock-free removal snapshot; lifecycle writers remain serialized below.
     removed: AtomicBool,
     lifecycle: SyncMutex<BlockEntityLifecycle>,
+    /// How many players have this block's container open.
+    ///
+    /// Vanilla parity: `ContainerOpenersCounter`. It lives on the base rather
+    /// than on each container block entity because the menu that has to
+    /// increment it only ever holds a `BlockEntityBase`, and because the three
+    /// things it drives -- a chest's open sound, a barrel's `open` state and a
+    /// trapped chest's signal -- all hang off the block, not off the inventory.
+    open_count: AtomicI32,
 }
 
 struct BlockEntityLifecycleDispatchGuard<'a> {
@@ -196,6 +205,7 @@ impl BlockEntityBase {
             level,
             pos,
             removed: AtomicBool::new(false),
+            open_count: AtomicI32::new(0),
             lifecycle: SyncMutex::new(BlockEntityLifecycle {
                 block_state,
                 events: SmallVec::new(),
@@ -212,6 +222,56 @@ impl BlockEntityBase {
     #[must_use]
     const fn pos(&self) -> BlockPos {
         self.pos
+    }
+
+    /// Returns how many players have this container open.
+    ///
+    /// Vanilla parity: `ContainerOpenersCounter.getOpenerCount`.
+    #[must_use]
+    pub fn opener_count(&self) -> i32 {
+        self.open_count.load(Ordering::Relaxed)
+    }
+
+    /// Records one more player looking inside.
+    ///
+    /// Vanilla parity: `ContainerOpenersCounter.incrementOpeners`. The block is
+    /// only told when the count leaves zero, because that is when a chest lid
+    /// rises and a barrel opens.
+    pub fn increment_openers(&self) {
+        let previous = self.open_count.fetch_add(1, Ordering::Relaxed);
+        self.notify_openers_changed(previous, previous + 1);
+    }
+
+    /// Records one fewer.
+    ///
+    /// Vanilla parity: `ContainerOpenersCounter.decrementOpeners`.
+    pub fn decrement_openers(&self) {
+        let previous = self.open_count.fetch_sub(1, Ordering::Relaxed);
+        let current = (previous - 1).max(0);
+        if previous <= 0 {
+            // Nothing was open; keep the count from going negative, which would
+            // leave a chest stuck shut for as many opens as it went under.
+            self.open_count.store(0, Ordering::Relaxed);
+            return;
+        }
+        self.notify_openers_changed(previous, current);
+    }
+
+    fn notify_openers_changed(&self, previous: i32, current: i32) {
+        let Some(world) = self.level.upgrade() else {
+            return;
+        };
+        let pos = self.pos;
+        let state = world.get_block_state(pos);
+        let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
+
+        if previous == 0 && current > 0 {
+            behavior.on_container_open(&world, pos, state);
+        } else if previous > 0 && current == 0 {
+            behavior.on_container_close(&world, pos, state);
+        }
+
+        behavior.on_opener_count_changed(&world, pos, state, previous, current);
     }
 
     #[must_use]
@@ -527,3 +587,63 @@ impl<T: BlockEntity + ?Sized> BlockEntityLifecycleExt for T {}
 
 /// A stable shared block entity without a whole-object mutex.
 pub type SharedBlockEntity = Arc<dyn BlockEntity>;
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Weak;
+
+    use steel_registry::{init_vanilla_registry, vanilla_block_entity_types, vanilla_blocks};
+
+    use super::BlockEntityBase;
+
+    /// Builds a base with no world behind it.
+    ///
+    /// `notify_openers_changed` gives up when the level is gone, so this
+    /// exercises the count itself without needing a world to look blocks up in.
+    fn detached_chest() -> BlockEntityBase {
+        init_vanilla_registry();
+        BlockEntityBase::new(
+            &vanilla_block_entity_types::CHEST,
+            Weak::new(),
+            steel_utils::BlockPos::new(0, 0, 0),
+            vanilla_blocks::CHEST.default_state(),
+        )
+    }
+
+    #[test]
+    fn openers_count_up_and_back_down() {
+        let base = detached_chest();
+        assert_eq!(base.opener_count(), 0);
+
+        base.increment_openers();
+        base.increment_openers();
+        assert_eq!(base.opener_count(), 2);
+
+        base.decrement_openers();
+        assert_eq!(base.opener_count(), 1);
+        base.decrement_openers();
+        assert_eq!(base.opener_count(), 0);
+    }
+
+    /// A close with nothing open must not push the count negative.
+    ///
+    /// It can happen for real: a client may send a container close for a menu
+    /// the server already dropped. If that took the count below zero the chest
+    /// would need as many extra opens to look open again, and a trapped chest
+    /// would go quiet while somebody was still inside it.
+    #[test]
+    fn closing_what_was_never_open_does_not_go_negative() {
+        let base = detached_chest();
+
+        base.decrement_openers();
+        base.decrement_openers();
+        assert_eq!(base.opener_count(), 0);
+
+        base.increment_openers();
+        assert_eq!(
+            base.opener_count(),
+            1,
+            "one player opening it must show as exactly one"
+        );
+    }
+}

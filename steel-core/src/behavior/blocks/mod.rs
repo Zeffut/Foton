@@ -32,7 +32,7 @@ pub use colored::StainedGlassPaneBlock;
 pub use container::{
     AnvilBlock, BarrelBlock, BeehiveBlock, BlastFurnaceBlock, BrewingStandBlock, ChestBlock,
     ChiseledBookShelfBlock, CraftingTableBlock, DispenserBlock, DropperBlock, EnchantingTableBlock,
-    EnderChestBlock, FurnaceBlock, HopperBlock, ShulkerBoxBlock, SmokerBlock,
+    EnderChestBlock, FurnaceBlock, HopperBlock, ShulkerBoxBlock, SmokerBlock, TrappedChestBlock,
     count_enchanting_power,
 };
 pub use decoration::{

@@ -55,10 +55,12 @@ cannot.
       and refuse cleanly), the `SPaddleBoat` packet so rowing animates, and the
       second seat.
 - [ ] **Minecarts** (6 entries). Rails already work; the carts do not exist.
-- [~] **Storage that travels**: shulker box (17) and ender chest done. Still
-      open: trapped chest, which needs the container opener count first --
-      without it the signal is always zero and it is a chest that costs a
-      tripwire hook.
+- [x] **Storage that travels**: shulker box (17), ender chest and trapped
+      chest. The trapped chest needed the container opener count first --
+      without it its signal is always zero and it is a chest that costs a
+      tripwire hook. That counter now lives on `BlockEntityBase` and drives
+      three things at once: the trapped chest's signal, the barrel's `open`
+      state, and the chest lid. Verified by `dev/openers-test.sh`.
 - [ ] **Workstations**: grindstone, stonecutter, smithing table, cartography
       table, loom, lectern, jukebox, bell, beacon, crafter.
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
@@ -115,5 +117,8 @@ a furnace has no behavior. These scripts can:
 - `dev/enderchest-test.sh` -- right-clicking an ender chest opens a container.
 - `dev/spawnegg-test.sh` -- a spawn egg used by hand makes the mob.
 - `dev/boat-test.sh` -- a boat put on water is still on it afterwards.
+- `dev/openers-test.sh` -- an open trapped chest powers redstone and a
+  closed one stops, a plain chest powers nothing, a chest under a solid
+  block refuses to open, and a barrel looks open while somebody is in it.
 
 Every entry above gets one before it is called done.

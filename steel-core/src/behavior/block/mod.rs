@@ -595,6 +595,44 @@ pub trait BlockBehavior: Send + Sync {
         REGISTRY.items.by_key(&block.key).map(ItemStack::new)
     }
 
+    /// Called when the first player opens this block's container.
+    ///
+    /// Vanilla parity: `ContainerOpenersCounter.onOpen`, which is where a chest
+    /// plays its lid sound and a barrel flips its `open` state.
+    #[expect(
+        unused_variables,
+        reason = "default trait implementation ignores all params"
+    )]
+    fn on_container_open(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {}
+
+    /// Called when the last player closes it.
+    ///
+    /// Vanilla parity: `ContainerOpenersCounter.onClose`.
+    #[expect(
+        unused_variables,
+        reason = "default trait implementation ignores all params"
+    )]
+    fn on_container_close(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {}
+
+    /// Called on every change to how many players have it open.
+    ///
+    /// Vanilla parity: `ContainerOpenersCounter.openerCountChanged`. Only the
+    /// trapped chest uses it, because only the trapped chest cares about the
+    /// difference between one viewer and two.
+    #[expect(
+        unused_variables,
+        reason = "default trait implementation ignores all params"
+    )]
+    fn on_opener_count_changed(
+        &self,
+        world: &Arc<World>,
+        pos: BlockPos,
+        state: BlockStateId,
+        previous: i32,
+        current: i32,
+    ) {
+    }
+
     /// Returns the plant this block holds, if it is a full flower pot.
     ///
     /// Vanilla parity: `FlowerPotBlock.getPotted`. Vanilla builds its

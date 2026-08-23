@@ -61,6 +61,7 @@ PLAY_C_SYSTEM_CHAT = 121
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
+PLAY_S_CONTAINER_CLOSE = 19
 PLAY_S_USE_ITEM_ON = 66
 PLAY_S_USE_ITEM = 67
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
@@ -84,8 +85,8 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # Optional: commands to run once in the world, separated by `;;`. An entry
 # starting with `!` is a client action rather than a chat command:
 # `!hotbar <slot>` selects a hotbar slot, `!useon <x> <y> <z> [face]`
-# right-clicks a block face, and `!useitem [yaw] [pitch]` right-clicks
-# without one. Those are the only way to reach an item's `use_on` and
+# right-clicks a block face, `!useitem [yaw] [pitch]` right-clicks
+# without one, and `!close` shuts whatever screen is open. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
@@ -124,6 +125,9 @@ class Connection:
         self.sock = sock
         self.buffer = b""
         self.compression_threshold = -1
+        # The container id of the screen the server last opened, so `!close`
+        # can shut that exact one.
+        self.open_container = None
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -384,6 +388,7 @@ def run_play(connection, watch_seconds=0):
             # A container that opens is a container whose behavior ran. No
             # command can right-click a block, so this is the only way to see
             # it happen.
+            connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
@@ -460,6 +465,7 @@ def pump(connection, seconds, spawned):
             # A container that opens is a container whose behavior ran. No
             # command can right-click a block, so this is the only way to see
             # it happen.
+            connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
@@ -533,9 +539,25 @@ def run_directive(connection, directive):
         x, y, z = (int(part) for part in parts[1:4])
         face = parts[4] if len(parts) > 4 else "up"
         send_use_item_on(connection, x, y, z, face)
+    elif parts[0] == "close":
+        send_container_close(connection)
     else:
         fail(f"unknown directive {directive}")
     return True
+
+
+def send_container_close(connection):
+    """Shuts the open screen, as pressing escape does.
+
+    A container only stops counting a player as an opener when the client says
+    it closed, so nothing that depends on that count -- a chest lid dropping, a
+    trapped chest going quiet -- can be tested without sending this.
+    """
+    if connection.open_container is None:
+        fail("nothing is open to close")
+    connection.send(PLAY_S_CONTAINER_CLOSE, varint(connection.open_container))
+    print("  the screen was closed")
+    connection.open_container = None
 
 
 def run_commands(connection, commands, spawned):
@@ -581,6 +603,7 @@ def watch_for_spawns(connection, seconds, spawned):
             # A container that opens is a container whose behavior ran. No
             # command can right-click a block, so this is the only way to see
             # it happen.
+            connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)

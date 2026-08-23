@@ -7,8 +7,10 @@ use std::sync::{Arc, Weak};
 use steel_macros::block_behavior;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
+use steel_registry::blocks::properties::BoolProperty;
 use steel_registry::blocks::properties::{BlockStateProperties, Direction, EnumProperty};
-use steel_registry::vanilla_block_entity_types;
+use steel_registry::{sound_events, vanilla_block_entity_types};
+use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, translations};
 use text_components::TextComponent;
 
@@ -32,6 +34,15 @@ pub struct BarrelBlock {
 }
 
 const FACING: &EnumProperty<Direction> = &BlockStateProperties::FACING;
+
+/// Whether the barrel is being looked into.
+const OPEN: &BoolProperty = &BlockStateProperties::OPEN;
+
+/// Pitch of the lid.
+///
+/// Vanilla randomizes this a little; Steel plays the middle of that range
+/// until block sounds carry a random pitch.
+const LID_PITCH: f32 = 1.0;
 
 impl BarrelBlock {
     /// Creates a new barrel block behavior.
@@ -75,13 +86,24 @@ impl BlockBehavior for BarrelBlock {
             move |context| chest(inventory, context.container_id, container_ref, 3),
         );
 
-        // TODO: Award stat OPEN_BARREL
-        // TODO: Anger nearby piglins (PiglinAi.angerNearbyPiglins)
-        // TODO: Implement ContainerOpenersCounter to track open state, play sounds,
-        //       and update OPEN block property. Requires scheduled block ticks (scheduleTick)
-        //       for recheck functionality. See vanilla BarrelBlockEntity and ContainerOpenersCounter.
-
+        // TODO: Award stat OPEN_BARREL, and anger nearby piglins; Steel has no
+        // statistics registry and no piglins.
         InteractionResult::Success
+    }
+
+    /// Vanilla parity: `BarrelBlockEntity.updateBlockState` on open.
+    ///
+    /// The `open` property is the only thing that makes a barrel look open, so
+    /// without it a player has no idea anyone is in theirs.
+    fn on_container_open(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {
+        world.set_block(pos, state.set_value(OPEN, true), UpdateFlags::UPDATE_ALL);
+        world.play_block_sound(&sound_events::BLOCK_BARREL_OPEN, pos, 0.5, LID_PITCH, None);
+    }
+
+    /// Vanilla parity: `BarrelBlockEntity.updateBlockState` on close.
+    fn on_container_close(&self, world: &Arc<World>, pos: BlockPos, state: BlockStateId) {
+        world.set_block(pos, state.set_value(OPEN, false), UpdateFlags::UPDATE_ALL);
+        world.play_block_sound(&sound_events::BLOCK_BARREL_CLOSE, pos, 0.5, LID_PITCH, None);
     }
 
     fn new_block_entity(

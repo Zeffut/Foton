@@ -8,6 +8,9 @@
 use steel_registry::menu_type::MenuTypeRef;
 use steel_registry::vanilla_menu_types;
 
+use std::iter;
+
+use crate::block_entity::BlockEntityBase;
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
 
@@ -107,7 +110,36 @@ unsafe impl steel_utils::DowncastType for ChestKind {
         steel_utils::DowncastTypeKey::new("steel:menu/chest");
 }
 
+impl ChestKind {
+    /// Runs `f` on the block entity behind each half, if there is one.
+    ///
+    /// A double chest counts as one opener on each half, which is what makes
+    /// both lids rise together.
+    fn for_each_owner(&self, f: impl Fn(&BlockEntityBase)) {
+        for container in iter::once(&self.container).chain(self.second_container.as_ref()) {
+            if let Some(owner) = container.owner_block_entity() {
+                f(&owner);
+            }
+        }
+    }
+}
+
 impl MenuKind for ChestKind {
+    /// Vanilla parity: `ChestBlockEntity.startOpen`.
+    fn on_open(
+        &mut self,
+        _behavior: &mut MenuBehavior,
+        _guard: &mut ContainerLockGuard,
+        _player: &Player,
+    ) {
+        self.for_each_owner(BlockEntityBase::increment_openers);
+    }
+
+    /// Vanilla parity: `ChestBlockEntity.stopOpen`.
+    fn removed(&mut self, _behavior: &mut MenuBehavior, _player: &Player) {
+        self.for_each_owner(BlockEntityBase::decrement_openers);
+    }
+
     /// Returns true if every backing container is still valid for the player.
     ///
     /// Vanilla parity: a double chest closes as soon as either half becomes
