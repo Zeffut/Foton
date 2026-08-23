@@ -17,7 +17,8 @@ pub use mobs::passive::{
 };
 pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
 pub use objects::display_ui::{
-    BlockDisplayEntity, ItemFrameEntity, LeashFenceKnotEntity, PaintingEntity,
+    BlockDisplayEntity, InteractionEntity, ItemDisplayEntity, ItemFrameEntity,
+    LeashFenceKnotEntity, PaintingEntity, TextDisplayEntity,
 };
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
@@ -30,4 +31,5 @@ pub use objects::vehicles::{
     HopperMinecartEntity, MinecartEntity, RaftEntity, TntMinecartEntity,
 };
 pub use objects::{AreaEffectCloudEntity, LightningBoltEntity};
+pub use objects::{AreaEffectCloudEntity, MarkerEntity};
 pub use raw::RawEntity;
