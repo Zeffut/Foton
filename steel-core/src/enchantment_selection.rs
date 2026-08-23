@@ -179,19 +179,15 @@ pub fn select_enchantment(
     results
 }
 
-/// Applies a rolled offer to an item.
+/// Writes an already-rolled offer onto an item.
 ///
-/// Vanilla parity: `EnchantmentHelper.enchantItem`. A plain book becomes an
-/// enchanted book, which is the only case where the item itself changes.
+/// Vanilla parity: the second half of `EnchantmentHelper.enchantItem`. A plain
+/// book becomes an enchanted book, which is the only case where the item itself
+/// changes -- and the only reason this is worth naming, because the enchanting
+/// table rolls its offer in two steps (once for the clue it shows before the
+/// click, once for the click) and must not re-implement the swap.
 #[must_use]
-pub fn enchant_item(
-    random: &mut impl Random,
-    item: &ItemStack,
-    cost: i32,
-    source: &[EnchantmentRef],
-) -> ItemStack {
-    let rolled = select_enchantment(random, item, cost, source);
-
+pub fn apply_enchantments(item: &ItemStack, rolled: &[EnchantmentInstance]) -> ItemStack {
     let mut result = if item.is(&vanilla_items::BOOK) {
         ItemStack::new(&vanilla_items::ENCHANTED_BOOK)
     } else {
@@ -413,12 +409,9 @@ mod tests {
     fn enchanting_a_plain_book_produces_an_enchanted_one() {
         init_vanilla_registry();
         let mut random = LegacyRandom::from_seed(11);
-        let result = enchant_item(
-            &mut random,
-            &ItemStack::new(&vanilla_items::BOOK),
-            30,
-            enchanting_table_candidates(),
-        );
+        let book = ItemStack::new(&vanilla_items::BOOK);
+        let rolled = select_enchantment(&mut random, &book, 30, enchanting_table_candidates());
+        let result = apply_enchantments(&book, &rolled);
         assert!(result.is(&vanilla_items::ENCHANTED_BOOK));
     }
 
@@ -426,12 +419,9 @@ mod tests {
     fn a_thirty_level_offer_actually_enchants() {
         init_vanilla_registry();
         let mut random = LegacyRandom::from_seed(5);
-        let result = enchant_item(
-            &mut random,
-            &diamond_sword(),
-            30,
-            enchanting_table_candidates(),
-        );
+        let sword = diamond_sword();
+        let rolled = select_enchantment(&mut random, &sword, 30, enchanting_table_candidates());
+        let result = apply_enchantments(&sword, &rolled);
 
         let enchantments = result
             .get_enchantments_for_crafting()

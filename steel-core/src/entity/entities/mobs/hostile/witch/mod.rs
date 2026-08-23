@@ -24,6 +24,7 @@ use steel_registry::{
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::behavior::potion_effects;
 use crate::entity::ai::goal::{
     FloatGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, RangedAttackGoal, WaterAvoidingRandomStrollGoal,
@@ -37,6 +38,7 @@ use crate::entity::{
 };
 use crate::inventory::equipment::EquipmentSlot;
 use crate::world::World;
+use steel_registry::items::ItemRef;
 
 /// Speed multiplier while repositioning.
 const ATTACK_SPEED_MODIFIER: f64 = 1.0;
@@ -188,13 +190,13 @@ impl WitchEntity {
     fn potion_to_drink(&self) -> Option<PotionRef> {
         if rand::random::<f32>() < 0.15
             && self.is_eye_in_water()
-            && !self.has_mob_effect(&vanilla_mob_effects::WATER_BREATHING)
+            && !self.has_mob_effect(vanilla_mob_effects::WATER_BREATHING)
         {
             return Some(&vanilla_potions::WATER_BREATHING);
         }
         if rand::random::<f32>() < 0.15
             && self.is_on_fire()
-            && !self.has_mob_effect(&vanilla_mob_effects::FIRE_RESISTANCE)
+            && !self.has_mob_effect(vanilla_mob_effects::FIRE_RESISTANCE)
         {
             return Some(&vanilla_potions::FIRE_RESISTANCE);
         }
@@ -207,7 +209,7 @@ impl WitchEntity {
         });
         if rand::random::<f32>() < 0.5
             && target_far
-            && !self.has_mob_effect(&vanilla_mob_effects::SPEED)
+            && !self.has_mob_effect(vanilla_mob_effects::SPEED)
         {
             return Some(&vanilla_potions::SWIFTNESS);
         }
@@ -247,7 +249,7 @@ impl WitchEntity {
         if bottle.is(&vanilla_items::POTION)
             && let Some(contents) = bottle.get(POTION_CONTENTS)
         {
-            for (effect, duration, amplifier) in crate::behavior::potion_effects(contents) {
+            for (effect, duration, amplifier) in potion_effects(contents) {
                 self.add_mob_effect(MobEffectInstance::with_duration(
                     effect, duration, amplifier,
                 ));
@@ -277,7 +279,7 @@ impl WitchEntity {
 }
 
 /// Builds a bottle of one potion.
-fn potion_bottle(item: steel_registry::items::ItemRef, potion: PotionRef) -> ItemStack {
+fn potion_bottle(item: ItemRef, potion: PotionRef) -> ItemStack {
     let mut stack = ItemStack::new(item);
     stack.set(
         POTION_CONTENTS,
@@ -342,16 +344,16 @@ fn choose_thrown_potion(target: &SharedEntity, distance: f64) -> PotionRef {
         return &vanilla_potions::HARMING;
     };
 
-    if distance >= SLOWNESS_RANGE && !living.has_mob_effect(&vanilla_mob_effects::SLOWNESS) {
+    if distance >= SLOWNESS_RANGE && !living.has_mob_effect(vanilla_mob_effects::SLOWNESS) {
         return &vanilla_potions::SLOWNESS;
     }
     if living.get_health() >= POISON_HEALTH_THRESHOLD
-        && !living.has_mob_effect(&vanilla_mob_effects::POISON)
+        && !living.has_mob_effect(vanilla_mob_effects::POISON)
     {
         return &vanilla_potions::POISON;
     }
     if distance <= WEAKNESS_RANGE
-        && !living.has_mob_effect(&vanilla_mob_effects::WEAKNESS)
+        && !living.has_mob_effect(vanilla_mob_effects::WEAKNESS)
         && rand::random::<f32>() < 0.25
     {
         return &vanilla_potions::WEAKNESS;

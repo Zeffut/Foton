@@ -27,6 +27,7 @@ use steel_utils::random::Random as _;
 use steel_utils::random::legacy_random::LegacyRandom;
 use steel_utils::{BlockPos, ChunkPos, Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{Goal, GoalControls, HurtByTargetGoal, NearestAttackableTargetGoal};
 use crate::entity::damage::DamageSource;
 use crate::entity::living_base::LivingTravelInput;
@@ -36,7 +37,9 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData, LivingEntity,
     LivingEntityBase, Mob, MobBase, PathfinderMob, SpawnGroupData, next_entity_id,
 };
+use crate::player::Player;
 use crate::world::{LevelReader as _, World};
+use steel_utils::types::Difficulty;
 
 /// Largest size a slime may be set to.
 ///
@@ -240,7 +243,7 @@ impl SlimeEntity {
     /// Hurts a target the slime is touching.
     ///
     /// Vanilla parity: `AbstractCubeMob.dealDamage`.
-    fn deal_damage(&self, world: &Arc<World>, target: &crate::entity::SharedEntity) {
+    fn deal_damage(&self, world: &Arc<World>, target: &SharedEntity) {
         if !Entity::is_alive(self) {
             return;
         }
@@ -305,7 +308,7 @@ fn check_slime_spawn_rules(
     spawn_reason: EntitySpawnReason,
     pos: BlockPos,
 ) -> bool {
-    if world.difficulty() == steel_utils::types::Difficulty::Peaceful {
+    if world.difficulty() == Difficulty::Peaceful {
         return false;
     }
     if spawn_reason.is_spawner() {
@@ -554,14 +557,14 @@ impl Entity for SlimeEntity {
     }
 
     /// Vanilla parity: `AbstractCubeMob.playerTouch`.
-    fn player_touch(self: Arc<Self>, player: &Arc<crate::player::Player>) {
+    fn player_touch(self: Arc<Self>, player: &Arc<Player>) {
         if !self.deals_damage() {
             return;
         }
         let Some(world) = self.level() else {
             return;
         };
-        let target: crate::entity::SharedEntity = player.clone();
+        let target: SharedEntity = player.clone();
         self.deal_damage(&world, &target);
     }
 }
@@ -584,6 +587,10 @@ impl SlimeEntity {
     }
 
     /// Vanilla parity: `AbstractCubeMob.getJumpDelay`.
+    #[expect(
+        clippy::unused_self,
+        reason = "mirrors an overridable vanilla method; a magma cube will want its own"
+    )]
     fn jump_delay(&self) -> i32 {
         rand::random_range(0..20) + 10
     }

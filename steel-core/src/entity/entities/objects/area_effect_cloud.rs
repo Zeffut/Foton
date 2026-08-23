@@ -22,6 +22,9 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, RemovalReason,
 };
 use crate::world::World;
+use steel_registry::entity_data::EntityPose;
+use steel_registry::entity_type::EntityDimensions;
+use steel_registry::mob_effect::MobEffectRef;
 
 /// Ticks between two sweeps for victims.
 ///
@@ -73,7 +76,7 @@ struct CloudState {
     /// How the radius changes each time somebody is dosed.
     radius_on_use: f32,
     /// Effects this cloud carries, as (effect, duration, amplifier).
-    effects: Vec<(steel_registry::mob_effect::MobEffectRef, i32, i32)>,
+    effects: Vec<(MobEffectRef, i32, i32)>,
     /// Entity id to the tick it may be dosed again on.
     victims: FxHashMap<i32, i32>,
 }
@@ -144,10 +147,7 @@ impl AreaEffectCloudEntity {
     /// Vanilla parity: `ThrownLingeringPotion.onHitAsPotion`. The per-tick
     /// shrink is derived from the duration, so a cloud fades out exactly as it
     /// runs out rather than vanishing at full size.
-    pub fn configure_as_lingering(
-        &self,
-        effects: Vec<(steel_registry::mob_effect::MobEffectRef, i32, i32)>,
-    ) {
+    pub fn configure_as_lingering(&self, effects: Vec<(MobEffectRef, i32, i32)>) {
         self.set_radius(DEFAULT_LINGERING_RADIUS);
 
         let mut state = self.state.lock();
@@ -237,7 +237,7 @@ impl AreaEffectCloudEntity {
 
             let mut dosed = false;
             for (effect, duration, amplifier) in &effects {
-                let instance = MobEffectInstance::with_duration(*effect, *duration, *amplifier);
+                let instance = MobEffectInstance::with_duration(effect, *duration, *amplifier);
                 if !living.can_be_affected(&instance) {
                     continue;
                 }
@@ -324,11 +324,8 @@ impl Entity for AreaEffectCloudEntity {
     /// The cloud is a flat disc, so its hitbox follows its radius.
     ///
     /// Vanilla parity: `AreaEffectCloud.makeBoundingBox`, height 0.5.
-    fn dimensions_for_pose(
-        &self,
-        _pose: steel_registry::entity_data::EntityPose,
-    ) -> steel_registry::entity_type::EntityDimensions {
-        steel_registry::entity_type::EntityDimensions::new(self.radius() * 2.0, 0.5, 0.25)
+    fn dimensions_for_pose(&self, _pose: EntityPose) -> EntityDimensions {
+        EntityDimensions::new(self.radius() * 2.0, 0.5, 0.25)
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {

@@ -30,6 +30,7 @@ use crate::block_entity::{BlockEntity, BlockEntityBase};
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
+use std::array;
 
 /// First of the three bottle slots.
 pub const SLOT_FIRST_BOTTLE: usize = 0;
@@ -159,7 +160,7 @@ impl BrewingStandContainer {
     ///
     /// Vanilla parity: `BrewingStandBlockEntity.getPotionBits`.
     fn bottle_flags(&self) -> [bool; BOTTLE_SLOTS] {
-        std::array::from_fn(|slot| !self.items[slot].is_empty())
+        array::from_fn(|slot| !self.items[slot].is_empty())
     }
 }
 
@@ -415,6 +416,9 @@ mod tests {
     use steel_registry::{init_vanilla_registry, vanilla_potions};
 
     use super::*;
+    use std::ptr;
+    use steel_registry::data_components::PotionContents;
+    use steel_registry::data_components::vanilla_components::POTION_CONTENTS;
 
     fn container() -> BrewingStandContainer {
         init_vanilla_registry();
@@ -445,10 +449,13 @@ mod tests {
         // Both filled bottles converted; the ingredient was spent once.
         for slot in 0..2 {
             let contents = stand.items[slot]
-                .get(steel_registry::data_components::vanilla_components::POTION_CONTENTS)
-                .and_then(|contents| contents.potion())
+                .get(POTION_CONTENTS)
+                .and_then(PotionContents::potion)
                 .expect("brewed bottle holds a potion");
-            assert!(std::ptr::eq(contents.value(), &vanilla_potions::AWKWARD));
+            assert!(ptr::eq(
+                contents.value(),
+                &raw const vanilla_potions::AWKWARD
+            ));
         }
         assert!(stand.items[SLOT_INGREDIENT].is_empty());
     }
@@ -465,10 +472,13 @@ mod tests {
         stand.brew();
 
         let untouched = stand.items[1]
-            .get(steel_registry::data_components::vanilla_components::POTION_CONTENTS)
-            .and_then(|contents| contents.potion())
+            .get(POTION_CONTENTS)
+            .and_then(PotionContents::potion)
             .expect("holds a potion");
-        assert!(std::ptr::eq(untouched.value(), &vanilla_potions::AWKWARD));
+        assert!(ptr::eq(
+            untouched.value(),
+            &raw const vanilla_potions::AWKWARD
+        ));
     }
 
     #[test]

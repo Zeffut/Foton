@@ -32,6 +32,7 @@ use crate::world::{LevelReader as _, World};
 use crate::worldgen::generator::ChunkGenerator as _;
 use crate::worldgen::generator::context::WorldGenContext;
 use crate::worldgen::region::WorldGenRegion;
+use steel_registry::entity_type::EntityTypeRef;
 
 /// Tries per animal before the pack gives up on it.
 ///
@@ -238,7 +239,7 @@ fn top_non_colliding_pos(
     world: &Arc<World>,
     x: i32,
     z: i32,
-    entity_type: steel_registry::entity_type::EntityTypeRef,
+    entity_type: EntityTypeRef,
 ) -> BlockPos {
     let y = region.height_at(HeightmapType::MotionBlockingNoLeaves, x, z);
     let mut pos = BlockPos::new(x, y, z);

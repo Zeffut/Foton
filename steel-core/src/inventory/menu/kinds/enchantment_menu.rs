@@ -17,6 +17,7 @@ use steel_utils::{
 };
 
 use crate::behavior::blocks::count_enchanting_power;
+use crate::enchantment_selection::{EnchantmentInstance, apply_enchantments};
 use crate::enchantment_selection::{
     OFFER_COUNT, enchanting_table_candidates, enchantment_cost, select_enchantment,
 };
@@ -24,6 +25,7 @@ use crate::inventory::container::SimpleContainer;
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
 use crate::world::{LevelReader as _, World};
+use steel_registry::item_stack::ItemStack;
 
 /// Slot holding the item being enchanted.
 const SLOT_ITEM: usize = 0;
@@ -150,7 +152,7 @@ impl EnchantmentKind {
             if self.cost_values[slot] <= 0 {
                 continue;
             }
-            let rolled = self.roll_offer(seed, slot, self.cost_values[slot], &item);
+            let rolled = Self::roll_offer(seed, slot, self.cost_values[slot], &item);
             let Some(first) = rolled.first() else {
                 continue;
             };
@@ -182,13 +184,7 @@ impl EnchantmentKind {
     /// Vanilla parity: `EnchantmentMenu.getEnchantmentList`, including the
     /// offset seed per slot, which is what lets the clue shown before the click
     /// match what the click produces.
-    fn roll_offer(
-        &self,
-        seed: i32,
-        slot: usize,
-        cost: i32,
-        item: &steel_registry::item_stack::ItemStack,
-    ) -> Vec<crate::enchantment_selection::EnchantmentInstance> {
+    fn roll_offer(seed: i32, slot: usize, cost: i32, item: &ItemStack) -> Vec<EnchantmentInstance> {
         let offset = i64::from(seed) + i64::try_from(slot).unwrap_or(0);
         #[expect(
             clippy::cast_sign_loss,
@@ -289,21 +285,12 @@ impl MenuKind for EnchantmentKind {
         }
 
         let seed = player.enchantment_seed();
-        let rolled = self.roll_offer(seed, slot, cost, &item);
+        let rolled = Self::roll_offer(seed, slot, cost, &item);
         if rolled.is_empty() {
             return false;
         }
 
-        let mut enchanted = if item.is(&vanilla_items::BOOK) {
-            steel_registry::item_stack::ItemStack::new(&vanilla_items::ENCHANTED_BOOK)
-        } else {
-            item
-        };
-        let applied: Vec<_> = rolled
-            .iter()
-            .map(|instance| (instance.enchantment.key.clone(), instance.level))
-            .collect();
-        enchanted.set_enchantments(&applied, true);
+        let enchanted = apply_enchantments(&item, &rolled);
 
         {
             let mut slots = self.enchant_slots.lock();

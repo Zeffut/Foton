@@ -22,6 +22,8 @@ use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
 use crate::player::{Player, player_inventory::EquipmentSwapResult};
 use crate::world::World;
+use steel_registry::data_components::PotionContents;
+use steel_registry::mob_effect::MobEffectRef;
 
 pub use steel_registry::data_components::vanilla_components::ItemUseAnimation;
 
@@ -104,9 +106,8 @@ fn apply_consume_effects(
 ///
 /// Vanilla parity: `PotionContents.forEachEffect`, without the duration scale,
 /// which only differs from one outside the ominous-bottle path.
-pub fn potion_effects(
-    contents: &steel_registry::data_components::PotionContents,
-) -> Vec<(steel_registry::mob_effect::MobEffectRef, i32, i32)> {
+#[must_use]
+pub fn potion_effects(contents: &PotionContents) -> Vec<(MobEffectRef, i32, i32)> {
     let mut effects = Vec::new();
 
     if let Some(potion) = contents.potion() {
@@ -389,8 +390,9 @@ mod potion_tests {
     };
 
     use super::potion_effects;
+    use steel_registry::potion::Potion;
 
-    fn bottle_of(potion: &'static steel_registry::potion::Potion) -> ItemStack {
+    fn bottle_of(potion: &'static Potion) -> ItemStack {
         let mut stack = ItemStack::new(&vanilla_items::POTION);
         stack.set(
             POTION_CONTENTS,
@@ -416,7 +418,7 @@ mod potion_tests {
 
         assert_eq!(effects.len(), 1);
         let (effect, duration, amplifier) = effects[0];
-        assert_eq!(effect, &*vanilla_mob_effects::SPEED);
+        assert_eq!(effect, vanilla_mob_effects::SPEED);
         assert!(duration > 0, "a timed potion must carry a duration");
         assert_eq!(amplifier, 0);
     }
@@ -453,7 +455,7 @@ mod potion_tests {
                 Some(RegistryReference::new(&vanilla_potions::SWIFTNESS)),
                 None,
                 vec![RegistryMobEffectInstance::simple(
-                    &vanilla_mob_effects::JUMP_BOOST,
+                    vanilla_mob_effects::JUMP_BOOST,
                     200,
                     1,
                 )],
@@ -470,7 +472,7 @@ mod potion_tests {
         assert!(
             effects
                 .iter()
-                .any(|(effect, _, _)| *effect == &*vanilla_mob_effects::JUMP_BOOST)
+                .any(|(effect, _, _)| *effect == vanilla_mob_effects::JUMP_BOOST)
         );
     }
 }

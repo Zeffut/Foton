@@ -19,6 +19,7 @@ use steel_registry::{sound_events, vanilla_attributes, vanilla_damage_types};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
@@ -31,6 +32,7 @@ use crate::entity::{
     MobBase, PathfinderMob,
 };
 use crate::world::{LevelReader as _, World};
+use steel_registry::fluid::is_water_fluid;
 
 /// How narrow the stare cone is.
 ///
@@ -236,9 +238,7 @@ impl EndermanEntity {
         }
 
         let landing = world.get_block_state(pos);
-        if !landing.blocks_motion()
-            || steel_registry::fluid::is_water_fluid(landing.get_fluid_state().fluid_id)
-        {
+        if !landing.blocks_motion() || is_water_fluid(landing.get_fluid_state().fluid_id) {
             return false;
         }
 
@@ -319,7 +319,7 @@ impl Goal for EndermanLookForPlayerGoal {
         let Some(player) = staring else {
             return false;
         };
-        let target: crate::entity::SharedEntity = player;
+        let target: SharedEntity = player;
         if let Some(living) = target.as_living_entity()
             && enderman.is_being_stared_by(living)
         {
@@ -445,7 +445,7 @@ impl Mob for EndermanEntity {
     /// Vanilla parity: the `setTarget` override. The speed modifier is
     /// transient: it is added when a target is taken and removed when it is
     /// dropped, so a calm enderman moves at its ordinary pace.
-    fn set_target(&self, target: Option<&crate::entity::SharedEntity>) -> bool {
+    fn set_target(&self, target: Option<&SharedEntity>) -> bool {
         let changed = self.mob_base().set_target(target, |_| true);
 
         if target.is_none() {

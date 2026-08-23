@@ -32,6 +32,7 @@ use crate::entity::{
 };
 use crate::physics::{MoveResult, MoverType};
 use crate::world::{LevelReader as _, World};
+use steel_utils::types::Difficulty;
 
 /// Speed multiplier while chasing.
 ///
@@ -315,7 +316,7 @@ fn check_drowned_spawn_rules(
     use steel_registry::fluid::is_water_fluid;
     use steel_registry::vanilla_biome_tags::BiomeTag;
 
-    if world.difficulty() == steel_utils::types::Difficulty::Peaceful {
+    if world.difficulty() == Difficulty::Peaceful {
         return false;
     }
 

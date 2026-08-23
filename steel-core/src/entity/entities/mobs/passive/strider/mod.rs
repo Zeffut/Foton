@@ -886,6 +886,7 @@ mod tests {
     use super::*;
     use crate::behavior::init_behaviors;
     use crate::entity::ai::path::Path;
+    use crate::entity::entities::PigEntity;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     fn strider() -> StriderEntity {
@@ -1201,12 +1202,7 @@ mod tests {
 
         let strider =
             StriderEntity::new(&vanilla_entities::STRIDER, 1, start, Arc::downgrade(&world));
-        let pig = crate::entity::entities::PigEntity::new(
-            &vanilla_entities::PIG,
-            2,
-            start,
-            Arc::downgrade(&world),
-        );
+        let pig = PigEntity::new(&vanilla_entities::PIG, 2, start, Arc::downgrade(&world));
 
         // A freshly built entity has never moved, so `on_ground` is false and
         // `can_update_path` refuses before the evaluator ever runs. Standing

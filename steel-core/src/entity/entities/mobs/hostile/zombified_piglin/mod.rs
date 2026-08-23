@@ -29,6 +29,8 @@ use crate::entity::{
     LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, SharedEntity, SpawnGroupData,
 };
 use crate::world::{LevelReader as _, World};
+use std::ptr;
+use steel_utils::types::Difficulty;
 
 /// Speed multiplier while chasing.
 const ATTACK_SPEED_MODIFIER: f64 = 1.0;
@@ -141,9 +143,10 @@ impl ZombifiedPiglinEntity {
                     };
                     // The anger check needs the shared world handle rather than
                     // the borrow the selector is given.
-                    let Some(world) = piglin.level().filter(|owned| {
-                        std::ptr::eq(Arc::as_ptr(owned), std::ptr::from_ref(world))
-                    }) else {
+                    let Some(world) = piglin
+                        .level()
+                        .filter(|owned| ptr::eq(Arc::as_ptr(owned), ptr::from_ref(world)))
+                    else {
                         return false;
                     };
                     piglin.is_angry_at(target, &world)
@@ -245,7 +248,7 @@ impl ZombifiedPiglinEntity {
 fn check_zombified_piglin_spawn_rules(world: &Arc<World>, pos: BlockPos) -> bool {
     use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 
-    world.difficulty() != steel_utils::types::Difficulty::Peaceful
+    world.difficulty() != Difficulty::Peaceful
         && world.get_block_state(pos.below()).get_block() != &vanilla_blocks::NETHER_WART_BLOCK
 }
 

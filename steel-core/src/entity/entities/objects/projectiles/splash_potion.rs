@@ -27,6 +27,7 @@ use steel_registry::{vanilla_damage_types, vanilla_entities, vanilla_items, vani
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey, WorldAabb};
 
+use crate::behavior::potion_effects;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::AreaEffectCloudEntity;
 use crate::entity::next_entity_id;
@@ -159,7 +160,7 @@ impl SplashPotionEntity {
         let Some(contents) = potion.get(POTION_CONTENTS) else {
             return;
         };
-        let effects = crate::behavior::potion_effects(contents);
+        let effects = potion_effects(contents);
         if effects.is_empty() {
             return;
         }
@@ -185,7 +186,7 @@ impl SplashPotionEntity {
         let Some(contents) = potion.get(POTION_CONTENTS) else {
             return;
         };
-        let effects = crate::behavior::potion_effects(contents);
+        let effects = potion_effects(contents);
         if effects.is_empty() {
             return;
         }
@@ -214,9 +215,7 @@ impl SplashPotionEntity {
                 if scaled < MINIMUM_EFFECT_TICKS {
                     continue;
                 }
-                living.add_mob_effect(MobEffectInstance::with_duration(
-                    *effect, scaled, *amplifier,
-                ));
+                living.add_mob_effect(MobEffectInstance::with_duration(effect, scaled, *amplifier));
             }
         }
     }

@@ -22,7 +22,12 @@ run() {
 
 run "cargo fmt --all --check"                      cargo fmt --all --check
 run "typos"                                        typos
-run "cargo clippy -r --all-targets --all-features" cargo clippy -r --all-targets --all-features
+# `-D warnings` is not decoration. Without it this suite stayed green while
+# `Drowned::travel_in_water` recursed into itself and eleven dead squid
+# constants sat in the tree -- clippy had been printing both the whole time
+# and nothing was reading. `--workspace` because the old invocation only
+# checked the default package.
+run "cargo clippy -r --workspace --all-targets --all-features -D warnings" cargo clippy -r --workspace --all-targets --all-features -- -D warnings
 run "cargo test --workspace"                       cargo test --workspace
 
 echo

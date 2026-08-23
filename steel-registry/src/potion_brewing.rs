@@ -511,7 +511,7 @@ mod tests {
         assert!(result.is(&vanilla_items::POTION));
         assert!(std::ptr::eq(
             potion_of(&result).expect("brewed bottle holds a potion"),
-            &vanilla_potions::AWKWARD
+            &raw const vanilla_potions::AWKWARD
         ));
     }
 
@@ -523,14 +523,14 @@ mod tests {
         let from_water = mix_with(&ItemStack::new(&vanilla_items::SUGAR), &water_bottle());
         assert!(std::ptr::eq(
             potion_of(&from_water).expect("holds a potion"),
-            &vanilla_potions::MUNDANE
+            &raw const vanilla_potions::MUNDANE
         ));
 
         let awkward = potion_item(&vanilla_items::POTION, &vanilla_potions::AWKWARD);
         let from_awkward = mix_with(&ItemStack::new(&vanilla_items::SUGAR), &awkward);
         assert!(std::ptr::eq(
             potion_of(&from_awkward).expect("holds a potion"),
-            &vanilla_potions::SWIFTNESS
+            &raw const vanilla_potions::SWIFTNESS
         ));
     }
 
@@ -543,7 +543,7 @@ mod tests {
         assert!(result.is(&vanilla_items::SPLASH_POTION));
         assert!(std::ptr::eq(
             potion_of(&result).expect("holds a potion"),
-            &vanilla_potions::SWIFTNESS
+            &raw const vanilla_potions::SWIFTNESS
         ));
     }
 
@@ -555,13 +555,13 @@ mod tests {
         let long = mix_with(&ItemStack::new(&vanilla_items::REDSTONE), &swiftness);
         assert!(std::ptr::eq(
             potion_of(&long).expect("holds a potion"),
-            &vanilla_potions::LONG_SWIFTNESS
+            &raw const vanilla_potions::LONG_SWIFTNESS
         ));
 
         let strong = mix_with(&ItemStack::new(&vanilla_items::GLOWSTONE_DUST), &swiftness);
         assert!(std::ptr::eq(
             potion_of(&strong).expect("holds a potion"),
-            &vanilla_potions::STRONG_SWIFTNESS
+            &raw const vanilla_potions::STRONG_SWIFTNESS
         ));
     }
 
@@ -572,7 +572,7 @@ mod tests {
         let result = mix_with(&ItemStack::new(&vanilla_items::DIRT), &awkward);
         assert!(std::ptr::eq(
             potion_of(&result).expect("holds a potion"),
-            &vanilla_potions::AWKWARD
+            &raw const vanilla_potions::AWKWARD
         ));
     }
 

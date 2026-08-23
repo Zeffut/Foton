@@ -22,6 +22,7 @@ use crate::entity::ai::path::PathComputationType;
 use crate::entity::ai::walk::WalkPathEvaluator;
 use crate::world::signal_getter::SignalQueryContext;
 use crate::world::{LevelReader as _, World};
+use std::ptr;
 
 /// Somewhere the spawn rules can read blocks from.
 ///
@@ -135,7 +136,7 @@ const PLACEMENT_EXCEPTIONS: &[(EntityTypeRef, SpawnPlacementType)] = &[
 pub fn spawn_placement_for(entity_type: EntityTypeRef) -> SpawnPlacementType {
     PLACEMENT_EXCEPTIONS
         .iter()
-        .find(|(candidate, _)| std::ptr::eq(*candidate, entity_type))
+        .find(|(candidate, _)| ptr::eq(*candidate, entity_type))
         .map_or(SpawnPlacementType::OnGround, |(_, placement)| *placement)
 }
 

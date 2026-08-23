@@ -17,6 +17,7 @@ use steel_utils::types::Difficulty;
 use uuid::Uuid;
 
 use crate::entity::{Entity, LivingEntity, Mob, SharedEntity};
+use crate::player::Player;
 use crate::world::World;
 
 /// The anger a neutral mob is carrying.
@@ -34,7 +35,7 @@ pub struct PersistentAnger {
 impl PersistentAnger {
     /// Creates a calm mob's anger state.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             end_time: SyncMutex::new(-1),
             target: SyncMutex::new(None),
@@ -214,7 +215,7 @@ fn is_valid_player_target(target: &dyn LivingEntity, world: &Arc<World>) -> bool
 }
 
 /// Returns whether a mob may stay angry at this player.
-fn player_can_be_angered_at(player: &crate::player::Player, world: &Arc<World>) -> bool {
+fn player_can_be_angered_at(player: &Player, world: &Arc<World>) -> bool {
     use steel_utils::types::GameType;
     !matches!(player.game_mode(), GameType::Creative | GameType::Spectator)
         && world.difficulty() != Difficulty::Peaceful
