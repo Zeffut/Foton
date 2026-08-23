@@ -42,61 +42,6 @@ const SQUID_SOUND_VOLUME: f32 = 0.4;
 /// Vanilla parity: `Squid.getDefaultGravity`.
 const SQUID_GRAVITY: f64 = 0.08;
 
-/// Particles in one ink cloud.
-///
-/// Vanilla parity: the `30` iterations of `Squid.spawnInk`.
-const INK_PARTICLE_COUNT: i32 = 30;
-
-/// Sideways scatter of each ink jet.
-///
-/// Vanilla parity: the `nextFloat() * 0.6 - 0.3` of the same loop.
-const INK_SCATTER: f64 = 0.6;
-
-/// Shortest distance an ink jet is thrown, for a grown squid.
-///
-/// Vanilla parity: the `0.3F` offset scale.
-const INK_REACH_ADULT: f64 = 0.3;
-
-/// Shortest distance an ink jet is thrown, for a baby.
-///
-/// Vanilla parity: the `0.1F` offset scale.
-const INK_REACH_BABY: f64 = 0.1;
-
-/// Extra distance an ink jet may travel beyond the minimum.
-///
-/// Vanilla parity: the `+ nextFloat() * 2.0F` of the same expression.
-const INK_REACH_SPREAD: f64 = 2.0;
-
-/// Speed the ink particles carry.
-///
-/// Vanilla parity: the `0.1F` speed argument of `sendParticles`.
-const INK_SPEED: f64 = 0.1;
-
-/// How fast a squid turns to face where it is drifting.
-///
-/// Vanilla parity: the `0.1F` interpolation of `Squid.aiStep`.
-const FACING_RESPONSIVENESS: f32 = 0.1;
-
-/// Squared distance within which a squid bolts from what hurt it.
-///
-/// Vanilla parity: the `distanceToSqr(entity) < 100.0` of `SquidFleeGoal`.
-const FLEE_TRIGGER_DISTANCE_SQR: f64 = 100.0;
-
-/// How hard a squid pushes away from what hurt it.
-///
-/// Vanilla parity: `SquidFleeGoal.SQUID_FLEE_SPEED`.
-const FLEE_SPEED: f64 = 3.0;
-
-/// Distance past which the flee push starts easing off.
-///
-/// Vanilla parity: `SquidFleeGoal.SQUID_FLEE_MIN_DISTANCE`.
-const FLEE_EASE_FROM: f64 = 5.0;
-
-/// Divisor turning the flee push into a per-tick movement vector.
-///
-/// Vanilla parity: the `/ 20.0` of `SquidFleeGoal.tick`.
-const FLEE_PUSH_DIVISOR: f64 = 20.0;
-
 /// Baby squid hitbox.
 ///
 /// Vanilla parity: `Squid.BABY_DIMENSIONS`.

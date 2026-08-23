@@ -319,7 +319,7 @@ static POTION_MIXES: LazyLock<Vec<PotionMix>> = LazyLock::new(|| {
     ]
 });
 
-fn mix(from: PotionRef, ingredient: ItemRef, to: PotionRef) -> PotionMix {
+const fn mix(from: PotionRef, ingredient: ItemRef, to: PotionRef) -> PotionMix {
     PotionMix {
         from,
         ingredient,
@@ -475,7 +475,7 @@ pub fn is_brewing_fuel(stack: &ItemStack) -> bool {
 fn potion_of(stack: &ItemStack) -> Option<PotionRef> {
     stack
         .get(POTION_CONTENTS)
-        .and_then(|contents| contents.potion())
+        .and_then(PotionContents::potion)
         .map(|reference| reference.value())
 }
 
