@@ -64,7 +64,8 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 29
+[items] 28
+ArmorStandItem
 ArrowItem
 BannerItem
 BottleItem
@@ -77,9 +78,7 @@ EndCrystalItem
 FishingRodItem
 GameMasterBlockItem
 GlowInkSacItem
-HangingEntityItem
 InkSacItem
-InstrumentItem
 Item
 KnowledgeBookItem
 LeadItem
@@ -90,15 +89,14 @@ ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
-SpyglassItem
 TridentItem
+WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 90
+[entities] 89
 Allay
 Armadillo
-ArmorStand
 Axolotl
 Bee
 Blaze
@@ -146,7 +144,6 @@ Mule
 Nautilus
 Ocelot
 OminousItemSpawner
-Painting
 Panda
 Parched
 Parrot
@@ -179,6 +176,7 @@ Villager
 Vindicator
 WanderingTrader
 Warden
+WindCharge
 WitherBoss
 WitherSkull
 Wolf
