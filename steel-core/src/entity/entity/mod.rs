@@ -1718,6 +1718,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         self.base().set_rotation(rotation);
     }
 
+    /// Returns whether this entity moved sideways at all on the last tick.
+    ///
+    /// Vanilla parity: `Entity.hasMovedHorizontallyRecently`, which is how a
+    /// dolphin tells a boat that is being rowed from one that is drifting.
+    fn has_moved_horizontally_recently(&self) -> bool {
+        let known_speed = self.base().known_speed();
+        known_speed.x.hypot(known_speed.z).abs() > 1.0e-5
+    }
+
     /// Gets the nearest horizontal direction to the entity's yaw (horizontal rotation).
     fn direction_yaw(&self) -> Direction {
         let (yaw, _) = self.rotation();

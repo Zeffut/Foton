@@ -1,6 +1,10 @@
 //! Mob control state.
 
 use glam::DVec3;
+use steel_registry::vanilla_attributes;
+
+use crate::entity::mob::rotlerp;
+use crate::entity::{LivingTravelInput, Mob};
 
 pub(crate) const DEFAULT_LOOK_Y_MAX_ROT_SPEED: f32 = 10.0;
 pub(crate) const DEFAULT_LOOK_X_MAX_ROT_ANGLE: f32 = 40.0;
@@ -375,6 +379,225 @@ impl BodyRotationControl {
 impl Default for BodyRotationControl {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Below this much left to turn a swimmer loses no speed at all.
+///
+/// Vanilla parity: `SmoothSwimmingMoveControl.FULL_SPEED_TURN_THRESHOLD`.
+const FULL_SPEED_TURN_THRESHOLD: f32 = 10.0;
+/// The span over which the turning penalty ramps to a full stop.
+///
+/// Vanilla parity: the `50.0F` divisor of `getTurningSpeedFactor`, which is
+/// `STOP_TURN_THRESHOLD - FULL_SPEED_TURN_THRESHOLD`.
+const TURN_SPEED_FALLOFF: f32 = 50.0;
+/// Degrees per tick a swimmer may pitch toward its heading.
+///
+/// Vanilla parity: the `5.0F` of `SmoothSwimmingMoveControl.tick`.
+const SWIMMING_PITCH_RATE: f32 = 5.0;
+/// Upward nudge a swimmer with gravity applied gets under water.
+const SWIMMING_LIFT: f64 = 0.005;
+/// Below this squared distance a swimmer stops rather than steers.
+const SWIMMING_MIN_DISTANCE_SQR: f64 = 2.500_000_3e-7;
+
+/// How a mob that swims well steers.
+///
+/// Vanilla parity: `SmoothSwimmingMoveControl`. A dolphin banks into its turns
+/// and loses speed the harder it has to turn, which is what makes it read as a
+/// swimmer rather than as a fish being dragged along a path.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SmoothSwimmingMoveControl {
+    max_turn_x: f32,
+    max_turn_y: f32,
+    in_water_speed_modifier: f32,
+    outside_water_speed_modifier: f32,
+    apply_gravity: bool,
+}
+
+impl SmoothSwimmingMoveControl {
+    #[must_use]
+    pub const fn new(
+        max_turn_x: i32,
+        max_turn_y: i32,
+        in_water_speed_modifier: f32,
+        outside_water_speed_modifier: f32,
+        apply_gravity: bool,
+    ) -> Self {
+        Self {
+            max_turn_x: max_turn_x as f32,
+            max_turn_y: max_turn_y as f32,
+            in_water_speed_modifier,
+            outside_water_speed_modifier,
+            apply_gravity,
+        }
+    }
+
+    /// Vanilla parity: `SmoothSwimmingMoveControl.getTurningSpeedFactor`.
+    #[must_use]
+    fn turning_speed_factor(left_to_turn: f32) -> f32 {
+        1.0 - ((left_to_turn - FULL_SPEED_TURN_THRESHOLD) / TURN_SPEED_FALLOFF).clamp(0.0, 1.0)
+    }
+
+    /// Vanilla parity: `SmoothSwimmingMoveControl.tick`.
+    pub fn tick(self, mob: &dyn Mob) {
+        if self.apply_gravity && mob.is_in_water() {
+            mob.set_velocity(mob.velocity() + DVec3::new(0.0, SWIMMING_LIFT, 0.0));
+        }
+
+        let (operation, wanted_position, speed_modifier) = {
+            let controls = mob.mob_base().controls().lock();
+            let move_control = controls.move_control;
+            (
+                move_control.operation(),
+                move_control.wanted_position(),
+                move_control.speed_modifier(),
+            )
+        };
+
+        let navigating = matches!(operation, MoveControlOperation::MoveTo)
+            && !mob.mob_base().navigation().lock().is_done();
+        if !navigating {
+            mob.set_mob_speed(0.0);
+            mob.set_travel_input(LivingTravelInput::new(0.0, 0.0, 0.0));
+            return;
+        }
+
+        let delta = wanted_position - mob.position();
+        if delta.length_squared() < SWIMMING_MIN_DISTANCE_SQR {
+            let input = mob.travel_input();
+            mob.set_travel_input(LivingTravelInput::new(
+                input.sideways(),
+                input.vertical(),
+                0.0,
+            ));
+            return;
+        }
+
+        let wanted_yaw = (delta.z.atan2(delta.x).to_degrees() as f32) - 90.0;
+        let (yaw, pitch) = mob.rotation();
+        let turned_yaw = rotlerp(yaw, wanted_yaw, self.max_turn_y);
+        mob.set_rotation((turned_yaw, pitch));
+        mob.set_y_body_rot(turned_yaw);
+        mob.set_y_head_rot(turned_yaw);
+
+        let movement_speed = mob
+            .attributes()
+            .lock()
+            .required_value(vanilla_attributes::MOVEMENT_SPEED);
+        let speed = (speed_modifier * movement_speed) as f32;
+        if !mob.is_in_water() {
+            let left_to_turn = wrap_degrees(mob.rotation().0 - wanted_yaw).abs();
+            let turning_speed_factor = Self::turning_speed_factor(left_to_turn);
+            mob.set_mob_speed(speed * self.outside_water_speed_modifier * turning_speed_factor);
+            return;
+        }
+
+        mob.set_mob_speed(speed * self.in_water_speed_modifier);
+        let horizontal = delta.x.hypot(delta.z);
+        if delta.y.abs() > 1.0e-5 || horizontal.abs() > 1.0e-5 {
+            let wanted_pitch = -(delta.y.atan2(horizontal).to_degrees() as f32);
+            let wanted_pitch = wrap_degrees(wanted_pitch).clamp(-self.max_turn_x, self.max_turn_x);
+            let (yaw, pitch) = mob.rotation();
+            mob.set_rotation((
+                yaw,
+                rotate_towards(pitch, wanted_pitch, SWIMMING_PITCH_RATE),
+            ));
+        }
+
+        let pitch_radians = mob.rotation().1.to_radians();
+        mob.set_travel_input(LivingTravelInput::new(
+            0.0,
+            -pitch_radians.sin() * speed,
+            pitch_radians.cos() * speed,
+        ));
+    }
+}
+
+/// Degrees a swimmer's head leads its look target by.
+///
+/// Vanilla parity: `SmoothSwimmingLookControl.HEAD_TILT_Y`.
+const SMOOTH_SWIMMING_HEAD_TILT_Y: f32 = 20.0;
+/// Degrees a swimmer's pitch leads its look target by.
+const SMOOTH_SWIMMING_HEAD_TILT_X: f32 = 10.0;
+/// Degrees per tick a swimmer levels out over when it has nowhere to look.
+const SMOOTH_SWIMMING_LEVEL_RATE: f32 = 5.0;
+/// Degrees per tick a swimmer's body follows its head by.
+const SMOOTH_SWIMMING_BODY_TURN_RATE: f32 = 4.0;
+
+/// How a mob that swims well looks around.
+///
+/// Vanilla parity: `SmoothSwimmingLookControl`, which lets the head lead the
+/// body and then drags the body after it a few degrees at a time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SmoothSwimmingLookControl {
+    max_y_rot_from_center: f32,
+}
+
+impl SmoothSwimmingLookControl {
+    #[must_use]
+    pub const fn new(max_y_rot_from_center: i32) -> Self {
+        Self {
+            max_y_rot_from_center: max_y_rot_from_center as f32,
+        }
+    }
+
+    /// Vanilla parity: `SmoothSwimmingLookControl.tick`.
+    pub fn tick(self, mob: &dyn Mob) {
+        let look_control = {
+            let mut controls = mob.mob_base().controls().lock();
+            let look_control = controls.look_control;
+            controls.look_control.tick_cooldown();
+            look_control
+        };
+
+        if look_control.is_looking_at_target() {
+            let position = mob.position();
+            let wanted_position = look_control.wanted_position();
+            let xd = wanted_position.x - position.x;
+            let yd = wanted_position.y - mob.get_eye_y();
+            let zd = wanted_position.z - position.z;
+            let horizontal = xd.hypot(zd);
+
+            if zd.abs() > 1.0e-5 || xd.abs() > 1.0e-5 {
+                let wanted_yaw = (zd.atan2(xd).to_degrees() as f32) - 90.0;
+                mob.set_y_head_rot(rotate_towards(
+                    mob.y_head_rot(),
+                    wanted_yaw + SMOOTH_SWIMMING_HEAD_TILT_Y,
+                    look_control.y_max_rot_speed(),
+                ));
+            }
+
+            if yd.abs() > 1.0e-5 || horizontal.abs() > 1.0e-5 {
+                let wanted_pitch = -(yd.atan2(horizontal).to_degrees() as f32);
+                let (yaw, pitch) = mob.rotation();
+                mob.set_rotation((
+                    yaw,
+                    rotate_towards(
+                        pitch,
+                        wanted_pitch + SMOOTH_SWIMMING_HEAD_TILT_X,
+                        look_control.x_max_rot_angle(),
+                    ),
+                ));
+            }
+        } else {
+            if mob.mob_base().navigation().lock().is_done() {
+                let (yaw, pitch) = mob.rotation();
+                mob.set_rotation((yaw, rotate_towards(pitch, 0.0, SMOOTH_SWIMMING_LEVEL_RATE)));
+            }
+
+            mob.set_y_head_rot(rotate_towards(
+                mob.y_head_rot(),
+                mob.y_body_rot(),
+                look_control.y_max_rot_speed(),
+            ));
+        }
+
+        let head_diff_body = wrap_degrees(mob.y_head_rot() - mob.y_body_rot());
+        if head_diff_body < -self.max_y_rot_from_center {
+            mob.set_y_body_rot(mob.y_body_rot() - SMOOTH_SWIMMING_BODY_TURN_RATE);
+        } else if head_diff_body > self.max_y_rot_from_center {
+            mob.set_y_body_rot(mob.y_body_rot() + SMOOTH_SWIMMING_BODY_TURN_RATE);
+        }
     }
 }
 

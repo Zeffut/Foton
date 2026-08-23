@@ -405,6 +405,15 @@ pub trait Mob: LivingEntity {
 
     /// Returns vanilla `Mob.canAttack`.
     fn can_attack(&self, target: &dyn LivingEntity) -> bool {
+        self.mob_can_attack(target)
+    }
+
+    /// The body of [`Self::can_attack`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition -- the dolphin,
+    /// whose calves pick no fights -- calls this for the rest. Going through
+    /// [`Self::is_valid_target`] instead would recurse.
+    fn mob_can_attack(&self, target: &dyn LivingEntity) -> bool {
         target.entity_type() != &vanilla_entities::GHAST && LivingEntity::can_attack(self, target)
     }
 

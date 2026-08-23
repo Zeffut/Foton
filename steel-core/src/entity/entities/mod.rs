@@ -16,7 +16,10 @@ pub use mobs::passive::{
     ChickenEntity, CowEntity, GoatEntity, MushroomCowEntity, PigEntity, PolarBearEntity,
     RabbitEntity, RabbitVariant, SheepEntity, StriderEntity, TurtleEntity,
 };
-pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
+pub use mobs::water::{
+    CodEntity, DolphinEntity, GlowSquidEntity, PufferfishEntity, SalmonEntity, SquidEntity,
+    TropicalFishEntity, TropicalFishPattern, TropicalFishVariant,
+};
 pub use objects::display_ui::{
     BlockDisplayEntity, InteractionEntity, ItemDisplayEntity, ItemFrameEntity,
     LeashFenceKnotEntity, PaintingEntity, TextDisplayEntity,

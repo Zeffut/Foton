@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 73
+[entities] 70
 Allay
 Armadillo
 Axolotl
@@ -82,7 +82,6 @@ CamelHusk
 Cat
 CopperGolem
 Creaking
-Dolphin
 Donkey
 ElderGuardian
 EnderDragon
@@ -119,7 +118,6 @@ Piglin
 PiglinBrute
 Pillager
 Player
-Pufferfish
 Ravager
 Shulker
 SkeletonHorse
@@ -130,7 +128,6 @@ SulfurCube
 Tadpole
 ThrownLingeringPotion
 TraderLlama
-TropicalFish
 Vex
 Villager
 Vindicator

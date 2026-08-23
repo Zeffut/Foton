@@ -1,4 +1,4 @@
-use crate::entity::entities::RabbitVariant;
+use crate::entity::entities::{RabbitVariant, TropicalFishVariant};
 
 /// Vanilla `EntitySpawnReason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,25 +42,52 @@ pub enum SpawnGroupData {
     /// Vanilla `Rabbit.RabbitGroupData`, which is an `AgeableMobGroupData` that
     /// also carries the variant every rabbit of the group is born with.
     Rabbit(RabbitGroupData),
+    /// Vanilla `TropicalFish.TropicalFishGroupData`, which carries the variant
+    /// a shoal shares. Vanilla derives it from
+    /// `AbstractSchoolingFish.SchoolSpawnGroupData` and so also carries the
+    /// school leader; Steel has no schooling fish, so that half is absent.
+    TropicalFish(TropicalFishGroupData),
 }
 
 impl SpawnGroupData {
-    /// Returns the ageable layer every group data kind extends.
+    /// Returns the ageable layer, for the kinds that extend one.
     #[must_use]
-    pub const fn ageable(&self) -> &AgeableMobGroupData {
+    pub const fn ageable(&self) -> Option<&AgeableMobGroupData> {
         match self {
-            Self::AgeableMob(group_data) => group_data,
-            Self::Rabbit(group_data) => &group_data.ageable,
+            Self::AgeableMob(group_data) => Some(group_data),
+            Self::Rabbit(group_data) => Some(&group_data.ageable),
+            Self::TropicalFish(_) => None,
         }
     }
 
     /// Returns the ageable layer for mutation.
     #[must_use]
-    pub const fn ageable_mut(&mut self) -> &mut AgeableMobGroupData {
+    pub const fn ageable_mut(&mut self) -> Option<&mut AgeableMobGroupData> {
         match self {
-            Self::AgeableMob(group_data) => group_data,
-            Self::Rabbit(group_data) => &mut group_data.ageable,
+            Self::AgeableMob(group_data) => Some(group_data),
+            Self::Rabbit(group_data) => Some(&mut group_data.ageable),
+            Self::TropicalFish(_) => None,
         }
+    }
+}
+
+/// Vanilla `TropicalFish.TropicalFishGroupData`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TropicalFishGroupData {
+    variant: TropicalFishVariant,
+}
+
+impl TropicalFishGroupData {
+    /// Creates group data for a shoal of tropical fish.
+    #[must_use]
+    pub const fn new(variant: TropicalFishVariant) -> Self {
+        Self { variant }
+    }
+
+    /// Returns the variant the shoal shares.
+    #[must_use]
+    pub const fn variant(self) -> TropicalFishVariant {
+        self.variant
     }
 }
 

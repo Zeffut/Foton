@@ -240,9 +240,8 @@ pub trait AgeableMob: Mob {
         let mut group_data = group_data.unwrap_or_else(|| {
             SpawnGroupData::AgeableMob(AgeableMobGroupData::with_should_spawn_baby(true))
         });
-        if group_data
-            .ageable_mut()
-            .finalize_ageable_spawn(rand::random::<f32>)
+        if let Some(ageable) = group_data.ageable_mut()
+            && ageable.finalize_ageable_spawn(rand::random::<f32>)
         {
             self.set_age(self.get_baby_start_age());
         }
