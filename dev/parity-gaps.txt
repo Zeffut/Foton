@@ -12,10 +12,11 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 33
+[blocks] 49
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
+CalibratedSculkSensorBlock
 CartographyTableBlock
 CarvedPumpkinBlock
 CommandBlock
@@ -24,15 +25,25 @@ CopperGolemStatueBlock
 CreakingHeartBlock
 CryingObsidianBlock
 DriedGhastBlock
+FrogspawnBlock
 FrostedIceBlock
 HalfTransparentBlock
 JigsawBlock
 LightBlock
+LightningRodBlock
 MangroveRootsBlock
 NetherrackBlock
 NyliumBlock
+PiglinWallSkullBlock
+PlayerHeadBlock
+PlayerWallHeadBlock
+SculkBlock
 SculkCatalystBlock
+SculkSensorBlock
+SculkShriekerBlock
 ShelfBlock
+SkullBlock
+SnifferEggBlock
 SoulSandBlock
 SpawnerBlock
 StainedGlassBlock
@@ -43,32 +54,48 @@ TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
 TrialSpawnerBlock
+TurtleEggBlock
 VaultBlock
+WallSkullBlock
 WeatheringCopperChestBlock
 WeatheringCopperGolemStatueBlock
+WeatheringLightningRodBlock
+WitherSkullBlock
+WitherWallSkullBlock
 
-[items] 19
+[items] 30
+ArmorStandItem
 ArrowItem
 BannerItem
+BottleItem
 BundleItem
+CrossbowItem
 DebugStickItem
 DiscFragmentItem
 EmptyMapItem
 EndCrystalItem
 FishingRodItem
 GameMasterBlockItem
+GlowInkSacItem
+InkSacItem
+InstrumentItem
 Item
 KnowledgeBookItem
+LeadItem
 MapItem
 MobBucketItem
 ScaffoldingBlockItem
+ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
+SpyglassItem
+TridentItem
+WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 82
+[entities] 84
 Allay
 Armadillo
 Axolotl
@@ -84,7 +111,6 @@ CopperGolem
 Creaking
 Dolphin
 Donkey
-DragonFireball
 ElderGuardian
 EnderDragon
 Endermite
@@ -103,11 +129,14 @@ HappyGhast
 Hoglin
 Horse
 Illusioner
+Interaction
 IronGolem
-LargeFireball
+ItemDisplay
+LightningBolt
 Llama
 LlamaSpit
 Mannequin
+Marker
 MinecartCommandBlock
 MinecartSpawner
 Mule
@@ -127,15 +156,15 @@ Pufferfish
 Rabbit
 Ravager
 Shulker
-ShulkerBullet
 SkeletonHorse
-SmallFireball
 Sniffer
 SnowGolem
 SpectralArrow
 SulfurCube
 Tadpole
+TextDisplay
 ThrownLingeringPotion
+ThrownTrident
 TraderLlama
 TropicalFish
 Turtle
@@ -144,8 +173,8 @@ Villager
 Vindicator
 WanderingTrader
 Warden
+WindCharge
 WitherBoss
-WitherSkull
 Wolf
 Zoglin
 ZombieHorse

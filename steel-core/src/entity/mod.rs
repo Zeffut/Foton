@@ -817,9 +817,10 @@ pub use movement_sync::{
     PackedEntityRotation, ServerEntityMovementSyncState, ServerEntityMovementSyncUpdate,
 };
 pub use projectile::{
-    EntityHitResult, Projectile, ProjectileBase, ProjectileDeflection, ProjectileEventSource,
-    ProjectileHit, ThrowableItemProjectile, ThrowableProjectile, ViewVectorHitResult,
-    compute_margin, get_hit_result_on_view_vector,
+    EntityHitResult, HurtingProjectile, HurtingProjectileBase, INITIAL_ACCELERATION_POWER,
+    Projectile, ProjectileBase, ProjectileDeflection, ProjectileEventSource, ProjectileHit,
+    ThrowableItemProjectile, ThrowableProjectile, ViewVectorHitResult, compute_margin,
+    get_hit_result_on_view_vector, rotate_towards_movement,
 };
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
 pub(crate) use spawn::{AgeableMobGroupData, EntitySpawnReason, SpawnGroupData};
