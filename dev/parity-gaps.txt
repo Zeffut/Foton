@@ -64,7 +64,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 30
+[items] 28
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -79,7 +79,6 @@ FishingRodItem
 GameMasterBlockItem
 GlowInkSacItem
 InkSacItem
-InstrumentItem
 Item
 KnowledgeBookItem
 LeadItem
@@ -90,7 +89,6 @@ ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
-SpyglassItem
 TridentItem
 WindChargeItem
 WritableBookItem

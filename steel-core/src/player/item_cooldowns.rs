@@ -46,14 +46,22 @@ impl ItemCooldowns {
         if duration <= 0 {
             return None;
         }
-        let group = cooldown_group(stack);
+        Some((self.add(cooldown_group(stack), duration), duration))
+    }
+
+    /// Starts a cooldown of a length the caller computed itself.
+    ///
+    /// Vanilla parity: `ItemCooldowns.addCooldown(Identifier, int)`. Items whose
+    /// cooldown is not a `minecraft:use_cooldown` component -- the goat horn
+    /// takes it from its instrument -- go through here.
+    pub(super) fn add(&mut self, group: Identifier, duration: i32) -> Identifier {
         self.cooldowns.insert(
             group.clone(),
             CooldownInstance {
                 end_time: self.tick_count + duration,
             },
         );
-        Some((group, duration))
+        group
     }
 }
 
@@ -79,6 +87,21 @@ impl Player {
                 duration,
             });
         }
+    }
+
+    /// Starts a cooldown the item works out for itself, rather than one carried
+    /// by a `minecraft:use_cooldown` component.
+    ///
+    /// Vanilla parity: `Player.getCooldowns().addCooldown(stack, ticks)`.
+    pub fn add_item_cooldown(&self, stack: &ItemStack, duration: i32) {
+        let cooldown_group = self
+            .item_cooldowns
+            .lock()
+            .add(cooldown_group(stack), duration);
+        self.send_packet(CCooldown {
+            cooldown_group,
+            duration,
+        });
     }
 
     pub(super) fn tick_item_cooldowns(&self) {
