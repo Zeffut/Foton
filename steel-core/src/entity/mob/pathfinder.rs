@@ -325,6 +325,19 @@ pub trait PathfinderMob: Mob {
             .has_running_panic_goal()
     }
 
+    /// Returns whether a tempt goal is currently leading this mob.
+    ///
+    /// Vanilla parity: the `isBeingTempted` several mobs implement by holding
+    /// on to the `TemptGoal` they registered. Steel's goals live behind the
+    /// selector rather than in the mob, so the selector is asked instead --
+    /// exactly as [`Self::is_panicking`] already does.
+    fn is_being_tempted(&self) -> bool {
+        self.mob_base()
+            .goal_selector()
+            .lock()
+            .has_running_tempt_goal()
+    }
+
     fn create_path_to_targets(
         &self,
         world: &Arc<World>,

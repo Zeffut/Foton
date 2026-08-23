@@ -1506,6 +1506,18 @@ pub trait LivingEntity: Entity {
         false
     }
 
+    /// Returns [`Self::can_stand_on_fluid`] as a bare function.
+    ///
+    /// The path finder copies a mob's settings into a plain struct that
+    /// outlives the borrow of the mob, so it stores the predicate rather than
+    /// the entity. Every implementation answers from the fluid alone, so a
+    /// function pointer loses nothing -- and an override that forgets this one
+    /// gets a mob that floats on a fluid it cannot path across, which is why
+    /// the two are tested against each other.
+    fn can_stand_on_fluid_predicate(&self) -> fn(FluidState) -> bool {
+        |_| false
+    }
+
     /// Checks if the entity is currently using an item.
     fn is_using_item(&self) -> bool {
         false
@@ -2530,6 +2542,23 @@ pub trait LivingEntity: Entity {
 
     /// Mirrors vanilla `LivingEntity.travelInWater()`.
     fn travel_in_water(
+        &self,
+        input: DVec3,
+        base_gravity: f64,
+        is_falling: bool,
+        old_y: f64,
+    ) -> Option<MoveResult> {
+        self.living_travel_in_water(input, base_gravity, is_falling, old_y)
+    }
+
+    /// The body of [`Self::travel_in_water`], callable from an override.
+    ///
+    /// Rust has no `super`: writing `LivingEntity::travel_in_water(self, ..)`
+    /// inside an override dispatches straight back into that override and
+    /// recurses until the stack runs out. An override that only wants to
+    /// intercept some cases -- the drowned, which swims only while submerged --
+    /// calls this for the rest.
+    fn living_travel_in_water(
         &self,
         input: DVec3,
         base_gravity: f64,

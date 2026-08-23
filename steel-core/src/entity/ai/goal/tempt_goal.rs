@@ -103,6 +103,10 @@ impl TemptGoal {
 }
 
 impl Goal for TemptGoal {
+    fn is_tempt_goal(&self) -> bool {
+        true
+    }
+
     fn controls(&self) -> GoalControls {
         GoalControls::MOVE | GoalControls::LOOK
     }

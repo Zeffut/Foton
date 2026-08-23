@@ -91,6 +91,10 @@ pub trait Goal: Send {
         false
     }
 
+    fn is_tempt_goal(&self) -> bool {
+        false
+    }
+
     fn start(&mut self, _mob: &dyn PathfinderMob) {}
 
     fn stop(&mut self, _mob: &dyn PathfinderMob) {}
@@ -163,6 +167,10 @@ impl WrappedGoal {
 
     fn is_panic_goal(&self) -> bool {
         self.goal.is_panic_goal()
+    }
+
+    fn is_tempt_goal(&self) -> bool {
+        self.goal.is_tempt_goal()
     }
 }
 
@@ -270,6 +278,13 @@ impl GoalSelector {
         self.available_goals
             .iter()
             .any(|goal| goal.is_running() && goal.is_panic_goal())
+    }
+
+    #[must_use]
+    pub(crate) fn has_running_tempt_goal(&self) -> bool {
+        self.available_goals
+            .iter()
+            .any(|goal| goal.is_running() && goal.is_tempt_goal())
     }
 
     #[cfg(test)]

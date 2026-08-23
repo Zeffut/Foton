@@ -3315,6 +3315,22 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         pos: BlockPos,
         world: &Arc<World>,
     ) {
+        self.entity_check_fall_damage(vertical_movement, on_ground, on_state, pos, world);
+    }
+
+    /// The body of [`Self::check_fall_damage`], callable from an override.
+    ///
+    /// Rust has no `super`, so an entity that only wants to intercept some
+    /// falls -- the strider, which treats lava as a floor -- calls this for the
+    /// rest instead of copying it.
+    fn entity_check_fall_damage(
+        &self,
+        vertical_movement: f64,
+        on_ground: bool,
+        on_state: BlockStateId,
+        pos: BlockPos,
+        world: &Arc<World>,
+    ) {
         if !self.is_in_water() && vertical_movement < 0.0 {
             self.base().accumulate_fall_distance(vertical_movement);
         }

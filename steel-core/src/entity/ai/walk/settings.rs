@@ -44,7 +44,7 @@ impl MobPathSettings {
             bounding_box,
             on_ground: mob.on_ground(),
             in_water: mob.is_in_water(),
-            can_stand_on_fluid: |_| false,
+            can_stand_on_fluid: mob.can_stand_on_fluid_predicate(),
             max_up_step: mob.max_up_step(),
             max_fall_distance: mob.max_fall_distance(),
             malus,

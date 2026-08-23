@@ -10,7 +10,9 @@ pub use mobs::hostile::{
     SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, WitchEntity, WitherSkeletonEntity,
     ZombieEntity, ZombifiedPiglinEntity,
 };
-pub use mobs::passive::{ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, SheepEntity};
+pub use mobs::passive::{
+    ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, SheepEntity, StriderEntity,
+};
 pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
 pub use objects::AreaEffectCloudEntity;
 pub use objects::display_ui::{BlockDisplayEntity, ItemFrameEntity, LeashFenceKnotEntity};
