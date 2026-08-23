@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 57
+[blocks] 56
 AirBlock
 BeaconBlock
 BellBlock
@@ -31,7 +31,6 @@ DecoratedPotBlock
 DriedGhastBlock
 FrogspawnBlock
 FrostedIceBlock
-GrindstoneBlock
 HalfTransparentBlock
 JigsawBlock
 LecternBlock

@@ -1,17 +1,18 @@
 #!/bin/bash
-# Cut a block of stone into something else.
+# Open every workstation a player can open.
 #
-# A stonecutter is the first workstation whose whole point is a recipe list:
-# one block matches many recipes and the player picks one by pressing a button,
-# so the test has to press that button rather than just open the screen.
+# What these blocks *do* is tested in Rust, where the computation lives -- a
+# recipe button and a slot click need container packets the scripted client
+# cannot send. What only a real client can answer is whether right-clicking the
+# block reaches the behavior at all, which is what this covers.
 #
-# Usage: bash dev/stonecutter-test.sh
+# Usage: bash dev/workstation-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 
 PORT=25593
-RUN_DIR="$ROOT/run-stonecutter"
+RUN_DIR="$ROOT/run-workstation"
 
 echo "=== Building ==="
 if ! cargo build 2>&1 | tail -2; then
@@ -53,13 +54,19 @@ CMDS='gamemode creative'
 # before the chunk around the player is ready.
 CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;setblock 0 99 0 minecraft:stone"
+CMDS="$CMDS;;setblock 0 99 2 minecraft:stone"
 CMDS="$CMDS;;setblock 0 100 0 minecraft:stonecutter"
-CMDS="$CMDS;;teleport @s 1 100 0"
-
+CMDS="$CMDS;;setblock 0 100 2 minecraft:grindstone"
 CMDS="$CMDS;;clear @s"
-CMDS="$CMDS;;give @s minecraft:andesite 8"
 CMDS="$CMDS;;!hotbar 0"
+
+CMDS="$CMDS;;teleport @s 1 100 0"
 CMDS="$CMDS;;!useon 0 100 0 east"
+CMDS="$CMDS;;!close"
+
+CMDS="$CMDS;;teleport @s 1 100 2"
+CMDS="$CMDS;;!useon 0 100 2 east"
+CMDS="$CMDS;;!close"
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
@@ -68,12 +75,14 @@ STATUS=$?
 cleanup
 
 echo "=== what happened ==="
-grep -E "a screen opened|server says" join.log | tail -4
+grep -cE "a screen opened" join.log | sed 's/^/screens opened: /'
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 
-fail() { echo "########## STONECUTTER TEST FAILED ($1) ##########"; exit 1; }
+fail() { echo "########## WORKSTATION TEST FAILED ($1) ##########"; exit 1; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
-grep -q "a screen opened" join.log || fail "right-clicking a stonecutter opened nothing"
-echo "########## STONECUTTER TEST PASSED ##########"
+screens=$(grep -c "a screen opened" join.log)
+[ "$screens" -eq 2 ] \
+  || fail "expected the stonecutter and the grindstone to open, got $screens"
+echo "########## WORKSTATION TEST PASSED ##########"

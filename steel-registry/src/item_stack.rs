@@ -800,6 +800,27 @@ impl ItemStack {
         self.set(self.enchantment_component(), current);
     }
 
+    /// Replaces every enchantment on this stack with `enchantments`.
+    ///
+    /// Vanilla parity: what `EnchantmentHelper.updateEnchantments` allows and
+    /// [`set_enchantments`](Self::set_enchantments) does not -- that one only
+    /// ever merges, so it cannot take an enchantment *off*. A grindstone needs
+    /// exactly that. An empty list removes the component rather than leaving an
+    /// empty one behind, which is what vanilla writes.
+    pub fn replace_enchantments(&mut self, enchantments: &[(Identifier, u32)]) {
+        let component = self.enchantment_component();
+        if enchantments.is_empty() {
+            self.remove(component);
+            return;
+        }
+
+        let mut replacement = ItemEnchantments::empty();
+        for (key, level) in enchantments {
+            replacement.set(key.clone(), *level);
+        }
+        self.set(component, replacement);
+    }
+
     /// Vanilla `ItemStack.enchant` → `Mutable.upgrade`: keeps the higher of existing vs new level.
     pub fn upgrade_enchantment(&mut self, enchantment: Identifier, level: u32) {
         let mut current = self
