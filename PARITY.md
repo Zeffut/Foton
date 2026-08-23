@@ -192,6 +192,9 @@ a furnace has no behavior. These scripts can:
   and read through the wall behind it by a comparator.
 - `dev/throw-test.sh` -- a snowball is thrown, flies and breaks, forty eggs
   hatch at least one chicken, and a bottle o' enchanting breaks into experience.
+- `dev/beehive-test.sh` -- shears and a glass bottle each empty a full hive,
+  and neither touches one that is not full. A hive's honey level is a block
+  state, so this is one of the few interactions readable straight back.
 - `dev/beacon-test.sh` -- a beacon with no pyramid refuses the effect and
   hands the payment back; one with a pyramid takes it and the effect reaches
   the player. Read off the effect packet, since no command can see any of it.
