@@ -40,3 +40,6 @@ rustc-ice-*
 .idea
 
 .DS_STORE
+
+# Python bytecode from the dev scripts
+__pycache__/
