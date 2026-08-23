@@ -99,7 +99,6 @@ WrittenBookItem
 [entities] 90
 Allay
 Armadillo
-ArmorStand
 Axolotl
 Bee
 Blaze

@@ -1,9 +1,11 @@
 //! Concrete entity implementations.
 
+pub mod decoration;
 pub mod mobs;
 pub mod objects;
 mod raw;
 
+pub use decoration::ArmorStandEntity;
 pub use mobs::ambient::BatEntity;
 pub use mobs::hostile::{
     CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HuskEntity, MagmaCubeEntity,
