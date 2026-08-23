@@ -29,8 +29,8 @@ use steel_utils::value_providers::IntProvider;
 use steel_utils::{BlockLocalAabb, BlockPos, BlockStateId, Identifier, WorldAabb, axis::Axis};
 
 use crate::behavior::BLOCK_BEHAVIORS;
-use crate::behavior::blocks::Infested;
 use crate::behavior::blocks::vegetation::bonemealable::Bonemealable;
+use crate::behavior::blocks::{Infested, LightningRod};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::behavior::{InventoryAccess, PlacementSource};
 use crate::block_entity::{BlockEntity, BlockEntityTicker, SharedBlockEntity};
@@ -1291,6 +1291,14 @@ pub trait BlockBehavior: Send + Sync {
 
     /// Returns the shared vanilla rail capability implemented by this block.
     fn as_rail(&self) -> Option<&dyn RailBehavior> {
+        None
+    }
+
+    /// Returns the lightning-rod capability implemented by this block.
+    ///
+    /// Stands in for vanilla's `instanceof LightningRodBlock` in
+    /// `LightningBolt.powerLightningRod`.
+    fn as_lightning_rod(&self) -> Option<&dyn LightningRod> {
         None
     }
 }

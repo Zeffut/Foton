@@ -218,9 +218,10 @@ impl MushroomCowEntity {
 
     // TODO: vanilla `MushroomCow.thunderHit` flips this entity between RED and BROWN
     // when struck by lightning (deduplicated per lightning-bolt UUID via
-    // `lastLightningBoltUUID`) and plays `MOOSHROOM_CONVERT`. Steel has no
-    // lightning-bolt entity or an `Entity::thunder_hit`-style hook yet, so there is
-    // nowhere in this file to wire that up.
+    // `lastLightningBoltUUID`) and plays `MOOSHROOM_CONVERT`. `LightningBoltEntity`
+    // now exists and applies the damage and fire of the base `Entity.thunderHit`
+    // directly, but Steel still has no `Entity::thunder_hit` hook for a subclass to
+    // override, so there is nowhere in this file to wire that up.
 
     fn update_dirty_mob_effect_entity_data(&self) {
         if !self.living_base.take_effects_dirty() {

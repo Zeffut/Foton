@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 49
+[blocks] 47
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
@@ -30,7 +30,6 @@ FrostedIceBlock
 HalfTransparentBlock
 JigsawBlock
 LightBlock
-LightningRodBlock
 MangroveRootsBlock
 NetherrackBlock
 NyliumBlock
@@ -59,7 +58,6 @@ VaultBlock
 WallSkullBlock
 WeatheringCopperChestBlock
 WeatheringCopperGolemStatueBlock
-WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
@@ -95,7 +93,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 89
+[entities] 88
 Allay
 Armadillo
 Axolotl
@@ -134,7 +132,6 @@ Interaction
 IronGolem
 ItemDisplay
 LargeFireball
-LightningBolt
 Llama
 LlamaSpit
 Mannequin
