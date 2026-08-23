@@ -29,21 +29,28 @@ started; the second is where `dev/parity-gaps.txt` stands now.
 
 | missing classes | at first measurement | now |
 |---|---|---|
-| blocks | 63 | 58 |
-| items | 38 | 31 |
-| entities | 142 | 94 |
+| blocks | 63 | 36 |
+| items | 38 | 19 |
+| entities | 142 | 86 |
 
-Blocks are close. Items are mostly `BlockItem`, which the item codegen handles
-separately from behaviors. **Entities are where the distance is**, though much
-less than it was: boats, rafts, chest boats, the minecart and the chest
-minecart, snowballs, eggs and bottles have all landed since.
+**Entities are still where the distance is**, and most of what remains there is
+mobs. Two thirds of the item gap and nearly half the block gap have gone.
 
-A pattern worth naming, because it has now come up five times: the expensive
-half of a feature was often already written and simply unreachable. Rails
-worked and nothing ran on them. `handle_move_vehicle` was complete and no
+Two warnings about reading this table at all. It counts classes with *no*
+behavior, so it says nothing about how complete the ones that exist are: the
+sculk sensor is off the list and still never fires. And it over-counts, because
+some vanilla classes are only collision shapes that Steel already takes from
+extracted data -- `SoulSandBlock` is one. A line disappearing is good news; it
+is not the same as the feature working.
+
+A pattern worth naming, because it has now come up more than a dozen times: the
+expensive half of a feature was often already written and simply unreachable.
+Rails worked and nothing ran on them. `handle_move_vehicle` was complete and no
 player could board a boat. The item frame had synced data, persistence and a
-comparator output, and no item to hang one. `MoveToBlockGoal` was written and
-never exported. Before adding anything, it is worth checking whether the thing
+comparator output, and no item to hang one. 319 stonecutting recipes sat behind
+a "skip other recipe types for now". Every mob effect applied server-side and
+no client was ever told. The entire leash -- state, spring maths, packet -- was
+there and no item could tie it. Before adding anything, check whether the thing
 already exists and is merely orphaned.
 
 ## The order
@@ -73,11 +80,20 @@ cannot.
       it. This is vanilla's old physics, the one a world runs with
       `minecart_improvements` off. The chest minecart rolls too and opens
       instead of seating; mineshafts have always generated these and there
-      was no way to open one. Still open: furnace, hopper, TNT, spawner and
-      command block, and `pushAndPickupEntities` -- a cart passes through
-      everything, because Steel has no entity push. A generated chest cart
-      opens empty: Steel has no loot system at all, which is a gap of its own
-      and older than this.
+      was no way to open one.
+
+      Three more now run on the same machinery. The TNT cart lights its fuse on
+      an activator rail and spares the track when it goes off, which is the
+      difference between a cart cannon that works twice and one that does not.
+      The furnace cart drives itself on coal, pushing away from whoever fed it.
+      The hopper cart sucks up what it rolls under, and is the one cart where a
+      powered activator rail switches the behavior *off*.
+
+      Still open: spawner and command block carts, both blocked on the blocks
+      they carry. `pushAndPickupEntities` is missing for all six -- a cart
+      passes through everything, because Steel has no entity push. A generated
+      chest cart opens empty: Steel has no loot system at all, which is a gap
+      of its own and older than this.
 - [x] **Storage that travels**: shulker box (17), ender chest and trapped
       chest. The trapped chest needed the container opener count first --
       without it its signal is always zero and it is a chest that costs a
@@ -115,18 +131,69 @@ cannot.
       `TRIM` component Steel does not have, so those eighteen recipes are
       still skipped -- deliberately now, rather than by omission. The
       cartography table is blocked outright: Steel has no maps at all.
+- [~] **Blocks that answer the world**: the lightning rod takes a strike and
+      powers redstone for eight ticks, and the bolt that hits it burns what it
+      lands on and scrubs oxidized copper clean. The sculk sensors, the
+      shrieker and the sculk block have their state, their redstone and their
+      comparator readings.
+
+      Two of those are wired to nothing, deliberately. Steel has game events
+      and a listener layer but no vibration system on top, so a sculk sensor
+      never fires on its own -- `activate` is written and tested because it is
+      exactly the seam a vibration system attaches to, and the vanilla
+      `listener` tag is round-tripped rather than dropped. The shrieker never
+      summons, because there is no warden. The sculk catalyst is left out for a
+      different reason worth stating: it is not blocked by a missing system,
+      but lifting `SculkSpreader` out of world generation is its own change,
+      and a catalyst that ate mob experience while spreading nothing would be
+      worse than none.
+
+      A lightning strike also does not convert what it hits -- no pig becomes a
+      zoglin, no villager a witch. That needs a `thunder_hit` seam on `Entity`
+      that does not exist.
+
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
       can now right-click a block at all.
-- [~] **Tools that act**: snowball, egg and bottle o' enchanting done -- all
-      three fly and break, one egg in eight hatches a chick, and a bottle
-      breaks into experience. Still open: shears, fishing rod, trident,
-      crossbow, wind charge.
-- [~] **Decoration a player places**: flower pot (39) and item frame done -- a
+- [~] **Tools that act**: snowball, egg and bottle o' enchanting fly and
+      break, one egg in eight hatches a chick, and a bottle breaks into
+      experience. Shears cap a growing vine and pay durability where the
+      generic tool rule does not -- a zero-hardness plant costs a point, fire
+      costs none, and finding that out is what turned the rule into a real
+      `ItemBehavior::mine_block` seam instead of a special case buried in the
+      block-breaking code. The crossbow charges, respects Quick Charge and
+      Multishot, and will fire a firework rocket. The trident throws, sticks,
+      comes home on Loyalty and launches its owner on Riptide. The wind charge
+      bursts without hurting what it shoves, which took teaching
+      `ExplosionSpec` to say `damages_entities: false` -- until then Steel had
+      no way to express a blast that only pushes. Still open: fishing rod,
+      which needs a bobber entity and a loot system.
+
+      Two of these are honestly partial. Riptide launches the player but
+      without the spin attack: Steel has no auto-spin-attack state at all.
+      Channeling is left out rather than approximated, because its lightning
+      needs a summon path the enchantment layer does not have.
+- [~] **Decoration a player places**: flower pot (39) and item frame -- a
       plant goes in and comes back out, and a frame hangs, holds an item, turns
-      it, and reads out to a comparator. Still open: glow item frame (the
-      entity is a separate vanilla class Steel does not have), painting (same),
-      armor stand, banner (16), skull (9). A frame does not drop what is in it
-      when broken, and does not fall off when its wall goes.
+      it, and reads out to a comparator. Banners (16) keep their pattern layers
+      from the loom through being placed and broken. Skulls and heads (9) keep
+      whose head it is. The decorated pot keeps its four sherds and shatters
+      back into them when broken without silk touch. A painting picks the
+      largest variant its wall will take, and unlike the item frame it checks
+      it can survive where it is being put. The armor stand is the first
+      `LivingEntity` here that is not a mob: it swaps gear on a right-click and
+      needs two hits inside five ticks to break.
+
+      A lead ties a mob to a fence. Almost all of that was already here --
+      the leash state, the spring maths, the packet the tracker sends -- and
+      only the item was missing, so a player could walk a pig around and never
+      hitch it.
+
+      Still open: glow item frame, whose entity is a separate vanilla class.
+      Three shared gaps are worth naming rather than repeating per entity: a
+      frame still does not drop what is in it; nothing block-attached falls off
+      when its wall goes, because there is no block-attached tick pass; and an
+      armor stand has no pose, because `Rotations` has no NBT codec and a
+      half-written one would lose a map-maker's work in silence.
 
 ### 2. The living world
 
@@ -201,6 +268,9 @@ a furnace has no behavior. These scripts can:
 - `dev/tnt-minecart-test.sh` -- a cart on a live activator rail lights its
   fuse and goes off, taking a witness block with it and leaving the track
   standing, which is the half that must not happen.
+- `dev/decoration-test.sh` -- an armor stand takes a helmet on the head and a
+  painting hangs on a wall. Both are read off packets: a stand's gear and a
+  painting's variant are entity state with no command behind them.
 - `dev/beehive-test.sh` -- shears and a glass bottle each empty a full hive,
   and neither touches one that is not full. A hive's honey level is a block
   state, so this is one of the few interactions readable straight back.
