@@ -23,6 +23,7 @@ mod potent_sulfur;
 mod raw;
 mod shulker_box;
 mod sign;
+mod skull;
 
 pub use banner::BannerBlockEntity;
 pub use barrel::{BARREL_SLOTS, BarrelBlockEntity};
@@ -64,3 +65,4 @@ pub use potent_sulfur::PotentSulfurBlockEntity;
 pub use raw::RawBlockEntity;
 pub use shulker_box::{SHULKER_BOX_SLOTS, ShulkerBoxBlockEntity};
 pub use sign::{SIGN_LINES, SignBlockEntity, SignText};
+pub use skull::SkullBlockEntity;

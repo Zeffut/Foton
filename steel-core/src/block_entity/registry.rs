@@ -21,7 +21,7 @@ use super::entities::{
     ComparatorBlockEntity, CrafterBlockEntity, DaylightDetectorBlockEntity, DispenserBlockEntity,
     EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
     JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
-    RawBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
+    RawBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity, SkullBlockEntity,
 };
 use crate::world::World;
 
@@ -202,11 +202,11 @@ impl BlockEntityRegistryLock {
 /// Access via deref: `BLOCK_ENTITIES.create(type, pos, state)`
 pub static BLOCK_ENTITIES: BlockEntityRegistryLock = BlockEntityRegistryLock(OnceLock::new());
 
-/// Registers the block entities behind the workstations.
+/// Registers the block entities that no longer fit in `init_block_entities`.
 ///
-/// Split out of `init_block_entities` only to keep that function under the
-/// line limit; there is nothing these two share beyond being late arrivals.
-fn register_workstations(registry: &mut BlockEntityRegistry) {
+/// Split out of it only to keep that function under the line limit; there is
+/// nothing these share beyond being late arrivals.
+fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
     registry.register(&vanilla_block_entity_types::BANNER, |level, pos, state| {
         Arc::new(BannerBlockEntity::new(level, pos, state))
     });
@@ -217,6 +217,11 @@ fn register_workstations(registry: &mut BlockEntityRegistry) {
 
     registry.register(&vanilla_block_entity_types::CRAFTER, |level, pos, state| {
         Arc::new(CrafterBlockEntity::new(level, pos, state))
+    });
+
+    // Every skull and head, standing or on a wall, shares this one type.
+    registry.register(&vanilla_block_entity_types::SKULL, |level, pos, state| {
+        Arc::new(SkullBlockEntity::new(level, pos, state))
     });
 }
 
@@ -301,7 +306,7 @@ pub fn init_block_entities() {
             Arc::new(DispenserBlockEntity::new_dropper(level, pos, state))
         });
 
-        register_workstations(&mut registry);
+        register_late_arrivals(&mut registry);
 
         registry.register(&vanilla_block_entity_types::HOPPER, |level, pos, state| {
             Arc::new(HopperBlockEntity::new(level, pos, state))

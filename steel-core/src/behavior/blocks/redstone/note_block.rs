@@ -231,7 +231,11 @@ impl BlockBehavior for NoteBlock {
     ) -> bool {
         let instrument = state.get_value(NOTEBLOCK_INSTRUMENT);
         let Some(sound) = Self::sound_event(instrument) else {
-            // Custom player-head sounds require the skull block entity's note-block sound.
+            // Vanilla `NoteBlock.getCustomSoundId` reads the head above,
+            // whose sound `SkullBlockEntity::note_block_sound` now stores,
+            // and wraps that identifier in a direct `Holder<SoundEvent>`.
+            // Steel's sound packet carries only registered sound events, so
+            // the head stays silent until inline sound events exist.
             return false;
         };
         let pitch = if instrument.is_tunable() {
