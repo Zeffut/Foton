@@ -13,6 +13,7 @@ use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::sound_events;
 use steel_registry::{REGISTRY, RegistryEntry, RegistryExt};
+use steel_utils::BlockStateId;
 use steel_utils::types::InteractionHand;
 use text_components::TextComponent;
 
@@ -122,6 +123,17 @@ pub fn potion_effects(contents: &PotionContents) -> Vec<(MobEffectRef, i32, i32)
     effects
 }
 
+/// Returns vanilla `BlockState.getDestroySpeed(level, pos)`.
+///
+/// Steel keeps hardness on the block's config, so the level and position vanilla
+/// threads through are unnecessary.
+pub(crate) fn block_destroy_time(state: BlockStateId) -> f32 {
+    REGISTRY
+        .blocks
+        .by_state_id(state)
+        .map_or(0.0, |block| block.config.destroy_time)
+}
+
 /// Trait defining the behavior of an item.
 ///
 /// This trait handles dynamic/functional aspects of items:
@@ -147,6 +159,34 @@ pub trait ItemBehavior: Send + Sync {
     /// Called when this item is used on a block.
     fn use_on(&self, _context: &mut UseOnContext) -> InteractionResult {
         InteractionResult::Pass
+    }
+
+    /// Called by vanilla `Item.mineBlock` once this item has broken `state`.
+    ///
+    /// Returns whether the stack acted as a tool, mirroring vanilla's return.
+    /// The default is `Item.mineBlock` itself: a tool spends `damage_per_block`
+    /// durability unless the block breaks instantly. Items whose durability rule
+    /// differs -- shears, which pay for zero-hardness plants but never for fire --
+    /// override this.
+    ///
+    /// Steel deviation: vanilla also takes the level and position so it can call
+    /// `state.getDestroySpeed(level, pos)`. Steel reads hardness off the block
+    /// state's config, which no vanilla block varies by position.
+    fn mine_block(
+        &self,
+        stack: &mut ItemStack,
+        state: BlockStateId,
+        miner: &dyn LivingEntity,
+    ) -> bool {
+        let Some(damage_per_block) = stack.get_tool().map(|tool| tool.damage_per_block) else {
+            return false;
+        };
+
+        if block_destroy_time(state) != 0.0 && damage_per_block > 0 {
+            stack.hurt_and_break(damage_per_block, miner.has_infinite_materials());
+        }
+
+        true
     }
 
     /// Called when this item is used (e.g. right click in air).

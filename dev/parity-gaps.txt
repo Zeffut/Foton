@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 49
+[blocks] 50
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
@@ -24,6 +24,7 @@ CopperChestBlock
 CopperGolemStatueBlock
 CreakingHeartBlock
 CryingObsidianBlock
+DecoratedPotBlock
 DriedGhastBlock
 FrogspawnBlock
 FrostedIceBlock
@@ -63,11 +64,10 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 30
+[items] 29
 ArmorStandItem
 ArrowItem
 BannerItem
-BottleItem
 BundleItem
 CrossbowItem
 DebugStickItem
@@ -77,6 +77,7 @@ EndCrystalItem
 FishingRodItem
 GameMasterBlockItem
 GlowInkSacItem
+HangingEntityItem
 InkSacItem
 InstrumentItem
 Item
@@ -85,7 +86,6 @@ LeadItem
 MapItem
 MobBucketItem
 ScaffoldingBlockItem
-ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
@@ -95,9 +95,10 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 89
+[entities] 91
 Allay
 Armadillo
+ArmorStand
 Axolotl
 Bee
 Blaze
@@ -145,6 +146,7 @@ Mule
 Nautilus
 Ocelot
 OminousItemSpawner
+Painting
 Panda
 Parched
 Parrot

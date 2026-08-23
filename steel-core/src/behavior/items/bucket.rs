@@ -6,7 +6,7 @@
 //! `Some(block)` = filled bucket. Logic is dispatched in `use_item`.
 //!
 use crate::behavior::context::InteractionResult;
-use crate::behavior::item_utils::create_filled_result;
+use crate::behavior::item_utils::{create_filled_result, player_pov_hit_source_fluid};
 use crate::behavior::{
     BLOCK_BEHAVIORS, BlockStateBehaviorExt, FLUID_BEHAVIORS, ItemBehavior, UseItemContext,
     pickup_waterlogged_block,
@@ -65,31 +65,9 @@ fn filled_bucket_success_stack(context: &UseItemContext) -> ItemStack {
 }
 
 fn use_empty_bucket(context: &mut UseItemContext) -> InteractionResult {
-    let (start, end) = context.player.get_ray_endpoints();
-
-    // Raytrace: stop on source fluids
-    let (hit_block, _) = context.world.raytrace(start, end, |pos, world| {
-        let state = world.get_block_state(pos);
-        let block = state.get_block();
-
-        if block == &vanilla_blocks::AIR {
-            return RaytraceAction::Pass;
-        }
-
-        let fluid_state = state.get_fluid_state();
-        if fluid_state.is_source() {
-            return RaytraceAction::ImmediateHit;
-        }
-        // Vanilla parity: ClipContext.Fluid.SOURCE_ONLY — flowing fluid is transparent.
-        if !fluid_state.is_empty() {
-            return RaytraceAction::Pass;
-        }
-
-        RaytraceAction::CheckShape
-    });
-
-    // Vanilla returns PASS when raytrace misses (allows other handlers to try)
-    let Some(hit_pos) = hit_block else {
+    // Vanilla parity: `getPlayerPOVHitResult(.., ClipContext.Fluid.SOURCE_ONLY)`.
+    // Vanilla returns PASS when the clip misses (allows other handlers to try).
+    let Some(hit_pos) = player_pov_hit_source_fluid(context) else {
         return InteractionResult::Pass;
     };
 

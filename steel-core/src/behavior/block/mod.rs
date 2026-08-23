@@ -31,6 +31,7 @@ use steel_utils::{BlockLocalAabb, BlockPos, BlockStateId, Identifier, WorldAabb,
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::behavior::blocks::Infested;
 use crate::behavior::blocks::vegetation::bonemealable::Bonemealable;
+use crate::behavior::blocks::vegetation::growing_plant_head_block::GrowingPlantHead;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::behavior::{InventoryAccess, PlacementSource};
 use crate::block_entity::{BlockEntity, BlockEntityTicker, SharedBlockEntity};
@@ -1273,6 +1274,14 @@ pub trait BlockBehavior: Send + Sync {
 
     /// Returns the trait object for Blocks that have the Bonemealable trait implemented.
     fn as_bonemealable(&self) -> Option<&dyn Bonemealable> {
+        None
+    }
+
+    /// Returns the shared vanilla `GrowingPlantHeadBlock` capability of this block.
+    ///
+    /// Vanilla parity: the `instanceof GrowingPlantHeadBlock` check in
+    /// `ShearsItem.useOn`.
+    fn as_growing_plant_head(&self) -> Option<&dyn GrowingPlantHead> {
         None
     }
 

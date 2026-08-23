@@ -20,7 +20,7 @@ use steel_utils::{
     types::{GameType, InteractionHand, UpdateFlags},
 };
 
-use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext};
+use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, ITEM_BEHAVIORS};
 use crate::entity::{Entity, LivingEntity};
 use crate::fluid::fluid_state_to_block;
 use crate::player::Player;
@@ -400,29 +400,18 @@ impl BlockBreakingManager {
                 )
             };
 
-            // Damage the tool if the block has non-zero destroy time
-            // This is done before playerDestroy, matching vanilla's Item.mineBlock
-            let block_destroy_time = REGISTRY
-                .blocks
-                .by_state_id(adjusted_state)
-                .map_or(0.0, |b| b.config.destroy_time);
-
-            if block_destroy_time != 0.0 {
+            // Vanilla parity: `ItemStack.mineBlock`, dispatched to the item so the
+            // ones with their own durability rule get it -- shears pay for a
+            // zero-hardness plant and never pay for fire. Runs before
+            // `playerDestroy`, as vanilla does.
+            // TODO: Play item break sound/particles when the tool breaks here.
+            {
                 let mut inv = player.inventory.lock();
-                let damage_per_block = inv.get_selected_item().get_tool_damage_per_block();
-
-                if damage_per_block > 0 {
-                    // Use with_selected_item_mut to ensure set_changed() is called
-                    // Skip damage if player has infinite materials (creative mode)
-                    let has_infinite_materials = player.has_infinite_materials();
-                    let broke = inv.with_selected_item_mut(|main_hand| {
-                        main_hand.hurt_and_break(damage_per_block, has_infinite_materials)
-                    });
-                    if broke {
-                        // TODO: Play item break sound/particles
-                        log::debug!("Tool broke while mining block at {pos:?}");
-                    }
-                }
+                let item_behavior = ITEM_BEHAVIORS.get_behavior(inv.get_selected_item().item());
+                // with_selected_item_mut so the slot is marked changed.
+                inv.with_selected_item_mut(|main_hand| {
+                    item_behavior.mine_block(main_hand, adjusted_state, player)
+                });
             }
 
             player.cause_food_exhaustion(food_constants::EXHAUSTION_MINE);
