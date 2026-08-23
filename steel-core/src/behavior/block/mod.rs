@@ -595,6 +595,15 @@ pub trait BlockBehavior: Send + Sync {
         REGISTRY.items.by_key(&block.key).map(ItemStack::new)
     }
 
+    /// Returns the plant this block holds, if it is a full flower pot.
+    ///
+    /// Vanilla parity: `FlowerPotBlock.getPotted`. Vanilla builds its
+    /// plant-to-pot map in the constructor; Steel has no constructor to hook,
+    /// so the map is built once by asking every block this.
+    fn potted_content(&self) -> Option<BlockRef> {
+        None
+    }
+
     /// Returns whether this block state is pathfindable for the supplied vanilla path computation.
     ///
     /// Vanilla baseline for `BlockBehaviour.isPathfindable`.

@@ -63,8 +63,9 @@ cannot.
       can now right-click a block at all.
 - [ ] **Tools that act**: shears, fishing rod, flint and steel's siblings,
       snowball, egg, experience bottle, ender pearl's siblings.
-- [ ] **Decoration a player places**: item frame, painting, armor stand,
-      flower pot (39), banner (16), skull (9).
+- [~] **Decoration a player places**: flower pot (39) done -- a plant goes in
+      and comes back out. Still open: item frame, painting, armor stand,
+      banner (16), skull (9).
 
 ### 2. The living world
 
@@ -108,6 +109,7 @@ a furnace has no behavior. These scripts can:
 - `dev/nether-test.sh` -- a client crosses dimensions and sees Nether mobs.
 - `dev/sapling-test.sh` -- a planted sapling becomes a tree.
 - `dev/container-test.sh` -- placed container blocks have block entities.
+- `dev/flowerpot-test.sh` -- a flower goes into a pot and comes back out.
 - `dev/spawnegg-test.sh` -- a spawn egg used by hand makes the mob.
 - `dev/boat-test.sh` -- a boat put on water is still on it afterwards.
 

@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 62
+[blocks] 61
 AirBlock
 BeaconBlock
 BellBlock
@@ -30,7 +30,6 @@ CryingObsidianBlock
 DecoratedPotBlock
 DriedGhastBlock
 EnderChestBlock
-FlowerPotBlock
 FrogspawnBlock
 FrostedIceBlock
 GrindstoneBlock
