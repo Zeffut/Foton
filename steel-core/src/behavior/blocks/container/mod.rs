@@ -11,6 +11,7 @@ mod enchanting_table_block;
 mod ender_chest_block;
 mod furnace_block;
 mod hopper_block;
+mod jukebox_block;
 mod shulker_box_block;
 mod trapped_chest_block;
 
@@ -26,5 +27,6 @@ pub use enchanting_table_block::{EnchantingTableBlock, count_enchanting_power};
 pub use ender_chest_block::EnderChestBlock;
 pub use furnace_block::{BlastFurnaceBlock, FurnaceBlock, SmokerBlock};
 pub use hopper_block::HopperBlock;
+pub use jukebox_block::JukeboxBlock;
 pub use shulker_box_block::ShulkerBoxBlock;
 pub use trapped_chest_block::TrappedChestBlock;

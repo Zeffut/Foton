@@ -75,8 +75,11 @@ cannot.
       tripwire hook. That counter now lives on `BlockEntityBase` and drives
       three things at once: the trapped chest's signal, the barrel's `open`
       state, and the chest lid. Verified by `dev/openers-test.sh`.
-- [ ] **Workstations**: grindstone, stonecutter, smithing table, cartography
-      table, loom, lectern, jukebox, bell, beacon, crafter.
+- [~] **Workstations**: jukebox done -- a disc goes in, the model changes, it
+      powers redstone while the music runs and answers a comparator with the
+      record's own number, and right-clicking gives the disc back. Still open:
+      grindstone, stonecutter, smithing table, cartography table, loom,
+      lectern, bell, beacon, crafter.
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
       can now right-click a block at all.
 - [ ] **Tools that act**: shears, fishing rod, flint and steel's siblings,
@@ -136,6 +139,8 @@ a furnace has no behavior. These scripts can:
 - `dev/minecart-test.sh` -- a cart launched by a powered rail runs a line, takes
   a corner, stops on a detector rail that notices it, is placed from the item
   onto a rail and nowhere else, and carries a player.
+- `dev/jukebox-test.sh` -- a disc goes into a jukebox and comes back out, the
+  block powers a lamp only while it plays, and a comparator reads the record.
 - `dev/openers-test.sh` -- an open trapped chest powers redstone and a
   closed one stops, a plain chest powers nothing, a chest under a solid
   block refuses to open, and a barrel looks open while somebody is in it.

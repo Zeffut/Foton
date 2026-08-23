@@ -13,6 +13,7 @@ mod end_gateway;
 mod end_portal;
 mod furnace;
 mod hopper;
+mod jukebox;
 mod piston_moving;
 mod potent_sulfur;
 mod raw;
@@ -41,6 +42,7 @@ pub use furnace::{
 pub use hopper::{
     HOPPER_SLOTS, HopperBlockEntity, HopperContainer, MOVE_ITEM_SPEED, insert_into_containers_at,
 };
+pub use jukebox::JukeboxBlockEntity;
 pub use piston_moving::PistonMovingBlockEntity;
 pub use potent_sulfur::PotentSulfurBlockEntity;
 pub use raw::RawBlockEntity;
