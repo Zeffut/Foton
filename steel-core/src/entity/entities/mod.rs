@@ -16,7 +16,6 @@ pub use mobs::passive::{
     ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, SheepEntity, StriderEntity,
 };
 pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
-pub use objects::AreaEffectCloudEntity;
 pub use objects::display_ui::{
     BlockDisplayEntity, ItemFrameEntity, LeashFenceKnotEntity, PaintingEntity,
 };
@@ -30,4 +29,5 @@ pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
     HopperMinecartEntity, MinecartEntity, RaftEntity, TntMinecartEntity,
 };
+pub use objects::{AreaEffectCloudEntity, LightningBoltEntity};
 pub use raw::RawEntity;
