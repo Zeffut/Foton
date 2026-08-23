@@ -18,11 +18,12 @@ use super::SharedBlockEntity;
 use super::entities::{
     BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity,
     BrewingStandBlockEntity, BrushableBlockEntity, ChestBlockEntity, ChiseledBookShelfBlockEntity,
-    ComparatorBlockEntity, CrafterBlockEntity, DaylightDetectorBlockEntity,
-    DecoratedPotBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
-    FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
-    PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, SculkSensorBlockEntity,
-    SculkShriekerBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity, SkullBlockEntity,
+    ComparatorBlockEntity, CopperGolemStatueBlockEntity, CrafterBlockEntity,
+    DaylightDetectorBlockEntity, DecoratedPotBlockEntity, DispenserBlockEntity,
+    EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
+    JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
+    RawBlockEntity, SculkSensorBlockEntity, SculkShriekerBlockEntity, ShulkerBoxBlockEntity,
+    SignBlockEntity, SkullBlockEntity,
 };
 use crate::world::World;
 
@@ -230,6 +231,11 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
     registry.register(&vanilla_block_entity_types::SKULL, |level, pos, state| {
         Arc::new(SkullBlockEntity::new(level, pos, state))
     });
+
+    registry.register(
+        &vanilla_block_entity_types::COPPER_GOLEM_STATUE,
+        |level, pos, state| Arc::new(CopperGolemStatueBlockEntity::new(level, pos, state)),
+    );
 
     registry.register(
         &vanilla_block_entity_types::SCULK_SENSOR,

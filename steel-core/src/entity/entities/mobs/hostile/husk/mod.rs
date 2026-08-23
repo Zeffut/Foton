@@ -16,6 +16,7 @@ use steel_registry::{sound_events, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
@@ -266,3 +267,5 @@ impl Mob for HuskEntity {
 }
 
 impl PathfinderMob for HuskEntity {}
+
+impl Enemy for HuskEntity {}

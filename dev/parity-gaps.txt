@@ -12,15 +12,13 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 33
+[blocks] 30
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
 CartographyTableBlock
-CarvedPumpkinBlock
 CommandBlock
 CopperChestBlock
-CopperGolemStatueBlock
 CreakingHeartBlock
 CryingObsidianBlock
 DriedGhastBlock
@@ -45,7 +43,6 @@ TransparentBlock
 TrialSpawnerBlock
 VaultBlock
 WeatheringCopperChestBlock
-WeatheringCopperGolemStatueBlock
 
 [items] 19
 ArrowItem
@@ -68,7 +65,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 77
+[entities] 74
 Allay
 Armadillo
 Axolotl
@@ -80,7 +77,6 @@ BreezeWindCharge
 Camel
 CamelHusk
 Cat
-CopperGolem
 Creaking
 Dolphin
 Donkey
@@ -102,7 +98,6 @@ HappyGhast
 Hoglin
 Horse
 Illusioner
-IronGolem
 Llama
 LlamaSpit
 Mannequin
@@ -127,7 +122,6 @@ Ravager
 Shulker
 SkeletonHorse
 Sniffer
-SnowGolem
 SpectralArrow
 SulfurCube
 Tadpole

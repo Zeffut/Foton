@@ -3,6 +3,12 @@ use steel_registry::DyeColor;
 use super::*;
 use crate::physics::collision;
 
+/// Damage a tick of water does to something water hurts.
+///
+/// Vanilla parity: the `1.0F` of the `isSensitiveToWater` branch at the end of
+/// `LivingEntity.aiStep`.
+const SENSITIVE_TO_WATER_DAMAGE: f32 = 1.0;
+
 /// A trait for living entities that can take damage, heal, and die.
 ///
 /// This trait provides the core functionality for entities that have health,
@@ -647,7 +653,16 @@ pub trait LivingEntity: Entity {
     ///
     /// `world` is the `ServerLevel` supplied by the vanilla caller. It may
     /// intentionally differ from the entity's attached world.
+    ///
+    /// Override this to add what a specific entity does when it is hurt, and
+    /// call [`Self::living_hurt_server`] from the override for the shared
+    /// behavior; Rust has no `super`, so the base body lives in its own method.
     fn hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
+        self.living_hurt_server(world, source, amount)
+    }
+
+    /// Runs the shared body of [`Self::hurt_server`].
+    fn living_hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         if self.is_invulnerable_to(world, source) {
             return false;
         }
@@ -819,7 +834,16 @@ pub trait LivingEntity: Entity {
     }
 
     /// Applies damage after vanilla reductions.
+    ///
+    /// Override this to react to landed damage, and call
+    /// [`Self::living_actually_hurt`] from the override for the shared
+    /// behavior; Rust has no `super`, so the base body lives in its own method.
     fn actually_hurt(&self, world: &World, source: &DamageSource, amount: f32) {
+        self.living_actually_hurt(world, source, amount);
+    }
+
+    /// Runs the shared body of [`Self::actually_hurt`].
+    fn living_actually_hurt(&self, world: &World, source: &DamageSource, amount: f32) {
         if self.is_invulnerable_to(world, source) {
             return;
         }
@@ -2320,6 +2344,20 @@ pub trait LivingEntity: Entity {
         self.apply_effects_from_blocks();
         self.tick_freezing();
         self.push_entities();
+
+        // Vanilla `LivingEntity.aiStep` closes by drowning whatever water hurts,
+        // which is what melts a snow golem in the rain and burns an enderman.
+        if self.is_sensitive_to_water()
+            && self.is_in_water_or_rain()
+            && let Some(world) = self.level()
+        {
+            self.hurt(
+                &world,
+                &DamageSource::environment(&vanilla_damage_types::DROWN),
+                SENSITIVE_TO_WATER_DAMAGE,
+            );
+        }
+
         result
     }
 
@@ -2346,8 +2384,21 @@ pub trait LivingEntity: Entity {
         self.apply_entity_cramming_damage(&world, &pushable_entities);
 
         for entity in pushable_entities {
-            entity.push_entity(pusher);
+            self.do_push(&entity);
         }
+    }
+
+    /// Mirrors vanilla `Entity.doPush`, run once per entity crowding this one.
+    ///
+    /// Override this to react to being crowded, and call
+    /// [`Self::living_do_push`] from the override for the shared behavior.
+    fn do_push(&self, entity: &SharedEntity) {
+        self.living_do_push(entity);
+    }
+
+    /// Runs the shared body of [`Self::do_push`].
+    fn living_do_push(&self, entity: &SharedEntity) {
+        entity.push_entity(self.as_entity_event_source());
     }
 
     /// Applies vanilla max entity cramming damage from `LivingEntity.pushEntities()`.

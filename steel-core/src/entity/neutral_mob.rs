@@ -11,7 +11,9 @@
 
 use std::sync::Arc;
 
+use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_registry::vanilla_game_rules::{FORGIVE_DEAD_PLAYERS, UNIVERSAL_ANGER};
+use steel_utils::UuidExt as _;
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::Difficulty;
 use uuid::Uuid;
@@ -19,6 +21,16 @@ use uuid::Uuid;
 use crate::entity::{Entity, LivingEntity, Mob, SharedEntity};
 use crate::player::Player;
 use crate::world::World;
+
+/// NBT key vanilla stores the anger deadline under.
+///
+/// Vanilla parity: `NeutralMob.TAG_ANGER_END_TIME`.
+pub const TAG_ANGER_END_TIME: &str = "anger_end_time";
+
+/// NBT key vanilla stores the grudge's target under.
+///
+/// Vanilla parity: `NeutralMob.TAG_ANGRY_AT`.
+pub const TAG_ANGRY_AT: &str = "angry_at";
 
 /// The anger a neutral mob is carrying.
 ///
@@ -219,6 +231,20 @@ fn player_can_be_angered_at(player: &Player, world: &Arc<World>) -> bool {
     use steel_utils::types::GameType;
     !matches!(player.game_mode(), GameType::Creative | GameType::Spectator)
         && world.difficulty() != Difficulty::Peaceful
+}
+
+/// Writes the anger a mob is carrying.
+///
+/// Vanilla parity: `addPersistentAngerSaveData`. The grudge is stored as the
+/// same four-int UUID array vanilla's `EntityReference` codec writes.
+pub fn write_persistent_anger(mob: &dyn NeutralMob, nbt: &mut NbtCompound) {
+    nbt.insert(TAG_ANGER_END_TIME, mob.persistent_anger_end_time());
+    if let Some(target) = mob.persistent_anger_target() {
+        nbt.insert(
+            TAG_ANGRY_AT,
+            NbtTag::IntArray(target.to_int_array().to_vec()),
+        );
+    }
 }
 
 /// Reads the anger a mob was saved with.

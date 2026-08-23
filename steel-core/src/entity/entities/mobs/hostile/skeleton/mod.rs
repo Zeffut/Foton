@@ -15,6 +15,7 @@ use steel_registry::vanilla_entity_data::SkeletonEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
@@ -259,3 +260,5 @@ impl Mob for SkeletonEntity {
 }
 
 impl PathfinderMob for SkeletonEntity {}
+
+impl Enemy for SkeletonEntity {}

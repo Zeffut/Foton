@@ -15,6 +15,7 @@ use steel_registry::vanilla_entity_data::ZombieEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
@@ -232,3 +233,5 @@ impl Mob for ZombieEntity {
 }
 
 impl PathfinderMob for ZombieEntity {}
+
+impl Enemy for ZombieEntity {}

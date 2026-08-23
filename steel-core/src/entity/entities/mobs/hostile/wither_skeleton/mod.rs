@@ -22,6 +22,7 @@ use steel_registry::{sound_events, vanilla_attributes, vanilla_mob_effects};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
+use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, RestrictSunGoal, WaterAvoidingRandomStrollGoal,
@@ -317,6 +318,8 @@ impl Mob for WitherSkeletonEntity {
 }
 
 impl PathfinderMob for WitherSkeletonEntity {}
+
+impl Enemy for WitherSkeletonEntity {}
 
 #[cfg(test)]
 mod tests {

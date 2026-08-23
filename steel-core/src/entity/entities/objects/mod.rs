@@ -11,4 +11,5 @@ pub mod vehicles;
 
 pub use area_effect_cloud::AreaEffectCloudEntity;
 pub use lightning_bolt::LightningBoltEntity;
+pub(crate) use lightning_bolt::entity_thunder_hit;
 pub use marker::MarkerEntity;

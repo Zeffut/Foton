@@ -25,6 +25,7 @@ use super::cube_common::{
     self, CubeAttackGoal, CubeFloatGoal, CubeKeepOnJumpingGoal, CubeLike, CubeRandomDirectionGoal,
     CubeState,
 };
+use crate::entity::Enemy;
 use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{HurtByTargetGoal, NearestAttackableTargetGoal};
 use crate::entity::damage::DamageSource;
@@ -400,6 +401,8 @@ impl CubeLike for MagmaCubeEntity {
 }
 
 impl PathfinderMob for MagmaCubeEntity {}
+
+impl Enemy for MagmaCubeEntity {}
 
 #[cfg(test)]
 mod tests {

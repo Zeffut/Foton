@@ -25,6 +25,7 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
 use crate::behavior::potion_effects;
+use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     FloatGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, RangedAttackGoal, WaterAvoidingRandomStrollGoal,
@@ -479,3 +480,5 @@ impl Mob for WitchEntity {
 }
 
 impl PathfinderMob for WitchEntity {}
+
+impl Enemy for WitchEntity {}

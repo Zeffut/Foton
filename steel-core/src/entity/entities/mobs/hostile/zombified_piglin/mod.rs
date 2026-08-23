@@ -18,6 +18,7 @@ use steel_registry::{sound_events, vanilla_attributes, vanilla_blocks};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, Downcast, DowncastType, DowncastTypeKey, WorldAabb};
 
+use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
@@ -414,3 +415,5 @@ impl NeutralMob for ZombifiedPiglinEntity {
         self.set_time_to_remain_angry(rand::random_range(ANGER_MIN_TICKS..=ANGER_MAX_TICKS));
     }
 }
+
+impl Enemy for ZombifiedPiglinEntity {}

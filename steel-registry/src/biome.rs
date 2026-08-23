@@ -16,6 +16,12 @@ pub struct Biome {
     pub temperature: f32,
     pub downfall: f32,
     pub temperature_modifier: TemperatureModifier,
+    /// This biome's override of vanilla `EnvironmentAttributes.SNOW_GOLEM_MELTS`.
+    ///
+    /// `None` when the biome leaves the attribute to the dimension. Vanilla
+    /// layers the biome on top of the dimension value, so a biome that sets it
+    /// wins wherever it applies.
+    pub snow_golem_melts: Option<bool>,
     pub effects: BiomeEffects,
     pub creature_spawn_probability: f32,
     pub spawners: FxHashMap<String, Vec<SpawnerData>>,
@@ -329,5 +335,20 @@ impl crate::RegistryEntry for Biome {
 
     fn try_id(&self) -> Option<usize> {
         self.id.get().copied()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::vanilla_biomes;
+
+    #[test]
+    fn only_the_hot_biomes_override_the_snow_golem_melt_attribute() {
+        // The build script reads `minecraft:gameplay/snow_golem_melts` out of
+        // the extracted biome JSON; a parse that silently dropped it would stop
+        // snow golems melting in the desert with nothing else to notice.
+        assert_eq!(vanilla_biomes::DESERT.snow_golem_melts, Some(true));
+        assert_eq!(vanilla_biomes::BADLANDS.snow_golem_melts, Some(true));
+        assert_eq!(vanilla_biomes::PLAINS.snow_golem_melts, None);
     }
 }

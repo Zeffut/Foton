@@ -69,6 +69,10 @@ pub struct BiomeJson {
     #[serde(default)]
     temperature_modifier: TemperatureModifier,
 
+    /// Extracted from the `minecraft:gameplay/snow_golem_melts` attribute.
+    #[serde(skip)]
+    snow_golem_melts: Option<bool>,
+
     effects: BiomeEffects,
 
     #[serde(default)]
@@ -261,6 +265,10 @@ struct AmbientParticle {
     particle: ParticleOptions,
     probability: f32,
 }
+
+/// Vanilla `EnvironmentAttributes.SNOW_GOLEM_MELTS`, which biomes such as the
+/// desert override to `true`.
+const SNOW_GOLEM_MELTS_ATTRIBUTE: &str = "minecraft:gameplay/snow_golem_melts";
 
 fn extract_attributes_to_effects(
     effects: &mut BiomeEffects,
@@ -521,6 +529,10 @@ pub(crate) fn build() -> TokenStream {
 
             // Extract attributes and populate effects
             extract_attributes_to_effects(&mut biome.effects, &biome.attributes);
+            biome.snow_golem_melts = match biome.attributes.get(SNOW_GOLEM_MELTS_ATTRIBUTE) {
+                Some(Value::Bool(melts)) => Some(*melts),
+                _ => None,
+            };
 
             biomes.push((biome_name, biome));
         }
@@ -551,6 +563,7 @@ pub(crate) fn build() -> TokenStream {
         let temperature = biome.temperature;
         let downfall = biome.downfall;
         let temperature_modifier = generate_temperature_modifier(&biome.temperature_modifier);
+        let snow_golem_melts = generate_option(&biome.snow_golem_melts, |melts| quote! { #melts });
         let effects = generate_biome_effects(&biome.effects);
         let creature_spawn_probability = biome.creature_spawn_probability;
         let spawners =
@@ -568,6 +581,7 @@ pub(crate) fn build() -> TokenStream {
                 temperature: #temperature,
                 downfall: #downfall,
                 temperature_modifier: #temperature_modifier,
+                snow_golem_melts: #snow_golem_melts,
                 effects: #effects,
                 creature_spawn_probability: #creature_spawn_probability,
                 spawners: #spawners,

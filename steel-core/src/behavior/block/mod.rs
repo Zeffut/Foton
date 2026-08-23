@@ -1134,11 +1134,12 @@ pub trait BlockBehavior: Send + Sync {
 
     /// Returns whether this new block should keep the old state's block entity.
     ///
-    /// Vanilla defaults to `false`; copper chests and copper golem statues explicitly
-    /// keep their entity across transformations within their respective block family.
-    /// Steel checks those two extracted tags here until those block classes have their
-    /// own complete behaviors, rather than registering partial block implementations.
-    /// Non-Vanilla behaviors must opt in explicitly even if a plugin extends either tag.
+    /// Vanilla defaults to `false`; copper chests explicitly keep their entity
+    /// across transformations within their block family. Steel checks that
+    /// extracted tag here until `CopperChestBlock` has its own complete
+    /// behavior, rather than registering a partial block implementation.
+    /// Non-Vanilla behaviors must opt in explicitly even if a plugin extends
+    /// the tag. Copper golem statues do this in their own behavior.
     ///
     /// # Arguments
     /// * `old_state` - The previous block state
@@ -1147,10 +1148,8 @@ pub trait BlockBehavior: Send + Sync {
         let old_block = old_state.get_block();
         let new_block = new_state.get_block();
         new_block.key.namespace == Identifier::VANILLA_NAMESPACE
-            && ((old_block.has_tag(&BlockTag::COPPER_CHESTS)
-                && new_block.has_tag(&BlockTag::COPPER_CHESTS))
-                || (old_block.has_tag(&BlockTag::COPPER_GOLEM_STATUES)
-                    && new_block.has_tag(&BlockTag::COPPER_GOLEM_STATUES)))
+            && old_block.has_tag(&BlockTag::COPPER_CHESTS)
+            && new_block.has_tag(&BlockTag::COPPER_CHESTS)
     }
 
     /// Returns brushable-block data for archaeology brushing

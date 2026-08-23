@@ -17,6 +17,7 @@ use steel_utils::types::Difficulty;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
 use super::spider::SpiderTargetGoal;
+use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
 use crate::entity::ai::goal::{
     FloatGoal, HurtByTargetGoal, LeapAtTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
@@ -269,3 +270,5 @@ impl Mob for CaveSpiderEntity {
 }
 
 impl PathfinderMob for CaveSpiderEntity {}
+
+impl Enemy for CaveSpiderEntity {}

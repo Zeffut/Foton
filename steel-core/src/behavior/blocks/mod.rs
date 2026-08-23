@@ -41,10 +41,11 @@ pub use container::{
 };
 pub use decoration::{
     BannerBlock, BellBlock, CakeBlock, CandleBlock, CandleCakeBlock, CeilingHangingSignBlock,
-    ChainBlock, DecoratedPotBlock, EndRodBlock, FlowerPotBlock, LanternBlock, PiglinWallSkullBlock,
-    PlayerHeadBlock, PlayerWallHeadBlock, SkullBlock, StandingSignBlock, TorchBlock,
-    WallBannerBlock, WallHangingSignBlock, WallSignBlock, WallSkullBlock, WallTorchBlock,
-    WeatheringCopperChainBlock, WeatheringLanternBlock, WitherSkullBlock, WitherWallSkullBlock,
+    ChainBlock, CopperGolemStatueBlock, DecoratedPotBlock, EndRodBlock, FlowerPotBlock,
+    LanternBlock, PiglinWallSkullBlock, PlayerHeadBlock, PlayerWallHeadBlock, SkullBlock,
+    StandingSignBlock, TorchBlock, WallBannerBlock, WallHangingSignBlock, WallSignBlock,
+    WallSkullBlock, WallTorchBlock, WeatheringCopperChainBlock, WeatheringCopperGolemStatueBlock,
+    WeatheringLanternBlock, WitherSkullBlock, WitherWallSkullBlock,
 };
 pub use eggs::{FrogspawnBlock, SnifferEggBlock, TurtleEggBlock};
 pub use falling::{ConcretePowderBlock, DragonEggBlock, FallingBlock, SandBlock};
@@ -70,12 +71,12 @@ pub use sculk::{
 pub(crate) use utils::multiface_face_property;
 pub use vegetation::{
     AttachedStemBlock, AzaleaBlock, BambooSaplingBlock, BambooStalkBlock, BeetrootBlock,
-    CactusBlock, CactusFlowerBlock, CarrotBlock, CocoaBlock, CoralBlock, CropBlock,
-    DoublePlantBlock, FlowerBlock, GrassBlock, MangroveLeavesBlock, MultifaceBlock, MyceliumBlock,
-    NetherSproutsBlock, NetherWartBlock, PitcherCropBlock, PotatoBlock, PumpkinBlock,
-    RootedDirtBlock, SeagrassBlock, SnowyBlock, StemBlock, SugarCaneBlock, SweetBerryBushBlock,
-    TallFlowerBlock, TallGrassBlock, TallSeagrassBlock, TintedParticleLeavesBlock,
-    TorchflowerCropBlock, UntintedParticleLeavesBlock,
+    CactusBlock, CactusFlowerBlock, CarrotBlock, CarvedPumpkinBlock, CocoaBlock, CoralBlock,
+    CropBlock, DoublePlantBlock, FlowerBlock, GrassBlock, MangroveLeavesBlock, MultifaceBlock,
+    MyceliumBlock, NetherSproutsBlock, NetherWartBlock, PitcherCropBlock, PotatoBlock,
+    PumpkinBlock, RootedDirtBlock, SeagrassBlock, SnowyBlock, StemBlock, SugarCaneBlock,
+    SweetBerryBushBlock, TallFlowerBlock, TallGrassBlock, TallSeagrassBlock,
+    TintedParticleLeavesBlock, TorchflowerCropBlock, UntintedParticleLeavesBlock,
 };
 pub use vegetation::{
     BaseCoralFanBlock, BaseCoralPlantBlock, BaseCoralWallFanBlock, BigDripleafBlock,

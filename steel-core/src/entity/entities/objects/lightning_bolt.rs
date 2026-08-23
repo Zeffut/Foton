@@ -233,7 +233,7 @@ impl LightningBoltEntity {
             entity.id() != own_id && entity.is_alive()
         });
         for entity in struck {
-            thunder_hit(entity.as_ref(), world);
+            entity.thunder_hit(world, self);
         }
     }
 }
@@ -319,15 +319,14 @@ impl Entity for LightningBoltEntity {
 
 /// Applies one strike to a single entity.
 ///
-/// Vanilla parity: `Entity.thunderHit`, the base-class body only. The
-/// subclass overrides that charge a creeper or turn a villager into a witch
-/// need an `Entity::thunder_hit` seam Steel does not have.
+/// Vanilla parity: `Entity.thunderHit`, the base-class body only. Subclass
+/// overrides hang off [`Entity::thunder_hit`].
 ///
 /// The fire here reads oddly on purpose: vanilla bumps the counter by one and
 /// then checks it against zero, so the eight-second ignition only ever fires
 /// for an entity whose counter was at -1. For everything else a strike leaves
 /// one tick of fire, which is the flicker seen in game.
-fn thunder_hit(entity: &dyn Entity, world: &World) {
+pub(crate) fn entity_thunder_hit(entity: &dyn Entity, world: &World) {
     entity.set_remaining_fire_ticks(entity.remaining_fire_ticks() + 1);
     if entity.remaining_fire_ticks() == 0 {
         entity.ignite_for_ticks(STRIKE_FIRE_TICKS);
