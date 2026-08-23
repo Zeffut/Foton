@@ -1,5 +1,6 @@
 //! Block entity implementations.
 
+mod banner;
 mod barrel;
 mod beacon;
 mod beehive;
@@ -23,6 +24,7 @@ mod raw;
 mod shulker_box;
 mod sign;
 
+pub use banner::BannerBlockEntity;
 pub use barrel::{BARREL_SLOTS, BarrelBlockEntity};
 pub use beacon::{
     BEACON_DATA_SLOTS, BeaconBlockEntity, BeaconDataSlots, LEVELS_NEEDED_FOR_SECONDARY, MAX_LEVELS,

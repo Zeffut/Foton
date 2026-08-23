@@ -16,12 +16,12 @@ use steel_utils::{BlockPos, BlockStateId};
 
 use super::SharedBlockEntity;
 use super::entities::{
-    BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity, BrewingStandBlockEntity,
-    BrushableBlockEntity, ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity,
-    CrafterBlockEntity, DaylightDetectorBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity,
-    EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity,
-    LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity,
-    ShulkerBoxBlockEntity, SignBlockEntity,
+    BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity,
+    BrewingStandBlockEntity, BrushableBlockEntity, ChestBlockEntity, ChiseledBookShelfBlockEntity,
+    ComparatorBlockEntity, CrafterBlockEntity, DaylightDetectorBlockEntity, DispenserBlockEntity,
+    EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
+    JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
+    RawBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
 };
 use crate::world::World;
 
@@ -207,6 +207,10 @@ pub static BLOCK_ENTITIES: BlockEntityRegistryLock = BlockEntityRegistryLock(Onc
 /// Split out of `init_block_entities` only to keep that function under the
 /// line limit; there is nothing these two share beyond being late arrivals.
 fn register_workstations(registry: &mut BlockEntityRegistry) {
+    registry.register(&vanilla_block_entity_types::BANNER, |level, pos, state| {
+        Arc::new(BannerBlockEntity::new(level, pos, state))
+    });
+
     registry.register(&vanilla_block_entity_types::BEACON, |level, pos, state| {
         Arc::new(BeaconBlockEntity::new(level, pos, state))
     });

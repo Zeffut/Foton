@@ -107,7 +107,9 @@ cannot.
       The loom stamps banners: a banner, a dye and an optional pattern item,
       with the pattern picked from whatever that item offers -- everything it
       needs was already in the registry, so the note that called it blocked
-      was simply wrong. Still open:
+      was simply wrong. Its output goes somewhere now too: a placed banner
+      keeps its layers and gives them back when broken, which it did not
+      before -- there was no banner block entity at all. Still open:
       cartography table. Armor trims are the half of smithing
       that is not here: they need trim pattern and material registries and a
       `TRIM` component Steel does not have, so those eighteen recipes are
