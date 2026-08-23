@@ -30,6 +30,5 @@ pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
     HopperMinecartEntity, MinecartEntity, RaftEntity, TntMinecartEntity,
 };
-pub use objects::{AreaEffectCloudEntity, LightningBoltEntity};
-pub use objects::{AreaEffectCloudEntity, MarkerEntity};
+pub use objects::{AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity};
 pub use raw::RawEntity;
