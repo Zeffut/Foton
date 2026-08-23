@@ -20,7 +20,7 @@ use super::entities::{
     ChestBlockEntity, ChiseledBookShelfBlockEntity, ComparatorBlockEntity,
     DaylightDetectorBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
     FurnaceBlockEntity, HopperBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
-    RawBlockEntity, SignBlockEntity,
+    RawBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
 };
 use crate::world::World;
 
@@ -227,6 +227,11 @@ pub fn init_block_entities() {
         registry.register(&vanilla_block_entity_types::CHEST, |level, pos, state| {
             Arc::new(ChestBlockEntity::new(level, pos, state))
         });
+
+        registry.register(
+            &vanilla_block_entity_types::SHULKER_BOX,
+            |level, pos, state| Arc::new(ShulkerBoxBlockEntity::new(level, pos, state)),
+        );
 
         registry.register(&vanilla_block_entity_types::FURNACE, |level, pos, state| {
             Arc::new(FurnaceBlockEntity::new(level, pos, state))

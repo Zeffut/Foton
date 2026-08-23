@@ -10,6 +10,7 @@ mod dispenser_block;
 mod enchanting_table_block;
 mod furnace_block;
 mod hopper_block;
+mod shulker_box_block;
 
 pub use anvil_block::AnvilBlock;
 pub use barrel_block::BarrelBlock;
@@ -22,3 +23,4 @@ pub use dispenser_block::{DispenserBlock, DropperBlock};
 pub use enchanting_table_block::{EnchantingTableBlock, count_enchanting_power};
 pub use furnace_block::{BlastFurnaceBlock, FurnaceBlock, SmokerBlock};
 pub use hopper_block::HopperBlock;
+pub use shulker_box_block::ShulkerBoxBlock;

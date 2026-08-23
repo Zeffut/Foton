@@ -1,21 +1,22 @@
 #!/bin/bash
-# Check a placed furnace really has a block entity behind it.
+# Check that placed container blocks really have block entities behind them.
 #
 # All three furnaces went unregistered: the behavior was written, a macro hid
 # the struct from the codegen scanner, and nothing said so -- right-clicking one
 # did nothing and smelting was unreachable. A unit test cannot see that, because
 # the behavior compiles fine; only the running server can.
 #
-# `new_block_entity` comes from the block's behavior, so a furnace with NBT data
-# behind it is a furnace whose behavior is registered.
+# `new_block_entity` comes from the block's behavior, so a block with NBT data
+# behind it is a block whose behavior is registered. That one question covers
+# every container, so they are all asked here.
 #
-# Usage: bash dev/furnace-test.sh
+# Usage: bash dev/container-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 
 PORT=25574
-RUN_DIR="$ROOT/run-furnace"
+RUN_DIR="$ROOT/run-container"
 
 echo "=== Building ==="
 if ! cargo build 2>&1 | tail -2; then
@@ -56,9 +57,13 @@ CMDS='teleport @s 0 100 0'
 CMDS="$CMDS;;setblock 0 99 0 minecraft:furnace"
 CMDS="$CMDS;;setblock 2 99 0 minecraft:smoker"
 CMDS="$CMDS;;setblock 4 99 0 minecraft:blast_furnace"
+CMDS="$CMDS;;setblock 6 99 0 minecraft:shulker_box"
+CMDS="$CMDS;;setblock 8 99 0 minecraft:red_shulker_box"
 CMDS="$CMDS;;execute if data block 0 99 0 {} run tellraw @s \"FURNACEHASENTITY\""
 CMDS="$CMDS;;execute if data block 2 99 0 {} run tellraw @s \"SMOKERHASENTITY\""
 CMDS="$CMDS;;execute if data block 4 99 0 {} run tellraw @s \"BLASTHASENTITY\""
+CMDS="$CMDS;;execute if data block 6 99 0 {} run tellraw @s \"SHULKERHASENTITY\""
+CMDS="$CMDS;;execute if data block 8 99 0 {} run tellraw @s \"REDSHULKERHASENTITY\""
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
@@ -70,15 +75,16 @@ echo "=== what the server answered ==="
 grep "server says" join.log | tail -10
 
 if [ $STATUS -ne 0 ]; then
-  echo "########## FURNACE TEST FAILED (the client never settled) ##########"
+  echo "########## CONTAINER TEST FAILED (the client never settled) ##########"
   tail -20 join.log
   exit 1
 fi
-for marker in FURNACEHASENTITY SMOKERHASENTITY BLASTHASENTITY; do
+for marker in FURNACEHASENTITY SMOKERHASENTITY BLASTHASENTITY \
+              SHULKERHASENTITY REDSHULKERHASENTITY; do
   # Only the server's own reply counts: join.py echoes the commands it sends.
   if ! grep "server says" join.log | grep -q "$marker"; then
-    echo "########## FURNACE TEST FAILED ($marker missing) ##########"
+    echo "########## CONTAINER TEST FAILED ($marker missing) ##########"
     exit 1
   fi
 done
-echo "########## FURNACE TEST PASSED ##########"
+echo "########## CONTAINER TEST PASSED ##########"
