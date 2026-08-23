@@ -189,8 +189,11 @@ impl World {
 
         if spec.interaction.destroys_blocks() {
             let loot_radius = spec.interaction.loot_explosion_radius(spec.radius);
+            // `ServerExplosion.source` is the direct entity, not the one to
+            // blame: a fireball's drops are the fireball's context, even
+            // though the ghast is what answers for the damage.
             let source_entity = spec
-                .source_entity_id
+                .direct_entity_id
                 .and_then(|entity_id| self.get_entity_by_id(entity_id));
             for pos in &to_blow {
                 self.destroy_block_from_explosion(*pos, source_entity.as_deref(), loot_radius);
