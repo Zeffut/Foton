@@ -13,6 +13,7 @@ mod furnace_block;
 mod hopper_block;
 mod jukebox_block;
 mod shulker_box_block;
+mod stonecutter_block;
 mod trapped_chest_block;
 
 pub use anvil_block::AnvilBlock;
@@ -29,4 +30,5 @@ pub use furnace_block::{BlastFurnaceBlock, FurnaceBlock, SmokerBlock};
 pub use hopper_block::HopperBlock;
 pub use jukebox_block::JukeboxBlock;
 pub use shulker_box_block::ShulkerBoxBlock;
+pub use stonecutter_block::StonecutterBlock;
 pub use trapped_chest_block::TrappedChestBlock;

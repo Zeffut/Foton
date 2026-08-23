@@ -1,12 +1,13 @@
 //! Recipe system for crafting and other recipe types.
 //!
 //! This module provides the data structures and matching logic for Minecraft recipes.
-//! Currently supports crafting recipes (shaped and shapeless).
+//! Supports crafting (shaped and shapeless), cooking, and stonecutting.
 
 mod cooking;
 mod crafting;
 mod ingredient;
 mod registry;
+mod stonecutting;
 
 pub use cooking::{CookingKind, SmeltingRecipe};
 pub use crafting::{
@@ -15,3 +16,4 @@ pub use crafting::{
 };
 pub use ingredient::Ingredient;
 pub use registry::RecipeRegistry;
+pub use stonecutting::StonecuttingRecipe;

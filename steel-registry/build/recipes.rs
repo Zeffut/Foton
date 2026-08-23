@@ -130,6 +130,14 @@ struct ShapelessRecipeData {
     result_count: i32,
 }
 
+struct StonecuttingRecipeData {
+    name: String,
+    ident: Ident,
+    ingredient: ParsedIngredient,
+    result_item_ident: Ident,
+    result_count: i32,
+}
+
 struct SmeltingRecipeData {
     name: String,
     ident: Ident,
@@ -260,6 +268,97 @@ fn parse_shapeless_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<Shap
         result_item_ident,
         result_count: result.count,
     })
+}
+
+/// Parses a stonecutting recipe from JSON.
+///
+/// The simplest shape there is: one ingredient, one result, no category and no
+/// timing.
+fn parse_stonecutting_recipe(
+    recipe_name: &str,
+    recipe: &RecipeJson,
+) -> Option<StonecuttingRecipeData> {
+    let ingredient = recipe.ingredient.as_ref()?;
+    let result = recipe.result.as_ref()?;
+
+    let result_item_id = result.id.strip_prefix("minecraft:").unwrap_or(&result.id);
+
+    Some(StonecuttingRecipeData {
+        name: recipe_name.to_string(),
+        ident: Ident::new(&recipe_name.to_snake_case(), Span::call_site()),
+        ingredient: parse_ingredient(ingredient),
+        result_item_ident: Ident::new(&result_item_id.to_shouty_snake_case(), Span::call_site()),
+        result_count: result.count,
+    })
+}
+
+/// Generates the creator functions, struct fields, field initializers and
+/// registration calls for the stonecutting family.
+fn stonecutting_tokens(
+    recipes: &[StonecuttingRecipeData],
+) -> (
+    Vec<TokenStream>,
+    Vec<TokenStream>,
+    Vec<TokenStream>,
+    Vec<TokenStream>,
+) {
+    let creator_fns = recipes
+        .iter()
+        .map(|r| {
+            let fn_ident = Ident::new(
+                &format!("create_stonecutting_{}", r.ident),
+                Span::call_site(),
+            );
+            let name = &r.name;
+            let ingredient = generate_ingredient_tokens(&r.ingredient);
+            let result_item_ident = &r.result_item_ident;
+            let result_count = r.result_count;
+
+            quote! {
+                #[inline(never)]
+                fn #fn_ident() -> StonecuttingRecipe {
+                    StonecuttingRecipe {
+                        id: Identifier::vanilla_static(#name),
+                        ingredient: #ingredient,
+                        result: RecipeResult {
+                            item: &*vanilla_items::#result_item_ident,
+                            count: #result_count,
+                        },
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let fields = recipes
+        .iter()
+        .map(|r| {
+            let ident = &r.ident;
+            quote! { pub #ident: StonecuttingRecipe, }
+        })
+        .collect();
+
+    let field_inits = recipes
+        .iter()
+        .map(|r| {
+            let ident = &r.ident;
+            let fn_ident = Ident::new(
+                &format!("create_stonecutting_{}", r.ident),
+                Span::call_site(),
+            );
+            quote! { #ident: #fn_ident(), }
+        })
+        .collect();
+
+    let registers = recipes
+        .iter()
+        .map(|r| {
+            let ident = &r.ident;
+            quote! { registry.register_stonecutting(&RECIPES.stonecutting.#ident); }
+        })
+        .collect();
+
+    (creator_fns, fields, field_inits, registers)
 }
 
 /// Parses a cooking recipe (furnace, blast furnace or smoker) from JSON.
@@ -400,6 +499,7 @@ pub(crate) fn build() -> TokenStream {
     let mut smelting_recipes: Vec<SmeltingRecipeData> = Vec::new();
     let mut blasting_recipes: Vec<SmeltingRecipeData> = Vec::new();
     let mut smoking_recipes: Vec<SmeltingRecipeData> = Vec::new();
+    let mut stonecutting_recipes: Vec<StonecuttingRecipeData> = Vec::new();
 
     // Read all recipe files
     fn read_recipes(
@@ -409,13 +509,22 @@ pub(crate) fn build() -> TokenStream {
         smelting: &mut Vec<SmeltingRecipeData>,
         blasting: &mut Vec<SmeltingRecipeData>,
         smoking: &mut Vec<SmeltingRecipeData>,
+        stonecutting: &mut Vec<StonecuttingRecipeData>,
     ) {
         for entry in fs::read_dir(dir).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
 
             if path.is_dir() {
-                read_recipes(&path, shaped, shapeless, smelting, blasting, smoking);
+                read_recipes(
+                    &path,
+                    shaped,
+                    shapeless,
+                    smelting,
+                    blasting,
+                    smoking,
+                    stonecutting,
+                );
             } else if path.extension().and_then(|s| s.to_str()) == Some("json") {
                 let recipe_name = path
                     .file_stem()
@@ -458,7 +567,12 @@ pub(crate) fn build() -> TokenStream {
                             smoking.push(r);
                         }
                     }
-                    // Skip other recipe types for now (stonecutting, smithing, etc.)
+                    "minecraft:stonecutting" => {
+                        if let Some(r) = parse_stonecutting_recipe(recipe_name, &recipe) {
+                            stonecutting.push(r);
+                        }
+                    }
+                    // Skip other recipe types for now (smithing, transmute, etc.)
                     _ => {}
                 }
             }
@@ -472,6 +586,7 @@ pub(crate) fn build() -> TokenStream {
         &mut smelting_recipes,
         &mut blasting_recipes,
         &mut smoking_recipes,
+        &mut stonecutting_recipes,
     );
 
     // Generate individual creator functions for each shaped recipe.
@@ -620,12 +735,18 @@ pub(crate) fn build() -> TokenStream {
         cooking_family_tokens("blasting", &blasting_recipes);
     let (smoking_creator_fns, smoking_fields, smoking_field_inits, smoking_registers) =
         cooking_family_tokens("smoking", &smoking_recipes);
+    let (
+        stonecutting_creator_fns,
+        stonecutting_fields,
+        stonecutting_field_inits,
+        stonecutting_registers,
+    ) = stonecutting_tokens(&stonecutting_recipes);
 
     quote! {
         use crate::{
             recipe::{
                 CraftingCategory, Ingredient, RecipeRegistry, RecipeResult,
-                ShapedRecipe, ShapelessRecipe, SmeltingRecipe,
+                ShapedRecipe, ShapelessRecipe, SmeltingRecipe, StonecuttingRecipe,
             },
             vanilla_items,
         };
@@ -659,12 +780,17 @@ pub(crate) fn build() -> TokenStream {
             #(#smoking_fields)*
         }
 
+        pub struct StonecuttingRecipes {
+            #(#stonecutting_fields)*
+        }
+
         pub struct Recipes {
             pub shaped: ShapedRecipes,
             pub shapeless: ShapelessRecipes,
             pub smelting: SmeltingRecipes,
             pub blasting: BlastingRecipes,
             pub smoking: SmokingRecipes,
+            pub stonecutting: StonecuttingRecipes,
         }
 
         // Individual recipe creator functions.
@@ -683,6 +809,7 @@ pub(crate) fn build() -> TokenStream {
         #(#smelting_creator_fns)*
         #(#blasting_creator_fns)*
         #(#smoking_creator_fns)*
+        #(#stonecutting_creator_fns)*
 
         impl Recipes {
             fn init() -> Self {
@@ -702,6 +829,9 @@ pub(crate) fn build() -> TokenStream {
                     smoking: SmokingRecipes {
                         #(#smoking_field_inits)*
                     },
+                    stonecutting: StonecuttingRecipes {
+                        #(#stonecutting_field_inits)*
+                    },
                 }
             }
         }
@@ -715,6 +845,7 @@ pub(crate) fn build() -> TokenStream {
             #(#smelting_registers)*
             #(#blasting_registers)*
             #(#smoking_registers)*
+            #(#stonecutting_registers)*
         }
     }
 }

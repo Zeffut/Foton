@@ -5,6 +5,7 @@ use steel_utils::Identifier;
 
 use super::cooking::{CookingKind, SmeltingRecipe};
 use super::crafting::{CraftingInput, CraftingRecipe, ShapedRecipe, ShapelessRecipe};
+use super::stonecutting::StonecuttingRecipe;
 use crate::item_stack::ItemStack;
 
 /// Registry for all recipes.
@@ -17,6 +18,13 @@ pub struct RecipeRegistry {
     shaped_recipes: Vec<&'static ShapedRecipe>,
     /// All shapeless crafting recipes (for type-specific iteration).
     shapeless_recipes: Vec<&'static ShapelessRecipe>,
+    /// Every stonecutter recipe, in registration order.
+    ///
+    /// Order matters here in a way it does not for the other kinds: the
+    /// client picks a recipe by its index in the list it was shown, so the
+    /// order the server hands them out in is the order the buttons appear.
+    stonecutting_recipes: Vec<&'static StonecuttingRecipe>,
+
     /// All furnace smelting recipes.
     smelting_recipes: Vec<&'static SmeltingRecipe>,
     /// All blast furnace recipes.
@@ -42,6 +50,7 @@ impl RecipeRegistry {
             recipes_by_key: FxHashMap::default(),
             shaped_recipes: Vec::new(),
             shapeless_recipes: Vec::new(),
+            stonecutting_recipes: Vec::new(),
             smelting_recipes: Vec::new(),
             blasting_recipes: Vec::new(),
             smoking_recipes: Vec::new(),
@@ -73,6 +82,25 @@ impl RecipeRegistry {
         self.recipes_by_id
             .push(Box::leak(Box::new(CraftingRecipe::Shapeless(recipe))));
         self.shapeless_recipes.push(recipe);
+    }
+
+    /// Registers a stonecutter recipe.
+    pub fn register_stonecutting(&mut self, recipe: &'static StonecuttingRecipe) {
+        self.stonecutting_recipes.push(recipe);
+    }
+
+    /// Returns every stonecutter recipe that accepts `input`, in order.
+    ///
+    /// Vanilla parity: `RecipeManager.getRecipesFor(STONECUTTING, ...)`. Every
+    /// match is returned rather than the first, because a stonecutter shows the
+    /// player all of them and lets them choose.
+    #[must_use]
+    pub fn stonecutting_recipes_for(&self, input: &ItemStack) -> Vec<&'static StonecuttingRecipe> {
+        self.stonecutting_recipes
+            .iter()
+            .filter(|recipe| recipe.matches(input))
+            .copied()
+            .collect()
     }
 
     /// Registers a furnace smelting recipe.

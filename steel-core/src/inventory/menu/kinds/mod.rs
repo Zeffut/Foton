@@ -10,6 +10,7 @@ mod enchantment_menu;
 mod furnace_menu;
 mod hopper_menu;
 mod inventory_menu;
+mod stonecutter_menu;
 
 pub use anvil_menu::{AnvilKind, anvil};
 pub use basic_menu::BasicKind;
@@ -21,3 +22,4 @@ pub use enchantment_menu::{EnchantmentKind, enchantment};
 pub use furnace_menu::{FurnaceKind, furnace};
 pub use hopper_menu::{HopperKind, hopper};
 pub use inventory_menu::{INVENTORY_MENU_CONTAINER_ID, InventoryKind, inventory_menu};
+pub use stonecutter_menu::{StonecutterKind, stonecutter};

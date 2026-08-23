@@ -84,11 +84,14 @@ cannot.
       tripwire hook. That counter now lives on `BlockEntityBase` and drives
       three things at once: the trapped chest's signal, the barrel's `open`
       state, and the chest lid. Verified by `dev/openers-test.sh`.
-- [~] **Workstations**: jukebox done -- a disc goes in, the model changes, it
-      powers redstone while the music runs and answers a comparator with the
-      record's own number, and right-clicking gives the disc back. Still open:
-      grindstone, stonecutter, smithing table, cartography table, loom,
-      lectern, bell, beacon, crafter.
+- [~] **Workstations**: jukebox and stonecutter done. The jukebox takes a
+      disc, changes shape, powers redstone while the music runs and answers a
+      comparator with the record's own number. The stonecutter cuts: 319
+      stonecutting recipes now reach the registry, which the build script had
+      been skipping outright, and the menu lets a player pick one of the many
+      cuts an input offers. Still open: grindstone, smithing table,
+      cartography table, loom, lectern, bell, beacon, crafter -- of which
+      smithing and loom also need recipe kinds the build script still skips.
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
       can now right-click a block at all.
 - [~] **Tools that act**: snowball, egg and bottle o' enchanting done -- all
@@ -166,6 +169,10 @@ a furnace has no behavior. These scripts can:
   and read through the wall behind it by a comparator.
 - `dev/throw-test.sh` -- a snowball is thrown, flies and breaks, forty eggs
   hatch at least one chicken, and a bottle o' enchanting breaks into experience.
+- `dev/stonecutter-test.sh` -- right-clicking a stonecutter opens its menu. The
+  cutting itself is tested at the menu level, in
+  `inventory::menu::kinds::stonecutter_menu::tests`, because pressing a recipe
+  button needs a container packet the test client cannot send.
 - `dev/openers-test.sh` -- an open trapped chest powers redstone and a
   closed one stops, a plain chest powers nothing, a chest under a solid
   block refuses to open, and a barrel looks open while somebody is in it.
