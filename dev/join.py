@@ -10,6 +10,8 @@ Used by dev/join-test.sh, which boots an offline-mode server for it.
 """
 
 import os
+import re
+import io
 import socket
 import time
 import struct
@@ -55,6 +57,7 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_S_ACCEPT_TELEPORTATION = 0
+PLAY_S_CHAT_COMMAND = 7
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
 PLAY_S_KEEP_ALIVE = 28
 PLAY_S_PLAYER_LOADED = 44
@@ -72,6 +75,21 @@ REQUIRED_CHUNKS = 9
 # Natural spawning needs a player present, so watching from inside is the
 # only way to see it happen.
 WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
+
+# Optional: commands to run once in the world, separated by `;;`. The server
+# console is a TUI and only reads a real terminal, so a scripted client is the
+# only way to drive the server from a test -- and it is also the honest way,
+# because it is the path a player takes. The joining player needs a permission
+# group that allows them; see `groups.toml`.
+JOIN_COMMANDS = [
+    command.strip()
+    for command in os.environ.get("JOIN_COMMANDS", "").split(";;")
+    if command.strip()
+]
+
+# How long to keep reading after each command before sending the next, so the
+# server has a tick or two to act on it.
+COMMAND_SETTLE_SECONDS = 2.0
 
 
 def varint(value):
@@ -255,11 +273,42 @@ def read_add_entity_type(payload):
     return entity_type
 
 
+def entity_names():
+    """Maps entity type ids to names by reading the generated registry.
+
+    The ids are registration order in `vanilla_entities.rs`, which is the same
+    order the server assigns, so this needs no protocol support and no extra
+    dependency. A bare number is still printed if the file moves.
+    """
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "steel-registry",
+        "src",
+        "generated",
+        "vanilla_entities.rs",
+    )
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            source = handle.read()
+    except OSError:
+        return {}
+    return {
+        index: name
+        for index, name in enumerate(
+            re.findall(r'Identifier :: vanilla_static \("([a-z_]+)"\)', source)
+        )
+    }
+
+
+ENTITY_NAMES = entity_names()
+
+
 def describe_spawns(spawned):
     if not spawned:
         return "nothing"
     return ", ".join(
-        f"type {entity_type}x{count}"
+        f"{ENTITY_NAMES.get(entity_type, f'type {entity_type}')} x{count}"
         for entity_type, count in sorted(spawned.items(), key=lambda kv: -kv[1])
     )
 
@@ -325,6 +374,14 @@ def run_play(connection, watch_seconds=0):
             # A real client says when it has finished loading, and the server
             # holds back interactions until it does.
             connection.send(PLAY_S_PLAYER_LOADED)
+            if JOIN_COMMANDS:
+                if not run_commands(connection, JOIN_COMMANDS, spawned):
+                    return
+                # Whatever was around the join point is not what the commands
+                # were run to look at -- a teleport across worlds especially --
+                # so the watch below reports only what arrives after them.
+                print(f"  before the commands: {describe_spawns(spawned)}")
+                spawned.clear()
             if watch_seconds > 0:
                 watch_for_spawns(connection, watch_seconds, spawned)
             return
@@ -334,6 +391,43 @@ def run_play(connection, watch_seconds=0):
         f"(joined={joined}, positioned={positioned}, chunks={chunks}; "
         f"got {describe(seen)})"
     )
+
+
+def pump(connection, seconds, spawned):
+    """Keeps the connection alive for `seconds`, recording anything that spawns."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        connection.sock.settimeout(max(0.1, deadline - time.monotonic()))
+        try:
+            packet_id, payload = connection.receive()
+        except socket.timeout:
+            break
+        except (OSError, EOFError):
+            break
+
+        if packet_id == PLAY_C_ADD_ENTITY:
+            spawn_type = read_add_entity_type(payload)
+            spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
+        elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
+            acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_KEEP_ALIVE:
+            connection.send(PLAY_S_KEEP_ALIVE, payload)
+        elif packet_id == PLAY_C_DISCONNECT:
+            fail(f"disconnected: {payload[:200]!r}")
+            return False
+    connection.sock.settimeout(TIMEOUT_SECONDS)
+    return True
+
+
+def run_commands(connection, commands, spawned):
+    """Runs each command as the player would type it, and lets it settle."""
+    for command in commands:
+        print(f"  /{command}")
+        encoded = command.encode()
+        connection.send(PLAY_S_CHAT_COMMAND, varint(len(encoded)) + encoded)
+        if not pump(connection, COMMAND_SETTLE_SECONDS, spawned):
+            return False
+    return True
 
 
 def watch_for_spawns(connection, seconds, spawned):
