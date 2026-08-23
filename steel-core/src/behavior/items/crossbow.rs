@@ -25,6 +25,7 @@ use steel_utils::types::InteractionHand;
 
 use crate::behavior::context::{InteractionResult, UseItemContext};
 use crate::behavior::item::{ItemBehavior, ItemUseAnimation};
+use crate::behavior::items::arrow_entity_type_for;
 use crate::enchantment_helper;
 use crate::entity::entities::{ArrowEntity, FireworkRocketEntity};
 use crate::entity::{Entity, LivingEntity, Projectile as _, SharedEntity, next_entity_id};
@@ -570,7 +571,7 @@ fn create_projectile(world: &Arc<World>, shooter: &Player, ammo: &ItemStack) -> 
     }
 
     let arrow = ArrowEntity::new(
-        &vanilla_entities::ARROW,
+        arrow_entity_type_for(ammo),
         next_entity_id(),
         position.with_y(shooter.get_eye_y() - ARROW_SPAWN_EYE_OFFSET),
         Arc::downgrade(world),

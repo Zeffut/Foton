@@ -24,6 +24,7 @@ mod c_level_particles;
 mod c_login;
 mod c_move_entity;
 mod c_move_vehicle;
+mod c_open_book;
 mod c_open_screen;
 mod c_open_sign_editor;
 mod c_player_abilities;
@@ -71,6 +72,7 @@ mod s_container_button_click;
 mod s_container_click;
 mod s_container_close;
 mod s_container_slot_state_changed;
+mod s_edit_book;
 mod s_interact;
 mod s_move_player;
 mod s_move_vehicle;
@@ -81,6 +83,7 @@ mod s_player_command;
 mod s_player_input;
 mod s_player_load;
 mod s_rename_item;
+mod s_select_bundle_item;
 mod s_set_beacon;
 mod s_set_carried_item;
 mod s_set_creative_mode_slot;
@@ -125,6 +128,7 @@ pub use c_move_entity::{
     CMoveEntityPos, CMoveEntityPosRot, CMoveEntityRot, PackedEntityDelta, calc_delta, to_angle_byte,
 };
 pub use c_move_vehicle::CMoveVehicle;
+pub use c_open_book::COpenBook;
 pub use c_open_screen::COpenScreen;
 pub use c_open_sign_editor::COpenSignEditor;
 pub use c_player_abilities::{CPlayerAbilities, ability_flags};
@@ -184,6 +188,7 @@ pub use s_container_button_click::SContainerButtonClick;
 pub use s_container_click::{ClickType, HashedPatchMap, HashedStack, SContainerClick};
 pub use s_container_close::SContainerClose;
 pub use s_container_slot_state_changed::SContainerSlotStateChanged;
+pub use s_edit_book::SEditBook;
 pub use s_interact::SInteract;
 pub use s_move_player::{
     SMovePlayer, SMovePlayerPos, SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly,
@@ -196,6 +201,7 @@ pub use s_player_command::{PlayerCommandAction, SPlayerCommand};
 pub use s_player_input::SPlayerInput;
 pub use s_player_load::SPlayerLoad;
 pub use s_rename_item::SRenameItem;
+pub use s_select_bundle_item::SSelectBundleItem;
 pub use s_set_beacon::SSetBeacon;
 pub use s_set_carried_item::SSetCarriedItem;
 pub use s_set_creative_mode_slot::SSetCreativeModeSlot;

@@ -1,7 +1,10 @@
 //! Block item behavior implementation.
 
 use steel_macros::item_behavior;
+use steel_registry::sound_event::SoundEventRef;
+use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::{
+    REGISTRY, TaggedRegistryExt as _,
     blocks::{BlockRef, block_state_ext::BlockStateExt},
     vanilla_blocks, vanilla_game_events,
 };
@@ -19,6 +22,11 @@ pub struct BlockItem {
     /// The block this item places.
     #[json_arg(vanilla_blocks, json = "block")]
     pub block: BlockRef,
+    /// Vanilla parity: `BlockItem.getPlaceSound`, which only `SolidBucketItem`
+    /// overrides. `None` keeps the placed block's own sound type.
+    place_sound: Option<SoundEventRef>,
+    /// Vanilla parity: `BlockItem.mustSurvive`, which only scaffolding turns off.
+    must_survive: bool,
 }
 
 impl BlockItem {
@@ -27,7 +35,25 @@ impl BlockItem {
     /// Creates a new block item behavior for the given block.
     #[must_use]
     pub const fn new(block: BlockRef) -> Self {
-        Self { block }
+        Self {
+            block,
+            place_sound: None,
+            must_survive: true,
+        }
+    }
+
+    /// Returns this behavior with `BlockItem.getPlaceSound` overridden.
+    #[must_use]
+    pub const fn with_place_sound(mut self, place_sound: SoundEventRef) -> Self {
+        self.place_sound = Some(place_sound);
+        self
+    }
+
+    /// Returns this behavior with `BlockItem.mustSurvive` turned off.
+    #[must_use]
+    pub const fn without_must_survive(mut self) -> Self {
+        self.must_survive = false;
+        self
     }
 
     pub(super) fn place_with(
@@ -45,7 +71,7 @@ impl BlockItem {
             return InteractionResult::Fail;
         };
 
-        if !behavior.can_survive(new_state, context.world, place_pos) {
+        if self.must_survive && !behavior.can_survive(new_state, context.world, place_pos) {
             return InteractionResult::Fail;
         }
 
@@ -67,7 +93,7 @@ impl BlockItem {
         // Play place sound (exclude the placing player, they hear it client-side)
         let sound_type = &self.block.config.sound_type;
         context.world.play_block_sound(
-            sound_type.place_sound,
+            self.place_sound.unwrap_or(sound_type.place_sound),
             place_pos,
             sound_type.volume,
             sound_type.pitch,
@@ -102,6 +128,16 @@ impl BlockItem {
 impl ItemBehavior for BlockItem {
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
         self.place(context.build_place_context())
+    }
+
+    /// Vanilla parity: `BlockItem.canFitInsideContainerItems`. Steel has no
+    /// `ShulkerBoxBlock` behavior to test against, so the block tag holding
+    /// exactly those seventeen blocks stands in, as it already does for banners
+    /// in the loom.
+    fn can_fit_inside_container_items(&self) -> bool {
+        !REGISTRY
+            .blocks
+            .is_in_tag(self.block, &BlockTag::SHULKER_BOXES)
     }
 }
 

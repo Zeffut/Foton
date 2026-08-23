@@ -2,6 +2,14 @@ use super::{
     Identifier, PermissionContext, PermissionExpr, PermissionMetadataSet, PermissionMetadataValue,
     PermissionSet, PermissionState, Player,
 };
+use crate::permission::PermissionKey;
+
+/// Permission key behind Vanilla's `Permissions.COMMANDS_GAMEMASTER`.
+///
+/// Vanilla gates command blocks, structure blocks, jigsaws and the debug stick
+/// on a command level; Steel expresses the same gate as a named key so a server
+/// can hand it out without handing out everything else.
+const GAME_MASTER_PERMISSION: &str = "minecraft.command.gamemaster";
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct PlayerPermissionState {
@@ -90,6 +98,25 @@ impl Player {
     #[must_use]
     pub fn permission_state_version(&self) -> u64 {
         self.permissions.lock().version
+    }
+
+    /// Returns whether the player may place, break or edit gamemaster blocks.
+    ///
+    /// Vanilla parity: `Player.canUseGameMasterBlocks`, which is creative mode
+    /// plus the gamemaster permission.
+    #[must_use]
+    pub fn can_use_game_master_blocks(&self) -> bool {
+        if !self.has_infinite_materials() {
+            return false;
+        }
+        let key = match PermissionKey::parse(GAME_MASTER_PERMISSION) {
+            Ok(key) => key,
+            Err(error) => {
+                log::error!("invalid built-in gamemaster permission key: {error}");
+                return false;
+            }
+        };
+        self.has_permission(&PermissionExpr::key(key))
     }
 
     /// Returns whether the player satisfies an expression in their current world.

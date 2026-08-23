@@ -5,6 +5,7 @@ use steel_registry::blocks::{
     properties::{BlockStateProperties, BoolProperty, Direction, IntProperty},
     shapes::VoxelShape,
 };
+use steel_registry::vanilla_blocks;
 use steel_utils::{BlockLocalAabb, BlockPos, BlockStateId};
 
 use crate::behavior::{
@@ -40,11 +41,50 @@ pub struct ScaffoldingBlock {
 const BOTTOM: &BoolProperty = &BlockStateProperties::BOTTOM;
 const STABILITY_DISTANCE: &IntProperty = &BlockStateProperties::STABILITY_DISTANCE;
 
+/// Vanilla parity: the `7` seeding `ScaffoldingBlock.getDistance`, which is
+/// also the maximum value of the `distance` property.
+const MAX_STABILITY_DISTANCE: i32 = 7;
+
 impl ScaffoldingBlock {
     /// Creates a scaffolding block behavior.
     #[must_use]
     pub const fn new(block: BlockRef) -> Self {
         Self { block }
+    }
+
+    /// Returns how far `pos` is from something that can hold scaffolding up,
+    /// where `7` means "too far".
+    ///
+    /// Vanilla parity: the static `ScaffoldingBlock.getDistance`.
+    ///
+    /// Steel gap: nothing yet writes `distance` when scaffolding is placed or
+    /// updated, so an existing tower reports the default `7` and this only
+    /// answers usefully for a position resting directly on solid ground.
+    #[must_use]
+    pub fn get_distance(level: &dyn LevelReader, pos: BlockPos) -> i32 {
+        let below_pos = pos.below();
+        let below = level.get_block_state(below_pos);
+
+        let mut distance = if below.get_block() == &vanilla_blocks::SCAFFOLDING {
+            i32::from(below.get_value(STABILITY_DISTANCE))
+        } else if level.is_face_sturdy(below, below_pos, Direction::Up) {
+            return 0;
+        } else {
+            MAX_STABILITY_DISTANCE
+        };
+
+        for direction in Direction::HORIZONTAL {
+            let neighbor = level.get_block_state(direction.relative(pos));
+            if neighbor.get_block() != &vanilla_blocks::SCAFFOLDING {
+                continue;
+            }
+            distance = distance.min(i32::from(neighbor.get_value(STABILITY_DISTANCE)) + 1);
+            if distance == 1 {
+                break;
+            }
+        }
+
+        distance
     }
 }
 

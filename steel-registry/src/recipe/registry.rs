@@ -187,6 +187,27 @@ impl RecipeRegistry {
     ///
     /// A furnace stores the recipe ids it has cooked so it can award their
     /// experience later, and only has the id to go on at that point.
+    /// Returns whether any recipe of any kind is registered under `key`.
+    ///
+    /// Vanilla parity: `RecipeManager.byKey(...).isPresent()`, which searches
+    /// the one `RecipeMap` holding every recipe type. Steel indexes crafting
+    /// recipes by key and keeps the other families in flat lists, so the
+    /// remaining kinds are scanned; a knowledge book is used rarely enough that
+    /// the scan is cheaper than a second index.
+    #[must_use]
+    pub fn contains_key(&self, key: &Identifier) -> bool {
+        if self.recipes_by_key.contains_key(key) {
+            return true;
+        }
+        if self.find_cooking_recipe_by_id(key).is_some() {
+            return true;
+        }
+        self.stonecutting_recipes
+            .iter()
+            .any(|recipe| &recipe.id == key)
+            || self.smithing_recipes.iter().any(|recipe| &recipe.id == key)
+    }
+
     #[must_use]
     pub fn find_cooking_recipe_by_id(&self, id: &Identifier) -> Option<&'static SmeltingRecipe> {
         self.smelting_recipes

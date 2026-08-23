@@ -1,5 +1,6 @@
 //! Item components whose codecs recursively contain item stack templates.
 
+use std::cmp::Ordering;
 use std::io::{Cursor, Error, Result, Write};
 
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
@@ -13,6 +14,7 @@ use super::Bees;
 use crate::ItemStackTemplate;
 use crate::data_components::registry::ValidatePersistentComponent;
 use crate::data_components::vanilla_components::{BEES, BUNDLE_CONTENTS};
+use crate::item_stack::ItemStack;
 
 macro_rules! impl_template_wrapper_codecs {
     ($type:ty, $field:ident) => {
@@ -142,20 +144,58 @@ impl ValidatePersistentComponent for ChargedProjectiles {
 }
 
 /// The ordered item templates stored in a bundle.
-#[derive(Debug, Default, Clone, PartialEq)]
+///
+/// Vanilla parity: `BundleContents`. `selected_item` sits outside every codec
+/// and outside equality, exactly as in Vanilla: it only says which stack the
+/// next extraction takes, and two bundles holding the same items must still
+/// stack together.
+#[derive(Debug, Clone)]
 pub struct BundleContents {
     items: Vec<ItemStackTemplate>,
+    selected_item: i32,
 }
 
 impl BundleContents {
+    /// Vanilla parity: `BundleContents.NO_SELECTED_ITEM_INDEX`.
+    pub const NO_SELECTED_ITEM_INDEX: i32 = -1;
+
+    /// Vanilla parity: `BundleContents.BUNDLE_IN_BUNDLE_WEIGHT`, the surcharge a
+    /// nested bundle pays on top of what it holds.
+    const BUNDLE_IN_BUNDLE_WEIGHT: (i32, i32) = (1, 16);
+
     #[must_use]
     pub const fn empty() -> Self {
-        Self { items: Vec::new() }
+        Self {
+            items: Vec::new(),
+            selected_item: Self::NO_SELECTED_ITEM_INDEX,
+        }
     }
 
     #[must_use]
     pub const fn new(items: Vec<ItemStackTemplate>) -> Self {
-        Self { items }
+        Self {
+            items,
+            selected_item: Self::NO_SELECTED_ITEM_INDEX,
+        }
+    }
+
+    /// Rebuilds contents that remember which stack the next extraction takes.
+    ///
+    /// Vanilla parity: the private `BundleContents(List, int)` constructor used
+    /// by `BundleContents.Mutable.toImmutable`. An index outside the item list
+    /// is normalized away, which is what `Mutable.toggleSelectedItem`
+    /// guarantees upstream in Vanilla.
+    #[must_use]
+    pub fn with_selected_item(items: Vec<ItemStackTemplate>, selected_item: i32) -> Self {
+        let in_bounds = usize::try_from(selected_item).is_ok_and(|index| index < items.len());
+        Self {
+            selected_item: if in_bounds {
+                selected_item
+            } else {
+                Self::NO_SELECTED_ITEM_INDEX
+            },
+            items,
+        }
     }
 
     #[must_use]
@@ -163,47 +203,124 @@ impl BundleContents {
         &self.items
     }
 
-    /// Validates the checked rational weight used by Vanilla's strict item-stack validation.
-    pub(crate) fn validate_weight(&self) -> Result<()> {
-        self.compute_weight().map(|_| ())
+    /// Vanilla parity: `BundleContents.size`.
+    #[must_use]
+    pub const fn size(&self) -> usize {
+        self.items.len()
     }
 
-    fn compute_weight(&self) -> Result<CheckedFraction> {
+    /// Vanilla parity: `BundleContents.isEmpty`.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Vanilla parity: `BundleContents.getSelectedItemIndex`.
+    #[must_use]
+    pub const fn selected_item_index(&self) -> i32 {
+        self.selected_item
+    }
+
+    /// Vanilla parity: `BundleContents.getSelectedItem`.
+    #[must_use]
+    pub fn selected_item(&self) -> Option<&ItemStackTemplate> {
+        usize::try_from(self.selected_item)
+            .ok()
+            .and_then(|index| self.items.get(index))
+    }
+
+    /// Validates the checked rational weight used by Vanilla's strict item-stack validation.
+    pub(crate) fn validate_weight(&self) -> Result<()> {
+        self.weight().map(|_| ())
+    }
+
+    /// Returns what this bundle holds, where a full bundle weighs exactly one.
+    ///
+    /// Vanilla parity: `BundleContents.weight`, minus the memoization -- Vanilla
+    /// caches the supplier because its client recomputes the fullness bar every
+    /// frame, which a server never draws.
+    pub fn weight(&self) -> Result<CheckedFraction> {
         let mut weight = CheckedFraction::ZERO;
         for item in &self.items {
-            let item_weight = bundle_item_weight(item)?.multiply(item.count())?;
+            let item_weight = Self::template_unit_weight(item)?.multiply(item.count())?;
             weight = weight.add(item_weight)?;
         }
         Ok(weight)
     }
+
+    /// Returns what a single one of `stack` weighs inside a bundle.
+    ///
+    /// Vanilla parity: `BundleContents.getWeight`, reached from a live stack.
+    /// Vanilla weighs `ItemStack` and `ItemStackTemplate` through the
+    /// `ItemInstance` interface they share; Steel has no such interface, so the
+    /// rule lives once in [`Self::unit_weight`] and the two wrappers around it
+    /// only read the facts it needs.
+    pub fn stack_unit_weight(stack: &ItemStack) -> Result<CheckedFraction> {
+        Self::unit_weight(
+            stack.max_stack_size(),
+            stack.get(BUNDLE_CONTENTS),
+            stack
+                .get(BEES)
+                .is_some_and(|bees: &Bees| !bees.bees().is_empty()),
+        )
+    }
+
+    fn template_unit_weight(item: &ItemStackTemplate) -> Result<CheckedFraction> {
+        Self::unit_weight(
+            item.max_stack_size(),
+            item.get(BUNDLE_CONTENTS),
+            item.get(BEES)
+                .is_some_and(|bees: &Bees| !bees.bees().is_empty()),
+        )
+    }
+
+    fn unit_weight(
+        max_stack_size: i32,
+        nested: Option<&Self>,
+        occupied_beehive: bool,
+    ) -> Result<CheckedFraction> {
+        if let Some(nested) = nested {
+            let (numerator, denominator) = Self::BUNDLE_IN_BUNDLE_WEIGHT;
+            return nested
+                .weight()?
+                .add(CheckedFraction::new(numerator, denominator)?);
+        }
+        if occupied_beehive {
+            return Ok(CheckedFraction::ONE);
+        }
+        CheckedFraction::new(1, max_stack_size)
+    }
 }
 
-fn bundle_item_weight(item: &ItemStackTemplate) -> Result<CheckedFraction> {
-    if let Some(bundle) = item.get(BUNDLE_CONTENTS) {
-        return bundle.compute_weight()?.add(CheckedFraction::new(1, 16)?);
+impl Default for BundleContents {
+    fn default() -> Self {
+        Self::empty()
     }
-    if item
-        .get(BEES)
-        .is_some_and(|bees: &Bees| !bees.bees().is_empty())
-    {
-        return Ok(CheckedFraction::ONE);
+}
+
+/// Vanilla parity: `BundleContents.equals`, which compares the items only --
+/// the selected index is view state, not identity.
+impl PartialEq for BundleContents {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
     }
-    CheckedFraction::new(1, item.max_stack_size())
 }
 
 /// Positive subset of Commons Lang `Fraction` used by `BundleContents`.
-#[derive(Clone, Copy)]
-struct CheckedFraction {
+#[derive(Clone, Copy, Debug)]
+pub struct CheckedFraction {
     numerator: i32,
     denominator: i32,
 }
 
 impl CheckedFraction {
-    const ZERO: Self = Self {
+    /// Vanilla parity: `Fraction.ZERO`, the weight of an empty bundle.
+    pub const ZERO: Self = Self {
         numerator: 0,
         denominator: 1,
     };
-    const ONE: Self = Self {
+    /// Vanilla parity: `Fraction.ONE`, the weight of a full bundle.
+    pub const ONE: Self = Self {
         numerator: 1,
         denominator: 1,
     };
@@ -220,7 +337,11 @@ impl CheckedFraction {
     }
 
     /// Mirrors the positive-number branches of Commons Lang `Fraction.addSub`.
-    fn add(self, other: Self) -> Result<Self> {
+    #[expect(
+        clippy::should_implement_trait,
+        reason = "keeps Commons Lang's name; the fallible signature rules out std::ops::Add"
+    )]
+    pub fn add(self, other: Self) -> Result<Self> {
         if self.numerator == 0 {
             return Ok(other);
         }
@@ -257,7 +378,7 @@ impl CheckedFraction {
     }
 
     /// Mirrors multiplying by Commons Lang `Fraction.getFraction(value, 1)`.
-    fn multiply(self, value: i32) -> Result<Self> {
+    pub fn multiply(self, value: i32) -> Result<Self> {
         if value < 0 {
             return Err(Error::other("Invalid bundle item count"));
         }
@@ -269,6 +390,66 @@ impl CheckedFraction {
             checked_mul(self.numerator, value / reduction)?,
             self.denominator / reduction,
         )
+    }
+
+    /// Subtracts a smaller weight from a larger one.
+    ///
+    /// Vanilla parity: Commons Lang `Fraction.subtract`. Both operands are
+    /// non-negative and the only caller removes weight it previously added, so
+    /// the exact 64-bit difference below reduces to the same lowest-terms
+    /// fraction Commons produces.
+    pub fn subtract(self, other: Self) -> Result<Self> {
+        let numerator = i64::from(self.numerator) * i64::from(other.denominator)
+            - i64::from(other.numerator) * i64::from(self.denominator);
+        if numerator < 0 {
+            return Err(Error::other("Negative bundle weight"));
+        }
+        let denominator = i64::from(self.denominator) * i64::from(other.denominator);
+        let divisor = gcd_i64(numerator, denominator).max(1);
+        Ok(Self {
+            numerator: i32::try_from(numerator / divisor)
+                .map_err(|_| Error::other("Excessive total bundle weight"))?,
+            denominator: i32::try_from(denominator / divisor)
+                .map_err(|_| Error::other("Excessive total bundle weight"))?,
+        })
+    }
+
+    /// Returns how many whole `divisor` weights fit inside this one.
+    ///
+    /// Vanilla parity: `remainingWeight.divideBy(itemWeight).intValue()`. The
+    /// quotient is taken in 64 bits, so Steel returns the exact truncated value
+    /// where Commons Lang would overflow its intermediate fraction and throw --
+    /// an exception that in Vanilla only ever becomes a crash report.
+    pub fn divide_to_int(self, divisor: Self) -> Result<i32> {
+        if divisor.numerator == 0 {
+            return Err(Error::other("Bundle item weight must be positive"));
+        }
+        let numerator = i64::from(self.numerator) * i64::from(divisor.denominator);
+        let denominator = i64::from(self.denominator) * i64::from(divisor.numerator);
+        i32::try_from(numerator / denominator)
+            .map_err(|_| Error::other("Excessive bundle insertion count"))
+    }
+}
+
+impl PartialEq for CheckedFraction {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for CheckedFraction {}
+
+impl PartialOrd for CheckedFraction {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CheckedFraction {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let left = i64::from(self.numerator) * i64::from(other.denominator);
+        let right = i64::from(other.numerator) * i64::from(self.denominator);
+        left.cmp(&right)
     }
 }
 
@@ -763,7 +944,7 @@ mod tests {
             ItemStackTemplate::try_with_count_and_patch(&vanilla_items::STONE, 1, inner_patch)
                 .expect("nested bundle should persist");
         let nested_weight = BundleContents::new(vec![nested_bundle])
-            .compute_weight()
+            .weight()
             .expect("small nested bundle weight should compute");
         assert_eq!(
             (nested_weight.numerator, nested_weight.denominator),
@@ -781,7 +962,7 @@ mod tests {
             ItemStackTemplate::try_with_count_and_patch(&vanilla_items::BEEHIVE, 1, beehive_patch)
                 .expect("occupied beehive should persist");
         let beehive_weight = BundleContents::new(vec![beehive])
-            .compute_weight()
+            .weight()
             .expect("occupied beehive weight should compute");
         assert_eq!(
             (beehive_weight.numerator, beehive_weight.denominator),

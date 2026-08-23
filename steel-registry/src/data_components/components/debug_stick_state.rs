@@ -70,6 +70,37 @@ impl DebugStickState {
         self.properties.values()
     }
 
+    /// Returns the property currently selected for `block`, if any.
+    ///
+    /// Vanilla parity: the `debugStickState.properties().get(block)` lookup in
+    /// `DebugStickItem.handleInteraction`.
+    #[must_use]
+    pub fn get(&self, block: BlockRef) -> Option<&'static str> {
+        self.properties
+            .get(&block.key.to_string())
+            .map(|property| property.property)
+    }
+
+    /// Returns these selections with `block` pointing at `property` instead.
+    ///
+    /// Vanilla parity: `DebugStickState.withProperty`. The property must belong
+    /// to the block, which is what the debug stick guarantees by only ever
+    /// passing one taken from `block.properties`.
+    pub fn with_property(&self, block: BlockRef, property: &str) -> Result<Self> {
+        let property = block
+            .properties
+            .iter()
+            .find(|candidate| candidate.get_name() == property)
+            .ok_or_else(|| Error::other(format!("Block {} has no property {property}", block.key)))?
+            .get_name();
+        let mut properties = self.properties.clone();
+        properties.insert(
+            block.key.to_string(),
+            DebugStickProperty { block, property },
+        );
+        Ok(Self { properties })
+    }
+
     fn to_nbt_tag_ref(&self) -> NbtTag {
         let mut compound = NbtCompound::new();
         for property in self.properties.values() {

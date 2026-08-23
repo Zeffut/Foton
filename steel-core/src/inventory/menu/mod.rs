@@ -268,8 +268,6 @@ impl Menu {
 
     /// Handles a click action in this menu. Packet clicks are validated via
     /// [`Click::parse`]; invalid programmatically constructed clicks are ignored.
-    ///
-    /// TODO: Add `tryItemClickBehaviorOverride` for bundle item support.
     pub fn clicked(&mut self, click: Click, player: &Player) {
         if !click.is_valid_for(self.behavior().slot_count()) {
             log::debug!(
@@ -311,7 +309,14 @@ impl Menu {
             if outcome == ClickOutcome::Fallthrough {
                 match click {
                     Click::Pickup { slot, button } => {
-                        self.behavior_mut().do_pickup(slot, button, player);
+                        // Vanilla parity: `doClick` gives the two stacks a
+                        // chance to handle the click before the default rules.
+                        if !self
+                            .behavior_mut()
+                            .try_item_click_behavior_override(slot, button, player)
+                        {
+                            self.behavior_mut().do_pickup(slot, button, player);
+                        }
                     }
                     Click::DropCarried { button } => {
                         self.behavior_mut().drop_carried(button, player);
@@ -346,6 +351,14 @@ impl Menu {
             let mut guard = self.behavior().lock_all_containers();
             self.slots_changed(&mut guard, player);
         }
+    }
+
+    /// Points the bundle in `slot_index` at the stack it hands out next.
+    ///
+    /// Vanilla parity: `AbstractContainerMenu.setSelectedBundleItemIndex`.
+    pub fn set_selected_bundle_item_index(&self, slot_index: usize, selected_item_index: i32) {
+        self.behavior()
+            .set_selected_bundle_item_index(slot_index, selected_item_index);
     }
 
     /// Handles quick move (shift-click).

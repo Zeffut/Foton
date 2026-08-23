@@ -47,26 +47,11 @@ VaultBlock
 WeatheringCopperChestBlock
 WeatheringCopperGolemStatueBlock
 
-[items] 19
-ArrowItem
-BannerItem
-BundleItem
-DebugStickItem
-DiscFragmentItem
+[items] 4
 EmptyMapItem
-EndCrystalItem
 FishingRodItem
-GameMasterBlockItem
 Item
-KnowledgeBookItem
 MapItem
-MobBucketItem
-ScaffoldingBlockItem
-SmithingTemplateItem
-SolidBucketItem
-SpectralArrowItem
-WritableBookItem
-WrittenBookItem
 
 [entities] 77
 Allay

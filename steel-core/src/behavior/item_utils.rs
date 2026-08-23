@@ -6,9 +6,27 @@ use steel_registry::vanilla_blocks;
 use steel_utils::BlockPos;
 
 use crate::behavior::UseItemContext;
+use crate::entity::Entity;
+use crate::entity::entities::ItemEntity;
 use crate::inventory::lock::ContainerId;
 use crate::player::player_inventory::PlayerInventory;
 use crate::world::RaytraceAction;
+
+/// Spills a destroyed container item's contents where it died.
+///
+/// Vanilla parity: `ItemUtils.onContainerDestroyed`.
+pub(crate) fn on_container_destroyed(
+    entity: &ItemEntity,
+    contents: impl IntoIterator<Item = ItemStack>,
+) {
+    let Some(world) = entity.level() else {
+        return;
+    };
+    let position = entity.position();
+    for stack in contents {
+        world.spawn_item(position, stack);
+    }
+}
 
 /// Applies vanilla `Item.getPlayerPOVHitResult(level, player,
 /// ClipContext.Fluid.SOURCE_ONLY)`.
