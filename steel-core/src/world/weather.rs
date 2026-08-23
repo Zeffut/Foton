@@ -257,6 +257,16 @@ impl World {
         environment::sun_angle_degrees(self.dimension_type, level_data.world_clocks())
     }
 
+    /// Returns the current vanilla `TURTLE_EGG_HATCH_CHANCE` environment attribute.
+    ///
+    /// Vanilla reads this attribute at a block position. Steel resolves
+    /// environment attributes per dimension, so there is no position argument;
+    /// no vanilla source varies this one within a dimension.
+    pub fn turtle_egg_hatch_chance(&self) -> f32 {
+        let level_data = self.level_data.read();
+        environment::turtle_egg_hatch_chance(self.dimension_type, level_data.world_clocks())
+    }
+
     /// Returns sky-layer light after the current sky darkening is subtracted.
     ///
     /// Mirrors vanilla `LevelReader.getEffectiveSkyBrightness` without allowing

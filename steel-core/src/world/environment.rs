@@ -9,8 +9,17 @@ use super::clock::WorldClockManager;
 
 const SKY_LIGHT_LEVEL_ATTRIBUTE: &str = "minecraft:gameplay/sky_light_level";
 const SUN_ANGLE_ATTRIBUTE: &str = "minecraft:visual/sun_angle";
+const TURTLE_EGG_HATCH_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/turtle_egg_hatch_chance";
 const DEFAULT_SKY_LIGHT_LEVEL: f32 = 15.0;
 const DEFAULT_SUN_ANGLE: f32 = 0.0;
+/// Vanilla `DimensionDefaults.TURTLE_EGG_HATCH_CHANCE`, which is also the
+/// declared default of `EnvironmentAttributes.TURTLE_EGG_HATCH_CHANCE`. No
+/// vanilla dimension type overrides it, so every dimension starts here and only
+/// the overworld `day` timeline raises it.
+const DEFAULT_TURTLE_EGG_HATCH_CHANCE: f32 = 0.002;
+/// The bounds of `AttributeRange.UNIT_FLOAT`.
+const MIN_UNIT_FLOAT: f32 = 0.0;
+const MAX_UNIT_FLOAT: f32 = 1.0;
 const MIN_SKY_LIGHT_LEVEL: f32 = 0.0;
 const MAX_SKY_LIGHT_LEVEL: f32 = 15.0;
 const RAIN_SKY_LIGHT_TARGET: f32 = 4.0;
@@ -52,6 +61,25 @@ pub(super) fn sun_angle_degrees(
         clock_manager,
         SUN_ANGLE_ATTRIBUTE,
     )
+}
+
+/// Returns the `gameplay/turtle_egg_hatch_chance` environment attribute.
+///
+/// The overworld `day` timeline pushes this to 1.0 for the stretch of night
+/// that ends just before sunrise and leaves it at the default the rest of the
+/// time, which is what makes turtle eggs hatch at dawn.
+#[must_use]
+pub(super) fn turtle_egg_hatch_chance(
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+) -> f32 {
+    apply_timeline_float_attribute(
+        DEFAULT_TURTLE_EGG_HATCH_CHANCE,
+        dimension_type,
+        clock_manager,
+        TURTLE_EGG_HATCH_CHANCE_ATTRIBUTE,
+    )
+    .clamp(MIN_UNIT_FLOAT, MAX_UNIT_FLOAT)
 }
 
 #[must_use]
@@ -104,6 +132,8 @@ fn apply_timeline_float_track(
     };
     match track.modifier {
         Some("multiply") => value * sample,
+        // Vanilla `FloatModifier.MAXIMUM`, used by the turtle-egg hatch chance.
+        Some("maximum") => value.max(sample),
         None => sample,
         _ => value,
     }
@@ -306,6 +336,8 @@ mod tests {
     const OVERWORLD_SUNSET_TICKS: i64 = 12_000;
     const OVERWORLD_SUNSET_INTERPOLATION_TICKS: i64 = 12_768;
     const OVERWORLD_MIDNIGHT_TICKS: i64 = 18_000;
+    /// Inside the `day` timeline's 21062..21905 turtle-egg hatch window.
+    const OVERWORLD_PRE_SUNRISE_TICKS: i64 = 21_500;
 
     fn assert_f32_close(left: f32, right: f32) {
         assert!(
@@ -432,6 +464,34 @@ mod tests {
                 false,
             ),
             4.0,
+        );
+    }
+
+    #[test]
+    fn turtle_eggs_are_sure_to_advance_only_in_the_stretch_before_sunrise() {
+        init_vanilla_registry();
+
+        assert_f32_close(
+            turtle_egg_hatch_chance(&OVERWORLD, &clock_manager_at(OVERWORLD_PRE_SUNRISE_TICKS)),
+            1.0,
+        );
+        assert_f32_close(
+            turtle_egg_hatch_chance(&OVERWORLD, &clock_manager_at(OVERWORLD_MIDNIGHT_TICKS)),
+            DEFAULT_TURTLE_EGG_HATCH_CHANCE,
+        );
+        assert_f32_close(
+            turtle_egg_hatch_chance(&OVERWORLD, &clock_manager_at(OVERWORLD_NOON_TICKS)),
+            DEFAULT_TURTLE_EGG_HATCH_CHANCE,
+        );
+    }
+
+    #[test]
+    fn a_dimension_without_the_day_timeline_never_speeds_turtle_eggs_up() {
+        init_vanilla_registry();
+
+        assert_f32_close(
+            turtle_egg_hatch_chance(&THE_NETHER, &clock_manager_at(OVERWORLD_PRE_SUNRISE_TICKS)),
+            DEFAULT_TURTLE_EGG_HATCH_CHANCE,
         );
     }
 

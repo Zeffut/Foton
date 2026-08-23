@@ -7,6 +7,7 @@ mod building;
 mod colored;
 mod container;
 mod decoration;
+mod eggs;
 mod falling;
 mod fluid;
 mod portal;
@@ -43,6 +44,7 @@ pub use decoration::{
     TorchBlock, WallBannerBlock, WallHangingSignBlock, WallSignBlock, WallTorchBlock,
     WeatheringCopperChainBlock, WeatheringLanternBlock,
 };
+pub use eggs::{FrogspawnBlock, SnifferEggBlock, TurtleEggBlock};
 pub use falling::{ConcretePowderBlock, DragonEggBlock, FallingBlock, SandBlock};
 pub use fluid::{BubbleColumnBlock, LiquidBlock};
 pub use portal::{
