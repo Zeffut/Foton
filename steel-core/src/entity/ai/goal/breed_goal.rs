@@ -1,18 +1,28 @@
+use std::sync::Arc;
+
 use glam::DVec3;
 
 use super::reduced_tick_delay;
 use super::selector::{Goal, GoalControls};
 use crate::entity::ai::targeting::TargetingConditions;
 use crate::entity::{Animal, PathfinderMob, SharedEntity};
+use crate::world::World;
 
 const PARTNER_SEARCH_RANGE: f64 = 8.0;
 const BREED_DISTANCE_SQR: f64 = 9.0;
 const BREED_TIME: i32 = 60;
 
+/// What a pair of animals does once they have finished courting.
+///
+/// Vanilla parity: the overridable `BreedGoal.breed`. A turtle replaces it to
+/// carry an egg away instead of producing a hatchling on the spot.
+type BreedAction = Box<dyn Fn(&Arc<World>, &dyn Animal, &dyn Animal) + Send + Sync>;
+
 pub struct BreedGoal {
     partner: Option<SharedEntity>,
     love_time: i32,
     speed_modifier: f64,
+    breed: Option<BreedAction>,
 }
 
 impl BreedGoal {
@@ -22,6 +32,23 @@ impl BreedGoal {
             partner: None,
             love_time: 0,
             speed_modifier,
+            breed: None,
+        }
+    }
+
+    /// Creates a breed goal that ends in something other than a newborn.
+    ///
+    /// Vanilla parity: overriding `BreedGoal.breed`.
+    #[must_use]
+    pub(crate) fn with_breed_action(
+        speed_modifier: f64,
+        breed: impl Fn(&Arc<World>, &dyn Animal, &dyn Animal) + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            partner: None,
+            love_time: 0,
+            speed_modifier,
+            breed: Some(Box::new(breed)),
         }
     }
 
@@ -121,7 +148,10 @@ impl Goal for BreedGoal {
         let Some(world) = mob.level() else {
             return;
         };
-        animal.spawn_child_from_breeding(&world, partner_animal);
+        match &self.breed {
+            Some(breed) => breed(&world, animal, partner_animal),
+            None => animal.spawn_child_from_breeding(&world, partner_animal),
+        }
     }
 }
 

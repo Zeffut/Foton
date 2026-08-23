@@ -122,6 +122,13 @@ impl MoveToBlockGoal {
         self.reached_target
     }
 
+    /// Vanilla parity: the protected `MoveToBlockGoal.tryTicks` field, which
+    /// subclasses such as `Turtle.TurtleGoToWaterGoal` read to give up.
+    #[must_use]
+    pub(crate) const fn try_ticks(&self) -> i32 {
+        self.try_ticks
+    }
+
     /// Vanilla parity: the static `MoveToBlockGoal.nextStartTick(Mob)`, which
     /// shares its name with the field above in Java but cannot here.
     fn roll_next_start_tick(_mob: &dyn PathfinderMob) -> i32 {

@@ -47,8 +47,11 @@ pub(crate) use look_at_player::LookAtPlayerGoal;
 pub(crate) use melee_attack::MeleeAttackGoal;
 pub(crate) use move_to_block::MoveToBlockGoal;
 pub(crate) use nearest_attackable_target::NearestAttackableTargetGoal;
-pub(crate) use panic_goal::PanicGoal;
+pub(crate) use panic_goal::{PanicGoal, block_pos_corner, look_for_water};
 pub(crate) use random_look_around::RandomLookAroundGoal;
+/// Vanilla parity: `DefaultRandomPos.getPosTowards`, used by mobs that steer
+/// toward a remote point rather than wandering, such as the turtle heading home.
+pub(crate) use random_pos::default_random_pos_towards;
 pub(crate) use random_stroll::RandomStrollGoal;
 pub(crate) use random_swimming::RandomSwimmingGoal;
 pub(crate) use ranged_attack::RangedAttackGoal;

@@ -10,5 +10,5 @@ pub mod projectiles;
 pub mod vehicles;
 
 pub use area_effect_cloud::AreaEffectCloudEntity;
-pub use lightning_bolt::LightningBoltEntity;
+pub use lightning_bolt::{LightningBoltEntity, default_thunder_hit};
 pub use marker::MarkerEntity;

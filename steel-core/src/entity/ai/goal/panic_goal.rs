@@ -32,12 +32,20 @@ impl PanicGoal {
         self.is_running
     }
 
-    fn should_panic(mob: &dyn PathfinderMob) -> bool {
+    /// Vanilla parity: the protected `PanicGoal.shouldPanic`.
+    pub(crate) fn should_panic(mob: &dyn PathfinderMob) -> bool {
         mob.last_damage_source()
             .is_some_and(|source| source.is(&vanilla_damage_type_tags::DamageTypeTag::PANIC_CAUSES))
     }
 
-    fn find_random_position(&mut self, mob: &dyn PathfinderMob) -> bool {
+    /// Vanilla parity: writing the protected `posX`/`posY`/`posZ` fields, as
+    /// `Turtle.TurtlePanicGoal.canUse` does after finding water.
+    pub(crate) const fn set_wanted_position(&mut self, wanted_position: DVec3) {
+        self.wanted_position = Some(wanted_position);
+    }
+
+    /// Vanilla parity: the protected `PanicGoal.findRandomPosition`.
+    pub(crate) fn find_random_position(&mut self, mob: &dyn PathfinderMob) -> bool {
         let Some(position) = default_random_pos(mob, 5, 4) else {
             return false;
         };
@@ -87,7 +95,7 @@ impl Goal for PanicGoal {
     }
 }
 
-fn look_for_water(mob: &dyn PathfinderMob, xz_dist: i32) -> Option<BlockPos> {
+pub(crate) fn look_for_water(mob: &dyn PathfinderMob, xz_dist: i32) -> Option<BlockPos> {
     let world = mob.level()?;
     let mob_position = mob.block_position();
     let block_state = world.get_block_state(mob_position);
@@ -109,7 +117,7 @@ fn look_for_water(mob: &dyn PathfinderMob, xz_dist: i32) -> Option<BlockPos> {
     })
 }
 
-fn block_pos_corner(pos: BlockPos) -> DVec3 {
+pub(crate) fn block_pos_corner(pos: BlockPos) -> DVec3 {
     DVec3::new(f64::from(pos.x()), f64::from(pos.y()), f64::from(pos.z()))
 }
 

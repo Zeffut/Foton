@@ -1,4 +1,5 @@
 use super::*;
+use crate::entity::entities::default_thunder_hit;
 
 /// Final state accepted from a client-authored movement packet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3510,6 +3511,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
             return false;
         };
         living.hurt_server(world, source, amount)
+    }
+
+    /// Reacts to being struck by lightning.
+    ///
+    /// Vanilla parity: `Entity.thunderHit`. The base body lives in
+    /// `LightningBoltEntity`; this is the seam a mob overrides to react
+    /// differently, as a turtle does by dying outright.
+    fn thunder_hit(&self, world: &World) {
+        default_thunder_hit(self.as_entity_event_source(), world);
     }
 }
 

@@ -14,7 +14,7 @@ pub use mobs::hostile::{
 };
 pub use mobs::passive::{
     ChickenEntity, CowEntity, MushroomCowEntity, PigEntity, RabbitEntity, RabbitVariant,
-    SheepEntity, StriderEntity,
+    SheepEntity, StriderEntity, TurtleEntity,
 };
 pub use mobs::water::{CodEntity, GlowSquidEntity, SalmonEntity, SquidEntity};
 pub use objects::display_ui::{
@@ -33,5 +33,5 @@ pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
     HopperMinecartEntity, MinecartEntity, RaftEntity, TntMinecartEntity,
 };
-pub use objects::{AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity};
+pub use objects::{AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity, default_thunder_hit};
 pub use raw::RawEntity;

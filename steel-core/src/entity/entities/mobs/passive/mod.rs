@@ -7,6 +7,7 @@ mod pig;
 mod rabbit;
 mod sheep;
 mod strider;
+mod turtle;
 
 pub use chicken::ChickenEntity;
 pub use cow::CowEntity;
@@ -15,3 +16,4 @@ pub use pig::PigEntity;
 pub use rabbit::{RabbitEntity, RabbitVariant};
 pub use sheep::SheepEntity;
 pub use strider::StriderEntity;
+pub use turtle::TurtleEntity;

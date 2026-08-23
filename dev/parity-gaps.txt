@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 76
+[entities] 75
 Allay
 Armadillo
 Axolotl
@@ -133,7 +133,6 @@ Tadpole
 ThrownLingeringPotion
 TraderLlama
 TropicalFish
-Turtle
 Vex
 Villager
 Vindicator
