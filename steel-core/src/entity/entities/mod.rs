@@ -23,8 +23,9 @@ pub use objects::display_ui::{
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
-    ArrowEntity, EnderPearlEntity, ExperienceBottleEntity, FireworkRocketEntity, SnowballEntity,
-    SplashPotionEntity, ThrownEggEntity,
+    ArrowEntity, DragonFireballEntity, EnderPearlEntity, ExperienceBottleEntity,
+    FireworkRocketEntity, LargeFireballEntity, ShulkerBulletEntity, SmallFireballEntity,
+    SnowballEntity, SplashPotionEntity, ThrownEggEntity, WitherSkullEntity,
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,

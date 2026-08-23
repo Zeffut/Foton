@@ -95,7 +95,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 89
+[entities] 84
 Allay
 Armadillo
 Axolotl
@@ -111,7 +111,6 @@ CopperGolem
 Creaking
 Dolphin
 Donkey
-DragonFireball
 ElderGuardian
 EnderDragon
 Endermite
@@ -133,7 +132,6 @@ Illusioner
 Interaction
 IronGolem
 ItemDisplay
-LargeFireball
 LightningBolt
 Llama
 LlamaSpit
@@ -158,9 +156,7 @@ Pufferfish
 Rabbit
 Ravager
 Shulker
-ShulkerBullet
 SkeletonHorse
-SmallFireball
 Sniffer
 SnowGolem
 SpectralArrow
@@ -179,7 +175,6 @@ WanderingTrader
 Warden
 WindCharge
 WitherBoss
-WitherSkull
 Wolf
 Zoglin
 ZombieHorse

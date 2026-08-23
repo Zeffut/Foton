@@ -13,8 +13,11 @@ use rustc_hash::FxHashMap;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
+use steel_registry::entity_data::ParticleData;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::particle_type::PowerParticleOption;
 use steel_registry::vanilla_entity_data::AreaEffectCloudEntityData;
+use steel_registry::{vanilla_mob_effects, vanilla_particle_types};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey, WorldAabb};
 
@@ -62,6 +65,28 @@ pub const DEFAULT_LINGERING_WAIT_TIME: i32 = 10;
 ///
 /// Vanilla parity: `DEFAULT_REAPPLICATION_DELAY`.
 const DEFAULT_REAPPLICATION_DELAY: i32 = 20;
+
+/// How long a dragon fireball's cloud lasts.
+///
+/// Vanilla parity: the `setDuration(600)` of `DragonFireball.onHit`.
+const DRAGON_BREATH_DURATION: i32 = 600;
+
+/// Radius a dragon fireball's cloud starts at.
+///
+/// Vanilla parity: the `setRadius(3.0F)` of `DragonFireball.onHit`.
+const DRAGON_BREATH_RADIUS: f32 = 3.0;
+
+/// Radius a dragon fireball's cloud grows to over its lifetime.
+///
+/// Vanilla parity: the `7.0F` of the `setRadiusPerTick` in `DragonFireball.onHit`.
+/// A dragon's breath spreads as it burns down, where a lingering potion shrinks.
+const DRAGON_BREATH_FINAL_RADIUS: f32 = 7.0;
+
+/// Amplifier of the harming effect a dragon's breath carries.
+///
+/// Vanilla parity: the `new MobEffectInstance(INSTANT_DAMAGE, 1, 1)` of
+/// `DragonFireball.onHit`.
+const DRAGON_BREATH_AMPLIFIER: i32 = 1;
 
 /// State a cloud keeps that is not synced.
 struct CloudState {
@@ -161,6 +186,43 @@ impl AreaEffectCloudEntity {
         let per_tick = -DEFAULT_LINGERING_RADIUS / DEFAULT_LINGERING_DURATION as f32;
         state.radius_per_tick = per_tick;
         state.effects = effects;
+    }
+
+    /// Sets this cloud up the way a dragon fireball does.
+    ///
+    /// Vanilla parity: the cloud built by `DragonFireball.onHit`. Unlike a
+    /// lingering potion's cloud this one grows, from three blocks to seven over
+    /// its half-minute, and costs nothing per victim, so it keeps working on
+    /// everything standing in it for the whole duration.
+    ///
+    /// Two vanilla settings are dropped because Steel has nowhere to put them.
+    /// `cloud.setOwner(livingEntity)` has no equivalent -- Steel's cloud has no
+    /// owner, so its damage is credited to nobody. `setPotionDurationScale(0.25F)`
+    /// likewise: Steel stores plain durations on the cloud, and the scale only
+    /// matters for effects that last, which a dragon's breath does not carry.
+    pub fn configure_as_dragon_breath(&self) {
+        self.set_radius(DRAGON_BREATH_RADIUS);
+        self.entity_data.lock().particle.set(ParticleData::new(
+            &vanilla_particle_types::DRAGON_BREATH,
+            PowerParticleOption::new(1.0),
+        ));
+
+        let mut state = self.state.lock();
+        state.duration = DRAGON_BREATH_DURATION;
+        state.wait_time = 10;
+        state.radius_on_use = 0.0;
+        state.radius_per_tick =
+            (DRAGON_BREATH_FINAL_RADIUS - DRAGON_BREATH_RADIUS) / DRAGON_BREATH_DURATION as f32;
+        // NOT IMPLEMENTED: vanilla applies `INSTANT_DAMAGE` through `MobEffect`s
+        // instant-effect hook (whose vanilla name is misspelled), which Steel has
+        // no equivalent for -- `MobEffectInstance::apply_effect_tick` only knows
+        // how to tick wither. The effect is stored so the cloud carries and saves
+        // the right thing, but standing in a dragon breath does no damage yet.
+        state.effects = vec![(
+            vanilla_mob_effects::INSTANT_DAMAGE,
+            1,
+            DRAGON_BREATH_AMPLIFIER,
+        )];
     }
 
     /// Returns how far the cloud reaches.

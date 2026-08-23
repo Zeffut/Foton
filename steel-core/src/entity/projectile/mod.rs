@@ -1,14 +1,18 @@
 //! Vanilla `Projectile` class hierarchy, mirrored as Rust traits + base structs.
 //!
 //! Mirrors `net.minecraft.world.entity.projectile`:
-//! `Entity → Projectile → ThrowableProjectile → ThrowableItemProjectile`.
+//! `Entity → Projectile → ThrowableProjectile → ThrowableItemProjectile`, plus
+//! the parallel `Entity → Projectile → AbstractHurtingProjectile` branch that the
+//! fireballs fly on.
 //! Concrete projectiles embed [`ProjectileBase`] (owner / left-owner / shot state)
 //! and implement the trait stack; the per-layer tick logic chains explicitly via
-//! [`Projectile::projectile_base_tick`] and
-//! [`ThrowableProjectile::throwable_projectile_tick`] (vanilla `super.tick()`).
+//! [`Projectile::projectile_base_tick`],
+//! [`ThrowableProjectile::throwable_projectile_tick`] and
+//! [`HurtingProjectile::hurting_projectile_tick`] (vanilla `super.tick()`).
 //!
 //! The block + entity move-vector raycast mirrors `ProjectileUtil`.
 
+mod hurting;
 mod throwable;
 mod throwable_item;
 
@@ -33,6 +37,7 @@ use crate::entity::{Entity, LivingEntity, SharedEntity};
 use crate::world::game_event::GameEventContext;
 use crate::world::{ClipBlockShape, ClipFluid, ClipHitResult, World};
 
+pub use hurting::{HurtingProjectile, HurtingProjectileBase, INITIAL_ACCELERATION_POWER};
 pub use throwable::ThrowableProjectile;
 pub use throwable_item::ThrowableItemProjectile;
 
@@ -779,6 +784,40 @@ fn lerp_rotation(mut rot_old: f32, rot: f32) -> f32 {
         rot_old += 360.0;
     }
     rot_old + 0.2 * (rot - rot_old)
+}
+
+/// Turns a projectile part of the way toward its heading.
+///
+/// Vanilla `ProjectileUtil.rotateTowardsMovement`. This is deliberately not
+/// [`Projectile::update_rotation`], which the throwables use: vanilla measures
+/// these angles from the other axis and negates the pitch, so a fireball drawn
+/// with the throwable formula would point the wrong way.
+pub fn rotate_towards_movement(projectile: &dyn Projectile, rotation_speed: f32) {
+    let movement = projectile.velocity();
+    if movement.length_squared() == 0.0 {
+        return;
+    }
+
+    let horizontal = movement.x.hypot(movement.z);
+    let yaw = movement.z.atan2(movement.x).to_degrees() as f32 + 90.0;
+    let pitch = horizontal.atan2(movement.y).to_degrees() as f32 - 90.0;
+
+    let (old_yaw, old_pitch) = projectile.base().old_rotation();
+    projectile.set_rotation((
+        lerp_toward(old_yaw, yaw, rotation_speed),
+        lerp_toward(old_pitch, pitch, rotation_speed),
+    ));
+}
+
+/// Vanilla `Mth.lerp` after wrapping the old angle into the shorter arc.
+fn lerp_toward(mut old: f32, new: f32, speed: f32) -> f32 {
+    while new - old < -180.0 {
+        old -= 360.0;
+    }
+    while new - old >= 180.0 {
+        old += 360.0;
+    }
+    speed.mul_add(new - old, old)
 }
 
 #[cfg(test)]
