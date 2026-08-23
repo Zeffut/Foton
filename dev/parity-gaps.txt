@@ -97,7 +97,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 93
+[entities] 92
 Allay
 Armadillo
 ArmorStand
@@ -143,7 +143,6 @@ LlamaSpit
 Mannequin
 Marker
 MinecartCommandBlock
-MinecartFurnace
 MinecartHopper
 MinecartSpawner
 Mule

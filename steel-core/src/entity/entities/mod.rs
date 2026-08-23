@@ -23,7 +23,7 @@ pub use objects::projectiles::{
     SplashPotionEntity, ThrownEggEntity,
 };
 pub use objects::vehicles::{
-    BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, MinecartEntity, RaftEntity,
-    TntMinecartEntity,
+    BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
+    MinecartEntity, RaftEntity, TntMinecartEntity,
 };
 pub use raw::RawEntity;

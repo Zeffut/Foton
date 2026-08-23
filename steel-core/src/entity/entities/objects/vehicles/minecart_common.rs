@@ -114,6 +114,14 @@ pub(super) trait MinecartLike: Entity {
     /// the base class and does something on four of the six carts.
     fn activate_minecart(&self, _world: &Arc<World>, _pos: BlockPos, _powered: bool) {}
 
+    /// Scales how fast this cart may go.
+    ///
+    /// Vanilla parity: the `getMaxSpeed` override of `MinecartFurnace`, which
+    /// is the only cart that is not an ordinary speed.
+    fn max_speed_factor(&self) -> f64 {
+        1.0
+    }
+
     /// Applies the drag this cart feels every tick.
     ///
     /// Vanilla parity: `AbstractMinecart.applyNaturalSlowdown`. The vertical
@@ -185,11 +193,12 @@ fn current_block_pos_or_rail_below<M: MinecartLike>(cart: &M, world: &Arc<World>
 ///
 /// Vanilla parity: `OldMinecartBehavior.getMaxSpeed`.
 fn max_speed<M: MinecartLike>(cart: &M) -> f64 {
-    if cart.is_in_water() {
+    let base = if cart.is_in_water() {
         MAX_SPEED_IN_WATER
     } else {
         MAX_SPEED_ON_LAND
-    }
+    };
+    base * cart.max_speed_factor()
 }
 
 /// Returns whether the block at `pos` can carry redstone through it.
