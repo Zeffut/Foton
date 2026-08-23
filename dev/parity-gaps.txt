@@ -96,7 +96,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 90
+[entities] 89
 Allay
 Armadillo
 Axolotl
