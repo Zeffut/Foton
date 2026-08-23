@@ -48,8 +48,11 @@ cannot.
 
 - [x] **Smelting.** Furnace, smoker, blast furnace had no behavior.
 - [x] **Renewable wood.** Saplings never grew.
-- [ ] **Boats and rafts** (20 entries). The only way across water, and the
-      largest single entity gap. Needs buoyancy and passenger steering.
+- [~] **Boats and rafts** (20 entries). `Boat` and `Raft` float, carry riders
+      and are steered by the rider's client, which is the ten entries a player
+      meets first. Still open: `ChestBoat` and `ChestRaft` (the other ten, and
+      a container), `BoatItem` so one can be placed rather than summoned, the
+      `SPaddleBoat` packet so rowing animates, and the second seat.
 - [ ] **Minecarts** (6 entries). Rails already work; the carts do not exist.
 - [ ] **Storage that travels**: shulker box (17), ender chest, trapped chest.
 - [ ] **Workstations**: grindstone, stonecutter, smithing table, cartography
@@ -104,5 +107,6 @@ a furnace has no behavior. These scripts can:
 - `dev/sapling-test.sh` -- a planted sapling becomes a tree.
 - `dev/furnace-test.sh` -- a placed furnace has a block entity behind it.
 - `dev/spawnegg-test.sh` -- a spawn egg used by hand makes the mob.
+- `dev/boat-test.sh` -- a boat put on water is still on it afterwards.
 
 Every entry above gets one before it is called done.

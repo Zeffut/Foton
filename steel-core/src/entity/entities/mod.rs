@@ -21,5 +21,5 @@ pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
     ArrowEntity, EnderPearlEntity, FireworkRocketEntity, SplashPotionEntity,
 };
-pub use objects::vehicles::ChestMinecartEntity;
+pub use objects::vehicles::{BoatEntity, ChestMinecartEntity, RaftEntity};
 pub use raw::RawEntity;
