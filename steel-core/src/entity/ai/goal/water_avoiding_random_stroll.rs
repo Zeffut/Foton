@@ -5,7 +5,7 @@ use super::random_stroll::RandomStrollGoal;
 use super::selector::{Goal, GoalControls};
 use crate::entity::PathfinderMob;
 
-const WATER_AVOIDING_RANDOM_STROLL_PROBABILITY: f32 = 0.001;
+pub(crate) const WATER_AVOIDING_RANDOM_STROLL_PROBABILITY: f32 = 0.001;
 
 pub struct WaterAvoidingRandomStrollGoal {
     stroll: RandomStrollGoal,

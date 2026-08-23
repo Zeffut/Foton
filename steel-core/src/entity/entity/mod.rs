@@ -1,4 +1,5 @@
 use super::*;
+use crate::entity::neutral_mob::NeutralMob;
 
 /// Final state accepted from a client-authored movement packet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1533,8 +1534,8 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Returns this entity as a neutral mob when it holds grudges.
     ///
     /// Mirrors vanilla's `instanceof NeutralMob` branches.
-    fn as_neutral_mob(&self) -> Option<&dyn crate::entity::neutral_mob::NeutralMob> {
-        try_as_dyn::<Self, dyn crate::entity::neutral_mob::NeutralMob>(self)
+    fn as_neutral_mob(&self) -> Option<&dyn NeutralMob> {
+        try_as_dyn::<Self, dyn NeutralMob>(self)
     }
 
     /// Returns true for entities that implement vanilla item-steered boosts.

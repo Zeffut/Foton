@@ -92,7 +92,7 @@ impl Goal for OcelotAttackGoal {
             30.0,
         );
 
-        let melee_radius = f64::from(mob.bounding_box().width() * 2.0);
+        let melee_radius = mob.bounding_box().width() * 2.0;
         let melee_radius_sqr = melee_radius * melee_radius;
         let distance_sqr = mob.position().distance_squared(target_position);
         let speed_modifier =

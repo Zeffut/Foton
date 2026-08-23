@@ -16,6 +16,7 @@ mod follow_owner;
 mod follow_parent;
 mod hurt_by_target;
 mod interact;
+mod land_on_owners_shoulder;
 mod leap_at_target;
 mod look_at_player;
 mod melee_attack;
@@ -42,6 +43,7 @@ mod tamable_animal_panic;
 mod target_goal;
 mod tempt_goal;
 mod try_find_water;
+mod water_avoiding_random_flying;
 mod water_avoiding_random_stroll;
 
 pub(crate) use avoid_entity::AvoidEntityGoal;
@@ -53,9 +55,11 @@ pub(crate) use climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal;
 pub(crate) use eat_block_goal::EatBlockGoal;
 pub(crate) use flee_sun::FleeSunGoal;
 pub(crate) use float_goal::FloatGoal;
+pub(crate) use follow_mob::FollowMobGoal;
 pub(crate) use follow_owner::FollowOwnerGoal;
 pub(crate) use follow_parent::FollowParentGoal;
 pub(crate) use hurt_by_target::HurtByTargetGoal;
+pub(crate) use land_on_owners_shoulder::LandOnOwnersShoulderGoal;
 pub(crate) use leap_at_target::LeapAtTargetGoal;
 pub(crate) use look_at_player::LookAtPlayerGoal;
 pub(crate) use melee_attack::MeleeAttackGoal;
@@ -66,6 +70,7 @@ pub(crate) use ocelot_attack::OcelotAttackGoal;
 pub(crate) use owner_hurt_target::OwnerHurtTargetGoal;
 pub(crate) use panic_goal::PanicGoal;
 pub(crate) use random_look_around::RandomLookAroundGoal;
+pub(crate) use random_pos::land_random_pos;
 pub(crate) use random_stroll::RandomStrollGoal;
 pub(crate) use random_swimming::RandomSwimmingGoal;
 pub(crate) use ranged_attack::RangedAttackGoal;
@@ -76,7 +81,12 @@ pub(crate) use selector::{Goal, GoalControl, GoalControls, GoalSelector};
 pub(crate) use sit_when_ordered_to::SitWhenOrderedToGoal;
 pub(crate) use tamable_animal_panic::TamableAnimalPanicGoal;
 pub(crate) use tempt_goal::{TemptGoal, TemptScareRule};
-pub(crate) use water_avoiding_random_stroll::WaterAvoidingRandomStrollGoal;
+pub(crate) use water_avoiding_random_flying::{
+    WaterAvoidingRandomFlyingGoal, flying_stroll_position,
+};
+pub(crate) use water_avoiding_random_stroll::{
+    WATER_AVOIDING_RANDOM_STROLL_PROBABILITY, WaterAvoidingRandomStrollGoal,
+};
 
 /// Halves a tick delay, rounding up.
 ///

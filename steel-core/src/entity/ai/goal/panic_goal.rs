@@ -27,7 +27,7 @@ pub struct PanicGoal {
 
 impl PanicGoal {
     #[must_use]
-    pub(crate) fn new(speed_modifier: f64) -> Self {
+    pub(crate) const fn new(speed_modifier: f64) -> Self {
         Self::with_damage_types(
             speed_modifier,
             vanilla_damage_type_tags::DamageTypeTag::PANIC_CAUSES,

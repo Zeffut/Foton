@@ -6,6 +6,7 @@ use simdnbt::borrow::read_compound as read_borrowed_compound;
 use steel_registry::{init_vanilla_registry, vanilla_entities};
 
 use super::*;
+use crate::entity::entities::CreeperEntity;
 
 fn wolf() -> WolfEntity {
     init_vanilla_registry();
@@ -125,12 +126,7 @@ fn a_wolf_refuses_the_targets_vanilla_excludes() {
     init_vanilla_registry();
     let wolf = WolfEntity::new(&vanilla_entities::WOLF, 1, DVec3::ZERO, Weak::new());
     let owner = WolfEntity::new(&vanilla_entities::WOLF, 2, DVec3::ZERO, Weak::new());
-    let creeper = crate::entity::entities::CreeperEntity::new(
-        &vanilla_entities::CREEPER,
-        3,
-        DVec3::ZERO,
-        Weak::new(),
-    );
+    let creeper = CreeperEntity::new(&vanilla_entities::CREEPER, 3, DVec3::ZERO, Weak::new());
     let other_pet = WolfEntity::new(&vanilla_entities::WOLF, 4, DVec3::ZERO, Weak::new());
 
     assert!(!wolf.wants_to_attack(&creeper, &owner));

@@ -285,11 +285,8 @@ pub trait TamableAnimal: Animal {
             return true;
         }
 
-        self.owner().is_some_and(|owner| {
-            owner
-                .as_player()
-                .is_some_and(|player| player.is_spectator())
-        })
+        self.owner()
+            .is_some_and(|owner| owner.as_player().is_some_and(Entity::is_spectator))
     }
 
     /// Returns vanilla `TamableAnimal.canFlyToOwner`.
@@ -432,15 +429,12 @@ pub trait TamableAnimal: Animal {
         let owner = nbt
             .int_array("Owner")
             .and_then(|values| Uuid::from_int_array(&values));
-        match owner {
-            Some(owner) => {
-                self.set_owner_uuid(Some(owner));
-                self.set_tame(true, false);
-            }
-            None => {
-                self.set_owner_uuid(None);
-                self.set_tame(false, true);
-            }
+        if let Some(owner) = owner {
+            self.set_owner_uuid(Some(owner));
+            self.set_tame(true, false);
+        } else {
+            self.set_owner_uuid(None);
+            self.set_tame(false, true);
         }
 
         let ordered_to_sit = nbt.byte("Sitting").is_some_and(|value| value != 0);

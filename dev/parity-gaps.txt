@@ -68,7 +68,7 @@ SpectralArrowItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 74
+[entities] 73
 Allay
 Armadillo
 Axolotl
@@ -112,7 +112,6 @@ Nautilus
 OminousItemSpawner
 Panda
 Parched
-Parrot
 Phantom
 Piglin
 PiglinBrute

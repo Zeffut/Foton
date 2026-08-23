@@ -66,6 +66,9 @@ const MOB_FLAG_LEFT_HANDED: i8 = 2;
 const MOB_FLAG_AGGRESSIVE: i8 = 4;
 const MOVE_CONTROL_MIN_SPEED_SQR: f64 = 2.500_000_3e-7;
 const MOVE_CONTROL_MAX_TURN: f32 = 90.0;
+/// Vanilla parity: the `1.0E-5F` of `FlyingMoveControl.tick`, below which a
+/// flier stops climbing rather than chasing a target it is already level with.
+const MOVE_CONTROL_MIN_FLYING_DELTA: f32 = 1.0e-5;
 const DEFAULT_EQUIPMENT_DROP_CHANCE: f32 = 0.085;
 const PRESERVE_ITEM_DROP_CHANCE_THRESHOLD: f32 = 1.0;
 const PRESERVE_ITEM_DROP_CHANCE: f32 = 2.0;
@@ -76,6 +79,24 @@ const DEFAULT_ATTACK_REACH_OFFSET: f32 = 0.6;
 const RANDOM_SPAWN_BONUS_ID: Identifier = Identifier::vanilla_static("random_spawn_bonus");
 const RANDOM_SPAWN_BONUS_SCALE: f64 = 0.114_850_000_000_000_01;
 const LEFT_HANDED_SPAWN_CHANCE: f32 = 0.05;
+
+/// How a mob turns a wanted position into movement.
+///
+/// Vanilla parity: the `MoveControl` subclass a mob installs in its
+/// constructor. Steel keeps one control and asks the mob which shape it wants,
+/// the way [`NavigationKind`] already handles navigation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MoveControlKind {
+    /// Vanilla parity: `MoveControl`.
+    Ground,
+    /// Vanilla parity: `FlyingMoveControl`.
+    Flying {
+        /// How fast the mob may pitch toward its target, in degrees per tick.
+        max_turn: f32,
+        /// Whether the mob keeps gravity off while it has nowhere to be.
+        hovers_in_place: bool,
+    },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DropChances {
@@ -1496,6 +1517,19 @@ pub trait Mob: LivingEntity {
 
         match move_control.operation() {
             MoveControlOperation::Wait => {
+                if let MoveControlKind::Flying {
+                    hovers_in_place, ..
+                } = self.move_control_kind()
+                {
+                    // Vanilla parity: the else branch of `FlyingMoveControl.tick`,
+                    // which drops a hovering flier back onto gravity.
+                    if !hovers_in_place {
+                        self.set_no_gravity(false);
+                    }
+                    self.set_travel_input(LivingTravelInput::new(0.0, 0.0, 0.0));
+                    return;
+                }
+
                 let input = self.travel_input();
                 self.set_travel_input(LivingTravelInput::new(
                     input.sideways(),
@@ -1503,10 +1537,17 @@ pub trait Mob: LivingEntity {
                     0.0,
                 ));
             }
-            MoveControlOperation::MoveTo => self.tick_move_to_control(
-                move_control.wanted_position(),
-                move_control.speed_modifier(),
-            ),
+            MoveControlOperation::MoveTo => match self.move_control_kind() {
+                MoveControlKind::Ground => self.tick_move_to_control(
+                    move_control.wanted_position(),
+                    move_control.speed_modifier(),
+                ),
+                MoveControlKind::Flying { max_turn, .. } => self.tick_flying_move_to_control(
+                    move_control.wanted_position(),
+                    move_control.speed_modifier(),
+                    max_turn,
+                ),
+            },
             MoveControlOperation::Strafe => {
                 self.tick_strafe_control(
                     move_control.strafe_forward(),
@@ -1517,6 +1558,66 @@ pub trait Mob: LivingEntity {
                 self.tick_jumping_control(move_control.speed_modifier());
             }
         }
+    }
+
+    /// Returns which move control this mob installs.
+    ///
+    /// Vanilla parity: the `MoveControl` subclass a mob's constructor assigns.
+    fn move_control_kind(&self) -> MoveControlKind {
+        MoveControlKind::Ground
+    }
+
+    /// Steers a flier toward its wanted position.
+    ///
+    /// Vanilla parity: `FlyingMoveControl.tick`. The gravity flag is the part
+    /// that matters: a flier only stays up because the move control turns
+    /// gravity off for as long as it has somewhere to be.
+    fn tick_flying_move_to_control(
+        &self,
+        wanted_position: DVec3,
+        speed_modifier: f64,
+        max_turn: f32,
+    ) {
+        self.set_no_gravity(true);
+
+        let position = self.position();
+        let xd = wanted_position.x - position.x;
+        let yd = wanted_position.y - position.y;
+        let zd = wanted_position.z - position.z;
+        if xd.mul_add(xd, yd.mul_add(yd, zd * zd)) < MOVE_CONTROL_MIN_SPEED_SQR {
+            self.set_travel_input(LivingTravelInput::new(0.0, 0.0, 0.0));
+            return;
+        }
+
+        let y_rot = (zd.atan2(xd) as f32).to_degrees() - 90.0;
+        let (yaw, pitch) = self.rotation();
+        self.set_rotation((rotlerp(yaw, y_rot, MOVE_CONTROL_MAX_TURN), pitch));
+
+        let attribute = if self.on_ground() {
+            vanilla_attributes::MOVEMENT_SPEED
+        } else {
+            vanilla_attributes::FLYING_SPEED
+        };
+        let speed = (speed_modifier * self.attributes().lock().required_value(attribute)) as f32;
+        self.set_mob_speed(speed);
+
+        let horizontal = xd.hypot(zd);
+        if yd.abs() <= f64::from(MOVE_CONTROL_MIN_FLYING_DELTA)
+            && horizontal <= f64::from(MOVE_CONTROL_MIN_FLYING_DELTA)
+        {
+            return;
+        }
+
+        let x_rot = -(yd.atan2(horizontal) as f32).to_degrees();
+        let (yaw, pitch) = self.rotation();
+        self.set_rotation((yaw, rotlerp(pitch, x_rot, max_turn)));
+        let vertical = if yd > 0.0 { speed } else { -speed };
+        let input = self.travel_input();
+        self.set_travel_input(LivingTravelInput::new(
+            input.sideways(),
+            vertical,
+            input.forward(),
+        ));
     }
 
     fn tick_move_to_control(&self, wanted_position: DVec3, speed_modifier: f64) {

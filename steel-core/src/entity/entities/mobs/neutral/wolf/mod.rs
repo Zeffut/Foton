@@ -24,6 +24,7 @@ use steel_registry::particle_type::{ItemParticleOption, ParticleData};
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_entity_data::WolfEntityData;
+use steel_registry::vanilla_entity_type_tags::EntityTypeTag;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::wolf_sound_variant::{WolfAge, WolfSoundVariantRef};
 use steel_registry::wolf_variant::WolfVariantRef;
@@ -51,7 +52,10 @@ use crate::entity::ai::goal::{
 };
 use crate::entity::ai::path::PathType;
 use crate::entity::damage::DamageSource;
-use crate::entity::neutral_mob::{NeutralMob, PersistentAnger, read_persistent_anger};
+use crate::entity::entities::SheepEntity;
+use crate::entity::neutral_mob::{
+    NeutralMob, PersistentAnger, read_persistent_anger, resolve_anger_target,
+};
 use crate::entity::{
     AgeableMob, AgeableMobBase, Animal, AnimalBase, Crackiness, Entity, EntityBase, EntityBaseLoad,
     EntityPose, EntitySpawnReason, EntitySyncedData, LivingEntity, LivingEntityBase,
@@ -59,6 +63,7 @@ use crate::entity::{
     TamableAnimalBase, is_tamed,
 };
 use crate::inventory::equipment::EquipmentSlot;
+use crate::physics::MoveResult;
 use crate::player::Player;
 use crate::world::{LevelReader as _, World};
 
@@ -291,10 +296,9 @@ impl WolfEntity {
         targets.add_goal(
             7,
             NearestAttackableTargetGoal::new(false, |_, target, _| {
-                REGISTRY.entity_types.is_in_tag(
-                    target.entity_type(),
-                    &steel_registry::vanilla_entity_type_tags::EntityTypeTag::SKELETONS,
-                )
+                REGISTRY
+                    .entity_types
+                    .is_in_tag(target.entity_type(), &EntityTypeTag::SKELETONS)
             }),
         );
         targets.add_goal(8, ResetUniversalAngerTargetGoal::new(true));
@@ -746,7 +750,7 @@ impl Entity for WolfEntity {
             angry_at,
         );
         if let Some(world) = self.level()
-            && let Some(target) = crate::entity::neutral_mob::resolve_anger_target(&world, angry_at)
+            && let Some(target) = resolve_anger_target(&world, angry_at)
         {
             self.set_target(Some(&target));
         }
@@ -856,7 +860,7 @@ impl LivingEntity for WolfEntity {
         Mob::mob_server_ai_step(self);
     }
 
-    fn ai_step(&self) -> Option<crate::physics::MoveResult> {
+    fn ai_step(&self) -> Option<MoveResult> {
         self.start_shake_if_dry_land();
         let result = self.default_ai_step();
         AgeableMob::tick_ageable_mob(self);
@@ -1174,7 +1178,7 @@ impl NeutralMob for WolfEntity {
 /// crafting recipes. [`crate::entity::entities::SheepEntity`] already owns that
 /// lookup, so the wolf borrows it rather than duplicating the recipe search.
 fn mixed_collar_color(first: DyeColor, second: DyeColor) -> DyeColor {
-    crate::entity::entities::SheepEntity::get_mixed_color(first, second)
+    SheepEntity::get_mixed_color(first, second)
 }
 
 #[cfg(test)]

@@ -42,11 +42,13 @@ use crate::entity::ai::goal::{
     TamableAnimalPanicGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::SheepEntity;
 use crate::entity::{
     AgeableMob, AgeableMobBase, Animal, AnimalBase, Entity, EntityBase, EntityBaseLoad,
     EntitySpawnReason, EntitySyncedData, LivingEntity, LivingEntityBase, LivingEntitySyncedData,
     Mob, MobBase, PathfinderMob, SpawnGroupData, TamableAnimal, TamableAnimalBase,
 };
+use crate::physics::MoveResult;
 use crate::player::Player;
 use crate::world::World;
 
@@ -578,7 +580,7 @@ impl LivingEntity for CatEntity {
         Mob::mob_server_ai_step(self);
     }
 
-    fn ai_step(&self) -> Option<crate::physics::MoveResult> {
+    fn ai_step(&self) -> Option<MoveResult> {
         let result = self.default_ai_step();
         AgeableMob::tick_ageable_mob(self);
         Animal::tick_animal_love(self);
@@ -666,7 +668,7 @@ impl Animal for CatEntity {
         kitten.set_owner_uuid(self.owner_uuid());
         kitten.set_tame(true, true);
         if let Some(partner_cat) = partner_cat {
-            kitten.set_collar_color(crate::entity::entities::SheepEntity::get_mixed_color(
+            kitten.set_collar_color(SheepEntity::get_mixed_color(
                 self.collar_color(),
                 partner_cat.collar_color(),
             ));

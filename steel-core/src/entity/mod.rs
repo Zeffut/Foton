@@ -811,7 +811,7 @@ pub use manager::{
     AddEntityError, ChunkEntityLoadResult, EntityLifecycleChanges, EntityMoveError,
     EntityMoveUpdate, EntityOwnership, EntityVisibility, WorldEntityManager,
 };
-pub(crate) use mob::{Mob, MobBase, PathfinderMob};
+pub(crate) use mob::{Mob, MobBase, MoveControlKind, NavigationKind, PathfinderMob};
 pub use movement_sync::{
     EntityMovementSyncPacket, EntityMovementSyncPackets, EntityMovementSyncState,
     EntityMovementSyncUpdate, EntityPositionRotSyncPacket, EntityPositionSyncDecision,

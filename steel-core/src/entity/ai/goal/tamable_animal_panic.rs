@@ -15,7 +15,7 @@ pub struct TamableAnimalPanicGoal {
 
 impl TamableAnimalPanicGoal {
     #[must_use]
-    pub(crate) fn new(speed_modifier: f64) -> Self {
+    pub(crate) const fn new(speed_modifier: f64) -> Self {
         Self {
             panic: PanicGoal::new(speed_modifier),
         }

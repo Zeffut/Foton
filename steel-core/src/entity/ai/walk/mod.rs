@@ -2,6 +2,7 @@
 
 mod collision;
 mod evaluator;
+mod fly_evaluator;
 pub mod node_evaluator;
 mod path_evaluator;
 mod settings;
@@ -9,6 +10,8 @@ mod swim_evaluator;
 
 pub use collision::WalkNodeCollision;
 pub use evaluator::NodeEvaluator;
+pub use fly_evaluator::FlyNodeEvaluator;
+use fly_evaluator::fly_path_type;
 pub use node_evaluator::WalkNodeEvaluator;
 pub use path_evaluator::WalkPathEvaluator;
 use path_evaluator::does_block_have_partial_collision;

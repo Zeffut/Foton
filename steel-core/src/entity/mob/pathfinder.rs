@@ -12,7 +12,7 @@ use crate::entity::ai::navigation::{
 };
 use crate::entity::ai::path::Path;
 use crate::entity::ai::walk::{
-    MobPathSettings, NodeEvaluator, SwimNodeEvaluator, WalkNodeEvaluator,
+    FlyNodeEvaluator, MobPathSettings, NodeEvaluator, SwimNodeEvaluator, WalkNodeEvaluator,
 };
 use crate::entity::{Entity, LivingEntity, SharedEntity};
 use crate::physics::WorldCollisionProvider;
@@ -24,10 +24,18 @@ pub(super) fn tick_path_navigation_target<M: Mob + ?Sized>(
     game_time: i64,
     can_update_path: bool,
 ) {
+    let flying = mob
+        .as_pathfinder_mob()
+        .is_some_and(|pathfinder| pathfinder.navigation_kind() == NavigationKind::Flying);
     let (target, speed_modifier) = {
         let mut navigation = mob.mob_base().navigation().lock();
-        let mob_position =
-            ground_navigation_temp_mob_pos(mob, world.as_ref(), navigation.can_float());
+        let mob_position = if flying {
+            // Vanilla parity: `FlyingPathNavigation.getTempMobPos` returns the
+            // mob's own position, because a flier is not standing on anything.
+            mob.position()
+        } else {
+            ground_navigation_temp_mob_pos(mob, world.as_ref(), navigation.can_float())
+        };
         let context = NavigationTickContext {
             mob_position,
             mob_bounding_box_width: mob.bounding_box().width(),
@@ -44,6 +52,13 @@ pub(super) fn tick_path_navigation_target<M: Mob + ?Sized>(
         };
         target
     };
+
+    if flying {
+        // Vanilla parity: `FlyingPathNavigation.tick` feeds the path position
+        // straight to the move control rather than dropping it to the floor.
+        mob.set_wanted_position(target, speed_modifier);
+        return;
+    }
 
     let target_pos = BlockPos::containing(target.x, target.y, target.z);
     let ground_y = if world.get_block_state(target_pos.below()).is_air() {
@@ -107,6 +122,10 @@ fn ground_navigation_surface_y<M: Mob + ?Sized>(mob: &M, world: &World, can_floa
 pub enum NavigationKind {
     /// Walks, climbs and jumps on land.
     Ground,
+    /// Flies.
+    ///
+    /// Vanilla parity: `FlyingPathNavigation`.
+    Flying,
     /// Swims.
     WaterBound {
         /// Whether the mob may leave the water.
@@ -154,6 +173,7 @@ pub trait PathfinderMob: Mob {
                 in_water: self.is_in_water(),
                 in_lava: self.is_in_lava(),
                 is_passenger: self.is_passenger(),
+                can_float: self.mob_base().navigation().lock().can_float(),
             },
         )
     }
@@ -211,6 +231,14 @@ pub trait PathfinderMob: Mob {
     }
 
     fn is_stable_destination(&self, pos: BlockPos) -> bool {
+        if self.navigation_kind() == NavigationKind::Flying {
+            // Vanilla parity: `FlyingPathNavigation.isStableDestination` asks
+            // whether the block itself can be stood on, not the one below.
+            return self
+                .level()
+                .is_some_and(|world| world.get_block_state(pos).is_solid_render());
+        }
+
         self.level()
             .is_some_and(|world| world.get_block_state(pos.below()).is_solid_render())
     }
@@ -371,6 +399,7 @@ pub trait PathfinderMob: Mob {
         let settings = MobPathSettings::from_mob(self);
         let mut evaluator: Box<dyn NodeEvaluator> = match self.navigation_kind() {
             NavigationKind::Ground => Box::new(WalkNodeEvaluator::new(settings)),
+            NavigationKind::Flying => Box::new(FlyNodeEvaluator::new(settings)),
             NavigationKind::WaterBound { allow_breaching } => {
                 Box::new(SwimNodeEvaluator::new(settings, allow_breaching))
             }
@@ -411,6 +440,9 @@ pub const fn can_update_path_for(kind: NavigationKind, support: PathSupport) -> 
         NavigationKind::Ground => {
             support.on_ground || support.in_water || support.in_lava || support.is_passenger
         }
+        // Vanilla parity: `FlyingPathNavigation.canUpdatePath`, which lets a
+        // flier re-path in mid-air but not while it is riding something.
+        NavigationKind::Flying => support.in_water && support.can_float || !support.is_passenger,
         NavigationKind::WaterBound { allow_breaching } => {
             allow_breaching || support.in_water || support.in_lava
         }
@@ -431,6 +463,11 @@ pub struct PathSupport {
     pub in_lava: bool,
     /// Whether the mob is riding something.
     pub is_passenger: bool,
+    /// Whether the mob swims rather than sinking.
+    ///
+    /// Vanilla parity: `PathNavigation.canFloat`, which only the flying
+    /// navigation reads in `canUpdatePath`.
+    pub can_float: bool,
 }
 
 pub(super) fn path_end_node_can_reach_target(path: &Path, target: BlockPos) -> bool {
@@ -507,6 +544,7 @@ mod navigation_kind_tests {
                 in_water: false,
                 in_lava: false,
                 is_passenger: false,
+                can_float: false,
             }
         ));
         assert!(can_update_path_for(
@@ -516,6 +554,7 @@ mod navigation_kind_tests {
                 in_water: true,
                 in_lava: false,
                 is_passenger: false,
+                can_float: false,
             }
         ));
         assert!(can_update_path_for(
@@ -525,6 +564,7 @@ mod navigation_kind_tests {
                 in_water: false,
                 in_lava: true,
                 is_passenger: false,
+                can_float: false,
             }
         ));
         assert!(can_update_path_for(
@@ -534,6 +574,7 @@ mod navigation_kind_tests {
                 in_water: false,
                 in_lava: false,
                 is_passenger: true,
+                can_float: false,
             }
         ));
     }
@@ -549,6 +590,7 @@ mod navigation_kind_tests {
                 in_water: false,
                 in_lava: false,
                 is_passenger: false,
+                can_float: false,
             }
         ));
     }
@@ -564,6 +606,7 @@ mod navigation_kind_tests {
                 in_water: true,
                 in_lava: false,
                 is_passenger: false,
+                can_float: false,
             }
         ));
         assert!(!can_update_path_for(
@@ -573,6 +616,7 @@ mod navigation_kind_tests {
                 in_water: false,
                 in_lava: false,
                 is_passenger: false,
+                can_float: false,
             }
         ));
         assert!(!can_update_path_for(
@@ -582,6 +626,7 @@ mod navigation_kind_tests {
                 in_water: false,
                 in_lava: false,
                 is_passenger: true,
+                can_float: false,
             }
         ));
     }
@@ -596,6 +641,7 @@ mod navigation_kind_tests {
                 in_water: false,
                 in_lava: false,
                 is_passenger: false,
+                can_float: false,
             }
         ));
     }

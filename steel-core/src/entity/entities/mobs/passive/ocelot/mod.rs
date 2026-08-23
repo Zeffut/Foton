@@ -40,6 +40,7 @@ use crate::entity::{
     EntityBaseLoad, EntitySpawnReason, EntitySyncedData, LivingEntity, LivingEntityBase,
     LivingEntitySyncedData, Mob, MobBase, PathfinderMob, SpawnGroupData,
 };
+use crate::physics::MoveResult;
 use crate::player::Player;
 use crate::world::World;
 
@@ -382,7 +383,7 @@ impl LivingEntity for OcelotEntity {
         Mob::mob_server_ai_step(self);
     }
 
-    fn ai_step(&self) -> Option<crate::physics::MoveResult> {
+    fn ai_step(&self) -> Option<MoveResult> {
         let result = self.default_ai_step();
         AgeableMob::tick_ageable_mob(self);
         Animal::tick_animal_love(self);
