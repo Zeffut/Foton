@@ -36,6 +36,24 @@ const RAY_STEP: f32 = 0.3;
 /// Power every ray loses per step regardless of what it crosses.
 const RAY_STEP_COST: f32 = 0.225_000_01;
 
+/// An explosion, apart from where it lands.
+///
+/// Only [`World::explode_sparing`] takes this: the plain
+/// [`World::explode`] keeps its arguments loose because every caller but one
+/// passes them straight through.
+pub struct ExplosionSpec {
+    /// The entity that set it off, if any.
+    pub source_entity_id: Option<i32>,
+    /// What the blast hurts entities with.
+    pub damage_source: Option<DamageSource>,
+    /// How far it reaches.
+    pub radius: f32,
+    /// Whether it leaves fires behind.
+    pub fire: bool,
+    /// What it does to blocks.
+    pub interaction: ExplosionBlockInteraction,
+}
+
 impl World {
     /// Detonates an explosion and returns the positions it destroyed.
     ///
@@ -49,16 +67,47 @@ impl World {
         fire: bool,
         interaction: ExplosionBlockInteraction,
     ) -> Vec<BlockPos> {
-        let to_blow = self.calculate_exploded_positions(center, radius);
-        self.hurt_entities_from_explosion(source_entity_id, damage_source, center, radius);
+        self.explode_sparing(
+            ExplosionSpec {
+                source_entity_id,
+                damage_source,
+                radius,
+                fire,
+                interaction,
+            },
+            center,
+            &|_pos| true,
+        )
+    }
 
-        if interaction == ExplosionBlockInteraction::Destroy {
+    /// Detonates an explosion that leaves some blocks standing.
+    ///
+    /// Vanilla parity: the `Explosion.shouldBlockExplode` hook, which the
+    /// source entity answers. Only the TNT minecart uses it, and only to spare
+    /// the rails it was running on -- otherwise one cart would take the track
+    /// with it and no cart cannon would work twice.
+    pub fn explode_sparing(
+        self: &Arc<Self>,
+        spec: ExplosionSpec,
+        center: DVec3,
+        should_explode: &dyn Fn(BlockPos) -> bool,
+    ) -> Vec<BlockPos> {
+        let mut to_blow = self.calculate_exploded_positions(center, spec.radius);
+        to_blow.retain(|pos| should_explode(*pos));
+        self.hurt_entities_from_explosion(
+            spec.source_entity_id,
+            spec.damage_source,
+            center,
+            spec.radius,
+        );
+
+        if spec.interaction == ExplosionBlockInteraction::Destroy {
             for pos in &to_blow {
                 self.destroy_block(*pos, true);
             }
         }
 
-        if fire {
+        if spec.fire {
             self.create_explosion_fire(&to_blow);
         }
 

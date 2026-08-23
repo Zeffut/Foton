@@ -97,7 +97,7 @@ WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 94
+[entities] 93
 Allay
 Armadillo
 ArmorStand
@@ -146,7 +146,6 @@ MinecartCommandBlock
 MinecartFurnace
 MinecartHopper
 MinecartSpawner
-MinecartTNT
 Mule
 Nautilus
 Ocelot

@@ -192,6 +192,9 @@ a furnace has no behavior. These scripts can:
   and read through the wall behind it by a comparator.
 - `dev/throw-test.sh` -- a snowball is thrown, flies and breaks, forty eggs
   hatch at least one chicken, and a bottle o' enchanting breaks into experience.
+- `dev/tnt-minecart-test.sh` -- a cart on a live activator rail lights its
+  fuse and goes off, taking a witness block with it and leaving the track
+  standing, which is the half that must not happen.
 - `dev/beehive-test.sh` -- shears and a glass bottle each empty a full hive,
   and neither touches one that is not full. A hive's honey level is a block
   state, so this is one of the few interactions readable straight back.

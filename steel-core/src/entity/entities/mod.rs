@@ -24,5 +24,6 @@ pub use objects::projectiles::{
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, MinecartEntity, RaftEntity,
+    TntMinecartEntity,
 };
 pub use raw::RawEntity;

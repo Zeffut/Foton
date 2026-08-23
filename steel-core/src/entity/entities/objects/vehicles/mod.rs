@@ -6,8 +6,10 @@ mod chest_boat;
 mod chest_minecart;
 mod minecart;
 mod minecart_common;
+mod tnt_minecart;
 
 pub use boat::{BoatEntity, RaftEntity};
 pub use chest_boat::{ChestBoatEntity, ChestRaftEntity};
 pub use chest_minecart::ChestMinecartEntity;
 pub use minecart::MinecartEntity;
+pub use tnt_minecart::TntMinecartEntity;
