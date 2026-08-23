@@ -49,22 +49,31 @@ if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
   cleanup; exit 1
 fi
 
-# A stone bowl filled with water, a boat dropped a little above it.
-CMDS='teleport @s 0 90 0'
+# A stone bowl filled with water. The player stands on the rim looking down at
+# it, so the boat item's ray lands on the surface.
+CMDS='gamemode creative'
+CMDS="$CMDS;;teleport @s 0 82 -4 0 40"
 for x in -3 -2 -1 0 1 2 3; do
   for z in -3 -2 -1 0 1 2 3; do
     CMDS="$CMDS;;setblock $x 79 $z minecraft:stone"
     CMDS="$CMDS;;setblock $x 80 $z minecraft:water"
   done
 done
+
+# First: summoned boats float. That is the entity.
 CMDS="$CMDS;;summon minecraft:oak_boat 0 82 0"
 CMDS="$CMDS;;summon minecraft:bamboo_raft 2 82 0"
-# Give the physics time to settle, then look. A boat that floats is still
-# within a block of the surface; one that sank is far below or gone.
-for _ in $(seq 1 8); do
+for _ in $(seq 1 6); do
   CMDS="$CMDS;;execute positioned 0 81 0 if entity @e[type=minecraft:oak_boat,distance=..3] run tellraw @s \"BOATSTILLAFLOAT\""
 done
 CMDS="$CMDS;;execute positioned 2 81 0 if entity @e[type=minecraft:bamboo_raft,distance=..3] run tellraw @s \"RAFTSTILLAFLOAT\""
+
+# Then: a boat placed by hand. That is the item, and it is what a player has.
+CMDS="$CMDS;;kill @e[type=minecraft:oak_boat]"
+CMDS="$CMDS;;give @s minecraft:spruce_boat 1"
+CMDS="$CMDS;;!hotbar 0"
+CMDS="$CMDS;;!useitem"
+CMDS="$CMDS;;execute positioned 0 81 0 if entity @e[type=minecraft:spruce_boat,distance=..6] run tellraw @s \"BOATPLACEDBYHAND\""
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
@@ -82,7 +91,7 @@ if [ $STATUS -ne 0 ]; then
   tail -20 join.log
   exit 1
 fi
-for marker in BOATSTILLAFLOAT RAFTSTILLAFLOAT; do
+for marker in BOATSTILLAFLOAT RAFTSTILLAFLOAT BOATPLACEDBYHAND; do
   # Only the server's own reply counts: join.py echoes the commands it sends.
   if ! grep "server says" join.log | grep -q "$marker"; then
     echo "########## BOAT TEST FAILED ($marker missing) ##########"

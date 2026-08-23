@@ -77,11 +77,10 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 37
+[items] 36
 ArmorStandItem
 ArrowItem
 BannerItem
-BoatItem
 BottleItem
 BundleItem
 CrossbowItem

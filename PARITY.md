@@ -48,11 +48,12 @@ cannot.
 
 - [x] **Smelting.** Furnace, smoker, blast furnace had no behavior.
 - [x] **Renewable wood.** Saplings never grew.
-- [~] **Boats and rafts** (20 entries). `Boat` and `Raft` float, carry riders
-      and are steered by the rider's client, which is the ten entries a player
-      meets first. Still open: `ChestBoat` and `ChestRaft` (the other ten, and
-      a container), `BoatItem` so one can be placed rather than summoned, the
-      `SPaddleBoat` packet so rowing animates, and the second seat.
+- [~] **Boats and rafts** (20 entity entries, 20 item entries). `Boat` and
+      `Raft` float, carry riders, are steered by the rider's client, and can be
+      placed from the item -- a player can cross water. Still open: `ChestBoat`
+      and `ChestRaft` (ten entity entries, and a container; their items exist
+      and refuse cleanly), the `SPaddleBoat` packet so rowing animates, and the
+      second seat.
 - [ ] **Minecarts** (6 entries). Rails already work; the carts do not exist.
 - [ ] **Storage that travels**: shulker box (17), ender chest, trapped chest.
 - [ ] **Workstations**: grindstone, stonecutter, smithing table, cartography

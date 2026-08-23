@@ -61,6 +61,7 @@ PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
 PLAY_S_USE_ITEM_ON = 66
+PLAY_S_USE_ITEM = 67
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
 PLAY_S_KEEP_ALIVE = 28
 PLAY_S_PLAYER_LOADED = 44
@@ -81,9 +82,10 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 
 # Optional: commands to run once in the world, separated by `;;`. An entry
 # starting with `!` is a client action rather than a chat command:
-# `!hotbar <slot>` selects a hotbar slot and `!useon <x> <y> <z> [face]`
-# right-clicks a block face. Those two are the only way to reach an item's
-# `use_on`, which no command can do. The server
+# `!hotbar <slot>` selects a hotbar slot, `!useon <x> <y> <z> [face]`
+# right-clicks a block face, and `!useitem [yaw] [pitch]` right-clicks
+# without one. Those are the only way to reach an item's `use_on` and
+# `use`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
 # because it is the path a player takes. The joining player needs a permission
@@ -493,6 +495,17 @@ def send_use_item_on(connection, x, y, z, face):
     connection.send(PLAY_S_USE_ITEM_ON, payload)
 
 
+def send_use_item(connection, yaw, pitch):
+    """Right-clicks holding an item, without a block under the cursor.
+
+    This is the `use` half of an item, as opposed to `use_on`: what a boat item
+    or a bow does. The server does its own ray cast from the rotation given
+    here, so the two angles decide where the boat lands.
+    """
+    payload = varint(0) + varint(0) + struct.pack(">ff", yaw, pitch)
+    connection.send(PLAY_S_USE_ITEM, payload)
+
+
 def run_directive(connection, directive):
     """Runs one `!`-prefixed instruction. Returns False if it is not one."""
     if not directive.startswith("!"):
@@ -501,6 +514,10 @@ def run_directive(connection, directive):
     parts = directive[1:].split()
     if parts[0] == "hotbar":
         send_set_carried_item(connection, int(parts[1]))
+    elif parts[0] == "useitem":
+        yaw = float(parts[1]) if len(parts) > 1 else 0.0
+        pitch = float(parts[2]) if len(parts) > 2 else 40.0
+        send_use_item(connection, yaw, pitch)
     elif parts[0] == "useon":
         x, y, z = (int(part) for part in parts[1:4])
         face = parts[4] if len(parts) > 4 else "up"
