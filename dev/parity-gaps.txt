@@ -64,8 +64,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 30
-ArmorStandItem
+[items] 29
 ArrowItem
 BannerItem
 BottleItem

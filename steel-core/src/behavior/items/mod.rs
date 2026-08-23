@@ -4,6 +4,7 @@
 //! See `src/behavior/generated/items.rs` for the generated registration code.
 
 mod air;
+mod armor_stand_item;
 mod axe;
 mod bed_item;
 mod block_item;
@@ -43,6 +44,7 @@ mod tipped_arrow;
 mod flint_and_steel;
 
 pub use air::AirItem;
+pub use armor_stand_item::ArmorStandItem;
 pub use axe::AxeItem;
 pub use bed_item::BedItem;
 pub use block_item::{BlockItem, DoubleHighBlockItem};
