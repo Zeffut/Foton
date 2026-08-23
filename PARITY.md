@@ -54,7 +54,8 @@ cannot.
 - [ ] **Storage that travels**: shulker box (17), ender chest, trapped chest.
 - [ ] **Workstations**: grindstone, stonecutter, smithing table, cartography
       table, loom, lectern, jukebox, bell, beacon, crafter.
-- [ ] **Spawn eggs** (88 entries). One class; unblocks testing everything else.
+- [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
+      can now right-click a block at all.
 - [ ] **Tools that act**: shears, fishing rod, flint and steel's siblings,
       snowball, egg, experience bottle, ender pearl's siblings.
 - [ ] **Decoration a player places**: item frame, painting, armor stand,
@@ -101,5 +102,7 @@ a furnace has no behavior. These scripts can:
 - `dev/reload-test.sh` -- a world survives a clean stop and a hard kill.
 - `dev/nether-test.sh` -- a client crosses dimensions and sees Nether mobs.
 - `dev/sapling-test.sh` -- a planted sapling becomes a tree.
+- `dev/furnace-test.sh` -- a placed furnace has a block entity behind it.
+- `dev/spawnegg-test.sh` -- a spawn egg used by hand makes the mob.
 
 Every entry above gets one before it is called done.

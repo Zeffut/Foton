@@ -77,7 +77,7 @@ WeatheringLightningRodBlock
 WitherSkullBlock
 WitherWallSkullBlock
 
-[items] 38
+[items] 37
 ArmorStandItem
 ArrowItem
 BannerItem
@@ -109,7 +109,6 @@ ShearsItem
 SmithingTemplateItem
 SnowballItem
 SolidBucketItem
-SpawnEggItem
 SpectralArrowItem
 SpyglassItem
 TridentItem

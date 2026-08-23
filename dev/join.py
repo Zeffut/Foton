@@ -59,6 +59,8 @@ PLAY_C_PLAYER_POSITION = 72
 PLAY_C_SYSTEM_CHAT = 121
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
+PLAY_S_SET_CARRIED_ITEM = 53
+PLAY_S_USE_ITEM_ON = 66
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
 PLAY_S_KEEP_ALIVE = 28
 PLAY_S_PLAYER_LOADED = 44
@@ -77,7 +79,11 @@ REQUIRED_CHUNKS = 9
 # only way to see it happen.
 WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 
-# Optional: commands to run once in the world, separated by `;;`. The server
+# Optional: commands to run once in the world, separated by `;;`. An entry
+# starting with `!` is a client action rather than a chat command:
+# `!hotbar <slot>` selects a hotbar slot and `!useon <x> <y> <z> [face]`
+# right-clicks a block face. Those two are the only way to reach an item's
+# `use_on`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
 # because it is the path a player takes. The joining player needs a permission
@@ -365,6 +371,12 @@ def run_play(connection, watch_seconds=0):
             chunks += 1
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_PLAYER_POSITION:
+            # A `/teleport` sends one of these, and the server holds the player
+            # at the old position until it is confirmed -- which puts anything
+            # they then click out of interaction range.
+            teleport_id, _ = read_varint(payload)
+            connection.send(PLAY_S_ACCEPT_TELEPORTATION, varint(teleport_id))
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -430,6 +442,12 @@ def pump(connection, seconds, spawned):
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_PLAYER_POSITION:
+            # A `/teleport` sends one of these, and the server holds the player
+            # at the old position until it is confirmed -- which puts anything
+            # they then click out of interaction range.
+            teleport_id, _ = read_varint(payload)
+            connection.send(PLAY_S_ACCEPT_TELEPORTATION, varint(teleport_id))
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -441,12 +459,64 @@ def pump(connection, seconds, spawned):
     return True
 
 
+# Vanilla `Direction.get3DDataValue`.
+FACES = {"down": 0, "up": 1, "north": 2, "south": 3, "west": 4, "east": 5}
+
+
+def packed_block_pos(x, y, z):
+    """Packs a position the way the protocol carries one."""
+    return ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF)
+
+
+def send_set_carried_item(connection, slot):
+    """Selects a hotbar slot, which is what decides the item in hand."""
+    connection.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", slot))
+
+
+def send_use_item_on(connection, x, y, z, face):
+    """Right-clicks a block face, the way a player does.
+
+    This is the only way to reach an item's `use_on`: a command can place a
+    block but cannot use an item on one, so anything that happens through a
+    player's hand -- a spawn egg, a bucket, shears -- is unverifiable without
+    it.
+    """
+    payload = (
+        varint(0)  # main hand
+        + struct.pack(">q", packed_block_pos(x, y, z))
+        + varint(FACES[face])
+        + struct.pack(">fff", 0.5, 1.0, 0.5)  # cursor, middle of the face
+        + b"\x00"  # not inside the block
+        + b"\x00"  # no world border hit
+        + varint(0)  # sequence
+    )
+    connection.send(PLAY_S_USE_ITEM_ON, payload)
+
+
+def run_directive(connection, directive):
+    """Runs one `!`-prefixed instruction. Returns False if it is not one."""
+    if not directive.startswith("!"):
+        return False
+
+    parts = directive[1:].split()
+    if parts[0] == "hotbar":
+        send_set_carried_item(connection, int(parts[1]))
+    elif parts[0] == "useon":
+        x, y, z = (int(part) for part in parts[1:4])
+        face = parts[4] if len(parts) > 4 else "up"
+        send_use_item_on(connection, x, y, z, face)
+    else:
+        fail(f"unknown directive {directive}")
+    return True
+
+
 def run_commands(connection, commands, spawned):
     """Runs each command as the player would type it, and lets it settle."""
     for command in commands:
-        print(f"  /{command}")
-        encoded = command.encode()
-        connection.send(PLAY_S_CHAT_COMMAND, varint(len(encoded)) + encoded)
+        print(f"  {command}" if command.startswith("!") else f"  /{command}")
+        if not run_directive(connection, command):
+            encoded = command.encode()
+            connection.send(PLAY_S_CHAT_COMMAND, varint(len(encoded)) + encoded)
         if not pump(connection, COMMAND_SETTLE_SECONDS, spawned):
             return False
     return True
@@ -473,6 +543,12 @@ def watch_for_spawns(connection, seconds, spawned):
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
         elif packet_id == PLAY_C_CHUNK_BATCH_FINISHED:
             acknowledge_chunk_batch(connection)
+        elif packet_id == PLAY_C_PLAYER_POSITION:
+            # A `/teleport` sends one of these, and the server holds the player
+            # at the old position until it is confirmed -- which puts anything
+            # they then click out of interaction range.
+            teleport_id, _ = read_varint(payload)
+            connection.send(PLAY_S_ACCEPT_TELEPORTATION, varint(teleport_id))
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
