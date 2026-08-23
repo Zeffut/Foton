@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 45
+[blocks] 38
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
@@ -33,12 +33,8 @@ LightningRodBlock
 MangroveRootsBlock
 NetherrackBlock
 NyliumBlock
-PiglinWallSkullBlock
-PlayerHeadBlock
-PlayerWallHeadBlock
 SculkCatalystBlock
 ShelfBlock
-SkullBlock
 SnifferEggBlock
 SoulSandBlock
 SpawnerBlock
@@ -52,18 +48,13 @@ TransparentBlock
 TrialSpawnerBlock
 TurtleEggBlock
 VaultBlock
-WallSkullBlock
 WeatheringCopperChestBlock
 WeatheringCopperGolemStatueBlock
 WeatheringLightningRodBlock
-WitherSkullBlock
-WitherWallSkullBlock
 
-[items] 30
-ArmorStandItem
+[items] 21
 ArrowItem
 BannerItem
-BottleItem
 BundleItem
 CrossbowItem
 DebugStickItem
@@ -72,26 +63,19 @@ EmptyMapItem
 EndCrystalItem
 FishingRodItem
 GameMasterBlockItem
-GlowInkSacItem
-InkSacItem
-InstrumentItem
 Item
 KnowledgeBookItem
-LeadItem
 MapItem
 MobBucketItem
 ScaffoldingBlockItem
-ShearsItem
 SmithingTemplateItem
 SolidBucketItem
 SpectralArrowItem
-SpyglassItem
 TridentItem
-WindChargeItem
 WritableBookItem
 WrittenBookItem
 
-[entities] 89
+[entities] 88
 Allay
 Armadillo
 Axolotl
@@ -173,7 +157,6 @@ Villager
 Vindicator
 WanderingTrader
 Warden
-WindCharge
 WitherBoss
 WitherSkull
 Wolf

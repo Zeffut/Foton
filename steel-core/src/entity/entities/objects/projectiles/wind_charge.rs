@@ -25,11 +25,16 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntityEventSource, EntitySyncedData, Projectile,
     ProjectileBase, ProjectileDeflection, ProjectileHit, RemovalReason, SharedEntity,
 };
-use crate::world::explosion::ExplosionBlockInteraction;
+use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
 use crate::world::{ClipHitResult, World};
 
 /// How far the burst reaches.
 ///
+/// How much harder than an ordinary blast a wind charge shoves.
+///
+/// Vanilla parity: the `1.22F` knockback multiplier of `WindCharge.explode`.
+const BURST_KNOCKBACK: f64 = 1.22;
+
 /// Vanilla parity: `WindCharge.RADIUS`, the `1.2F` handed to `Level.explode`.
 const BURST_RADIUS: f32 = 1.2;
 
@@ -196,21 +201,14 @@ impl WindChargeEntity {
     /// damagesEntities = false, knockbackMultiplier = 1.22F,
     /// immuneBlocks = #blocks_wind_charge_explosions)`.
     ///
-    /// Three parts of that are out of reach, and are worth naming rather than
-    /// approximating in silence:
-    ///
-    /// * Steel has no `Explosion.BlockInteraction.TRIGGER_BLOCK`.
-    ///   [`ExplosionBlockInteraction`] offers only `Keep` and `Destroy`, so
-    ///   `Keep` is used -- blocks survive, which is the half that matters, but
-    ///   the per-block `BlockState.onExplosionHit` that lets a vanilla wind
-    ///   charge slam a door, flip a trapdoor or ring a bell never runs. That
-    ///   block callback is the missing system.
-    /// * Steel has no `ExplosionDamageCalculator`, so `damagesEntities = false`
-    ///   cannot be expressed: `World::hurt_entities_from_explosion` always
-    ///   deals the vanilla blast damage. A Steel wind charge therefore hurts
-    ///   what it pushes, where a vanilla one only pushes it.
-    /// * For the same reason the `1.22F` knockback multiplier is dropped and
-    ///   the blast pushes at the default strength of one.
+    /// One part of that is still out of reach and is worth naming rather than
+    /// approximating in silence: Steel has no
+    /// `Explosion.BlockInteraction.TRIGGER_BLOCK`. [`ExplosionBlockInteraction`]
+    /// offers only `Keep` and `Destroy`, so `Keep` is used -- blocks survive,
+    /// which is the half that matters, but the per-block
+    /// `BlockState.onExplosionHit` that lets a vanilla wind charge slam a door,
+    /// flip a trapdoor or ring a bell never runs. That block callback is the
+    /// missing system.
     ///
     /// The `#blocks_wind_charge_explosions` immunity is moot while every block
     /// is kept. Vanilla's burst sound and its gust particles both travel inside
@@ -218,14 +216,21 @@ impl WindChargeEntity {
     /// directly here so the burst is at least audible, and the gust particles
     /// are absent.
     fn explode(&self, world: &Arc<World>, position: DVec3) {
-        world.explode(
-            Some(self.id()),
-            // Vanilla parity: `WindCharge.explode` passes a null damage source.
-            None,
+        world.explode_sparing(
+            ExplosionSpec {
+                source_entity_id: Some(self.id()),
+                // Vanilla parity: `WindCharge.explode` passes a null damage source.
+                damage_source: None,
+                radius: BURST_RADIUS,
+                fire: false,
+                interaction: ExplosionBlockInteraction::Keep,
+                // This is the whole point of a wind charge: it shoves what it
+                // reaches and hurts none of it, harder than an ordinary blast.
+                damages_entities: false,
+                knockback_multiplier: BURST_KNOCKBACK,
+            },
             position,
-            BURST_RADIUS,
-            false,
-            ExplosionBlockInteraction::Keep,
+            &|_pos| true,
         );
 
         // Vanilla parity: the volume and pitch `ClientPacketListener.handleExplosion`
@@ -712,6 +717,44 @@ mod tests {
         assert!(
             pig.velocity().x > 0.0,
             "the burst should throw the pig away from the charge"
+        );
+    }
+
+    /// The whole point of a wind charge: the burst shoves a bystander and does
+    /// not hurt it. A direct hit still hurts -- that damage comes from
+    /// `onHitEntity`, not from the blast -- so the two have to be told apart.
+    #[test]
+    fn the_burst_shoves_a_bystander_without_hurting_it() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("wind_charge_burst_is_harmless");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let pig: SharedEntity = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            DVec3::new(9.0, 64.0, 8.0),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&pig))
+            .expect("pig should attach to the loaded test chunk");
+        let health_before = pig
+            .as_living_entity()
+            .expect("a pig is a living entity")
+            .get_health();
+
+        let charge = charge_at(DVec3::new(8.0, 64.0, 8.0), &world);
+        charge.explode(&world, DVec3::new(8.0, 64.0, 8.0));
+
+        let living = pig.as_living_entity().expect("a pig is a living entity");
+        assert!(
+            (living.get_health() - health_before).abs() < f32::EPSILON,
+            "the burst took health off a bystander"
+        );
+        assert!(
+            pig.velocity().length_squared() > 0.0,
+            "the burst did not move the bystander at all"
         );
     }
 

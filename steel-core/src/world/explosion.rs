@@ -52,6 +52,38 @@ pub struct ExplosionSpec {
     pub fire: bool,
     /// What it does to blocks.
     pub interaction: ExplosionBlockInteraction,
+    /// Whether the blast hurts what it reaches.
+    ///
+    /// Vanilla parity: the `damagesEntities` of
+    /// `SimpleExplosionDamageCalculator`. A wind charge is the reason this
+    /// exists: it shoves everything around it and hurts none of it.
+    pub damages_entities: bool,
+    /// How hard the blast shoves, against an ordinary explosion.
+    ///
+    /// Vanilla parity: the `knockbackMultiplier` of the same calculator.
+    pub knockback_multiplier: f64,
+}
+
+impl ExplosionSpec {
+    /// An ordinary blast: it hurts, and it shoves as hard as TNT.
+    #[must_use]
+    pub const fn new(
+        source_entity_id: Option<i32>,
+        damage_source: Option<DamageSource>,
+        radius: f32,
+        fire: bool,
+        interaction: ExplosionBlockInteraction,
+    ) -> Self {
+        Self {
+            source_entity_id,
+            damage_source,
+            radius,
+            fire,
+            interaction,
+            damages_entities: true,
+            knockback_multiplier: 1.0,
+        }
+    }
 }
 
 impl World {
@@ -74,6 +106,8 @@ impl World {
                 radius,
                 fire,
                 interaction,
+                damages_entities: true,
+                knockback_multiplier: 1.0,
             },
             center,
             &|_pos| true,
@@ -94,12 +128,7 @@ impl World {
     ) -> Vec<BlockPos> {
         let mut to_blow = self.calculate_exploded_positions(center, spec.radius);
         to_blow.retain(|pos| should_explode(*pos));
-        self.hurt_entities_from_explosion(
-            spec.source_entity_id,
-            spec.damage_source,
-            center,
-            spec.radius,
-        );
+        self.hurt_entities_from_explosion(&spec, center);
 
         if spec.interaction == ExplosionBlockInteraction::Destroy {
             for pos in &to_blow {
@@ -198,13 +227,8 @@ impl World {
     /// Damages and pushes every entity the blast reaches.
     ///
     /// Vanilla parity: `ServerExplosion.hurtEntities`.
-    fn hurt_entities_from_explosion(
-        self: &Arc<Self>,
-        source_entity_id: Option<i32>,
-        damage_source: Option<DamageSource>,
-        center: DVec3,
-        radius: f32,
-    ) {
+    fn hurt_entities_from_explosion(self: &Arc<Self>, spec: &ExplosionSpec, center: DVec3) {
+        let (source_entity_id, radius) = (spec.source_entity_id, spec.radius);
         if radius < 1.0e-5 {
             return;
         }
@@ -218,7 +242,9 @@ impl World {
             center.z + reach + 1.0,
         );
 
-        let mut damage_source = damage_source
+        let mut damage_source = spec
+            .damage_source
+            .clone()
             .unwrap_or_else(|| DamageSource::environment(&vanilla_damage_types::EXPLOSION));
         damage_source = damage_source.with_source_position(center);
         if let Some(id) = source_entity_id {
@@ -238,8 +264,10 @@ impl World {
 
             // Vanilla parity: `ExplosionDamageCalculator.getEntityDamageAmount`.
             let impact = (1.0 - distance) * exposure;
-            let damage = (impact.mul_add(impact, impact) / 2.0).mul_add(7.0 * reach, 1.0);
-            entity.hurt(self, &damage_source, damage as f32);
+            if spec.damages_entities {
+                let damage = (impact.mul_add(impact, impact) / 2.0).mul_add(7.0 * reach, 1.0);
+                entity.hurt(self, &damage_source, damage as f32);
+            }
 
             // Vanilla pushes from the blast toward the entity's eyes.
             let origin = entity.position().with_y(entity.get_eye_y());
@@ -251,7 +279,7 @@ impl World {
                         .lock()
                         .required_value(vanilla_attributes::EXPLOSION_KNOCKBACK_RESISTANCE)
                 });
-                let power = impact * (1.0 - resistance);
+                let power = impact * (1.0 - resistance) * spec.knockback_multiplier;
                 let knockback = direction.normalize() * power;
                 entity.set_velocity(entity.velocity() + knockback);
                 entity.mark_velocity_sync();

@@ -164,13 +164,13 @@ impl TntMinecartEntity {
             !is_rail(&world, pos) && !is_rail(&world, BlockPos::new(pos.x(), pos.y() + 1, pos.z()))
         };
         world.explode_sparing(
-            ExplosionSpec {
-                source_entity_id: Some(self.id()),
-                damage_source: None,
-                radius: power as f32,
-                fire: false,
-                interaction: ExplosionBlockInteraction::Destroy,
-            },
+            ExplosionSpec::new(
+                Some(self.id()),
+                None,
+                power as f32,
+                false,
+                ExplosionBlockInteraction::Destroy,
+            ),
             self.position(),
             &spare_rails,
         );
