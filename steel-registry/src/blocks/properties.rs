@@ -518,13 +518,75 @@ impl PropertyEnum for Half {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Eq)]
 #[derive_const(PartialEq)]
 pub enum SideChainPart {
     Unconnected,
     Right,
     Center,
     Left,
+}
+
+impl SideChainPart {
+    /// Returns whether this part has a neighbour on either side.
+    #[must_use]
+    pub const fn is_connected(self) -> bool {
+        !matches!(self, SideChainPart::Unconnected)
+    }
+
+    /// Returns whether the chain continues towards `end_part` from here.
+    #[must_use]
+    pub const fn is_connection_towards(self, end_part: SideChainPart) -> bool {
+        matches!(
+            (self, end_part),
+            (SideChainPart::Center, _)
+                | (SideChainPart::Left, SideChainPart::Left)
+                | (SideChainPart::Right, SideChainPart::Right)
+                | (SideChainPart::Unconnected, SideChainPart::Unconnected)
+        )
+    }
+
+    /// Returns whether this part is one end of its chain rather than a middle.
+    #[must_use]
+    pub const fn is_chain_end(self) -> bool {
+        !matches!(self, SideChainPart::Center)
+    }
+
+    /// Returns this part after gaining a neighbour on the right.
+    #[must_use]
+    pub const fn when_connected_to_the_right(self) -> SideChainPart {
+        match self {
+            SideChainPart::Unconnected | SideChainPart::Left => SideChainPart::Left,
+            SideChainPart::Right | SideChainPart::Center => SideChainPart::Center,
+        }
+    }
+
+    /// Returns this part after gaining a neighbour on the left.
+    #[must_use]
+    pub const fn when_connected_to_the_left(self) -> SideChainPart {
+        match self {
+            SideChainPart::Unconnected | SideChainPart::Right => SideChainPart::Right,
+            SideChainPart::Center | SideChainPart::Left => SideChainPart::Center,
+        }
+    }
+
+    /// Returns this part after losing its neighbour on the right.
+    #[must_use]
+    pub const fn when_disconnected_from_the_right(self) -> SideChainPart {
+        match self {
+            SideChainPart::Unconnected | SideChainPart::Left => SideChainPart::Unconnected,
+            SideChainPart::Right | SideChainPart::Center => SideChainPart::Right,
+        }
+    }
+
+    /// Returns this part after losing its neighbour on the left.
+    #[must_use]
+    pub const fn when_disconnected_from_the_left(self) -> SideChainPart {
+        match self {
+            SideChainPart::Unconnected | SideChainPart::Right => SideChainPart::Unconnected,
+            SideChainPart::Center | SideChainPart::Left => SideChainPart::Left,
+        }
+    }
 }
 
 impl PropertyEnum for SideChainPart {

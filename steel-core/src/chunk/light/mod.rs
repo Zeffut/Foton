@@ -61,6 +61,20 @@ pub fn get_light_opacity(state: BlockStateId) -> u8 {
     state.get_light_dampening().max(MIN_LIGHT_OPACITY)
 }
 
+/// Returns vanilla `BlockStateBase.propagatesSkylightDown`.
+///
+/// Vanilla caches the flag on every state and the extractor does not emit it,
+/// but it is recoverable from the light dampening the extractor does emit.
+/// Vanilla's own `BlockBehaviour.getLightDampening` is
+/// `isSolidRender() ? 15 : (propagatesSkylightDown() ? 0 : 1)`, so a state
+/// propagates skylight exactly when its dampening is zero. Only two classes
+/// override `getLightDampening` -- tinted glass at 15 and leaves at 1 -- and
+/// both also answer "does not propagate", so the identity holds throughout.
+#[must_use]
+pub fn propagates_skylight_down(state: BlockStateId) -> bool {
+    state.get_light_dampening() == 0
+}
+
 /// Returns the occlusion shape vanilla lighting uses for a block state.
 #[must_use]
 pub fn light_occlusion_shape(state: BlockStateId) -> VoxelShape {
@@ -172,8 +186,39 @@ mod tests {
         ChunkLightData, ChunkSkyLightSources, DATA_LAYER_SIZE, DataLayer, LightLayer, LightSection,
         LightSectionData, LightSectionRange, MAX_LIGHT_LEVEL, build_chunk_light_update_packet,
         build_chunk_light_update_packet_for_sections, get_light_opacity,
-        has_different_light_properties,
+        has_different_light_properties, propagates_skylight_down,
     };
+
+    #[test]
+    fn skylight_propagation_derived_from_dampening_matches_the_vanilla_answers() {
+        init_vanilla_registry();
+
+        for block in [
+            &vanilla_blocks::AIR,
+            &vanilla_blocks::GLASS,
+            &vanilla_blocks::BARRIER,
+            &vanilla_blocks::MOSS_CARPET,
+        ] {
+            assert!(
+                propagates_skylight_down(block.default_state()),
+                "{} should propagate skylight",
+                block.key
+            );
+        }
+
+        for block in [
+            &vanilla_blocks::TINTED_GLASS,
+            &vanilla_blocks::OAK_LEAVES,
+            &vanilla_blocks::NETHERRACK,
+            &vanilla_blocks::WATER,
+        ] {
+            assert!(
+                !propagates_skylight_down(block.default_state()),
+                "{} should not propagate skylight",
+                block.key
+            );
+        }
+    }
 
     fn init_light_tests() {
         init_vanilla_registry();

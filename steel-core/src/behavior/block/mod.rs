@@ -31,7 +31,7 @@ use steel_utils::{BlockLocalAabb, BlockPos, BlockStateId, Identifier, WorldAabb,
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::behavior::blocks::vegetation::bonemealable::Bonemealable;
 use crate::behavior::blocks::vegetation::growing_plant_head_block::GrowingPlantHead;
-use crate::behavior::blocks::{Infested, LightningRod};
+use crate::behavior::blocks::{CopperChest, Infested, LightningRod};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::behavior::{InventoryAccess, PlacementSource};
 use crate::block_entity::{BlockEntity, BlockEntityTicker, SharedBlockEntity};
@@ -1308,6 +1308,14 @@ pub trait BlockBehavior: Send + Sync {
     /// Stands in for vanilla's `instanceof LightningRodBlock` in
     /// `LightningBolt.powerLightningRod`.
     fn as_lightning_rod(&self) -> Option<&dyn LightningRod> {
+        None
+    }
+
+    /// Returns the copper-chest capability implemented by this block.
+    ///
+    /// Stands in for vanilla's `instanceof CopperChestBlock` in
+    /// `CopperChestBlock.getLeastOxidizedChestOfConnectedBlocks`.
+    fn as_copper_chest(&self) -> Option<&dyn CopperChest> {
         None
     }
 }

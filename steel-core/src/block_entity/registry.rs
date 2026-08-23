@@ -22,7 +22,8 @@ use super::entities::{
     DecoratedPotBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
     FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
     PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, SculkSensorBlockEntity,
-    SculkShriekerBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity, SkullBlockEntity,
+    SculkShriekerBlockEntity, ShelfBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
+    SkullBlockEntity,
 };
 use crate::world::World;
 
@@ -274,6 +275,10 @@ pub fn init_block_entities() {
 
         registry.register(&vanilla_block_entity_types::CHEST, |level, pos, state| {
             Arc::new(ChestBlockEntity::new(level, pos, state))
+        });
+
+        registry.register(&vanilla_block_entity_types::SHELF, |level, pos, state| {
+            Arc::new(ShelfBlockEntity::new(level, pos, state))
         });
 
         registry.register(
