@@ -49,7 +49,7 @@ const MAX_SPEED_IN_WATER: f64 = 0.2;
 const SLOWDOWN_RIDDEN: f64 = 0.997;
 const SLOWDOWN_EMPTY: f64 = 0.96;
 
-/// Extra drag while under water.
+/// Extra drag while under water, shared by every cart.
 ///
 /// Vanilla parity: the `0.95F` of `AbstractMinecart.applyNaturalSlowdown`.
 const WATER_SLOWDOWN: f64 = 0.95;
@@ -113,6 +113,25 @@ pub(super) trait MinecartLike: Entity {
     /// Vanilla parity: `AbstractMinecart.activateMinecart`, which is a no-op on
     /// the base class and does something on four of the six carts.
     fn activate_minecart(&self, _world: &Arc<World>, _pos: BlockPos, _powered: bool) {}
+
+    /// Applies the drag this cart feels every tick.
+    ///
+    /// Vanilla parity: `AbstractMinecart.applyNaturalSlowdown`. The vertical
+    /// component is dropped entirely, which is why a cart on a rail never
+    /// accumulates fall speed. A container cart overrides this: a fuller chest
+    /// rolls less far.
+    fn apply_natural_slowdown(&self, movement: DVec3) -> DVec3 {
+        let slowdown = if self.is_vehicle() {
+            SLOWDOWN_RIDDEN
+        } else {
+            SLOWDOWN_EMPTY
+        };
+        let mut slowed = DVec3::new(movement.x * slowdown, 0.0, movement.z * slowdown);
+        if self.is_in_water() {
+            slowed *= WATER_SLOWDOWN;
+        }
+        slowed
+    }
 }
 
 /// Returns the two directions a rail of this shape leads out in.
@@ -171,24 +190,6 @@ fn max_speed<M: MinecartLike>(cart: &M) -> f64 {
     } else {
         MAX_SPEED_ON_LAND
     }
-}
-
-/// Applies the drag a cart feels every tick.
-///
-/// Vanilla parity: `AbstractMinecart.applyNaturalSlowdown`. The vertical
-/// component is dropped entirely, which is why a cart on a rail never
-/// accumulates fall speed.
-fn apply_natural_slowdown<M: MinecartLike>(cart: &M, movement: DVec3) -> DVec3 {
-    let slowdown = if cart.is_vehicle() {
-        SLOWDOWN_RIDDEN
-    } else {
-        SLOWDOWN_EMPTY
-    };
-    let mut slowed = DVec3::new(movement.x * slowdown, 0.0, movement.z * slowdown);
-    if cart.is_in_water() {
-        slowed *= WATER_SLOWDOWN;
-    }
-    slowed
 }
 
 /// Returns whether the block at `pos` can carry redstone through it.
@@ -413,7 +414,7 @@ fn move_along_track<M: MinecartLike>(
         let _ = cart.try_set_position(DVec3::new(moved.x, moved.y + f64::from(exit1[1]), moved.z));
     }
 
-    cart.set_velocity(apply_natural_slowdown(cart, cart.velocity()));
+    cart.set_velocity(cart.apply_natural_slowdown(cart.velocity()));
 
     // Height it actually gained or lost, converted back into speed: this is
     // what makes a cart run faster downhill and slower up.

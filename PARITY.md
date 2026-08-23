@@ -62,10 +62,13 @@ cannot.
       without anything looking for one, a detector rail notices it pass, the
       item puts one on a rail and refuses anything else, and a player can ride
       it. This is vanilla's old physics, the one a world runs with
-      `minecart_improvements` off. Still open: the five variants (chest,
-      furnace, hopper, TNT, spawner, command block), and
-      `pushAndPickupEntities` -- a cart passes through everything, because
-      Steel has no entity push.
+      `minecart_improvements` off. The chest minecart rolls too and opens
+      instead of seating; mineshafts have always generated these and there
+      was no way to open one. Still open: furnace, hopper, TNT, spawner and
+      command block, and `pushAndPickupEntities` -- a cart passes through
+      everything, because Steel has no entity push. A generated chest cart
+      opens empty: Steel has no loot system at all, which is a gap of its own
+      and older than this.
 - [x] **Storage that travels**: shulker box (17), ender chest and trapped
       chest. The trapped chest needed the container opener count first --
       without it its signal is always zero and it is a chest that costs a

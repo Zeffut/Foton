@@ -128,6 +128,14 @@ CMDS="$CMDS;;!useon 8 100 11 up"
 CMDS="$CMDS;;execute if entity @e[type=minecraft:minecart,x=8,y=100,z=11,distance=..2] run tellraw @s \"CARTPLACEDFROMITEM\""
 # And a cart is something to sit in.
 CMDS="$CMDS;;!useentity minecart"
+# A chest minecart is not. It rolls the same way and opens instead of seating,
+# which is the one thing that separates the two.
+CMDS="$CMDS;;setblock 8 99 13 minecraft:stone"
+CMDS="$CMDS;;setblock 8 100 13 minecraft:rail[shape=east_west]"
+CMDS="$CMDS;;teleport @s 8 100 12"
+CMDS="$CMDS;;summon minecraft:chest_minecart 8 100 13"
+CMDS="$CMDS;;!useentity chest_minecart"
+CMDS="$CMDS;;!close"
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
@@ -136,7 +144,7 @@ STATUS=$?
 cleanup
 
 echo "=== what happened ==="
-grep "server says" join.log | grep -oE "DETECTORSTARTSOFF|RAILISPOWERED|CARTEXISTS|CARTLEFT|CARTREACHEDTHEEND|DETECTORSAWIT|CARTTOOKTHECORNER|NOCARTONSTONE|CARTPLACEDFROMITEM"; grep -E "is carrying" join.log | tail -2
+grep "server says" join.log | grep -oE "DETECTORSTARTSOFF|RAILISPOWERED|CARTEXISTS|CARTLEFT|CARTREACHEDTHEEND|DETECTORSAWIT|CARTTOOKTHECORNER|NOCARTONSTONE|CARTPLACEDFROMITEM"; grep -E "is carrying|a screen opened" join.log | tail -3
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect|unknown" | tail -5
 
@@ -155,4 +163,11 @@ said CARTPLACEDFROMITEM || fail "the minecart item placed nothing on a rail"
 player=$(grep -o 'joined the world as entity [0-9]*' join.log | head -1 | awk '{print $NF}')
 [ -n "$player" ] || fail "never learned the player entity id"
 grep -q "is carrying \[$player\]" join.log || fail "right-clicking a minecart put nobody in it"
+screens=$(grep -c "a screen opened" join.log)
+[ "$screens" -eq 1 ] \
+  || fail "expected exactly the chest minecart to open a screen, got $screens"
+chest_cart=$(grep -o 'right-clicked the chest_minecart (entity [0-9]*' join.log | head -1 | awk '{print $NF}')
+[ -n "$chest_cart" ] || fail "the chest minecart was never right-clicked"
+! grep -q "entity $chest_cart is carrying \[" join.log \
+  || fail "a chest minecart seated the player instead of opening"
 echo "########## MINECART TEST PASSED ##########"
