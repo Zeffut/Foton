@@ -29,12 +29,14 @@ started; the second is where `dev/parity-gaps.txt` stands now.
 
 | missing classes | at first measurement | now |
 |---|---|---|
-| blocks | 63 | 36 |
-| items | 38 | 19 |
-| entities | 142 | 86 |
+| blocks | 63 | 20 |
+| items | 38 | 4 |
+| entities | 142 | 74 |
 
-**Entities are still where the distance is**, and most of what remains there is
-mobs. Two thirds of the item gap and nearly half the block gap have gone.
+**Entities are all that is left of any size**, and nearly all of it is mobs.
+The item column is down to four, three of which are blocked on a map system
+that does not exist and one of which -- vanilla's plain `Item` -- needs
+nothing.
 
 Two warnings about reading this table at all. It counts classes with *no*
 behavior, so it says nothing about how complete the ones that exist are: the
@@ -43,15 +45,30 @@ some vanilla classes are only collision shapes that Steel already takes from
 extracted data -- `SoulSandBlock` is one. A line disappearing is good news; it
 is not the same as the feature working.
 
-A pattern worth naming, because it has now come up more than a dozen times: the
+A pattern worth naming, because it has now come up more than twenty times: the
 expensive half of a feature was often already written and simply unreachable.
 Rails worked and nothing ran on them. `handle_move_vehicle` was complete and no
 player could board a boat. The item frame had synced data, persistence and a
 comparator output, and no item to hang one. 319 stonecutting recipes sat behind
 a "skip other recipe types for now". Every mob effect applied server-side and
 no client was ever told. The entire leash -- state, spring maths, packet -- was
-there and no item could tie it. Before adding anything, check whether the thing
-already exists and is merely orphaned.
+there and no item could tie it. `is_sensitive_to_water` was declared by the
+enderman and the strider and read by nothing, so neither ever took the damage.
+Before adding anything, check whether the thing already exists and is merely
+orphaned.
+
+The loot system is the sharpest version of this so far, and it is worth reading
+as a warning about this document too. It was written down here as "Steel has no
+loot system at all". Steel had a complete one: a 2,443-line interpreter and a
+build step compiling all 1355 vanilla tables into typed statics. What it did
+not have was correct *results*, and nothing on the outside distinguished the
+two. `match_tool` answered true when there was no tool, so 138 conditions were
+wrong. Looting read the enchantment off the tool instead of the attacker, which
+is not where it lives, so the enchantment did nothing at all. An entity
+predicate with an unmodelled key silently matched everything, which is why
+every zombie in Steel dropped a red mushroom -- vanilla gates that on riding a
+zombie horse. **A system that exists is not the same as a system that works,
+and this file has been wrong about which was which.**
 
 ## The order
 
@@ -92,8 +109,24 @@ cannot.
       Still open: spawner and command block carts, both blocked on the blocks
       they carry. `pushAndPickupEntities` is missing for all six -- a cart
       passes through everything, because Steel has no entity push. A generated
-      chest cart opens empty: Steel has no loot system at all, which is a gap
-      of its own and older than this.
+      chest cart still opens empty, but not for the reason written here before:
+      see the loot entry below.
+
+- [~] **Loot**: block drops and mob drops both roll real vanilla tables, with
+      Silk Touch, Fortune, Looting, explosion decay and the killer's luck all
+      doing what they should. That is a change of results, not of machinery --
+      the interpreter and all 1355 tables were already here and quietly wrong.
+
+      Still open, and named precisely because "loot works now" would be too
+      generous: **container loot is not unpacked**. Worldgen writes the
+      `LootTable` tag correctly and eight block entities discard it on load, so
+      a generated chest is empty and so is the chest minecart. `copy_components`
+      (71 uses) needs the block entity in the block loot path, which is why a
+      dozen hand-written `get_drops` overrides still exist for shulker boxes,
+      decorated pots, banners and skulls. `enchant_randomly` and
+      `enchant_with_levels` (86 uses, all chests) need an enchantment selector
+      that only an enchanting table would bring. `location_check` is still
+      silently true, which double-drops seeds from tall grass.
 - [x] **Storage that travels**: shulker box (17), ender chest and trapped
       chest. The trapped chest needed the container opener count first --
       without it its signal is always zero and it is a chest that costs a
@@ -148,9 +181,10 @@ cannot.
       and a catalyst that ate mob experience while spreading nothing would be
       worse than none.
 
-      A lightning strike also does not convert what it hits -- no pig becomes a
-      zoglin, no villager a witch. That needs a `thunder_hit` seam on `Entity`
-      that does not exist.
+      A lightning strike still does not convert what it hits -- no pig becomes
+      a zoglin, no villager a witch -- but the reason changed: the
+      `thunder_hit` seam on `Entity` now exists, added alongside the golems,
+      and what is missing is the mobs on the far side of it.
 
 - [x] **Spawn eggs** (88 entries). One class, and the reason `dev/join.py`
       can now right-click a block at all.
@@ -188,6 +222,13 @@ cannot.
       only the item was missing, so a player could walk a pig around and never
       hitch it.
 
+      The bundle works, all of it: the weight rule, partial insertion, the
+      selected item and the cycling. Books can be written, signed and read,
+      which needed the `SEditBook` and `OpenBook` packets -- Steel had numbers
+      for both and nothing behind them. The debug stick cycles block states for
+      an operator, fish buckets carry cod and salmon, and the powder snow
+      bucket places its block.
+
       Still open: glow item frame, whose entity is a separate vanilla class.
       Three shared gaps are worth naming rather than repeating per entity: a
       frame still does not drop what is in it; nothing block-attached falls off
@@ -197,8 +238,25 @@ cannot.
 
 ### 2. The living world
 
-- [ ] **Villager, trading, iron golem.** One mob unlocks a whole economy, and
-      the zombie villager behind it.
+- [~] **The golems a player builds.** A carved pumpkin on the right stack of
+      blocks now makes a golem, which needed `BlockPattern`, `BlockInWorld` and
+      `BlockPatternBuilder` -- ported whole into `world/block_pattern/` rather
+      than into the pumpkin, because the wither summon and the end crystal
+      ritual want the same machinery. The snow golem leaves a trail, throws
+      snowballs and melts; the iron golem cracks as it is hurt, is repaired
+      with an ingot, remembers being player-built and keeps a grudge across a
+      save; the copper golem weathers, shears, waxes and freezes into a statue.
+
+      Two honest limits. An iron golem's *village* half is absent -- no
+      `MoveBackToVillage`, no `DefendVillage`, no natural village spawn --
+      because those need a POI distance tracker Steel has not got, and
+      villagers. And the copper golem never moves an item: vanilla drives it
+      entirely from a `Brain`, and Steel has no brain layer, only goals.
+
+- [ ] **Villager, trading, iron golem in a village.** One mob unlocks a whole
+      economy, and the zombie villager behind it. It is also what would make
+      the iron golem's village goals and its poppy worth writing: with no
+      villagers, an iron golem currently offers flowers only to copper golems.
 - [ ] **Mounts**: horse, donkey, mule, skeleton horse, llama, camel.
 - [ ] **The rest of the passive roster**: cat, ocelot, fox, rabbit, panda,
       goat, turtle, dolphin, parrot, bee, axolotl, frog, sniffer, armadillo.
@@ -209,6 +267,20 @@ cannot.
 Ghast and phantom need flying navigation, which does not exist yet; that is one
 piece of work that unlocks several mobs at once, and should come before the
 mobs that need it.
+
+### 2b. Blocks the world runs on its own
+
+- [~] Nylium dies back without light and grows nether vegetation from bone
+      meal; netherrack takes the spread. Frosted ice melts through its four
+      stages. The dried ghast hydrates in water and dries on land. The shelf
+      holds three items and chains sideways up to three wide, powered or not.
+      Copper chests weather with the rest of the copper. The light block cycles
+      its level for an operator only.
+
+      Left on the ledger deliberately: `BonemealableFeaturePlacerBlock` (moss),
+      because placing its patch needs the worldgen placement dispatcher, and a
+      `perform_bonemeal` that placed nothing would still eat the bone meal --
+      worse than the no-op there now.
 
 ### 3. The end of the game
 
