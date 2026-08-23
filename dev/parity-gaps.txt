@@ -12,7 +12,7 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 50
+[blocks] 43
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
@@ -35,15 +35,11 @@ LightningRodBlock
 MangroveRootsBlock
 NetherrackBlock
 NyliumBlock
-PiglinWallSkullBlock
-PlayerHeadBlock
-PlayerWallHeadBlock
 SculkBlock
 SculkCatalystBlock
 SculkSensorBlock
 SculkShriekerBlock
 ShelfBlock
-SkullBlock
 SnifferEggBlock
 SoulSandBlock
 SpawnerBlock
@@ -57,12 +53,9 @@ TransparentBlock
 TrialSpawnerBlock
 TurtleEggBlock
 VaultBlock
-WallSkullBlock
 WeatheringCopperChestBlock
 WeatheringCopperGolemStatueBlock
 WeatheringLightningRodBlock
-WitherSkullBlock
-WitherWallSkullBlock
 
 [items] 28
 ArmorStandItem

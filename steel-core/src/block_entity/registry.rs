@@ -22,7 +22,7 @@ use super::entities::{
     DecoratedPotBlockEntity, DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity,
     FurnaceBlockEntity, HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
     PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, ShulkerBoxBlockEntity,
-    SignBlockEntity,
+    SignBlockEntity, SkullBlockEntity,
 };
 use crate::world::World;
 
@@ -225,6 +225,11 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
         &vanilla_block_entity_types::DECORATED_POT,
         |level, pos, state| Arc::new(DecoratedPotBlockEntity::new(level, pos, state)),
     );
+
+    // Every skull and head, standing or on a wall, shares this one type.
+    registry.register(&vanilla_block_entity_types::SKULL, |level, pos, state| {
+        Arc::new(SkullBlockEntity::new(level, pos, state))
+    });
 }
 
 /// Initializes the global block entity registry.

@@ -10,6 +10,7 @@ mod end_rod_block;
 mod flower_pot_block;
 mod lantern_block;
 mod sign_block;
+mod skull_block;
 mod torch_block;
 mod weathering_lantern_block;
 
@@ -24,6 +25,10 @@ pub use flower_pot_block::FlowerPotBlock;
 pub use lantern_block::LanternBlock;
 pub use sign_block::{
     CeilingHangingSignBlock, StandingSignBlock, WallHangingSignBlock, WallSignBlock,
+};
+pub use skull_block::{
+    PiglinWallSkullBlock, PlayerHeadBlock, PlayerWallHeadBlock, SkullBlock, WallSkullBlock,
+    WitherSkullBlock, WitherWallSkullBlock,
 };
 pub use torch_block::{TorchBlock, WallTorchBlock};
 pub use weathering_lantern_block::WeatheringLanternBlock;
