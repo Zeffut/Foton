@@ -196,6 +196,26 @@ fn leash_scan_area(center: DVec3) -> WorldAabb {
     )
 }
 
+/// Finds leashable mobs held by `holder_id` inside the leash scan cube
+/// centered on `center`.
+///
+/// Vanilla parity: `Leashable.leashableInArea(Level, Vec3, Predicate)`, the
+/// overload that scans around a loose point instead of around an entity. The
+/// predicate callers pass there is always `l -> l.getLeashHolder() == holder`,
+/// so the holder is taken by id here rather than as a closure.
+pub(crate) fn leashables_leashed_to_holder_at(
+    world: &World,
+    center: DVec3,
+    holder_id: i32,
+) -> Vec<SharedEntity> {
+    world.get_entities_in_aabb_matching(&leash_scan_area(center), |entity| {
+        entity.as_mob().is_some_and(|mob| {
+            mob.leash_holder()
+                .is_some_and(|holder| holder.id() == holder_id)
+        })
+    })
+}
+
 fn transfer_leashables_to_holder(leashables: Vec<SharedEntity>, new_holder: &SharedEntity) -> bool {
     let mut transferred = false;
     for leashable in leashables {

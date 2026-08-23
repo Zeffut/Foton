@@ -1181,14 +1181,11 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         let Some(world) = self.level() else {
             return Vec::new();
         };
-        let holder_id = holder.id();
-        let scan_area = leash_scan_area(world_aabb_center(self.bounding_box()));
-        world.get_entities_in_aabb_matching(&scan_area, |entity| {
-            entity.as_mob().is_some_and(|mob| {
-                mob.leash_holder()
-                    .is_some_and(|holder| holder.id() == holder_id)
-            })
-        })
+        leashables_leashed_to_holder_at(
+            world.as_ref(),
+            world_aabb_center(self.bounding_box()),
+            holder.id(),
+        )
     }
 
     /// Transfers leashables currently held by `old_holder` to this entity.

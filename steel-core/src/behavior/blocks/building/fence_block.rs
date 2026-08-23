@@ -4,8 +4,11 @@
 
 use std::sync::Arc;
 
+use crate::behavior::InventoryAccess;
 use crate::behavior::block::{BlockBehavior, schedule_water_tick_if_waterlogged};
-use crate::behavior::context::BlockPlaceContext;
+use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::behavior::items::bind_player_mobs;
+use crate::player::Player;
 use crate::world::{LevelReader, ScheduledTickAccess, World};
 use steel_macros::block_behavior;
 use steel_registry::blocks::BlockRef;
@@ -128,6 +131,22 @@ impl FenceBlock {
 }
 
 impl BlockBehavior for FenceBlock {
+    /// Vanilla parity: `FenceBlock.useWithoutItem`.
+    ///
+    /// The client-side branch has no counterpart -- Steel only runs the server
+    /// half of the interaction.
+    fn use_without_item(
+        &self,
+        _state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+        _hit_result: &BlockHitResult,
+        _inv: &mut InventoryAccess,
+    ) -> InteractionResult {
+        bind_player_mobs(player, world, pos)
+    }
+
     fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {
         log::debug!(
             "FenceBlock::get_state_for_placement called for {:?} at {:?}",
@@ -181,12 +200,21 @@ impl BlockBehavior for FenceBlock {
 
 #[cfg(test)]
 mod tests {
-    use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_fluids};
-    use steel_utils::BlockPos;
+    use glam::DVec3;
+    use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_fluids};
+    use steel_utils::types::{InteractionHand, UpdateFlags};
+    use steel_utils::{BlockPos, ChunkPos, Downcast as _};
 
-    use crate::test_support::TestLevel;
+    use crate::behavior::init_behaviors;
+    use crate::entity::entities::{LeashFenceKnotEntity, PigEntity};
+    use crate::entity::{SharedEntity, next_entity_id};
+    use crate::test_support::{
+        TestLevel, TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk,
+    };
 
     use super::*;
+
+    const FENCE_POS: BlockPos = BlockPos::new(8, 64, 8);
 
     #[test]
     fn waterlogged_fence_update_shape_schedules_water_tick() {
@@ -216,6 +244,61 @@ mod tests {
                 .map(|tick| (tick.fluid, tick.delay))
                 .collect::<Vec<_>>(),
             vec![(&vanilla_fluids::WATER, 5)]
+        );
+    }
+
+    /// The empty-hand click is the path an ordinary (non-sneaking) player takes
+    /// when tying a mob to a fence, so it is worth covering separately from
+    /// `LeadItem::use_on`.
+    #[test]
+    fn clicking_a_fence_while_leading_a_pig_ties_it_to_a_knot() {
+        let world = fresh_test_world("fence_use_without_item_binds_leashes");
+        init_behaviors();
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(FENCE_POS));
+        let state = vanilla_blocks::OAK_FENCE.default_state();
+        assert!(world.set_block(FENCE_POS, state, UpdateFlags::UPDATE_ALL));
+
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "Leader", next_entity_id()).build();
+        let player_entity: SharedEntity = Arc::clone(&player) as SharedEntity;
+        let pig: SharedEntity = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            DVec3::new(8.0, 64.0, 7.0),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&pig))
+            .expect("pig should attach to the loaded test chunk");
+        let mob = pig.as_mob().expect("pig should expose mob behavior");
+        mob.set_leashed_to(&player_entity);
+
+        let behavior = FenceBlock::new(&vanilla_blocks::OAK_FENCE);
+        let mut inventory =
+            InventoryAccess::new(Arc::clone(&player.inventory), InteractionHand::MainHand);
+        let result = behavior.use_without_item(
+            state,
+            &world,
+            FENCE_POS,
+            player.as_ref(),
+            &BlockHitResult {
+                location: DVec3::new(8.5, 65.0, 8.5),
+                direction: Direction::Up,
+                block_pos: FENCE_POS,
+                miss: false,
+                inside: false,
+                world_border_hit: false,
+            },
+            &mut inventory,
+        );
+
+        assert_eq!(result, InteractionResult::SuccessServer);
+        let holder = mob.leash_holder().expect("pig should stay leashed");
+        assert_eq!(
+            holder
+                .downcast_ref::<LeashFenceKnotEntity>()
+                .expect("pig should now be held by a fence knot")
+                .block_pos(),
+            FENCE_POS
         );
     }
 }
