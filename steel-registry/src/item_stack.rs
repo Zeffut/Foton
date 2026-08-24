@@ -647,13 +647,37 @@ impl ItemStack {
         value
     }
 
-    /// Sets the damage/durability as a fraction (0.0 = broken, 1.0 = full).
-    /// If `add` is true, adds to current damage instead of setting.
-    pub const fn set_damage_fraction(&mut self, _fraction: f32, _add: bool) {
-        // TODO: Implement when damage component system is ready
-        // let max_damage = self.get_max_damage();
-        // let damage_value = ((1.0 - fraction) * max_damage as f32) as i32;
-        // self.set_component(DAMAGE, damage_value);
+    /// Takes `fraction` of this item's durability away.
+    ///
+    /// Vanilla parity: `SetItemDamageFunction.run`. The fraction is of the
+    /// whole bar, not of what is left: 0.2 leaves an item at 80% unless `add`
+    /// is set, which stacks it onto the damage already there. An item that
+    /// cannot be damaged is left alone, as vanilla does after logging.
+    pub fn set_damage_fraction(&mut self, fraction: f32, add: bool) {
+        if !self.is_damageable_item() {
+            return;
+        }
+        let max_damage = self.get_max_damage();
+        if max_damage <= 0 {
+            return;
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "vanilla does this arithmetic in f32 and the values are small"
+        )]
+        let already_gone = if add {
+            1.0 - self.get_damage_value() as f32 / max_damage as f32
+        } else {
+            0.0
+        };
+        let remaining = 1.0 - (fraction + already_gone).clamp(0.0, 1.0);
+        #[expect(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            reason = "vanilla parity: `Mth.floor` of an f32 product"
+        )]
+        let damage = (remaining * max_damage as f32).floor() as i32;
+        self.set_damage_value(damage);
     }
 
     /// Enchants this item randomly with enchantments from the given options.
@@ -765,10 +789,27 @@ impl ItemStack {
         );
     }
 
-    /// Sets the potion type for this item.
-    pub const fn set_potion(&mut self, _id: &Identifier) {
-        // TODO: Implement potion type setting
-        // Set the POTION_CONTENTS component with the potion ID
+    /// Puts a potion into this item, keeping whatever else the contents held.
+    ///
+    /// Vanilla parity: `SetPotionFunction.run`, which updates
+    /// `POTION_CONTENTS` through `PotionContents::withPotion` starting from
+    /// `PotionContents.EMPTY`. An id no potion answers to is ignored rather
+    /// than written, so a bad table cannot produce a bottle of nothing.
+    pub fn set_potion(&mut self, id: &Identifier) {
+        use crate::data_components::components::PotionContents;
+        use crate::data_components::vanilla_components::POTION_CONTENTS;
+
+        let Some(potion) = crate::REGISTRY.potions.by_key(id) else {
+            return;
+        };
+        let contents = self
+            .get(POTION_CONTENTS)
+            .cloned()
+            .unwrap_or_else(PotionContents::empty);
+        self.set(
+            POTION_CONTENTS,
+            contents.with_potion(crate::registry::reference::RegistryReference::new(potion)),
+        );
     }
 
     /// Sets the suspicious stew effects for this item.
