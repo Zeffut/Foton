@@ -31,9 +31,8 @@ TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
 
-[items] 4
+[items] 3
 EmptyMapItem
-FishingRodItem
 Item
 MapItem
 
@@ -52,7 +51,6 @@ EnderDragon
 Evoker
 EvokerFangs
 EyeOfEnder
-FishingHook
 Frog
 Giant
 GlowItemFrame

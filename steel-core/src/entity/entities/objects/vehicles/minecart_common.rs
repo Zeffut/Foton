@@ -10,18 +10,18 @@
 //! game rule. This is the old one, which is what a world runs with the rule off
 //! -- the default.
 //!
-//! Not implemented, and not pretended otherwise: `pushAndPickupEntities`, which
-//! is how a moving cart shoves what it hits and scoops up a mob that walks into
-//! it. Steel has no entity push, so a cart passes through everything. That also
-//! leaves `AbstractMinecart.isRideable` with nothing to ask it, so it is not
-//! here either.
+//! `pushAndPickupEntities` is here: a moving rideable cart scoops up the mob
+//! that walks into it and shoves everything else, and a stationary one is
+//! shoved by other carts. The note that used to sit here said Steel had no
+//! entity push; it does, in `Entity::push_entity`, and every living entity had
+//! been using it. Only the cart was missing.
 
 use std::sync::Arc;
 
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty, RailShape};
-use steel_registry::vanilla_blocks;
+use steel_registry::{vanilla_blocks, vanilla_entities};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId};
 
@@ -113,6 +113,15 @@ pub(super) trait MinecartLike: Entity {
     /// Vanilla parity: `AbstractMinecart.activateMinecart`, which is a no-op on
     /// the base class and does something on four of the six carts.
     fn activate_minecart(&self, _world: &Arc<World>, _pos: BlockPos, _powered: bool) {}
+
+    /// Whether a mob that walks into this cart climbs aboard.
+    ///
+    /// Vanilla parity: `AbstractMinecart.isRideable`, which is false on the
+    /// base class and true only on the plain minecart -- a chest cart runs a
+    /// pig over rather than carrying it.
+    fn is_rideable(&self) -> bool {
+        false
+    }
 
     /// Scales how fast this cart may go.
     ///
@@ -524,8 +533,54 @@ pub(super) fn tick_minecart<M: MinecartLike>(cart: &M) {
         come_off_track(cart, &world);
     }
 
+    push_and_pickup_entities(cart, &world);
     cart.apply_effects_from_blocks();
     face_travel(cart);
+}
+
+/// Shoves what the cart runs into, and scoops up what can ride.
+///
+/// Vanilla parity: `OldMinecartBehavior.pushAndPickupEntities`. A rideable cart
+/// with real horizontal speed takes on the first thing that is not a player, an
+/// iron golem or another cart; everything else it simply shoves. A cart that is
+/// stopped, or one nothing can ride, only gets shoved by other carts.
+///
+/// Vanilla filters with `EntitySelector.pushableBy`, which is `isPushable`
+/// narrowed by team collision rules. Steel has no teams, so it reduces to
+/// `is_pushable` and skipping spectators.
+fn push_and_pickup_entities<M: MinecartLike>(cart: &M, world: &Arc<World>) {
+    let hitbox = cart.bounding_box().inflate_xyz(0.2, 0.0, 0.2);
+    let moving = cart.velocity().with_y(0.0).length_squared() >= 0.01;
+    let riders_welcome = cart.is_rideable() && moving;
+
+    for entity in world.get_entities_in_aabb(&hitbox) {
+        if entity.id() == cart.id() {
+            continue;
+        }
+
+        if riders_welcome {
+            if entity.is_spectator() || !entity.is_pushable() {
+                continue;
+            }
+            let boardable = entity.as_player().is_none()
+                && entity.entity_type().key != vanilla_entities::IRON_GOLEM.key
+                && !entity.is_minecart()
+                && !cart.is_vehicle()
+                && !entity.is_passenger();
+            if boardable {
+                if let Some(shared_cart) = world.get_entity_by_id(cart.id()) {
+                    entity.start_riding(&shared_cart);
+                }
+            } else {
+                entity.push_entity(cart);
+            }
+        } else if !cart.has_passenger(entity.as_ref())
+            && entity.is_pushable()
+            && entity.is_minecart()
+        {
+            entity.push_entity(cart);
+        }
+    }
 }
 
 /// Turns the cart to face the way it just moved.
@@ -575,5 +630,144 @@ trait HorizontalLength {
 impl HorizontalLength for DVec3 {
     fn length_squared_xz(self) -> f64 {
         self.x.mul_add(self.x, self.z * self.z)
+    }
+}
+
+#[cfg(test)]
+mod push_tests {
+    use std::sync::Arc;
+
+    use glam::DVec3;
+    use steel_registry::{init_vanilla_registry, vanilla_entities};
+    use steel_utils::ChunkPos;
+
+    use super::push_and_pickup_entities;
+    use crate::entity::entities::{ChestMinecartEntity, MinecartEntity, PigEntity};
+    use crate::entity::{Entity, SharedEntity, next_entity_id};
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use crate::world::World;
+
+    /// The one spot the test world is solid ground rather than a column the
+    /// fluid scan walks.
+    const TRACK: DVec3 = DVec3::new(8.5, 64.0, 8.5);
+
+    fn track_world(key: &'static str) -> Arc<World> {
+        init_vanilla_registry();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        world
+    }
+
+    fn add(world: &Arc<World>, entity: SharedEntity) -> SharedEntity {
+        world
+            .try_add_entity(Arc::clone(&entity))
+            .expect("the test chunk is loaded, so the entity should attach");
+        entity
+    }
+
+    /// Vanilla parity: the `startRiding` branch of `pushAndPickupEntities`. A
+    /// rolling minecart runs a pig over and the pig ends up in it.
+    #[test]
+    fn a_rolling_minecart_scoops_up_the_pig_it_runs_into() {
+        let world = track_world("cart_scoops_pig");
+        let cart = Arc::new(MinecartEntity::new(
+            &vanilla_entities::MINECART,
+            next_entity_id(),
+            TRACK,
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&cart) as SharedEntity);
+        let pig: SharedEntity = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            TRACK,
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&pig));
+
+        cart.set_velocity(DVec3::new(0.5, 0.0, 0.0));
+        push_and_pickup_entities(cart.as_ref(), &world);
+
+        assert!(pig.is_passenger(), "the pig did not board the cart");
+        assert!(cart.is_vehicle(), "the cart is carrying nobody");
+    }
+
+    /// Vanilla parity: `AbstractMinecart.isRideable`, false on every cart but
+    /// the plain one. A chest cart runs a pig over rather than carrying it.
+    #[test]
+    fn a_chest_minecart_carries_nobody() {
+        let world = track_world("chest_cart_carries_nobody");
+        let cart = Arc::new(ChestMinecartEntity::new(
+            &vanilla_entities::CHEST_MINECART,
+            next_entity_id(),
+            TRACK,
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&cart) as SharedEntity);
+        let pig: SharedEntity = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            TRACK,
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&pig));
+
+        cart.set_velocity(DVec3::new(0.5, 0.0, 0.0));
+        push_and_pickup_entities(cart.as_ref(), &world);
+
+        assert!(!pig.is_passenger(), "a chest cart took a passenger");
+    }
+
+    /// Vanilla parity: the speed gate on the same branch. A cart standing
+    /// still is furniture, and a pig may share the square with it.
+    #[test]
+    fn a_stopped_minecart_scoops_up_nobody() {
+        let world = track_world("stopped_cart_scoops_nobody");
+        let cart = Arc::new(MinecartEntity::new(
+            &vanilla_entities::MINECART,
+            next_entity_id(),
+            TRACK,
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&cart) as SharedEntity);
+        let pig: SharedEntity = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            TRACK,
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&pig));
+
+        push_and_pickup_entities(cart.as_ref(), &world);
+
+        assert!(!pig.is_passenger(), "a stopped cart took a passenger");
+    }
+
+    /// Vanilla parity: the `else` branch, which is the only thing a cart that
+    /// carries nobody does -- carts shove each other rather than overlapping.
+    #[test]
+    fn a_cart_shoves_the_cart_it_is_sitting_in() {
+        let world = track_world("cart_shoves_cart");
+        let rolling = Arc::new(MinecartEntity::new(
+            &vanilla_entities::MINECART,
+            next_entity_id(),
+            TRACK,
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&rolling) as SharedEntity);
+        let parked: SharedEntity = Arc::new(MinecartEntity::new(
+            &vanilla_entities::MINECART,
+            next_entity_id(),
+            TRACK + DVec3::new(0.3, 0.0, 0.0),
+            Arc::downgrade(&world),
+        ));
+        add(&world, Arc::clone(&parked));
+
+        push_and_pickup_entities(rolling.as_ref(), &world);
+
+        assert!(
+            parked.velocity().length_squared() > 0.0,
+            "one cart passed straight through another"
+        );
     }
 }

@@ -189,6 +189,10 @@ impl FurnaceMinecartEntity {
 }
 
 impl Entity for FurnaceMinecartEntity {
+    fn is_minecart(&self) -> bool {
+        true
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }

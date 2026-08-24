@@ -585,6 +585,32 @@ pub(crate) fn get_trident_return_to_owner_acceleration(weapon: &ItemStack) -> i3
     (acceleration as i32).max(0)
 }
 
+/// Mirrors vanilla `EnchantmentHelper.getFishingTimeReduction`, in seconds.
+///
+/// Deviation: vanilla evaluates each effect's requirements against the fisher
+/// through a loot context. Lure, the only vanilla enchantment with a
+/// `fishing_time_reduction` effect, is unconditional, so this reads the
+/// unconditional effects only -- the same trade the trident helpers above make.
+pub(crate) fn get_fishing_time_reduction(rod: &ItemStack) -> f32 {
+    rod.apply_unconditional_enchantment_value_effects(
+        EnchantmentEffectComponent::FishingTimeReduction,
+        0.0,
+    )
+    .max(0.0)
+}
+
+/// Mirrors vanilla `EnchantmentHelper.getFishingLuckBonus`.
+///
+/// Same deviation as [`get_fishing_time_reduction`]: Luck of the Sea declares
+/// `fishing_luck_bonus` unconditionally.
+pub(crate) fn get_fishing_luck_bonus(rod: &ItemStack) -> i32 {
+    let bonus = rod.apply_unconditional_enchantment_value_effects(
+        EnchantmentEffectComponent::FishingLuckBonus,
+        0.0,
+    );
+    (bonus as i32).max(0)
+}
+
 /// Mirrors vanilla `EnchantmentHelper.pickHighestLevel` for the `trident_sound`
 /// component: the highest-level enchantment that carries a sound list wins, and
 /// its level indexes into that list.
