@@ -120,7 +120,7 @@ pub struct CatalystListener {
 }
 
 impl CatalystListener {
-    fn new(pos: BlockPos, block_state: BlockStateId) -> Self {
+    const fn new(pos: BlockPos, block_state: BlockStateId) -> Self {
         Self {
             spreader: SyncMutex::new(SculkSpreader::level()),
             pos,
@@ -188,7 +188,7 @@ impl GameEventListener for CatalystListener {
         context: &GameEventContext<'_>,
         source_pos: DVec3,
     ) -> bool {
-        if !std::ptr::eq(event, &vanilla_game_events::ENTITY_DIE) {
+        if event.key != vanilla_game_events::ENTITY_DIE.key {
             return false;
         }
         let Some(source) = context.source_entity() else {

@@ -15,6 +15,7 @@
 //! vanilla does; the moment `Creaking` lands, `CreakingHeartBlockEntity` is where the spawn,
 //! the tether and the hurt-transfer belong.
 
+use std::ops::RangeInclusive;
 use std::sync::{Arc, Weak};
 
 use rand::RngExt as _;
@@ -47,7 +48,7 @@ pub(crate) const STATE: &EnumProperty<CreakingHeartState> =
 const NATURAL: &BoolProperty = &BlockStateProperties::NATURAL;
 
 /// Vanilla `CreakingHeartBlock.tryAwardExperience`: `nextIntBetweenInclusive(20, 24)`.
-const NATURAL_BREAK_EXPERIENCE: std::ops::RangeInclusive<i32> = 20..=24;
+const NATURAL_BREAK_EXPERIENCE: RangeInclusive<i32> = 20..=24;
 
 /// Vanilla `CreakingHeartBlock`.
 #[block_behavior]

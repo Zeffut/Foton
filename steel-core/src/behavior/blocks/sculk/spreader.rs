@@ -231,12 +231,11 @@ impl SculkSpreader {
             }
 
             let pos = cursor.pos;
-            match charge_index.get(&pos) {
-                Some(&index) => charge_at[index].1 += cursor.charge,
-                None => {
-                    charge_index.insert(pos, charge_at.len());
-                    charge_at.push((pos, cursor.charge));
-                }
+            if let Some(&index) = charge_index.get(&pos) {
+                charge_at[index].1 += cursor.charge;
+            } else {
+                charge_index.insert(pos, charge_at.len());
+                charge_at.push((pos, cursor.charge));
             }
 
             let Some(&existing) = mergeable.get(&pos) else {
@@ -675,10 +674,6 @@ fn vein_spread_all(
 }
 
 /// Vanilla `MultifaceSpreader.spreadFromFaceTowardDirection`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors vanilla MultifaceSpreader.spreadFromFaceTowardDirection"
-)]
 fn vein_spread_from_face_toward_direction(
     level: &impl LevelAccessor,
     state: BlockStateId,
@@ -1167,7 +1162,7 @@ fn chessboard_distance(left: BlockPos, right: BlockPos) -> i32 {
 }
 
 /// Vanilla `Vec3i.distManhattan`.
-fn manhattan_distance(left: BlockPos, right: BlockPos) -> i32 {
+const fn manhattan_distance(left: BlockPos, right: BlockPos) -> i32 {
     (left.x() - right.x()).abs() + (left.y() - right.y()).abs() + (left.z() - right.z()).abs()
 }
 

@@ -71,7 +71,7 @@ fi
 # once somebody has been opped by name.
 CMDS='op SmokeTester'
 CMDS="$CMDS;;gamemode creative"
-# A zombie refuses to exist on peaceful, and its reward is what feeds this.
+# A monster refuses to exist on peaceful, and its reward is what feeds this.
 CMDS="$CMDS;;difficulty normal"
 # One throwaway command first: the very first `setblock` of a run can land
 # before the chunk around the player is ready.
@@ -91,17 +91,25 @@ CMDS="$CMDS;;teleport @s 0 100 -2"
 # The listener is committed by the chunk once the block entity starts ticking,
 # so give it a moment before anything dies.
 CMDS="$CMDS;;!wait 2"
-
 # --- the deaths -----------------------------------------------------------
-# Six zombies at five experience each is thirty charge: enough to convert a
-# handful of blocks, and short of the ten-per-growth budget that would start
-# planting sensors on top. They die two blocks from the catalyst, well inside
-# its eight-block listening radius.
+# Six blazes at ten experience each is sixty charge: enough to convert a
+# handful of blocks and plant a growth or two. They die two blocks from the
+# catalyst, well inside its eight-block listening radius.
+#
+# A blaze rather than the obvious zombie, and the reason is a bug in the mobs
+# rather than in the catalyst: vanilla's `Monster` constructor sets
+# `xpReward = 5`, and Steel's monsters never do. Fifteen hostiles -- zombie,
+# skeleton, creeper, spider, husk, stray, drowned, cave spider, enderman,
+# silverfish, witch, wither skeleton, zombified piglin, and the two slimes
+# whose reward is their size -- currently reward nothing at all, so a catalyst
+# next to one correctly eats nothing. The blaze is one of the eight that do
+# carry their reward, which is what makes it the mob that measures the
+# catalyst instead of the gap.
 for _ in 1 2 3 4 5 6; do
-  CMDS="$CMDS;;summon minecraft:zombie 0 100 2"
+  CMDS="$CMDS;;summon minecraft:blaze 0 100 2"
 done
 CMDS="$CMDS;;!wait 2"
-CMDS="$CMDS;;kill @e[type=minecraft:zombie]"
+CMDS="$CMDS;;kill @e[type=minecraft:blaze]"
 
 # --- the spread -----------------------------------------------------------
 # A cursor moves one block a tick and rolls for decay on the way, so give it a
