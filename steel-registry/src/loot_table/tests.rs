@@ -183,6 +183,7 @@ fn sheared_predicate_rejects_non_sheep_entities() {
             chicken_variant: None,
             mooshroom_variant: None,
             cube_size: None,
+            in_open_water: None,
             unsupported: &[],
         },
     };

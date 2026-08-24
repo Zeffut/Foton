@@ -1421,6 +1421,7 @@ pub(crate) fn entity_loot_ref_with_equipment<'a>(
         chicken_variant: living_entity.and_then(LivingEntity::chicken_loot_variant),
         mooshroom_variant: living_entity.and_then(LivingEntity::mooshroom_loot_variant),
         cube_size: living_entity.and_then(LivingEntity::cube_loot_size),
+        in_open_water: entity.fishing_hook_loot_open_water(),
     }
 }
 
