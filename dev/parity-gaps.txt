@@ -33,7 +33,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 43
+[entities] 37
 Allay
 Armadillo
 Axolotl
@@ -45,15 +45,12 @@ Camel
 CamelHusk
 Creaking
 EnderDragon
-Evoker
-EvokerFangs
 EyeOfEnder
 Frog
 Giant
 GlowItemFrame
 HappyGhast
 Hoglin
-Illusioner
 Mannequin
 MinecartCommandBlock
 Nautilus
@@ -61,16 +58,13 @@ Panda
 Parched
 Piglin
 PiglinBrute
-Pillager
 Player
-Ravager
 Sniffer
 SpectralArrow
 SulfurCube
 Tadpole
 ThrownLingeringPotion
 Villager
-Vindicator
 WanderingTrader
 Warden
 WitherBoss

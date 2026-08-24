@@ -732,6 +732,7 @@ fn apply_effects_from_block_movements(entity: &dyn Entity, movements: &[EntityMo
     finish_inside_block_effects(entity, &mut effect_collector, before_effects);
 }
 
+pub mod abstract_illager;
 mod ageable;
 pub(crate) mod ai;
 mod animal;
@@ -765,10 +766,13 @@ mod manager;
 mod mob;
 mod movement_sync;
 pub mod neutral_mob;
+pub mod patrolling_monster;
 pub mod projectile;
+pub mod raider;
 mod registry;
 mod spawn;
 pub mod spawn_rules;
+pub mod spellcaster_illager;
 mod storage;
 mod synced_data;
 mod tamable;
@@ -779,6 +783,7 @@ use crate::portal::{
     PortalKind, PortalProcessResult, PortalProcessor, PortalTicketTarget, TeleportPostAction,
     TeleportTransition, WorldChangeRequest, portal_shape::PortalShape,
 };
+pub use abstract_illager::{AbstractIllager, IllagerArmPose};
 pub(crate) use ageable::{AgeableMob, AgeableMobBase};
 pub(crate) use animal::{Animal, AnimalBase};
 pub use base::{
@@ -828,16 +833,19 @@ pub use movement_sync::{
     PackedEntityRotation, ServerEntityMovementSyncState, ServerEntityMovementSyncUpdate,
 };
 pub use neutral_mob::NeutralMob;
+pub use patrolling_monster::{PatrolState, PatrollingMonster};
 pub use projectile::{
     EntityHitResult, HurtingProjectile, HurtingProjectileBase, INITIAL_ACCELERATION_POWER,
     Projectile, ProjectileBase, ProjectileDeflection, ProjectileEventSource, ProjectileHit,
     ThrowableItemProjectile, ThrowableProjectile, ViewVectorHitResult, compute_margin,
     get_hit_result_on_view_vector, rotate_towards_movement,
 };
+pub use raider::{RaidStatus, Raider, RaiderState};
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
 pub(crate) use spawn::{
     AgeableMobGroupData, EntitySpawnReason, HorseGroupData, LlamaGroupData, SpawnGroupData,
 };
+pub use spellcaster_illager::{IllagerSpell, SpellcasterIllager, SpellcasterState};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
 pub use synced_data::{EntitySyncedData, LivingEntitySyncedData};
 pub(crate) use tamable::{

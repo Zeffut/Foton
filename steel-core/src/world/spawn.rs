@@ -196,7 +196,7 @@ impl World {
         self.heightmap_pos(HeightmapType::WorldSurface, pos).y()
     }
 
-    pub(super) fn heightmap_pos(&self, heightmap_type: HeightmapType, pos: BlockPos) -> BlockPos {
+    pub(crate) fn heightmap_pos(&self, heightmap_type: HeightmapType, pos: BlockPos) -> BlockPos {
         BlockPos::new(
             pos.x(),
             self.level_height_at(heightmap_type, pos.x(), pos.z()),

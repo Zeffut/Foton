@@ -1593,6 +1593,36 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn TamableAnimal>(self)
     }
 
+    /// Returns this entity as a patrolling monster when it walks a patrol.
+    ///
+    /// Mirrors vanilla's `instanceof PatrollingMonster` branches, which is how
+    /// a patrol leader finds the companions to drag along.
+    fn as_patrolling_monster(&self) -> Option<&dyn PatrollingMonster> {
+        try_as_dyn::<Self, dyn PatrollingMonster>(self)
+    }
+
+    /// Returns this entity as a raider when it belongs to the illager side.
+    ///
+    /// Mirrors vanilla's `instanceof Raider` branches.
+    fn as_raider(&self) -> Option<&dyn Raider> {
+        try_as_dyn::<Self, dyn Raider>(self)
+    }
+
+    /// Returns this entity as an illager.
+    ///
+    /// Mirrors vanilla's `instanceof AbstractIllager` branches, which is how a
+    /// ravager's roar spares the illagers standing next to it.
+    fn as_abstract_illager(&self) -> Option<&dyn AbstractIllager> {
+        try_as_dyn::<Self, dyn AbstractIllager>(self)
+    }
+
+    /// Returns this entity as a spellcasting illager.
+    ///
+    /// Mirrors vanilla's `SpellcasterIllager` casts inside its spell goals.
+    fn as_spellcaster_illager(&self) -> Option<&dyn SpellcasterIllager> {
+        try_as_dyn::<Self, dyn SpellcasterIllager>(self)
+    }
+
     /// Returns this entity as a horse-shaped mob.
     ///
     /// Mirrors vanilla's `instanceof AbstractHorse` branches.
@@ -2837,7 +2867,17 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     }
 
     /// Sets this entity's optional vanilla custom name.
+    ///
+    /// Override this to react to being renamed -- a vindicator becomes Johnny
+    /// -- and call [`Self::entity_set_custom_name`] from the override for the
+    /// shared store and sync; Rust has no `super`, so the base body lives in
+    /// its own method.
     fn set_custom_name(&self, custom_name: Option<TextComponent>) {
+        self.entity_set_custom_name(custom_name);
+    }
+
+    /// Runs the shared body of [`Self::set_custom_name`].
+    fn entity_set_custom_name(&self, custom_name: Option<TextComponent>) {
         self.base().set_custom_name(custom_name.clone());
         if let Some(synced_data) = self.synced_data() {
             synced_data.set_custom_name(custom_name);

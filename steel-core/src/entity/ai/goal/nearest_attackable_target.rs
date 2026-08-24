@@ -104,6 +104,18 @@ impl NearestAttackableTargetGoal {
         }
     }
 
+    /// Sets how long the goal keeps chasing a target it has lost sight of.
+    ///
+    /// Vanilla parity: `TargetGoal.setUnseenMemoryTicks`, which the evoker and
+    /// the illusioner both raise to fifteen seconds so a caster does not forget
+    /// the player who ducked behind a wall.
+    #[must_use]
+    pub(crate) const fn with_unseen_memory_ticks(mut self, unseen_memory_ticks: i32) -> Self {
+        self.target_goal
+            .set_unseen_memory_ticks(unseen_memory_ticks);
+        self
+    }
+
     /// Narrows or widens how far this goal looks.
     ///
     /// Vanilla parity: overriding the protected

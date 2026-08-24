@@ -3,6 +3,7 @@
 mod arrow;
 mod dragon_fireball;
 mod ender_pearl;
+mod evoker_fangs;
 mod experience_bottle;
 mod firework_rocket;
 mod fishing_hook;
@@ -20,6 +21,7 @@ mod wither_skull;
 pub use arrow::ArrowEntity;
 pub use dragon_fireball::DragonFireballEntity;
 pub use ender_pearl::EnderPearlEntity;
+pub use evoker_fangs::EvokerFangsEntity;
 pub use experience_bottle::ExperienceBottleEntity;
 pub use firework_rocket::FireworkRocketEntity;
 pub use fishing_hook::FishingHookEntity;

@@ -354,7 +354,7 @@ fn summonable_entity_argument_suggests_only_registered_factories() {
         .map(Suggestion::text)
         .collect::<Vec<_>>();
 
-    assert_eq!(suggestions, ["minecraft:pig"]);
+    assert_eq!(suggestions, ["minecraft:pig", "minecraft:pillager"]);
 }
 
 #[test]

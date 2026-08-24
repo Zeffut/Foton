@@ -1537,7 +1537,17 @@ pub trait Mob: LivingEntity {
     }
 
     /// Returns vanilla `Mob.getAttackBoundingBox`.
+    ///
+    /// Override this to change a mob's reach -- a ravager's is narrower than
+    /// its body -- and call [`Self::mob_attack_bounding_box`] from the override
+    /// for the shared box; Rust has no `super`, so the base body lives in its
+    /// own method.
     fn attack_bounding_box(&self, horizontal_expansion: f64) -> WorldAabb {
+        self.mob_attack_bounding_box(horizontal_expansion)
+    }
+
+    /// Runs the shared body of [`Self::attack_bounding_box`].
+    fn mob_attack_bounding_box(&self, horizontal_expansion: f64) -> WorldAabb {
         let own_aabb = self.bounding_box();
         let base = if let Some(vehicle) = self.vehicle() {
             let mount_aabb = vehicle.bounding_box();
@@ -1676,8 +1686,17 @@ pub trait Mob: LivingEntity {
         }
     }
 
-    fn mob_server_ai_step(&self) {
+    /// Advances the idle clock by one tick.
+    ///
+    /// Vanilla parity: `Mob.updateNoActionTime`. A raider counts double, which
+    /// is what makes it stop being recruitable after two minutes of standing
+    /// around rather than four.
+    fn update_no_action_time(&self) {
         self.increment_no_action_time();
+    }
+
+    fn mob_server_ai_step(&self) {
+        self.update_no_action_time();
         self.pick_up_nearby_items();
         self.mob_base().sensing().lock().tick();
         if self.tick_count() % 5 == 0 {

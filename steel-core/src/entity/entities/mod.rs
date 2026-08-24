@@ -9,9 +9,10 @@ pub use decoration::ArmorStandEntity;
 pub use mobs::ambient::BatEntity;
 pub use mobs::hostile::{
     BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
-    EndermanEntity, EndermiteEntity, GhastEntity, GuardianEntity, HuskEntity, MagmaCubeEntity,
-    PhantomEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity,
-    StrayEntity, VexEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
+    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HuskEntity,
+    IllusionerEntity, MagmaCubeEntity, PhantomEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
+    SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, VexEntity,
+    VindicatorEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::passive::{
@@ -32,7 +33,7 @@ pub use objects::display_ui::{
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
-    ArrowEntity, DragonFireballEntity, EnderPearlEntity, ExperienceBottleEntity,
+    ArrowEntity, DragonFireballEntity, EnderPearlEntity, EvokerFangsEntity, ExperienceBottleEntity,
     FireworkRocketEntity, FishingHookEntity, LargeFireballEntity, LlamaSpitEntity,
     ShulkerBulletEntity, SmallFireballEntity, SnowballEntity, SplashPotionEntity, ThrownEggEntity,
     ThrownTridentEntity, TridentPickup, WindChargeEntity, WitherSkullEntity,

@@ -82,6 +82,9 @@ pub use bucket::BucketItem;
 pub use bundle::{BundleItem, MutableBundleContents, can_item_be_in_bundle};
 pub use compass::CompassItem;
 pub use crossbow::CrossbowItem;
+/// Vanilla parity: `CrossbowItem.getChargeDuration`, which a mob's crossbow
+/// goal has to know because it winds the weapon itself.
+pub(crate) use crossbow::charge_duration as crossbow_charge_duration;
 pub use debug_stick::DebugStickItem;
 pub use default::DefaultItemBehavior;
 pub use dye::DyeItem;

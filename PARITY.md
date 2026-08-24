@@ -31,11 +31,13 @@ started; the second is where `dev/parity-gaps.txt` stands now.
 |---|---|---|
 | blocks | 63 | 17 |
 | items | 38 | 4 |
-| entities | 142 | 52 |
+| entities | 142 | 37 |
 
 **Entities are all that is left of any size**, and nearly all of it is mobs --
 though the tameable pets, the passive animals and the golems have taken a third
-of that column since the last count. The three blocks that make mobs -- the
+of that column since the last count, and the illagers took six more: the
+pillager, the vindicator, the evoker with its fangs, the illusioner and the
+ravager. The raid those six exist for is not here; see the note below. The three blocks that make mobs -- the
 monster spawner, the trial spawner and the vault -- came off the block column
 together with the spawner minecart and the ominous item spawner.
 The item column is closed but for vanilla's plain `Item`, which needs
@@ -312,7 +314,17 @@ cannot.
       goat, turtle, dolphin, parrot, bee, axolotl, frog, sniffer, armadillo.
 - [ ] **The rest of the hostile roster**: blaze, ghast, phantom, guardian,
       shulker, piglin and brute, hoglin, endermite, vex, breeze, creaking.
-- [ ] **Raids**: evoker, vindicator, pillager, ravager, illusioner.
+- [~] **Raids**: the five illagers and the ravager are in, with the shared
+      `PatrollingMonster`, `Raider`, `AbstractIllager` and
+      `SpellcasterIllager` layers under them, the ominous banner a patrol
+      captain wears, and all five spells. The raid itself is not: `Raid`
+      and `Raids` stand on villagers, an occupied village POI index, a
+      saved-data manager and a boss bar, and Steel has none of the four.
+      Every seam that needs a live raid is written and answers from
+      `Raider::current_raid_status`, which is always `None`; landing the
+      raid manager means giving that one method something to read. What is
+      inert until then: the door goals, the celebration, the wave buffs,
+      and the bad-omen path.
 
 Ghast and phantom need flying navigation, which does not exist yet; that is one
 piece of work that unlocks several mobs at once, and should come before the

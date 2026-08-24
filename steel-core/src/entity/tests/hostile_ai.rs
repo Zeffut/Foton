@@ -16,9 +16,10 @@
 use super::*;
 use crate::entity::entities::{
     BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
-    EndermanEntity, EndermiteEntity, GhastEntity, GuardianEntity, HuskEntity, IronGolemEntity,
-    MagmaCubeEntity, PhantomEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity,
-    SnowGolemEntity, SpiderEntity, StrayEntity, VexEntity, WitchEntity, WitherSkeletonEntity,
+    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HuskEntity,
+    IllusionerEntity, IronGolemEntity, MagmaCubeEntity, PhantomEntity, PillagerEntity,
+    RavagerEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity,
+    SpiderEntity, StrayEntity, VexEntity, VindicatorEntity, WitchEntity, WitherSkeletonEntity,
     ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
@@ -26,10 +27,13 @@ use steel_registry::vanilla_entities;
 
 /// `mob_server_ai_step` bumps `no_action_time` before it does anything else,
 /// which makes it the cheapest possible witness that the whole body ran.
+///
+/// The bump is one tick for most mobs and two for a raider, whose
+/// `update_no_action_time` counts double; either answer proves the body ran.
 fn ai_step_runs(mob: &impl Mob) -> bool {
     mob.set_no_action_time(0);
     LivingEntity::server_ai_step(mob);
-    mob.no_action_time() == 1
+    mob.no_action_time() > 0
 }
 
 macro_rules! assert_ai_runs {
@@ -63,6 +67,11 @@ assert_ai_runs! {
     an_enderman_runs_its_goals: EndermanEntity, &vanilla_entities::ENDERMAN;
     a_silverfish_runs_its_goals: SilverfishEntity, &vanilla_entities::SILVERFISH;
     a_witch_runs_its_goals: WitchEntity, &vanilla_entities::WITCH;
+    a_pillager_runs_its_goals: PillagerEntity, &vanilla_entities::PILLAGER;
+    a_vindicator_runs_its_goals: VindicatorEntity, &vanilla_entities::VINDICATOR;
+    an_evoker_runs_its_goals: EvokerEntity, &vanilla_entities::EVOKER;
+    an_illusioner_runs_its_goals: IllusionerEntity, &vanilla_entities::ILLUSIONER;
+    a_ravager_runs_its_goals: RavagerEntity, &vanilla_entities::RAVAGER;
     a_slime_runs_its_goals: SlimeEntity, &vanilla_entities::SLIME;
     a_magma_cube_runs_its_goals: MagmaCubeEntity, &vanilla_entities::MAGMA_CUBE;
     an_iron_golem_runs_its_goals: IronGolemEntity, &vanilla_entities::IRON_GOLEM;

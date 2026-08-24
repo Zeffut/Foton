@@ -235,7 +235,7 @@ fn default_charging_sounds() -> CrossbowChargingSounds {
 }
 
 /// Returns vanilla `CrossbowItem.getChargeDuration`, in ticks.
-fn charge_duration(crossbow: &ItemStack) -> i32 {
+pub(crate) fn charge_duration(crossbow: &ItemStack) -> i32 {
     let seconds = enchantment_helper::modify_crossbow_charging_time(crossbow, MAX_CHARGE_DURATION);
     (seconds * 20.0).floor() as i32
 }

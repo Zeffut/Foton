@@ -4,13 +4,21 @@ use steel_utils::{DowncastTypeKey, WorldAabb};
 use super::selector::{Goal, GoalControls};
 use super::target_goal::{TargetGoalBase, follow_distance};
 use crate::entity::ai::targeting::TargetingConditions;
-use crate::entity::{Mob, PathfinderMob, SharedEntity, TamableAnimal};
+use crate::entity::{Entity, Mob, PathfinderMob, SharedEntity, TamableAnimal};
 
 /// Extra condition an alerted mob must meet.
 ///
 /// Vanilla parity: overriding the protected `HurtByTargetGoal.alertOther`, as
 /// the polar bear does to leave the cubs out of it.
 type AlertFilter = Box<dyn Fn(&dyn Mob) -> bool + Send + Sync>;
+
+/// A whole-hierarchy test for vanilla's `toIgnoreDamage`.
+///
+/// Vanilla passes classes -- every raider is built with
+/// `new HurtByTargetGoal(this, Raider.class)` -- and tests them with
+/// `isAssignableFrom`. A list of concrete downcast keys cannot express an
+/// abstract class, so a hierarchy that is a Rust trait arrives as a predicate.
+type IgnoredDamageFilter = fn(&dyn Entity) -> bool;
 
 const HURT_BY_UNSEEN_MEMORY_TICKS: i32 = 300;
 const ALERT_RANGE_Y: f64 = 10.0;
@@ -20,6 +28,7 @@ pub(crate) struct HurtByTargetGoal {
     targeting: TargetingConditions,
     timestamp: i32,
     ignore_damage_types: Vec<DowncastTypeKey>,
+    ignore_damage_filter: Option<IgnoredDamageFilter>,
     alert_same_type: bool,
     ignore_alert_types: Vec<DowncastTypeKey>,
     alert_filter: Option<AlertFilter>,
@@ -35,6 +44,7 @@ impl HurtByTargetGoal {
                 .ignore_invisibility_testing(),
             timestamp: 0,
             ignore_damage_types: Vec::new(),
+            ignore_damage_filter: None,
             alert_same_type: false,
             ignore_alert_types: Vec::new(),
             alert_filter: None,
@@ -59,6 +69,16 @@ impl HurtByTargetGoal {
         types: impl IntoIterator<Item = DowncastTypeKey>,
     ) -> Self {
         self.ignore_damage_types = types.into_iter().collect();
+        self
+    }
+
+    /// Ignores damage from a whole hierarchy rather than a list of types.
+    ///
+    /// Vanilla parity: `new HurtByTargetGoal(this, Raider.class)`, which is why
+    /// a pillager caught by a friendly ravager does not turn on it.
+    #[must_use]
+    pub(crate) const fn with_ignored_damage_filter(mut self, filter: IgnoredDamageFilter) -> Self {
+        self.ignore_damage_filter = Some(filter);
         self
     }
 
@@ -154,6 +174,12 @@ impl Goal for HurtByTargetGoal {
         if self
             .ignore_damage_types
             .contains(&hurt_by_mob.downcast_type_key())
+        {
+            return false;
+        }
+        if self
+            .ignore_damage_filter
+            .is_some_and(|ignores| ignores(hurt_by_mob.as_ref()))
         {
             return false;
         }
