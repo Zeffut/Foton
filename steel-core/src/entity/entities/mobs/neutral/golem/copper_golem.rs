@@ -5,14 +5,10 @@
 //! into a [`crate::block_entity::entities::CopperGolemStatueBlockEntity`].
 //! Honeycomb stops the clock, an axe winds it back.
 //!
-//! Not implemented: everything the golem does with chests. Vanilla drives that
-//! entirely from a `Brain` -- `CopperGolemAi` with its
-//! `TRANSPORT_ITEMS_COOLDOWN_TICKS` memory and its container behaviors -- and
-//! Steel has no brain/behavior layer at all, so this golem oxidizes, weathers,
-//! shears, waxes and freezes correctly but never picks anything up. The
-//! `ContainerUser` half of the class (`hasContainerOpen`,
-//! `getContainerInteractionRange`) is left out for the same reason: nothing can
-//! open a container for it to be tracked against.
+//! Its whole job -- carrying one stack at a time out of a copper chest and into
+//! an ordinary one -- is brain-driven, and lives in
+//! [`super::copper_golem_ai`]. This entity has no goals at all; the brain in
+//! [`Self::brain`] is its entire AI, exactly as in vanilla.
 
 use std::sync::{Arc, Weak};
 
@@ -45,6 +41,7 @@ use uuid::Uuid;
 use crate::behavior::InteractionResult;
 use crate::behavior::blocks::WeatherState;
 use crate::block_entity::entities::CopperGolemStatueBlockEntity;
+use crate::entity::ai::brain::Brain;
 use crate::entity::ai::path::PathType;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
@@ -55,7 +52,7 @@ use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
 
-use super::AMBIENT_SOUND_INTERVAL;
+use super::{AMBIENT_SOUND_INTERVAL, copper_golem_ai};
 
 /// Marks a golem waxed with honeycomb, which never oxidizes again.
 ///
@@ -164,6 +161,10 @@ struct CopperGolemInternalState {
     next_weathering_tick: i64,
     /// The last bolt that hit, so one strike only scrapes one stage off.
     last_lightning_bolt_uuid: Option<Uuid>,
+    /// The chest the golem currently has its arm in, if any.
+    ///
+    /// Vanilla parity: `CopperGolem.openedChestPos`.
+    opened_chest_pos: Option<BlockPos>,
 }
 
 /// A copper golem.
@@ -175,6 +176,7 @@ pub struct CopperGolemEntity {
     mob_base: MobBase,
     entity_data: SyncMutex<CopperGolemEntityData>,
     state: SyncMutex<CopperGolemInternalState>,
+    brain: Brain,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `CopperGolemEntity`.
@@ -223,12 +225,12 @@ impl CopperGolemEntity {
             state: SyncMutex::new(CopperGolemInternalState {
                 next_weathering_tick: UNSET_WEATHERING_TICK,
                 last_lightning_bolt_uuid: None,
+                opened_chest_pos: None,
             }),
+            brain: copper_golem_ai::make_brain(),
         };
 
-        // Vanilla `CopperGolem`'s constructor. The brain's
-        // `TRANSPORT_ITEMS_COOLDOWN_TICKS` memory is left out with the rest of
-        // the brain.
+        // Vanilla `CopperGolem`'s constructor.
         golem.set_persistence_required();
         golem.set_pathfinding_malus(PathType::FireInNeighbor, NEIGHBORING_DANGER_MALUS);
         golem.set_pathfinding_malus(PathType::DamagingInNeighbor, NEIGHBORING_DANGER_MALUS);
@@ -260,6 +262,29 @@ impl CopperGolemEntity {
             .copper_golem_mut()
             .copper_golem_state
             .set(state.id());
+    }
+
+    /// Returns the chest the golem currently has open, if any.
+    ///
+    /// Vanilla parity: the `openedChestPos` field `CopperGolem.hasContainerOpen`
+    /// answers from.
+    #[must_use]
+    pub fn opened_chest_pos(&self) -> Option<BlockPos> {
+        self.state.lock().opened_chest_pos
+    }
+
+    /// Records which chest the golem has open.
+    ///
+    /// Vanilla parity: `CopperGolem.setOpenedChestPos`.
+    pub fn set_opened_chest_pos(&self, pos: BlockPos) {
+        self.state.lock().opened_chest_pos = Some(pos);
+    }
+
+    /// Forgets whichever chest the golem had open.
+    ///
+    /// Vanilla parity: `CopperGolem.clearOpenedChestPos`.
+    pub fn clear_opened_chest_pos(&self) {
+        self.state.lock().opened_chest_pos = None;
     }
 
     /// Returns how oxidized the golem is.
@@ -584,12 +609,16 @@ impl Entity for CopperGolemEntity {
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
         self.save_mob(nbt);
+        // Vanilla parity: `LivingEntity.addAdditionalSaveData` writes the brain
+        // for every living entity; only mobs that have one do here.
+        self.brain.save(nbt);
         nbt.insert("next_weather_age", self.state.lock().next_weathering_tick);
         nbt.insert("weather_state", weather_state_name(self.weather_state()));
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
         self.load_mob(nbt);
+        self.brain.load(nbt);
         self.state.lock().next_weathering_tick = nbt
             .long("next_weather_age")
             .unwrap_or(UNSET_WEATHERING_TICK);
@@ -641,6 +670,12 @@ impl LivingEntity for CopperGolemEntity {
             .set(clamped);
     }
 
+    /// Vanilla parity: the `Mob.serverAiStep` the copper golem inherits, which
+    /// is what actually reaches [`Mob::custom_server_ai_step`] and so the brain.
+    fn server_ai_step(&self) {
+        Mob::mob_server_ai_step(self);
+    }
+
     fn hurt_sound(&self, _source: &DamageSource) -> Option<SoundEventRef> {
         Some(self.oxidation_sounds().hurt)
     }
@@ -660,6 +695,19 @@ impl LivingEntity for CopperGolemEntity {
 impl Mob for CopperGolemEntity {
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
+    }
+
+    fn brain(&self) -> Option<&Brain> {
+        Some(&self.brain)
+    }
+
+    /// Vanilla parity: `CopperGolem.customServerAiStep`.
+    fn custom_server_ai_step(&self) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        self.brain.tick(&world, self);
+        copper_golem_ai::update_activity(&self.brain);
     }
 
     fn tick_goal_selectors(&self) {

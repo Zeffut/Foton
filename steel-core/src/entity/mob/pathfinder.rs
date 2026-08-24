@@ -7,6 +7,7 @@ use steel_registry::{vanilla_attributes, vanilla_blocks};
 use steel_utils::{BlockPos, ChunkPos};
 
 use super::{Mob, TARGET_REACH_DISTANCE_SQR};
+use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::navigation::{
     NavigationPathRequest, NavigationRecomputeRequest, NavigationTickContext,
 };
@@ -349,7 +350,20 @@ pub trait PathfinderMob: Mob {
         !self.mob_base().navigation().lock().is_done()
     }
 
+    /// Vanilla parity: `PathfinderMob.isPanicking`, which asks the brain first
+    /// and only falls back to the goal selector for a mob without one.
+    ///
+    /// Vanilla guards the brain half with `!isBrainDead()`; Steel does not need
+    /// to, because a mob only answers [`Mob::brain`] at all once it owns one.
+    /// Reading the memory rather than the brain's own state also keeps this to
+    /// the brain's leaf lock, so a behavior may call it from inside its tick.
     fn is_panicking(&self) -> bool {
+        if Mob::brain(self)
+            .is_some_and(|brain| brain.has_memory_value(memory_module_types::IS_PANICKING.id()))
+        {
+            return true;
+        }
+
         self.mob_base()
             .goal_selector()
             .lock()

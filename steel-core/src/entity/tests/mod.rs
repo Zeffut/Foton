@@ -1042,6 +1042,7 @@ fn closest_direction_with_blocked_neighbors(
     })
 }
 
+mod brains;
 mod damage;
 mod equine;
 mod equipment_and_freezing;

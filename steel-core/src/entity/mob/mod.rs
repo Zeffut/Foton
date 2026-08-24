@@ -40,6 +40,7 @@ use steel_utils::{BlockPos, Downcast as _, Identifier, WorldAabb, axis::Axis};
 
 use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext, ITEM_BEHAVIORS, InteractionResult};
 use crate::enchantment_helper::{self, EnchantmentDamageContext, EnchantmentPostAttackContext};
+use crate::entity::ai::brain::Brain;
 use crate::entity::ai::control::{
     BodyRotationInput, MobControls, MoveControlOperation, rotate_if_necessary, rotate_towards,
 };
@@ -382,6 +383,18 @@ pub trait Mob: LivingEntity {
     /// and only tags it `Enemy`, which is why a rabbit never flees a slime.
     fn is_monster(&self) -> bool {
         false
+    }
+
+    /// Returns this mob's brain, when it has one.
+    ///
+    /// Vanilla parity: `LivingEntity.getBrain`. Vanilla gives every
+    /// `LivingEntity` a brain and lets `makeBrain` return an empty one, which
+    /// `Brain.isBrainDead` then has to detect. Steel's brain owns three mutexes
+    /// and two maps, and every goal-driven mob in the tree would pay for one it
+    /// never reads, so a mob opts in by overriding this and holding a
+    /// [`crate::entity::ai::brain::Brain`] of its own.
+    fn brain(&self) -> Option<&Brain> {
+        None
     }
 
     fn custom_server_ai_step(&self) {}
@@ -874,7 +887,7 @@ pub trait Mob: LivingEntity {
         holder.notify_leash_holder(self.as_entity_event_source());
     }
 
-    fn leash_too_far_behaviour(&self) {
+    fn leash_too_far_behavior(&self) {
         self.drop_leash();
     }
 
@@ -882,7 +895,7 @@ pub trait Mob: LivingEntity {
         self.check_fall_distance_accumulation();
     }
 
-    fn close_range_leash_behaviour(&self, _holder: &dyn Entity) {}
+    fn close_range_leash_behavior(&self, _holder: &dyn Entity) {}
 
     fn check_elastic_interactions(&self, holder: &dyn Entity) -> bool {
         let Some(wrench) = compute_elastic_interaction(
@@ -1015,7 +1028,7 @@ pub trait Mob: LivingEntity {
                         None,
                     );
                 }
-                self.leash_too_far_behaviour();
+                self.leash_too_far_behavior();
             } else if distance_to
                 > self.leash_elastic_distance()
                     - f64::from(holder.base().dimensions().width)
@@ -1024,7 +1037,7 @@ pub trait Mob: LivingEntity {
             {
                 self.on_elastic_leash_pull();
             } else {
-                self.close_range_leash_behaviour(holder.as_ref());
+                self.close_range_leash_behavior(holder.as_ref());
             }
             if !self.apply_leash_angular_momentum()
                 && let Some(angular_momentum) = angular_momentum_before_distance_action
