@@ -789,6 +789,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         self.mark_velocity_sync();
     }
 
+    /// Whether this entity is one of the six minecarts.
+    ///
+    /// Mirrors the `instanceof AbstractMinecart` of
+    /// `OldMinecartBehavior.pushAndPickupEntities`, which treats a cart it runs
+    /// into differently from a mob: carts shove each other, mobs get scooped up.
+    fn is_minecart(&self) -> bool {
+        false
+    }
+
     /// Applies vanilla entity-to-entity push separation.
     ///
     /// Mirrors vanilla `Entity.push(Entity)`.

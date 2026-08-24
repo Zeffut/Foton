@@ -70,6 +70,10 @@ impl MinecartEntity {
 }
 
 impl Entity for MinecartEntity {
+    fn is_minecart(&self) -> bool {
+        true
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }
@@ -142,6 +146,11 @@ impl Entity for MinecartEntity {
 }
 
 impl MinecartLike for MinecartEntity {
+    /// Vanilla parity: `Minecart.isRideable`, the one cart that overrides it.
+    fn is_rideable(&self) -> bool {
+        true
+    }
+
     fn minecart_state(&self) -> &SyncMutex<MinecartState> {
         &self.minecart
     }

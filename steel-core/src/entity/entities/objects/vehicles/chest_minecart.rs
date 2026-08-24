@@ -195,6 +195,10 @@ impl ChestMinecartEntity {
 }
 
 impl Entity for ChestMinecartEntity {
+    fn is_minecart(&self) -> bool {
+        true
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }
