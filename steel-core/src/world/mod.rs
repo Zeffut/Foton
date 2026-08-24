@@ -102,6 +102,7 @@ use crate::{
     poi::PointOfInterestStorage,
 };
 
+pub mod base_spawner;
 mod block_entity_ticker;
 mod block_event;
 /// Matching multi-block shapes against the world.
