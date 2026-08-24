@@ -36,7 +36,7 @@ EmptyMapItem
 Item
 MapItem
 
-[entities] 46
+[entities] 43
 Allay
 Armadillo
 Axolotl
@@ -62,13 +62,11 @@ MinecartCommandBlock
 Nautilus
 Panda
 Parched
-Phantom
 Piglin
 PiglinBrute
 Pillager
 Player
 Ravager
-Shulker
 Sniffer
 SpectralArrow
 SulfurCube

@@ -10,8 +10,8 @@ pub use mobs::ambient::BatEntity;
 pub use mobs::hostile::{
     BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
     EndermanEntity, EndermiteEntity, GhastEntity, GuardianEntity, HuskEntity, MagmaCubeEntity,
-    SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, VexEntity,
-    WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
+    PhantomEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity,
+    StrayEntity, VexEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::passive::{

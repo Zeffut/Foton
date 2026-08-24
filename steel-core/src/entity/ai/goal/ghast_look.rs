@@ -28,12 +28,10 @@ pub(crate) fn face_movement_direction(mob: &dyn Mob) {
             let target_position = target.position();
             // A target further off than sixty-four blocks leaves the ghast
             // facing wherever it already was.
-            (target_position.distance_squared(position) < FACE_TARGET_RANGE_SQR).then(|| {
-                (
-                    target_position.x - position.x,
-                    target_position.z - position.z,
-                )
-            })
+            (target_position.distance_squared(position) < FACE_TARGET_RANGE_SQR).then_some((
+                target_position.x - position.x,
+                target_position.z - position.z,
+            ))
         }
     };
 

@@ -2,6 +2,8 @@ use std::sync::Weak;
 
 use steel_registry::{init_vanilla_registry, vanilla_damage_types, vanilla_entities};
 
+use crate::test_support::fresh_test_world;
+
 use super::*;
 
 fn guardian() -> GuardianEntity {
@@ -87,7 +89,7 @@ fn the_moving_flag_round_trips_through_the_synced_data() {
 #[test]
 fn thorns_damage_never_reflects_but_still_rerolls_the_wander() {
     init_vanilla_registry();
-    let world = crate::test_support::fresh_test_world("guardian_thorns");
+    let world = fresh_test_world("guardian_thorns");
     let mob = guardian();
     let source = DamageSource::environment(&vanilla_damage_types::THORNS).with_direct_entity(7);
 

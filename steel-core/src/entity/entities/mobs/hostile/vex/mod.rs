@@ -508,7 +508,7 @@ struct VexCopyOwnerTargetGoal {
 }
 
 impl VexCopyOwnerTargetGoal {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             targeting: TargetingConditions::for_non_combat()
                 .ignore_line_of_sight()
@@ -676,7 +676,7 @@ impl Mob for VexEntity {
 
     /// Vanilla parity: `Vex` installs a `VexMoveControl`.
     fn tick_move_control(&self) {
-        VexMoveControl.tick(self);
+        VexMoveControl::tick(self);
     }
 
     fn ambient_sound(&self) -> Option<SoundEventRef> {
@@ -692,6 +692,10 @@ impl Mob for VexEntity {
     }
 
     /// Vanilla parity: `Vex.finalizeSpawn`, whose only work is the sword.
+    ///
+    /// Vanilla also calls `populateDefaultEquipmentEnchantments`, which Steel
+    /// does not model for any mob yet, so it is left out here too rather than
+    /// singled out for the vex.
     fn finalize_spawn(
         &self,
         world: &Arc<World>,

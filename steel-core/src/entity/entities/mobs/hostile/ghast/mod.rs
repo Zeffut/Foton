@@ -4,6 +4,11 @@
 //! goals it shares with the happy ghast. A ghast drifts through the nether on
 //! nothing but its move control, faces wherever it is heading, and lobs a
 //! fireball that a player can bat straight back into it.
+//!
+//! **Gaps**: `Ghast.getMaxSpawnClusterSize` caps a natural spawn at one ghast
+//! and `supportQuadLeashAsHolder` lets four leads hang off one; Steel's natural
+//! spawner has no per-entity cluster-size hook and its leash layer has no
+//! quad-leash holder flag, so neither has anywhere to go yet.
 
 use std::sync::{Arc, Weak};
 
@@ -184,8 +189,8 @@ impl GhastEntity {
                     TARGET_SCAN_INTERVAL,
                     true,
                     false,
-                    |targeter, target, _| {
-                        targeter.is_none_or(|ghast| {
+                    |ghast, target, _| {
+                        ghast.is_some_and(|ghast| {
                             (target.position().y - ghast.position().y).abs()
                                 <= TARGET_MAX_Y_DIFFERENCE
                         })
@@ -463,7 +468,10 @@ impl LivingEntity for GhastEntity {
     /// into a thousand points of damage rather than the fireball's six.
     fn hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         if self.is_reflected_fireball(source) {
-            return self.living_hurt_server(world, source, REFLECTED_FIREBALL_DAMAGE);
+            // Vanilla reports the hit as landed whatever the base call says,
+            // because a reflected fireball is meant to be unanswerable.
+            self.living_hurt_server(world, source, REFLECTED_FIREBALL_DAMAGE);
+            return true;
         }
 
         if self.is_invulnerable_to(world, source) {

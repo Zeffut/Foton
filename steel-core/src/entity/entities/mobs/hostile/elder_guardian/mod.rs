@@ -167,17 +167,18 @@ impl ElderGuardianEntity {
             }
 
             let needs_effect = player
-                .mob_effect(&vanilla_mob_effects::MINING_FATIGUE)
+                .mob_effect(vanilla_mob_effects::MINING_FATIGUE)
                 .is_none_or(|active| {
                     active.amplifier() < EFFECT_AMPLIFIER
-                        || active.duration() <= EFFECT_DISPLAY_LIMIT - 1
+                        || !active.is_infinite_duration()
+                            && active.duration() < EFFECT_DISPLAY_LIMIT
                 });
             if !needs_effect {
                 return true;
             }
 
             player.add_mob_effect(MobEffectInstance::with_duration(
-                &vanilla_mob_effects::MINING_FATIGUE,
+                vanilla_mob_effects::MINING_FATIGUE,
                 EFFECT_DURATION,
                 EFFECT_AMPLIFIER,
             ));

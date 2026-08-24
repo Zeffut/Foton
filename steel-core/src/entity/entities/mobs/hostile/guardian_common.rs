@@ -6,6 +6,7 @@
 //! water -- lives here as free functions over [`GuardianLike`], and the two
 //! mobs differ only in the values they answer.
 
+use std::mem;
 use std::sync::Arc;
 
 use glam::DVec3;
@@ -205,7 +206,7 @@ where
         take_stroll_trigger: |mob| {
             mob.downcast_ref::<G>().is_some_and(|guardian| {
                 let mut state = guardian.guardian_state().lock();
-                std::mem::take(&mut state.trigger_stroll)
+                mem::take(&mut state.trigger_stroll)
             })
         },
         set_active_attack_target: |mob, id| {
@@ -388,7 +389,7 @@ pub(super) fn on_hurt<G: GuardianLike + ?Sized>(
 
 /// Vanilla parity: `Guardian` installs a `GuardianMoveControl`.
 pub(super) fn tick_move_control<G: GuardianLike>(guardian: &G) {
-    let moving = GuardianMoveControl.tick(guardian);
+    let moving = GuardianMoveControl::tick(guardian);
     guardian.set_moving(moving);
 }
 

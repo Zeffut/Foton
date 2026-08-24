@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::sync::Weak;
 
 use simdnbt::borrow::read_compound as read_borrowed_compound;
-use steel_registry::init_vanilla_registry;
+use steel_registry::{init_vanilla_registry, vanilla_damage_types};
 
 use super::*;
 
@@ -84,7 +84,7 @@ fn the_shoot_goal_holds_no_control() {
 fn a_damage_source_with_no_world_is_never_a_reflected_fireball() {
     init_vanilla_registry();
     let mob = ghast();
-    let source = DamageSource::environment(&steel_registry::vanilla_damage_types::FIREBALL)
+    let source = DamageSource::environment(&vanilla_damage_types::FIREBALL)
         .with_causing_entity(2)
         .with_direct_entity(3);
 

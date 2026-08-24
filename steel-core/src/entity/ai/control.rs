@@ -1,8 +1,11 @@
 //! Mob control state.
 
-use glam::DVec3;
+use std::f32::consts::{FRAC_PI_2, PI};
+
+use glam::{DVec3, Quat, Vec3};
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::vanilla_attributes;
+use steel_utils::Direction;
 
 use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext};
 use crate::entity::block_effects;
@@ -613,6 +616,264 @@ impl SmoothSwimmingLookControl {
     }
 }
 
+/// Degrees per tick a shulker's head drifts back toward its body when it has
+/// nothing to look at.
+///
+/// Vanilla parity: the `10.0F` of the else branch of `LookControl.tick`.
+const IDLE_HEAD_RETURN_RATE: f32 = 10.0;
+
+/// How a shulker looks around.
+///
+/// Vanilla parity: `Shulker.ShulkerLookControl`. A shulker's head turns in the
+/// plane of the face it is stuck to rather than around the world's Y axis, it
+/// never pitches, and it is never clamped back toward its body -- the body has
+/// no meaningful rotation to clamp to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShulkerLookControl {
+    /// The face the shulker is attached to.
+    attach_face: Direction,
+}
+
+impl ShulkerLookControl {
+    #[must_use]
+    pub const fn new(attach_face: Direction) -> Self {
+        Self { attach_face }
+    }
+
+    /// Returns the basis the shulker's head turns in.
+    ///
+    /// Vanilla parity: the `forward`/`right` pair of
+    /// `ShulkerLookControl.getYRotD`, built from `Direction.getRotation`.
+    fn face_basis(attach_face: Direction) -> (Vec3, Vec3) {
+        let rotation = match attach_face {
+            Direction::Down => Quat::from_rotation_x(PI),
+            Direction::Up => Quat::IDENTITY,
+            Direction::North => Quat::from_rotation_z(PI) * Quat::from_rotation_x(FRAC_PI_2),
+            Direction::South => Quat::from_rotation_x(FRAC_PI_2),
+            Direction::West => Quat::from_rotation_z(FRAC_PI_2) * Quat::from_rotation_x(FRAC_PI_2),
+            Direction::East => Quat::from_rotation_z(-FRAC_PI_2) * Quat::from_rotation_x(FRAC_PI_2),
+        };
+
+        // Vanilla parity: `FORWARD` is the south unit vector.
+        let forward = rotation * Vec3::new(0.0, 0.0, 1.0);
+        let up_normal = attach_face.offset_vec();
+        let right =
+            Vec3::new(up_normal.x as f32, up_normal.y as f32, up_normal.z as f32).cross(forward);
+
+        (forward, right)
+    }
+
+    /// Vanilla parity: `LookControl.tick` with the shulker's three overrides.
+    pub fn tick(self, mob: &dyn Mob) {
+        let look_control = {
+            let mut controls = mob.mob_base().controls().lock();
+            let look_control = controls.look_control;
+            controls.look_control.tick_cooldown();
+            look_control
+        };
+
+        let (yaw, _) = mob.rotation();
+        // Vanilla parity: `LookControl.resetXRotOnTick` is true for a shulker,
+        // so its pitch is zeroed every tick before anything else.
+        mob.set_rotation((yaw, 0.0));
+
+        if !look_control.is_looking_at_target() {
+            mob.set_y_head_rot(rotate_towards(
+                mob.y_head_rot(),
+                mob.y_body_rot(),
+                IDLE_HEAD_RETURN_RATE,
+            ));
+            return;
+        }
+
+        let (forward, right) = Self::face_basis(self.attach_face.opposite());
+        let wanted = look_control.wanted_position();
+        let position = mob.position();
+        let out = Vec3::new(
+            (wanted.x - position.x) as f32,
+            (wanted.y - mob.get_eye_y()) as f32,
+            (wanted.z - position.z) as f32,
+        );
+        let delta_right = right.dot(out);
+        let delta_forward = forward.dot(out);
+
+        if delta_right.abs() > 1.0e-5 || delta_forward.abs() > 1.0e-5 {
+            let wanted_yaw = (-delta_right).atan2(delta_forward).to_degrees();
+            mob.set_y_head_rot(rotate_towards(
+                mob.y_head_rot(),
+                wanted_yaw,
+                look_control.y_max_rot_speed(),
+            ));
+        }
+
+        // Vanilla parity: `ShulkerLookControl.getXRotD` always answers zero.
+        let (yaw, pitch) = mob.rotation();
+        mob.set_rotation((
+            yaw,
+            rotate_towards(pitch, 0.0, look_control.x_max_rot_angle()),
+        ));
+    }
+}
+
+/// Moves `current` toward `target` by at most `increment`.
+///
+/// Vanilla parity: `Mth.approach`.
+fn approach(current: f32, target: f32, increment: f32) -> f32 {
+    let increment = increment.abs();
+    if current < target {
+        (current + increment).clamp(current, target)
+    } else {
+        (current - increment).clamp(target, current)
+    }
+}
+
+/// Moves an angle toward another the short way round.
+///
+/// Vanilla parity: `Mth.approachDegrees`.
+fn approach_degrees(current: f32, target: f32, increment: f32) -> f32 {
+    let difference = wrap_degrees(target - current);
+    approach(current, current + difference, increment)
+}
+
+/// Fastest a phantom will ever fly.
+///
+/// Vanilla parity: the `Mth.approach(this.speed, 1.8F, ...)` of
+/// `Phantom.PhantomMoveControl.tick`.
+const PHANTOM_MAX_SPEED: f32 = 1.8;
+
+/// Speed a phantom drops back to while it is still turning.
+///
+/// Vanilla parity: the `Mth.approach(this.speed, 0.2F, 0.025F)` of the same
+/// method, and the `0.1F` the control starts and resets at.
+const PHANTOM_TURNING_SPEED: f32 = 0.2;
+
+/// Speed a phantom resets to when it flies into a wall.
+pub const PHANTOM_INITIAL_SPEED: f32 = 0.1;
+
+/// How fast a phantom picks up speed while it is flying straight.
+///
+/// Vanilla parity: the `0.005F * (1.8F / this.speed)` increment, which is why a
+/// slow phantom accelerates hard and a fast one barely gains.
+const PHANTOM_ACCELERATION: f32 = 0.005;
+
+/// How fast a phantom sheds speed while it is turning.
+const PHANTOM_DECELERATION: f32 = 0.025;
+
+/// Degrees per tick a phantom may turn.
+const PHANTOM_MAX_TURN: f32 = 4.0;
+
+/// Below this much turn left a phantom counts as flying straight.
+const PHANTOM_STRAIGHT_THRESHOLD: f32 = 3.0;
+
+/// How much a phantom flattens its dive when it is far above or below its
+/// target.
+///
+/// Vanilla parity: the `1.0 - Math.abs(tdy * 0.7F) / sd` of the same method.
+const PHANTOM_DIVE_FLATTENING: f64 = 0.7;
+
+/// How much of the gap between its current and wanted velocity a phantom closes
+/// each tick.
+const PHANTOM_VELOCITY_LERP: f64 = 0.2;
+
+/// How a phantom steers.
+///
+/// Vanilla parity: `Phantom.PhantomMoveControl`. A phantom ignores the move
+/// control's wanted position entirely and flies at the point its goals put in
+/// `moveTargetPoint`, banking toward it a few degrees at a time and speeding up
+/// only once it is pointed the right way. That is what makes a phantom circle
+/// wide and then commit to a dive.
+///
+/// Returns the phantom's new speed, which vanilla keeps on the control object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhantomMoveControl {
+    move_target_point: DVec3,
+    speed: f32,
+}
+
+impl PhantomMoveControl {
+    #[must_use]
+    pub const fn new(move_target_point: DVec3, speed: f32) -> Self {
+        Self {
+            move_target_point,
+            speed,
+        }
+    }
+
+    /// Vanilla parity: `PhantomMoveControl.tick`.
+    #[must_use]
+    pub fn tick(self, mob: &dyn Mob) -> f32 {
+        let mut speed = self.speed;
+        if mob.horizontal_collision() {
+            let (yaw, pitch) = mob.rotation();
+            mob.set_rotation((yaw + 180.0, pitch));
+            speed = PHANTOM_INITIAL_SPEED;
+        }
+
+        let position = mob.position();
+        let mut tdx = self.move_target_point.x - position.x;
+        let tdy = self.move_target_point.y - position.y;
+        let mut tdz = self.move_target_point.z - position.z;
+        let mut horizontal = tdx.hypot(tdz);
+        if horizontal.abs() <= f64::from(1.0e-5_f32) {
+            return speed;
+        }
+
+        // Vanilla shortens the horizontal reach when the target is well above
+        // or below, which is what turns a shallow approach into a dive.
+        let y_relative_scale = 1.0 - (tdy * PHANTOM_DIVE_FLATTENING).abs() / horizontal;
+        tdx *= y_relative_scale;
+        tdz *= y_relative_scale;
+        horizontal = tdx.hypot(tdz);
+        let distance = DVec3::new(tdx, tdy, tdz).length();
+
+        let (yaw, _) = mob.rotation();
+        let previous_yaw = yaw;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "vanilla stores entity rotation as a float"
+        )]
+        let wanted_yaw = tdz.atan2(tdx).to_degrees() as f32;
+        let turned_yaw = approach_degrees(
+            wrap_degrees(yaw + 90.0),
+            wrap_degrees(wanted_yaw),
+            PHANTOM_MAX_TURN,
+        ) - 90.0;
+        let (_, pitch) = mob.rotation();
+        mob.set_rotation((turned_yaw, pitch));
+        mob.set_y_body_rot(turned_yaw);
+
+        if wrap_degrees(turned_yaw - previous_yaw).abs() < PHANTOM_STRAIGHT_THRESHOLD {
+            speed = approach(
+                speed,
+                PHANTOM_MAX_SPEED,
+                PHANTOM_ACCELERATION * (PHANTOM_MAX_SPEED / speed),
+            );
+        } else {
+            speed = approach(speed, PHANTOM_TURNING_SPEED, PHANTOM_DECELERATION);
+        }
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "vanilla stores entity rotation as a float"
+        )]
+        let wanted_pitch = -(tdy.atan2(horizontal).to_degrees() as f32);
+        mob.set_rotation((mob.rotation().0, wanted_pitch));
+
+        let move_angle = f64::from((mob.rotation().0 + 90.0).to_radians());
+        let pitch_radians = f64::from(wanted_pitch.to_radians());
+        let flight_speed = f64::from(speed);
+        let wanted = DVec3::new(
+            flight_speed * move_angle.cos() * (tdx / distance).abs(),
+            flight_speed * pitch_radians.sin() * (tdy / distance).abs(),
+            flight_speed * move_angle.sin() * (tdz / distance).abs(),
+        );
+        let movement = mob.velocity();
+        mob.set_velocity(movement + (wanted - movement) * PHANTOM_VELOCITY_LERP);
+
+        speed
+    }
+}
+
 /// Degrees per tick a guardian may turn toward its heading.
 ///
 /// Vanilla parity: the `rotlerp(getYRot(), yRotD, 90.0F)` of
@@ -670,7 +931,7 @@ pub struct GuardianMoveControl;
 impl GuardianMoveControl {
     /// Vanilla parity: `GuardianMoveControl.tick`.
     #[must_use]
-    pub fn tick(self, mob: &dyn Mob) -> bool {
+    pub fn tick(mob: &dyn Mob) -> bool {
         let (operation, wanted_position, speed_modifier) = {
             let controls = mob.mob_base().controls().lock();
             let move_control = controls.move_control;
@@ -901,7 +1162,7 @@ pub struct VexMoveControl;
 
 impl VexMoveControl {
     /// Vanilla parity: `Vex.VexMoveControl.tick`.
-    pub fn tick(self, mob: &dyn Mob) {
+    pub fn tick(mob: &dyn Mob) {
         let (operation, wanted_position, speed_modifier) = {
             let controls = mob.mob_base().controls().lock();
             let move_control = controls.move_control;

@@ -1050,6 +1050,7 @@ mod fall_and_fluids;
 mod hostile_ai;
 mod living_state;
 mod movement;
+mod nether_ocean_end_hostiles;
 mod pets;
 mod portals;
 mod riding_and_leashes;
