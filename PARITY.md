@@ -204,11 +204,24 @@ cannot.
       never fires on its own -- `activate` is written and tested because it is
       exactly the seam a vibration system attaches to, and the vanilla
       `listener` tag is round-tripped rather than dropped. The shrieker never
-      summons, because there is no warden. The sculk catalyst is left out for a
-      different reason worth stating: it is not blocked by a missing system,
-      but lifting `SculkSpreader` out of world generation is its own change,
-      and a catalyst that ate mob experience while spreading nothing would be
-      worse than none.
+      summons, because there is no warden.
+
+      The sculk catalyst now works. `SculkSpreader` and its charge cursors were
+      lifted out of `worldgen/feature/features/sculk_patch.rs` into
+      `behavior/blocks/sculk/spreader.rs` and rewritten against `LevelAccessor`,
+      so world generation and a live catalyst walk the same algorithm; the
+      catalyst's block entity is the first in Steel to publish a game-event
+      listener, hears `ENTITY_DIE` from eight blocks, takes the experience the
+      death was about to drop and spends it as sculk. `dev/catalyst-test.sh`
+      kills mobs next to one and watches the floor turn.
+
+      The creaking heart carries its own state machine -- `uprooted` without
+      pale oak logs on both ends of its axis, `dormant` by day, `awake` for the
+      stretch of night the `creaking_active` environment attribute names -- plus
+      its axis, its comparator hook and the twenty-odd experience a naturally
+      generated one drops. What it cannot do is hold a creaking, because that
+      mob does not exist; a vanilla world's `creaking` UUID is carried through a
+      save untouched rather than dropped.
 
       A lightning strike still does not convert what it hits -- no pig becomes
       a zoglin, no villager a witch -- but the reason changed: the

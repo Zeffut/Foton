@@ -28,6 +28,7 @@ mod coral_block;
 mod coral_fan_block;
 mod coral_plant_block;
 mod coral_wall_fan_block;
+mod creaking_heart_block;
 mod crop_block;
 mod dirt_path_block;
 mod double_plant_block;
@@ -119,6 +120,10 @@ pub use coral_block::CoralBlock;
 pub use coral_fan_block::CoralFanBlock;
 pub use coral_plant_block::CoralPlantBlock;
 pub use coral_wall_fan_block::CoralWallFanBlock;
+pub use creaking_heart_block::CreakingHeartBlock;
+pub(crate) use creaking_heart_block::{
+    STATE as CREAKING_HEART_STATE, awake_or_dormant as creaking_heart_awake_or_dormant,
+};
 pub use crop_block::CropBlock;
 pub use dirt_path_block::DirtPathBlock;
 pub use double_plant_block::DoublePlantBlock;

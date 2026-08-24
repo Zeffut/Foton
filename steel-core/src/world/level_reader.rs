@@ -5,6 +5,7 @@
 //! `World` type. `World` and `WorldGenRegion` both implement this trait.
 
 use crate::chunk::heightmap::HeightmapType;
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::Direction;
@@ -177,6 +178,34 @@ pub trait LevelAccessor: ScheduledTickAccess {
         reason = "worldgen and test level surfaces do not emit game events"
     )]
     fn game_event(&self, event: GameEventRef, pos: BlockPos, context: &GameEventContext<'_>) {}
+
+    /// Broadcasts a level event when this level surface has players to broadcast to.
+    ///
+    /// Vanilla parity: `LevelAccessor.levelEvent`, whose `WorldGenRegion` override does
+    /// nothing, which is why the default here does nothing either.
+    #[expect(
+        unused_variables,
+        reason = "worldgen and test level surfaces have no players to notify"
+    )]
+    fn level_event(&self, event_type: i32, pos: BlockPos, data: i32, exclude: Option<i32>) {}
+
+    /// Attaches a block entity that this level surface does not build on its own.
+    ///
+    /// Vanilla parity: `WorldGenRegion.setBlock` constructs an `EntityBlock`'s block entity
+    /// as it writes the block. Steel's worldgen region only records a pending marker, so a
+    /// caller that needs the entity right away asks for it here. A live `World` already
+    /// built it inside `set_block`, which is why the default does nothing.
+    #[expect(
+        unused_variables,
+        reason = "a live world builds the block entity inside set_block"
+    )]
+    fn attach_block_entity(
+        &self,
+        pos: BlockPos,
+        block_entity_type: BlockEntityTypeRef,
+        state: BlockStateId,
+    ) {
+    }
 
     /// Returns the heightmap value at a column, or the floor when unknown.
     ///

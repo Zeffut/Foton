@@ -67,9 +67,11 @@ pub use redstone::{
     WeightedPressurePlateBlock, rail_shape_at,
 };
 pub(crate) use redstone::{MAX_REDSTONE_SIGNAL, MIN_REDSTONE_SIGNAL};
+pub use sculk::behavior_of as sculk_behavior_of;
 pub use sculk::{
-    CalibratedSculkSensorBlock, SculkBlock, SculkSensorBlock, SculkShriekerBlock,
-    can_activate_sculk_sensor, deactivate_sculk_sensor, sculk_sensor_phase, try_resonate_vibration,
+    CalibratedSculkSensorBlock, ChargeCursor, SculkBehaviorKind, SculkBlock, SculkCatalystBlock,
+    SculkSensorBlock, SculkShriekerBlock, SculkSpreader, can_activate_sculk_sensor,
+    deactivate_sculk_sensor, sculk_sensor_phase, try_resonate_vibration,
 };
 pub use spawner::{SpawnerBlock, TrialSpawnerBlock, VaultBlock};
 pub(crate) use utils::multiface_face_property;
@@ -87,12 +89,13 @@ pub use vegetation::{
     BaseCoralFanBlock, BaseCoralPlantBlock, BaseCoralWallFanBlock, BigDripleafBlock,
     BigDripleafStemBlock, BushBlock, CarpetBlock, CaveVinesBlock, CaveVinesPlantBlock,
     ChorusFlowerBlock, ChorusPlantBlock, CoralFanBlock, CoralPlantBlock, CoralWallFanBlock,
-    DirtPathBlock, DryVegetationBlock, EyeblossomBlock, EyeblossomType, FarmlandBlock,
-    FireflyBushBlock, FlowerBedBlock, GlowLichenBlock, HangingMossBlock, HangingRootsBlock,
-    HugeMushroomBlock, KelpBlock, KelpPlantBlock, LeafLitterBlock, LilyPadBlock,
+    CreakingHeartBlock, DirtPathBlock, DryVegetationBlock, EyeblossomBlock, EyeblossomType,
+    FarmlandBlock, FireflyBushBlock, FlowerBedBlock, GlowLichenBlock, HangingMossBlock,
+    HangingRootsBlock, HugeMushroomBlock, KelpBlock, KelpPlantBlock, LeafLitterBlock, LilyPadBlock,
     MangrovePropaguleBlock, MossyCarpetBlock, MushroomBlock, NetherFungusBlock, NetherRootsBlock,
     PointedDripstoneBlock, SaplingBlock, SculkVeinBlock, SeaPickleBlock, ShortDryGrassBlock,
     SmallDripleafBlock, SporeBlossomBlock, SulfurSpikeBlock, TallDryGrassBlock, TwistingVinesBlock,
     TwistingVinesPlantBlock, VineBlock, WeepingVinesBlock, WeepingVinesPlantBlock, WitherRoseBlock,
     WoolCarpetBlock,
 };
+pub(crate) use vegetation::{CREAKING_HEART_STATE, creaking_heart_awake_or_dormant};

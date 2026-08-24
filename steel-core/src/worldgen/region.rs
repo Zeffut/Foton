@@ -1497,6 +1497,15 @@ impl LevelAccessor for WorldGenRegion<'_> {
     fn set_block_state(&self, pos: BlockPos, state: BlockStateId, flags: UpdateFlags) -> bool {
         WorldGenRegion::set_block_state(self, pos, state, flags)
     }
+
+    fn attach_block_entity(
+        &self,
+        pos: BlockPos,
+        block_entity_type: BlockEntityTypeRef,
+        state: BlockStateId,
+    ) {
+        let _ = self.set_block_entity_data(pos, block_entity_type, state, NbtCompound::new());
+    }
 }
 
 #[cfg(test)]

@@ -278,6 +278,15 @@ impl World {
         environment::cat_waking_up_gift_chance(self.dimension_type, level_data.world_clocks())
     }
 
+    /// Returns the current vanilla `CREAKING_ACTIVE` environment attribute.
+    ///
+    /// Vanilla reads this attribute at a block position; Steel resolves environment
+    /// attributes per dimension, and no vanilla source varies this one within a dimension.
+    pub fn creaking_active(&self) -> bool {
+        let level_data = self.level_data.read();
+        environment::creaking_active(self.dimension_type, level_data.world_clocks())
+    }
+
     /// Returns sky-layer light after the current sky darkening is subtracted.
     ///
     /// Mirrors vanilla `LevelReader.getEffectiveSkyBrightness` without allowing
