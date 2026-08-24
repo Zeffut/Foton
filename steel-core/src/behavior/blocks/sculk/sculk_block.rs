@@ -5,14 +5,10 @@
 //! The `DropExperienceBlock` half -- one experience per block mined -- is here in full;
 //! it is the whole of the block's `BlockBehaviour` surface.
 //!
-//! Not implemented: the `SculkBehaviour` half. `attemptUseCharge` and
-//! `canChangeBlockStateOnSpread` are only ever called by a `SculkSpreader` walking its
-//! charge cursors, and Steel has no level-side spreader: the only port of that algorithm
-//! is bound to `WorldGenRegion` inside `worldgen/feature/features/sculk_patch.rs`, which
-//! is what grows the deep dark at world generation. Until that algorithm is lifted to
-//! `World`, a sculk block in a live world never grows a sensor or a shrieker on top of
-//! itself, and `SculkCatalystBlock` -- the block that would drive it -- is unimplemented
-//! for the same reason.
+//! The `SculkBehaviour` half -- `attemptUseCharge`, `canChangeBlockStateOnSpread` and the
+//! rest -- is only ever called by a `SculkSpreader` walking its charge cursors, so it lives
+//! next door in `spreader`, which both a live sculk catalyst and the deep-dark world
+//! generation feature drive.
 
 use std::sync::Arc;
 

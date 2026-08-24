@@ -19,12 +19,12 @@ use super::entities::{
     BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity,
     BrewingStandBlockEntity, BrushableBlockEntity, ChestBlockEntity, ChiseledBookShelfBlockEntity,
     ComparatorBlockEntity, CopperGolemStatueBlockEntity, CrafterBlockEntity,
-    DaylightDetectorBlockEntity, DecoratedPotBlockEntity, DispenserBlockEntity,
-    EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
-    JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
-    RawBlockEntity, SculkSensorBlockEntity, SculkShriekerBlockEntity, ShelfBlockEntity,
-    ShulkerBoxBlockEntity, SignBlockEntity, SkullBlockEntity, SpawnerBlockEntity,
-    TrialSpawnerBlockEntity,
+    CreakingHeartBlockEntity, DaylightDetectorBlockEntity, DecoratedPotBlockEntity,
+    DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity,
+    HopperBlockEntity, JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity,
+    PotentSulfurBlockEntity, RawBlockEntity, SculkCatalystBlockEntity, SculkSensorBlockEntity,
+    SculkShriekerBlockEntity, ShelfBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
+    SkullBlockEntity, SpawnerBlockEntity, TrialSpawnerBlockEntity,
 };
 use super::vault::VaultBlockEntity;
 use crate::world::World;
@@ -254,6 +254,16 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
     registry.register(
         &vanilla_block_entity_types::SCULK_SHRIEKER,
         |level, pos, state| Arc::new(SculkShriekerBlockEntity::new(level, pos, state)),
+    );
+
+    registry.register(
+        &vanilla_block_entity_types::CREAKING_HEART,
+        |level, pos, state| Arc::new(CreakingHeartBlockEntity::new(level, pos, state)),
+    );
+
+    registry.register(
+        &vanilla_block_entity_types::SCULK_CATALYST,
+        |level, pos, state| Arc::new(SculkCatalystBlockEntity::new(level, pos, state)),
     );
 
     registry.register(

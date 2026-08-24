@@ -11,6 +11,10 @@ const SKY_LIGHT_LEVEL_ATTRIBUTE: &str = "minecraft:gameplay/sky_light_level";
 const SUN_ANGLE_ATTRIBUTE: &str = "minecraft:visual/sun_angle";
 const TURTLE_EGG_HATCH_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/turtle_egg_hatch_chance";
 const CAT_WAKING_UP_GIFT_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/cat_waking_up_gift_chance";
+const CREAKING_ACTIVE_ATTRIBUTE: &str = "minecraft:gameplay/creaking_active";
+/// The declared default of `EnvironmentAttributes.CREAKING_ACTIVE`. No dimension type
+/// overrides it, so only the overworld `day` timeline ever turns it on.
+const DEFAULT_CREAKING_ACTIVE: bool = false;
 const DEFAULT_SKY_LIGHT_LEVEL: f32 = 15.0;
 const DEFAULT_SUN_ANGLE: f32 = 0.0;
 /// Vanilla `DimensionDefaults.TURTLE_EGG_HATCH_CHANCE`, which is also the
@@ -105,6 +109,25 @@ pub(super) fn cat_waking_up_gift_chance(
     .clamp(MIN_UNIT_FLOAT, MAX_UNIT_FLOAT)
 }
 
+/// Returns the `gameplay/creaking_active` environment attribute.
+///
+/// The overworld `day` timeline turns this on for the stretch of night between 12600 and
+/// 23401 ticks, which is what wakes a creaking heart and, in vanilla, lets it hold a
+/// creaking. It defaults to off and no dimension type overrides it, so a dimension without
+/// the `day` timeline never wakes one.
+#[must_use]
+pub(super) fn creaking_active(
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+) -> bool {
+    apply_timeline_bool_attribute(
+        DEFAULT_CREAKING_ACTIVE,
+        dimension_type,
+        clock_manager,
+        CREAKING_ACTIVE_ATTRIBUTE,
+    )
+}
+
 #[must_use]
 pub(super) fn sky_darkening(sky_light_level: f32) -> u8 {
     (MAX_SKY_LIGHT_LEVEL - sky_light_level.clamp(MIN_SKY_LIGHT_LEVEL, MAX_SKY_LIGHT_LEVEL)) as u8
@@ -135,6 +158,96 @@ fn apply_timeline_float_attribute(
     REGISTRY.timelines.by_key(&key).map_or(value, |timeline| {
         apply_timeline_float_track(value, timeline, clock_manager, attribute)
     })
+}
+
+fn apply_timeline_bool_attribute(
+    mut value: bool,
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+    attribute: &str,
+) -> bool {
+    let Some(timelines) = dimension_type.timelines else {
+        return value;
+    };
+    if let Some(tag) = timelines.strip_prefix('#') {
+        let Ok(tag) = Identifier::from_str(tag) else {
+            return value;
+        };
+        for timeline in REGISTRY.timelines.iter_tag(&tag) {
+            value = apply_timeline_bool_track(value, timeline, clock_manager, attribute);
+        }
+        return value;
+    }
+
+    let Ok(key) = Identifier::from_str(timelines) else {
+        return value;
+    };
+    REGISTRY.timelines.by_key(&key).map_or(value, |timeline| {
+        apply_timeline_bool_track(value, timeline, clock_manager, attribute)
+    })
+}
+
+fn apply_timeline_bool_track(
+    value: bool,
+    timeline: TimelineRef,
+    clock_manager: &WorldClockManager,
+    attribute: &str,
+) -> bool {
+    let Some(track) = timeline.tracks.iter().find(|track| track.name == attribute) else {
+        return value;
+    };
+    let Some(total_ticks) = clock_manager.total_ticks(timeline.clock) else {
+        return value;
+    };
+    let Some(sample) = sample_bool_track(track, timeline.period_ticks.map(i64::from), total_ticks)
+    else {
+        return value;
+    };
+    match track.modifier {
+        // Vanilla `BooleanModifier.OR`, the only boolean modifier any timeline uses.
+        Some("or") => value || sample,
+        Some("and") => value && sample,
+        None => sample,
+        _ => value,
+    }
+}
+
+/// Samples a boolean keyframe track.
+///
+/// Vanilla bakes non-numeric tracks with `LerpFunction.ofConstant()`, which is
+/// `ofStep(1.0)`: a segment holds its `from` value for every tick strictly before the next
+/// keyframe. So a boolean track is a step function over its keyframes, wrapped by the
+/// timeline period.
+fn sample_bool_track(track: &Track, period_ticks: Option<i64>, ticks: i64) -> Option<bool> {
+    let keyframes = track.keyframes;
+    match keyframes.len() {
+        0 => return None,
+        1 => return keyframe_bool_value(&keyframes[0].value),
+        _ => {}
+    }
+
+    let sample_ticks = period_ticks.map_or(ticks, |period| ticks.rem_euclid(period));
+    let first = &keyframes[0];
+    let last = &keyframes[keyframes.len() - 1];
+
+    if period_ticks.is_some() && sample_ticks < first.ticks {
+        return keyframe_bool_value(&last.value);
+    }
+
+    for segment in keyframes.windows(2) {
+        if sample_ticks < segment[1].ticks {
+            return keyframe_bool_value(&segment[0].value);
+        }
+    }
+
+    keyframe_bool_value(&last.value)
+}
+
+const fn keyframe_bool_value(value: &KeyframeValue) -> Option<bool> {
+    match value {
+        KeyframeValue::Bool(value) => Some(*value),
+        _ => None,
+    }
 }
 
 fn apply_timeline_float_track(
@@ -516,6 +629,46 @@ mod tests {
             turtle_egg_hatch_chance(&THE_NETHER, &clock_manager_at(OVERWORLD_PRE_SUNRISE_TICKS)),
             DEFAULT_TURTLE_EGG_HATCH_CHANCE,
         );
+    }
+
+    /// A boolean track is a step function, not an interpolated one -- vanilla bakes it with
+    /// `LerpFunction.ofConstant()`. The creaking is awake for exactly the stretch between
+    /// the two keyframes, and reading the edges wrong would wake every creaking heart a
+    /// whole day out of phase.
+    #[test]
+    fn the_creaking_is_active_for_exactly_the_night_the_day_timeline_names() {
+        init_vanilla_registry();
+
+        // The `day` timeline switches this on at 12600 and off at 23401.
+        assert!(!creaking_active(&OVERWORLD, &clock_manager_at(12_599)));
+        assert!(creaking_active(&OVERWORLD, &clock_manager_at(12_600)));
+        assert!(creaking_active(
+            &OVERWORLD,
+            &clock_manager_at(OVERWORLD_MIDNIGHT_TICKS)
+        ));
+        assert!(creaking_active(&OVERWORLD, &clock_manager_at(23_400)));
+        assert!(!creaking_active(&OVERWORLD, &clock_manager_at(23_401)));
+        assert!(!creaking_active(
+            &OVERWORLD,
+            &clock_manager_at(OVERWORLD_NOON_TICKS)
+        ));
+        // Before the first keyframe the period wraps back to the last one.
+        assert!(!creaking_active(
+            &OVERWORLD,
+            &clock_manager_at(OVERWORLD_WAKE_UP_TICKS)
+        ));
+    }
+
+    /// The attribute defaults to off and no dimension type overrides it, so a dimension
+    /// without the overworld `day` timeline never wakes a creaking heart.
+    #[test]
+    fn a_dimension_without_the_day_timeline_never_wakes_the_creaking() {
+        init_vanilla_registry();
+
+        assert!(!creaking_active(
+            &THE_NETHER,
+            &clock_manager_at(OVERWORLD_MIDNIGHT_TICKS)
+        ));
     }
 
     #[test]

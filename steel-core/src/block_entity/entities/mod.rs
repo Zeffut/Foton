@@ -11,6 +11,7 @@ mod chiseled_bookshelf;
 mod comparator;
 mod copper_golem_statue;
 mod crafter;
+mod creaking_heart;
 mod daylight_detector;
 mod decorated_pot;
 mod dispenser;
@@ -23,6 +24,7 @@ mod lectern;
 mod piston_moving;
 mod potent_sulfur;
 mod raw;
+mod sculk_catalyst;
 mod sculk_sensor;
 mod sculk_shrieker;
 mod shelf;
@@ -55,6 +57,7 @@ pub use crafter::{
     CRAFTER_DATA_SLOTS, CRAFTER_HEIGHT, CRAFTER_SLOTS, CRAFTER_WIDTH, CrafterBlockEntity,
     CrafterContainer, CrafterDataSlots,
 };
+pub use creaking_heart::CreakingHeartBlockEntity;
 pub use daylight_detector::DaylightDetectorBlockEntity;
 pub use decorated_pot::{
     DECORATED_POT_SLOTS, DecoratedPotBlockEntity, EVENT_POT_WOBBLES, WobbleStyle,
@@ -74,6 +77,7 @@ pub use lectern::LecternBlockEntity;
 pub use piston_moving::PistonMovingBlockEntity;
 pub use potent_sulfur::PotentSulfurBlockEntity;
 pub use raw::RawBlockEntity;
+pub use sculk_catalyst::{CatalystListener, SculkCatalystBlockEntity};
 pub use sculk_sensor::SculkSensorBlockEntity;
 pub use sculk_shrieker::{SculkShriekerBlockEntity, with_shrieking_player};
 pub use shelf::{SHELF_SLOTS, ShelfBlockEntity};
