@@ -15,9 +15,11 @@
 
 use super::*;
 use crate::entity::entities::{
-    CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HuskEntity, IronGolemEntity,
-    MagmaCubeEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity, SpiderEntity,
-    StrayEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
+    BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
+    EndermanEntity, EndermiteEntity, GhastEntity, GuardianEntity, HuskEntity, IronGolemEntity,
+    MagmaCubeEntity, PhantomEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity,
+    SnowGolemEntity, SpiderEntity, StrayEntity, VexEntity, WitchEntity, WitherSkeletonEntity,
+    ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -65,4 +67,12 @@ assert_ai_runs! {
     a_magma_cube_runs_its_goals: MagmaCubeEntity, &vanilla_entities::MAGMA_CUBE;
     an_iron_golem_runs_its_goals: IronGolemEntity, &vanilla_entities::IRON_GOLEM;
     a_snow_golem_runs_its_goals: SnowGolemEntity, &vanilla_entities::SNOW_GOLEM;
+    a_blaze_runs_its_goals: BlazeEntity, &vanilla_entities::BLAZE;
+    a_ghast_runs_its_goals: GhastEntity, &vanilla_entities::GHAST;
+    a_guardian_runs_its_goals: GuardianEntity, &vanilla_entities::GUARDIAN;
+    an_elder_guardian_runs_its_goals: ElderGuardianEntity, &vanilla_entities::ELDER_GUARDIAN;
+    an_endermite_runs_its_goals: EndermiteEntity, &vanilla_entities::ENDERMITE;
+    a_vex_runs_its_goals: VexEntity, &vanilla_entities::VEX;
+    a_phantom_runs_its_goals: PhantomEntity, &vanilla_entities::PHANTOM;
+    a_shulker_runs_its_goals: ShulkerEntity, &vanilla_entities::SHULKER;
 }

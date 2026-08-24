@@ -14,6 +14,7 @@ pub mod game_mode;
 mod health_sync;
 mod item_cooldowns;
 mod lifecycle;
+mod map_sync;
 pub mod movement;
 mod permissions;
 pub mod player_data;
@@ -288,6 +289,11 @@ pub struct Player {
     /// In-flight ender pearls thrown by this player, kept weakly so they persist
     /// with the player and re-spawn on login (vanilla `ServerPlayer.enderPearls`).
     ender_pearls: SyncMutex<Vec<Weak<dyn Entity>>>,
+    /// The fishing hook this player has cast (vanilla `Player.fishing`).
+    ///
+    /// Held weakly: the hook lives in the world's entity table, and this field
+    /// only answers whether a bobber is already out when the rod is used again.
+    fishing: SyncMutex<Option<Weak<dyn Entity>>>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `Player`.
@@ -572,6 +578,7 @@ impl Player {
             chunk_send_epoch: SyncMutex::new(0),
             residence: SyncMutex::new(PlayerResidenceState::new()),
             ender_pearls: SyncMutex::new(Vec::new()),
+            fishing: SyncMutex::new(None),
         }
     }
 
@@ -581,6 +588,10 @@ impl Player {
     ///
     /// Panics if the player position cannot be restored after `ai_step`. Vanilla treats the
     /// pre-tick position as authoritative here, so a rejection indicates corrupted entity state.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one vanilla tick, whose order between steps is the behavior"
+    )]
     pub fn tick(&self) {
         self.advance_tick();
         self.tick_item_cooldowns();
@@ -615,6 +626,8 @@ impl Player {
 
         self.default_tick();
         self.detect_equipment_updates();
+        // Vanilla parity: `Inventory.tick`, which `Player.aiStep` runs first.
+        self.tick_inventory_items();
         self.ai_step();
 
         // Vanilla snaps the player back to firstGood after ServerPlayer.doTick().
@@ -666,6 +679,7 @@ impl Player {
 
         self.tick_living_state();
 
+        self.sync_map_item_updates();
         self.tick_open_menu();
         self.flush_inventory_resync();
         self.broadcast_inventory_changes();
@@ -1092,6 +1106,28 @@ impl Player {
             pearl.world == world_key && Uuid::from_bytes(pearl.entity.uuid) == uuid
         })?;
         Some(residence.pending_ender_pearls.remove(index))
+    }
+
+    /// Returns the fishing hook this player currently has out, if any.
+    ///
+    /// Vanilla `Player.fishing`. A hook already removed from the world reads as
+    /// absent, so a rod whose bobber was killed casts again instead of trying to
+    /// reel in a corpse.
+    #[must_use]
+    pub fn fishing_hook(&self) -> Option<SharedEntity> {
+        let mut fishing = self.fishing.lock();
+        match fishing.as_ref().and_then(Weak::upgrade) {
+            Some(hook) if !hook.is_removed() => Some(hook),
+            _ => {
+                *fishing = None;
+                None
+            }
+        }
+    }
+
+    /// Sets or clears this player's fishing hook (vanilla `Player.fishing`).
+    pub fn set_fishing_hook(&self, hook: Option<&SharedEntity>) {
+        *self.fishing.lock() = hook.map(Arc::downgrade);
     }
 
     /// Registers a thrown ender pearl so it persists with this player and

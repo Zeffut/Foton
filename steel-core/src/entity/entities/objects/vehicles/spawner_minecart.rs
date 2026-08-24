@@ -89,6 +89,10 @@ impl SpawnerOwner for SpawnerMinecartEntity {
 }
 
 impl Entity for SpawnerMinecartEntity {
+    fn is_minecart(&self) -> bool {
+        true
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }

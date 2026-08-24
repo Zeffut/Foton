@@ -35,6 +35,18 @@ impl PotionContents {
         }
     }
 
+    /// Returns these contents with a different potion in them.
+    ///
+    /// Vanilla parity: `PotionContents.withPotion`, which keeps the custom
+    /// color, effects and name and swaps only the potion itself.
+    #[must_use]
+    pub fn with_potion(self, potion: RegistryReference<Potion>) -> Self {
+        Self {
+            potion: Some(potion),
+            ..self
+        }
+    }
+
     #[must_use]
     pub const fn new(
         potion: Option<RegistryReference<Potion>>,

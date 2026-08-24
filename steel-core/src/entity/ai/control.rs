@@ -1,8 +1,14 @@
 //! Mob control state.
 
-use glam::DVec3;
-use steel_registry::vanilla_attributes;
+use std::f32::consts::{FRAC_PI_2, PI};
 
+use glam::{DVec3, Quat, Vec3};
+use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::vanilla_attributes;
+use steel_utils::Direction;
+
+use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext};
+use crate::entity::block_effects;
 use crate::entity::mob::rotlerp;
 use crate::entity::{LivingTravelInput, Mob};
 
@@ -67,6 +73,15 @@ impl MoveControl {
     #[must_use]
     pub const fn operation(&self) -> MoveControlOperation {
         self.operation
+    }
+
+    /// Returns whether the mob still has somewhere to be.
+    ///
+    /// Vanilla parity: `MoveControl.hasWanted`, which several goals read to
+    /// decide whether the mob is already busy going somewhere.
+    #[must_use]
+    pub const fn has_wanted(&self) -> bool {
+        matches!(self.operation, MoveControlOperation::MoveTo)
     }
 
     #[must_use]
@@ -598,6 +613,600 @@ impl SmoothSwimmingLookControl {
         } else if head_diff_body > self.max_y_rot_from_center {
             mob.set_y_body_rot(mob.y_body_rot() + SMOOTH_SWIMMING_BODY_TURN_RATE);
         }
+    }
+}
+
+/// Degrees per tick a shulker's head drifts back toward its body when it has
+/// nothing to look at.
+///
+/// Vanilla parity: the `10.0F` of the else branch of `LookControl.tick`.
+const IDLE_HEAD_RETURN_RATE: f32 = 10.0;
+
+/// How a shulker looks around.
+///
+/// Vanilla parity: `Shulker.ShulkerLookControl`. A shulker's head turns in the
+/// plane of the face it is stuck to rather than around the world's Y axis, it
+/// never pitches, and it is never clamped back toward its body -- the body has
+/// no meaningful rotation to clamp to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShulkerLookControl {
+    /// The face the shulker is attached to.
+    attach_face: Direction,
+}
+
+impl ShulkerLookControl {
+    #[must_use]
+    pub const fn new(attach_face: Direction) -> Self {
+        Self { attach_face }
+    }
+
+    /// Returns the basis the shulker's head turns in.
+    ///
+    /// Vanilla parity: the `forward`/`right` pair of
+    /// `ShulkerLookControl.getYRotD`, built from `Direction.getRotation`.
+    fn face_basis(attach_face: Direction) -> (Vec3, Vec3) {
+        let rotation = match attach_face {
+            Direction::Down => Quat::from_rotation_x(PI),
+            Direction::Up => Quat::IDENTITY,
+            Direction::North => Quat::from_rotation_z(PI) * Quat::from_rotation_x(FRAC_PI_2),
+            Direction::South => Quat::from_rotation_x(FRAC_PI_2),
+            Direction::West => Quat::from_rotation_z(FRAC_PI_2) * Quat::from_rotation_x(FRAC_PI_2),
+            Direction::East => Quat::from_rotation_z(-FRAC_PI_2) * Quat::from_rotation_x(FRAC_PI_2),
+        };
+
+        // Vanilla parity: `FORWARD` is the south unit vector.
+        let forward = rotation * Vec3::new(0.0, 0.0, 1.0);
+        let up_normal = attach_face.offset_vec();
+        let right =
+            Vec3::new(up_normal.x as f32, up_normal.y as f32, up_normal.z as f32).cross(forward);
+
+        (forward, right)
+    }
+
+    /// Vanilla parity: `LookControl.tick` with the shulker's three overrides.
+    pub fn tick(self, mob: &dyn Mob) {
+        let look_control = {
+            let mut controls = mob.mob_base().controls().lock();
+            let look_control = controls.look_control;
+            controls.look_control.tick_cooldown();
+            look_control
+        };
+
+        let (yaw, _) = mob.rotation();
+        // Vanilla parity: `LookControl.resetXRotOnTick` is true for a shulker,
+        // so its pitch is zeroed every tick before anything else.
+        mob.set_rotation((yaw, 0.0));
+
+        if !look_control.is_looking_at_target() {
+            mob.set_y_head_rot(rotate_towards(
+                mob.y_head_rot(),
+                mob.y_body_rot(),
+                IDLE_HEAD_RETURN_RATE,
+            ));
+            return;
+        }
+
+        let (forward, right) = Self::face_basis(self.attach_face.opposite());
+        let wanted = look_control.wanted_position();
+        let position = mob.position();
+        let out = Vec3::new(
+            (wanted.x - position.x) as f32,
+            (wanted.y - mob.get_eye_y()) as f32,
+            (wanted.z - position.z) as f32,
+        );
+        let delta_right = right.dot(out);
+        let delta_forward = forward.dot(out);
+
+        if delta_right.abs() > 1.0e-5 || delta_forward.abs() > 1.0e-5 {
+            let wanted_yaw = (-delta_right).atan2(delta_forward).to_degrees();
+            mob.set_y_head_rot(rotate_towards(
+                mob.y_head_rot(),
+                wanted_yaw,
+                look_control.y_max_rot_speed(),
+            ));
+        }
+
+        // Vanilla parity: `ShulkerLookControl.getXRotD` always answers zero.
+        let (yaw, pitch) = mob.rotation();
+        mob.set_rotation((
+            yaw,
+            rotate_towards(pitch, 0.0, look_control.x_max_rot_angle()),
+        ));
+    }
+}
+
+/// Moves `current` toward `target` by at most `increment`.
+///
+/// Vanilla parity: `Mth.approach`.
+fn approach(current: f32, target: f32, increment: f32) -> f32 {
+    let increment = increment.abs();
+    if current < target {
+        (current + increment).clamp(current, target)
+    } else {
+        (current - increment).clamp(target, current)
+    }
+}
+
+/// Moves an angle toward another the short way round.
+///
+/// Vanilla parity: `Mth.approachDegrees`.
+fn approach_degrees(current: f32, target: f32, increment: f32) -> f32 {
+    let difference = wrap_degrees(target - current);
+    approach(current, current + difference, increment)
+}
+
+/// Fastest a phantom will ever fly.
+///
+/// Vanilla parity: the `Mth.approach(this.speed, 1.8F, ...)` of
+/// `Phantom.PhantomMoveControl.tick`.
+const PHANTOM_MAX_SPEED: f32 = 1.8;
+
+/// Speed a phantom drops back to while it is still turning.
+///
+/// Vanilla parity: the `Mth.approach(this.speed, 0.2F, 0.025F)` of the same
+/// method, and the `0.1F` the control starts and resets at.
+const PHANTOM_TURNING_SPEED: f32 = 0.2;
+
+/// Speed a phantom resets to when it flies into a wall.
+pub const PHANTOM_INITIAL_SPEED: f32 = 0.1;
+
+/// How fast a phantom picks up speed while it is flying straight.
+///
+/// Vanilla parity: the `0.005F * (1.8F / this.speed)` increment, which is why a
+/// slow phantom accelerates hard and a fast one barely gains.
+const PHANTOM_ACCELERATION: f32 = 0.005;
+
+/// How fast a phantom sheds speed while it is turning.
+const PHANTOM_DECELERATION: f32 = 0.025;
+
+/// Degrees per tick a phantom may turn.
+const PHANTOM_MAX_TURN: f32 = 4.0;
+
+/// Below this much turn left a phantom counts as flying straight.
+const PHANTOM_STRAIGHT_THRESHOLD: f32 = 3.0;
+
+/// How much a phantom flattens its dive when it is far above or below its
+/// target.
+///
+/// Vanilla parity: the `1.0 - Math.abs(tdy * 0.7F) / sd` of the same method.
+const PHANTOM_DIVE_FLATTENING: f64 = 0.7;
+
+/// How much of the gap between its current and wanted velocity a phantom closes
+/// each tick.
+const PHANTOM_VELOCITY_LERP: f64 = 0.2;
+
+/// How a phantom steers.
+///
+/// Vanilla parity: `Phantom.PhantomMoveControl`. A phantom ignores the move
+/// control's wanted position entirely and flies at the point its goals put in
+/// `moveTargetPoint`, banking toward it a few degrees at a time and speeding up
+/// only once it is pointed the right way. That is what makes a phantom circle
+/// wide and then commit to a dive.
+///
+/// Returns the phantom's new speed, which vanilla keeps on the control object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhantomMoveControl {
+    move_target_point: DVec3,
+    speed: f32,
+}
+
+impl PhantomMoveControl {
+    #[must_use]
+    pub const fn new(move_target_point: DVec3, speed: f32) -> Self {
+        Self {
+            move_target_point,
+            speed,
+        }
+    }
+
+    /// Vanilla parity: `PhantomMoveControl.tick`.
+    #[must_use]
+    pub fn tick(self, mob: &dyn Mob) -> f32 {
+        let mut speed = self.speed;
+        if mob.horizontal_collision() {
+            let (yaw, pitch) = mob.rotation();
+            mob.set_rotation((yaw + 180.0, pitch));
+            speed = PHANTOM_INITIAL_SPEED;
+        }
+
+        let position = mob.position();
+        let mut tdx = self.move_target_point.x - position.x;
+        let tdy = self.move_target_point.y - position.y;
+        let mut tdz = self.move_target_point.z - position.z;
+        let mut horizontal = tdx.hypot(tdz);
+        if horizontal.abs() <= f64::from(1.0e-5_f32) {
+            return speed;
+        }
+
+        // Vanilla shortens the horizontal reach when the target is well above
+        // or below, which is what turns a shallow approach into a dive.
+        let y_relative_scale = 1.0 - (tdy * PHANTOM_DIVE_FLATTENING).abs() / horizontal;
+        tdx *= y_relative_scale;
+        tdz *= y_relative_scale;
+        horizontal = tdx.hypot(tdz);
+        let distance = DVec3::new(tdx, tdy, tdz).length();
+
+        let (yaw, _) = mob.rotation();
+        let previous_yaw = yaw;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "vanilla stores entity rotation as a float"
+        )]
+        let wanted_yaw = tdz.atan2(tdx).to_degrees() as f32;
+        let turned_yaw = approach_degrees(
+            wrap_degrees(yaw + 90.0),
+            wrap_degrees(wanted_yaw),
+            PHANTOM_MAX_TURN,
+        ) - 90.0;
+        let (_, pitch) = mob.rotation();
+        mob.set_rotation((turned_yaw, pitch));
+        mob.set_y_body_rot(turned_yaw);
+
+        if wrap_degrees(turned_yaw - previous_yaw).abs() < PHANTOM_STRAIGHT_THRESHOLD {
+            speed = approach(
+                speed,
+                PHANTOM_MAX_SPEED,
+                PHANTOM_ACCELERATION * (PHANTOM_MAX_SPEED / speed),
+            );
+        } else {
+            speed = approach(speed, PHANTOM_TURNING_SPEED, PHANTOM_DECELERATION);
+        }
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "vanilla stores entity rotation as a float"
+        )]
+        let wanted_pitch = -(tdy.atan2(horizontal).to_degrees() as f32);
+        mob.set_rotation((mob.rotation().0, wanted_pitch));
+
+        let move_angle = f64::from((mob.rotation().0 + 90.0).to_radians());
+        let pitch_radians = f64::from(wanted_pitch.to_radians());
+        let flight_speed = f64::from(speed);
+        let wanted = DVec3::new(
+            flight_speed * move_angle.cos() * (tdx / distance).abs(),
+            flight_speed * pitch_radians.sin() * (tdy / distance).abs(),
+            flight_speed * move_angle.sin() * (tdz / distance).abs(),
+        );
+        let movement = mob.velocity();
+        mob.set_velocity(movement + (wanted - movement) * PHANTOM_VELOCITY_LERP);
+
+        speed
+    }
+}
+
+/// Degrees per tick a guardian may turn toward its heading.
+///
+/// Vanilla parity: the `rotlerp(getYRot(), yRotD, 90.0F)` of
+/// `Guardian.GuardianMoveControl.tick`, the same cap the base move control uses.
+const GUARDIAN_MAX_TURN: f32 = 90.0;
+
+/// How much of the gap to its target speed a guardian closes each tick.
+///
+/// Vanilla parity: the `Mth.lerp(0.125F, getSpeed(), targetSpeed)` of
+/// `Guardian.GuardianMoveControl.tick`.
+const GUARDIAN_SPEED_LERP: f32 = 0.125;
+
+/// Amplitude of the sideways sculling a guardian adds to its swimming.
+///
+/// Vanilla parity: the `* 0.05` of both `push` terms.
+const GUARDIAN_SCULL_AMPLITUDE: f64 = 0.05;
+
+/// How fast the horizontal scull oscillates.
+const GUARDIAN_SCULL_RATE: f64 = 0.5;
+
+/// How fast the vertical scull oscillates.
+const GUARDIAN_BOB_RATE: f64 = 0.75;
+
+/// How much of the vertical scull actually reaches the guardian.
+const GUARDIAN_BOB_SCALE: f64 = 0.25;
+
+/// How much of its forward speed a guardian turns into climb or dive.
+const GUARDIAN_CLIMB_SCALE: f64 = 0.1;
+
+/// How far ahead a guardian looks while swimming, in blocks.
+const GUARDIAN_LOOK_AHEAD: f64 = 2.0;
+
+/// How much of the gap to its new look target a guardian closes each tick.
+const GUARDIAN_LOOK_LERP: f64 = 0.125;
+
+/// How fast a swimming guardian's head turns, in degrees per tick.
+const GUARDIAN_LOOK_Y_MAX_ROT_SPEED: f32 = 10.0;
+
+/// How far a swimming guardian's head may pitch, in degrees per tick.
+const GUARDIAN_LOOK_X_MAX_ROT_ANGLE: f32 = 40.0;
+
+/// How a guardian steers.
+///
+/// Vanilla parity: `Guardian.GuardianMoveControl`. A guardian does not swim in
+/// a straight line: it eases into its speed, sculls from side to side on a sine
+/// wave keyed to its own entity id, and drags its own look target along behind
+/// its heading. That wobble is what the whole mob reads as.
+///
+/// Returns whether the guardian is moving, which vanilla writes straight to
+/// `Guardian.setMoving`; Steel returns it because the flag lives in the
+/// guardian's synchronized data rather than on the control.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuardianMoveControl;
+
+impl GuardianMoveControl {
+    /// Vanilla parity: `GuardianMoveControl.tick`.
+    #[must_use]
+    pub fn tick(mob: &dyn Mob) -> bool {
+        let (operation, wanted_position, speed_modifier) = {
+            let controls = mob.mob_base().controls().lock();
+            let move_control = controls.move_control;
+            (
+                move_control.operation(),
+                move_control.wanted_position(),
+                move_control.speed_modifier(),
+            )
+        };
+        let navigating = matches!(operation, MoveControlOperation::MoveTo)
+            && !mob.mob_base().navigation().lock().is_done();
+        if !navigating {
+            mob.set_mob_speed(0.0);
+            return false;
+        }
+
+        let position = mob.position();
+        let delta = wanted_position - position;
+        let length = delta.length();
+        let unit = delta / length;
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "vanilla stores entity rotation as a float"
+        )]
+        let wanted_yaw = (delta.z.atan2(delta.x).to_degrees() as f32) - 90.0;
+        let (yaw, pitch) = mob.rotation();
+        let turned_yaw = rotlerp(yaw, wanted_yaw, GUARDIAN_MAX_TURN);
+        mob.set_rotation((turned_yaw, pitch));
+        mob.set_y_body_rot(turned_yaw);
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "vanilla stores movement speed as a float"
+        )]
+        let target_speed = (speed_modifier
+            * mob
+                .attributes()
+                .lock()
+                .required_value(vanilla_attributes::MOVEMENT_SPEED))
+            as f32;
+        let new_speed =
+            GUARDIAN_SPEED_LERP.mul_add(target_speed - mob.get_speed(), mob.get_speed());
+        mob.set_mob_speed(new_speed);
+
+        let phase = f64::from(mob.tick_count() + mob.id());
+        let push = (phase * GUARDIAN_SCULL_RATE).sin() * GUARDIAN_SCULL_AMPLITUDE;
+        let bob = (phase * GUARDIAN_BOB_RATE).sin() * GUARDIAN_SCULL_AMPLITUDE;
+        let yaw_radians = f64::from(mob.rotation().0.to_radians());
+        let cos = yaw_radians.cos();
+        let sin = yaw_radians.sin();
+        mob.set_velocity(
+            mob.velocity()
+                + DVec3::new(
+                    push * cos,
+                    bob * (sin + cos) * GUARDIAN_BOB_SCALE
+                        + f64::from(new_speed) * unit.y * GUARDIAN_CLIMB_SCALE,
+                    push * sin,
+                ),
+        );
+
+        // Vanilla parity: the guardian eases its own look target along its
+        // heading, which is what keeps its eye tracking ahead of it.
+        let new_look = DVec3::new(
+            position.x + unit.x * GUARDIAN_LOOK_AHEAD,
+            mob.get_eye_y() + unit.y / length,
+            position.z + unit.z * GUARDIAN_LOOK_AHEAD,
+        );
+        let mut controls = mob.mob_base().controls().lock();
+        let old_look = if controls.look_control.is_looking_at_target() {
+            controls.look_control.wanted_position()
+        } else {
+            new_look
+        };
+        controls.look_control.set_look_at(
+            old_look + (new_look - old_look) * GUARDIAN_LOOK_LERP,
+            GUARDIAN_LOOK_Y_MAX_ROT_SPEED,
+            GUARDIAN_LOOK_X_MAX_ROT_ANGLE,
+        );
+
+        true
+    }
+}
+
+/// Shortest pause between two nudges of a drifting ghast, in ticks.
+///
+/// Vanilla parity: the `random.nextInt(5) + 2` of `GhastMoveControl.tick`.
+const GHAST_FLOAT_MIN_PAUSE_TICKS: i32 = 2;
+
+/// Span of the random part of that pause.
+const GHAST_FLOAT_PAUSE_SPAN: i32 = 5;
+
+/// How hard one nudge pushes, as a multiple of the flying speed attribute.
+///
+/// Vanilla parity: the `getAttributeValue(FLYING_SPEED) * 5.0 / 3.0` scale.
+const GHAST_THRUST_SCALE: f64 = 5.0 / 3.0;
+
+/// How a ghast steers.
+///
+/// Vanilla parity: `Ghast.GhastMoveControl`. A ghast does not path and does not
+/// accelerate smoothly: every few ticks it checks whether the straight line to
+/// its destination is clear and, if it is, gives itself one shove along it.
+/// That intermittent shove is the whole of a ghast's drift.
+///
+/// Vanilla's control also carries a `careful` flag and a `shouldBeStopped`
+/// supplier. Both exist for the happy ghast -- a ghast constructs it with
+/// `(this, false, () -> false)` -- so neither is modeled here; add them with
+/// that mob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GhastMoveControl {
+    /// Ticks left before the next shove.
+    ///
+    /// Vanilla parity: `GhastMoveControl.floatDuration`. Vanilla keeps this on
+    /// the control object; Steel's controls are recreated each tick, so the
+    /// ghast holds it and hands it in.
+    float_duration: i32,
+}
+
+impl GhastMoveControl {
+    #[must_use]
+    pub const fn new(float_duration: i32) -> Self {
+        Self { float_duration }
+    }
+
+    /// Ticks the control and returns the new float duration for the mob to keep.
+    ///
+    /// Vanilla parity: `GhastMoveControl.tick`.
+    #[must_use]
+    pub fn tick(self, mob: &dyn Mob) -> i32 {
+        let (operation, wanted_position) = {
+            let controls = mob.mob_base().controls().lock();
+            (
+                controls.move_control.operation(),
+                controls.move_control.wanted_position(),
+            )
+        };
+        if operation != MoveControlOperation::MoveTo {
+            return self.float_duration;
+        }
+
+        let remaining = self.float_duration - 1;
+        if remaining > 0 {
+            return remaining;
+        }
+
+        let travel = wanted_position - mob.position();
+        if !Self::can_reach(mob, travel) {
+            mob.mob_base().controls().lock().move_control.set_wait();
+            return remaining;
+        }
+
+        let flying_speed = mob
+            .attributes()
+            .lock()
+            .required_value(vanilla_attributes::FLYING_SPEED);
+        mob.set_velocity(
+            mob.velocity() + travel.normalize_or_zero() * (flying_speed * GHAST_THRUST_SCALE),
+        );
+
+        remaining + rand::random_range(0..GHAST_FLOAT_PAUSE_SPAN) + GHAST_FLOAT_MIN_PAUSE_TICKS
+    }
+
+    /// Returns whether the ghast could slide along `travel` without hitting
+    /// anything.
+    ///
+    /// Vanilla parity: `GhastMoveControl.canReach` with `careful` false, which
+    /// reduces `blockTraversalPossible` to the collision test alone.
+    fn can_reach(mob: &dyn Mob, travel: DVec3) -> bool {
+        let Some(world) = mob.level() else {
+            return false;
+        };
+        let aabb = mob.bounding_box();
+        let aabb_at_destination = aabb.translate(travel);
+        let start = mob.position();
+        let end = start + travel;
+
+        block_effects::for_each_block_intersected_between(
+            start,
+            end,
+            aabb_at_destination,
+            |pos, _iteration| {
+                if aabb.intersects_block(pos) {
+                    return true;
+                }
+
+                let state = world.get_block_state(pos);
+                if state.is_air() {
+                    return true;
+                }
+
+                let shape = BLOCK_BEHAVIORS
+                    .get_behavior(state.get_block())
+                    .get_collision_shape(
+                        state,
+                        world.as_ref(),
+                        pos,
+                        BlockCollisionContext::empty(),
+                    );
+                !block_effects::collided_with_shape_moving_from(aabb, start, end, pos, shape)
+            },
+        )
+        .is_some()
+    }
+}
+
+/// Fraction of its speed a vex keeps when it arrives.
+///
+/// Vanilla parity: the `scale(0.5)` of `Vex.VexMoveControl.tick`.
+const VEX_ARRIVAL_DAMPING: f64 = 0.5;
+
+/// How much of the remaining gap a vex closes each tick, per speed unit.
+///
+/// Vanilla parity: the `speedModifier * 0.05 / deltaLength` scale.
+const VEX_ACCELERATION: f64 = 0.05;
+
+/// How a vex steers.
+///
+/// Vanilla parity: `Vex.VexMoveControl`. A vex has no navigation and no
+/// gravity: it accelerates straight at whatever point it was given and coasts
+/// there, which is what makes it drift through walls in a straight line.
+///
+/// Unlike the base control this one does not clear the wanted position at the
+/// top of the tick -- it clears it only on arrival -- and both of the vex's
+/// movement goals read that back through [`MoveControl::operation`], so the
+/// difference is the whole of their pacing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VexMoveControl;
+
+impl VexMoveControl {
+    /// Vanilla parity: `Vex.VexMoveControl.tick`.
+    pub fn tick(mob: &dyn Mob) {
+        let (operation, wanted_position, speed_modifier) = {
+            let controls = mob.mob_base().controls().lock();
+            let move_control = controls.move_control;
+            (
+                move_control.operation(),
+                move_control.wanted_position(),
+                move_control.speed_modifier(),
+            )
+        };
+        if operation != MoveControlOperation::MoveTo {
+            return;
+        }
+
+        let delta = wanted_position - mob.position();
+        let delta_length = delta.length();
+        if delta_length < mob.bounding_box().size() {
+            mob.mob_base().controls().lock().move_control.set_wait();
+            mob.set_velocity(mob.velocity() * VEX_ARRIVAL_DAMPING);
+            return;
+        }
+
+        mob.set_velocity(
+            mob.velocity() + delta * (speed_modifier * VEX_ACCELERATION / delta_length),
+        );
+
+        // Vanilla faces the target if it has one and its own heading if not.
+        let heading = mob.target().map_or_else(
+            || {
+                let movement = mob.velocity();
+                (movement.x, movement.z)
+            },
+            |target| {
+                let position = mob.position();
+                let target_position = target.position();
+                (
+                    target_position.x - position.x,
+                    target_position.z - position.z,
+                )
+            },
+        );
+        let y_rot = -(heading.0.atan2(heading.1).to_degrees() as f32);
+        let (_, pitch) = mob.rotation();
+        mob.set_rotation((y_rot, pitch));
+        mob.set_y_body_rot(y_rot);
     }
 }
 

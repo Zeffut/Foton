@@ -295,6 +295,9 @@ struct EntityPredicateJson {
     /// `minecraft:type_specific/cube_mob`, shared by slime and magma cube.
     #[serde(rename = "minecraft:type_specific/cube_mob", default)]
     cube_mob_type_specific: Option<CubeMobTypeSpecificJson>,
+    /// `minecraft:type_specific/fishing_hook`, which gates fishing treasure.
+    #[serde(rename = "minecraft:type_specific/fishing_hook", default)]
+    fishing_hook_type_specific: Option<FishingHookTypeSpecificJson>,
     /// Everything this generator does not model, kept so the predicate can be
     /// marked unsupported instead of quietly matching anything.
     #[serde(flatten)]
@@ -341,6 +344,14 @@ enum IntBoundJson {
 struct SheepTypeSpecificJson {
     #[serde(default)]
     sheared: Option<bool>,
+}
+
+/// `minecraft:type_specific/fishing_hook`: vanilla `FishingHookPredicate`.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct FishingHookTypeSpecificJson {
+    #[serde(default)]
+    in_open_water: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

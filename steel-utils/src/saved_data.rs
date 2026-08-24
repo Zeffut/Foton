@@ -27,6 +27,15 @@ pub mod names {
     pub const SCOREBOARD: SavedDataName = SavedDataName::trusted("scoreboard");
     /// Domain command storage, persisted through the domain default world.
     pub const COMMAND_STORAGE: SavedDataName = SavedDataName::trusted("command_storage");
+    /// Every filled map of a domain plus its id counter, persisted through the
+    /// domain default world as `data/maps.bin`.
+    ///
+    /// Vanilla splits this across one `data/maps/<id>.dat` per map and a
+    /// `data/maps/last_id.dat` counter. A saved-data name here is a
+    /// `&'static str`, so a file per map is not expressible; the layout is not
+    /// observable in game, and one binary file avoids writing 16 KiB color
+    /// arrays through the TOML encoder.
+    pub const MAPS: WincodeSavedDataName = WincodeSavedDataName::trusted("maps", *b"STMD", 1);
 }
 
 /// Name of a per-world saved data entry.

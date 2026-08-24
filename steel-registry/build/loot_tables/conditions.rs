@@ -162,6 +162,7 @@ pub(super) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
                             chicken_variant: None,
                             mooshroom_variant: None,
                             cube_size: None,
+                            in_open_water: None,
                             unsupported: &[],
                         }
                     }
@@ -177,6 +178,7 @@ pub(super) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
                         chicken_variant: None,
                         mooshroom_variant: None,
                         cube_size: None,
+                        in_open_water: None,
                         unsupported: &[],
                     }
                 }

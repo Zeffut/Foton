@@ -396,6 +396,12 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             },
         );
 
+    let in_open_water = predicate
+        .fishing_hook_type_specific
+        .as_ref()
+        .and_then(|hook| hook.in_open_water)
+        .map_or_else(|| quote! { None }, |open| quote! { Some(#open) });
+
     // A predicate key the generator cannot lower must be visible: it is warned
     // about at build time and fails at evaluation time, never silently passes.
     let mut unsupported: Vec<String> = predicate.unmodeled.keys().cloned().collect();
@@ -420,6 +426,7 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             chicken_variant: #chicken_variant,
             mooshroom_variant: #mooshroom_variant,
             cube_size: #cube_size,
+            in_open_water: #in_open_water,
             unsupported: &[#(#unsupported),*],
         }
     }

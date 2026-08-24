@@ -9,6 +9,21 @@ use crate::physics::collision;
 /// `LivingEntity.aiStep`.
 const SENSITIVE_TO_WATER_DAMAGE: f32 = 1.0;
 
+/// How hard a flier pushes against water and lava.
+///
+/// Vanilla parity: the two `0.02F` defaults of the two-argument
+/// `LivingEntity.travelFlying`.
+const FLYING_TRAVEL_FLUID_SPEED: f32 = 0.02;
+
+/// How much of a flier's speed survives a tick under water.
+const FLYING_TRAVEL_WATER_DRAG: f32 = 0.8;
+
+/// How much of a flier's speed survives a tick in lava.
+const FLYING_TRAVEL_LAVA_DRAG: f64 = 0.5;
+
+/// How much of a flier's speed survives a tick in the air.
+const FLYING_TRAVEL_AIR_DRAG: f32 = 0.91;
+
 /// A trait for living entities that can take damage, heal, and die.
 ///
 /// This trait provides the core functionality for entities that have health,
@@ -2941,6 +2956,42 @@ pub trait LivingEntity: Entity {
         self.default_travel(input)
     }
 
+    /// Moves a flier, which neither falls nor cares what it is standing on.
+    ///
+    /// Vanilla parity: `LivingEntity.travelFlying(input, speed)`, the two-arg
+    /// form every flier but the happy ghast uses.
+    fn travel_flying(&self, input: DVec3, air_speed: f32) -> Option<MoveResult> {
+        self.travel_flying_in_fluids(
+            input,
+            FLYING_TRAVEL_FLUID_SPEED,
+            FLYING_TRAVEL_FLUID_SPEED,
+            air_speed,
+        )
+    }
+
+    /// Vanilla parity: `LivingEntity.travelFlying(input, water, lava, air)`.
+    fn travel_flying_in_fluids(
+        &self,
+        input: DVec3,
+        water_speed: f32,
+        lava_speed: f32,
+        air_speed: f32,
+    ) -> Option<MoveResult> {
+        let (speed, drag) = if self.is_in_water() {
+            (water_speed, f64::from(FLYING_TRAVEL_WATER_DRAG))
+        } else if self.is_in_lava() {
+            (lava_speed, FLYING_TRAVEL_LAVA_DRAG)
+        } else {
+            (air_speed, f64::from(FLYING_TRAVEL_AIR_DRAG))
+        };
+
+        self.move_relative(speed, input);
+        let result = self.move_entity(MoverType::SelfMovement, self.velocity())?;
+        self.set_velocity(self.velocity() * drag);
+
+        Some(result)
+    }
+
     /// Returns the bed position that makes this living entity sleeping.
     fn sleeping_pos(&self) -> Option<BlockPos> {
         self.living_base().sleeping_pos()
@@ -3270,6 +3321,8 @@ fn living_entity_loot_ref_with_equipment<'a, E: LivingEntity + ?Sized>(
         chicken_variant: entity.chicken_loot_variant(),
         mooshroom_variant: entity.mooshroom_loot_variant(),
         cube_size: entity.cube_loot_size(),
+        // A living entity is never a fishing hook.
+        in_open_water: None,
     }
 }
 

@@ -10,6 +10,7 @@ use steel_registry::data_components::vanilla_components::{
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::vanilla_components::ITEM_NAME;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::equipment::EquipmentSlot;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::sound_events;
@@ -394,6 +395,21 @@ pub trait ItemBehavior: Send + Sync {
         } else {
             0
         }
+    }
+
+    /// Called once per tick for every stack a living entity carries.
+    ///
+    /// Vanilla parity: `Item.inventoryTick`, driven by `Inventory.tick` for the
+    /// main inventory and by `EntityEquipment.tick` for the worn slots. `slot`
+    /// is `None` for the inventory slots vanilla does not name -- everything
+    /// except the selected hand.
+    fn inventory_tick(
+        &self,
+        _stack: &mut ItemStack,
+        _world: &Arc<World>,
+        _owner: &dyn LivingEntity,
+        _slot: Option<EquipmentSlot>,
+    ) {
     }
 
     /// Called every tick while a living entity is actively using this item.

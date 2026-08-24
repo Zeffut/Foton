@@ -12,11 +12,10 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 15
+[blocks] 14
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
-CartographyTableBlock
 CommandBlock
 CryingObsidianBlock
 HalfTransparentBlock
@@ -29,36 +28,27 @@ TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
 
-[items] 4
-EmptyMapItem
-FishingRodItem
+[items] 1
 Item
-MapItem
 
-[entities] 52
+[entities] 43
 Allay
 Armadillo
 Axolotl
 Bee
-Blaze
 Bogged
 Breeze
 BreezeWindCharge
 Camel
 CamelHusk
 Creaking
-ElderGuardian
 EnderDragon
-Endermite
 Evoker
 EvokerFangs
 EyeOfEnder
-FishingHook
 Frog
-Ghast
 Giant
 GlowItemFrame
-Guardian
 HappyGhast
 Hoglin
 Illusioner
@@ -67,19 +57,16 @@ MinecartCommandBlock
 Nautilus
 Panda
 Parched
-Phantom
 Piglin
 PiglinBrute
 Pillager
 Player
 Ravager
-Shulker
 Sniffer
 SpectralArrow
 SulfurCube
 Tadpole
 ThrownLingeringPotion
-Vex
 Villager
 Vindicator
 WanderingTrader
