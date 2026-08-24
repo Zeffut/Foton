@@ -33,29 +33,24 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 51
+[entities] 43
 Allay
 Armadillo
 Axolotl
 Bee
-Blaze
 Bogged
 Breeze
 BreezeWindCharge
 Camel
 CamelHusk
 Creaking
-ElderGuardian
 EnderDragon
-Endermite
 Evoker
 EvokerFangs
 EyeOfEnder
 Frog
-Ghast
 Giant
 GlowItemFrame
-Guardian
 HappyGhast
 Hoglin
 Illusioner
@@ -64,19 +59,16 @@ MinecartCommandBlock
 Nautilus
 Panda
 Parched
-Phantom
 Piglin
 PiglinBrute
 Pillager
 Player
 Ravager
-Shulker
 Sniffer
 SpectralArrow
 SulfurCube
 Tadpole
 ThrownLingeringPotion
-Vex
 Villager
 Vindicator
 WanderingTrader

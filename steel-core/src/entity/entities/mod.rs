@@ -8,9 +8,10 @@ mod raw;
 pub use decoration::ArmorStandEntity;
 pub use mobs::ambient::BatEntity;
 pub use mobs::hostile::{
-    CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HuskEntity, MagmaCubeEntity,
-    SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, WitchEntity,
-    WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
+    BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
+    EndermanEntity, EndermiteEntity, GhastEntity, GuardianEntity, HuskEntity, MagmaCubeEntity,
+    PhantomEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity,
+    StrayEntity, VexEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::passive::{
