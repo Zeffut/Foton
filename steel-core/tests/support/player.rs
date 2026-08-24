@@ -89,12 +89,20 @@ impl TestPlayerBuilder {
         self
     }
 
+    /// Builds a player whose client has finished loading.
+    ///
+    /// That default is deliberate. `ServerPlayer.isInvulnerableTo` ends
+    /// `|| !this.connection.hasClientLoaded()`, so a player built without it is
+    /// immune to *everything* -- and a test that hurts one and then checks the
+    /// consequence passes whether the code under test works or not. That has
+    /// already produced one false green here. A test that actually wants the
+    /// not-yet-loaded path says `set_client_loaded(false)`.
     pub(crate) fn build(self) -> Arc<Player> {
         let (server, config) = match self.context {
             TestPlayerContext::Detached(config) => (Weak::new(), config),
             TestPlayerContext::Server { server, config } => (server, config),
         };
-        Arc::new(Player::new(
+        let player = Arc::new(Player::new(
             self.profile,
             self.connection,
             self.world,
@@ -102,6 +110,8 @@ impl TestPlayerBuilder {
             config,
             self.entity_id,
             ClientInformation::default(),
-        ))
+        ));
+        player.set_client_loaded(true);
+        player
     }
 }
