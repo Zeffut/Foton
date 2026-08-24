@@ -295,7 +295,7 @@ mobs that need it.
 
 - [~] **A Brain, and one mob on it.** Vanilla drives its newer mobs from a
       `Brain` -- memories, sensors, activities, a behaviour schedule -- and not
-      from goals. Steel now has one: 33 memory kinds, 6 sensors, 18 behaviours,
+      from goals. Steel now has one: 33 memory kinds, 6 sensors, 18 behaviors,
       and the copper golem running `CopperGolemAi` for real, carrying stacks
       between containers.
 
@@ -308,7 +308,7 @@ mobs that need it.
       and distance tracker (villagers, the iron golem's village half), an
       `EnvironmentAttribute<Activity>` schedule (the villager day), a
       multi-slot `InventoryCarrier` (villagers, piglins), long-jump and ram
-      behaviours (the goat), and vibration listeners (the warden).
+      behaviors (the goat), and vibration listeners (the warden).
 
 - [~] **Spawners.** The monster spawner, the trial spawner with its whole
       state machine, the vault with its per-player reward ledger, the spawner
