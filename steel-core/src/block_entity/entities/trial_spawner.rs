@@ -130,3 +130,31 @@ impl BlockEntity for TrialSpawnerBlockEntity {
             .tick_server(self, world, self.get_block_pos(), is_ominous);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use steel_registry::{init_vanilla_registry, vanilla_blocks};
+
+    use super::*;
+
+    /// A spawn egg reaches a spawner through the `Spawner` capability, and the
+    /// only thing that connects the two is the keyed downcast. If it stops
+    /// answering, clicking a trial spawner silently places a mob beside it
+    /// instead of retargeting it -- which looks like the egg working.
+    #[test]
+    fn a_trial_spawner_answers_as_a_spawner() {
+        init_vanilla_registry();
+        let entity: Arc<dyn BlockEntity> = Arc::new(TrialSpawnerBlockEntity::new(
+            Weak::new(),
+            BlockPos::new(8, 64, 8),
+            vanilla_blocks::TRIAL_SPAWNER.default_state(),
+        ));
+
+        assert!(
+            entity.as_spawner().is_some(),
+            "a trial spawner must be reachable as a Spawner"
+        );
+    }
+}

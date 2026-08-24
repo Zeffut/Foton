@@ -20,6 +20,7 @@ for test in dev/join-test.sh dev/sapling-test.sh dev/container-test.sh \
             dev/decoration-test.sh \
             dev/lightning-test.sh \
             dev/shelf-test.sh \
+            dev/spawner-test.sh \
             dev/nether-test.sh dev/reload-test.sh; do
   name=$(basename "$test")
   if bash "$test" > "/tmp/$name.out" 2>&1; then

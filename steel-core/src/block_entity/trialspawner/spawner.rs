@@ -375,21 +375,19 @@ impl TrialSpawner {
         let current = accessor.trial_spawner_state();
         let current_for_compare = current.clone();
 
-        let untracked = {
-            let ticks_between_spawn = self.active_config().ticks_between_spawn;
-            let game_time = world.game_time();
-            self.with_data(|data| {
-                let before = data.current_mobs.len();
-                data.current_mobs
-                    .retain(|uuid| !should_mob_be_untracked(world, pos, *uuid));
-                if data.current_mobs.len() == before {
-                    return false;
-                }
+        // Vanilla parity: the `currentMobs.removeIf` of `tickServer`, which
+        // pushes the next spawn back whenever a tracked mob is dropped -- so a
+        // player who kills one does not immediately get its replacement.
+        let ticks_between_spawn = self.active_config().ticks_between_spawn;
+        let game_time = world.game_time();
+        self.with_data(|data| {
+            let before = data.current_mobs.len();
+            data.current_mobs
+                .retain(|uuid| !should_mob_be_untracked(world, pos, *uuid));
+            if data.current_mobs.len() != before {
                 data.next_mob_spawns_at = game_time + i64::from(ticks_between_spawn);
-                true
-            })
-        };
-        let _ = untracked;
+            }
+        });
 
         let next = self.tick_and_get_next(current, accessor, world, pos);
         if next != current_for_compare {
