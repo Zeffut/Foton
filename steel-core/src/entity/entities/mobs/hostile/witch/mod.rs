@@ -389,6 +389,13 @@ impl LivingEntity for WitchEntity {
         &self.living_base
     }
 
+    /// Vanilla parity: `Mob.serverAiStep`, which is where a mob's goals run.
+    /// Without this the goal selector is never ticked and every goal this mob
+    /// registers is dead code.
+    fn server_ai_step(&self) {
+        Mob::mob_server_ai_step(self);
+    }
+
     fn get_health(&self) -> f32 {
         *self.entity_data.lock().living_entity().health.get()
     }

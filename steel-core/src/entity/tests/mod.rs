@@ -1047,6 +1047,7 @@ mod damage;
 mod equine;
 mod equipment_and_freezing;
 mod fall_and_fluids;
+mod hostile_ai;
 mod living_state;
 mod movement;
 mod pets;
