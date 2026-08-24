@@ -36,6 +36,12 @@ use crate::entity::{
 };
 use crate::world::World;
 
+/// Experience this mob drops.
+///
+/// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
+/// every monster inherits and this one does not override.
+const XP_REWARD: i32 = 5;
+
 /// Speed multiplier while chasing in melee.
 ///
 /// Vanilla parity: `AbstractSkeleton`'s private `meleeGoal`, built with
@@ -118,6 +124,7 @@ impl WitherSkeletonEntity {
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
+        mob_base.set_xp_reward(XP_REWARD);
         // Vanilla parity: `WitherSkeleton`'s constructor raises the lava malus
         // so it paths straight through lava instead of routing around it.
         mob_base

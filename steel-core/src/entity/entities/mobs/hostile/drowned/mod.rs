@@ -35,6 +35,12 @@ use crate::physics::{MoveResult, MoverType};
 use crate::world::{LevelReader as _, World};
 use steel_utils::types::Difficulty;
 
+/// Experience this mob drops.
+///
+/// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
+/// every monster inherits and this one does not override.
+const XP_REWARD: i32 = 5;
+
 /// Speed multiplier while chasing.
 ///
 /// Vanilla parity: the `DrownedAttackGoal(this, 1.0, false)` entry.
@@ -124,6 +130,7 @@ impl DrownedEntity {
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
+        mob_base.set_xp_reward(XP_REWARD);
         let mut entity_data = DrownedEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 

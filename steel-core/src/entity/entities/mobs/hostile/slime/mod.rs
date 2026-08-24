@@ -362,6 +362,15 @@ impl Mob for SlimeEntity {
 }
 
 impl CubeLike for SlimeEntity {
+    /// Vanilla parity: `Slime.setSize`, whose only additions over the shared
+    /// body are the attack damage -- which `apply_size` already sets -- and the
+    /// experience. The reward is here rather than in `apply_size` because
+    /// `SulfurCube` overrides `setSize` too and deliberately sets neither.
+    fn set_size(&self, size: i32, update_health: bool) {
+        cube_common::apply_size(self, size, update_health);
+        self.set_xp_reward(self.size());
+    }
+
     fn cube_state(&self) -> &SyncMutex<CubeState> {
         &self.cube
     }
@@ -414,6 +423,31 @@ impl Enemy for SlimeEntity {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Vanilla parity: `setSize` ends `this.xpReward = actualSize`, so one of
+    /// these is worth what it is big, and a split one is worth less than its parent.
+    #[test]
+    fn a_slime_is_worth_its_size() {
+        use std::sync::Weak;
+
+        use glam::DVec3;
+        use steel_registry::{init_vanilla_registry, vanilla_entities};
+
+        use crate::entity::{Mob, next_entity_id};
+
+        init_vanilla_registry();
+        let cube = SlimeEntity::new(
+            &vanilla_entities::SLIME,
+            next_entity_id(),
+            DVec3::ZERO,
+            Weak::new(),
+        );
+
+        cube.set_size(4, true);
+        assert_eq!(cube.xp_reward(), 4);
+        cube.set_size(2, true);
+        assert_eq!(cube.xp_reward(), 2, "a split cube kept the parent's reward");
+    }
 
     #[test]
     fn slime_chunks_are_about_one_in_ten() {

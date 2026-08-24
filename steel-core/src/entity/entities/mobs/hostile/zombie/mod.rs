@@ -29,6 +29,12 @@ use crate::entity::{
 use crate::world::World;
 use steel_utils::BlockPos;
 
+/// Experience this mob drops.
+///
+/// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
+/// every monster inherits and this one does not override.
+const XP_REWARD: i32 = 5;
+
 /// Speed multiplier the zombie uses while chasing.
 ///
 /// Vanilla parity: the `ZombieAttackGoal(this, 1.0, false)` entry.
@@ -79,6 +85,7 @@ impl ZombieEntity {
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
+        mob_base.set_xp_reward(XP_REWARD);
         let mut entity_data = ZombieEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 
@@ -149,6 +156,22 @@ impl Entity for ZombieEntity {
 }
 
 impl LivingEntity for ZombieEntity {
+    /// Vanilla parity: `Zombie.getBaseExperienceReward`, which is worth reading
+    /// twice -- it *mutates* `xpReward` rather than scaling the return, so a
+    /// baby zombie's reward compounds if it is ever asked more than once.
+    /// Vanilla asks once, at death, and this keeps that shape.
+    fn base_experience_reward(&self) -> i32 {
+        if self.is_baby() {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "vanilla parity: an `(int)` cast of the same product"
+            )]
+            let scaled = (f64::from(self.xp_reward()) * 2.5) as i32;
+            self.set_xp_reward(scaled);
+        }
+        self.base_experience_reward_mob()
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

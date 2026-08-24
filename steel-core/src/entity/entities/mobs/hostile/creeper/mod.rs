@@ -33,6 +33,12 @@ use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
 use std::sync::Arc;
 use steel_utils::BlockPos;
 
+/// Experience this mob drops.
+///
+/// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
+/// every monster inherits and this one does not override.
+const XP_REWARD: i32 = 5;
+
 /// Ticks the fuse takes to fill.
 ///
 /// Vanilla parity: `Creeper.maxSwell`.
@@ -96,6 +102,7 @@ impl CreeperEntity {
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
+        mob_base.set_xp_reward(XP_REWARD);
         let mut entity_data = CreeperEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
         entity_data.swell_dir.set(-1);

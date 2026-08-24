@@ -361,6 +361,10 @@ impl CubeLike for MagmaCubeEntity {
         cube_common::apply_size(self, size, update_health);
 
         let size = self.size();
+        // Vanilla parity: `MagmaCube.setSize` ends `this.xpReward = actualSize`.
+        // It sits here rather than in `apply_size` because `SulfurCube`
+        // overrides `setSize` too and deliberately sets no reward.
+        self.set_xp_reward(size);
         let mut attributes = self.attributes().lock();
         attributes.set_base_value(vanilla_attributes::ARMOR, ARMOR_PER_SIZE * f64::from(size));
         // Vanilla parity: `getAttackDamage` adds two on top of the attribute,
@@ -424,6 +428,24 @@ mod tests {
 
     use super::*;
     use crate::entity::entities::SlimeEntity;
+
+    /// Vanilla parity: `MagmaCube.setSize` ends `this.xpReward = actualSize`,
+    /// so one of these is worth what it is big.
+    #[test]
+    fn a_magma_cube_is_worth_its_size() {
+        init_vanilla_registry();
+        let cube = MagmaCubeEntity::new(
+            &vanilla_entities::MAGMA_CUBE,
+            next_entity_id(),
+            DVec3::ZERO,
+            Weak::new(),
+        );
+
+        cube.set_size(4, true);
+        assert_eq!(cube.xp_reward(), 4);
+        cube.set_size(2, true);
+        assert_eq!(cube.xp_reward(), 2, "a split cube kept the parent's reward");
+    }
 
     fn magma_cube() -> MagmaCubeEntity {
         MagmaCubeEntity::new(

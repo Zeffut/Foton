@@ -40,6 +40,12 @@ use crate::entity::{
 use crate::world::World;
 use std::sync::Arc;
 
+/// Experience this mob drops.
+///
+/// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
+/// every monster inherits and this one does not override.
+const XP_REWARD: i32 = 5;
+
 /// Speed multiplier while chasing.
 ///
 /// Vanilla parity: `new MeleeAttackGoal(this, 1.0, false)`.
@@ -138,6 +144,7 @@ impl SilverfishEntity {
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
+        mob_base.set_xp_reward(XP_REWARD);
         let mut entity_data = SilverfishEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 

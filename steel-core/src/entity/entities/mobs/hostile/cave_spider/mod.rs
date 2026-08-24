@@ -33,6 +33,12 @@ use crate::world::World;
 use std::sync::Arc;
 use steel_utils::BlockPos;
 
+/// Experience this mob drops.
+///
+/// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
+/// every monster inherits and this one does not override.
+const XP_REWARD: i32 = 5;
+
 /// Bit of the synced flags byte that marks a climbing spider.
 ///
 /// Vanilla parity: the `1` mask of `Spider.setClimbing`.
@@ -95,6 +101,7 @@ impl CaveSpiderEntity {
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
+        mob_base.set_xp_reward(XP_REWARD);
         let mut entity_data = CaveSpiderEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 

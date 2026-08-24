@@ -33,6 +33,12 @@ use crate::world::{LevelReader as _, World};
 use std::ptr;
 use steel_utils::types::Difficulty;
 
+/// Experience this mob drops.
+///
+/// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
+/// every monster inherits and this one does not override.
+const XP_REWARD: i32 = 5;
+
 /// Speed multiplier while chasing.
 const ATTACK_SPEED_MODIFIER: f64 = 1.0;
 
@@ -116,6 +122,7 @@ impl ZombifiedPiglinEntity {
     fn new_with_base(base: EntityBase, entity_type: EntityTypeRef) -> Self {
         let living_base = LivingEntityBase::new(entity_type);
         let mob_base = MobBase::new();
+        mob_base.set_xp_reward(XP_REWARD);
         let mut entity_data = ZombifiedPiglinEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 
