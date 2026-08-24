@@ -38,10 +38,9 @@ though the tameable pets, the passive animals and the golems have taken a third
 of that column since the last count. The three blocks that make mobs -- the
 monster spawner, the trial spawner and the vault -- came off the block column
 together with the spawner minecart and the ominous item spawner.
-The item column is down to two: the fishing rod, which waits on the
-`FishingHook` entity, and vanilla's plain `Item`, which needs nothing. Maps
-took the other two with them, and the cartography table off the block column
-with them.
+The item column is closed but for vanilla's plain `Item`, which needs
+nothing: the fishing rod came off it with its hook, and maps took the last
+two, carrying the cartography table off the block column with them.
 
 Two warnings about reading this table at all. It counts classes with *no*
 behavior, so it says nothing about how complete the ones that exist are: the

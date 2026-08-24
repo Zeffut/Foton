@@ -150,6 +150,10 @@ pub struct EntityPredicate {
     pub mooshroom_variant: Option<&'static str>,
     /// Vanilla `minecraft:type_specific/cube_mob.size` check (slime, magma cube).
     pub cube_size: Option<NumberProviderRange>,
+    /// Vanilla `minecraft:type_specific/fishing_hook.in_open_water` check.
+    ///
+    /// This is what gates the treasure entry of `gameplay/fishing`.
+    pub in_open_water: Option<bool>,
     /// Predicate keys the generator could not model, by name.
     ///
     /// A predicate Steel cannot evaluate must not silently pass -- that hands
@@ -428,6 +432,14 @@ impl EntityPredicate {
             && entity.mooshroom_variant != Some(expected_variant)
         {
             return false;
+        }
+
+        if let Some(expected_open_water) = self.in_open_water {
+            // Vanilla `FishingHookPredicate.matches` rejects any subject that is
+            // not a fishing hook, so an unknown open-water state fails.
+            if entity.in_open_water != Some(expected_open_water) {
+                return false;
+            }
         }
 
         if let Some(expected_size) = &self.cube_size {

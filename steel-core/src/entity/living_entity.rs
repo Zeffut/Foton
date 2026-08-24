@@ -3270,6 +3270,8 @@ fn living_entity_loot_ref_with_equipment<'a, E: LivingEntity + ?Sized>(
         chicken_variant: entity.chicken_loot_variant(),
         mooshroom_variant: entity.mooshroom_loot_variant(),
         cube_size: entity.cube_loot_size(),
+        // A living entity is never a fishing hook.
+        in_open_water: None,
     }
 }
 

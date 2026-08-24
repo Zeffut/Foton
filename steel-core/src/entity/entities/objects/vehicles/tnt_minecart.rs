@@ -189,6 +189,10 @@ impl TntMinecartEntity {
 }
 
 impl Entity for TntMinecartEntity {
+    fn is_minecart(&self) -> bool {
+        true
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }

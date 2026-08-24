@@ -198,6 +198,10 @@ impl HopperMinecartEntity {
 }
 
 impl Entity for HopperMinecartEntity {
+    fn is_minecart(&self) -> bool {
+        true
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }

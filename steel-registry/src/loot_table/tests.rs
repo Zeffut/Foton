@@ -183,6 +183,7 @@ fn sheared_predicate_rejects_non_sheep_entities() {
             chicken_variant: None,
             mooshroom_variant: None,
             cube_size: None,
+            in_open_water: None,
             unsupported: &[],
         },
     };
@@ -657,4 +658,97 @@ fn test_survives_explosion_condition() {
         survived > 10 && survived < 50,
         "Expected ~25% survival rate, got {survived}%"
     );
+}
+
+/// Both of these functions were `const fn` bodies with a TODO in them, so the
+/// tables that use them rolled an item they never touched. A junk fishing rod
+/// came out of the water at full durability and the junk water bottle came out
+/// as a bare `potion` item with nothing in it.
+mod functions_that_used_to_do_nothing {
+    use steel_utils::Identifier;
+
+    use crate::init_vanilla_registry;
+    use crate::item_stack::ItemStack;
+    use crate::vanilla_items;
+
+    /// Vanilla parity: `SetItemDamageFunction.run`. The fraction is of the
+    /// whole bar, so 0.25 off a 64-use rod leaves 48 uses.
+    #[test]
+    fn setting_a_damage_fraction_takes_that_share_of_the_bar() {
+        init_vanilla_registry();
+        let mut rod = ItemStack::new(&vanilla_items::FISHING_ROD);
+        let max = rod.get_max_damage();
+        assert!(max > 0, "a fishing rod should be damageable");
+
+        rod.set_damage_fraction(0.25, false);
+
+        let expected = ((1.0 - 0.25) * max as f32).floor() as i32;
+        assert_eq!(rod.get_damage_value(), expected);
+        assert_ne!(rod.get_damage_value(), 0, "the rod came out untouched");
+    }
+
+    /// Vanilla parity: the `add` arm, which stacks onto the damage already
+    /// there rather than replacing it.
+    #[test]
+    fn adding_a_damage_fraction_stacks_on_what_is_already_gone() {
+        init_vanilla_registry();
+        let mut rod = ItemStack::new(&vanilla_items::FISHING_ROD);
+        rod.set_damage_fraction(0.25, false);
+        let after_first = rod.get_damage_value();
+
+        rod.set_damage_fraction(0.25, true);
+
+        assert!(
+            rod.get_damage_value() < after_first,
+            "the second call did not take any more off"
+        );
+    }
+
+    /// An item with no durability is left alone, which is what vanilla does
+    /// after logging a warning.
+    #[test]
+    fn an_item_that_cannot_be_damaged_is_left_alone() {
+        init_vanilla_registry();
+        let mut stone = ItemStack::new(&vanilla_items::STONE);
+        stone.set_damage_fraction(0.5, false);
+        assert_eq!(stone.get_damage_value(), 0);
+    }
+
+    /// Vanilla parity: `SetPotionFunction.run`.
+    #[test]
+    fn setting_a_potion_puts_it_in_the_bottle() {
+        init_vanilla_registry();
+        let mut bottle = ItemStack::new(&vanilla_items::POTION);
+        bottle.set_potion(&Identifier::vanilla_static("water"));
+
+        let contents = bottle
+            .get(crate::data_components::vanilla_components::POTION_CONTENTS)
+            .expect("the bottle should carry potion contents now");
+        assert!(
+            contents.potion().is_some(),
+            "the bottle came out with nothing in it"
+        );
+    }
+
+    /// An id no potion answers to is ignored rather than written, so a bad
+    /// table cannot produce a bottle of nothing. A fresh `potion` item already
+    /// carries empty contents from its default components, so what this checks
+    /// is the potion inside them, not the presence of the component.
+    #[test]
+    fn an_unknown_potion_id_leaves_the_bottle_as_it_was() {
+        init_vanilla_registry();
+        let mut bottle = ItemStack::new(&vanilla_items::POTION);
+        let before = bottle
+            .get(crate::data_components::vanilla_components::POTION_CONTENTS)
+            .and_then(crate::data_components::components::PotionContents::potion)
+            .map(|potion| potion.value().key.clone());
+
+        bottle.set_potion(&Identifier::vanilla_static("not_a_potion"));
+
+        let after = bottle
+            .get(crate::data_components::vanilla_components::POTION_CONTENTS)
+            .and_then(crate::data_components::components::PotionContents::potion)
+            .map(|potion| potion.value().key.clone());
+        assert_eq!(before, after, "an unknown id changed the bottle");
+    }
 }

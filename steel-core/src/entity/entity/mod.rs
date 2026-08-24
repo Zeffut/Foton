@@ -455,6 +455,16 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         None
     }
 
+    /// Returns `minecraft:type_specific/fishing_hook.in_open_water` for the loot
+    /// context, when this entity is a fishing hook.
+    ///
+    /// Mirrors `FishingHook.isOpenWaterFishing`; vanilla
+    /// `FishingHookPredicate.matches` rejects any other entity outright, which is
+    /// what `None` stands for here.
+    fn fishing_hook_loot_open_water(&self) -> Option<bool> {
+        None
+    }
+
     /// Returns true for vanilla players whose abilities have `flying` set.
     fn is_flying_player(&self) -> bool {
         false
@@ -787,6 +797,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
 
         self.set_velocity(self.velocity() + impulse);
         self.mark_velocity_sync();
+    }
+
+    /// Whether this entity is one of the six minecarts.
+    ///
+    /// Mirrors the `instanceof AbstractMinecart` of
+    /// `OldMinecartBehavior.pushAndPickupEntities`, which treats a cart it runs
+    /// into differently from a mob: carts shove each other, mobs get scooped up.
+    fn is_minecart(&self) -> bool {
+        false
     }
 
     /// Applies vanilla entity-to-entity push separation.

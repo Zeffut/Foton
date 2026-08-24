@@ -32,9 +32,9 @@ pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
     ArrowEntity, DragonFireballEntity, EnderPearlEntity, ExperienceBottleEntity,
-    FireworkRocketEntity, LargeFireballEntity, LlamaSpitEntity, ShulkerBulletEntity,
-    SmallFireballEntity, SnowballEntity, SplashPotionEntity, ThrownEggEntity, ThrownTridentEntity,
-    TridentPickup, WindChargeEntity, WitherSkullEntity,
+    FireworkRocketEntity, FishingHookEntity, LargeFireballEntity, LlamaSpitEntity,
+    ShulkerBulletEntity, SmallFireballEntity, SnowballEntity, SplashPotionEntity, ThrownEggEntity,
+    ThrownTridentEntity, TridentPickup, WindChargeEntity, WitherSkullEntity,
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,

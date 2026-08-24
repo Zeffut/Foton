@@ -289,6 +289,11 @@ pub struct Player {
     /// In-flight ender pearls thrown by this player, kept weakly so they persist
     /// with the player and re-spawn on login (vanilla `ServerPlayer.enderPearls`).
     ender_pearls: SyncMutex<Vec<Weak<dyn Entity>>>,
+    /// The fishing hook this player has cast (vanilla `Player.fishing`).
+    ///
+    /// Held weakly: the hook lives in the world's entity table, and this field
+    /// only answers whether a bobber is already out when the rod is used again.
+    fishing: SyncMutex<Option<Weak<dyn Entity>>>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `Player`.
@@ -573,6 +578,7 @@ impl Player {
             chunk_send_epoch: SyncMutex::new(0),
             residence: SyncMutex::new(PlayerResidenceState::new()),
             ender_pearls: SyncMutex::new(Vec::new()),
+            fishing: SyncMutex::new(None),
         }
     }
 
@@ -1100,6 +1106,28 @@ impl Player {
             pearl.world == world_key && Uuid::from_bytes(pearl.entity.uuid) == uuid
         })?;
         Some(residence.pending_ender_pearls.remove(index))
+    }
+
+    /// Returns the fishing hook this player currently has out, if any.
+    ///
+    /// Vanilla `Player.fishing`. A hook already removed from the world reads as
+    /// absent, so a rod whose bobber was killed casts again instead of trying to
+    /// reel in a corpse.
+    #[must_use]
+    pub fn fishing_hook(&self) -> Option<SharedEntity> {
+        let mut fishing = self.fishing.lock();
+        match fishing.as_ref().and_then(Weak::upgrade) {
+            Some(hook) if !hook.is_removed() => Some(hook),
+            _ => {
+                *fishing = None;
+                None
+            }
+        }
+    }
+
+    /// Sets or clears this player's fishing hook (vanilla `Player.fishing`).
+    pub fn set_fishing_hook(&self, hook: Option<&SharedEntity>) {
+        *self.fishing.lock() = hook.map(Arc::downgrade);
     }
 
     /// Registers a thrown ender pearl so it persists with this player and
