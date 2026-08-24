@@ -23,8 +23,10 @@ use super::entities::{
     EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
     JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity, PotentSulfurBlockEntity,
     RawBlockEntity, SculkSensorBlockEntity, SculkShriekerBlockEntity, ShelfBlockEntity,
-    ShulkerBoxBlockEntity, SignBlockEntity, SkullBlockEntity,
+    ShulkerBoxBlockEntity, SignBlockEntity, SkullBlockEntity, SpawnerBlockEntity,
+    TrialSpawnerBlockEntity,
 };
+use super::vault::VaultBlockEntity;
 use crate::world::World;
 
 /// Factory function type for creating block entities.
@@ -253,6 +255,20 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
         &vanilla_block_entity_types::SCULK_SHRIEKER,
         |level, pos, state| Arc::new(SculkShriekerBlockEntity::new(level, pos, state)),
     );
+
+    registry.register(
+        &vanilla_block_entity_types::MOB_SPAWNER,
+        |level, pos, state| Arc::new(SpawnerBlockEntity::new(level, pos, state)),
+    );
+
+    registry.register(
+        &vanilla_block_entity_types::TRIAL_SPAWNER,
+        |level, pos, state| Arc::new(TrialSpawnerBlockEntity::new(level, pos, state)),
+    );
+
+    registry.register(&vanilla_block_entity_types::VAULT, |level, pos, state| {
+        Arc::new(VaultBlockEntity::new(level, pos, state))
+    });
 }
 
 /// Initializes the global block entity registry.

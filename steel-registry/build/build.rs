@@ -71,6 +71,7 @@ mod sound_events;
 mod sound_types;
 mod structure;
 mod timelines;
+mod trial_spawner_configs;
 mod trim_materials;
 mod trim_patterns;
 mod villager_professions;
@@ -158,6 +159,7 @@ const STRUCTURES: &str = "structures";
 const STRUCTURE_PROCESSORS: &str = "structure_processors";
 const TEMPLATE_POOLS: &str = "template_pools";
 const WORLD_CLOCKS: &str = "world_clocks";
+const TRIAL_SPAWNER_CONFIGS: &str = "trial_spawner_configs";
 const CARVERS: &str = "configured_carvers";
 const CONFIGURED_FEATURES: &str = "configured_features";
 const PLACED_FEATURES: &str = "placed_features";
@@ -232,6 +234,7 @@ pub fn main() {
         (sound_events::build(), SOUND_EVENTS),
         (sound_types::build(), SOUND_TYPES),
         (world_clocks::build(), WORLD_CLOCKS),
+        (trial_spawner_configs::build(), TRIAL_SPAWNER_CONFIGS),
         (poi_types::build(), POI_TYPES),
         (structure::structures(), STRUCTURES),
         (structure::processors(), STRUCTURE_PROCESSORS),

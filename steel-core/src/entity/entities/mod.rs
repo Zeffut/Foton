@@ -38,7 +38,10 @@ pub use objects::projectiles::{
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
-    HopperMinecartEntity, MinecartEntity, RaftEntity, TntMinecartEntity,
+    HopperMinecartEntity, MinecartEntity, RaftEntity, SpawnerMinecartEntity, TntMinecartEntity,
 };
-pub use objects::{AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity, default_thunder_hit};
+pub use objects::{
+    AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity, OminousItemSpawnerEntity,
+    default_thunder_hit,
+};
 pub use raw::RawEntity;

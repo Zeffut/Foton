@@ -1,3 +1,5 @@
+use steel_registry::vanilla_game_rules::SPAWNER_BLOCKS_WORK;
+
 use super::{
     ADVANCE_TIME, BlockPos, CChangeDifficulty, ChunkPos, Difficulty, Digest, ErasedGameRuleRef,
     GameRule, GameRuleValue, GameRuleValueType, LevelDataManager, OffsetVoxelShape, Ordering,
@@ -140,6 +142,15 @@ impl World {
     pub fn get_game_rule<T: GameRuleValueType>(&self, rule: &GameRule<T>) -> T {
         let guard = self.level_data.read();
         self.get_game_rule_with_guard(rule, &guard)
+    }
+
+    /// Returns whether spawner blocks are allowed to spawn anything.
+    ///
+    /// Vanilla parity: `Level.isSpawnerBlockEnabled`, which reads the
+    /// `spawnerBlocksWork` game rule.
+    #[must_use]
+    pub fn is_spawner_block_enabled(&self) -> bool {
+        self.get_game_rule(&SPAWNER_BLOCKS_WORK)
     }
 
     /// Gets the value of a game rule on the `LevelDataManager` guard being passed in.

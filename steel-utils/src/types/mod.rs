@@ -3,12 +3,14 @@
 mod codec_glue;
 mod gameplay;
 mod identifier;
+mod inclusive_range;
 mod packed_position;
 mod position;
 
 pub use codec_glue::{BlockStateId, Todo};
 pub use gameplay::{Difficulty, GameType, InteractionHand, UpdateFlags};
 pub use identifier::Identifier;
+pub use inclusive_range::InclusiveRange;
 pub use packed_position::{
     InvalidPackedSectionBlockPos, PackedBlockPos, PackedChunkLocalXZ, PackedChunkPos,
     PackedSectionBlockPos, PackedSectionPos,

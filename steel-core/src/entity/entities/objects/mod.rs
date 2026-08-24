@@ -6,9 +6,11 @@ pub mod explosives;
 pub mod items;
 mod lightning_bolt;
 mod marker;
+mod ominous_item_spawner;
 pub mod projectiles;
 pub mod vehicles;
 
 pub use area_effect_cloud::AreaEffectCloudEntity;
 pub use lightning_bolt::{LightningBoltEntity, default_thunder_hit};
 pub use marker::MarkerEntity;
+pub use ominous_item_spawner::OminousItemSpawnerEntity;

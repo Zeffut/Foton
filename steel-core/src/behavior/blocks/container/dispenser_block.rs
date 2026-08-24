@@ -18,7 +18,6 @@ use steel_registry::blocks::properties::{
 };
 use steel_registry::item_stack::ItemStack;
 use steel_registry::{level_events, vanilla_block_entity_types};
-use steel_utils::axis::Axis;
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _, translations};
 use text_components::TextComponent;
@@ -28,6 +27,7 @@ use super::dispense_behavior::{DispenseOutcome, DispenseSource, dispense_behavio
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::behavior::item_utils::spawn_item_toward;
 use crate::block_entity::BLOCK_ENTITIES;
 use crate::block_entity::entities::{DispenserBlockEntity, insert_into_containers_at};
 use crate::inventory::container::calculate_redstone_signal_from_container;
@@ -52,25 +52,10 @@ const TRIGGER_DURATION: i32 = 4;
 /// Vanilla parity: the `0.7` of `DispenserBlock.getDispensePosition`.
 const DISPENSE_OFFSET: f64 = 0.7;
 
-/// Downward nudge applied when firing along the vertical axis.
-///
-/// Vanilla parity: the `0.125` of `DefaultDispenseItemBehavior.spawnItem`.
-const VERTICAL_SPAWN_DROP: f64 = 0.125;
-
-/// Downward nudge applied when firing sideways.
-///
-/// Vanilla parity: the `0.15625` of `DefaultDispenseItemBehavior.spawnItem`.
-const HORIZONTAL_SPAWN_DROP: f64 = 0.156_25;
-
 /// Spread of a dispensed item, in vanilla's accuracy units.
 ///
 /// Vanilla parity: `DefaultDispenseItemBehavior.DEFAULT_ACCURACY`.
-const DEFAULT_ACCURACY: f64 = 6.0;
-
-/// Deviation one accuracy unit is worth.
-///
-/// Vanilla parity: the `0.0172275` of `spawnItem`.
-const ACCURACY_DEVIATION: f64 = 0.017_227_5;
+const DEFAULT_ACCURACY: i32 = 6;
 
 /// Behavior shared by the dispenser and the dropper.
 struct DispenserBase {
@@ -183,30 +168,16 @@ fn dispense_position(pos: BlockPos, facing: Direction) -> DVec3 {
 
 /// Throws one item out of the block.
 ///
-/// Vanilla parity: `DefaultDispenseItemBehavior.spawnItem`.
+/// Vanilla parity: `DefaultDispenseItemBehavior.spawnItem` at the dispenser's
+/// own accuracy.
 fn spawn_dispensed_item(world: &Arc<World>, pos: BlockPos, facing: Direction, stack: ItemStack) {
-    let mut position = dispense_position(pos, facing);
-    position.y -= if facing.get_axis() == Axis::Y {
-        VERTICAL_SPAWN_DROP
-    } else {
-        HORIZONTAL_SPAWN_DROP
-    };
-
-    let (step_x, _, step_z) = facing.offset();
-    let power = rand::random::<f64>().mul_add(0.1, 0.2);
-    let deviation = ACCURACY_DEVIATION * DEFAULT_ACCURACY;
-    let velocity = DVec3::new(
-        triangle(f64::from(step_x) * power, deviation),
-        triangle(0.2, deviation),
-        triangle(f64::from(step_z) * power, deviation),
+    spawn_item_toward(
+        world,
+        dispense_position(pos, facing),
+        facing,
+        DEFAULT_ACCURACY,
+        stack,
     );
-
-    world.spawn_item_with_velocity(position, stack, velocity);
-}
-
-/// Vanilla parity: `RandomSource.triangle`.
-fn triangle(mode: f64, deviation: f64) -> f64 {
-    deviation.mul_add(rand::random::<f64>() - rand::random::<f64>(), mode)
 }
 
 /// Plays the click and the puff of smoke.

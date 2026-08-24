@@ -1,0 +1,9 @@
+//! The blocks that make mobs, and the vault that pays for beating them.
+
+mod spawner_block;
+mod trial_spawner_block;
+mod vault_block;
+
+pub use spawner_block::SpawnerBlock;
+pub use trial_spawner_block::TrialSpawnerBlock;
+pub use vault_block::VaultBlock;

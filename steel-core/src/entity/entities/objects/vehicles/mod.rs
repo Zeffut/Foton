@@ -8,6 +8,7 @@ mod furnace_minecart;
 mod hopper_minecart;
 mod minecart;
 mod minecart_common;
+mod spawner_minecart;
 mod tnt_minecart;
 
 pub use boat::{BoatEntity, RaftEntity};
@@ -16,4 +17,5 @@ pub use chest_minecart::ChestMinecartEntity;
 pub use furnace_minecart::FurnaceMinecartEntity;
 pub use hopper_minecart::HopperMinecartEntity;
 pub use minecart::MinecartEntity;
+pub use spawner_minecart::SpawnerMinecartEntity;
 pub use tnt_minecart::TntMinecartEntity;

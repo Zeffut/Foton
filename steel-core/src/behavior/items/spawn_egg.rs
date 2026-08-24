@@ -38,19 +38,35 @@ impl SpawnEggItem {
 
 impl ItemBehavior for SpawnEggItem {
     /// Vanilla parity: `SpawnEggItem.useOn`.
-    ///
-    /// TODO: vanilla also retargets a spawner block entity when one is clicked,
-    /// setting the mob it spawns. Steel has no spawner block behavior yet, so
-    /// clicking one falls through to placing the mob beside it.
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
         let Some(entity_type) = context.inv.with_item(|item| Self::entity_type(item)) else {
             return InteractionResult::Pass;
         };
 
+        // Vanilla parity: clicking a spawner retargets it instead of placing
+        // the mob, and refuses when the game rule has spawners switched off.
+        let clicked_pos = context.hit_result.block_pos;
+        if let Some(block_entity) = context.world.get_block_entity(clicked_pos)
+            && let Some(spawner) = block_entity.as_spawner()
+        {
+            if !context.world.is_spawner_block_enabled() {
+                return InteractionResult::Fail;
+            }
+            spawner.set_spawner_entity_id(entity_type);
+            context.world.send_block_updated(clicked_pos);
+            context.world.game_event(
+                &vanilla_game_events::BLOCK_CHANGE,
+                clicked_pos,
+                &GameEventContext::new(Some(context.player), None),
+            );
+            context.inv.with_item(|item| item.shrink(1));
+            return InteractionResult::Success;
+        }
+
         // Vanilla parity: the egg lands in the clicked block when nothing is
         // there to stand on -- tall grass, a fluid -- and against the clicked
         // face otherwise.
-        let clicked = context.hit_result.block_pos;
+        let clicked = clicked_pos;
         let spawn_pos = if context
             .world
             .get_block_state(clicked)

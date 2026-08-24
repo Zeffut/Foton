@@ -25,8 +25,9 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::enchantment_effect::EnchantmentEffectComponent;
 use steel_registry::item_stack::ItemStack;
-use steel_registry::loot_table::LootTableRef;
+use steel_registry::loot_table::{LootContext, LootTableRef};
 use steel_registry::sound_event::SoundEventRef;
+use steel_registry::spawn_data::EquipmentTable;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_entity_type_tags::EntityTypeTag;
 use steel_registry::vanilla_game_rules::{ENTITY_DROPS, MOB_GRIEFING};
@@ -34,6 +35,7 @@ use steel_registry::{
     REGISTRY, RegistryExt, TaggedRegistryExt as _, sound_events, vanilla_attributes,
     vanilla_damage_types, vanilla_entities, vanilla_game_events, vanilla_items,
 };
+use steel_utils::entity_events::EntityStatus;
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, Downcast as _, Identifier, WorldAabb, axis::Axis};
@@ -52,6 +54,7 @@ use crate::entity::ai::walk::WalkPathEvaluator;
 use crate::entity::attribute::{AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::{ItemEntity, LeashFenceKnotEntity};
+use crate::entity::entity_loot_ref;
 use crate::entity::spawn_rules::check_mob_spawn_rules;
 use crate::entity::{
     Entity, EntitySpawnReason, LivingEntity, LivingTravelInput, RemovalReason, SharedEntity,
@@ -97,6 +100,24 @@ pub enum MoveControlKind {
         /// Whether the mob keeps gravity off while it has nowhere to be.
         hovers_in_place: bool,
     },
+}
+
+/// Picks the slot an item rolled by an equipment table goes into.
+///
+/// Vanilla parity: `EquipmentUser.resolveSlot`.
+fn resolve_equipment_slot(
+    to_equip: &ItemStack,
+    already_inserted: &[EquipmentSlot],
+) -> Option<EquipmentSlot> {
+    if to_equip.is_empty() {
+        return None;
+    }
+    match to_equip.get_equippable_slot() {
+        Some(slot) if !already_inserted.contains(&slot) => Some(slot),
+        Some(_) => None,
+        None => (!already_inserted.contains(&EquipmentSlot::MainHand))
+            .then_some(EquipmentSlot::MainHand),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -687,6 +708,78 @@ pub trait Mob: LivingEntity {
             .drop_chances()
             .lock()
             .set_guaranteed_drop(slot);
+    }
+
+    /// Sets how likely one slot is to drop, refusing a negative chance.
+    ///
+    /// Vanilla parity: `Mob.setDropChance`.
+    fn set_drop_chance(&self, slot: EquipmentSlot, chance: f32) {
+        self.mob_base()
+            .drop_chances()
+            .lock()
+            .set_equipment_chance(slot, chance);
+    }
+
+    /// Plays the puff of smoke a spawner makes when it produces a mob.
+    ///
+    /// Vanilla parity: `Mob.spawnAnim`, whose server half is one entity event.
+    /// The particles themselves are the client's answer to it.
+    fn spawn_anim(&self) {
+        self.broadcast_entity_event(EntityStatus::SilverfishMergeAnim);
+    }
+
+    /// Dresses this mob from a loot table.
+    ///
+    /// Vanilla parity: `Mob.equip(EquipmentTable)` through
+    /// `EquipmentUser.equip`. Vanilla threads a `LootParams` built from
+    /// `LootContextParamSets.EQUIPMENT`; Steel's loot context takes the same
+    /// two facts -- where the mob is and which mob it is.
+    fn equip_from_table(&self, world: &Arc<World>, table: &EquipmentTable) {
+        let mut rng = rand::rng();
+        let position = self.position();
+        let mut context = LootContext::new(&mut rng)
+            .with_origin(position.x, position.y, position.z)
+            .with_this_entity(entity_loot_ref(self.as_entity_event_source()))
+            .with_game_time(world.game_time());
+        let rolled = table.loot_table.get_random_items(&mut context);
+
+        let mut filled: Vec<EquipmentSlot> = Vec::new();
+        for stack in rolled {
+            let Some(slot) = resolve_equipment_slot(&stack, &filled) else {
+                continue;
+            };
+            // Vanilla parity: `EquipmentSlot.limit`, which keeps a single item
+            // in every slot but the main hand.
+            let equipped = if slot == EquipmentSlot::MainHand {
+                stack
+            } else {
+                stack.copy_with_count(1)
+            };
+            self.living_base().equipment().lock().set(slot, equipped);
+            if let Some(chance) = table.slot_drop_chances.get(&slot) {
+                self.set_drop_chance(slot, *chance);
+            }
+            filled.push(slot);
+        }
+    }
+
+    /// Drops the equipment this mob was told to keep.
+    ///
+    /// Vanilla parity: `Mob.dropPreservedEquipment`.
+    fn drop_preserved_equipment(&self, _world: &Arc<World>) {
+        for slot in EquipmentSlot::ALL {
+            if !self.is_equipment_drop_preserved(slot) {
+                continue;
+            }
+            let mut taken = ItemStack::empty();
+            self.with_equipment_slot_mut(slot, &mut |item| {
+                taken = item.copy_with_count(item.count());
+                *item = ItemStack::empty();
+            });
+            if !taken.is_empty() {
+                let _ = self.spawn_at_location(taken, 0.0);
+            }
+        }
     }
 
     fn drop_custom_death_loot_mob(&self, _source: &DamageSource, killed_by_player: bool) {
