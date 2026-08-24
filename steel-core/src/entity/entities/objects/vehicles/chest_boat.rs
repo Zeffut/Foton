@@ -26,6 +26,7 @@ use super::boat_common::{
     self, BOAT_GRAVITY, BOAT_RIDE_HEIGHT, BoatLike, BoatState, RAFT_RIDE_HEIGHT,
 };
 use crate::behavior::InteractionResult;
+use crate::block_entity::ContainerLoot;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData};
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
@@ -94,7 +95,21 @@ macro_rules! chest_boat_body {
                     boat: SyncMutex::new(BoatState::default()),
                     container_ref: ContainerRef::from(shared),
                     container,
+                    loot: Arc::new(ContainerLoot::new()),
                 }
+            }
+
+            /// Rolls a still-packed loot table into the boat.
+            ///
+            /// Vanilla parity: `AbstractChestBoat.unpackLootTable`, which is
+            /// `ContainerEntity.unpackChestVehicleLootTable`.
+            fn unpack_loot_table(&self, player: Option<&Player>) {
+                let Some(world) = self.level() else {
+                    return;
+                };
+                let container: SharedContainer = self.container.clone();
+                self.loot
+                    .unpack_at(&world, self.position(), &container, player);
             }
         }
 
@@ -168,8 +183,12 @@ macro_rules! chest_boat_body {
                 self.open_chest(player)
             }
 
-            /// Vanilla parity: the `Items` tag of `ContainerEntity`.
+            /// Vanilla parity: `ContainerEntity.addChestVehicleSaveData`,
+            /// which writes the loot table instead of the items.
             fn save_additional(&self, nbt: &mut NbtCompound) {
+                if self.loot.try_save_loot_table(nbt) {
+                    return;
+                }
                 let container = self.container.lock();
                 let mut items: Vec<NbtCompound> = Vec::new();
                 for (slot, item) in container.items().iter().enumerate() {
@@ -184,8 +203,14 @@ macro_rules! chest_boat_body {
             }
 
             fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+                // Vanilla parity: `ContainerEntity.readChestVehicleSaveData`,
+                // which reads the items only when no table is packed.
+                let packed = self.loot.try_load_loot_table(&nbt);
                 let mut container = self.container.lock();
                 container.items_mut().fill(ItemStack::empty());
+                if packed {
+                    return;
+                }
 
                 let Some(items_list) = nbt.list("Items") else {
                     return;
@@ -228,6 +253,9 @@ pub struct ChestBoatEntity {
     boat: SyncMutex<BoatState>,
     container: Shared<SimpleContainer>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `lootTable`/`lootTableSeed` pair of
+    /// `AbstractChestBoat`.
+    loot: Arc<ContainerLoot>,
 }
 
 /// A raft with a chest on it.
@@ -239,6 +267,9 @@ pub struct ChestRaftEntity {
     boat: SyncMutex<BoatState>,
     container: Shared<SimpleContainer>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `lootTable`/`lootTableSeed` pair of
+    /// `AbstractChestBoat`.
+    loot: Arc<ContainerLoot>,
 }
 
 chest_boat_body!(ChestBoatEntity, BOAT_RIDE_HEIGHT, "steel:entity/chest_boat");
@@ -252,6 +283,8 @@ macro_rules! open_chest_impl {
     ($name:ident) => {
         impl $name {
             fn open_chest(&self, player: &Player) -> InteractionResult {
+                // Vanilla parity: `AbstractChestBoat.createMenu`.
+                self.unpack_loot_table(Some(player));
                 let inventory = player.inventory.clone();
                 let container = self.container_ref.clone();
                 player.open_menu(self.name(), move |context| {

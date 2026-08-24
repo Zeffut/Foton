@@ -10,12 +10,14 @@ use steel_utils::{BlockStateId, Identifier};
 mod conditions;
 mod context;
 mod entries;
+mod fill;
 mod functions;
 mod registry;
 
 pub use conditions::*;
 pub use context::*;
 pub use entries::*;
+pub use fill::*;
 pub use functions::*;
 pub use registry::*;
 

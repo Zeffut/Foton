@@ -120,6 +120,10 @@ impl BlockBehavior for HopperBlock {
             return InteractionResult::Pass;
         };
 
+        // Vanilla parity: `RandomizableContainerBlockEntity.createMenu`
+        // unpacks with the opening player, whose luck the roll uses.
+        container_ref.unpack_loot_table(Some(player));
+
         let inventory = player.inventory.clone();
         player.open_menu(
             TextComponent::translated(translations::CONTAINER_HOPPER.msg()),

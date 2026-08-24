@@ -16,7 +16,7 @@ use steel_utils::locks::Shared;
 use steel_utils::{Downcast as _, DowncastType, locks::SyncMutex};
 
 use crate::{
-    block_entity::{BlockEntityBase, SharedBlockEntity},
+    block_entity::{BlockEntityBase, ContainerLoot, SharedBlockEntity},
     inventory::container::Container,
     player::{Player, player_inventory::PlayerInventory},
 };
@@ -35,6 +35,12 @@ type ContainerChangedCallback = Arc<dyn Fn() + Send + Sync>;
 struct ContainerOwner {
     block_entity: Arc<BlockEntityBase>,
     after_changed: Option<ContainerChangedCallback>,
+    /// The loot table this container still has to roll, if it is randomizable.
+    ///
+    /// Vanilla parity: the `lootTable` of `RandomizableContainer`. It lives
+    /// beside the owner because unpacking needs the level and the position that
+    /// only the block entity knows.
+    loot: Option<Arc<ContainerLoot>>,
 }
 
 /// Thread-safe reference to an erased container.
@@ -136,8 +142,48 @@ impl ContainerRef {
             owner: Some(ContainerOwner {
                 block_entity: owner,
                 after_changed: None,
+                loot: None,
             }),
         }
+    }
+
+    /// Creates a block-entity container capability that may still be holding a
+    /// packed loot table.
+    ///
+    /// Vanilla parity: the `RandomizableContainer` half of a container block
+    /// entity. Every access through [`ContainerLockGuard::lock_all`] rolls the
+    /// table first, which is how a hopper draining an untouched dungeon chest
+    /// gets its contents.
+    #[must_use]
+    pub fn owned_by_randomizable_block_entity(
+        container: SharedContainer,
+        owner: Arc<BlockEntityBase>,
+        loot: Arc<ContainerLoot>,
+    ) -> Self {
+        Self {
+            id: ContainerId::from_arc(&container),
+            source: container,
+            owner: Some(ContainerOwner {
+                block_entity: owner,
+                after_changed: None,
+                loot: Some(loot),
+            }),
+        }
+    }
+
+    /// Rolls a still-packed loot table into this container.
+    ///
+    /// Vanilla parity: `RandomizableContainer.unpackLootTable`. `player` is
+    /// `Some` only where vanilla passes one, which is the menu-opening path:
+    /// it contributes the opener's luck to the roll.
+    pub fn unpack_loot_table(&self, player: Option<&Player>) {
+        let Some(owner) = self.owner.as_ref() else {
+            return;
+        };
+        let Some(loot) = owner.loot.as_ref() else {
+            return;
+        };
+        loot.unpack_for_block_entity(&owner.block_entity, &self.source, player);
     }
 
     /// Creates a block-entity container capability with an unlocked post-change callback.
@@ -158,6 +204,7 @@ impl ContainerRef {
             owner: Some(ContainerOwner {
                 block_entity: owner,
                 after_changed: Some(after_changed),
+                loot: None,
             }),
         }
     }
@@ -239,6 +286,17 @@ impl ContainerLockGuard {
 
         // Deduplicate (in case same container passed multiple times)
         sources.dedup_by_key(|(id, _)| *id);
+
+        // Vanilla parity: `RandomizableContainerBlockEntity` rolls a packed
+        // loot table from `getItem`, `setItem`, `removeItem` and `isEmpty`, not
+        // from opening the menu, so anything that reaches the container at all
+        // unpacks it. Rolling here, before a single lock is taken, is Steel's
+        // equivalent boundary: unpacking writes into the container and then
+        // marks the block entity changed, neither of which may happen while a
+        // container lock is held.
+        for (_, container) in &sources {
+            container.unpack_loot_table(None);
+        }
 
         // Lock all in sorted order
         let mut guards = Vec::with_capacity(sources.len());

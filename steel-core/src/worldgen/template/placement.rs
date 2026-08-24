@@ -749,5 +749,9 @@ impl StructureTemplate {
             || key == &vanilla_block_entity_types::HOPPER.key
             || key == &vanilla_block_entity_types::SHULKER_BOX.key
             || key == &vanilla_block_entity_types::CRAFTER.key
+            // Vanilla tests `instanceof RandomizableContainer`, which the
+            // decorated pot implements directly rather than through
+            // `RandomizableContainerBlockEntity`.
+            || key == &vanilla_block_entity_types::DECORATED_POT.key
     }
 }

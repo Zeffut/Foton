@@ -256,6 +256,9 @@ impl BlockBehavior for CrafterBlock {
         };
         let container = crafter_entity.container_ref();
         let data = crafter_entity.data();
+        // Vanilla parity: `RandomizableContainerBlockEntity.createMenu`
+        // unpacks with the opening player, whose luck the roll uses.
+        container.unpack_loot_table(Some(player));
 
         let inventory = player.inventory.clone();
         player.open_menu(

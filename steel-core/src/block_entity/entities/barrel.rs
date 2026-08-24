@@ -15,7 +15,7 @@ use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_block_entity_types;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, locks::SyncMutex};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
 use crate::inventory::container::Container;
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
@@ -30,6 +30,9 @@ pub struct BarrelBlockEntity {
     base: Arc<BlockEntityBase>,
     container: Arc<SyncMutex<BarrelContainer>>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `RandomizableContainer` half of a barrel, which is
+    /// how a trial chamber or village barrel arrives stocked.
+    loot: Arc<ContainerLoot>,
 }
 
 struct BarrelContainer {
@@ -61,10 +64,16 @@ impl BarrelBlockEntity {
             items: vec![ItemStack::empty(); BARREL_SLOTS],
         }));
         let shared_container: SharedContainer = container.clone();
+        let loot = Arc::new(ContainerLoot::new());
         Self {
-            container_ref: ContainerRef::owned_by_block_entity(shared_container, Arc::clone(&base)),
+            container_ref: ContainerRef::owned_by_randomizable_block_entity(
+                shared_container,
+                Arc::clone(&base),
+                Arc::clone(&loot),
+            ),
             base,
             container,
+            loot,
         }
     }
 }
@@ -75,6 +84,9 @@ impl BlockEntity for BarrelBlockEntity {
     }
 
     fn pre_remove_side_effects(&self, pos: BlockPos, _state: BlockStateId) {
+        // Vanilla reads the contents out through `Container.getItem`, which
+        // rolls a packed table first.
+        self.container_ref.unpack_loot_table(None);
         let items = {
             let mut container = self.container.lock();
             mem::replace(&mut container.items, vec![ItemStack::empty(); BARREL_SLOTS])
@@ -90,8 +102,13 @@ impl BlockEntity for BarrelBlockEntity {
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         // Convert to NbtCompound view for accessing methods
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        // Vanilla parity: a barrel stores either a loot table or its items.
+        let packed = self.loot.try_load_loot_table(&nbt_view);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
+        if packed {
+            return;
+        }
 
         // Load items from NBT using borrowed NBT for proper ItemStack parsing
         if let Some(items_list) = nbt_view.list("Items")
@@ -113,6 +130,9 @@ impl BlockEntity for BarrelBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        if self.loot.try_save_loot_table(nbt) {
+            return;
+        }
         // Save items to NBT (only non-empty slots)
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();

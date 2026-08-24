@@ -25,7 +25,7 @@ use steel_utils::{
 };
 
 use crate::behavior::BLOCK_BEHAVIORS;
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
 use crate::entity::entities::ItemEntity;
 use crate::entity::{RemovalReason, SharedEntity};
 use crate::inventory::container::{Container, SlotsForFace};
@@ -65,6 +65,8 @@ pub struct HopperBlockEntity {
     base: Arc<BlockEntityBase>,
     container: Arc<SyncMutex<HopperContainer>>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `RandomizableContainer` half of a hopper.
+    loot: Arc<ContainerLoot>,
 }
 
 /// The five slots of a hopper plus its transfer cooldown.
@@ -136,10 +138,16 @@ impl HopperBlockEntity {
             ticked_game_time: 0,
         }));
         let shared_container: SharedContainer = container.clone();
+        let loot = Arc::new(ContainerLoot::new());
         Self {
-            container_ref: ContainerRef::owned_by_block_entity(shared_container, Arc::clone(&base)),
+            container_ref: ContainerRef::owned_by_randomizable_block_entity(
+                shared_container,
+                Arc::clone(&base),
+                Arc::clone(&loot),
+            ),
             base,
             container,
+            loot,
         }
     }
 
@@ -179,6 +187,9 @@ impl HopperBlockEntity {
             return;
         }
 
+        // Vanilla parity: `tryMoveItems` opens with `isEmpty`, which is one of
+        // the accessors `RandomizableContainerBlockEntity` unpacks from.
+        self.container_ref.unpack_loot_table(None);
         let (is_empty, is_full) = {
             let container = self.container.lock();
             (Container::is_empty(&*container), container.inventory_full())
@@ -692,6 +703,7 @@ impl BlockEntity for HopperBlockEntity {
     }
 
     fn pre_remove_side_effects(&self, pos: BlockPos, _state: BlockStateId) {
+        self.container_ref.unpack_loot_table(None);
         let items = {
             let mut container = self.container.lock();
             mem::replace(&mut container.items, vec![ItemStack::empty(); HOPPER_SLOTS])
@@ -706,10 +718,14 @@ impl BlockEntity for HopperBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        // Vanilla parity: a hopper stores either a loot table or its items; the
+        // transfer cooldown is read either way.
+        let packed = self.loot.try_load_loot_table(&nbt_view);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
 
-        if let Some(items_list) = nbt_view.list("Items")
+        if !packed
+            && let Some(items_list) = nbt_view.list("Items")
             && let Some(compounds) = items_list.compounds()
         {
             for compound in compounds {
@@ -729,16 +745,18 @@ impl BlockEntity for HopperBlockEntity {
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
         let container = self.container.lock();
-        let mut items: Vec<NbtCompound> = Vec::new();
-        for (slot, item) in container.items.iter().enumerate() {
-            if !item.is_empty()
-                && let NbtTag::Compound(mut item_nbt) = item.clone().to_nbt_tag()
-            {
-                item_nbt.insert("Slot", slot as i8);
-                items.push(item_nbt);
+        if !self.loot.try_save_loot_table(nbt) {
+            let mut items: Vec<NbtCompound> = Vec::new();
+            for (slot, item) in container.items.iter().enumerate() {
+                if !item.is_empty()
+                    && let NbtTag::Compound(mut item_nbt) = item.clone().to_nbt_tag()
+                {
+                    item_nbt.insert("Slot", slot as i8);
+                    items.push(item_nbt);
+                }
             }
+            nbt.insert("Items", NbtList::Compound(items));
         }
-        nbt.insert("Items", NbtList::Compound(items));
         nbt.insert("TransferCooldown", container.cooldown_time);
     }
 

@@ -103,6 +103,10 @@ impl BlockBehavior for BarrelBlock {
             return InteractionResult::Pass;
         };
 
+        // Vanilla parity: `RandomizableContainerBlockEntity.createMenu`
+        // unpacks with the opening player, whose luck the roll uses.
+        container_ref.unpack_loot_table(Some(player));
+
         // Open the chest menu (3 rows for barrel)
         let inventory = player.inventory.clone();
         player.open_menu(

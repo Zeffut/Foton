@@ -25,6 +25,7 @@
 
 pub(crate) mod block_state_nbt;
 pub mod entities;
+mod randomizable_container;
 mod registry;
 mod storage;
 
@@ -43,6 +44,7 @@ use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_utils::{BlockPos, BlockStateId, ErasedType, locks::SyncMutex};
 
+pub use randomizable_container::ContainerLoot;
 pub use registry::{BLOCK_ENTITIES, BlockEntityFactory, BlockEntityRegistry, init_block_entities};
 pub(crate) use storage::{
     BlockEntityInsert, BlockEntityLookup, BlockEntityStorage, ClearedBlockEntities,

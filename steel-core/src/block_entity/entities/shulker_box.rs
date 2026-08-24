@@ -16,7 +16,7 @@ use steel_registry::vanilla_block_entity_types;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
 use crate::inventory::container::Container;
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
@@ -29,6 +29,9 @@ pub struct ShulkerBoxBlockEntity {
     base: Arc<BlockEntityBase>,
     container: Arc<SyncMutex<ShulkerBoxContainer>>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `RandomizableContainer` half of a shulker box, which
+    /// is how an end city box arrives stocked.
+    loot: Arc<ContainerLoot>,
 }
 
 struct ShulkerBoxContainer {
@@ -59,16 +62,23 @@ impl ShulkerBoxBlockEntity {
             items: vec![ItemStack::empty(); SHULKER_BOX_SLOTS],
         }));
         let shared: SharedContainer = container.clone();
+        let loot = Arc::new(ContainerLoot::new());
         Self {
-            container_ref: ContainerRef::owned_by_block_entity(shared, Arc::clone(&base)),
+            container_ref: ContainerRef::owned_by_randomizable_block_entity(
+                shared,
+                Arc::clone(&base),
+                Arc::clone(&loot),
+            ),
             base,
             container,
+            loot,
         }
     }
 
     /// Returns a copy of everything inside.
     #[must_use]
     pub fn snapshot(&self) -> Vec<ItemStack> {
+        self.container_ref.unpack_loot_table(None);
         self.container.lock().items.clone()
     }
 
@@ -86,6 +96,7 @@ impl ShulkerBoxBlockEntity {
     /// as well would duplicate every stack.
     #[must_use]
     pub fn take_all(&self) -> Vec<ItemStack> {
+        self.container_ref.unpack_loot_table(None);
         let mut container = self.container.lock();
         mem::replace(
             &mut container.items,
@@ -94,8 +105,13 @@ impl ShulkerBoxBlockEntity {
     }
 
     /// Returns whether the box holds nothing.
+    ///
+    /// Vanilla parity: `RandomizableContainerBlockEntity.isEmpty`, which rolls
+    /// a packed table before answering -- a generated box is not empty, it just
+    /// has not been looked in yet.
     #[must_use]
     pub fn is_empty(&self) -> bool {
+        self.container_ref.unpack_loot_table(None);
         self.container.lock().items.iter().all(ItemStack::is_empty)
     }
 }
@@ -111,8 +127,14 @@ impl BlockEntity for ShulkerBoxBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        // Vanilla parity: `ShulkerBoxBlockEntity.loadFromTag`, which stores
+        // either a loot table or its items.
+        let packed = self.loot.try_load_loot_table(&nbt_view);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
+        if packed {
+            return;
+        }
 
         if let Some(items_list) = nbt_view.list("Items")
             && let Some(compounds) = items_list.compounds()
@@ -131,6 +153,9 @@ impl BlockEntity for ShulkerBoxBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        if self.loot.try_save_loot_table(nbt) {
+            return;
+        }
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items.iter().enumerate() {

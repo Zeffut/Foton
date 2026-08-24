@@ -4,12 +4,10 @@
 //! chest: it runs on rails like any cart, and a right-click opens it rather
 //! than seating anybody, because there is nowhere to sit.
 //!
-//! Mineshafts already generate these with a loot table attached, and until now
-//! there was no way to open one. Steel has no loot system, so a generated cart
-//! opens empty rather than full -- but it opens, and it keeps what is put in
-//! it.
+//! Mineshafts generate these with a loot table attached. The table is rolled
+//! the first time somebody opens the cart, matching
+//! `ContainerEntity.unpackChestVehicleLootTable`.
 
-use std::str::FromStr;
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
@@ -29,6 +27,7 @@ use steel_utils::{DowncastType, DowncastTypeKey, Identifier};
 
 use super::minecart_common::{self, MinecartLike, MinecartState};
 use crate::behavior::InteractionResult;
+use crate::block_entity::ContainerLoot;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntityMovementEmission,
     reset_forward_direction_of_relative_portal_position,
@@ -83,6 +82,9 @@ pub struct ChestMinecartEntity {
     minecart: SyncMutex<MinecartState>,
     container: Shared<SimpleContainer>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `lootTable`/`lootTableSeed` pair of
+    /// `AbstractMinecartContainer`.
+    loot: Arc<ContainerLoot>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `ChestMinecartEntity`.
@@ -93,17 +95,11 @@ unsafe impl DowncastType for ChestMinecartEntity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ChestMinecartState {
     first_tick: bool,
-    loot_table: Option<Identifier>,
-    loot_table_seed: i64,
 }
 
 impl ChestMinecartState {
     const fn new(first_tick: bool) -> Self {
-        Self {
-            first_tick,
-            loot_table: None,
-            loot_table_seed: 0,
-        }
+        Self { first_tick }
     }
 }
 
@@ -139,7 +135,21 @@ impl ChestMinecartEntity {
             minecart: SyncMutex::new(MinecartState::default()),
             container_ref: ContainerRef::from(shared),
             container,
+            loot: Arc::new(ContainerLoot::new()),
         }
+    }
+
+    /// Rolls a still-packed loot table into the cart.
+    ///
+    /// Vanilla parity: `ContainerEntity.unpackChestVehicleLootTable`, whose
+    /// `ORIGIN` is the cart's own position because a cart moves.
+    fn unpack_loot_table(&self, player: Option<&Player>) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        let container: SharedContainer = self.container.clone();
+        self.loot
+            .unpack_at(&world, self.position(), &container, player);
     }
 
     /// Opens the chest for `player`.
@@ -147,6 +157,9 @@ impl ChestMinecartEntity {
     /// Vanilla parity: `MinecartChest.interact`, which goes straight to the
     /// container -- there is no seat to compete with, so no sneak is needed.
     fn open_chest(&self, player: &Player) -> InteractionResult {
+        // Vanilla parity: `AbstractMinecartContainer.createMenu` unpacks
+        // with the opening player, whose luck the roll uses.
+        self.unpack_loot_table(Some(player));
         let inventory = player.inventory.clone();
         let container = self.container_ref.clone();
         player.open_menu(self.name(), move |context| {
@@ -170,10 +183,10 @@ impl ChestMinecartEntity {
     }
 
     /// Sets the deferred loot table used when the container is first opened.
+    ///
+    /// Vanilla parity: `AbstractMinecartContainer.setLootTable`.
     pub fn set_loot_table(&self, loot_table: Identifier, seed: i64) {
-        let mut state = self.state.lock();
-        state.loot_table = Some(loot_table);
-        state.loot_table_seed = seed;
+        self.loot.set_loot_table(loot_table, seed);
     }
 
     const fn nbt_bool(value: bool) -> i8 {
@@ -252,7 +265,13 @@ impl Entity for ChestMinecartEntity {
             Self::nbt_bool(self.minecart.lock().flipped),
         );
 
-        // Vanilla parity: the `Items` tag of `ContainerEntity`.
+        nbt.insert("HasTicked", Self::nbt_bool(self.state.lock().first_tick));
+
+        // Vanilla parity: `ContainerEntity.addChestVehicleSaveData`, which
+        // writes the loot table *instead of* the items when one is packed.
+        if self.loot.try_save_loot_table(nbt) {
+            return;
+        }
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items().iter().enumerate() {
@@ -263,38 +282,29 @@ impl Entity for ChestMinecartEntity {
                 items.push(item_nbt);
             }
         }
-        drop(container);
         nbt.insert("Items", NbtList::Compound(items));
-
-        let state = self.state.lock();
-        nbt.insert("HasTicked", Self::nbt_bool(state.first_tick));
-
-        if let Some(loot_table) = state.loot_table.as_ref() {
-            nbt.insert("LootTable", loot_table.to_string());
-            if state.loot_table_seed != 0 {
-                nbt.insert("LootTableSeed", NbtTag::Long(state.loot_table_seed));
-            }
-        }
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
-        let loot_table = nbt
-            .string("LootTable")
-            .and_then(|value| Identifier::from_str(&value.to_string()).ok());
-        let mut state = self.state.lock();
-        if let Some(first_tick) = nbt.byte("HasTicked") {
-            state.first_tick = first_tick != 0;
+        {
+            let mut state = self.state.lock();
+            if let Some(first_tick) = nbt.byte("HasTicked") {
+                state.first_tick = first_tick != 0;
+            }
         }
-        state.loot_table = loot_table;
-        state.loot_table_seed = nbt.long("LootTableSeed").unwrap_or(0);
-        drop(state);
 
         if let Some(flipped) = nbt.byte("FlippedRotation") {
             self.minecart.lock().flipped = flipped != 0;
         }
 
+        // Vanilla parity: `ContainerEntity.readChestVehicleSaveData` clears
+        // the slots, then reads the items only when no table is packed.
+        let packed = self.loot.try_load_loot_table(&nbt);
         let mut container = self.container.lock();
         container.items_mut().fill(ItemStack::empty());
+        if packed {
+            return;
+        }
         let Some(items_list) = nbt.list("Items") else {
             return;
         };
@@ -331,7 +341,7 @@ impl MinecartLike for ChestMinecartEntity {
 
         // Vanilla skips the cargo bonus while a loot table is still packed,
         // because the cart does not yet know what it is carrying.
-        if self.state.lock().loot_table.is_none() {
+        if !self.loot.is_packed() {
             let filled = calculate_redstone_signal_from_container(&*self.container.lock());
             keep += (FULL_SIGNAL - filled) as f32 * EMPTINESS_BONUS;
         }
@@ -347,17 +357,36 @@ impl MinecartLike for ChestMinecartEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use steel_registry::vanilla_entities;
+    use std::io::Cursor;
 
-    #[test]
-    fn chest_minecart_saves_structure_loot_table_state() {
-        let minecart = ChestMinecartEntity::new(
+    use simdnbt::borrow::read_compound as read_borrowed_compound;
+    use steel_registry::{init_vanilla_registry, vanilla_entities, vanilla_items};
+
+    use super::*;
+
+    const MINESHAFT: &str = "minecraft:chests/abandoned_mineshaft";
+
+    fn test_minecart() -> ChestMinecartEntity {
+        init_vanilla_registry();
+        ChestMinecartEntity::new(
             &vanilla_entities::CHEST_MINECART,
             1,
             DVec3::new(1.5, 2.5, 3.5),
             Weak::new(),
-        );
+        )
+    }
+
+    fn load_from_owned_nbt(minecart: &ChestMinecartEntity, nbt: &NbtCompound) {
+        let mut bytes = Vec::new();
+        nbt.write(&mut bytes);
+        let base = read_borrowed_compound(&mut Cursor::new(bytes.as_slice()))
+            .expect("test nbt should reborrow");
+        minecart.load_additional((&base).into());
+    }
+
+    #[test]
+    fn chest_minecart_saves_structure_loot_table_state() {
+        let minecart = test_minecart();
         minecart.set_loot_table(
             Identifier::new_static("minecraft", "chests/abandoned_mineshaft"),
             42,
@@ -368,11 +397,48 @@ mod tests {
 
         assert_eq!(
             nbt.string("LootTable").map(ToString::to_string),
-            Some("minecraft:chests/abandoned_mineshaft".to_owned())
+            Some(MINESHAFT.to_owned())
         );
         assert_eq!(nbt.long("LootTableSeed"), Some(42));
         assert_eq!(nbt.byte("HasTicked"), Some(1));
         assert_eq!(nbt.byte("FlippedRotation"), Some(0));
+        assert!(
+            nbt.list("Items").is_none(),
+            "vanilla writes the table instead of the items, never both"
+        );
+    }
+
+    /// A mineshaft cart comes back off disk still packed, and the stale `Items`
+    /// list a hand-edited save might carry does not become free loot on top.
+    #[test]
+    fn a_packed_chest_minecart_reloads_its_table_and_ignores_stale_items() {
+        let minecart = test_minecart();
+        let mut nbt = NbtCompound::new();
+        nbt.insert("LootTable", MINESHAFT);
+        nbt.insert("LootTableSeed", 1234_i64);
+        let mut stale = NbtCompound::new();
+        if let NbtTag::Compound(mut item) = ItemStack::new(&vanilla_items::DIAMOND).to_nbt_tag() {
+            item.insert("Slot", 0_i8);
+            stale = item;
+        }
+        nbt.insert("Items", NbtList::Compound(vec![stale]));
+
+        load_from_owned_nbt(&minecart, &nbt);
+
+        assert!(minecart.loot.is_packed());
+        assert!(
+            minecart
+                .container
+                .lock()
+                .items()
+                .iter()
+                .all(ItemStack::is_empty),
+            "a packed cart must not also carry the items it saved before"
+        );
+
+        let mut saved = NbtCompound::new();
+        minecart.save_additional(&mut saved);
+        assert_eq!(saved.long("LootTableSeed"), Some(1234));
     }
 
     #[test]

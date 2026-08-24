@@ -17,7 +17,7 @@ use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_block_entity_types;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, locks::SyncMutex};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
 use crate::inventory::container::Container;
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
@@ -32,6 +32,9 @@ pub struct DispenserBlockEntity {
     base: Arc<BlockEntityBase>,
     container: Arc<SyncMutex<DispenserContainer>>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `RandomizableContainer` half of a dispenser, which
+    /// is how a jungle temple's trap arrives loaded.
+    loot: Arc<ContainerLoot>,
 }
 
 /// The nine slots of a dispenser or dropper.
@@ -77,19 +80,28 @@ impl DispenserBlockEntity {
             items: vec![ItemStack::empty(); DISPENSER_SLOTS],
         }));
         let shared_container: SharedContainer = container.clone();
+        let loot = Arc::new(ContainerLoot::new());
         Self {
-            container_ref: ContainerRef::owned_by_block_entity(shared_container, Arc::clone(&base)),
+            container_ref: ContainerRef::owned_by_randomizable_block_entity(
+                shared_container,
+                Arc::clone(&base),
+                Arc::clone(&loot),
+            ),
             base,
             container,
+            loot,
         }
     }
 
     /// Picks one non-empty slot at random, or `None` when everything is empty.
     ///
     /// Vanilla parity: `DispenserBlockEntity.getRandomSlot`, which is reservoir
-    /// sampling: every filled slot is equally likely, in one pass.
+    /// sampling: every filled slot is equally likely, in one pass. It opens
+    /// with `unpackLootTable(null)`, so a generated trap dispenser loads itself
+    /// the first time it fires.
     #[must_use]
     pub fn get_random_slot(&self) -> Option<usize> {
+        self.container_ref.unpack_loot_table(None);
         let container = self.container.lock();
         let mut chosen = None;
         let mut seen = 0;
@@ -108,6 +120,7 @@ impl DispenserBlockEntity {
     /// Returns a copy of the stack in `slot`.
     #[must_use]
     pub fn get_item(&self, slot: usize) -> ItemStack {
+        self.container_ref.unpack_loot_table(None);
         let container = self.container.lock();
         container
             .items
@@ -117,6 +130,7 @@ impl DispenserBlockEntity {
 
     /// Replaces the stack in `slot`.
     pub fn set_item(&self, slot: usize, stack: ItemStack) {
+        self.container_ref.unpack_loot_table(None);
         self.container.lock().set_item(slot, stack);
         self.set_changed();
     }
@@ -128,6 +142,7 @@ impl DispenserBlockEntity {
     /// that hand back a remainder such as an empty bucket.
     #[must_use = "the remainder has to be thrown or it is destroyed"]
     pub fn insert_item(&self, mut stack: ItemStack) -> ItemStack {
+        self.container_ref.unpack_loot_table(None);
         {
             let mut container = self.container.lock();
             for slot in 0..DISPENSER_SLOTS {
@@ -164,6 +179,7 @@ impl BlockEntity for DispenserBlockEntity {
     }
 
     fn pre_remove_side_effects(&self, pos: BlockPos, _state: BlockStateId) {
+        self.container_ref.unpack_loot_table(None);
         let items = {
             let mut container = self.container.lock();
             mem::replace(
@@ -181,8 +197,13 @@ impl BlockEntity for DispenserBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        // Vanilla parity: a dispenser stores either a loot table or its items.
+        let packed = self.loot.try_load_loot_table(&nbt_view);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
+        if packed {
+            return;
+        }
 
         if let Some(items_list) = nbt_view.list("Items")
             && let Some(compounds) = items_list.compounds()
@@ -201,6 +222,9 @@ impl BlockEntity for DispenserBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        if self.loot.try_save_loot_table(nbt) {
+            return;
+        }
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items.iter().enumerate() {

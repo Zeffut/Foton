@@ -21,7 +21,7 @@ use steel_registry::vanilla_block_entity_types;
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, locks::SyncMutex};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
 use crate::inventory::container::Container;
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::{LevelReader as _, World};
@@ -122,6 +122,10 @@ pub struct CrafterBlockEntity {
     data: Arc<CrafterDataSlots>,
     /// Ticks left before the block drops out of its crafting pose.
     crafting_ticks_remaining: AtomicI32,
+    /// Vanilla parity: the `RandomizableContainer` half of a crafter. Nothing
+    /// in vanilla worldgen generates one stocked, but the block entity carries
+    /// the pair like every other `RandomizableContainerBlockEntity`.
+    loot: Arc<ContainerLoot>,
 }
 
 /// The nine slots of a crafter.
@@ -157,12 +161,18 @@ impl CrafterBlockEntity {
             data: Arc::clone(&data),
         }));
         let shared_container: SharedContainer = container.clone();
+        let loot = Arc::new(ContainerLoot::new());
         Self {
-            container_ref: ContainerRef::owned_by_block_entity(shared_container, Arc::clone(&base)),
+            container_ref: ContainerRef::owned_by_randomizable_block_entity(
+                shared_container,
+                Arc::clone(&base),
+                Arc::clone(&loot),
+            ),
             base,
             container,
             data,
             crafting_ticks_remaining: AtomicI32::new(0),
+            loot,
         }
     }
 
@@ -181,6 +191,7 @@ impl CrafterBlockEntity {
     /// Returns a copy of the stack in `slot`.
     #[must_use]
     pub fn get_item(&self, slot: usize) -> ItemStack {
+        self.container_ref.unpack_loot_table(None);
         let container = self.container.lock();
         container
             .items
@@ -194,6 +205,7 @@ impl CrafterBlockEntity {
     /// slot back on rather than dropping the item -- putting something in a
     /// slot is how you say you want it used.
     pub fn set_item(&self, slot: usize, stack: ItemStack) {
+        self.container_ref.unpack_loot_table(None);
         self.container.lock().set_item(slot, stack);
         self.set_changed();
     }
@@ -255,6 +267,7 @@ impl CrafterBlockEntity {
     /// pattern over the input itself, so the untrimmed 3x3 is what it wants.
     #[must_use]
     pub fn as_craft_input(&self) -> CraftingInput {
+        self.container_ref.unpack_loot_table(None);
         let container = self.container.lock();
         CraftingInput::new(CRAFTER_WIDTH, CRAFTER_HEIGHT, container.items.clone())
     }
@@ -264,6 +277,7 @@ impl CrafterBlockEntity {
     /// Vanilla parity: the `getItems().forEach(shrink(1))` of
     /// `CrafterBlock.dispenseFrom`.
     pub fn consume_one_of_each(&self) {
+        self.container_ref.unpack_loot_table(None);
         {
             let mut container = self.container.lock();
             for item in &mut container.items {
@@ -282,6 +296,7 @@ impl CrafterBlockEntity {
     /// holes reads full even though it is not.
     #[must_use]
     pub fn redstone_signal(&self) -> i32 {
+        self.container_ref.unpack_loot_table(None);
         let container = self.container.lock();
         let mut count = 0;
         for slot in 0..CRAFTER_SLOTS {
@@ -320,6 +335,7 @@ impl BlockEntity for CrafterBlockEntity {
     }
 
     fn pre_remove_side_effects(&self, pos: BlockPos, _state: BlockStateId) {
+        self.container_ref.unpack_loot_table(None);
         let items = {
             let mut container = self.container.lock();
             mem::replace(
@@ -337,11 +353,15 @@ impl BlockEntity for CrafterBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        // Vanilla parity: a crafter stores either a loot table or its
+        // items; the crafting ticks and slot states are read either way.
+        let packed = self.loot.try_load_loot_table(&nbt_view);
         {
             let mut container = self.container.lock();
             container.items.fill(ItemStack::empty());
 
-            if let Some(items_list) = nbt_view.list("Items")
+            if !packed
+                && let Some(items_list) = nbt_view.list("Items")
                 && let Some(compounds) = items_list.compounds()
             {
                 for compound in compounds {
@@ -382,16 +402,18 @@ impl BlockEntity for CrafterBlockEntity {
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
         let container = self.container.lock();
-        let mut items: Vec<NbtCompound> = Vec::new();
-        for (slot, item) in container.items.iter().enumerate() {
-            if !item.is_empty()
-                && let NbtTag::Compound(mut item_nbt) = item.clone().to_nbt_tag()
-            {
-                item_nbt.insert("Slot", slot as i8);
-                items.push(item_nbt);
+        if !self.loot.try_save_loot_table(nbt) {
+            let mut items: Vec<NbtCompound> = Vec::new();
+            for (slot, item) in container.items.iter().enumerate() {
+                if !item.is_empty()
+                    && let NbtTag::Compound(mut item_nbt) = item.clone().to_nbt_tag()
+                {
+                    item_nbt.insert("Slot", slot as i8);
+                    items.push(item_nbt);
+                }
             }
+            nbt.insert("Items", NbtList::Compound(items));
         }
-        nbt.insert("Items", NbtList::Compound(items));
 
         nbt.insert(
             "crafting_ticks_remaining",

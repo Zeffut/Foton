@@ -378,6 +378,14 @@ impl BlockBehavior for ChestBlock {
             return InteractionResult::Consume;
         };
 
+        // Vanilla parity: the `MENU_PROVIDER_COMBINER` of `ChestBlock`,
+        // which unpacks both halves with the opening player before the
+        // double menu is built.
+        first.unpack_loot_table(Some(player));
+        if let Some(second) = second.as_ref() {
+            second.unpack_loot_table(Some(player));
+        }
+
         let inventory = player.inventory.clone();
         match second {
             Some(second) => player.open_menu(

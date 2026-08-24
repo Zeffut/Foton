@@ -156,7 +156,7 @@ pub(super) fn math_round(value: f32) -> i32 {
 
 /// Vanilla `Mth.nextInt(random, min, max)` is inclusive and clamps to `min`
 /// when `min >= max`.
-fn uniform_int(rng: &mut impl rand::Rng, min: i32, max: i32) -> i32 {
+pub(super) fn uniform_int(rng: &mut impl rand::Rng, min: i32, max: i32) -> i32 {
     if min >= max {
         min
     } else {

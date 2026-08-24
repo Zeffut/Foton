@@ -30,6 +30,7 @@ use steel_utils::{BlockPos, DowncastType, DowncastTypeKey};
 
 use super::minecart_common::{self, MinecartLike, MinecartState};
 use crate::behavior::InteractionResult;
+use crate::block_entity::ContainerLoot;
 use crate::block_entity::entities::suck_into_at;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission};
 use crate::inventory::container::{
@@ -79,6 +80,9 @@ pub struct HopperMinecartEntity {
     minecart: SyncMutex<MinecartState>,
     container: Shared<SimpleContainer>,
     container_ref: ContainerRef,
+    /// Vanilla parity: the `lootTable`/`lootTableSeed` pair of
+    /// `AbstractMinecartContainer`.
+    loot: Arc<ContainerLoot>,
     /// Whether it is allowed to suck. An activator rail switches this *off*.
     enabled: AtomicBool,
     /// Guards against sucking twice in one tick, once from the tick itself and
@@ -120,9 +124,22 @@ impl HopperMinecartEntity {
             minecart: SyncMutex::new(MinecartState::default()),
             container_ref: ContainerRef::from(shared),
             container,
+            loot: Arc::new(ContainerLoot::new()),
             enabled: AtomicBool::new(true),
             consumed_this_tick: AtomicBool::new(false),
         }
+    }
+
+    /// Rolls a still-packed loot table into the cart.
+    ///
+    /// Vanilla parity: `ContainerEntity.unpackChestVehicleLootTable`.
+    fn unpack_loot_table(&self, player: Option<&Player>) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        let container: SharedContainer = self.container.clone();
+        self.loot
+            .unpack_at(&world, self.position(), &container, player);
     }
 
     /// Returns whether the cart is allowed to suck items in.
@@ -160,6 +177,8 @@ impl HopperMinecartEntity {
 
     /// Opens the hopper for `player`.
     fn open_hopper(&self, player: &Player) -> InteractionResult {
+        // Vanilla parity: `AbstractMinecartContainer.createMenu`.
+        self.unpack_loot_table(Some(player));
         let inventory = player.inventory.clone();
         let container = self.container_ref.clone();
         player.open_menu(self.name(), move |context| {
@@ -236,6 +255,10 @@ impl Entity for HopperMinecartEntity {
     fn save_additional(&self, nbt: &mut NbtCompound) {
         nbt.insert("Enabled", i8::from(self.is_enabled()));
 
+        // Vanilla parity: `ContainerEntity.addChestVehicleSaveData`.
+        if self.loot.try_save_loot_table(nbt) {
+            return;
+        }
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items().iter().enumerate() {
@@ -255,11 +278,14 @@ impl Entity for HopperMinecartEntity {
             Ordering::Relaxed,
         );
 
+        // Vanilla parity: `ContainerEntity.readChestVehicleSaveData`.
+        let packed = self.loot.try_load_loot_table(&nbt);
         let mut container = self.container.lock();
         for slot in 0..HOPPER_MINECART_SLOTS {
             container.set_item(slot, ItemStack::empty());
         }
-        if let Some(items) = nbt.list("Items")
+        if !packed
+            && let Some(items) = nbt.list("Items")
             && let Some(compounds) = items.compounds()
         {
             for compound in compounds {
@@ -290,8 +316,13 @@ impl MinecartLike for HopperMinecartEntity {
     /// Vanilla parity: `AbstractMinecartContainer.applyNaturalSlowdown`, which
     /// is the same rule the chest cart follows: a fuller cart rolls less far.
     fn apply_natural_slowdown(&self, movement: DVec3) -> DVec3 {
-        let filled = calculate_redstone_signal_from_container(&*self.container.lock());
-        let mut keep = LOADED_SLOWDOWN + (FULL_SIGNAL - filled) as f32 * EMPTINESS_BONUS;
+        let mut keep = LOADED_SLOWDOWN;
+        // Vanilla skips the cargo bonus while a loot table is still packed,
+        // because the cart does not yet know what it is carrying.
+        if !self.loot.is_packed() {
+            let filled = calculate_redstone_signal_from_container(&*self.container.lock());
+            keep += (FULL_SIGNAL - filled) as f32 * EMPTINESS_BONUS;
+        }
         if self.is_in_water() {
             keep *= WATER_SLOWDOWN;
         }

@@ -25,7 +25,7 @@ use steel_registry::vanilla_block_entity_types;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
 use crate::inventory::container::Container;
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
@@ -76,6 +76,10 @@ pub struct DecoratedPotBlockEntity {
     decorations: SyncMutex<PotDecorations>,
     container: Arc<SyncMutex<DecoratedPotContainer>>,
     container_ref: ContainerRef,
+    /// Vanilla parity: `DecoratedPotBlockEntity` implements
+    /// `RandomizableContainer` directly rather than through
+    /// `RandomizableContainerBlockEntity`, but carries the same pair.
+    loot: Arc<ContainerLoot>,
 }
 
 /// The pot's one slot.
@@ -107,11 +111,17 @@ impl DecoratedPotBlockEntity {
             items: vec![ItemStack::empty(); DECORATED_POT_SLOTS],
         }));
         let shared: SharedContainer = container.clone();
+        let loot = Arc::new(ContainerLoot::new());
         Self {
-            container_ref: ContainerRef::owned_by_block_entity(shared, Arc::clone(&base)),
+            container_ref: ContainerRef::owned_by_randomizable_block_entity(
+                shared,
+                Arc::clone(&base),
+                Arc::clone(&loot),
+            ),
             base,
             decorations: SyncMutex::new(PotDecorations::EMPTY),
             container,
+            loot,
         }
     }
 
@@ -135,12 +145,11 @@ impl DecoratedPotBlockEntity {
 
     /// Returns a copy of what is inside the pot.
     ///
-    /// Vanilla parity: `DecoratedPotBlockEntity.getTheItem`, minus the loot
-    /// table it unpacks first. Steel has no block-entity loot tables, so a pot
-    /// that a structure generated with one reads as empty here rather than
-    /// rolling its contents on first look.
+    /// Vanilla parity: `DecoratedPotBlockEntity.getTheItem`, which rolls a
+    /// packed loot table before answering.
     #[must_use]
     pub fn the_item(&self) -> ItemStack {
+        self.container_ref.unpack_loot_table(None);
         self.container.lock().items[0].clone()
     }
 
@@ -148,15 +157,18 @@ impl DecoratedPotBlockEntity {
     ///
     /// Vanilla parity: `DecoratedPotBlockEntity.setTheItem`.
     pub fn set_the_item(&self, item: ItemStack) {
+        self.container_ref.unpack_loot_table(None);
         self.container.lock().items[0] = item;
         self.set_changed();
     }
 
     /// Returns whether the pot holds nothing.
     ///
-    /// Vanilla parity: `ContainerSingleItem.isEmpty`.
+    /// Vanilla parity: `ContainerSingleItem.isEmpty`, which reads through
+    /// `getTheItem` and therefore unpacks too.
     #[must_use]
     pub fn is_empty(&self) -> bool {
+        self.container_ref.unpack_loot_table(None);
         self.container.lock().items[0].is_empty()
     }
 
@@ -183,6 +195,7 @@ impl BlockEntity for DecoratedPotBlockEntity {
     /// drops a container's contents. The sherds ride out on the item the block
     /// drops, but whatever a player stored inside falls on the floor.
     fn pre_remove_side_effects(&self, pos: BlockPos, _state: BlockStateId) {
+        self.container_ref.unpack_loot_table(None);
         let item = {
             let mut container = self.container.lock();
             mem::replace(&mut container.items[0], ItemStack::empty())
@@ -202,26 +215,31 @@ impl BlockEntity for DecoratedPotBlockEntity {
             .get("sherds")
             .and_then(PotDecorations::from_nbt_tag)
             .unwrap_or(PotDecorations::EMPTY);
-        let item = view
-            .compound("item")
-            .and_then(|compound| ItemStack::from_borrowed_compound(&compound))
-            .unwrap_or_else(ItemStack::empty);
+        // Vanilla parity: a pot stores either a loot table or its item.
+        let item = if self.loot.try_load_loot_table(&view) {
+            ItemStack::empty()
+        } else {
+            view.compound("item")
+                .and_then(|compound| ItemStack::from_borrowed_compound(&compound))
+                .unwrap_or_else(ItemStack::empty)
+        };
 
         *self.decorations.lock() = decorations;
         self.container.lock().items[0] = item;
     }
 
     /// Vanilla parity: `DecoratedPotBlockEntity.saveAdditional`, which leaves
-    /// the sherds out of an all-brick pot rather than writing four bricks.
-    ///
-    /// Vanilla writes a loot table in place of the item when one is set; Steel
-    /// has no block-entity loot tables, so there is only ever the item.
+    /// the sherds out of an all-brick pot rather than writing four bricks,
+    /// and writes a still-packed loot table in place of the item.
     fn save_additional(&self, nbt: &mut NbtCompound) {
         let decorations = self.decorations.lock().clone();
         if decorations != PotDecorations::EMPTY {
             nbt.insert("sherds", decorations.to_nbt_tag());
         }
 
+        if self.loot.try_save_loot_table(nbt) {
+            return;
+        }
         let item = self.container.lock().items[0].clone();
         if !item.is_empty()
             && let NbtTag::Compound(item_nbt) = item.to_nbt_tag()
