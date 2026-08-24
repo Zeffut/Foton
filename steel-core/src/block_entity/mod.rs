@@ -27,8 +27,10 @@ pub(crate) mod block_state_nbt;
 pub mod entities;
 mod registry;
 mod storage;
+pub mod trialspawner;
 
 use std::{
+    any::try_as_dyn,
     ptr,
     sync::{
         Arc, Weak,
@@ -57,6 +59,7 @@ use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 
 use crate::world::World;
+use crate::world::base_spawner::Spawner;
 use crate::world::game_event::SharedGameEventListener;
 
 /// Erased block-state-selected ticker for one concrete block-entity type.
@@ -391,7 +394,7 @@ impl BlockEntityBase {
 /// additional data storage beyond what block states can hold. Concrete
 /// implementations must claim a unique [`steel_utils::DowncastTypeKey`] through
 /// [`steel_utils::DowncastType`].
-pub trait BlockEntity: ErasedType + Send + Sync {
+pub trait BlockEntity: ErasedType + Send + Sync + 'static {
     /// Returns the common metadata owned by this block entity.
     fn base(&self) -> &BlockEntityBase;
 
@@ -527,6 +530,13 @@ pub trait BlockEntity: ErasedType + Send + Sync {
     /// Returns the independently lockable container capability owned by this entity.
     fn container_ref(&self) -> Option<ContainerRef> {
         None
+    }
+
+    /// Returns this block entity as something a spawn egg can retarget.
+    ///
+    /// Mirrors Vanilla's `instanceof Spawner` check in `SpawnEggItem.useOn`.
+    fn as_spawner(&self) -> Option<&dyn Spawner> {
+        try_as_dyn::<Self, dyn Spawner>(self)
     }
 
     /// Returns this entity's fixed game-event listener, if it provides one.

@@ -16,6 +16,7 @@ use std::sync::{Arc, Weak};
 use glam::DVec3;
 use simdnbt::borrow::NbtCompound as NbtCompoundView;
 use simdnbt::owned::NbtCompound;
+use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::spawn_data::{CustomSpawnRules, SpawnData};
 use steel_registry::{REGISTRY, RegistryExt as _, level_events, vanilla_game_events};
 use steel_utils::locks::SyncMutex;
@@ -60,6 +61,16 @@ pub trait SpawnerOwner {
     /// Vanilla parity: the `setNextSpawnData` override of `SpawnerBlockEntity`,
     /// which re-sends the block so the client's spinning mob changes with it.
     fn on_next_spawn_data_set(&self, _world: &Arc<World>, _pos: BlockPos) {}
+}
+
+/// Something a spawn egg can retarget.
+///
+/// Vanilla parity: the `net.minecraft.world.level.Spawner` interface, which the
+/// spawner block entity, the trial spawner block entity and the spawner
+/// minecart all implement.
+pub trait Spawner {
+    /// Vanilla parity: `Spawner.setEntityId`.
+    fn set_spawner_entity_id(&self, entity_type: EntityTypeRef);
 }
 
 /// Everything a spawner remembers between ticks.
@@ -282,7 +293,7 @@ impl BaseSpawner {
             {
                 return SpawnAttempt::Skipped;
             }
-            if !custom_rules_allow(rules, world, spawn_block_pos) {
+            if !custom_spawn_rules_allow(rules, world, spawn_block_pos) {
                 return SpawnAttempt::Skipped;
             }
         }
@@ -469,7 +480,11 @@ fn random_spawn_position(pos: BlockPos, spawn_range: i32) -> DVec3 {
 }
 
 /// Vanilla parity: `SpawnData.CustomSpawnRules.isValidPosition`.
-fn custom_rules_allow(rules: &CustomSpawnRules, world: &Arc<World>, pos: BlockPos) -> bool {
+pub(crate) fn custom_spawn_rules_allow(
+    rules: &CustomSpawnRules,
+    world: &Arc<World>,
+    pos: BlockPos,
+) -> bool {
     let block_light = i32::from(world.light_value_at(LightLayer::Block, pos));
     let sky_light = i32::from(world.effective_sky_brightness(pos));
     rules.block_light_limit.is_value_in_range(block_light)
@@ -511,7 +526,7 @@ fn count_nearby_of_type(
 /// see the module note.
 pub(crate) fn load_spawner_entity(
     world: &Arc<World>,
-    entity_type: steel_registry::entity_type::EntityTypeRef,
+    entity_type: EntityTypeRef,
     position: DVec3,
     spawn_data: &SpawnData,
     _reason: EntitySpawnReason,

@@ -1,6 +1,10 @@
 //! Helpers shared by item behavior implementations.
 
+use std::sync::Arc;
+
+use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
+use steel_registry::blocks::properties::{Axis, Direction};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_blocks;
 use steel_utils::BlockPos;
@@ -10,7 +14,7 @@ use crate::entity::Entity;
 use crate::entity::entities::ItemEntity;
 use crate::inventory::lock::ContainerId;
 use crate::player::player_inventory::PlayerInventory;
-use crate::world::RaytraceAction;
+use crate::world::{RaytraceAction, World};
 
 /// Spills a destroyed container item's contents where it died.
 ///
@@ -81,4 +85,49 @@ pub(crate) fn create_filled_result(
     if !overflow.is_empty() {
         let _ = player.drop_item(overflow, false, false);
     }
+}
+
+/// Vanilla parity: the `0.0172275` of `DefaultDispenseItemBehavior.spawnItem`.
+const ACCURACY_DEVIATION: f64 = 0.017_227_5;
+
+/// Vanilla parity: the `-= 0.125` a vertical throw drops by.
+const VERTICAL_SPAWN_DROP: f64 = 0.125;
+
+/// Vanilla parity: the `-= 0.15625` a horizontal throw drops by.
+const HORIZONTAL_SPAWN_DROP: f64 = 0.156_25;
+
+/// Vanilla parity: `RandomSource.triangle`.
+fn triangle(mode: f64, deviation: f64) -> f64 {
+    deviation.mul_add(rand::random::<f64>() - rand::random::<f64>(), mode)
+}
+
+/// Throws one item out of a block face.
+///
+/// Vanilla parity: `DefaultDispenseItemBehavior.spawnItem`. A dispenser throws
+/// with accuracy six; a trial spawner and a vault both eject with accuracy two,
+/// which is what makes their rewards land in a tidy pile.
+pub(crate) fn spawn_item_toward(
+    world: &Arc<World>,
+    position: DVec3,
+    direction: Direction,
+    accuracy: i32,
+    stack: ItemStack,
+) {
+    let mut position = position;
+    position.y -= if direction.get_axis() == Axis::Y {
+        VERTICAL_SPAWN_DROP
+    } else {
+        HORIZONTAL_SPAWN_DROP
+    };
+
+    let (step_x, _, step_z) = direction.offset();
+    let power = rand::random::<f64>().mul_add(0.1, 0.2);
+    let deviation = ACCURACY_DEVIATION * f64::from(accuracy);
+    let velocity = DVec3::new(
+        triangle(f64::from(step_x) * power, deviation),
+        triangle(0.2, deviation),
+        triangle(f64::from(step_z) * power, deviation),
+    );
+
+    world.spawn_item_with_velocity(position, stack, velocity);
 }

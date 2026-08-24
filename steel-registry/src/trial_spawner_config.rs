@@ -5,13 +5,17 @@
 //! entries are generated from the builtin datapack by
 //! `steel-registry/build/trial_spawner_configs.rs` and looked up by key here.
 
+use std::sync::Arc;
+
+use simdnbt::borrow::{NbtCompound as NbtCompoundView, NbtTag as BorrowedNbtTag};
+use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_utils::Identifier;
+use steel_utils::nbt::NbtNumeric as _;
 use steel_utils::random::weighted_list::{Weighted, WeightedList};
 
 use crate::loot_table::LootTableRef;
-use crate::spawn_data::SpawnData;
-use crate::vanilla_loot_tables;
-use crate::vanilla_trial_spawner_configs;
+use crate::spawn_data::{SpawnData, load_loot_table_list, save_loot_table_list};
+use crate::{REGISTRY, RegistryExt as _, vanilla_loot_tables, vanilla_trial_spawner_configs};
 
 /// One trial spawner's tuning.
 ///
@@ -113,6 +117,165 @@ impl TrialSpawnerConfig {
         self.simultaneous_mobs_added_per_player
             .mul_add(additional_players as f32, self.simultaneous_mobs)
             .floor() as i32
+    }
+}
+
+impl TrialSpawnerConfig {
+    /// Reads one inline configuration.
+    ///
+    /// Vanilla parity: `TrialSpawnerConfig.DIRECT_CODEC`.
+    #[must_use]
+    pub fn load(nbt: &NbtCompoundView<'_, '_>) -> Self {
+        let default = Self::vanilla_default();
+        let items_to_drop_when_ominous = nbt
+            .string("items_to_drop_when_ominous")
+            .and_then(|key| key.to_str().parse::<Identifier>().ok())
+            .and_then(|key| REGISTRY.loot_tables.by_key(&key))
+            .unwrap_or(default.items_to_drop_when_ominous);
+
+        Self {
+            spawn_range: numeric_or(nbt, "spawn_range", default.spawn_range),
+            total_mobs: float_or(nbt, "total_mobs", default.total_mobs),
+            simultaneous_mobs: float_or(nbt, "simultaneous_mobs", default.simultaneous_mobs),
+            total_mobs_added_per_player: float_or(
+                nbt,
+                "total_mobs_added_per_player",
+                default.total_mobs_added_per_player,
+            ),
+            simultaneous_mobs_added_per_player: float_or(
+                nbt,
+                "simultaneous_mobs_added_per_player",
+                default.simultaneous_mobs_added_per_player,
+            ),
+            ticks_between_spawn: numeric_or(
+                nbt,
+                "ticks_between_spawn",
+                default.ticks_between_spawn,
+            ),
+            spawn_potentials: SpawnData::load_list(nbt.list("spawn_potentials").as_ref()),
+            loot_tables_to_eject: match nbt.list("loot_tables_to_eject") {
+                Some(list) => load_loot_table_list(Some(&list)),
+                None => default.loot_tables_to_eject,
+            },
+            items_to_drop_when_ominous,
+        }
+    }
+
+    /// Writes one inline configuration.
+    #[must_use]
+    pub fn save(&self) -> NbtCompound {
+        let mut nbt = NbtCompound::new();
+        nbt.insert("spawn_range", self.spawn_range);
+        nbt.insert("total_mobs", self.total_mobs);
+        nbt.insert("simultaneous_mobs", self.simultaneous_mobs);
+        nbt.insert(
+            "total_mobs_added_per_player",
+            self.total_mobs_added_per_player,
+        );
+        nbt.insert(
+            "simultaneous_mobs_added_per_player",
+            self.simultaneous_mobs_added_per_player,
+        );
+        nbt.insert("ticks_between_spawn", self.ticks_between_spawn);
+        nbt.insert(
+            "spawn_potentials",
+            SpawnData::save_list(&self.spawn_potentials),
+        );
+        nbt.insert(
+            "loot_tables_to_eject",
+            save_loot_table_list(&self.loot_tables_to_eject),
+        );
+        nbt.insert(
+            "items_to_drop_when_ominous",
+            self.items_to_drop_when_ominous.key.to_string(),
+        );
+        nbt
+    }
+}
+
+/// Vanilla parity: `ValueInput.getIntOr`, which accepts any numeric tag.
+fn numeric_or(nbt: &NbtCompoundView<'_, '_>, name: &str, fallback: i32) -> i32 {
+    nbt.get(name)
+        .and_then(|tag| tag.codec_i32())
+        .unwrap_or(fallback)
+}
+
+/// Vanilla parity: `ValueInput.getFloatOr`.
+fn float_or(nbt: &NbtCompoundView<'_, '_>, name: &str, fallback: f32) -> f32 {
+    nbt.get(name)
+        .and_then(|tag| tag.codec_f32())
+        .unwrap_or(fallback)
+}
+
+/// A configuration a trial spawner points at, by key or inline.
+///
+/// Vanilla parity: `Holder<TrialSpawnerConfig>` under `RegistryFileCodec`,
+/// which writes a bare key for a registered value and the whole object for a
+/// direct one. Keeping the two apart is what lets a saved spawner come back
+/// pointing at the same thing it was pointing at.
+#[derive(Clone, Debug)]
+pub enum TrialSpawnerConfigHolder {
+    /// A value out of the `minecraft:trial_spawner` registry.
+    Registry {
+        /// The key it was named by, which is what gets written back.
+        key: Identifier,
+        /// The registered value.
+        value: &'static TrialSpawnerConfig,
+    },
+    /// A configuration written out in full.
+    Direct(Arc<TrialSpawnerConfig>),
+}
+
+impl TrialSpawnerConfigHolder {
+    /// Returns the configuration this holder points at.
+    #[must_use]
+    pub fn value(&self) -> &TrialSpawnerConfig {
+        match self {
+            Self::Registry { value, .. } => value,
+            Self::Direct(value) => value,
+        }
+    }
+
+    /// Returns a direct holder over `config`.
+    #[must_use]
+    pub fn direct(config: TrialSpawnerConfig) -> Self {
+        Self::Direct(Arc::new(config))
+    }
+
+    /// Reads a holder from a key string or an inline object.
+    ///
+    /// An unknown registry key falls back to a direct default and says so:
+    /// silently swapping in the default fight would make a datapack spawner
+    /// look like it worked.
+    #[must_use]
+    pub fn load(tag: BorrowedNbtTag<'_, '_>) -> Option<Self> {
+        if let Some(key) = tag.string() {
+            let key: Identifier = key.to_str().parse().ok()?;
+            return match vanilla_trial_spawner_configs::by_key(&key) {
+                Some(value) => Some(Self::Registry { key, value }),
+                None => {
+                    log::warn!("unknown trial spawner config {key}; using the default");
+                    Some(Self::direct(TrialSpawnerConfig::vanilla_default()))
+                }
+            };
+        }
+        let compound = tag.compound()?;
+        Some(Self::direct(TrialSpawnerConfig::load(&compound)))
+    }
+
+    /// Writes this holder the way vanilla's `RegistryFileCodec` would.
+    #[must_use]
+    pub fn save(&self) -> NbtTag {
+        match self {
+            Self::Registry { key, .. } => NbtTag::String(key.to_string().into()),
+            Self::Direct(value) => NbtTag::Compound(value.save()),
+        }
+    }
+}
+
+impl Default for TrialSpawnerConfigHolder {
+    fn default() -> Self {
+        Self::direct(TrialSpawnerConfig::vanilla_default())
     }
 }
 

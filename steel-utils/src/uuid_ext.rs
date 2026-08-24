@@ -46,6 +46,38 @@ impl UuidExt for Uuid {
     }
 }
 
+/// Reads a saved list of UUIDs.
+///
+/// Vanilla parity: `UUIDUtil.CODEC_SET` and `CODEC_LINKED_SET`, both of which
+/// are a list of the four-int form. Insertion order is kept, which is what the
+/// linked variant promises and what an ordinary set happens to give too.
+#[must_use]
+pub fn load_uuid_list(list: Option<&simdnbt::borrow::NbtList<'_, '_>>) -> Vec<Uuid> {
+    let Some(arrays) = list.and_then(simdnbt::borrow::NbtList::int_arrays) else {
+        return Vec::new();
+    };
+    let mut uuids = Vec::with_capacity(arrays.len());
+    for raw in arrays {
+        if let Some(uuid) = Uuid::from_int_array(&raw.to_vec())
+            && !uuids.contains(&uuid)
+        {
+            uuids.push(uuid);
+        }
+    }
+    uuids
+}
+
+/// Writes a list of UUIDs in vanilla's four-int form.
+#[must_use]
+pub fn save_uuid_list(uuids: &[Uuid]) -> simdnbt::owned::NbtList {
+    simdnbt::owned::NbtList::IntArray(
+        uuids
+            .iter()
+            .map(|uuid| uuid.to_int_array().to_vec())
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

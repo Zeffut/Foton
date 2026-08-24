@@ -13,6 +13,7 @@ mod fluid;
 mod portal;
 mod redstone;
 mod sculk;
+mod spawner;
 mod utils;
 pub mod vegetation;
 
@@ -69,6 +70,7 @@ pub use sculk::{
     CalibratedSculkSensorBlock, SculkBlock, SculkSensorBlock, SculkShriekerBlock,
     can_activate_sculk_sensor, deactivate_sculk_sensor, sculk_sensor_phase, try_resonate_vibration,
 };
+pub use spawner::{SpawnerBlock, TrialSpawnerBlock};
 pub(crate) use utils::multiface_face_property;
 pub use vegetation::{
     AttachedStemBlock, AzaleaBlock, BambooSaplingBlock, BambooStalkBlock, BeetrootBlock,
