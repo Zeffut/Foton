@@ -46,7 +46,7 @@ impl Player {
     /// pass because a player's worn slots live in the same container.
     ///
     /// The stack is lifted out of its slot for the duration of the call, the
-    /// way `tick_active_item_use` does: a behavior is free to lock the
+    /// way `updating_using_item` does: a behavior is free to lock the
     /// inventory again, and Steel's mutex is not reentrant.
     pub(crate) fn tick_inventory_items(&self) {
         let world = self.get_world();

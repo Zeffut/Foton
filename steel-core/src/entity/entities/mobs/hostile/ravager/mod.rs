@@ -302,29 +302,6 @@ impl RavagerEntity {
         self.timers.lock().roar
     }
 
-    /// Staggers or shoves in answer to a blocked hit.
-    ///
-    /// Vanilla parity: `Ravager.blockedByItem`, which vanilla calls from
-    /// `LivingEntity.blockedByItem` when a defender's shield eats the hit.
-    /// Steel has no shield blocking yet -- `LivingEntity` has the TODO for it
-    /// -- so nothing calls this and a ravager cannot currently be stunned. The
-    /// body is here whole because the stagger is the mob's one weakness and
-    /// wiring it up later is one call.
-    pub fn blocked_by_item(&self, defender: &SharedEntity) {
-        if self.roar_tick() != 0 {
-            return;
-        }
-
-        if rand::random::<f64>() < STUN_CHANCE {
-            self.timers.lock().stunned = STUN_DURATION;
-            self.play_sound(&sound_events::ENTITY_RAVAGER_STUNNED, 1.0, 1.0);
-            self.broadcast_entity_event(EntityStatus::RavagerStunned);
-            defender.push_entity(self);
-        } else {
-            self.strong_knockback(defender.as_ref());
-        }
-    }
-
     /// Throws `entity` away from the ravager.
     ///
     /// Vanilla parity: `Ravager.strongKnockback`.
@@ -566,6 +543,28 @@ impl LivingEntity for RavagerEntity {
             .living_entity_mut()
             .health
             .set(clamped);
+    }
+
+    /// Staggers or shoves when a raised shield eats one of its hits.
+    ///
+    /// Vanilla parity: `Ravager.blockedByItem`. Half the time the charge stops
+    /// dead for two seconds -- the mob's one weakness -- and the other half it
+    /// hurls the defender clear.
+    fn blocked_by_item(&self, defender: &dyn LivingEntity) {
+        if self.roar_tick() != 0 {
+            return;
+        }
+
+        if rand::random::<f64>() < STUN_CHANCE {
+            self.timers.lock().stunned = STUN_DURATION;
+            self.play_sound(&sound_events::ENTITY_RAVAGER_STUNNED, 1.0, 1.0);
+            self.broadcast_entity_event(EntityStatus::RavagerStunned);
+            defender.push_entity(self);
+        } else {
+            self.strong_knockback(defender);
+        }
+
+        defender.mark_hurt();
     }
 
     /// Vanilla parity: `Ravager.isImmobile`. A ravager mid-swing, staggered or

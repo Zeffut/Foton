@@ -343,34 +343,48 @@ pub trait ItemBehavior: Send + Sync {
             return InteractionResult::Consume;
         }
 
-        // TODO: Mirror Item.use/finishUsingItem for BLOCKS_ATTACKS, and
-        // KINETIC_WEAPON so specialized behaviors inherit the complete Vanilla base path.
-        let Some(equippable) = context.inv.with_item(|item| item.get_equippable().cloned()) else {
-            return InteractionResult::Pass;
-        };
-
-        if !equippable.swappable || !equippable.can_be_equipped_by(context.player.entity_type()) {
-            return InteractionResult::Pass;
-        }
-
-        let slot = equippable.slot;
-        let result = context.inv.with_inventory(|inventory| {
-            inventory.try_swap_with_equipment_slot(
-                context.hand,
-                slot,
-                context.player.has_infinite_materials(),
-            )
-        });
-
-        match result {
-            EquipmentSwapResult::Success(overflow) => {
-                if !overflow.is_empty() {
-                    let _ = context.player.drop_item(overflow, false, false);
-                }
-                InteractionResult::Success
+        // Vanilla parity: `Equippable.swapWithEquipmentSlot`. An item carrying
+        // the component but not swappable falls straight through -- which is
+        // exactly how a shield, whose `equippable` only names the off hand,
+        // reaches the blocking branch below instead of being swapped.
+        let equippable = context.inv.with_item(|item| item.get_equippable().cloned());
+        if let Some(equippable) = equippable
+            && equippable.swappable
+        {
+            if !equippable.can_be_equipped_by(context.player.entity_type()) {
+                return InteractionResult::Pass;
             }
-            EquipmentSwapResult::Fail => InteractionResult::Fail,
+
+            let slot = equippable.slot;
+            let result = context.inv.with_inventory(|inventory| {
+                inventory.try_swap_with_equipment_slot(
+                    context.hand,
+                    slot,
+                    context.player.has_infinite_materials(),
+                )
+            });
+
+            return match result {
+                EquipmentSwapResult::Success(overflow) => {
+                    if !overflow.is_empty() {
+                        let _ = context.player.drop_item(overflow, false, false);
+                    }
+                    InteractionResult::Success
+                }
+                EquipmentSwapResult::Fail => InteractionResult::Fail,
+            };
         }
+
+        // Vanilla parity: the `BLOCKS_ATTACKS` branch of `Item.use`. Raising a
+        // shield is nothing more than starting to use it.
+        if context.inv.with_item(|item| item.has(BLOCKS_ATTACKS)) {
+            context.player.start_using_item(context.hand);
+            return InteractionResult::Consume;
+        }
+
+        // TODO: mirror the `KINETIC_WEAPON` branch of `Item.use` once spears
+        // and the wind-up sound they make are modeled.
+        InteractionResult::Pass
     }
 
     /// Returns vanilla `Item.getUseAnimation`.

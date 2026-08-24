@@ -72,6 +72,26 @@ impl DamageReduction {
         self.factor
     }
 
+    /// Returns how much of `dealt_damage` this rule absorbs.
+    ///
+    /// Vanilla parity: `BlocksAttacks.DamageReduction.resolve`. `angle` is the
+    /// radian angle between where the defender is looking and where the hit
+    /// came from, which is why a shield only helps against what you face.
+    #[must_use]
+    pub fn resolve(&self, damage_type: &'static DamageType, dealt_damage: f32, angle: f64) -> f32 {
+        if angle > f64::from(self.horizontal_blocking_angle.to_radians()) {
+            return 0.0;
+        }
+        if let Some(damage_types) = &self.damage_types
+            && !damage_types.contains(damage_type)
+        {
+            return 0.0;
+        }
+        // Vanilla evaluates `base + factor * dealtDamage` in two steps; a fused
+        // multiply-add would round once and drift from the client's number.
+        (self.base + self.factor * dealt_damage).clamp(0.0, dealt_damage)
+    }
+
     fn to_nbt_compound(&self) -> NbtCompound {
         let mut compound = NbtCompound::new();
         if !float_equals(
@@ -220,6 +240,18 @@ impl ItemDamageFunction {
         self.factor
     }
 
+    /// Returns the durability cost of blocking `dealt_damage`.
+    ///
+    /// Vanilla parity: `BlocksAttacks.ItemDamageFunction.apply`. A hit under the
+    /// threshold costs the shield nothing at all.
+    #[must_use]
+    pub fn apply(self, dealt_damage: f32) -> i32 {
+        if dealt_damage < self.threshold {
+            return 0;
+        }
+        (self.base + self.factor * dealt_damage).floor() as i32
+    }
+
     fn to_nbt_compound(self) -> NbtCompound {
         let mut compound = NbtCompound::new();
         compound.insert("threshold", self.threshold);
@@ -365,6 +397,32 @@ impl BlocksAttacks {
     #[must_use]
     pub const fn disabled_sound(&self) -> Option<&SoundEventHolder> {
         self.disabled_sound.as_ref()
+    }
+
+    /// Returns how long the item must be raised before it blocks anything.
+    ///
+    /// Vanilla parity: `BlocksAttacks.blockDelayTicks`. It is why tapping a
+    /// shield the instant an arrow lands does not save you.
+    #[must_use]
+    pub fn block_delay_ticks(&self) -> i32 {
+        (self.block_delay_seconds * 20.0).round() as i32
+    }
+
+    /// Returns how much of `dealt_damage` every reduction rule together absorbs.
+    ///
+    /// Vanilla parity: `BlocksAttacks.resolveBlockedDamage`.
+    #[must_use]
+    pub fn resolve_blocked_damage(
+        &self,
+        damage_type: &'static DamageType,
+        dealt_damage: f32,
+        angle: f64,
+    ) -> f32 {
+        let mut blocked = 0.0;
+        for reduction in &self.damage_reductions {
+            blocked += reduction.resolve(damage_type, dealt_damage, angle);
+        }
+        blocked.clamp(0.0, dealt_damage)
     }
 
     fn to_nbt_tag_ref(&self) -> NbtTag {
@@ -717,5 +775,48 @@ mod tests {
             assert!(DamageReduction::new(invalid, None, 0.0, 1.0).is_err());
         }
         assert!(DamageReduction::new(f32::MAX, None, 0.0, 1.0).is_ok());
+    }
+
+    /// A shield stops everything inside its arc and nothing outside it, and the
+    /// cutoff is the blocking angle exactly.
+    #[test]
+    fn a_shield_only_stops_what_arrives_inside_its_arc() {
+        init_vanilla_registry();
+        let shield = REGISTRY
+            .items
+            .by_key(&steel_utils::Identifier::vanilla_static("shield"))
+            .expect("shield should be registered");
+        let blocks_attacks = shield
+            .components
+            .get(BLOCKS_ATTACKS)
+            .expect("shield should block attacks");
+        let mob_attack = REGISTRY
+            .damage_types
+            .by_key(&steel_utils::Identifier::vanilla_static("mob_attack"))
+            .expect("mob_attack should be registered");
+
+        let straight_on = blocks_attacks.resolve_blocked_damage(mob_attack, 6.0, 0.0);
+        assert_eq!(straight_on, 6.0, "the default rule eats the whole hit");
+
+        let just_inside = blocks_attacks.resolve_blocked_damage(
+            mob_attack,
+            6.0,
+            f64::from(DamageReduction::DEFAULT_HORIZONTAL_BLOCKING_ANGLE.to_radians()),
+        );
+        assert_eq!(just_inside, 6.0);
+
+        let from_behind =
+            blocks_attacks.resolve_blocked_damage(mob_attack, 6.0, std::f64::consts::PI);
+        assert_eq!(from_behind, 0.0, "a shield is not armor");
+    }
+
+    /// Small hits cost a shield nothing; the threshold is not decoration.
+    #[test]
+    fn a_shield_only_wears_out_on_hits_worth_wearing_out_for() {
+        let item_damage = ItemDamageFunction::new(3.0, 1.0, 1.0).expect("valid item damage");
+
+        assert_eq!(item_damage.apply(2.9), 0, "below the threshold is free");
+        assert_eq!(item_damage.apply(3.0), 4);
+        assert_eq!(item_damage.apply(6.5), 7, "vanilla floors the result");
     }
 }

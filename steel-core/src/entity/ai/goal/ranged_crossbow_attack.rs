@@ -7,13 +7,16 @@
 //! bolt is the window a player has to break line of sight.
 //!
 //! Vanilla drives the winding through the item-use pipeline --
-//! `startUsingItem`, `onUseTick`, `releaseUsingItem`. Steel ticks item use for
-//! players only, so the goal counts the charge itself against the same
-//! `CrossbowItem.getChargeDuration` and the state machine, the timings and the
-//! synced charging flag are unchanged. What is lost is the loading sound
-//! triple, which vanilla plays from `onUseTick`, and any ammunition the mob
-//! might have been carrying: the shot always leaves as one plain arrow, which
-//! is what `Mob.getProjectile` falls back to for a mob with an empty quiver.
+//! `startUsingItem`, `onUseTick`, `releaseUsingItem`. Steel now ticks that
+//! pipeline for every living entity, but `CrossbowItem`'s own hooks still take
+//! a player: `on_use_tick` returns early for anything else, and the shooting
+//! path reads ammunition out of a `PlayerInventory`. Until those are widened
+//! and `Mob.getProjectile` exists, the goal counts the charge itself against
+//! the same `CrossbowItem.getChargeDuration`; the state machine, the timings
+//! and the synced charging flag are unchanged. What is lost is the loading
+//! sound triple, which vanilla plays from `onUseTick`, and any ammunition the
+//! mob might have been carrying: the shot always leaves as one plain arrow,
+//! which is what `Mob.getProjectile` falls back to for an empty quiver.
 
 use super::selector::{Goal, GoalControls};
 use crate::behavior::items::crossbow_charge_duration;

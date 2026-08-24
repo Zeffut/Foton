@@ -177,6 +177,41 @@ impl ThrownTridentEntity {
         power: f32,
         uncertainty: f32,
     ) -> Arc<Self> {
+        let trident = Self::in_the_hand_of(world, thrower, trident_item);
+        let (yaw, pitch) = thrower.rotation();
+        trident.shoot_from_rotation(thrower, pitch, yaw, 0.0, power, uncertainty);
+        Self::let_go_of(world, thrower, trident_item, trident)
+    }
+
+    /// Throws `trident_item` from `thrower` at `target` and adds the trident.
+    ///
+    /// Vanilla parity: `Drowned.performRangedAttack` calling
+    /// `Projectile.spawnProjectileUsingShoot`. A mob aims at a point rather
+    /// than along its rotation, and lifts the throw by a fifth of the
+    /// horizontal distance so it arcs instead of falling short.
+    pub fn shoot_at(
+        world: &Arc<World>,
+        thrower: &dyn Entity,
+        trident_item: &ItemStack,
+        target: DVec3,
+        power: f32,
+        uncertainty: f32,
+    ) -> Arc<Self> {
+        let trident = Self::in_the_hand_of(world, thrower, trident_item);
+        let thrower_position = thrower.position();
+        let xd = target.x - thrower_position.x;
+        let zd = target.z - thrower_position.z;
+        let yd = xd.hypot(zd).mul_add(0.2, target.y - trident.position().y);
+        trident.shoot(DVec3::new(xd, yd, zd), power, uncertainty);
+        Self::let_go_of(world, thrower, trident_item, trident)
+    }
+
+    /// Creates an unlaunched trident at `thrower`'s hand.
+    fn in_the_hand_of(
+        world: &Arc<World>,
+        thrower: &dyn Entity,
+        trident_item: &ItemStack,
+    ) -> Arc<Self> {
         let position = thrower.position().with_y(thrower.get_eye_y() - 0.1);
         let trident = Arc::new(Self::new(
             &vanilla_entities::TRIDENT,
@@ -186,18 +221,26 @@ impl ThrownTridentEntity {
         ));
         trident.set_pickup_item_stack(trident_item.copy_with_count(1));
         trident.set_owner(thrower);
+        trident
+    }
 
-        let (yaw, pitch) = thrower.rotation();
-        trident.shoot_from_rotation(thrower, pitch, yaw, 0.0, power, uncertainty);
-
+    /// Hands an aimed trident to the world.
+    ///
+    /// Vanilla parity: `Projectile.spawnProjectile`, which adds the entity and
+    /// then runs `EnchantmentHelper.onProjectileSpawned`.
+    fn let_go_of(
+        world: &Arc<World>,
+        thrower: &dyn Entity,
+        trident_item: &ItemStack,
+        trident: Arc<Self>,
+    ) -> Arc<Self> {
         if let Err(error) = world.try_add_entity(Arc::clone(&trident) as Arc<dyn Entity>) {
             log::error!("failed to add thrown trident entity: {error}");
         }
 
-        // Vanilla `Projectile.spawnProjectile` runs the weapon's
-        // `projectile_spawned` effects once the entity is in the world. The
-        // trident is its own weapon, so the copy handed in here is discarded --
-        // no vanilla enchantment on a trident damages the weapon from this hook.
+        // The trident is its own weapon, so the copy handed in here is
+        // discarded -- no vanilla enchantment on a trident damages the weapon
+        // from this hook.
         let mut weapon = trident_item.copy_with_count(trident_item.count());
         enchantment_helper::on_projectile_spawned(
             world,
