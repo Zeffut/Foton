@@ -455,6 +455,16 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         None
     }
 
+    /// Returns `minecraft:type_specific/fishing_hook.in_open_water` for the loot
+    /// context, when this entity is a fishing hook.
+    ///
+    /// Mirrors `FishingHook.isOpenWaterFishing`; vanilla
+    /// `FishingHookPredicate.matches` rejects any other entity outright, which is
+    /// what `None` stands for here.
+    fn fishing_hook_loot_open_water(&self) -> Option<bool> {
+        None
+    }
+
     /// Returns true for vanilla players whose abilities have `flying` set.
     fn is_flying_player(&self) -> bool {
         false

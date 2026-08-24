@@ -31,13 +31,12 @@ TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
 
-[items] 4
+[items] 3
 EmptyMapItem
-FishingRodItem
 Item
 MapItem
 
-[entities] 52
+[entities] 51
 Allay
 Armadillo
 Axolotl
@@ -55,7 +54,6 @@ Endermite
 Evoker
 EvokerFangs
 EyeOfEnder
-FishingHook
 Frog
 Ghast
 Giant

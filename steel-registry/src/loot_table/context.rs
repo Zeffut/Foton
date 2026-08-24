@@ -338,6 +338,9 @@ pub struct EntityRef<'a> {
     /// Vanilla `minecraft:type_specific/cube_mob.size`, `None` for anything that
     /// is not a slime or magma cube.
     pub cube_size: Option<i32>,
+    /// Vanilla `FishingHook.isOpenWaterFishing`, `None` for anything that is not
+    /// a fishing hook.
+    pub in_open_water: Option<bool>,
 }
 
 /// Entity flags for predicate checking.
