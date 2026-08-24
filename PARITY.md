@@ -31,7 +31,7 @@ started; the second is where `dev/parity-gaps.txt` stands now.
 |---|---|---|
 | blocks | 63 | 17 |
 | items | 38 | 4 |
-| entities | 142 | 60 |
+| entities | 142 | 52 |
 
 **Entities are all that is left of any size**, and nearly all of it is mobs --
 though the tameable pets, the passive animals and the golems have taken a third
@@ -48,6 +48,19 @@ sculk sensor is off the list and still never fires. And it over-counts, because
 some vanilla classes are only collision shapes that Steel already takes from
 extracted data -- `SoulSandBlock` is one. A line disappearing is good news; it
 is not the same as the feature working.
+
+The largest single instance of that pattern turned up late and is worth its
+own paragraph, because it was the most player-visible bug in the project.
+`LivingEntity::server_ai_step` does nothing unless a mob overrides it to call
+`Mob::mob_server_ai_step`, and that call is the only path to the goal selector,
+the path navigation and the move control. Every passive and water mob overrode
+it. **None of the fifteen hostiles did, nor the iron or the snow golem.** A
+zombie registered a melee attack, a stroll, two look goals and a full target
+selector, and ticked none of it; so did every other hostile in the game. The
+mob-local unit tests all called `mob_server_ai_step` directly and stepped
+straight over the missing override, so nothing was red. There are now
+seventeen tests that come in through `server_ai_step` instead, which is the
+door the tick actually uses.
 
 A pattern worth naming, because it has now come up more than twenty times: the
 expensive half of a feature was often already written and simply unreachable.
@@ -279,6 +292,41 @@ cannot.
 Ghast and phantom need flying navigation, which does not exist yet; that is one
 piece of work that unlocks several mobs at once, and should come before the
 mobs that need it.
+
+- [~] **A Brain, and one mob on it.** Vanilla drives its newer mobs from a
+      `Brain` -- memories, sensors, activities, a behaviour schedule -- and not
+      from goals. Steel now has one: 33 memory kinds, 6 sensors, 18 behaviours,
+      and the copper golem running `CopperGolemAi` for real, carrying stacks
+      between containers.
+
+      Vanilla's `BehaviorBuilder` DSL was deliberately not ported. It emulates
+      higher-kinded types on DataFixerUpper to say "memory A present, memory B
+      absent, here are typed accessors" in a language without variadic
+      generics; Rust says that in two lines with `let ... else`.
+
+      What a brain mob still needs, each blocking a named list: a POI ticket
+      and distance tracker (villagers, the iron golem's village half), an
+      `EnvironmentAttribute<Activity>` schedule (the villager day), a
+      multi-slot `InventoryCarrier` (villagers, piglins), long-jump and ram
+      behaviours (the goat), and vibration listeners (the warden).
+
+- [~] **Spawners.** The monster spawner, the trial spawner with its whole
+      state machine, the vault with its per-player reward ledger, the spawner
+      minecart and the ominous item spawner. The 28 vanilla trial-spawner
+      configs are compiled from the extracted datapack rather than transcribed.
+
+      Two things this found: Steel's strict NBT getters would have silently
+      reset every saved spawner, because vanilla writes those delays as shorts
+      and reads them leniently; and `simdnbt`'s `insert` appends instead of
+      replacing, which was quietly giving a spawn entry two `id` keys.
+
+- [x] **The horse family**: horse, donkey, mule, skeleton horse with its
+      lightning trap, zombie horse, llama, trader llama and the llama spit.
+      Taming by temper, the chest, coat and markings, the caravan, breeding
+      inheritance. The inventory itself is complete -- contents, resizing, slot
+      rules, NBT and drops -- but there is no screen to open it with, because
+      the saddle and armour slots are entity equipment and Steel's menu slots
+      are backed by containers.
 
 ### 2b. Blocks the world runs on its own
 
