@@ -563,7 +563,7 @@ fn can_merge_items(current: &ItemStack, incoming: &ItemStack) -> bool {
 /// Vanilla parity: `HopperBlockEntity.getContainerAt`, minus the container
 /// entities. Steel has no chest minecart container capability yet, so a hopper
 /// under a rail does nothing rather than loading the minecart.
-fn attached_containers_at(world: &Arc<World>, pos: BlockPos) -> AttachedContainers {
+pub(crate) fn attached_containers_at(world: &Arc<World>, pos: BlockPos) -> AttachedContainers {
     let state = world.get_block_state(pos);
     BLOCK_BEHAVIORS
         .get_behavior(state.get_block())

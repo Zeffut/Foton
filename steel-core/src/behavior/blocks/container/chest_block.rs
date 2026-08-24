@@ -176,7 +176,7 @@ impl ChestBlock {
     /// Returns the direction of the paired half, for a non-single chest.
     ///
     /// Vanilla parity: `ChestBlock.getConnectedDirection`.
-    pub(super) fn connected_direction(state: BlockStateId) -> Direction {
+    pub(crate) fn connected_direction(state: BlockStateId) -> Direction {
         let facing = state.get_value(FACING);
         if state.get_value(TYPE) == ChestType::Left {
             facing.rotate_y_clockwise()
@@ -237,7 +237,7 @@ impl ChestBlock {
     ///
     /// Vanilla parity: `ChestBlock.isChestBlockedAt`. The sitting-cat check is
     /// not implemented because Steel has no `Cat` entity yet.
-    fn is_chest_blocked_at(world: &dyn LevelReader, pos: BlockPos) -> bool {
+    pub(crate) fn is_chest_blocked_at(world: &dyn LevelReader, pos: BlockPos) -> bool {
         // TODO: also block when a cat is sitting on the chest, matching
         // `ChestBlock.isCatSittingOnChest`, once the Cat entity exists.
         let above = pos.above();

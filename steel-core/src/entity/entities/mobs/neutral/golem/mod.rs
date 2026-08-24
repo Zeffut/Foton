@@ -5,6 +5,7 @@
 //! by the world, and all three share `AbstractGolem`'s refusal to despawn.
 
 mod copper_golem;
+mod copper_golem_ai;
 mod iron_golem;
 mod snow_golem;
 

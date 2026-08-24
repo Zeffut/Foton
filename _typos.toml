@@ -28,6 +28,10 @@ convertable = "convertable"
 # Mojang spelling in ThrownTrident.isAcceptibleReturnOwner.
 acceptible = "acceptible"
 Acceptible = "Acceptible"
+# Vanilla names in TransportItemsBetweenContainers: the TRAVELLING state and its
+# onStartTravelling / resumeTravelling steps.
+travelling = "travelling"
+Travelling = "Travelling"
 
 [default]
 locale = "en-us"
