@@ -67,6 +67,23 @@ impl BlockBehavior for SpawnerBlock {
         )
     }
 
+    /// Vanilla parity: `BaseEntityBlock.triggerEvent`, which hands the event to
+    /// the block entity and lets its answer decide whether the packet goes out.
+    /// A spawner sends itself one every time it re-arms, and that packet is
+    /// what resets the spinning mob on the client.
+    fn trigger_event(
+        &self,
+        _state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        param_a: i32,
+        param_b: i32,
+    ) -> bool {
+        world
+            .get_block_entity(pos)
+            .is_some_and(|block_entity| block_entity.trigger_event(param_a, param_b))
+    }
+
     /// Vanilla parity: `SpawnerBlock.spawnAfterBreak`, which pops its
     /// experience directly rather than through `tryDropExperience` -- a spawner
     /// pays the same whatever the pickaxe was enchanted with.
