@@ -9,7 +9,9 @@ use crate::behavior::ItemBehavior;
 use super::dynamic_name::{default_name, description_id, translated};
 
 /// Shield behavior providing the base-color-specific name.
-// TODO: Complete the shared Item.use BLOCKS_ATTACKS path so shields can block.
+///
+/// Raising the shield is entirely the shared `Item.use` `BLOCKS_ATTACKS` path,
+/// so this only has to name itself.
 #[item_behavior]
 pub struct ShieldItem;
 

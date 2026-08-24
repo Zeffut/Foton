@@ -1,7 +1,32 @@
+use std::f32::consts::PI;
+
 use steel_registry::DyeColor;
+use steel_registry::data_components::components::ItemDamageFunction;
+use steel_registry::data_components::vanilla_components::BLOCKS_ATTACKS;
 
 use super::*;
+use crate::behavior::ITEM_BEHAVIORS;
 use crate::physics::collision;
+
+/// Bit of `DATA_LIVING_ENTITY_FLAGS` that says an item is being used.
+///
+/// Vanilla parity: the `1` of `LivingEntity.setLivingEntityFlag`.
+const USING_ITEM_FLAG: i8 = 1;
+
+/// Bit of `DATA_LIVING_ENTITY_FLAGS` that says the off hand is the one using it.
+///
+/// Vanilla parity: the `2` of the same call.
+const OFF_HAND_ACTIVE_ITEM_FLAG: i8 = 1 << 1;
+
+/// How hard a blocked attacker shoves the defender back.
+///
+/// Vanilla parity: the `0.5` of `LivingEntity.blockedByItem`.
+const BLOCKED_BY_ITEM_KNOCKBACK: f64 = 0.5;
+
+/// Below this length vanilla treats a direction vector as having none.
+///
+/// Vanilla parity: the `1.0E-4` cutoff of `Vec3.normalize`.
+const BLOCKING_ANGLE_EPSILON: f64 = 1.0e-4;
 
 /// Damage a tick of water does to something water hurts.
 ///
@@ -722,7 +747,17 @@ pub trait LivingEntity: Entity {
             damage = 0.0;
         }
 
-        // TODO: apply item blocking before actually_hurt once shield/use-item hooks exist.
+        // Vanilla parity: the item-blocking pass runs first, so what a raised
+        // shield eats never reaches the freeze multiplier or the armor.
+        let damage_blocked = self.apply_item_blocking(world, source, damage);
+        damage -= damage_blocked;
+        let blocked = damage_blocked > 0.0;
+        // Vanilla reads the use item *before* the block resolves, so a shield
+        // that broke on this very hit no longer carries the component and the
+        // hit falls back to the ordinary damage event. Reading the hand back
+        // afterwards gives the same answer for the same reason.
+        let block_sound = blocked.then(|| self.blocking_item_sound()).flatten();
+
         if source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FREEZING)
             && REGISTRY
                 .entity_types
@@ -748,8 +783,24 @@ pub trait LivingEntity: Entity {
         self.resolve_player_responsible_for_damage(world, source);
 
         if took_full_damage {
-            self.broadcast_damage_event(world, source);
-            if !source.is(&vanilla_damage_type_tags::DamageTypeTag::NO_IMPACT) {
+            // Vanilla parity: `BlocksAttacks.onBlocked` replaces the damage
+            // event, which is why a blocked hit clanks instead of flashing red.
+            if let Some(sound) = block_sound {
+                let pitch = 0.4f32.mul_add(rand::random::<f32>(), 0.8);
+                world.play_sound_at(
+                    sound,
+                    self.sound_source(),
+                    self.position(),
+                    1.0,
+                    pitch,
+                    None,
+                );
+            } else {
+                self.broadcast_damage_event(world, source);
+            }
+            if !source.is(&vanilla_damage_type_tags::DamageTypeTag::NO_IMPACT)
+                && (!blocked || damage > 0.0)
+            {
                 self.mark_hurt();
                 self.broadcast_hurt_animation(world);
             }
@@ -766,11 +817,25 @@ pub trait LivingEntity: Entity {
         }
         // TODO: Play secondary hurt sounds once equipment effects expose them.
 
-        let game_time = self.level().map_or(0, |world| world.game_time());
-        self.living_base()
-            .record_last_damage_source(source, game_time);
+        // Vanilla parity: a hit a shield swallowed whole never counts as
+        // damage, so it leaves no last damage source behind either.
+        let success = !blocked || damage > 0.0;
+        if success {
+            let game_time = self.level().map_or(0, |world| world.game_time());
+            self.living_base()
+                .record_last_damage_source(source, game_time);
+        }
 
-        true
+        success
+    }
+
+    /// Returns the sound the item this entity blocks with makes on a block.
+    ///
+    /// Vanilla parity: the `blockSound` of `BlocksAttacks.onBlocked`.
+    fn blocking_item_sound(&self) -> Option<SoundEventRef> {
+        let hand = self.active_item_use_hand()?;
+        let item = self.get_item_in_hand(hand);
+        item.get(BLOCKS_ATTACKS)?.block_sound()?.registry_ref()
     }
 
     /// Hook before applying damage after vanilla reductions.
@@ -1642,14 +1707,322 @@ pub trait LivingEntity: Entity {
         |_| false
     }
 
-    /// Checks if the entity is currently using an item.
+    /// Returns whether this entity is holding an item up.
+    ///
+    /// Vanilla parity: `LivingEntity.isUsingItem`. Vanilla reads the
+    /// synchronized flag back out of the entity data; Steel answers from the
+    /// authoritative copy on [`LivingEntityBase`] that the flag mirrors, so
+    /// that an entity which does not expose living synchronized data still
+    /// knows what it is doing.
     fn is_using_item(&self) -> bool {
-        false
+        self.living_base().is_using_item()
     }
 
-    /// Checks if the entity is blocking with a shield or similar item.
+    /// Returns the hand driving active item use.
+    ///
+    /// Vanilla parity: `LivingEntity.getUsedItemHand`.
+    fn active_item_use_hand(&self) -> Option<InteractionHand> {
+        self.living_base()
+            .active_item_use()
+            .map(|active| active.hand())
+    }
+
+    /// Returns what this entity holds in `hand`.
+    ///
+    /// Vanilla parity: `LivingEntity.getItemInHand`, which reads the two hand
+    /// equipment slots. A player's inventory *is* its equipment storage --
+    /// `PlayerInventory` maps `MainHand` to the selected hotbar slot -- so the
+    /// one body serves both.
+    fn get_item_in_hand(&self, hand: InteractionHand) -> ItemStack {
+        self.living_base()
+            .equipment()
+            .lock()
+            .get_ref(EquipmentSlot::for_hand(hand))
+            .clone()
+    }
+
+    /// Puts `item_stack` in `hand`.
+    ///
+    /// Vanilla parity: `LivingEntity.setItemInHand`.
+    fn set_item_in_hand(&self, hand: InteractionHand, item_stack: ItemStack) {
+        self.living_base()
+            .equipment()
+            .lock()
+            .set(EquipmentSlot::for_hand(hand), item_stack);
+    }
+
+    /// Empties `hand` and hands back what was in it.
+    ///
+    /// Vanilla keeps a live reference into the equipment while the item hooks
+    /// run. Steel cannot: a hook is free to lock the same inventory, so the
+    /// stack leaves the slot for the length of the call and is put back after.
+    fn take_item_in_hand(&self, hand: InteractionHand) -> ItemStack {
+        self.living_base()
+            .equipment()
+            .lock()
+            .take(EquipmentSlot::for_hand(hand))
+    }
+
+    /// Sets one bit of the synchronized living-entity flags.
+    ///
+    /// Vanilla parity: `LivingEntity.setLivingEntityFlag`. An entity that does
+    /// not expose living synchronized data keeps the server-side state and
+    /// simply sends nothing, the same way its sleeping position behaves.
+    fn set_living_entity_flag(&self, flag: i8, value: bool) {
+        let Some(entity_data) = self.living_synced_data() else {
+            return;
+        };
+        let flags = entity_data.living_entity_flags();
+        entity_data.set_living_entity_flags(if value { flags | flag } else { flags & !flag });
+    }
+
+    /// Starts using whatever is held in `hand`.
+    ///
+    /// Vanilla parity: `LivingEntity.startUsingItem`.
+    fn start_using_item(&self, hand: InteractionHand) {
+        let Some(user) = self.as_living_entity() else {
+            return;
+        };
+        let item = self.get_item_in_hand(hand);
+        let duration = ITEM_BEHAVIORS
+            .get_behavior(item.item())
+            .get_use_duration(&item, user);
+        if !self.living_base().start_using_item(hand, &item, duration) {
+            return;
+        }
+
+        self.set_living_entity_flag(USING_ITEM_FLAG, true);
+        self.set_living_entity_flag(OFF_HAND_ACTIVE_ITEM_FLAG, hand == InteractionHand::OffHand);
+        // TODO: emit `GameEvent.ITEM_INTERACT_START` once item use vibrations
+        // are modeled; `KINETIC_WEAPON` recent-enemy tracking has no home yet.
+    }
+
+    /// Stops active item use without running any item hook.
+    ///
+    /// Vanilla parity: `LivingEntity.stopUsingItem`.
+    fn stop_using_item(&self) {
+        self.living_base().stop_using_item();
+        self.set_living_entity_flag(USING_ITEM_FLAG, false);
+        // TODO: emit `GameEvent.ITEM_INTERACT_FINISH` with item use vibrations.
+    }
+
+    /// Lets go of the item early and runs its release hook.
+    ///
+    /// Vanilla parity: `LivingEntity.releaseUsingItem`.
+    fn release_using_item(&self) {
+        let Some(user) = self.as_living_entity() else {
+            return;
+        };
+        let Some(active) = self.living_base().active_item_use() else {
+            return;
+        };
+        let hand = active.hand();
+        if self.get_item_in_hand(hand).item() != active.item() {
+            self.stop_using_item();
+            return;
+        }
+
+        let Some(world) = self.level() else {
+            self.stop_using_item();
+            return;
+        };
+        let mut item = self.take_item_in_hand(hand);
+        let use_on_release = ITEM_BEHAVIORS.get_behavior(item.item()).release_using(
+            &mut item,
+            &world,
+            user,
+            active.remaining_ticks(),
+        );
+        self.set_item_in_hand(hand, item);
+        if use_on_release {
+            self.updating_using_item();
+        }
+        self.stop_using_item();
+    }
+
+    /// Advances active item use by one tick.
+    ///
+    /// Vanilla parity: `LivingEntity.updatingUsingItem`, plus the
+    /// `updateUsingItem` and `completeUsingItem` it calls straight through to.
+    /// Vanilla can keep those apart because each holds the same live stack;
+    /// Steel takes the stack out of the hand for the length of the hooks, so
+    /// the three read as one body.
+    fn updating_using_item(&self) {
+        let Some(user) = self.as_living_entity() else {
+            return;
+        };
+        let Some(active) = self.living_base().active_item_use() else {
+            return;
+        };
+        let hand = active.hand();
+        // Vanilla parity: `ItemStack.isSameItem`, which compares only the item.
+        if self.get_item_in_hand(hand).item() != active.item() {
+            self.stop_using_item();
+            return;
+        }
+        let Some(world) = self.level() else {
+            return;
+        };
+
+        let mut item = self.take_item_in_hand(hand);
+        let behavior = ITEM_BEHAVIORS.get_behavior(item.item());
+        behavior.on_use_tick(&world, user, &mut item, active.remaining_ticks());
+
+        // A hook is allowed to stop the use or switch hands mid-tick.
+        if self.active_item_use_hand() != Some(hand) {
+            self.set_item_in_hand(hand, item);
+            return;
+        }
+        let Some(active) = self.living_base().decrement_active_item_use() else {
+            self.set_item_in_hand(hand, item);
+            return;
+        };
+        if active.remaining_ticks() <= 0 {
+            item = behavior.finish_using(&mut item, &world, user);
+            self.stop_using_item();
+        }
+
+        self.set_item_in_hand(hand, item);
+    }
+
+    /// Returns the item this entity is actually blocking with, if any.
+    ///
+    /// Vanilla parity: `LivingEntity.getItemBlockingWith`. Raising a shield is
+    /// not enough on its own -- the item's `blocks_attacks` block delay has to
+    /// have elapsed first, which is why a shield tapped as the arrow lands does
+    /// nothing.
+    fn item_blocking_with(&self) -> Option<ItemStack> {
+        let user = self.as_living_entity()?;
+        let active = self.living_base().active_item_use()?;
+        let item = self.get_item_in_hand(active.hand());
+        let block_delay_ticks = item.get(BLOCKS_ATTACKS)?.block_delay_ticks();
+        let use_duration = ITEM_BEHAVIORS
+            .get_behavior(item.item())
+            .get_use_duration(&item, user);
+        let elapsed_ticks = use_duration - active.remaining_ticks();
+        (elapsed_ticks >= block_delay_ticks).then_some(item)
+    }
+
+    /// Returns whether this entity is blocking with a raised item.
+    ///
+    /// Vanilla parity: `LivingEntity.isBlocking`.
     fn is_blocking(&self) -> bool {
-        false
+        self.item_blocking_with().is_some()
+    }
+
+    /// Returns how much of `damage` a raised item eats, and pays for it.
+    ///
+    /// Vanilla parity: `LivingEntity.applyItemBlocking`. It runs before every
+    /// other reduction, so what a shield stops never reaches armor at all.
+    fn apply_item_blocking(&self, world: &World, source: &DamageSource, damage: f32) -> f32 {
+        if damage <= 0.0 {
+            return 0.0;
+        }
+        let Some(blocking_with) = self.item_blocking_with() else {
+            return 0.0;
+        };
+        let Some(blocks_attacks) = blocking_with.get(BLOCKS_ATTACKS) else {
+            return 0.0;
+        };
+        if blocks_attacks
+            .bypassed_by()
+            .is_some_and(|bypassed_by| bypassed_by.contains(source.damage_type))
+        {
+            return 0.0;
+        }
+        // Not ported: vanilla lets a piercing arrow through here. Steel's arrows
+        // carry no pierce level, so there is nothing to read.
+
+        let angle = self.blocking_angle_to(source);
+        let damage_blocked =
+            blocks_attacks.resolve_blocked_damage(source.damage_type, damage, angle);
+        let item_damage = blocks_attacks.item_damage();
+        let Some(hand) = self.active_item_use_hand() else {
+            return damage_blocked;
+        };
+        self.hurt_blocking_item(item_damage, hand, damage_blocked);
+
+        if damage_blocked > 0.0
+            && !source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_PROJECTILE)
+            && let Some(defender) = self.as_living_entity()
+            && let Some(direct_entity_id) = source.direct_entity_id
+            && let Some(direct_entity) = world.get_entity_by_id(direct_entity_id)
+            && let Some(attacker) = direct_entity.as_living_entity()
+        {
+            // Vanilla routes this through `blockUsingItem`, which only forwards.
+            attacker.blocked_by_item(defender);
+        }
+
+        damage_blocked
+    }
+
+    /// Returns the radian angle between where this entity looks and the hit.
+    ///
+    /// Vanilla parity: the angle `LivingEntity.applyItemBlocking` measures. A
+    /// hit with no position at all counts as coming from directly behind.
+    fn blocking_angle_to(&self, source: &DamageSource) -> f64 {
+        let Some(source_position) = source.source_position else {
+            return f64::from(PI);
+        };
+        let view_vector = self.calculate_view_vector(0.0, self.y_head_rot());
+        let to_source = source_position - self.position();
+        let to_source = DVec3::new(to_source.x, 0.0, to_source.z);
+        // Vanilla `Vec3.normalize` collapses anything shorter than 1.0E-4 to
+        // zero, and a zero dot product is a quarter turn -- outside every
+        // blocking angle vanilla ships.
+        let direction = if to_source.length() < BLOCKING_ANGLE_EPSILON {
+            DVec3::ZERO
+        } else {
+            to_source.normalize()
+        };
+        direction.dot(view_vector).acos()
+    }
+
+    /// Spends the blocking item's durability on the hit it just stopped.
+    ///
+    /// Vanilla parity: `BlocksAttacks.hurtBlockingItem`, whose entire body sits
+    /// behind an `instanceof Player` check -- a mob's shield never wears out.
+    fn hurt_blocking_item(
+        &self,
+        item_damage: ItemDamageFunction,
+        hand: InteractionHand,
+        damage: f32,
+    ) {
+        if self.as_player().is_none() {
+            return;
+        }
+        // TODO: award `Stats.ITEM_USED` once Steel has a statistics foundation.
+        let durability_damage = item_damage.apply(damage);
+        if durability_damage <= 0 {
+            return;
+        }
+
+        let slot = EquipmentSlot::for_hand(hand);
+        let has_infinite_materials = self.has_infinite_materials();
+        let mut item_broke = false;
+        self.with_equipment_slot_mut(slot, &mut |item| {
+            item_broke = item.hurt_and_break(durability_damage, has_infinite_materials);
+        });
+        if item_broke {
+            self.on_equipped_item_broken(slot);
+        }
+    }
+
+    /// Answers a hit that this entity's own attack ran into a raised item.
+    ///
+    /// Vanilla parity: `LivingEntity.blockedByItem`, reached from the defender
+    /// through `blockUsingItem`. Override this to react to being blocked -- the
+    /// ravager's stagger is the one vanilla case. Vanilla also hands over the
+    /// damage source and amount for a knockback overload Steel's
+    /// [`Self::knockback`] does not take, so they are left out here.
+    fn blocked_by_item(&self, defender: &dyn LivingEntity) {
+        let position = self.position();
+        let defender_position = defender.position();
+        defender.knockback(
+            BLOCKED_BY_ITEM_KNOCKBACK,
+            defender_position.x - position.x,
+            defender_position.z - position.z,
+        );
     }
 
     /// Checks if the entity is fall flying (using elytra).
@@ -1994,6 +2367,9 @@ pub trait LivingEntity: Entity {
     /// The default `Entity::tick` dispatches living entities here.
     fn tick_living_entity(&self) {
         self.default_tick();
+        // Vanilla parity: `LivingEntity.tick` drives active item use for every
+        // living entity, immediately after `super.tick()`.
+        self.updating_using_item();
         self.living_base().decrement_invulnerable_time();
         self.tick_mob_effects();
         self.detect_equipment_updates();

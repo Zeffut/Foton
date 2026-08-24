@@ -586,7 +586,9 @@ fn create_projectile(world: &Arc<World>, shooter: &Player, ammo: &ItemStack) -> 
 /// Aims and launches one projectile, then plays the shot.
 ///
 /// Vanilla parity: `CrossbowItem.shootProjectile` without the mob-only target
-/// override, which needs the ranged-attack goals Steel has no crossbow user for.
+/// override. Steel's crossbow illagers count their own charge and fire through
+/// `RangedCrossbowAttackGoal` instead of coming through here, because this
+/// whole shooting path still reads a `PlayerInventory` for its ammunition.
 fn shoot_projectile(
     world: &Arc<World>,
     shooter: &Player,

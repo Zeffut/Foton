@@ -1048,6 +1048,7 @@ mod equine;
 mod equipment_and_freezing;
 mod fall_and_fluids;
 mod hostile_ai;
+mod item_use;
 mod living_state;
 mod movement;
 mod nether_ocean_end_hostiles;

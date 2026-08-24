@@ -1,5 +1,7 @@
 //! Shared equipment slot definitions.
 
+use steel_utils::types::InteractionHand;
+
 /// Equipment slot types for categorization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EquipmentSlotType {
@@ -56,6 +58,17 @@ impl EquipmentSlot {
         EquipmentSlot::Legs,
         EquipmentSlot::Feet,
     ];
+
+    /// Returns the slot a hand reads from.
+    ///
+    /// Vanilla parity: `InteractionHand.asEquipmentSlot`.
+    #[must_use]
+    pub const fn for_hand(hand: InteractionHand) -> Self {
+        match hand {
+            InteractionHand::MainHand => Self::MainHand,
+            InteractionHand::OffHand => Self::OffHand,
+        }
+    }
 
     /// Returns the slot type for this equipment slot.
     #[must_use]

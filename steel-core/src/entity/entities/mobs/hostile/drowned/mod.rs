@@ -13,27 +13,32 @@ use glam::DVec3;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::sound_events;
 use steel_registry::vanilla_entity_data::DrownedEntityData;
+use steel_registry::{sound_events, vanilla_items};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, Downcast as _, DowncastType, DowncastTypeKey};
 
 use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
-    NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
+    NearestAttackableTargetGoal, RandomLookAroundGoal, RangedAttackGoal,
+    WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::ThrownTridentEntity;
 use crate::entity::mob::NavigationKind;
 use crate::entity::spawn_rules::is_dark_enough_to_spawn;
 use crate::entity::{
     AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
-    LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, SpawnGroupData,
+    LivingEntity, LivingEntityBase, LivingEntitySyncedData, Mob, MobBase, PathfinderMob,
+    SharedEntity, SpawnGroupData,
 };
+use crate::inventory::equipment::EquipmentSlot;
 use crate::physics::{MoveResult, MoverType};
 use crate::world::{LevelReader as _, World};
-use steel_utils::types::Difficulty;
+use steel_utils::types::{Difficulty, InteractionHand};
 
 /// Speed multiplier while chasing.
 ///
@@ -81,6 +86,55 @@ const ORDINARY_SPAWN_ODDS: i32 = 40;
 /// Vanilla parity: the `nextInt(15)` for the
 /// `more_frequent_drowned_spawns` biomes -- rivers, where drowned crowd.
 const FREQUENT_SPAWN_ODDS: i32 = 15;
+
+/// Speed multiplier while lining up a trident throw.
+///
+/// Vanilla parity: the `DrownedTridentAttackGoal(this, 1.0, 40, 10.0F)` entry.
+const TRIDENT_APPROACH_SPEED: f64 = 1.0;
+
+/// Ticks between trident throws.
+const TRIDENT_ATTACK_INTERVAL: i32 = 40;
+
+/// How far a drowned is willing to throw from.
+const TRIDENT_ATTACK_RADIUS: f32 = 10.0;
+
+/// Speed the thrown trident leaves the hand at.
+///
+/// Vanilla parity: the `1.6F` of `Drowned.performRangedAttack`.
+const TRIDENT_POWER: f32 = 1.6;
+
+/// Spread of a thrown trident before difficulty tightens it.
+///
+/// Vanilla parity: the `14` of `14 - difficulty * 4`.
+const TRIDENT_UNCERTAINTY_BASE: f32 = 14.0;
+
+/// How much each difficulty step tightens the throw.
+const TRIDENT_UNCERTAINTY_PER_DIFFICULTY: f32 = 4.0;
+
+/// Fraction of a target's height a trident is aimed at.
+///
+/// Vanilla parity: the `getY(0.3333333333333333)` of `performRangedAttack`.
+const AIM_HEIGHT_FRACTION: f64 = 1.0 / 3.0;
+
+/// A roll above this arms the drowned at all.
+///
+/// Vanilla parity: the `random.nextFloat() > 0.9` of
+/// `Drowned.populateDefaultEquipmentSlots` -- nine drowned in ten spawn
+/// bare-handed.
+const WEAPON_SPAWN_THRESHOLD: f32 = 0.9;
+
+/// Sides of the die that picks between the two weapons.
+///
+/// Vanilla parity: the `nextInt(16)` of the same method.
+const WEAPON_ROLL_RANGE: i32 = 16;
+
+/// Rolls below this hand out a trident rather than a fishing rod.
+const TRIDENT_ROLL_CEILING: i32 = 10;
+
+/// Odds a drowned spawns clutching a nautilus shell.
+///
+/// Vanilla parity: `Drowned.NAUTILUS_SHELL_CHANCE`.
+const NAUTILUS_SHELL_CHANCE: f32 = 0.03;
 
 /// A drowned.
 #[entity_behavior(class = "Drowned")]
@@ -130,6 +184,7 @@ impl DrownedEntity {
         {
             // Vanilla parity: the goal order of `Drowned.addBehaviourGoals`.
             let mut goals = mob_base.goal_selector().lock();
+            goals.add_goal(2, DrownedTridentAttackGoal::new());
             goals.add_goal(2, MeleeAttackGoal::new(ATTACK_SPEED_MODIFIER, false));
             goals.add_goal(6, DrownedSwimUpGoal);
             goals.add_goal(7, WaterAvoidingRandomStrollGoal::new(STROLL_SPEED_MODIFIER));
@@ -138,8 +193,6 @@ impl DrownedEntity {
             // TODO: vanilla also has DrownedGoToWaterGoal at 1 and
             // DrownedGoToBeachGoal at 5; both need a random position search
             // biased toward or away from water, which does not exist yet.
-            // TODO: a drowned holding a trident throws it, at priority 2. The
-            // thrown trident entity is not implemented.
         }
 
         {
@@ -185,6 +238,138 @@ impl DrownedEntity {
         };
         !world.is_bright_outside() || target.is_in_water()
     }
+
+    /// Returns whether this drowned is the kind that throws.
+    ///
+    /// Vanilla parity: the `getMainHandItem().is(Items.TRIDENT)` gate on
+    /// `DrownedTridentAttackGoal.canUse`.
+    #[must_use]
+    fn holds_a_trident(&self) -> bool {
+        self.get_item_in_hand(InteractionHand::MainHand)
+            .is(&vanilla_items::TRIDENT)
+    }
+
+    /// Rolls the weapon this drowned spawned with.
+    ///
+    /// Vanilla parity: `Drowned.populateDefaultEquipmentSlots`. One drowned in
+    /// ten carries anything at all, and five of every eight of those get the
+    /// trident -- which is why a thrower is a rare and unwelcome surprise.
+    fn populate_default_equipment_slots(&self) {
+        if rand::random::<f32>() <= WEAPON_SPAWN_THRESHOLD {
+            return;
+        }
+
+        let weapon = if rand::random_range(0..WEAPON_ROLL_RANGE) < TRIDENT_ROLL_CEILING {
+            &vanilla_items::TRIDENT
+        } else {
+            &vanilla_items::FISHING_ROD
+        };
+        self.set_item_in_hand(InteractionHand::MainHand, ItemStack::new(weapon));
+    }
+}
+
+/// Winds a trident up and throws it.
+///
+/// Vanilla parity: `Drowned.DrownedTridentAttackGoal`. The wind-up is the
+/// whole reason `LivingEntity` drives active item use for mobs: the goal calls
+/// `startUsingItem` and the living tick carries it from there.
+struct DrownedTridentAttackGoal {
+    inner: RangedAttackGoal,
+}
+
+impl DrownedTridentAttackGoal {
+    fn new() -> Self {
+        Self {
+            inner: RangedAttackGoal::new(
+                TRIDENT_APPROACH_SPEED,
+                TRIDENT_ATTACK_INTERVAL,
+                TRIDENT_ATTACK_RADIUS,
+                throw_trident,
+            ),
+        }
+    }
+}
+
+impl Goal for DrownedTridentAttackGoal {
+    fn controls(&self) -> GoalControls {
+        self.inner.controls()
+    }
+
+    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        let holds_a_trident = mob
+            .downcast_ref::<DrownedEntity>()
+            .is_some_and(DrownedEntity::holds_a_trident);
+        holds_a_trident && self.inner.can_use(mob)
+    }
+
+    fn can_continue_to_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        self.inner.can_continue_to_use(mob)
+    }
+
+    fn start(&mut self, mob: &dyn PathfinderMob) {
+        self.inner.start(mob);
+        mob.set_aggressive(true);
+        mob.start_using_item(InteractionHand::MainHand);
+    }
+
+    fn stop(&mut self, mob: &dyn PathfinderMob) {
+        self.inner.stop(mob);
+        mob.stop_using_item();
+        mob.set_aggressive(false);
+    }
+
+    fn tick(&mut self, mob: &dyn PathfinderMob) {
+        self.inner.tick(mob);
+    }
+
+    fn requires_update_every_tick(&self) -> bool {
+        self.inner.requires_update_every_tick()
+    }
+}
+
+/// Throws the held trident at `target`.
+///
+/// Vanilla parity: `Drowned.performRangedAttack`. A drowned that somehow lost
+/// its trident mid-throw still throws one -- vanilla conjures the stack rather
+/// than checking, and the hand is never emptied either way.
+fn throw_trident(mob: &dyn PathfinderMob, target: &SharedEntity, _power: f32) {
+    let Some(drowned) = mob.downcast_ref::<DrownedEntity>() else {
+        return;
+    };
+    let Some(world) = drowned.level() else {
+        return;
+    };
+
+    let main_hand = drowned.get_item_in_hand(InteractionHand::MainHand);
+    let trident_item = if main_hand.is(&vanilla_items::TRIDENT) {
+        main_hand
+    } else {
+        ItemStack::new(&vanilla_items::TRIDENT)
+    };
+
+    // Vanilla aims a third of the way up the target rather than at its feet.
+    let target_position = target.position();
+    let target_height = f64::from(target.base().dimensions().height);
+    let aim = target_position.with_y(target_height.mul_add(AIM_HEIGHT_FRACTION, target_position.y));
+
+    let difficulty = u8::from(world.difficulty());
+    let uncertainty = TRIDENT_UNCERTAINTY_PER_DIFFICULTY
+        .mul_add(-f32::from(difficulty), TRIDENT_UNCERTAINTY_BASE);
+    let trident = ThrownTridentEntity::shoot_at(
+        &world,
+        drowned,
+        &trident_item,
+        aim,
+        TRIDENT_POWER,
+        uncertainty,
+    );
+    drop(trident);
+
+    drowned.play_sound(
+        &sound_events::ENTITY_DROWNED_SHOOT,
+        1.0,
+        0.4f32.mul_add(rand::random::<f32>(), 0.8).recip(),
+    );
 }
 
 /// Takes a player, but only one the daylight rule allows.
@@ -394,6 +579,14 @@ impl LivingEntity for DrownedEntity {
         &self.living_base
     }
 
+    /// Lets the wind-up reach the client.
+    ///
+    /// Without this the drowned raises its trident server-side and the flag
+    /// that draws the pose never leaves the server.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     /// Vanilla parity: `Mob.serverAiStep`, which is where a mob's goals run.
     /// Without this the goal selector is never ticked and every goal this mob
     /// registers is dead code.
@@ -502,8 +695,23 @@ impl Mob for DrownedEntity {
         if rand::random::<f32>() < AgeableMobGroupData::DEFAULT_BABY_SPAWN_CHANCE {
             self.entity_data.lock().zombie_mut().baby.set(true);
         }
-        // TODO: vanilla also gives one drowned in thirty-three a nautilus shell
-        // and arms some with tridents; mob equipment rolls are not wired.
+        // Vanilla parity: `Zombie.finalizeSpawn` rolls the weapon, and only for
+        // a spawn that is not a conversion -- a drowning zombie keeps what it
+        // was already holding.
+        if spawn_reason != EntitySpawnReason::Conversion {
+            self.populate_default_equipment_slots();
+        }
+        // Vanilla parity: the nautilus shell of `Drowned.finalizeSpawn`, which
+        // is where the shell in every drowned-farm chest comes from.
+        if !self.has_item_in_slot(EquipmentSlot::OffHand)
+            && rand::random::<f32>() < NAUTILUS_SHELL_CHANCE
+        {
+            self.set_item_in_hand(
+                InteractionHand::OffHand,
+                ItemStack::new(&vanilla_items::NAUTILUS_SHELL),
+            );
+            self.set_guaranteed_drop(EquipmentSlot::OffHand);
+        }
         self.finalize_spawn_mob_base(world, spawn_reason, group_data)
     }
 
