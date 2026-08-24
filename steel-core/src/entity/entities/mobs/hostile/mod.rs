@@ -1,10 +1,16 @@
 //! Hostile mob implementations.
 
+mod blaze;
 mod cave_spider;
 mod creeper;
 mod cube_common;
 mod drowned;
+mod elder_guardian;
 mod enderman;
+mod endermite;
+mod ghast;
+mod guardian;
+mod guardian_common;
 mod husk;
 mod magma_cube;
 mod silverfish;
@@ -12,15 +18,21 @@ mod skeleton;
 mod slime;
 mod spider;
 mod stray;
+mod vex;
 mod witch;
 mod wither_skeleton;
 mod zombie;
 mod zombified_piglin;
 
+pub use blaze::BlazeEntity;
 pub use cave_spider::CaveSpiderEntity;
 pub use creeper::CreeperEntity;
 pub use drowned::DrownedEntity;
+pub use elder_guardian::ElderGuardianEntity;
 pub use enderman::EndermanEntity;
+pub use endermite::EndermiteEntity;
+pub use ghast::GhastEntity;
+pub use guardian::GuardianEntity;
 pub use husk::HuskEntity;
 pub use magma_cube::MagmaCubeEntity;
 pub use silverfish::SilverfishEntity;
@@ -28,6 +40,7 @@ pub use skeleton::SkeletonEntity;
 pub use slime::SlimeEntity;
 pub use spider::SpiderEntity;
 pub use stray::StrayEntity;
+pub use vex::VexEntity;
 pub use witch::WitchEntity;
 pub use wither_skeleton::WitherSkeletonEntity;
 pub use zombie::ZombieEntity;
