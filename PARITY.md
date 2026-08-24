@@ -119,10 +119,18 @@ cannot.
       doing what they should. That is a change of results, not of machinery --
       the interpreter and all 1355 tables were already here and quietly wrong.
 
+      Container loot is unpacked too, so a generated chest finally has
+      something in it. The tables were arriving all along -- worldgen writes
+      the `LootTable` tag from the fortress, the stronghold, the dungeon, the
+      shipwreck and the rest -- and the receiving end simply threw it away on
+      load. Unpacking hangs off the lock every container access already takes,
+      not off opening the lid, which is what vanilla does and what lets a
+      hopper or a comparator roll a chest nobody has touched.
+
       Still open, and named precisely because "loot works now" would be too
-      generous: **container loot is not unpacked**. Worldgen writes the
-      `LootTable` tag correctly and eight block entities discard it on load, so
-      a generated chest is empty and so is the chest minecart. `copy_components`
+      generous: the seeded draw is Rust's `StdRng`, not `java.util.Random`, so
+      contents are stable per seed but not identical to a real server -- that
+      belongs to the interpreter, not to any one caller. `copy_components`
       (71 uses) needs the block entity in the block loot path, which is why a
       dozen hand-written `get_drops` overrides still exist for shulker boxes,
       decorated pots, banners and skulls. `enchant_randomly` and
