@@ -34,11 +34,12 @@ pub use building::{
 pub use colored::StainedGlassPaneBlock;
 pub use container::{
     AnvilBlock, BarrelBlock, BeaconBlock, BeehiveBlock, BlastFurnaceBlock, BrewingStandBlock,
-    ChestBlock, ChiseledBookShelfBlock, CopperChest, CopperChestBlock, CrafterBlock,
-    CraftingTableBlock, DispenserBlock, DropperBlock, EnchantingTableBlock, EnderChestBlock,
-    FurnaceBlock, GrindstoneBlock, HopperBlock, JukeboxBlock, LecternBlock, LoomBlock, ShelfBlock,
-    ShulkerBoxBlock, SmithingTableBlock, SmokerBlock, StonecutterBlock, TrappedChestBlock,
-    WeatheringCopperChestBlock, count_enchanting_power, signal_lectern_page_change, take_book_from,
+    CartographyTableBlock, ChestBlock, ChiseledBookShelfBlock, CopperChest, CopperChestBlock,
+    CrafterBlock, CraftingTableBlock, DispenserBlock, DropperBlock, EnchantingTableBlock,
+    EnderChestBlock, FurnaceBlock, GrindstoneBlock, HopperBlock, JukeboxBlock, LecternBlock,
+    LoomBlock, ShelfBlock, ShulkerBoxBlock, SmithingTableBlock, SmokerBlock, StonecutterBlock,
+    TrappedChestBlock, WeatheringCopperChestBlock, count_enchanting_power,
+    signal_lectern_page_change, take_book_from,
 };
 pub use decoration::{
     BannerBlock, BellBlock, CakeBlock, CandleBlock, CandleCakeBlock, CeilingHangingSignBlock,

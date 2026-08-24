@@ -486,6 +486,16 @@ impl World {
         self.key.namespace.as_ref()
     }
 
+    /// Returns whether this world uses vanilla's Nether dimension type.
+    ///
+    /// Vanilla tests `level.dimension() == Level.NETHER` against a fixed level
+    /// key. Steel's world keys are `domain:world`, so the dimension type is the
+    /// only thing that still identifies a Nether.
+    #[must_use]
+    pub fn is_nether(&self) -> bool {
+        self.dimension_type == &vanilla_dimension_types::THE_NETHER
+    }
+
     /// Game tick: weather, time, chunk game tick (broadcasts + random/scheduled ticks),
     /// and player logic (without chunk sending).
     ///

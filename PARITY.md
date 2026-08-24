@@ -38,9 +38,10 @@ though the tameable pets, the passive animals and the golems have taken a third
 of that column since the last count. The three blocks that make mobs -- the
 monster spawner, the trial spawner and the vault -- came off the block column
 together with the spawner minecart and the ominous item spawner.
-The item column is down to four, three of which are blocked on a map system
-that does not exist and one of which -- vanilla's plain `Item` -- needs
-nothing.
+The item column is down to two: the fishing rod, which waits on the
+`FishingHook` entity, and vanilla's plain `Item`, which needs nothing. Maps
+took the other two with them, and the cartography table off the block column
+with them.
 
 Two warnings about reading this table at all. It counts classes with *no*
 behavior, so it says nothing about how complete the ones that exist are: the
@@ -183,12 +184,14 @@ cannot.
       needs was already in the registry, so the note that called it blocked
       was simply wrong. Its output goes somewhere now too: a placed banner
       keeps its layers and gives them back when broken, which it did not
-      before -- there was no banner block entity at all. Still open:
-      cartography table. Armor trims are the half of smithing
-      that is not here: they need trim pattern and material registries and a
-      `TRIM` component Steel does not have, so those eighteen recipes are
-      still skipped -- deliberately now, rather than by omission. The
-      cartography table is blocked outright: Steel has no maps at all.
+      before -- there was no banner block entity at all. The cartography
+      table is here as well, now that maps are: it copies, zooms out and
+      locks, deferring the new map to a `map_post_processing` marker so that
+      hovering over a result does not burn a map id per click. Armor trims are
+      the half of smithing that is not here: they need trim pattern and
+      material registries and a `TRIM` component Steel does not have, so those
+      eighteen recipes are still skipped -- deliberately now, rather than by
+      omission.
 - [~] **Blocks that answer the world**: the lightning rod takes a strike and
       powers redstone for eight ticks, and the bolt that hits it burns what it
       lands on and scrubs oxidized copper clean. The sculk sensors, the

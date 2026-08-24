@@ -429,6 +429,12 @@ impl Server {
         players
     }
 
+    /// Returns the online player with this UUID, if one is connected.
+    #[must_use]
+    pub fn get_player_by_uuid(&self, uuid: Uuid) -> Option<Arc<Player>> {
+        self.online_players.get_by_uuid(&uuid)
+    }
+
     /// Returns whether this exact player owns the online session for its UUID.
     pub(crate) fn owns_online_player(&self, player: &Player) -> bool {
         self.online_players

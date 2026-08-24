@@ -57,6 +57,7 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+PLAY_C_MAP_ITEM_DATA = 51
 PLAY_C_SET_EQUIPMENT = 102
 PLAY_C_UPDATE_MOB_EFFECT = 132
 
@@ -446,6 +447,8 @@ def run_play(connection, watch_seconds=0):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_MAP_ITEM_DATA:
+            note_map_item_data(payload)
         elif packet_id == PLAY_C_SET_EQUIPMENT:
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
@@ -533,6 +536,8 @@ def pump(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_MAP_ITEM_DATA:
+            note_map_item_data(payload)
         elif packet_id == PLAY_C_SET_EQUIPMENT:
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
@@ -663,6 +668,24 @@ def run_directive(connection, directive):
     else:
         fail(f"unknown directive {directive}")
     return True
+
+
+def note_map_item_data(payload):
+    """Prints the header of one map update.
+
+    Only the fixed-width prefix is read. What follows is a marker list whose
+    entries carry an optional name as NBT, and a color patch; neither has a
+    length a short parser can trust, and the header already says which map
+    changed and at what zoom.
+    """
+    try:
+        map_id, rest = read_varint(payload)
+        scale = rest[0]
+        locked = rest[1]
+    except (IndexError, ValueError):
+        print("  a map update arrived that could not be parsed")
+        return
+    print(f"  map data id={map_id} scale={scale} locked={locked}")
 
 
 def note_equipment(payload):
@@ -877,6 +900,8 @@ def watch_for_spawns(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_MAP_ITEM_DATA:
+            note_map_item_data(payload)
         elif packet_id == PLAY_C_SET_EQUIPMENT:
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:

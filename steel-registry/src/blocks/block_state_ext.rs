@@ -7,6 +7,7 @@ use crate::{
         shapes::{OffsetVoxelShape, SupportType},
     },
     fluid::FluidState,
+    map_color::MapColor,
 };
 use glam::DVec3;
 use steel_utils::BlockPos;
@@ -82,6 +83,11 @@ pub trait BlockStateExt {
     fn is_solid_render(&self) -> bool;
     /// Returns vanilla `BlockState.isSuffocating`.
     fn is_suffocating(&self) -> bool;
+    /// Returns vanilla `BlockState.getMapColor(level, pos)`.
+    ///
+    /// Vanilla caches one color per state at registration, so it never
+    /// consults the level or position it is handed.
+    fn get_map_color(&self) -> MapColor;
     /// Returns the extracted static `BlockState.isRedstoneConductor` value.
     /// Dynamic behavior queries must also receive the live level and position.
     fn is_static_redstone_conductor(&self) -> bool;
@@ -268,6 +274,10 @@ impl BlockStateExt for BlockStateId {
 
     fn is_suffocating(&self) -> bool {
         REGISTRY.blocks.is_suffocating(*self)
+    }
+
+    fn get_map_color(&self) -> MapColor {
+        REGISTRY.blocks.get_map_color(*self)
     }
 
     fn is_static_redstone_conductor(&self) -> bool {

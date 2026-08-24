@@ -14,6 +14,7 @@ pub mod game_mode;
 mod health_sync;
 mod item_cooldowns;
 mod lifecycle;
+mod map_sync;
 pub mod movement;
 mod permissions;
 pub mod player_data;
@@ -581,6 +582,10 @@ impl Player {
     ///
     /// Panics if the player position cannot be restored after `ai_step`. Vanilla treats the
     /// pre-tick position as authoritative here, so a rejection indicates corrupted entity state.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one vanilla tick, whose order between steps is the behavior"
+    )]
     pub fn tick(&self) {
         self.advance_tick();
         self.tick_item_cooldowns();
@@ -615,6 +620,8 @@ impl Player {
 
         self.default_tick();
         self.detect_equipment_updates();
+        // Vanilla parity: `Inventory.tick`, which `Player.aiStep` runs first.
+        self.tick_inventory_items();
         self.ai_step();
 
         // Vanilla snaps the player back to firstGood after ServerPlayer.doTick().
@@ -666,6 +673,7 @@ impl Player {
 
         self.tick_living_state();
 
+        self.sync_map_item_updates();
         self.tick_open_menu();
         self.flush_inventory_resync();
         self.broadcast_inventory_changes();

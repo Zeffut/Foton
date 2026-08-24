@@ -2,6 +2,7 @@
 
 mod anvil_slots;
 mod armor_slot;
+mod cartography_slots;
 mod crafting_slots;
 mod furnace_slots;
 mod grindstone_slots;
@@ -16,6 +17,10 @@ mod stonecutter_slots;
 
 pub use anvil_slots::*;
 pub use armor_slot::ArmorSlot;
+pub use cartography_slots::{
+    CARTOGRAPHY_ADDITIONAL, CARTOGRAPHY_MAP, CartographyHandler, is_cartography_material,
+    is_filled_map,
+};
 pub use crafting_slots::CraftingHandler;
 pub use furnace_slots::FurnaceResultSlot;
 pub use grindstone_slots::{

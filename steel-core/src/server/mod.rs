@@ -39,6 +39,7 @@ use crate::entity::{
 
 use crate::chunk_saver::{ChunkStorage, PersistentEntity, registry::WorldStorageRegistry};
 use crate::level_data::{LevelDataManager, RespawnData, WorldGenerationSettings};
+use crate::map::DomainMapData;
 use crate::permission::{
     OP_GROUP, PermissionGroupManager, PermissionGroupManagerError, PermissionGroupUpdateError,
     PermissionGroupsConfig, PermissionMetadataExpression, PermissionRuleExpression, PermissionSet,
@@ -148,6 +149,8 @@ pub struct CommandDataSaveResults {
     pub scoreboards: io::Result<usize>,
     /// Number of dirty domain command-storage values written, or the save error.
     pub storage: io::Result<usize>,
+    /// Number of dirty domain map stores written, or the save error.
+    pub maps: io::Result<usize>,
 }
 
 mod known_players;
@@ -419,6 +422,12 @@ pub struct Server {
     pub scoreboards: DomainScoreboards,
     /// Command NBT storage isolated by Steel domain.
     pub(crate) command_storage: DomainCommandStorage,
+    /// Filled maps isolated by Steel domain.
+    ///
+    /// Vanilla keeps one map store per server; Steel keeps one per domain, so
+    /// a map carried between a domain's worlds stays readable while two
+    /// domains never share an id.
+    pub map_data: DomainMapData,
     /// Saves and dispatches commands to appropriate handlers.
     command_dispatcher: SyncRwLock<CommandDispatcher>,
     /// Steel-owned permission keys exposed for command autocomplete.
@@ -686,6 +695,8 @@ impl Server {
         let command_storage = DomainCommandStorage::load(&worlds)
             .await
             .map_err(|error| format!("failed to load domain command storage: {error}"))?;
+        let map_data = DomainMapData::load(&worlds)
+            .map_err(|error| format!("failed to load domain map data: {error}"))?;
         let registered_commands = create_registered_dispatcher(command_registry)
             .map_err(|error| format!("failed to register commands: {error}"))?;
         let command_permission_keys = registered_commands
@@ -710,6 +721,7 @@ impl Server {
             tick_rate_manager: SyncRwLock::new(TickRateManager::new()),
             scoreboards,
             command_storage,
+            map_data,
             command_dispatcher: SyncRwLock::new(registered_commands.dispatcher),
             command_permission_keys,
             command_requests: CommandRequestQueue::new(),
@@ -753,6 +765,7 @@ impl Server {
         CommandDataSaveResults {
             scoreboards: self.scoreboards.save(&self.worlds).await,
             storage: self.save_command_storage().await,
+            maps: self.map_data.save(&self.worlds).await,
         }
     }
 

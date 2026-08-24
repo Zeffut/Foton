@@ -20,6 +20,7 @@ use crate::blocks::behavior::BlockConfig;
 use crate::blocks::properties::Property;
 use crate::blocks::shapes::ShapeChannel;
 use crate::fluid::{FluidRef, FluidState};
+use crate::map_color::MapColor;
 use crate::{RegistryExt, RegistryTags, TaggedRegistryExt};
 use steel_utils::{BlockPos, BlockStateId};
 
@@ -122,6 +123,45 @@ impl StateFluidData {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct StateMapColorOverwrite {
+    pub offset: u16,
+    pub value: MapColor,
+}
+
+impl StateMapColorOverwrite {
+    #[must_use]
+    pub const fn new(offset: u16, value: MapColor) -> Self {
+        Self { offset, value }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct StateMapColorData {
+    pub default: MapColor,
+    pub overwrites: &'static [StateMapColorOverwrite],
+}
+
+impl StateMapColorData {
+    pub const NONE: Self = Self::new(MapColor::NONE, &[]);
+
+    #[must_use]
+    pub const fn new(default: MapColor, overwrites: &'static [StateMapColorOverwrite]) -> Self {
+        Self {
+            default,
+            overwrites,
+        }
+    }
+
+    #[must_use]
+    pub fn value(self, offset: u16) -> MapColor {
+        self.overwrites
+            .iter()
+            .find(|overwrite| overwrite.offset == offset)
+            .map_or(self.default, |overwrite| overwrite.value)
+    }
+}
+
 /// Immutable ticking metadata flattened by global block-state ID during registration.
 ///
 /// The fields are packed instead of embedding `FluidState` plus separate booleans, while
@@ -204,6 +244,12 @@ pub struct Block {
     pub fluid_state: StateFluidData,
     /// Vanilla `BlockState.isRandomlyTicking` values indexed by block-local state offset.
     pub randomly_ticking: StateBooleanData,
+    /// Vanilla `BlockState.getMapColor` values indexed by block-local state offset.
+    ///
+    /// Vanilla resolves this from `BlockBehaviour.Properties.mapColor` once per
+    /// state at registration and caches it, so the `BlockGetter`/`BlockPos`
+    /// arguments of `getMapColor` never affect the answer.
+    pub map_color: StateMapColorData,
     /// Extracted vanilla light properties indexed by block-local state offset.
     pub light_properties: LightPropertiesFn,
     /// Function to get collision shape for a state offset
@@ -265,6 +311,7 @@ impl Block {
             redstone_conductor: StateBooleanData::TRUE,
             fluid_state: StateFluidData::EMPTY,
             randomly_ticking,
+            map_color: StateMapColorData::NONE,
             light_properties: opaque_full_block_light_properties,
             collision_shape: full_block_shape,
             support_shape: full_block_shape,
@@ -317,6 +364,12 @@ impl Block {
     /// Sets the extracted per-state random-tick predicate.
     pub const fn with_randomly_ticking(mut self, randomly_ticking: StateBooleanData) -> Self {
         self.randomly_ticking = randomly_ticking;
+        self
+    }
+
+    /// Sets the extracted per-state map colors.
+    pub const fn with_map_color(mut self, map_color: StateMapColorData) -> Self {
+        self.map_color = map_color;
         self
     }
 
@@ -882,6 +935,15 @@ impl BlockRegistry {
             return false;
         };
         block.suffocating.value(offset)
+    }
+
+    /// Returns vanilla `BlockState.getMapColor`.
+    #[must_use]
+    pub fn get_map_color(&self, state_id: BlockStateId) -> MapColor {
+        let Some((block, offset)) = self.block_and_state_offset(state_id) else {
+            return MapColor::NONE;
+        };
+        block.map_color.value(offset)
     }
 
     /// Returns the extracted static `BlockState.isRedstoneConductor` value.

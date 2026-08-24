@@ -12,11 +12,10 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 17
+[blocks] 16
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
-CartographyTableBlock
 CommandBlock
 CreakingHeartBlock
 CryingObsidianBlock
@@ -31,11 +30,9 @@ TestInstanceBlock
 TintedGlassBlock
 TransparentBlock
 
-[items] 4
-EmptyMapItem
+[items] 2
 FishingRodItem
 Item
-MapItem
 
 [entities] 52
 Allay
