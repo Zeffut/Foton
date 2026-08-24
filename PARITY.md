@@ -325,7 +325,7 @@ mobs that need it.
       Taming by temper, the chest, coat and markings, the caravan, breeding
       inheritance. The inventory itself is complete -- contents, resizing, slot
       rules, NBT and drops -- but there is no screen to open it with, because
-      the saddle and armour slots are entity equipment and Steel's menu slots
+      the saddle and armor slots are entity equipment and Steel's menu slots
       are backed by containers.
 
 ### 2b. Blocks the world runs on its own
