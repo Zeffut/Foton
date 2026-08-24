@@ -1,4 +1,5 @@
-use crate::entity::entities::{RabbitVariant, TropicalFishVariant};
+use crate::entity::LlamaVariant;
+use crate::entity::entities::{HorseVariant, RabbitVariant, TropicalFishVariant};
 
 /// Vanilla `EntitySpawnReason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,11 @@ pub enum SpawnGroupData {
     /// `AbstractSchoolingFish.SchoolSpawnGroupData` and so also carries the
     /// school leader; Steel has no schooling fish, so that half is absent.
     TropicalFish(TropicalFishGroupData),
+    /// Vanilla `Horse.HorseGroupData`, which carries the coat every horse of a
+    /// herd is born with.
+    Horse(HorseGroupData),
+    /// Vanilla `Llama.LlamaGroupData`, the same idea for a llama herd.
+    Llama(LlamaGroupData),
 }
 
 impl SpawnGroupData {
@@ -56,6 +62,8 @@ impl SpawnGroupData {
         match self {
             Self::AgeableMob(group_data) => Some(group_data),
             Self::Rabbit(group_data) => Some(&group_data.ageable),
+            Self::Horse(group_data) => Some(&group_data.ageable),
+            Self::Llama(group_data) => Some(&group_data.ageable),
             Self::TropicalFish(_) => None,
         }
     }
@@ -66,8 +74,61 @@ impl SpawnGroupData {
         match self {
             Self::AgeableMob(group_data) => Some(group_data),
             Self::Rabbit(group_data) => Some(&mut group_data.ageable),
+            Self::Horse(group_data) => Some(&mut group_data.ageable),
+            Self::Llama(group_data) => Some(&mut group_data.ageable),
             Self::TropicalFish(_) => None,
         }
+    }
+}
+
+/// Vanilla `Horse.HorseGroupData`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HorseGroupData {
+    ageable: AgeableMobGroupData,
+    variant: HorseVariant,
+}
+
+impl HorseGroupData {
+    /// Creates group data for a herd of horses.
+    ///
+    /// Vanilla parity: `HorseGroupData(variant)` calls `super(true)`, so the
+    /// herd keeps the default foal chance.
+    #[must_use]
+    pub const fn new(variant: HorseVariant) -> Self {
+        Self {
+            ageable: AgeableMobGroupData::with_should_spawn_baby(true),
+            variant,
+        }
+    }
+
+    /// Returns the coat shared by the herd.
+    #[must_use]
+    pub const fn variant(self) -> HorseVariant {
+        self.variant
+    }
+}
+
+/// Vanilla `Llama.LlamaGroupData`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LlamaGroupData {
+    ageable: AgeableMobGroupData,
+    variant: LlamaVariant,
+}
+
+impl LlamaGroupData {
+    /// Creates group data for a herd of llamas.
+    #[must_use]
+    pub const fn new(variant: LlamaVariant) -> Self {
+        Self {
+            ageable: AgeableMobGroupData::with_should_spawn_baby(true),
+            variant,
+        }
+    }
+
+    /// Returns the coat shared by the herd.
+    #[must_use]
+    pub const fn variant(self) -> LlamaVariant {
+        self.variant
     }
 }
 

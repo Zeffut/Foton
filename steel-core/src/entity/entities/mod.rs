@@ -14,9 +14,11 @@ pub use mobs::hostile::{
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::passive::{
-    CatEntity, ChickenEntity, CowEntity, FoxEntity, FoxVariant, GoatEntity, MushroomCowEntity,
+    CatEntity, ChickenEntity, CowEntity, DonkeyEntity, FoxEntity, FoxVariant, GoatEntity,
+    HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity, MushroomCowEntity,
     OcelotEntity, ParrotEntity, ParrotVariant, PigEntity, PolarBearEntity, RabbitEntity,
-    RabbitVariant, SheepEntity, StriderEntity, TurtleEntity,
+    RabbitVariant, SheepEntity, SkeletonHorseEntity, StriderEntity, TraderLlamaEntity,
+    TurtleEntity, ZombieHorseEntity,
 };
 pub use mobs::water::{
     CodEntity, DolphinEntity, GlowSquidEntity, PufferfishEntity, SalmonEntity, SquidEntity,
@@ -30,9 +32,9 @@ pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
     ArrowEntity, DragonFireballEntity, EnderPearlEntity, ExperienceBottleEntity,
-    FireworkRocketEntity, LargeFireballEntity, ShulkerBulletEntity, SmallFireballEntity,
-    SnowballEntity, SplashPotionEntity, ThrownEggEntity, ThrownTridentEntity, TridentPickup,
-    WindChargeEntity, WitherSkullEntity,
+    FireworkRocketEntity, LargeFireballEntity, LlamaSpitEntity, ShulkerBulletEntity,
+    SmallFireballEntity, SnowballEntity, SplashPotionEntity, ThrownEggEntity, ThrownTridentEntity,
+    TridentPickup, WindChargeEntity, WitherSkullEntity,
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,

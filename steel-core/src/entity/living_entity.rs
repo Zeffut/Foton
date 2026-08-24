@@ -1737,6 +1737,14 @@ pub trait LivingEntity: Entity {
 
     /// Returns the equip sound Steel can currently resolve for this entity.
     fn equip_sound(&self, slot: EquipmentSlot, stack: &ItemStack) -> Option<SoundEventRef> {
+        self.default_equip_sound(slot, stack)
+    }
+
+    /// The body of [`Self::equip_sound`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only replaces the sound of one slot --
+    /// the horse, whose saddle is louder than its armor -- calls this for the rest.
+    fn default_equip_sound(&self, slot: EquipmentSlot, stack: &ItemStack) -> Option<SoundEventRef> {
         let equippable = stack.get_equippable()?;
         (slot == equippable.slot)
             .then(|| equippable.equip_sound.registry_ref())
