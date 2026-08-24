@@ -104,6 +104,8 @@ impl BlockEntity for SpawnerBlockEntity {
 mod tests {
     use std::io::Cursor;
 
+    use simdnbt::borrow::read_compound;
+
     use steel_registry::init_vanilla_registry;
     use steel_utils::Identifier;
 
@@ -131,8 +133,8 @@ mod tests {
 
         let mut bytes = Vec::new();
         saved.write(&mut bytes);
-        let borrowed = simdnbt::borrow::read_compound(&mut Cursor::new(&bytes))
-            .expect("hand-built spawner nbt must parse");
+        let borrowed =
+            read_compound(&mut Cursor::new(&bytes)).expect("hand-built spawner nbt must parse");
         entity.load_additional(&borrowed);
 
         let update_tag = entity

@@ -425,7 +425,7 @@ mod tests {
     /// Vanilla's compact constructor drops an `id` it cannot parse. A spawner
     /// that kept a malformed id would try to spawn it on every attempt.
     #[test]
-    fn an_unparseable_entity_id_is_dropped() {
+    fn an_unparsable_entity_id_is_dropped() {
         let mut entity = NbtCompound::new();
         entity.insert("id", "not a valid id");
         let data = SpawnData::new(entity, None, None);

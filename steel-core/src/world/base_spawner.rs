@@ -11,10 +11,12 @@
 //! * Vanilla counts nearby mobs by exact Java class. Steel counts by entity
 //!   type, which is the finest identity an entity carries here.
 
+use std::io::Cursor;
+use std::ptr;
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
-use simdnbt::borrow::NbtCompound as NbtCompoundView;
+use simdnbt::borrow::{NbtCompound as NbtCompoundView, read_compound};
 use simdnbt::owned::NbtCompound;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::spawn_data::{CustomSpawnRules, SpawnData};
@@ -26,7 +28,7 @@ use steel_utils::types::Difficulty;
 use steel_utils::{BlockPos, Identifier, WorldAabb};
 
 use crate::chunk::light::LightLayer;
-use crate::entity::{ENTITIES, Entity, EntitySpawnReason, SharedEntity};
+use crate::entity::{ENTITIES, Entity, EntitySpawnReason, SharedEntity, next_entity_id};
 use crate::physics::{WorldCollisionProvider, has_collision};
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -514,7 +516,7 @@ fn count_nearby_of_type(
     let spawned_type = spawned.entity_type();
     world
         .get_entities_in_aabb_matching(&aabb, |entity| {
-            !entity.is_spectator() && std::ptr::eq(entity.entity_type(), spawned_type)
+            !entity.is_spectator() && ptr::eq(entity.entity_type(), spawned_type)
         })
         .len() as i32
 }
@@ -537,14 +539,14 @@ pub(crate) fn load_spawner_entity(
 
     let entity = ENTITIES.create(
         entity_type,
-        crate::entity::next_entity_id(),
+        next_entity_id(),
         position,
         Arc::downgrade(world) as Weak<World>,
     )?;
 
     let mut bytes = Vec::new();
     spawn_data.entity_to_spawn().write(&mut bytes);
-    match simdnbt::borrow::read_compound(&mut std::io::Cursor::new(&bytes)) {
+    match read_compound(&mut Cursor::new(&bytes)) {
         Ok(borrowed) => entity.load_additional((&borrowed).into()),
         Err(error) => log::warn!("spawner entity tag could not be re-read: {error}"),
     }
@@ -601,15 +603,15 @@ mod tests {
         saved.insert("SpawnData", spawn_data);
 
         let bytes = reparse(&saved);
-        let borrowed = simdnbt::borrow::read_compound(&mut std::io::Cursor::new(&bytes))
-            .expect("hand-built spawner nbt must parse");
+        let borrowed =
+            read_compound(&mut Cursor::new(&bytes)).expect("hand-built spawner nbt must parse");
         spawner.load(&(&borrowed).into());
 
         let mut written = NbtCompound::new();
         spawner.save(&mut written);
         let bytes = reparse(&written);
-        let borrowed = simdnbt::borrow::read_compound(&mut std::io::Cursor::new(&bytes))
-            .expect("saved spawner nbt must parse");
+        let borrowed =
+            read_compound(&mut Cursor::new(&bytes)).expect("saved spawner nbt must parse");
         let reloaded = BaseSpawner::new();
         reloaded.load(&(&borrowed).into());
 
@@ -646,8 +648,8 @@ mod tests {
         saved.insert("SpawnData", spawn_data);
 
         let bytes = reparse(&saved);
-        let borrowed = simdnbt::borrow::read_compound(&mut std::io::Cursor::new(&bytes))
-            .expect("hand-built spawner nbt must parse");
+        let borrowed =
+            read_compound(&mut Cursor::new(&bytes)).expect("hand-built spawner nbt must parse");
         spawner.load(&(&borrowed).into());
 
         let state = spawner.state.lock();

@@ -103,7 +103,7 @@ impl TrialSpawnerConfig {
     ///
     /// Vanilla parity: `TrialSpawnerConfig.calculateTargetTotalMobs`.
     #[must_use]
-    pub fn calculate_target_total_mobs(&self, additional_players: i32) -> i32 {
+    pub const fn calculate_target_total_mobs(&self, additional_players: i32) -> i32 {
         self.total_mobs_added_per_player
             .mul_add(additional_players as f32, self.total_mobs)
             .floor() as i32
@@ -113,7 +113,7 @@ impl TrialSpawnerConfig {
     ///
     /// Vanilla parity: `TrialSpawnerConfig.calculateTargetSimultaneousMobs`.
     #[must_use]
-    pub fn calculate_target_simultaneous_mobs(&self, additional_players: i32) -> i32 {
+    pub const fn calculate_target_simultaneous_mobs(&self, additional_players: i32) -> i32 {
         self.simultaneous_mobs_added_per_player
             .mul_add(additional_players as f32, self.simultaneous_mobs)
             .floor() as i32
@@ -251,13 +251,11 @@ impl TrialSpawnerConfigHolder {
     pub fn load(tag: BorrowedNbtTag<'_, '_>) -> Option<Self> {
         if let Some(key) = tag.string() {
             let key: Identifier = key.to_str().parse().ok()?;
-            return match vanilla_trial_spawner_configs::by_key(&key) {
-                Some(value) => Some(Self::Registry { key, value }),
-                None => {
-                    log::warn!("unknown trial spawner config {key}; using the default");
-                    Some(Self::direct(TrialSpawnerConfig::vanilla_default()))
-                }
+            let Some(value) = vanilla_trial_spawner_configs::by_key(&key) else {
+                log::warn!("unknown trial spawner config {key}; using the default");
+                return Some(Self::direct(TrialSpawnerConfig::vanilla_default()));
             };
+            return Some(Self::Registry { key, value });
         }
         let compound = tag.compound()?;
         Some(Self::direct(TrialSpawnerConfig::load(&compound)))

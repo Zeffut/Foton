@@ -3,6 +3,8 @@
 //! Vanilla Minecraft stores UUIDs as int arrays with 4 elements,
 //! where each i32 represents 4 bytes of the UUID in big-endian order.
 
+use simdnbt::borrow::NbtList as BorrowedNbtList;
+use simdnbt::owned::NbtList;
 use uuid::Uuid;
 
 /// Extension trait for UUID to support Minecraft's NBT int array format.
@@ -52,8 +54,8 @@ impl UuidExt for Uuid {
 /// are a list of the four-int form. Insertion order is kept, which is what the
 /// linked variant promises and what an ordinary set happens to give too.
 #[must_use]
-pub fn load_uuid_list(list: Option<&simdnbt::borrow::NbtList<'_, '_>>) -> Vec<Uuid> {
-    let Some(arrays) = list.and_then(simdnbt::borrow::NbtList::int_arrays) else {
+pub fn load_uuid_list(list: Option<&BorrowedNbtList<'_, '_>>) -> Vec<Uuid> {
+    let Some(arrays) = list.and_then(BorrowedNbtList::int_arrays) else {
         return Vec::new();
     };
     let mut uuids = Vec::with_capacity(arrays.len());
@@ -69,8 +71,8 @@ pub fn load_uuid_list(list: Option<&simdnbt::borrow::NbtList<'_, '_>>) -> Vec<Uu
 
 /// Writes a list of UUIDs in vanilla's four-int form.
 #[must_use]
-pub fn save_uuid_list(uuids: &[Uuid]) -> simdnbt::owned::NbtList {
-    simdnbt::owned::NbtList::IntArray(
+pub fn save_uuid_list(uuids: &[Uuid]) -> NbtList {
+    NbtList::IntArray(
         uuids
             .iter()
             .map(|uuid| uuid.to_int_array().to_vec())

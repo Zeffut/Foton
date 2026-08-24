@@ -80,13 +80,13 @@ impl<T> WeightedList<T> {
     /// Vanilla parity: `WeightedList.isEmpty`, which asks only about the entry
     /// list -- a list of zero-weight entries is not empty to vanilla either.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Returns how many entries the list holds.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.entries.len()
     }
 

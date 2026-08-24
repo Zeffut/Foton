@@ -26,20 +26,20 @@ const SPIN_FAST: f64 = 1000.0;
 /// The per-state constants vanilla holds in the enum's fields.
 pub trait TrialSpawnerStateExt {
     /// Vanilla parity: `TrialSpawnerState.lightLevel`.
-    fn light_level(self) -> i32;
+    fn light_level(&self) -> i32;
 
     /// Vanilla parity: `TrialSpawnerState.spinningMobSpeed`.
-    fn spinning_mob_speed(self) -> f64;
+    fn spinning_mob_speed(&self) -> f64;
 
     /// Vanilla parity: `TrialSpawnerState.hasSpinningMob`.
-    fn has_spinning_mob(self) -> bool;
+    fn has_spinning_mob(&self) -> bool;
 
     /// Vanilla parity: `TrialSpawnerState.isCapableOfSpawning`.
-    fn is_capable_of_spawning(self) -> bool;
+    fn is_capable_of_spawning(&self) -> bool;
 }
 
 impl TrialSpawnerStateExt for TrialSpawnerState {
-    fn light_level(self) -> i32 {
+    fn light_level(&self) -> i32 {
         match self {
             Self::Inactive | Self::Cooldown => 0,
             Self::WaitingForPlayers => 4,
@@ -47,7 +47,7 @@ impl TrialSpawnerStateExt for TrialSpawnerState {
         }
     }
 
-    fn spinning_mob_speed(self) -> f64 {
+    fn spinning_mob_speed(&self) -> f64 {
         match self {
             Self::WaitingForPlayers => SPIN_SLOW,
             Self::Active => SPIN_FAST,
@@ -55,11 +55,11 @@ impl TrialSpawnerStateExt for TrialSpawnerState {
         }
     }
 
-    fn has_spinning_mob(self) -> bool {
+    fn has_spinning_mob(&self) -> bool {
         self.spinning_mob_speed() >= 0.0
     }
 
-    fn is_capable_of_spawning(self) -> bool {
+    fn is_capable_of_spawning(&self) -> bool {
         matches!(self, Self::WaitingForPlayers | Self::Active)
     }
 }

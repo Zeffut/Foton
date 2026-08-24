@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::DVec3;
+use rand::SeedableRng as _;
+use rand::rngs::StdRng;
 use simdnbt::borrow::NbtCompound as NbtCompoundView;
 use simdnbt::owned::NbtCompound;
 use steel_protocol::packets::game::SoundSource;
@@ -14,6 +16,7 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, TrialSpawnerState};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::loot_table::{LootContext, LootTableRef};
+use steel_registry::spawn_data::SpawnData;
 use steel_registry::trial_spawner_config::{
     TICKS_BETWEEN_ITEM_SPAWNERS, TrialSpawnerConfig, TrialSpawnerConfigHolder,
 };
@@ -34,9 +37,12 @@ use super::state::{DELAY_BEFORE_EJECT_AFTER_KILLING_LAST_MOB, TIME_BETWEEN_EACH_
 use super::state_data::{DELAY_BETWEEN_PLAYER_SCANS, TrialSpawnerStateData};
 use crate::behavior::item_utils::spawn_item_toward;
 use crate::entity::entities::OminousItemSpawnerEntity;
-use crate::entity::{Entity, EntitySpawnReason, LivingEntity as _, MobEffectInstance};
+use crate::entity::{
+    Entity, EntitySpawnReason, LivingEntity as _, MobEffectInstance, RemovalReason,
+};
 use crate::physics::{WorldCollisionProvider, has_collision};
-use crate::world::base_spawner::load_spawner_entity;
+use crate::player::Player;
+use crate::world::base_spawner::{custom_spawn_rules_allow, load_spawner_entity};
 use crate::world::game_event::GameEventContext;
 use crate::world::{ClipBlockShape, ClipFluid, World};
 
@@ -248,7 +254,7 @@ impl TrialSpawner {
 
     /// Vanilla parity: `TrialSpawner.canSpawnInLevel`.
     #[must_use]
-    pub fn can_spawn_in_level(&self, world: &Arc<World>) -> bool {
+    pub fn can_spawn_in_level(world: &Arc<World>) -> bool {
         if !world.get_game_rule(&SPAWNER_BLOCKS_WORK) {
             return false;
         }
@@ -314,7 +320,7 @@ impl TrialSpawner {
             if let Some(mob) = entity.as_mob() {
                 mob.drop_preserved_equipment(world);
             }
-            entity.set_removed(crate::entity::RemovalReason::Discarded);
+            entity.set_removed(RemovalReason::Discarded);
         }
 
         let game_time = world.game_time();
@@ -428,7 +434,7 @@ impl TrialSpawner {
             let named = data
                 .next_spawn_data
                 .as_ref()
-                .and_then(steel_registry::spawn_data::SpawnData::entity_type_key)
+                .and_then(SpawnData::entity_type_key)
                 .is_some();
             (drawn, named)
         });
@@ -450,7 +456,7 @@ impl TrialSpawner {
         pos: BlockPos,
         config: &TrialSpawnerConfig,
     ) -> TrialSpawnerState {
-        if !self.can_spawn_in_level(world) {
+        if !Self::can_spawn_in_level(world) {
             self.with_data(TrialSpawnerStateData::reset_statistics);
             return TrialSpawnerState::WaitingForPlayers;
         }
@@ -473,7 +479,7 @@ impl TrialSpawner {
         pos: BlockPos,
         config: &TrialSpawnerConfig,
     ) -> TrialSpawnerState {
-        if !self.can_spawn_in_level(world) {
+        if !Self::can_spawn_in_level(world) {
             self.with_data(TrialSpawnerStateData::reset_statistics);
             return TrialSpawnerState::WaitingForPlayers;
         }
@@ -634,7 +640,7 @@ impl TrialSpawner {
             let named = data
                 .next_spawn_data
                 .as_ref()
-                .and_then(steel_registry::spawn_data::SpawnData::entity_type_key)
+                .and_then(SpawnData::entity_type_key)
                 .is_some();
             (drawn, named)
         });
@@ -668,9 +674,11 @@ impl TrialSpawner {
         let in_line_of_sight = self.player_detector.detect(world, pos, range, true);
 
         let mut became_ominous = false;
-        if !self.is_ominous() && !in_line_of_sight.is_empty() {
-            if let Some((player_uuid, effect_is_bad_omen)) =
+        if !self.is_ominous()
+            && !in_line_of_sight.is_empty()
+            && let Some((player_uuid, effect_is_bad_omen)) =
                 find_player_with_ominous_effect(world, &in_line_of_sight)
+        {
             {
                 if let Some(player) = world.players.get_by_uuid(&player_uuid) {
                     if effect_is_bad_omen {
@@ -787,11 +795,7 @@ impl TrialSpawner {
                 return None;
             }
             if let Some(rules) = spawn_data.custom_spawn_rules()
-                && !crate::world::base_spawner::custom_spawn_rules_allow(
-                    rules,
-                    world,
-                    spawn_block_pos,
-                )
+                && !custom_spawn_rules_allow(rules, world, spawn_block_pos)
             {
                 return None;
             }
@@ -947,7 +951,7 @@ impl TrialSpawner {
             (f64::from(pos.z()) / 30.0).floor() as i32,
         );
         let seed = world.seed().wrapping_add(packed_pos(low_resolution));
-        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed as u64);
+        let mut rng = StdRng::seed_from_u64(seed as u64);
         let mut context = LootContext::new(&mut rng).with_game_time(world.game_time());
         let drops = config
             .items_to_drop_when_ominous
@@ -1028,10 +1032,10 @@ fn find_player_with_ominous_effect(
         let Some(player) = world.players.get_by_uuid(uuid) else {
             continue;
         };
-        if player.has_mob_effect(&vanilla_mob_effects::TRIAL_OMEN) {
+        if player.has_mob_effect(vanilla_mob_effects::TRIAL_OMEN) {
             return Some((*uuid, false));
         }
-        if with_bad_omen.is_none() && player.has_mob_effect(&vanilla_mob_effects::BAD_OMEN) {
+        if with_bad_omen.is_none() && player.has_mob_effect(vanilla_mob_effects::BAD_OMEN) {
             with_bad_omen = Some(*uuid);
         }
     }
@@ -1039,18 +1043,18 @@ fn find_player_with_ominous_effect(
 }
 
 /// Vanilla parity: `TrialSpawnerStateData.transformBadOmenIntoTrialOmen`.
-fn transform_bad_omen_into_trial_omen(player: &Arc<crate::player::Player>) {
+fn transform_bad_omen_into_trial_omen(player: &Arc<Player>) {
     let Some(bad_omen) = player
         .living_base()
-        .mob_effect(&vanilla_mob_effects::BAD_OMEN)
+        .mob_effect(vanilla_mob_effects::BAD_OMEN)
     else {
         return;
     };
     let amplifier = bad_omen.amplifier() + 1;
     let duration = super::state_data::TRIAL_OMEN_PER_BAD_OMEN_LEVEL * amplifier;
-    player.remove_mob_effect(&vanilla_mob_effects::BAD_OMEN);
+    player.remove_mob_effect(vanilla_mob_effects::BAD_OMEN);
     player.add_mob_effect(MobEffectInstance::with_duration(
-        &vanilla_mob_effects::TRIAL_OMEN,
+        vanilla_mob_effects::TRIAL_OMEN,
         duration,
         0,
     ));

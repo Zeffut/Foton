@@ -28,6 +28,7 @@ pub mod entities;
 mod registry;
 mod storage;
 pub mod trialspawner;
+pub mod vault;
 
 use std::{
     any::try_as_dyn,

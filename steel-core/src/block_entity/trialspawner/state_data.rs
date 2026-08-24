@@ -61,7 +61,7 @@ impl TrialSpawnerStateData {
 
     /// Vanilla parity: `TrialSpawnerStateData.hasFinishedSpawningAllMobs`.
     #[must_use]
-    pub fn has_finished_spawning_all_mobs(
+    pub const fn has_finished_spawning_all_mobs(
         &self,
         config: &TrialSpawnerConfig,
         additional_players: i32,
@@ -71,13 +71,13 @@ impl TrialSpawnerStateData {
 
     /// Vanilla parity: `TrialSpawnerStateData.haveAllCurrentMobsDied`.
     #[must_use]
-    pub fn have_all_current_mobs_died(&self) -> bool {
+    pub const fn have_all_current_mobs_died(&self) -> bool {
         self.current_mobs.is_empty()
     }
 
     /// Vanilla parity: `TrialSpawnerStateData.isReadyToSpawnNextMob`.
     #[must_use]
-    pub fn is_ready_to_spawn_next_mob(
+    pub const fn is_ready_to_spawn_next_mob(
         &self,
         game_time: i64,
         config: &TrialSpawnerConfig,
@@ -215,9 +215,11 @@ mod tests {
     /// apart is what a player sees as one item per second and a half.
     #[test]
     fn items_eject_exactly_on_the_thirty_tick_beat() {
-        let mut data = TrialSpawnerStateData::default();
         // A cooldown that started at game time 1000.
-        data.cooldown_ends_at = 1000 + 36_000;
+        let data = TrialSpawnerStateData {
+            cooldown_ends_at: 1000 + 36_000,
+            ..TrialSpawnerStateData::default()
+        };
 
         assert!(data.is_ready_to_eject_items(1000, 30.0, 36_000));
         assert!(!data.is_ready_to_eject_items(1015, 30.0, 36_000));
@@ -228,8 +230,10 @@ mod tests {
     /// Opening early would eject the reward into a fight that is still running.
     #[test]
     fn the_shutter_waits_forty_ticks_after_the_cooldown_starts() {
-        let mut data = TrialSpawnerStateData::default();
-        data.cooldown_ends_at = 1000 + 36_000;
+        let data = TrialSpawnerStateData {
+            cooldown_ends_at: 1000 + 36_000,
+            ..TrialSpawnerStateData::default()
+        };
 
         assert!(!data.is_ready_to_open_shutter(1039, 40.0, 36_000));
         assert!(data.is_ready_to_open_shutter(1040, 40.0, 36_000));
