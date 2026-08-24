@@ -29,13 +29,15 @@ started; the second is where `dev/parity-gaps.txt` stands now.
 
 | missing classes | at first measurement | now |
 |---|---|---|
-| blocks | 63 | 20 |
+| blocks | 63 | 17 |
 | items | 38 | 4 |
-| entities | 142 | 62 |
+| entities | 142 | 60 |
 
 **Entities are all that is left of any size**, and nearly all of it is mobs --
 though the tameable pets, the passive animals and the golems have taken a third
-of that column since the last count.
+of that column since the last count. The three blocks that make mobs -- the
+monster spawner, the trial spawner and the vault -- came off the block column
+together with the spawner minecart and the ominous item spawner.
 The item column is down to four, three of which are blocked on a map system
 that does not exist and one of which -- vanilla's plain `Item` -- needs
 nothing.
