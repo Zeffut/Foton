@@ -750,6 +750,7 @@ pub mod entities;
     reason = "the entity module mirrors vanilla's Entity class and groups its implementation"
 )]
 mod entity;
+mod equine;
 mod fluid_contact;
 #[expect(warnings)]
 #[rustfmt::skip]
@@ -797,6 +798,11 @@ pub(crate) use entity::apply_entity_look_at;
 pub use entity::{
     AcceptedClientMovement, AcceptedClientMovementOutcome, Entity, EntityEventSource,
 };
+pub(crate) use equine::{
+    AbstractChestedHorse, AbstractHorse, AbstractHorseBase, BABY_SCALE, Llama, LlamaBase,
+    LlamaVariant, generate_jump_strength, generate_max_health, generate_speed, is_llama,
+    should_follow_mommy,
+};
 pub use fluid_contact::EntityFluidContact;
 pub use inside_block_effects::{
     InsideBlockEffectCallback, InsideBlockEffectCollector, InsideBlockEffectType,
@@ -829,7 +835,9 @@ pub use projectile::{
     get_hit_result_on_view_vector, rotate_towards_movement,
 };
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
-pub(crate) use spawn::{AgeableMobGroupData, EntitySpawnReason, SpawnGroupData};
+pub(crate) use spawn::{
+    AgeableMobGroupData, EntitySpawnReason, HorseGroupData, LlamaGroupData, SpawnGroupData,
+};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
 pub use synced_data::{EntitySyncedData, LivingEntitySyncedData};
 pub(crate) use tamable::{

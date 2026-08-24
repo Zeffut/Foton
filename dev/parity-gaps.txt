@@ -40,7 +40,7 @@ FishingRodItem
 Item
 MapItem
 
-[entities] 62
+[entities] 54
 Allay
 Armadillo
 Axolotl
@@ -52,7 +52,6 @@ BreezeWindCharge
 Camel
 CamelHusk
 Creaking
-Donkey
 ElderGuardian
 EnderDragon
 Endermite
@@ -67,14 +66,10 @@ GlowItemFrame
 Guardian
 HappyGhast
 Hoglin
-Horse
 Illusioner
-Llama
-LlamaSpit
 Mannequin
 MinecartCommandBlock
 MinecartSpawner
-Mule
 Nautilus
 OminousItemSpawner
 Panda
@@ -86,13 +81,11 @@ Pillager
 Player
 Ravager
 Shulker
-SkeletonHorse
 Sniffer
 SpectralArrow
 SulfurCube
 Tadpole
 ThrownLingeringPotion
-TraderLlama
 Vex
 Villager
 Vindicator
@@ -100,6 +93,5 @@ WanderingTrader
 Warden
 WitherBoss
 Zoglin
-ZombieHorse
 ZombieNautilus
 ZombieVillager

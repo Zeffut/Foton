@@ -669,6 +669,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     ///
     /// Mirrors vanilla `Entity.getPassengerAttachmentPoint` for the base entity class.
     fn passenger_attachment_point(&self, passenger: &dyn Entity) -> DVec3 {
+        self.default_passenger_attachment_point(passenger)
+    }
+
+    /// The body of [`Self::passenger_attachment_point`], callable from an override.
+    ///
+    /// Rust has no `super`, and a rearing horse needs the base point before it
+    /// can add its own offset to it.
+    fn default_passenger_attachment_point(&self, passenger: &dyn Entity) -> DVec3 {
         let dimensions = self.base().dimensions();
         let passenger_index = self.passenger_index(passenger).unwrap_or_default();
         dimensions.attachments.get_clamped(
@@ -1565,6 +1573,52 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     fn as_tamable_animal(&self) -> Option<&dyn TamableAnimal> {
         try_as_dyn::<Self, dyn TamableAnimal>(self)
     }
+
+    /// Returns this entity as a horse-shaped mob.
+    ///
+    /// Mirrors vanilla's `instanceof AbstractHorse` branches.
+    fn as_abstract_horse(&self) -> Option<&dyn AbstractHorse> {
+        try_as_dyn::<Self, dyn AbstractHorse>(self)
+    }
+
+    /// Returns this entity as a llama.
+    ///
+    /// Mirrors vanilla's `instanceof Llama` branches, which the caravan goal
+    /// and the llama's own hurt-by-target goal both take.
+    fn as_llama(&self) -> Option<&dyn Llama> {
+        try_as_dyn::<Self, dyn Llama>(self)
+    }
+
+    /// Throws every passenger off.
+    ///
+    /// Mirrors vanilla `Entity.ejectPassengers`.
+    fn eject_passengers(&self) {
+        for passenger in self.passengers().into_iter().rev() {
+            passenger.stop_riding();
+        }
+    }
+
+    /// Returns whether a rider may charge a jump on this vehicle.
+    ///
+    /// Mirrors vanilla `PlayerRideableJumping.canJump`.
+    fn can_jump_while_ridden(&self) -> bool {
+        false
+    }
+
+    /// Starts a rider's charged jump.
+    ///
+    /// Mirrors vanilla `PlayerRideableJumping.handleStartJump`.
+    fn handle_start_jump(&self, _jump_scale: i32) {}
+
+    /// Ends a rider's charged jump.
+    ///
+    /// Mirrors vanilla `PlayerRideableJumping.handleStopJump`.
+    fn handle_stop_jump(&self) {}
+
+    /// Opens this entity's own inventory screen for `player`.
+    ///
+    /// Mirrors vanilla `HasCustomInventoryScreen.openCustomInventoryScreen`.
+    fn open_custom_inventory_screen(&self, _player: &Player) {}
 
     /// Returns true for entities that implement vanilla item-steered boosts.
     fn is_item_steerable(&self) -> bool {
@@ -2957,6 +3011,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
 
     /// Plays this entity's swim sound at the given volume.
     fn play_swim_sound(&self, volume: f32) {
+        self.default_play_swim_sound(volume);
+    }
+
+    /// The body of [`Self::play_swim_sound`], callable from an override.
+    ///
+    /// Rust has no `super`, and the skeleton horse only rewrites the volume it
+    /// passes down.
+    fn default_play_swim_sound(&self, volume: f32) {
         let pitch = 1.0 + (rand::random::<f32>() - rand::random::<f32>()) * 0.4;
         self.play_sound(self.swim_sound(), volume, pitch);
     }

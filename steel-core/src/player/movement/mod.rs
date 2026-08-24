@@ -908,10 +908,23 @@ impl Player {
                     self.stop_sleep_in_bed(false, true);
                 }
             }
-            PlayerCommandAction::StartRidingJump
-            | PlayerCommandAction::StopRidingJump
-            | PlayerCommandAction::OpenVehicleInventory => {
-                // TODO: Implement once controlled vehicle jumping and vehicle inventory interfaces exist.
+            PlayerCommandAction::StartRidingJump => {
+                if let Some(vehicle) = self.controlled_vehicle()
+                    && vehicle.can_jump_while_ridden()
+                    && packet.data > 0
+                {
+                    vehicle.handle_start_jump(packet.data);
+                }
+            }
+            PlayerCommandAction::StopRidingJump => {
+                if let Some(vehicle) = self.controlled_vehicle() {
+                    vehicle.handle_stop_jump();
+                }
+            }
+            PlayerCommandAction::OpenVehicleInventory => {
+                if let Some(vehicle) = self.vehicle() {
+                    vehicle.open_custom_inventory_screen(self);
+                }
             }
         }
 
