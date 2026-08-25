@@ -78,7 +78,8 @@ impl PointOfInterestSet {
         self.pois_by_pos.get_mut(&packed_pos)
     }
 
-    /// Returns all POIs of the given type matching the occupation status.
+    /// Returns all POIs of the given type matching the occupation status,
+    /// ordered by section-relative position.
     #[must_use]
     pub fn get_by_type(
         &self,
@@ -90,27 +91,38 @@ impl PointOfInterestSet {
             return Vec::new();
         };
 
-        positions
-            .iter()
-            .filter_map(|pos| self.pois_by_pos.get(pos))
+        let mut sorted: Vec<PackedSectionBlockPos> = positions.iter().copied().collect();
+        sorted.sort_unstable();
+        sorted
+            .into_iter()
+            .filter_map(|pos| self.pois_by_pos.get(&pos))
             .filter(|poi| status.matches(poi, max_tickets))
             .collect()
     }
 
-    /// Returns all POIs matching the type predicate and occupation status.
+    /// Returns all POIs matching the type predicate and occupation status,
+    /// ordered by section-relative position.
+    ///
+    /// Vanilla parity: `PoiSection.getRecords`, which walks a `HashMap` and so
+    /// leaves the order undefined. Sorting keeps `find`, `take` and every
+    /// distance tie answering the same way across runs and reloads.
     pub fn get_matching(
         &self,
         type_predicate: &impl Fn(usize) -> bool,
         status: OccupationStatus,
         max_tickets_fn: &impl Fn(usize) -> u32,
     ) -> Vec<&PointOfInterest> {
-        self.pois_by_pos
-            .values()
-            .filter(|poi| {
+        let mut matching: Vec<(PackedSectionBlockPos, &PointOfInterest)> = self
+            .pois_by_pos
+            .iter()
+            .filter(|(_, poi)| {
                 type_predicate(poi.poi_type_id)
                     && status.matches(poi, max_tickets_fn(poi.poi_type_id))
             })
-            .collect()
+            .map(|(&packed, poi)| (packed, poi))
+            .collect();
+        matching.sort_unstable_by_key(|&(packed, _)| packed);
+        matching.into_iter().map(|(_, poi)| poi).collect()
     }
 
     /// Returns `true` if any POIs have been added or removed since last cleared.
