@@ -394,9 +394,52 @@ mobs that need it.
 
 ### 3. The end of the game
 
-- [ ] Ender dragon, wither, elder guardian, end crystal, eye of ender.
+- [x] **The boss bar**: `BossEvent`, `ServerBossEvent` and the boss-event packet
+      with all six of its operations. The bar is per-viewer, not per-world: a
+      player is added when they start tracking the boss and removed when they
+      stop, which is what stops a bar lingering on a client that walked away.
+      `Entity::start_seen_by_player` / `stop_seen_by_player` are the hooks, and
+      the tracker drives them from the same two places vanilla's `ServerEntity`
+      does. Raids can use it as-is -- vanilla's raid bar is a plain
+      `ServerBossEvent`.
+
+      Not done: `CustomBossEvent` / `CustomBossEvents`, the *named* bars behind
+      `/bossbar` and `execute store ... bossbar`. Their persistence format is
+      best settled with the command that drives it, and nothing else needs them.
+
+- [x] **The wither**: the soul-sand summon, the eleven-second arrival and the
+      blast that ends it, three independently aiming heads, the block-chewing
+      on every hit, the powered second half that arrows and wind charges cannot
+      touch, and the nether star.
+
+- [ ] Ender dragon, elder guardian, end crystal, eye of ender.
 
 ### Blocked, and honestly so
+
+- **The ender dragon.** Two of its parts do not exist in any form, and neither
+  is a dragon-shaped job:
+
+  - *Multi-part entities.* The dragon is eight `EnderDragonPart` hitboxes; the
+    client builds them itself from `dragonId + 1 ..= dragonId + 8`, and every
+    hit arrives on one of those ids. Steel has no part concept anywhere, and
+    `Player::handle_attack` resolves an id through one flat `live_by_id` map and
+    silently returns on a miss -- so a hit on the dragon's head would evaporate.
+    Routing parts back to their owner means touching `EntityManager`, the
+    interact handler and the tracker. `next_entity_id` also hands out one id at
+    a time, so the contiguous block the protocol requires is not even reservable
+    today.
+  - *The end podium.* `EnderDragonFight` places the exit portal, the egg and the
+    return gateway through `EndPodiumFeature`, and finds them again through
+    `EndPodiumFeature.getLocation`. Steel has the end spikes, the end island,
+    the end platform and the end gateway, but nothing for the podium.
+
+  What is *not* blocking it, checked rather than assumed: the End dimension is
+  real and served, the 24-node ring A* needs only `Node`/`NodeHeap`/`Path`,
+  which are all public and complete, the dragon's synced phase data is already
+  generated, and the boss bar above is ready for it. `EndCrystal` also has no
+  `hurt` override, so a crystal is currently indestructible -- small, and worth
+  doing with the fight rather than before it.
+
 
 - **Statistics and advancements.** Both need `stat_type` and `custom_stat`
   registries that come from SteelExtractor, an external tool not in this

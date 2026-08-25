@@ -31,7 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 37
+[entities] 36
 Allay
 Armadillo
 Axolotl
@@ -65,7 +65,6 @@ ThrownLingeringPotion
 Villager
 WanderingTrader
 Warden
-WitherBoss
 Zoglin
 ZombieNautilus
 ZombieVillager

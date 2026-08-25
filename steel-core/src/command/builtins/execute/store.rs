@@ -30,7 +30,13 @@ type Builder = CommandNodeBuilder<CommandSource, SteelCommandRuntime>;
 const EXECUTE_ROOT: CommandRedirectTarget = CommandRedirectTarget::CommandRoot;
 
 pub(super) fn target(name: &'static str, store_result: bool) -> Builder {
-    // TODO: Add bossbar after Steel has a persistent custom-bossbar manager.
+    // TODO: Add bossbar. The bar itself now exists -- `crate::boss_event`
+    // carries `BossEvent`/`ServerBossEvent` and the packet -- but this target
+    // stores into a *named* bar, which needs vanilla's `CustomBossEvent`
+    // (an id, a value and a max over a `ServerBossEvent`) and the per-domain
+    // `CustomBossEvents` saved data that owns them. Neither exists yet, and
+    // the shape of the persistence is best settled alongside `/bossbar`,
+    // which is its only other caller.
     // TODO: Add entity after live entity NBT can reload every command-visible field.
     literal(name)
         .then(

@@ -198,13 +198,15 @@ impl EntityTracker {
             let entity = tracked.entity.upgrade();
             // Send despawn to all tracking players
             for player_id in tracked.seen_by.read().iter() {
-                if let Some(player) = get_player(*player_id) {
-                    if let Some(entity) = &entity
-                        && let Some(packet) =
-                            self.vehicle_passenger_packet_for_player(entity.as_ref(), *player_id)
-                    {
-                        player.send_packet(packet);
-                    }
+                let Some(player) = get_player(*player_id) else {
+                    continue;
+                };
+                // A dead  means the entity object is already gone, so
+                // there is nothing left to run the stop hook on; the client
+                // still has to be told.
+                if let Some(entity) = &entity {
+                    self.send_despawn_packets(entity.as_ref(), &player);
+                } else {
                     player.send_packet(CRemoveEntities::single(entity_id));
                 }
             }
@@ -218,7 +220,7 @@ impl EntityTracker {
     /// broadcast predicate, and is inside the effective horizontal range.
     pub fn update_player(
         &self,
-        player: &Player,
+        player: &Arc<Player>,
         view: &PlayerChunkView,
         is_chunk_sent: impl Fn(ChunkPos) -> bool,
     ) {
@@ -262,19 +264,14 @@ impl EntityTracker {
             }
 
             if despawn {
-                let vehicle_packet =
-                    self.vehicle_passenger_packet_for_player(entity.as_ref(), player_id);
-                entities_to_despawn.push((entity_id, vehicle_packet));
+                entities_to_despawn.push(entity);
             }
 
             true
         });
 
-        for (entity_id, vehicle_packet) in entities_to_despawn {
-            if let Some(packet) = vehicle_packet {
-                player.send_packet(packet);
-            }
-            player.send_packet(CRemoveEntities::single(entity_id));
+        for entity in entities_to_despawn {
+            self.send_despawn_packets(entity.as_ref(), player);
         }
 
         for entity in entities_to_spawn {
@@ -523,7 +520,7 @@ impl EntityTracker {
 
         self.entities.iter_sync(|entity_id, tracked| {
             if tracked.seen_by.write().remove(&player_id) {
-                entities_to_despawn.push(*entity_id);
+                entities_to_despawn.push((*entity_id, tracked.entity.upgrade()));
             }
             if tracked.entity.strong_count() == 0 {
                 dead_entities.push(*entity_id);
@@ -531,8 +528,12 @@ impl EntityTracker {
             true
         });
 
-        for entity_id in entities_to_despawn {
-            player.send_packet(CRemoveEntities::single(entity_id));
+        for (entity_id, entity) in entities_to_despawn {
+            if let Some(entity) = entity {
+                self.send_despawn_packets(entity.as_ref(), player);
+            } else {
+                player.send_packet(CRemoveEntities::single(entity_id));
+            }
         }
 
         for entity_id in dead_entities {
@@ -587,12 +588,7 @@ impl EntityTracker {
 
         for player_id in players_to_remove {
             if let Some(player) = get_player(player_id) {
-                if let Some(packet) =
-                    self.vehicle_passenger_packet_for_player(entity.as_ref(), player_id)
-                {
-                    player.send_packet(packet);
-                }
-                player.send_packet(CRemoveEntities::single(entity_id));
+                self.send_despawn_packets(entity.as_ref(), &player);
             }
         }
 
@@ -640,12 +636,7 @@ impl EntityTracker {
 
         for player_id in players_to_remove {
             if let Some(player) = get_player(player_id) {
-                if let Some(packet) =
-                    self.vehicle_passenger_packet_for_player(entity.as_ref(), player_id)
-                {
-                    player.send_packet(packet);
-                }
-                player.send_packet(CRemoveEntities::single(entity_id));
+                self.send_despawn_packets(entity.as_ref(), &player);
             }
         }
 
@@ -717,10 +708,29 @@ impl EntityTracker {
         players
     }
 
-    fn send_spawn_packets(&self, entity: &SharedEntity, player: &Player) {
+    /// Sends one player everything it needs to see an entity, then tells the
+    /// entity it has a new viewer.
+    ///
+    /// Vanilla parity: `ServerEntity.addPairing`, which sends the pairing
+    /// bundle and only then calls `Entity.startSeenByPlayer`.
+    fn send_spawn_packets(&self, entity: &SharedEntity, player: &Arc<Player>) {
         let entity_id = entity.id();
         self.spawn_pairing(entity, player.id())
             .send_to(entity_id, player);
+        entity.start_seen_by_player(player);
+    }
+
+    /// Tells an entity it lost a viewer, then takes it off that client.
+    ///
+    /// Vanilla parity: `ServerEntity.removePairing`, which calls
+    /// `Entity.stopSeenByPlayer` before the remove packet so a boss bar comes
+    /// down with the entity rather than after it.
+    fn send_despawn_packets(&self, entity: &dyn Entity, player: &Player) {
+        entity.stop_seen_by_player(player);
+        if let Some(packet) = self.vehicle_passenger_packet_for_player(entity, player.id()) {
+            player.send_packet(packet);
+        }
+        player.send_packet(CRemoveEntities::single(entity.id()));
     }
 
     fn spawn_pairing(&self, entity: &SharedEntity, player_id: i32) -> EntitySpawnPairing {

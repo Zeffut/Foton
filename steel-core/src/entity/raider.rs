@@ -7,8 +7,11 @@
 //! village falls.
 //!
 //! **Steel has no raid.** `Raid` and `Raids` stand on villagers, an occupied
-//! village point-of-interest index, a saved-data manager and a boss bar, and
-//! Steel has none of those four. Every member of this trait that vanilla
+//! village point-of-interest index, a saved-data manager and a boss bar. The
+//! boss bar is now here -- vanilla's raid bar is a plain
+//! [`ServerBossEvent`](crate::boss_event::ServerBossEvent), which is what
+//! `crate::boss_event` provides -- and the other three are still missing.
+//! Every member of this trait that vanilla
 //! answers from a live `Raid` therefore answers from nothing here and is marked
 //! as such; the raid-independent half -- the patrol captaincy, the banner, the
 //! two-per-tick idle clock, the celebration flag and the per-mob raid buffs --

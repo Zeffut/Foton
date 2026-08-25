@@ -89,9 +89,14 @@ impl ChunkMap {
         // chunk-view changes. Vanilla refreshes tracked entities for accepted
         // movement within the same chunk as well.
         let sent_chunks = player.chunk_sender.lock().sent_chunks_snapshot();
-        world
-            .entity_tracker()
-            .update_player(player, &new_view, |chunk| sent_chunks.contains(&chunk));
+        // The tracker hands the shared handle to `start_seen_by_player`, which
+        // a boss keeps a weak reference to; a player that is not in the world's
+        // index yet has no entities to be paired with either.
+        if let Some(player) = world.players.get_by_entity_id(player.id()) {
+            world
+                .entity_tracker()
+                .update_player(&player, &new_view, |chunk| sent_chunks.contains(&chunk));
+        }
     }
 
     /// Removes a player from the chunk map.
