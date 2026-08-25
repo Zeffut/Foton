@@ -15,6 +15,7 @@ mod sign_block;
 mod skull_block;
 mod torch_block;
 mod weathering_lantern_block;
+pub mod wither_summon;
 
 pub use banner_block::{BannerBlock, WallBannerBlock};
 pub use cake_block::CakeBlock;

@@ -82,6 +82,19 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         true
     }
 
+    /// Called when a player begins tracking this entity.
+    ///
+    /// Mirrors vanilla `Entity.startSeenByPlayer`. Bosses put their bar on the
+    /// newcomer's screen here.
+    fn start_seen_by_player(&self, _player: &Arc<Player>) {}
+
+    /// Called when a player stops tracking this entity.
+    ///
+    /// Mirrors vanilla `Entity.stopSeenByPlayer`. Bosses take their bar back
+    /// off here, which is what stops a bar lingering on a client that walked
+    /// away.
+    fn stop_seen_by_player(&self, _player: &Player) {}
+
     /// Gets the entity's unique network ID (session-local).
     fn id(&self) -> i32 {
         self.base().id()

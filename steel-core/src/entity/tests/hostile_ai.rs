@@ -19,8 +19,8 @@ use crate::entity::entities::{
     EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HuskEntity,
     IllusionerEntity, IronGolemEntity, MagmaCubeEntity, PhantomEntity, PillagerEntity,
     RavagerEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity,
-    SpiderEntity, StrayEntity, VexEntity, VindicatorEntity, WitchEntity, WitherSkeletonEntity,
-    ZombieEntity, ZombifiedPiglinEntity,
+    SpiderEntity, StrayEntity, VexEntity, VindicatorEntity, WitchEntity, WitherBoss,
+    WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -84,4 +84,5 @@ assert_ai_runs! {
     a_vex_runs_its_goals: VexEntity, &vanilla_entities::VEX;
     a_phantom_runs_its_goals: PhantomEntity, &vanilla_entities::PHANTOM;
     a_shulker_runs_its_goals: ShulkerEntity, &vanilla_entities::SHULKER;
+    a_wither_runs_its_goals: WitherBoss, &vanilla_entities::WITHER;
 }

@@ -29,9 +29,11 @@ use crate::world::{
 use crate::worldgen::{ChunkGeneratorType, EmptyChunkGenerator};
 use steel_utils::ChunkPos;
 
+mod boss_bar;
 mod connection;
 mod player;
 
+pub(crate) use boss_bar::{BossBarViewer, OP_ADD, OP_REMOVE, OP_UPDATE_PROGRESS, OP_UPDATE_STYLE};
 pub(crate) use connection::TestConnection;
 pub(crate) use player::{TestPlayerBuilder, test_runtime_config};
 

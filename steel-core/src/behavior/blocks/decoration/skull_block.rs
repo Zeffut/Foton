@@ -6,9 +6,9 @@
 //! All fourteen skull blocks share one block entity, so the classes differ
 //! only in how the block is oriented and in what a broken one gives back.
 //!
-//! Not implemented: the wither summoning that `WitherSkullBlock.checkSpawn`
-//! performs. Steel has no wither entity, so there is nothing to summon; the
-//! hook is marked where it belongs rather than half-built.
+//! The wither summoning that `WitherSkullBlock.checkSpawn` performs lives in
+//! the sibling [`wither_summon`](super::wither_summon) module, which owns the
+//! two block patterns it searches with.
 
 use std::sync::{Arc, Weak};
 
@@ -26,6 +26,7 @@ use steel_utils::angle::convert_to_rotation_segment;
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _, Identifier};
 
+use super::wither_summon::check_wither_spawn;
 use crate::behavior::block::{BlockEntityCreation, BlockLootContext};
 use crate::behavior::context::PlacementSource;
 use crate::behavior::{BlockBehavior, BlockPlaceContext, BlockStateBehaviorExt as _};
@@ -561,10 +562,7 @@ impl BlockBehavior for WitherSkullBlock {
         source: &PlacementSource<'_>,
     ) {
         self.inner.set_placed_by(state, world, pos, source);
-        // Vanilla calls `WitherSkullBlock.checkSpawn` here, which matches the
-        // soul sand and skull pattern and spawns a wither. Steel has no wither
-        // entity, so there is nothing to spawn and no pattern matcher to run;
-        // this is where that hook goes once the entity exists.
+        check_wither_spawn(world, pos);
     }
 
     fn get_drops(
@@ -630,8 +628,7 @@ impl BlockBehavior for WitherWallSkullBlock {
         source: &PlacementSource<'_>,
     ) {
         self.inner.set_placed_by(state, world, pos, source);
-        // Vanilla calls `WitherSkullBlock.checkSpawn` here as well. Out of
-        // scope for the same reason: Steel has no wither entity.
+        check_wither_spawn(world, pos);
     }
 
     fn get_drops(
