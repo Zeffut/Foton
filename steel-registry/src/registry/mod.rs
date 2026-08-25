@@ -63,6 +63,7 @@ use crate::{
     structure_processor::StructureProcessorListRegistry,
     template_pool,
     timeline::TimelineRegistry,
+    trading::{TradeSetRegistry, VillagerTradeRegistry},
     trim_material::TrimMaterialRegistry,
     trim_pattern::TrimPatternRegistry,
     vanilla_attributes, vanilla_banner_pattern_tags, vanilla_banner_patterns, vanilla_biome_tags,
@@ -82,8 +83,8 @@ use crate::{
     vanilla_potions, vanilla_recipes, vanilla_structure_processors, vanilla_structure_tags,
     vanilla_structures, vanilla_template_pools, vanilla_timeline_tags, vanilla_timelines,
     vanilla_trim_materials, vanilla_trim_patterns, vanilla_villager_professions,
-    vanilla_villager_types, vanilla_wolf_sound_variants, vanilla_wolf_variants,
-    vanilla_world_clocks, vanilla_zombie_nautilus_variants,
+    vanilla_villager_trades, vanilla_villager_types, vanilla_wolf_sound_variants,
+    vanilla_wolf_variants, vanilla_world_clocks, vanilla_zombie_nautilus_variants,
     villager_profession::VillagerProfessionRegistry,
     villager_type::VillagerTypeRegistry,
     wolf_sound_variant::WolfSoundVariantRegistry,
@@ -279,6 +280,8 @@ pub struct Registry {
     pub placed_features: PlacedFeatureRegistry,
     pub structures: StructureRegistry,
     pub structure_processors: StructureProcessorListRegistry,
+    pub villager_trades: VillagerTradeRegistry,
+    pub trade_sets: TradeSetRegistry,
 }
 
 impl Debug for Registry {
@@ -378,6 +381,8 @@ impl Registry {
             &mut registry.entity_types,
         );
         vanilla_loot_tables::register_loot_tables(&mut registry.loot_tables);
+        vanilla_villager_trades::register_villager_trades(&mut registry.villager_trades);
+        vanilla_villager_trades::register_trade_sets(&mut registry.trade_sets);
         vanilla_block_entity_types::register_block_entity_types(&mut registry.block_entity_types);
         vanilla_game_rules::register_game_rules(&mut registry.game_rules);
         vanilla_game_events::register_game_events(&mut registry.game_events);
@@ -469,6 +474,8 @@ impl Registry {
         self.placed_features.freeze();
         self.structures.freeze();
         self.structure_processors.freeze();
+        self.villager_trades.freeze();
+        self.trade_sets.freeze();
     }
 
     fn validate_references(&self) {
@@ -725,6 +732,8 @@ impl Registry {
             placed_features: PlacedFeatureRegistry::new(),
             structures: StructureRegistry::new(),
             structure_processors: StructureProcessorListRegistry::new(),
+            villager_trades: VillagerTradeRegistry::new(),
+            trade_sets: TradeSetRegistry::new(),
         }
     }
 }

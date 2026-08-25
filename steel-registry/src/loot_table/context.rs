@@ -61,6 +61,13 @@ pub enum NumberProvider {
     EnchantmentLevel {
         enchantment: Identifier,
     },
+    /// The sum of several providers.
+    ///
+    /// Vanilla parity: `net.minecraft.world.level.storage.loot.providers.number.Sum`.
+    /// Note that it adds its summands as *floats* and only then converts, so
+    /// `sum(0.6, 0.6)` is one, not two; and that its `getInt` floors where every
+    /// other provider rounds.
+    Sum(&'static [NumberProvider]),
 }
 
 /// Target for scoreboard number provider.
@@ -106,6 +113,10 @@ impl NumberProvider {
             Self::EnchantmentLevel { enchantment } => ctx
                 .and_then(|c| c.tool)
                 .map_or(0.0, |t| t.get_enchantment_level(enchantment) as f32),
+            Self::Sum(summands) => summands
+                .iter()
+                .map(|summand| summand.get(rng, ctx))
+                .sum::<f32>(),
         }
     }
 
@@ -123,6 +134,10 @@ impl NumberProvider {
                 }
                 count as f32
             }
+            Self::Sum(summands) => summands
+                .iter()
+                .map(|summand| summand.get_simple(rng))
+                .sum::<f32>(),
             // Context-dependent providers return 0 when no context available
             Self::Score { .. } | Self::Storage { .. } | Self::EnchantmentLevel { .. } => 0.0,
         }
@@ -132,6 +147,8 @@ impl NumberProvider {
     pub fn get_int(&self, rng: &mut impl rand::Rng) -> i32 {
         match self {
             Self::Uniform { min, max } => uniform_int(rng, math_round(*min), math_round(*max)),
+            // `Sum.getInt` is the one provider that floors rather than rounds.
+            Self::Sum(_) => math_floor(self.get_simple(rng)),
             other => math_round(other.get_simple(rng)),
         }
     }
@@ -144,9 +161,20 @@ impl NumberProvider {
     ) -> i32 {
         match self {
             Self::Uniform { min, max } => uniform_int(rng, math_round(*min), math_round(*max)),
+            Self::Sum(_) => math_floor(self.get(rng, ctx)),
             other => math_round(other.get(rng, ctx)),
         }
     }
+}
+
+/// Vanilla parity: `Mth.floor(float)`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "vanilla's Mth.floor(float) truncates to int the same way"
+)]
+#[must_use]
+pub const fn math_floor(value: f32) -> i32 {
+    value.floor() as i32
 }
 
 /// `java.lang.Math.round` semantics for a float.
@@ -301,6 +329,12 @@ pub struct LootContext<'a, R: rand::Rng> {
     pub block_entity: Option<BlockEntityRef<'a>>,
     /// The entity interacting with a block/entity (e.g., player opening a chest).
     pub interacting_entity: Option<EntityRef<'a>>,
+    /// Whether an enchanting function may bank its cost in `ADDITIONAL_TRADE_COST`.
+    ///
+    /// Vanilla parity: the presence of `LootContextParams.ADDITIONAL_COST_COMPONENT_ALLOWED`,
+    /// which only `AbstractVillager.addOffersFromTradeSet` supplies. Every other
+    /// loot roll leaves it out, so a chest's enchanted sword never carries a price.
+    pub additional_cost_component_allowed: bool,
 }
 
 /// Weather state for `WeatherCheck` condition.
@@ -341,6 +375,11 @@ pub struct EntityRef<'a> {
     /// Vanilla `FishingHook.isOpenWaterFishing`, `None` for anything that is not
     /// a fishing hook.
     pub in_open_water: Option<bool>,
+    /// Vanilla `minecraft:predicates.villager/variant`, the villager type a
+    /// villager or zombie villager answers `DataComponents.VILLAGER_VARIANT`
+    /// with. `None` for anything that is not one. This is what decides which
+    /// boats a fisherman sells and which maps a cartographer draws.
+    pub villager_variant: Option<&'a Identifier>,
 }
 
 /// Entity flags for predicate checking.
@@ -425,7 +464,18 @@ impl<'a, R: rand::Rng> LootContext<'a, R> {
             damage_source: None,
             block_entity: None,
             interacting_entity: None,
+            additional_cost_component_allowed: false,
         }
+    }
+
+    /// Allow enchanting functions to bank their cost in `ADDITIONAL_TRADE_COST`.
+    ///
+    /// Vanilla parity: adding `LootContextParams.ADDITIONAL_COST_COMPONENT_ALLOWED`
+    /// to the params, which only a merchant building its offers does.
+    #[must_use]
+    pub const fn allowing_additional_cost_component(mut self) -> Self {
+        self.additional_cost_component_allowed = true;
+        self
     }
 
     /// Set the luck value.

@@ -358,6 +358,15 @@ pub trait LivingEntity: Entity {
         None
     }
 
+    /// Returns `minecraft:predicates.villager/variant` for the loot context,
+    /// when this entity answers `DataComponents.VILLAGER_VARIANT`.
+    ///
+    /// This is what a villager trade's `merchant_predicate` reads, so a
+    /// cartographer only draws the maps its own biome sells.
+    fn villager_loot_variant(&self) -> Option<&'static Identifier> {
+        None
+    }
+
     /// Returns vanilla `LivingEntity.getSoundVolume`.
     fn sound_volume(&self) -> f32 {
         1.0
@@ -3697,6 +3706,7 @@ fn living_entity_loot_ref_with_equipment<'a, E: LivingEntity + ?Sized>(
         chicken_variant: entity.chicken_loot_variant(),
         mooshroom_variant: entity.mooshroom_loot_variant(),
         cube_size: entity.cube_loot_size(),
+        villager_variant: entity.villager_loot_variant(),
         // A living entity is never a fishing hook.
         in_open_water: None,
     }

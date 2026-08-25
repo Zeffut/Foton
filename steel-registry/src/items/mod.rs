@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 use rustc_hash::FxHashMap;
 
@@ -102,6 +102,14 @@ impl Item {
 }
 
 pub type ItemRef = &'static Item;
+
+/// A `vanilla_items` entry as it can be named from a `static` initializer.
+///
+/// Every generated item is a `LazyLock<Item>`, because building one needs the
+/// component registry. That makes `&vanilla_items::EMERALD` a reference to the
+/// lock rather than an [`ItemRef`], which is the only form another generated
+/// table's `static` can hold; deref it to reach the item itself.
+pub type LazyItemRef = &'static LazyLock<Item>;
 
 pub struct ItemRegistry {
     items_by_id: Vec<ItemRef>,

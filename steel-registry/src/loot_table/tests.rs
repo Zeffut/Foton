@@ -175,16 +175,8 @@ fn sheared_predicate_rejects_non_sheep_entities() {
     let condition = LootCondition::EntityProperties {
         entity: LootContextEntity::This,
         predicate: EntityPredicate {
-            entity_type: None,
-            flags: None,
-            equipment: None,
-            sheep_color: None,
             sheep_sheared: Some(false),
-            chicken_variant: None,
-            mooshroom_variant: None,
-            cube_size: None,
-            in_open_water: None,
-            unsupported: &[],
+            ..EntityPredicate::ANY
         },
     };
     assert!(
@@ -584,7 +576,7 @@ fn chest_pool_weights_favor_the_heavier_entries() {
 }
 
 #[test]
-fn an_unmodelled_entity_predicate_key_never_matches() {
+fn an_unmodeled_entity_predicate_key_never_matches() {
     // `entities/zombie` gates its red mushroom on riding a zombie horse, a
     // vehicle predicate the generator cannot lower. Treating the unlowerable
     // predicate as satisfied handed every zombie a red mushroom.

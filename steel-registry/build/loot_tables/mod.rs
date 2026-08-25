@@ -14,19 +14,20 @@ mod entries;
 mod functions;
 mod values;
 
-use conditions::generate_condition;
+pub(crate) use conditions::generate_condition;
 use entries::generate_pool;
-use functions::generate_function;
+pub(crate) use functions::generate_function;
+pub(crate) use values::generate_number_provider;
 use values::{
-    generate_damage_source_predicate, generate_enchantment_options, generate_entity_predicate,
-    generate_instrument_options, generate_location_predicate, generate_loot_context_entity,
-    generate_loot_type, generate_number_provider, generate_tool_predicate,
+    generate_damage_source_predicate, generate_entity_predicate, generate_instrument_options,
+    generate_location_predicate, generate_loot_context_entity, generate_loot_type,
+    generate_optional_enchantment_options, generate_potion_options, generate_tool_predicate,
 };
 
 /// A number provider can be a constant number or an object with type.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
-enum NumberProviderJson {
+pub(crate) enum NumberProviderJson {
     Constant(f32),
     Object {
         #[serde(rename = "type")]
@@ -41,6 +42,9 @@ enum NumberProviderJson {
         n: Option<f32>, // Can be float in JSON, convert to i32 later
         #[serde(default)]
         p: Option<f32>,
+        /// The terms of a `minecraft:sum` provider.
+        #[serde(default)]
+        summands: Option<Vec<NumberProviderJson>>,
     },
 }
 
@@ -181,7 +185,7 @@ const fn default_weight() -> i32 {
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
-struct LootConditionJson {
+pub(crate) struct LootConditionJson {
     condition: String,
     // block_state_property
     #[serde(default)]
@@ -288,6 +292,10 @@ struct EntityPredicateJson {
     /// Entity data components (`minecraft:components`). Only `sheep/color` is modeled.
     #[serde(rename = "minecraft:components", default)]
     components: Option<EntityComponentsJson>,
+    /// Partial component predicates (`minecraft:predicates`, vanilla's
+    /// `DataComponentMatchers.partial`). Only `villager/variant` is modeled.
+    #[serde(rename = "minecraft:predicates", default)]
+    component_predicates: Option<EntityComponentPredicatesJson>,
     /// Type-specific predicates. `minecraft:type_specific/sheep` is a single
     /// registry-style flat key, not a nested object.
     #[serde(rename = "minecraft:type_specific/sheep", default)]
@@ -300,6 +308,17 @@ struct EntityPredicateJson {
     fishing_hook_type_specific: Option<FishingHookTypeSpecificJson>,
     /// Everything this generator does not model, kept so the predicate can be
     /// marked unsupported instead of quietly matching anything.
+    #[serde(flatten)]
+    unmodeled: FxHashMap<String, serde_json::Value>,
+}
+
+/// Partial component predicates (`minecraft:predicates`).
+#[derive(Deserialize, Debug, Clone)]
+struct EntityComponentPredicatesJson {
+    /// Vanilla `VillagerTypePredicate`: a `HolderSet<VillagerType>`, so either
+    /// one id or a list of them.
+    #[serde(rename = "minecraft:villager/variant", default)]
+    villager_variant: Option<EnchantmentOptionsJson>,
     #[serde(flatten)]
     unmodeled: FxHashMap<String, serde_json::Value>,
 }
@@ -411,6 +430,21 @@ struct ToolPredicatesJson {
     enchantments: Option<Vec<EnchantmentPredicateJson>>,
 }
 
+/// The `item_filter` of a `minecraft:filtered` function.
+///
+/// Vanilla parity: `ItemPredicate`. `count` is not modeled because no vanilla
+/// data uses it here; `read_item_filter` fails the build if it appears.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct ItemFilterJson {
+    #[serde(default)]
+    items: Option<String>,
+    #[serde(default)]
+    predicates: Option<FxHashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    components: Option<serde_json::Value>,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 struct EnchantmentPredicateJson {
@@ -429,7 +463,7 @@ struct LevelRangeJson {
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
-struct LootFunctionJson {
+pub(crate) struct LootFunctionJson {
     function: String,
     #[serde(default)]
     count: Option<NumberProviderJson>,
@@ -454,6 +488,22 @@ struct LootFunctionJson {
     // enchant_with_levels
     #[serde(default)]
     levels: Option<NumberProviderJson>,
+    // enchant_randomly
+    #[serde(default)]
+    only_compatible: Option<bool>,
+    // enchant_randomly / enchant_with_levels
+    #[serde(default)]
+    include_additional_cost_component: bool,
+    // set_random_dyes
+    #[serde(default)]
+    number_of_dyes: Option<NumberProviderJson>,
+    // filtered
+    #[serde(default)]
+    item_filter: Option<ItemFilterJson>,
+    #[serde(default)]
+    on_pass: Option<Box<LootFunctionJson>>,
+    #[serde(default)]
+    on_fail: Option<Box<LootFunctionJson>>,
     // copy_components
     #[serde(default)]
     source: Option<String>,
@@ -480,6 +530,12 @@ struct LootFunctionJson {
     zoom: Option<i32>,
     #[serde(default)]
     skip_existing_chunks: Option<bool>,
+    /// Read only so `deny_unknown_fields` accepts the exploration-map trades.
+    /// Nothing consumes it: locating a structure needs a world the loot context
+    /// does not carry, so `ItemStack::create_exploration_map` is inert.
+    #[expect(dead_code, reason = "parsed so the field is not silently unknown")]
+    #[serde(default)]
+    search_radius: Option<i32>,
     // set_name (keep as raw value for text component)
     #[serde(default)]
     name: Option<serde_json::Value>,
@@ -607,10 +663,11 @@ pub(crate) fn build() -> TokenStream {
         use crate::loot_table::{
             BlockPredicate, BonusFormula, ConditionalLootFunction, CopySource, DamageSourcePredicate,
             DamageTagPredicate, DyeColor, EnchantedChance, EnchantmentOptions, EntityEquipment,
-            EntityFlags, EntityPredicate, EquipmentSlotGroup, InstrumentOptions, LocationPredicate,
-            LootCondition, LootContextEntity, LootEntry, LootFunction, LootPool, LootTable,
-            LootTableRef, LootTableRegistry, LootType, NameTarget, NumberProvider,
-            NumberProviderRange, PropertyCheck, StewEffect, ToolPredicate,
+            EntityFlags, EntityPredicate, EquipmentSlotGroup, InstrumentOptions,
+            ItemComponentPredicate, ItemFilter, ItemFilterItems, LocationPredicate, LootCondition,
+            LootContextEntity, LootEntry, LootFunction, LootPool, LootTable, LootTableRef,
+            LootTableRegistry, LootType, NameTarget, NumberProvider, NumberProviderRange,
+            PotionOptions, PropertyCheck, StewEffect, ToolPredicate,
         };
         use steel_utils::Identifier;
     });

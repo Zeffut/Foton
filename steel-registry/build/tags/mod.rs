@@ -1,7 +1,7 @@
 //! Build-time generation for vanilla registry tags.
 
 mod block;
-mod common;
+pub(crate) mod common;
 mod fluid;
 mod item;
 

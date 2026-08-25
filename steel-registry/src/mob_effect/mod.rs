@@ -79,6 +79,20 @@ pub struct MobEffect {
 }
 
 impl MobEffect {
+    /// Returns whether this effect lands once instead of ticking for a duration.
+    ///
+    /// Vanilla parity: `MobEffect.isInstantaneous`, which is `false` on the base
+    /// class and overridden only by `InstantaneousMobEffect` -- a class just
+    /// `HealOrHarmMobEffect` (instant health, instant damage) and
+    /// `SaturationMobEffect` extend. Vanilla keeps this in the class hierarchy
+    /// rather than in registry data, so it is mirrored as the same fixed set.
+    #[must_use]
+    pub fn is_instantaneous(&self) -> bool {
+        self.key == crate::vanilla_mob_effects::INSTANT_HEALTH.key
+            || self.key == crate::vanilla_mob_effects::INSTANT_DAMAGE.key
+            || self.key == crate::vanilla_mob_effects::SATURATION.key
+    }
+
     /// Creates the particle options synchronized for one effect instance.
     #[must_use]
     pub fn create_particle_options(&self, ambient: bool) -> ParticleData {

@@ -317,16 +317,8 @@ fn the_open_water_predicate_rejects_a_non_hook() {
     init_vanilla_registry();
 
     let predicate = EntityPredicate {
-        entity_type: None,
-        flags: None,
-        equipment: None,
-        sheep_color: None,
-        sheep_sheared: None,
-        chicken_variant: None,
-        mooshroom_variant: None,
-        cube_size: None,
         in_open_water: Some(true),
-        unsupported: &[],
+        ..EntityPredicate::ANY
     };
     let mut rng = rand::rng();
     let mut context = LootContext::new(&mut rng).with_this_entity(EntityRef::default());

@@ -680,33 +680,145 @@ impl ItemStack {
         self.set_damage_value(damage);
     }
 
-    /// Enchants this item randomly with enchantments from the given options.
-    pub const fn enchant_randomly<R: rand::Rng>(
+    /// Puts one enchantment drawn at random from `options` on this item.
+    ///
+    /// Returns the trade cost the draw would carry, so a caller holding
+    /// `ADDITIONAL_COST_COMPONENT_ALLOWED` can bank it; `None` when nothing was
+    /// applied. `options` of `None` means the whole enchantment registry.
+    ///
+    /// Vanilla parity: the body of `EnchantRandomlyFunction.run` and its private
+    /// `enchantItem`, including the book-to-enchanted-book swap.
+    pub fn enchant_randomly<R: rand::Rng>(
         &mut self,
-        _options: &crate::loot_table::EnchantmentOptions,
-        _rng: &mut R,
-    ) {
-        // TODO: Implement when enchantment registry and system are ready
-        // 1. Get list of valid enchantments from options (tag or list)
-        // 2. Filter to enchantments that can apply to this item
-        // 3. Pick one randomly
-        // 4. Pick a random level for that enchantment
-        // 5. Add to ENCHANTMENTS component
+        options: Option<&crate::loot_table::EnchantmentOptions>,
+        only_compatible: bool,
+        rng: &mut R,
+    ) -> Option<i32> {
+        use crate::enchantment::{Enchantment, helper};
+
+        let target_is_book = self.is(&vanilla_items::BOOK);
+        // A book accepts anything, so vanilla drops the filter for one even when
+        // the function asked for it.
+        let should_check_compatibility = !target_is_book && only_compatible;
+
+        let candidates: Vec<_> = helper::resolve_options(options)
+            .into_iter()
+            .filter(|candidate| !should_check_compatibility || candidate.can_enchant(self.item))
+            .collect();
+        if candidates.is_empty() {
+            // Vanilla logs "couldn't find a compatible enchantment" and hands
+            // the stack back untouched.
+            return None;
+        }
+
+        let enchantment = candidates[rng.random_range(0..candidates.len())];
+        let max_level = enchantment.max_level.max(Enchantment::MIN_LEVEL);
+        let level = rng.random_range(Enchantment::MIN_LEVEL..=max_level);
+
+        if target_is_book {
+            *self = Self::new(&vanilla_items::ENCHANTED_BOOK);
+        }
+        self.upgrade_enchantment(enchantment.key.clone(), level);
+
+        let level = i32::try_from(level).unwrap_or(i32::MAX);
+        Some(2 + rng.random_range(0..5 + level * 10) + 3 * level)
     }
 
-    /// Enchants this item as if using an enchanting table at the given level.
-    pub const fn enchant_with_levels<R: rand::Rng>(
+    /// Enchants this item as if an enchanting table had spent `enchantment_cost`.
+    ///
+    /// Vanilla parity: `EnchantmentHelper.enchantItem`. `options` of `None`
+    /// means the whole enchantment registry.
+    pub fn enchant_with_levels<R: rand::Rng>(
         &mut self,
-        _level: i32,
-        _options: &crate::loot_table::EnchantmentOptions,
-        _rng: &mut R,
+        enchantment_cost: i32,
+        options: Option<&crate::loot_table::EnchantmentOptions>,
+        rng: &mut R,
     ) {
-        // TODO: Implement when enchantment registry and system are ready
-        // This simulates the enchanting table algorithm:
-        // 1. Calculate modified level based on item enchantability
-        // 2. Generate list of possible enchantments for that level
-        // 3. Filter by options (tag or list)
-        // 4. Apply enchantments with proper weights
+        use crate::enchantment::helper;
+
+        let source = helper::resolve_options(options);
+        let rolled = helper::select_enchantment(rng, self, enchantment_cost, &source);
+
+        // Vanilla swaps the book after rolling and does it whether or not the
+        // roll came back empty, so a book that catches nothing is still an
+        // enchanted book.
+        if self.is(&vanilla_items::BOOK) {
+            *self = Self::new(&vanilla_items::ENCHANTED_BOOK);
+        }
+        for instance in rolled {
+            self.upgrade_enchantment(instance.enchantment.key.clone(), instance.level);
+        }
+    }
+
+    /// Dyes this item with `rolls` dyes drawn at random.
+    ///
+    /// Vanilla parity: `SetRandomDyesFunction.run`, which draws from the whole
+    /// `DyeColor` enum and hands the result to `DyedItemColor.applyDyes`.
+    pub fn set_random_dyes<R: rand::Rng>(&mut self, rolls: i32, rng: &mut R) {
+        use crate::DyeColor;
+        use crate::data_components::components::DyedItemColor;
+        use crate::data_components::vanilla_components::DYED_COLOR;
+
+        if rolls <= 0 {
+            return;
+        }
+
+        let dyes: Vec<DyeColor> = (0..rolls)
+            .map(|_| DyeColor::VALUES[rng.random_range(0..DyeColor::VALUES.len())])
+            .collect();
+        let Some(mixed) = DyedItemColor::apply_dyes(self.get(DYED_COLOR).copied(), &dyes) else {
+            return;
+        };
+
+        // Vanilla parity: `DyedItemColor.applyDyes` returns
+        // `itemStack.copyWithCount(1)`, so a dyed roll is always a single item.
+        self.count = 1;
+        self.set(DYED_COLOR, mixed);
+    }
+
+    /// Puts a potion drawn at random from `options` into this item.
+    ///
+    /// Vanilla parity: `SetRandomPotionFunction.run`. `options` of `None` means
+    /// the whole potion registry.
+    pub fn set_random_potion<R: rand::Rng>(
+        &mut self,
+        options: Option<&crate::loot_table::PotionOptions>,
+        rng: &mut R,
+    ) {
+        use crate::TaggedRegistryExt as _;
+        use crate::loot_table::PotionOptions;
+        use crate::potion::PotionRef;
+
+        fn draw<R: rand::Rng>(rng: &mut R, potions: &[PotionRef]) -> Option<PotionRef> {
+            (!potions.is_empty()).then(|| potions[rng.random_range(0..potions.len())])
+        }
+
+        let drawn = match options {
+            // Vanilla parity: no options means `HolderLookup.getRandom` over the
+            // whole potion registry.
+            None => {
+                let count = REGISTRY.potions.len();
+                (count > 0)
+                    .then(|| rng.random_range(0..count))
+                    .and_then(|id| REGISTRY.potions.by_id(id))
+            }
+            Some(PotionOptions::Tag(tag)) => REGISTRY
+                .potions
+                .get_tag(tag)
+                .and_then(|potions| draw(rng, &potions)),
+            Some(PotionOptions::List(keys)) => {
+                let potions: Vec<PotionRef> = keys
+                    .iter()
+                    .filter_map(|key| REGISTRY.potions.by_key(key))
+                    .collect();
+                draw(rng, &potions)
+            }
+        };
+
+        let Some(potion) = drawn else {
+            return;
+        };
+        self.set_potion(&potion.key);
     }
 
     /// Copies components from a source (block entity, attacker, etc.) to this item.
@@ -761,6 +873,18 @@ impl ItemStack {
     }
 
     /// Creates an exploration map pointing to a structure.
+    ///
+    /// MISSING FOUNDATION: `ExplorationMapFunction.run` locates a structure with
+    /// `ServerLevel.findNearestMapStructure` and then builds a map item around
+    /// the position it finds. A [`crate::loot_table::LootContext`] carries an
+    /// origin but no world, and Steel has no structure locator reachable from
+    /// `steel-registry` at all, so there is nothing here to search with.
+    ///
+    /// The stack is deliberately left as the plain `map` the trade started
+    /// from. Every vanilla use of this function is followed by a
+    /// `minecraft:filtered` on `filled_map`/`map_id` whose `on_fail` discards,
+    /// so the effect is that a cartographer withholds the trade rather than
+    /// selling a blank map -- one offer instead of two at levels 2, 3 and 5.
     pub const fn create_exploration_map(
         &mut self,
         _destination: &Identifier,
@@ -768,11 +892,6 @@ impl ItemStack {
         _zoom: i32,
         _skip_existing_chunks: bool,
     ) {
-        // TODO: Implement exploration map creation
-        // 1. Change item to filled_map
-        // 2. Set MAP_DECORATIONS component
-        // 3. Set destination structure tag
-        // This requires world access to find the structure
     }
 
     /// Sets the custom name or item name of this item.
@@ -812,15 +931,41 @@ impl ItemStack {
         );
     }
 
-    /// Sets the suspicious stew effects for this item.
-    pub const fn set_stew_effects<R: rand::Rng>(
+    /// Adds one of `effects`, drawn at random, to this suspicious stew.
+    ///
+    /// Vanilla parity: `SetStewEffectFunction.run`. Anything that is not a
+    /// suspicious stew is left alone, and the drawn duration is read as seconds
+    /// unless the effect lands instantly.
+    pub fn set_stew_effects<R: rand::Rng>(
         &mut self,
-        _effects: &[crate::loot_table::StewEffect],
-        _rng: &mut R,
+        effects: &[crate::loot_table::StewEffect],
+        rng: &mut R,
     ) {
-        // TODO: Implement stew effect setting
-        // Set the SUSPICIOUS_STEW_EFFECTS component
-        // Duration is determined by each effect's NumberProvider
+        use crate::data_components::components::{SuspiciousStewEffect, SuspiciousStewEffects};
+        use crate::data_components::vanilla_components::SUSPICIOUS_STEW_EFFECTS;
+
+        if !self.is(&vanilla_items::SUSPICIOUS_STEW) || effects.is_empty() {
+            return;
+        }
+
+        let entry = &effects[rng.random_range(0..effects.len())];
+        let Some(effect) = REGISTRY.mob_effects.by_key(&entry.effect_type) else {
+            return;
+        };
+
+        let mut duration = entry.duration.get_int(rng);
+        if !effect.is_instantaneous() {
+            duration *= 20;
+        }
+
+        // Vanilla parity: `SuspiciousStewEffects.withEffectAdded`, which copies
+        // the list and appends rather than replacing what is already there.
+        let mut applied = self
+            .get(SUSPICIOUS_STEW_EFFECTS)
+            .map(|existing| existing.effects().to_vec())
+            .unwrap_or_default();
+        applied.push(SuspiciousStewEffect::new(effect, duration));
+        self.set(SUSPICIOUS_STEW_EFFECTS, SuspiciousStewEffects::new(applied));
     }
 
     pub fn set_enchantments(&mut self, enchantments: &[(Identifier, u32)], add: bool) {
@@ -1784,5 +1929,153 @@ mod persistence_tests {
             .expect("nested custom data should remain");
         assert_eq!(nested.int("kept"), Some(1));
         assert_eq!(nested.int("changed"), Some(2));
+    }
+}
+
+#[cfg(test)]
+mod loot_component_tests {
+    use rand::SeedableRng as _;
+    use rand::rngs::StdRng;
+    use steel_utils::Identifier;
+
+    use super::ItemStack;
+    use crate::data_components::components::{DyedItemColor, PotionContents, SuspiciousStewEffect};
+    use crate::data_components::vanilla_components::{
+        DYED_COLOR, POTION_CONTENTS, SUSPICIOUS_STEW_EFFECTS,
+    };
+    use crate::loot_table::{NumberProvider, PotionOptions, StewEffect};
+    use crate::{DyeColor, init_vanilla_registry, vanilla_items};
+
+    static AWKWARD_ONLY: [Identifier; 1] = [Identifier::vanilla_static("awkward")];
+
+    fn seeded_rng(seed: u64) -> StdRng {
+        StdRng::seed_from_u64(seed)
+    }
+
+    fn stew_effects(effect: &str, seconds: f32) -> Vec<StewEffect> {
+        vec![StewEffect {
+            effect_type: Identifier::vanilla(effect.to_owned()),
+            duration: NumberProvider::Constant(seconds),
+        }]
+    }
+
+    fn stored_durations(stack: &ItemStack) -> Vec<i32> {
+        stack
+            .get(SUSPICIOUS_STEW_EFFECTS)
+            .map(|stored| {
+                stored
+                    .effects()
+                    .iter()
+                    .map(SuspiciousStewEffect::duration)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `SetRandomDyesFunction` returns before it touches anything when the
+    /// number provider hands it nothing to roll.
+    #[test]
+    fn dyeing_with_no_rolls_leaves_the_stack_alone() {
+        init_vanilla_registry();
+        let mut helmet = ItemStack::with_count(&vanilla_items::LEATHER_HELMET, 3);
+        // Already dyed, so a roll that went ahead anyway would still have
+        // something to average and would shrink the stack to one.
+        helmet.set(DYED_COLOR, DyedItemColor::new(DyedItemColor::LEATHER_COLOR));
+        let untouched = helmet.clone();
+        let mut rng = seeded_rng(1);
+
+        helmet.set_random_dyes(0, &mut rng);
+
+        assert_eq!(helmet, untouched);
+    }
+
+    /// Vanilla dyes through `copyWithCount(1)`, so however big the stack was
+    /// only one item comes back dyed.
+    #[test]
+    fn dyeing_a_stack_leaves_one_dyed_item_behind() {
+        init_vanilla_registry();
+        let mut helmet = ItemStack::with_count(&vanilla_items::LEATHER_HELMET, 3);
+        let mut rng = seeded_rng(1);
+
+        helmet.set_random_dyes(2, &mut rng);
+
+        assert_eq!(helmet.count, 1);
+        assert!(helmet.get(DYED_COLOR).is_some());
+    }
+
+    /// White and black average to `(139, 142, 143)`, whose brightest channel is
+    /// 143 -- but the two sources average 144 bright, and vanilla rescales the
+    /// mix back up to that. Without the rescale, mixing could only ever darken.
+    #[test]
+    fn mixing_dyes_rescales_to_the_average_brightness_instead_of_just_averaging() {
+        let mixed = DyedItemColor::apply_dyes(None, &[DyeColor::White, DyeColor::Black])
+            .expect("two dyes should mix to a color");
+
+        assert_eq!((mixed.rgb() >> 16) & 0xFF, 139);
+        assert_eq!((mixed.rgb() >> 8) & 0xFF, 142);
+        assert_eq!(mixed.rgb() & 0xFF, 144);
+    }
+
+    /// A one-entry holder set is the narrowest a loot table can ask for, so
+    /// anything but that potion means the options were ignored.
+    #[test]
+    fn a_random_potion_is_drawn_from_the_options_it_was_given() {
+        init_vanilla_registry();
+        let mut bottle = ItemStack::new(&vanilla_items::POTION);
+        let mut rng = seeded_rng(2);
+
+        bottle.set_random_potion(Some(&PotionOptions::List(&AWKWARD_ONLY)), &mut rng);
+
+        assert_eq!(
+            bottle
+                .get(POTION_CONTENTS)
+                .and_then(PotionContents::potion)
+                .map(|potion| potion.value().key.clone()),
+            Some(Identifier::vanilla_static("awkward"))
+        );
+    }
+
+    /// `SetStewEffectFunction` guards on the item, so a bowl of ordinary stew
+    /// never picks up an effect from a table that shares its functions.
+    #[test]
+    fn stew_effects_are_ignored_by_anything_that_is_not_a_suspicious_stew() {
+        init_vanilla_registry();
+        let mut bowl = ItemStack::new(&vanilla_items::MUSHROOM_STEW);
+        let mut rng = seeded_rng(4);
+
+        bowl.set_stew_effects(&stew_effects("night_vision", 7.0), &mut rng);
+
+        assert!(bowl.get(SUSPICIOUS_STEW_EFFECTS).is_none());
+    }
+
+    /// The loot table writes seconds; the component holds ticks. An effect that
+    /// lands instantly is the exception vanilla leaves unscaled.
+    #[test]
+    fn a_lasting_stew_effect_is_stored_in_ticks_while_an_instant_one_is_not() {
+        init_vanilla_registry();
+        let mut rng = seeded_rng(6);
+
+        let mut lasting = ItemStack::new(&vanilla_items::SUSPICIOUS_STEW);
+        lasting.set_stew_effects(&stew_effects("night_vision", 7.0), &mut rng);
+
+        let mut instant = ItemStack::new(&vanilla_items::SUSPICIOUS_STEW);
+        instant.set_stew_effects(&stew_effects("instant_health", 7.0), &mut rng);
+
+        assert_eq!(stored_durations(&lasting), vec![140]);
+        assert_eq!(stored_durations(&instant), vec![7]);
+    }
+
+    /// `withEffectAdded` copies and appends, so two functions on one table each
+    /// add an effect instead of the second overwriting the first.
+    #[test]
+    fn a_second_stew_effect_is_added_beside_the_first_rather_than_replacing_it() {
+        init_vanilla_registry();
+        let mut stew = ItemStack::new(&vanilla_items::SUSPICIOUS_STEW);
+        let mut rng = seeded_rng(8);
+
+        stew.set_stew_effects(&stew_effects("night_vision", 7.0), &mut rng);
+        stew.set_stew_effects(&stew_effects("saturation", 3.0), &mut rng);
+
+        assert_eq!(stored_durations(&stew), vec![140, 3]);
     }
 }

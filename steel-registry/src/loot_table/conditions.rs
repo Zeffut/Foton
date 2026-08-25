@@ -154,6 +154,9 @@ pub struct EntityPredicate {
     ///
     /// This is what gates the treasure entry of `gameplay/fishing`.
     pub in_open_water: Option<bool>,
+    /// Vanilla `minecraft:predicates.villager/variant` check: the subject's
+    /// villager type must be one of these. Empty means the key was absent.
+    pub villager_variant: &'static [Identifier],
     /// Predicate keys the generator could not model, by name.
     ///
     /// A predicate Steel cannot evaluate must not silently pass -- that hands
@@ -387,6 +390,25 @@ fn tool_enchantment_matches(
 }
 
 impl EntityPredicate {
+    /// A predicate that asks nothing, so every subject passes it.
+    ///
+    /// Vanilla parity: `EntityPredicate.Builder.entity().build()`, which the
+    /// generator emits for an `entity_properties` condition whose predicate is
+    /// absent or is not an entity predicate at all.
+    pub const ANY: Self = Self {
+        entity_type: None,
+        flags: None,
+        equipment: None,
+        sheep_color: None,
+        sheep_sheared: None,
+        chicken_variant: None,
+        mooshroom_variant: None,
+        cube_size: None,
+        in_open_water: None,
+        villager_variant: &[],
+        unsupported: &[],
+    };
+
     fn test<R: rand::Rng>(&self, entity: EntityRef<'_>, ctx: &LootContext<'_, R>) -> bool {
         if !self.unsupported.is_empty() {
             return false;
@@ -438,6 +460,17 @@ impl EntityPredicate {
             // Vanilla `FishingHookPredicate.matches` rejects any subject that is
             // not a fishing hook, so an unknown open-water state fails.
             if entity.in_open_water != Some(expected_open_water) {
+                return false;
+            }
+        }
+
+        if !self.villager_variant.is_empty() {
+            // A subject with no villager type has none of the listed ones, the
+            // way vanilla's `VillagerTypePredicate` rejects a non-villager.
+            let Some(variant) = entity.villager_variant else {
+                return false;
+            };
+            if !self.villager_variant.contains(variant) {
                 return false;
             }
         }

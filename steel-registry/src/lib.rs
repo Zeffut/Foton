@@ -400,6 +400,11 @@ pub mod vanilla_loot_tables;
 
 #[expect(warnings)]
 #[rustfmt::skip]
+#[path = "generated/vanilla_villager_trades.rs"]
+pub mod vanilla_villager_trades;
+
+#[expect(warnings)]
+#[rustfmt::skip]
 #[path = "generated/vanilla_trial_spawner_configs.rs"]
 pub mod vanilla_trial_spawner_configs;
 

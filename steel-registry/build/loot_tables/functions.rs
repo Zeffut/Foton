@@ -1,9 +1,91 @@
 use super::{
-    LimitJson, LootFunctionJson, TokenStream, generate_condition, generate_enchantment_options,
-    generate_instrument_options, generate_number_provider, quote,
+    ItemFilterJson, LimitJson, LootFunctionJson, TokenStream, generate_condition,
+    generate_instrument_options, generate_number_provider, generate_optional_enchantment_options,
+    generate_potion_options, quote,
 };
 
-pub(super) fn generate_function(function: &LootFunctionJson) -> TokenStream {
+/// Generates the `ItemPredicate` a `minecraft:filtered` function tests.
+///
+/// Every `predicates` entry a vanilla file uses is a presence check -- either
+/// `DataComponentPredicate.AnyValueType` (`{}`) or an enchantment list built
+/// from `[{}]`. Anything richer fails the build rather than passing unchecked,
+/// because a filter that always matches turns an `on_fail: discard` into a
+/// villager selling the unenchanted item vanilla would have withheld.
+fn generate_item_filter(filter: &ItemFilterJson) -> TokenStream {
+    assert!(
+        filter.components.is_none(),
+        "`item_filter.components` is not modeled; the only vanilla uses are `predicates`"
+    );
+
+    let items = match &filter.items {
+        None => quote! { None },
+        Some(items) => {
+            if let Some(tag) = items.strip_prefix('#') {
+                let tag = tag.strip_prefix("minecraft:").unwrap_or(tag);
+                quote! { Some(ItemFilterItems::Tag(Identifier::vanilla_static(#tag))) }
+            } else {
+                let id = items.strip_prefix("minecraft:").unwrap_or(items);
+                quote! { Some(ItemFilterItems::List(&[Identifier::vanilla_static(#id)])) }
+            }
+        }
+    };
+
+    let mut predicates: Vec<(&str, TokenStream)> = Vec::new();
+    for (key, value) in filter.predicates.iter().flatten() {
+        let generated = match key.as_str() {
+            "minecraft:enchantments" | "minecraft:stored_enchantments" => {
+                let entries = value
+                    .as_array()
+                    .unwrap_or_else(|| panic!("`{key}` item filter predicate must be a list"));
+                assert!(
+                    entries.len() == 1
+                        && entries[0]
+                            .as_object()
+                            .is_some_and(serde_json::Map::is_empty),
+                    "only the `[{{}}]` form of `{key}` is modeled, got {value}"
+                );
+                if key == "minecraft:enchantments" {
+                    quote! { ItemComponentPredicate::AnyEnchantment }
+                } else {
+                    quote! { ItemComponentPredicate::AnyStoredEnchantment }
+                }
+            }
+            other => {
+                assert!(
+                    value.as_object().is_some_and(serde_json::Map::is_empty),
+                    "item filter predicate `{other}` is only modeled in its empty \
+                     `DataComponentPredicate.AnyValueType` form, got {value}"
+                );
+                let component = other.strip_prefix("minecraft:").unwrap_or(other);
+                quote! { ItemComponentPredicate::Present(Identifier::vanilla_static(#component)) }
+            }
+        };
+        predicates.push((key.as_str(), generated));
+    }
+    // A JSON map has no order; sort so the generated file is reproducible.
+    predicates.sort_by_key(|(key, _)| *key);
+    let predicates: Vec<TokenStream> = predicates.into_iter().map(|(_, tokens)| tokens).collect();
+
+    quote! {
+        ItemFilter {
+            items: #items,
+            predicates: &[#(#predicates),*],
+        }
+    }
+}
+
+/// Generates one `on_pass` / `on_fail` branch of a `minecraft:filtered` function.
+fn generate_optional_branch(branch: Option<&LootFunctionJson>) -> TokenStream {
+    match branch {
+        None => quote! { None },
+        Some(branch) => {
+            let branch = generate_function(branch);
+            quote! { Some(&#branch) }
+        }
+    }
+}
+
+pub(crate) fn generate_function(function: &LootFunctionJson) -> TokenStream {
     let func_body = match function.function.as_str() {
         "minecraft:set_count" => {
             let count = function.count.as_ref().map_or_else(
@@ -121,19 +203,59 @@ pub(super) fn generate_function(function: &LootFunctionJson) -> TokenStream {
             quote! { LootFunction::SetDamage { damage: #damage, add: #add } }
         }
         "minecraft:enchant_randomly" => {
-            let options = generate_enchantment_options(&function.options);
-            quote! { LootFunction::EnchantRandomly { options: #options } }
+            let options = generate_optional_enchantment_options(&function.options);
+            // Vanilla's `only_compatible` defaults to true.
+            let only_compatible = function.only_compatible.unwrap_or(true);
+            let include_additional_cost_component = function.include_additional_cost_component;
+            quote! {
+                LootFunction::EnchantRandomly {
+                    options: #options,
+                    only_compatible: #only_compatible,
+                    include_additional_cost_component: #include_additional_cost_component,
+                }
+            }
         }
         "minecraft:enchant_with_levels" => {
             let levels = function.levels.as_ref().map_or_else(
-                || quote! { NumberProvider::Constant(30.0) },
+                || panic!("`minecraft:enchant_with_levels` is missing its `levels`"),
                 generate_number_provider,
             );
-            let options = generate_enchantment_options(&function.options);
+            let options = generate_optional_enchantment_options(&function.options);
+            let include_additional_cost_component = function.include_additional_cost_component;
             quote! {
                 LootFunction::EnchantWithLevels {
                     levels: #levels,
                     options: #options,
+                    include_additional_cost_component: #include_additional_cost_component,
+                }
+            }
+        }
+        "minecraft:set_random_potion" => {
+            let options = generate_potion_options(&function.options);
+            quote! { LootFunction::SetRandomPotion { options: #options } }
+        }
+        "minecraft:set_random_dyes" => {
+            let number_of_dyes = function.number_of_dyes.as_ref().map_or_else(
+                || panic!("`minecraft:set_random_dyes` is missing its `number_of_dyes`"),
+                generate_number_provider,
+            );
+            quote! { LootFunction::SetRandomDyes { number_of_dyes: #number_of_dyes } }
+        }
+        "minecraft:discard" => {
+            quote! { LootFunction::Discard }
+        }
+        "minecraft:filtered" => {
+            let item_filter =
+                generate_item_filter(function.item_filter.as_ref().unwrap_or_else(|| {
+                    panic!("`minecraft:filtered` is missing its `item_filter`")
+                }));
+            let on_pass = generate_optional_branch(function.on_pass.as_deref());
+            let on_fail = generate_optional_branch(function.on_fail.as_deref());
+            quote! {
+                LootFunction::Filtered {
+                    item_filter: #item_filter,
+                    on_pass: #on_pass,
+                    on_fail: #on_fail,
                 }
             }
         }

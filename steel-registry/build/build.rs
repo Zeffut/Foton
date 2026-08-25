@@ -75,6 +75,7 @@ mod trial_spawner_configs;
 mod trim_materials;
 mod trim_patterns;
 mod villager_professions;
+mod villager_trades;
 mod villager_types;
 mod wolf_sound_variants;
 mod wolf_variants;
@@ -163,6 +164,7 @@ const TRIAL_SPAWNER_CONFIGS: &str = "trial_spawner_configs";
 const CARVERS: &str = "configured_carvers";
 const CONFIGURED_FEATURES: &str = "configured_features";
 const PLACED_FEATURES: &str = "placed_features";
+const VILLAGER_TRADES: &str = "villager_trades";
 
 pub fn main() {
     // Rerun build script when any file in the build/ directory changes
@@ -252,6 +254,7 @@ pub fn main() {
         (carvers::build(), CARVERS),
         (features::build_configured(), CONFIGURED_FEATURES),
         (features::build_placed(), PLACED_FEATURES),
+        (villager_trades::build(), VILLAGER_TRADES),
     ];
 
     // Track which files we're generating this run

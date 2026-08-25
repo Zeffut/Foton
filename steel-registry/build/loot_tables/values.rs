@@ -8,7 +8,7 @@ use super::{
     ToShoutySnakeCase, TokenStream, quote,
 };
 
-pub(super) fn generate_number_provider(value: &NumberProviderJson) -> TokenStream {
+pub(crate) fn generate_number_provider(value: &NumberProviderJson) -> TokenStream {
     match value {
         NumberProviderJson::Constant(v) => {
             quote! { NumberProvider::Constant(#v) }
@@ -20,7 +20,12 @@ pub(super) fn generate_number_provider(value: &NumberProviderJson) -> TokenStrea
             max,
             n,
             p,
+            summands,
         } => match provider_type.as_str() {
+            "minecraft:constant" => {
+                let v = value.unwrap_or(1.0);
+                quote! { NumberProvider::Constant(#v) }
+            }
             "minecraft:uniform" => {
                 let min = min.unwrap_or(0.0);
                 let max = max.unwrap_or(1.0);
@@ -31,10 +36,18 @@ pub(super) fn generate_number_provider(value: &NumberProviderJson) -> TokenStrea
                 let p = p.unwrap_or(0.5);
                 quote! { NumberProvider::Binomial { n: #n, p: #p } }
             }
-            _ => {
-                let v = value.unwrap_or(1.0);
-                quote! { NumberProvider::Constant(#v) }
+            "minecraft:sum" => {
+                let summands = summands.as_ref().unwrap_or_else(|| {
+                    panic!("`minecraft:sum` number provider is missing its `summands`")
+                });
+                let summands: Vec<TokenStream> =
+                    summands.iter().map(generate_number_provider).collect();
+                quote! { NumberProvider::Sum(&[#(#summands),*]) }
             }
+            // A provider Steel cannot model must not silently become a constant:
+            // that hands out a count nobody computed. Fail the build instead,
+            // the way an unknown loot function already does.
+            other => panic!("Unknown number provider type: {other}"),
         },
     }
 }
@@ -166,29 +179,67 @@ pub(super) fn generate_tool_predicate(predicate: &Option<PredicateJson>) -> Toke
     quote! { ToolPredicate::Any }
 }
 
-pub(super) fn generate_enchantment_options(
-    options: &Option<EnchantmentOptionsJson>,
+/// Generates the body of a `RegistryCodecs.homogeneousList` field.
+///
+/// The three vanilla shapes are `"#namespace:tag"`, a bare `"namespace:id"`
+/// naming exactly one entry, and a list of ids. Only the `#` marks a tag --
+/// treating a bare id as one was the old behavior and silently produced an
+/// empty set, so `piglin_bartering`'s soul speed boots came out unenchanted.
+fn generate_homogeneous_list(
+    options: &EnchantmentOptionsJson,
+    tag_variant: &TokenStream,
+    list_variant: &TokenStream,
 ) -> TokenStream {
     match options {
-        Some(EnchantmentOptionsJson::Tag(s)) => {
-            let tag = s
-                .strip_prefix("#minecraft:")
-                .unwrap_or(s.strip_prefix("minecraft:").unwrap_or(s));
-            quote! { EnchantmentOptions::Tag(Identifier::vanilla_static(#tag)) }
+        EnchantmentOptionsJson::Tag(s) => {
+            if let Some(tag) = s.strip_prefix('#') {
+                let tag = tag.strip_prefix("minecraft:").unwrap_or(tag);
+                quote! { #tag_variant(Identifier::vanilla_static(#tag)) }
+            } else {
+                let id = s.strip_prefix("minecraft:").unwrap_or(s);
+                quote! { #list_variant(&[Identifier::vanilla_static(#id)]) }
+            }
         }
-        Some(EnchantmentOptionsJson::List(arr)) => {
-            let enchants: Vec<TokenStream> = arr
+        EnchantmentOptionsJson::List(arr) => {
+            let ids: Vec<TokenStream> = arr
                 .iter()
                 .map(|s| {
+                    assert!(
+                        !s.starts_with('#'),
+                        "a homogeneous list may not contain the tag {s}"
+                    );
                     let s = s.strip_prefix("minecraft:").unwrap_or(s);
                     quote! { Identifier::vanilla_static(#s) }
                 })
                 .collect();
-            quote! { EnchantmentOptions::List(&[#(#enchants),*]) }
+            quote! { #list_variant(&[#(#ids),*]) }
         }
-        None => {
-            quote! { EnchantmentOptions::Tag(Identifier::vanilla_static("on_random_loot")) }
-        }
+    }
+}
+
+/// The `Optional<HolderSet<Enchantment>>` shape: absent means the whole registry.
+pub(super) fn generate_optional_enchantment_options(
+    options: &Option<EnchantmentOptionsJson>,
+) -> TokenStream {
+    let tag = quote! { EnchantmentOptions::Tag };
+    let list = quote! { EnchantmentOptions::List };
+    if let Some(options) = options {
+        let options = generate_homogeneous_list(options, &tag, &list);
+        quote! { Some(#options) }
+    } else {
+        quote! { None }
+    }
+}
+
+/// The `Optional<HolderSet<Potion>>` of `minecraft:set_random_potion`.
+pub(super) fn generate_potion_options(options: &Option<EnchantmentOptionsJson>) -> TokenStream {
+    let tag = quote! { PotionOptions::Tag };
+    let list = quote! { PotionOptions::List };
+    if let Some(options) = options {
+        let options = generate_homogeneous_list(options, &tag, &list);
+        quote! { Some(#options) }
+    } else {
+        quote! { None }
     }
 }
 
@@ -402,6 +453,31 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
         .and_then(|hook| hook.in_open_water)
         .map_or_else(|| quote! { None }, |open| quote! { Some(#open) });
 
+    let villager_variant: Vec<TokenStream> = predicate
+        .component_predicates
+        .as_ref()
+        .and_then(|predicates| predicates.villager_variant.as_ref())
+        .map(|variants| match variants {
+            // Vanilla's `HolderSet` shape: one id, or a list of them. No trade
+            // uses a `#tag` here, and a tag would need a runtime lookup the
+            // predicate has no registry for, so it fails the build.
+            EnchantmentOptionsJson::Tag(id) => {
+                assert!(
+                    !id.starts_with('#'),
+                    "a villager/variant predicate given as the tag {id} is not modeled"
+                );
+                vec![id.clone()]
+            }
+            EnchantmentOptionsJson::List(ids) => ids.clone(),
+        })
+        .unwrap_or_default()
+        .iter()
+        .map(|id| {
+            let id = id.strip_prefix("minecraft:").unwrap_or(id);
+            quote! { Identifier::vanilla_static(#id) }
+        })
+        .collect();
+
     // A predicate key the generator cannot lower must be visible: it is warned
     // about at build time and fails at evaluation time, never silently passes.
     let mut unsupported: Vec<String> = predicate.unmodeled.keys().cloned().collect();
@@ -411,6 +487,14 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
                 .unmodeled
                 .keys()
                 .map(|key| format!("minecraft:components -> {key}")),
+        );
+    }
+    if let Some(predicates) = &predicate.component_predicates {
+        unsupported.extend(
+            predicates
+                .unmodeled
+                .keys()
+                .map(|key| format!("minecraft:predicates -> {key}")),
         );
     }
     unsupported.sort();
@@ -427,6 +511,7 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             mooshroom_variant: #mooshroom_variant,
             cube_size: #cube_size,
             in_open_water: #in_open_water,
+            villager_variant: &[#(#villager_variant),*],
             unsupported: &[#(#unsupported),*],
         }
     }

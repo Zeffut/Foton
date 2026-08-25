@@ -1,4 +1,5 @@
 pub mod effect;
+pub mod helper;
 
 use crate::equipment::EquipmentSlot;
 pub use crate::equipment::EquipmentSlotGroup;
@@ -15,6 +16,14 @@ use steel_utils::Identifier;
 pub struct EnchantmentCost {
     pub base: i32,
     pub per_level_above_first: i32,
+}
+
+impl EnchantmentCost {
+    /// Vanilla parity: `Enchantment.Cost.calculate`.
+    #[must_use]
+    pub const fn calculate(self, level: i32) -> i32 {
+        self.base + self.per_level_above_first * (level - 1)
+    }
 }
 
 #[derive(Debug)]
@@ -104,6 +113,12 @@ fn parse_tag_ref(tag_ref: &str) -> Option<Identifier> {
 }
 
 impl Enchantment {
+    /// The lowest level any enchantment is ever rolled at.
+    ///
+    /// Vanilla parity: `Enchantment.getMinLevel`, which is a hardcoded 1 --
+    /// only the maximum comes from the definition.
+    pub const MIN_LEVEL: u32 = 1;
+
     /// Vanilla `Enchantment::matchingSlot`.
     #[must_use]
     pub fn matching_slot(&self, slot: EquipmentSlot) -> bool {
@@ -126,6 +141,9 @@ impl Enchantment {
     /// while remaining applicable from a book at an anvil.
     #[must_use]
     pub fn is_primary_item(&self, item: ItemRef) -> bool {
+        if !self.can_enchant(item) {
+            return false;
+        }
         let Some(primary) = self.primary_items else {
             return true;
         };

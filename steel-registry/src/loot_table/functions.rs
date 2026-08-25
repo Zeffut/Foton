@@ -1,7 +1,6 @@
 use super::{
     DyeColor, EquipmentSlotGroup, Identifier, InstrumentRef, ItemStack, LootCondition, LootContext,
-    LootContextEntity, LootEntry, NumberProvider, REGISTRY, RngExt, TaggedRegistryExt,
-    ToolPredicate, math_round,
+    LootContextEntity, LootEntry, NumberProvider, REGISTRY, RngExt, TaggedRegistryExt, math_round,
 };
 
 /// Options for selecting enchantments - either a tag reference or explicit list.
@@ -10,6 +9,17 @@ pub enum EnchantmentOptions {
     /// Reference to an enchantment tag (e.g., "`on_random_loot`").
     Tag(Identifier),
     /// Explicit list of enchantment IDs.
+    List(&'static [Identifier]),
+}
+
+/// Options for selecting a potion - either a tag reference or explicit list.
+///
+/// Vanilla parity: the `HolderSet<Potion>` of `SetRandomPotionFunction`.
+#[derive(Debug, Clone)]
+pub enum PotionOptions {
+    /// Reference to a potion tag (e.g., "`tradeable`").
+    Tag(Identifier),
+    /// Explicit list of potion IDs.
     List(&'static [Identifier]),
 }
 
@@ -68,11 +78,22 @@ pub enum LootFunction {
     /// Set the damage of the item (0.0 = broken, 1.0 = full durability).
     SetDamage { damage: NumberProvider, add: bool },
     /// Enchant the item randomly with enchantments from options.
-    EnchantRandomly { options: EnchantmentOptions },
+    EnchantRandomly {
+        /// Absent means "every registered enchantment".
+        options: Option<EnchantmentOptions>,
+        /// Whether the drawn enchantment has to be one this item accepts.
+        /// Vanilla default is `true`; a book ignores it either way.
+        only_compatible: bool,
+        /// Whether to bank the enchantment's cost in `ADDITIONAL_TRADE_COST`.
+        include_additional_cost_component: bool,
+    },
     /// Enchant the item as if using an enchanting table at the specified level.
     EnchantWithLevels {
         levels: NumberProvider,
-        options: EnchantmentOptions,
+        /// Absent means "every registered enchantment".
+        options: Option<EnchantmentOptions>,
+        /// Whether to bank the enchantment cost in `ADDITIONAL_TRADE_COST`.
+        include_additional_cost_component: bool,
     },
     /// Copy components from the block entity to the item.
     CopyComponents {
@@ -108,6 +129,15 @@ pub enum LootFunction {
     SetOminousBottleAmplifier { amplifier: NumberProvider },
     /// Set the potion type.
     SetPotion { id: Identifier },
+    /// Put a potion drawn at random into the item.
+    ///
+    /// Vanilla parity: `SetRandomPotionFunction`. Absent options mean the whole
+    /// potion registry.
+    SetRandomPotion { options: Option<PotionOptions> },
+    /// Dye the item with `number_of_dyes` dyes drawn at random.
+    ///
+    /// Vanilla parity: `SetRandomDyesFunction`.
+    SetRandomDyes { number_of_dyes: NumberProvider },
     /// Set the suspicious stew effects.
     SetStewEffect { effects: &'static [StewEffect] },
     /// Set the instrument for goat horns.
@@ -193,11 +223,89 @@ pub enum LootFunction {
     Sequence {
         functions: &'static [ConditionalLootFunction],
     },
-    /// Conditionally apply function to specific item predicate matches.
+    /// Branch on whether the item matches a predicate.
+    ///
+    /// Vanilla parity: `FilteredFunction`, which since 26.2 carries an
+    /// `on_pass` *and* an `on_fail` branch rather than a single modifier. The
+    /// `on_fail` half is what makes a villager's enchanted-gear trade vanish
+    /// when the enchantment did not take, instead of selling plain gear.
     Filtered {
-        item_filter: ToolPredicate,
-        modifier: &'static ConditionalLootFunction,
+        item_filter: ItemFilter,
+        on_pass: Option<&'static ConditionalLootFunction>,
+        on_fail: Option<&'static ConditionalLootFunction>,
     },
+}
+
+/// The items an [`ItemFilter`] accepts.
+#[derive(Debug, Clone)]
+pub enum ItemFilterItems {
+    /// Reference to an item tag.
+    Tag(Identifier),
+    /// Explicit list of item IDs.
+    List(&'static [Identifier]),
+}
+
+impl ItemFilterItems {
+    fn test(&self, item: &ItemStack) -> bool {
+        match self {
+            Self::Tag(tag) => REGISTRY
+                .items
+                .get_tag(tag)
+                .is_some_and(|items| items.iter().any(|candidate| item.is(candidate))),
+            Self::List(ids) => ids.contains(&item.item.key),
+        }
+    }
+}
+
+/// One entry of an [`ItemFilter`]'s `predicates` map.
+///
+/// Vanilla parity: the values of `DataComponentMatchers.partial`. Only the
+/// shapes the vanilla data actually uses are modeled; the build script fails
+/// on anything else rather than letting an unchecked predicate pass.
+#[derive(Debug, Clone)]
+pub enum ItemComponentPredicate {
+    /// Vanilla parity: `DataComponentPredicate.AnyValueType` -- the named
+    /// component is present on the stack, whatever its value.
+    Present(Identifier),
+    /// Vanilla parity: `EnchantmentsPredicate.Enchantments` built from `[{}]`,
+    /// which passes when the stack carries at least one enchantment.
+    AnyEnchantment,
+    /// Vanilla parity: `EnchantmentsPredicate.StoredEnchantments` built from `[{}]`.
+    AnyStoredEnchantment,
+}
+
+/// Vanilla parity: the `ItemPredicate` a `minecraft:filtered` function tests.
+#[derive(Debug, Clone)]
+pub struct ItemFilter {
+    /// The accepted items. `None` accepts any item.
+    pub items: Option<ItemFilterItems>,
+    /// Component predicates that must all pass.
+    pub predicates: &'static [ItemComponentPredicate],
+}
+
+impl ItemFilter {
+    /// Vanilla parity: `ItemPredicate.test`.
+    #[must_use]
+    pub fn test(&self, item: &ItemStack) -> bool {
+        if item.is_empty() {
+            return false;
+        }
+        if let Some(items) = &self.items
+            && !items.test(item)
+        {
+            return false;
+        }
+
+        self.predicates.iter().all(|predicate| match predicate {
+            ItemComponentPredicate::Present(component) => item.has_component(component),
+            ItemComponentPredicate::AnyEnchantment => item
+                .get(crate::data_components::vanilla_components::ENCHANTMENTS)
+                .is_some_and(|enchantments| !enchantments.is_empty()),
+            ItemComponentPredicate::AnyStoredEnchantment => item
+                .get(crate::data_components::vanilla_components::STORED_ENCHANTMENTS)
+                .is_some_and(|enchantments| !enchantments.is_empty()),
+        })
+    }
 }
 
 /// Operation mode for list modifications (lore, book pages).
@@ -391,14 +499,39 @@ impl LootFunction {
             LootFunction::SetDamage { damage, add } => {
                 item.set_damage_fraction(damage.get_simple(ctx.rng), *add);
             }
-            LootFunction::EnchantRandomly { options } => {
-                // TODO: Implement when enchantment system is ready
-                item.enchant_randomly(options, ctx.rng);
+            LootFunction::EnchantRandomly {
+                options,
+                only_compatible,
+                include_additional_cost_component,
+            } => {
+                let Some(cost) = item.enchant_randomly(options.as_ref(), *only_compatible, ctx.rng)
+                else {
+                    return;
+                };
+                if *include_additional_cost_component && ctx.additional_cost_component_allowed {
+                    item.set(
+                        crate::data_components::vanilla_components::ADDITIONAL_TRADE_COST,
+                        cost,
+                    );
+                }
             }
-            LootFunction::EnchantWithLevels { levels, options } => {
-                // TODO: Implement when enchantment system is ready
-                let level = levels.get_int(ctx.rng);
-                item.enchant_with_levels(level, options, ctx.rng);
+            LootFunction::EnchantWithLevels {
+                levels,
+                options,
+                include_additional_cost_component,
+            } => {
+                let enchantment_cost = levels.get_int(ctx.rng);
+                item.enchant_with_levels(enchantment_cost, options.as_ref(), ctx.rng);
+                if *include_additional_cost_component
+                    && ctx.additional_cost_component_allowed
+                    && !item.is_empty()
+                    && enchantment_cost > 0
+                {
+                    item.set(
+                        crate::data_components::vanilla_components::ADDITIONAL_TRADE_COST,
+                        enchantment_cost,
+                    );
+                }
             }
             LootFunction::CopyComponents { source, include } => {
                 // TODO: Implement when block entity system is ready
@@ -440,6 +573,12 @@ impl LootFunction {
             }
             LootFunction::SetPotion { id } => {
                 item.set_potion(id);
+            }
+            LootFunction::SetRandomPotion { options } => {
+                item.set_random_potion(options.as_ref(), ctx.rng);
+            }
+            LootFunction::SetRandomDyes { number_of_dyes } => {
+                item.set_random_dyes(number_of_dyes.get_int(ctx.rng), ctx.rng);
             }
             LootFunction::SetStewEffect { effects } => {
                 item.set_stew_effects(effects, ctx.rng);
@@ -537,10 +676,17 @@ impl LootFunction {
             }
             LootFunction::Filtered {
                 item_filter,
-                modifier,
+                on_pass,
+                on_fail,
             } => {
-                if item_filter.test(item, ctx) && modifier.conditions.iter().all(|c| c.test(ctx)) {
-                    modifier.function.apply(item, ctx);
+                let branch = if item_filter.test(item) {
+                    on_pass
+                } else {
+                    on_fail
+                };
+                let Some(branch) = branch else { return };
+                if branch.conditions.iter().all(|c| c.test(ctx)) {
+                    branch.function.apply(item, ctx);
                 }
             }
         }

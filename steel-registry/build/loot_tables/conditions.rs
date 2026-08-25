@@ -4,7 +4,7 @@ use super::{
     generate_loot_context_entity, generate_tool_predicate, quote,
 };
 
-pub(super) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
+pub(crate) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
     match condition.condition.as_str() {
         "minecraft:survives_explosion" => {
             quote! { LootCondition::SurvivesExplosion }
@@ -148,41 +148,12 @@ pub(super) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
             let entity = condition.entity.as_deref().unwrap_or("this");
             let entity_variant = generate_loot_context_entity(entity);
 
-            let predicate = if let Some(pred) = &condition.predicate {
-                if let PredicateJson::Entity(e) = pred {
-                    generate_entity_predicate(e)
+            let predicate =
+                if let Some(PredicateJson::Entity(entity_predicate)) = &condition.predicate {
+                    generate_entity_predicate(entity_predicate)
                 } else {
-                    quote! {
-                        EntityPredicate {
-                            entity_type: None,
-                            flags: None,
-                            equipment: None,
-                            sheep_color: None,
-                            sheep_sheared: None,
-                            chicken_variant: None,
-                            mooshroom_variant: None,
-                            cube_size: None,
-                            in_open_water: None,
-                            unsupported: &[],
-                        }
-                    }
-                }
-            } else {
-                quote! {
-                    EntityPredicate {
-                        entity_type: None,
-                        flags: None,
-                        equipment: None,
-                        sheep_color: None,
-                        sheep_sheared: None,
-                        chicken_variant: None,
-                        mooshroom_variant: None,
-                        cube_size: None,
-                        in_open_water: None,
-                        unsupported: &[],
-                    }
-                }
-            };
+                    quote! { EntityPredicate::ANY }
+                };
 
             quote! {
                 LootCondition::EntityProperties {

@@ -29,6 +29,60 @@ impl DyedItemColor {
     pub const fn rgb(self) -> i32 {
         self.rgb
     }
+
+    /// Mixes `dyes` into the color an item already carries.
+    ///
+    /// Vanilla parity: `DyedItemColor.applyDyes(DyedItemColor, List<DyeColor>)`.
+    /// The channels are averaged, but so is each source color's brightest
+    /// channel, and the average is then rescaled to that brightness -- without
+    /// the rescale, mixing two dyes could only ever darken. A color already on
+    /// the item counts as one more dye, which is why re-dyeing leather drifts
+    /// rather than replaces.
+    ///
+    /// Returns `None` when there is nothing at all to average; vanilla divides
+    /// by the count unguarded and never reaches that case, because
+    /// `SetRandomDyesFunction` returns early on a non-positive roll count.
+    #[must_use]
+    pub fn apply_dyes(current: Option<Self>, dyes: &[crate::DyeColor]) -> Option<Self> {
+        let mut red_total = 0;
+        let mut green_total = 0;
+        let mut blue_total = 0;
+        let mut intensity_total = 0;
+        let mut color_count = 0;
+
+        let sources = current
+            .map(Self::rgb)
+            .into_iter()
+            .chain(dyes.iter().map(|dye| dye.texture_diffuse_color()));
+        for color in sources {
+            let red = (color >> 16) & 0xFF;
+            let green = (color >> 8) & 0xFF;
+            let blue = color & 0xFF;
+            intensity_total += red.max(green).max(blue);
+            red_total += red;
+            green_total += green;
+            blue_total += blue;
+            color_count += 1;
+        }
+
+        if color_count == 0 {
+            return None;
+        }
+
+        let red = red_total / color_count;
+        let green = green_total / color_count;
+        let blue = blue_total / color_count;
+        let average_intensity = intensity_total as f32 / color_count as f32;
+        let result_intensity = red.max(green).max(blue) as f32;
+        let red = (red as f32 * average_intensity / result_intensity) as i32;
+        let green = (green as f32 * average_intensity / result_intensity) as i32;
+        let blue = (blue as f32 * average_intensity / result_intensity) as i32;
+
+        // Vanilla parity: `ARGB.color(0, ..)`, which leaves the alpha byte zero.
+        Some(Self::new(
+            ((red & 0xFF) << 16) | ((green & 0xFF) << 8) | (blue & 0xFF),
+        ))
+    }
 }
 
 impl WriteTo for DyedItemColor {
@@ -175,6 +229,72 @@ mod tests {
     use steel_utils::serial::{ReadFrom as _, WriteTo as _};
 
     use super::{DyedItemColor, MapId, MapItemColor};
+    use crate::DyeColor;
+
+    fn channels(color: i32) -> (i32, i32, i32) {
+        ((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF)
+    }
+
+    fn brightest(color: i32) -> i32 {
+        let (red, green, blue) = channels(color);
+        red.max(green).max(blue)
+    }
+
+    /// Mixing dyes averages the channels *and* the brightest channel of each
+    /// source, then rescales the average back up to that brightness. Without the
+    /// rescale, mixing could only ever darken -- two bright dyes of different
+    /// hues would average into mud, and a leatherworker's dyed armor would come
+    /// out progressively greyer the more dyes went in.
+    #[test]
+    fn mixing_two_dyes_keeps_the_brightness_they_averaged_to() {
+        let red = DyeColor::Red.texture_diffuse_color();
+        let white = DyeColor::White.texture_diffuse_color();
+
+        let mixed = DyedItemColor::apply_dyes(None, &[DyeColor::Red, DyeColor::White])
+            .expect("two dyes are something to average");
+
+        let expected_brightness = i32::midpoint(brightest(red), brightest(white));
+        assert_eq!(
+            brightest(mixed.rgb()),
+            expected_brightness,
+            "the mix should be as bright as its sources were on average"
+        );
+
+        // The plain channel average, which is what a mix without the rescale
+        // would produce, is dimmer than that -- so this really is the rescale
+        // being observed and not an accident of these two colors.
+        let (red_r, red_g, red_b) = channels(red);
+        let (white_r, white_g, white_b) = channels(white);
+        let flat = i32::midpoint(red_r, white_r)
+            .max(i32::midpoint(red_g, white_g))
+            .max(i32::midpoint(red_b, white_b));
+        assert!(
+            flat < expected_brightness,
+            "an unrescaled average would be dimmer, so the test can tell them apart"
+        );
+    }
+
+    /// A color already on the item counts as one more dye rather than being
+    /// replaced, which is what makes re-dyeing leather drift towards a mix.
+    #[test]
+    fn an_existing_color_is_mixed_in_rather_than_overwritten() {
+        let only_white = DyedItemColor::apply_dyes(None, &[DyeColor::White])
+            .expect("one dye is something to average");
+        let over_red =
+            DyedItemColor::apply_dyes(Some(DyedItemColor::new(0x00FF_0000)), &[DyeColor::White])
+                .expect("a current color plus one dye is something to average");
+
+        assert_ne!(
+            over_red.rgb(),
+            only_white.rgb(),
+            "dyeing a red item white should not simply make it white"
+        );
+        let (red, _, blue) = channels(over_red.rgb());
+        assert!(
+            red > blue,
+            "the red it started from should still dominate the mix"
+        );
+    }
 
     fn parse<T: simdnbt::FromNbtTag>(tag: NbtTag) -> Option<T> {
         let mut bytes = Vec::new();

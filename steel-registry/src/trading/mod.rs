@@ -8,9 +8,15 @@
 
 mod item_cost;
 mod merchant_offer;
+mod trade_set;
+mod villager_trade;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod trade_data_tests;
 
 pub use item_cost::ItemCost;
 pub use merchant_offer::{MerchantOffer, MerchantOffers};
+pub use trade_set::{TradeSet, TradeSetRef, TradeSetRegistry, VillagerTradeRegistry};
+pub use villager_trade::{TradeCost, TradeCostComponents, VillagerTrade, VillagerTradeRef};
