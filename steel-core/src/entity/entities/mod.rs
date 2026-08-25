@@ -16,6 +16,7 @@ pub use mobs::hostile::{
     VindicatorEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
+pub use mobs::npc::VillagerEntity;
 pub use mobs::passive::{
     CatEntity, ChickenEntity, CowEntity, DonkeyEntity, FoxEntity, FoxVariant, GoatEntity,
     HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity, MushroomCowEntity,

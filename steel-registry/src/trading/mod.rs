@@ -8,6 +8,7 @@
 
 mod item_cost;
 mod merchant_offer;
+pub mod offer_nbt;
 mod trade_set;
 mod villager_trade;
 

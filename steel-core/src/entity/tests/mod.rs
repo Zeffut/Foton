@@ -1057,3 +1057,4 @@ mod pets;
 mod portals;
 mod riding_and_leashes;
 mod travel;
+mod villagers;

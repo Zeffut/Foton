@@ -5,5 +5,6 @@ pub mod bosses;
 pub mod hostile;
 pub mod jockeys;
 pub mod neutral;
+pub mod npc;
 pub mod passive;
 pub mod water;
