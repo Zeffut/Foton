@@ -1,4 +1,6 @@
 use super::*;
+use crate::data_components::DataComponentPatch;
+use crate::item_stack::ItemStack;
 
 /// Typed payload behavior for a registered partial component predicate.
 pub trait DataComponentPredicateCodec:
@@ -340,6 +342,31 @@ impl DataComponentExactPredicate {
             values.push((entry, entry.read_nbt_owned(value)?));
         }
         Self::new(values)
+    }
+
+    /// Builds the component patch this predicate stands for.
+    ///
+    /// Vanilla parity: `DataComponentExactPredicate.asPatch`, which `ItemCost`
+    /// uses to build the stack the trade screen draws for a price.
+    #[must_use]
+    pub fn as_patch(&self) -> DataComponentPatch {
+        let mut patch = DataComponentPatch::new();
+        for (entry, value) in &self.values {
+            patch.set_raw(entry.key.clone(), value.clone());
+        }
+        patch
+    }
+
+    /// Returns `true` if `stack` carries exactly these component values.
+    ///
+    /// Vanilla parity: `DataComponentExactPredicate.test`. It compares against
+    /// the stack's *effective* value, so an item whose prototype already has the
+    /// required value matches without carrying a patch of its own.
+    #[must_use]
+    pub fn test(&self, stack: &ItemStack) -> bool {
+        self.values
+            .iter()
+            .all(|(entry, value)| stack.get_effective_value_raw(&entry.key) == Some(value))
     }
 
     fn to_nbt_value(&self) -> NbtTag {

@@ -18,8 +18,8 @@ use steel_protocol::packets::game::{
     SContainerSlotStateChanged, SEditBook, SInteract, SMovePlayer, SMovePlayerPos,
     SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
     SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem,
-    SSelectBundleItem, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot, SSignUpdate,
-    SSpectatorAction, SSwing, SUseItem, SUseItemOn,
+    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot,
+    SSignUpdate, SSpectatorAction, SSwing, SUseItem, SUseItemOn,
 };
 
 use steel_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
@@ -91,6 +91,7 @@ enum ScheduledPlayPacketKind {
     ContainerSlotStateChanged(SContainerSlotStateChanged),
     EditBook(SEditBook),
     SelectBundleItem(SSelectBundleItem),
+    SelectTrade(SSelectTrade),
     SetBeacon(SSetBeacon),
     SetCreativeModeSlot(SSetCreativeModeSlot),
     PlayerInput(SPlayerInput),
@@ -219,9 +220,8 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::Attack(_)
             | ScheduledPlayPacketKind::Interact(_)
             | ScheduledPlayPacketKind::CustomPayload(_)
-            | ScheduledPlayPacketKind::ContainerButtonClick(_) => {
-                ScheduledPacketExecution::Exclusive
-            }
+            | ScheduledPlayPacketKind::ContainerButtonClick(_)
+            | ScheduledPlayPacketKind::SelectTrade(_) => ScheduledPacketExecution::Exclusive,
         }
     }
 
@@ -259,6 +259,9 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::EditBook(packet) => player.handle_edit_book(packet),
             ScheduledPlayPacketKind::SelectBundleItem(packet) => {
                 player.handle_select_bundle_item(packet);
+            }
+            ScheduledPlayPacketKind::SelectTrade(packet) => {
+                player.handle_select_trade(packet);
             }
             ScheduledPlayPacketKind::SetBeacon(packet) => {
                 player.handle_set_beacon(packet);
@@ -325,6 +328,7 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::ContainerSlotStateChanged(_)
             | ScheduledPlayPacketKind::EditBook(_)
             | ScheduledPlayPacketKind::SelectBundleItem(_)
+            | ScheduledPlayPacketKind::SelectTrade(_)
             | ScheduledPlayPacketKind::SetBeacon(_) => Self::handle_menu(kind, &player),
             ScheduledPlayPacketKind::SetCreativeModeSlot(packet) => {
                 player.handle_set_creative_mode_slot(packet);
@@ -757,6 +761,9 @@ impl JavaConnection {
             )),
             play::S_BUNDLE_ITEM_SELECTED => scheduled(ScheduledPlayPacketKind::SelectBundleItem(
                 SSelectBundleItem::read_packet(data)?,
+            )),
+            play::S_SELECT_TRADE => scheduled(ScheduledPlayPacketKind::SelectTrade(
+                SSelectTrade::read_packet(data)?,
             )),
             play::S_SET_BEACON => scheduled(ScheduledPlayPacketKind::SetBeacon(
                 SSetBeacon::read_packet(data)?,

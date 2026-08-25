@@ -71,6 +71,7 @@ pub mod map_color;
 pub mod map_decoration_type;
 pub mod menu_type;
 pub mod mob_effect;
+pub mod trading;
 pub use mob_effect::instance as mob_effect_instance;
 pub mod painting_variant;
 pub mod particle_type;

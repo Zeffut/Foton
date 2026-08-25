@@ -4,7 +4,7 @@ use glam::DVec3;
 use steel_protocol::packets::game::{
     CContainerClose, COpenBook, COpenScreen, CSetPlayerInventory, ClickType, SContainerButtonClick,
     SContainerClick, SContainerClose, SContainerSlotStateChanged, SEditBook, SRenameItem,
-    SSelectBundleItem, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot,
+    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot,
 };
 use steel_registry::data_components::components::{
     Filterable, WritableBookContent, WrittenBookContent,
@@ -329,6 +329,21 @@ impl Player {
         };
         if menu.still_valid(self) {
             menu.click_menu_button(self, packet.button_id);
+        }
+        self.finish_open_menu_callback(menu);
+    }
+
+    /// Handles the player clicking a trade in a merchant's screen.
+    ///
+    /// Vanilla parity: `ServerGamePacketListenerImpl.handleSelectTrade`. The
+    /// index is not range-checked here: only the menu knows how long the
+    /// merchant's offer list currently is.
+    pub fn handle_select_trade(&self, packet: SSelectTrade) {
+        let Ok(mut menu) = self.take_open_menu_for_callback(None) else {
+            return;
+        };
+        if menu.still_valid(self) {
+            menu.select_trade(self, packet.selected_trade);
         }
         self.finish_open_menu_callback(menu);
     }

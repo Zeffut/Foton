@@ -214,6 +214,15 @@ impl Menu {
         kind.on_button_click(behavior, &mut guard, player, button)
     }
 
+    /// Passes the trade the player clicked to the kind.
+    ///
+    /// Vanilla parity: `MerchantMenu.setSelectionHint`.
+    pub fn select_trade(&mut self, player: &Player, selected_trade: i32) {
+        let mut guard = self.behavior().lock_all_containers();
+        let Self { behavior, kind, .. } = self;
+        kind.on_select_trade(behavior, &mut guard, player, selected_trade);
+    }
+
     /// Passes a slot enable/disable toggle to the kind.
     ///
     /// Vanilla parity: `CrafterMenu.setSlotState`.

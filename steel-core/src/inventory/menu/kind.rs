@@ -112,6 +112,22 @@ pub trait MenuKind: ErasedType + Send + Sync {
         false
     }
 
+    /// Handles the player clicking one of a merchant's trades.
+    ///
+    /// Vanilla parity: `MerchantMenu.setSelectionHint`, reached from
+    /// `ServerGamePacketListenerImpl.handleSelectTrade`. Vanilla follows it with
+    /// `tryMoveItems`, which pulls the price out of the player's inventory into
+    /// the payment slots; that half is not implemented, so the player fills the
+    /// slots themselves and the trade otherwise behaves the same.
+    fn on_select_trade(
+        &mut self,
+        _behavior: &mut MenuBehavior,
+        _guard: &mut ContainerLockGuard,
+        _player: &Player,
+        _selected_trade: i32,
+    ) {
+    }
+
     /// Runs for each drag phase before default handling. Return
     /// [`ClickOutcome::Consume`] to cancel the drag.
     fn on_drag(

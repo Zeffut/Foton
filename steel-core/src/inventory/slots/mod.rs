@@ -7,6 +7,7 @@ mod crafting_slots;
 mod furnace_slots;
 mod grindstone_slots;
 mod loom_slots;
+mod merchant_slots;
 mod normal_slot;
 mod restricted_slot;
 mod result_handler;
@@ -31,6 +32,7 @@ pub use loom_slots::{
     LOOM_BANNER, LOOM_DYE, LOOM_PATTERN, LoomHandler, PATTERN_NOT_SET, is_banner, is_dye_item,
     is_pattern_item, selectable_patterns,
 };
+pub use merchant_slots::{MerchantHandler, NO_TRADE_SELECTED};
 pub use normal_slot::NormalSlot;
 pub use restricted_slot::*;
 pub use result_handler::ResultHandler;
