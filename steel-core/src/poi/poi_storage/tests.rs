@@ -143,6 +143,31 @@ fn closest_query_beats_a_farther_bed_the_scan_reaches_first() {
 }
 
 #[test]
+fn a_section_is_scanned_in_packed_position_order() {
+    // Both beds sit in section (0, 4, 0), so nothing but the within-section
+    // order decides which one the scan reaches first. Packed order is
+    // (x << 8) | (z << 4) | y, which puts the farther bed first -- so `find`
+    // and `find_closest` must disagree, and they must disagree the same way
+    // on every run. Vanilla walks a HashMap here and promises nothing.
+    let lower_packed_but_farther = BlockPos::new(2, 64, 3);
+    let higher_packed_but_nearer = BlockPos::new(5, 64, 1);
+    let storage = storage_with(&[
+        (higher_packed_but_nearer, home()),
+        (lower_packed_but_farther, home()),
+    ]);
+    let center = BlockPos::new(8, 64, 8);
+
+    assert_eq!(
+        storage.find(&any_type, &any_pos, center, 16, OccupationStatus::Any),
+        Some(lower_packed_but_farther),
+    );
+    assert_eq!(
+        storage.find_closest(&any_type, &any_pos, center, 16, OccupationStatus::Any),
+        Some(higher_packed_but_nearer),
+    );
+}
+
+#[test]
 fn claiming_a_bed_spends_its_only_ticket_until_it_is_released() {
     let bed = BlockPos::new(8, 64, 8);
     let mut storage = storage_with(&[(bed, home())]);
