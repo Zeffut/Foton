@@ -741,6 +741,7 @@ mod base;
 mod block_effects;
 mod callback;
 mod combat_rules;
+pub mod conversion;
 mod crackiness;
 pub mod damage;
 pub(crate) mod dismount_helper;

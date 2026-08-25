@@ -1096,8 +1096,22 @@ pub trait LivingEntity: Entity {
             return;
         }
 
-        self.game_event(&vanilla_game_events::ENTITY_DIE);
-        self.drop_all_death_loot(source);
+        // Vanilla parity: `sourceEntity == null || sourceEntity.killedEntity(..)`
+        // gates the loot, which is how a zombie converting the villager it just
+        // killed stops that villager from dropping anything -- it did not really
+        // die, it changed shape.
+        let killer = source
+            .causing_entity_id
+            .and_then(|id| self.level().and_then(|world| world.get_entity_by_id(id)));
+        let perished = match (killer, self.as_living_entity()) {
+            (Some(killer), Some(victim)) => killer.killed_entity(victim, source),
+            _ => true,
+        };
+
+        if perished {
+            self.game_event(&vanilla_game_events::ENTITY_DIE);
+            self.drop_all_death_loot(source);
+        }
         self.broadcast_entity_event(EntityStatus::Death);
         self.set_pose(EntityPose::Dying);
     }

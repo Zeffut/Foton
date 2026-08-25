@@ -20,14 +20,19 @@ use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
+use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::{VillagerEntity, ZombieVillagerEntity};
 use crate::entity::spawn_rules::check_monster_spawn_rules;
 use crate::entity::{
     AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, SpawnGroupData,
 };
 use crate::world::World;
+use steel_registry::vanilla_entities;
 use steel_utils::BlockPos;
+use steel_utils::Downcast as _;
+use steel_utils::types::Difficulty;
 
 /// Experience this mob drops.
 ///
@@ -133,7 +138,85 @@ impl ZombieEntity {
     }
 }
 
+impl ZombieEntity {
+    /// Turns a villager this zombie killed into a zombie villager.
+    ///
+    /// Vanilla parity: `Zombie.convertVillagerToZombieVillager`. Everything the
+    /// villager knew travels with it -- the profession, the trades, the
+    /// experience and the gossip -- which is what makes curing it later give
+    /// back the same villager rather than a fresh one.
+    fn convert_villager_to_zombie_villager(&self, villager: &VillagerEntity) -> bool {
+        let villager_type = villager.villager_type();
+        let profession = villager.profession();
+        let level = villager.villager_level();
+        let finalized = villager.villager_data_finalized();
+        let gossips = villager.gossips();
+        //  rolls the trades if the villager never met a player, so a
+        // zombie villager always carries the trades it would have sold.
+        let offers = villager.offers();
+        let xp = villager.merchant().xp();
+
+        // Vanilla parity: `releaseAllPois` runs on the villager's way out, or
+        // its workstation stays claimed by a mob that no longer exists.
+        villager.release_all_pois();
+
+        let converted = convert_to(
+            villager,
+            // Vanilla parity: `ConversionParams.single(villager, true, true)`.
+            ConversionParams::single(true, true),
+            |id, position, world| {
+                ZombieVillagerEntity::new(&vanilla_entities::ZOMBIE_VILLAGER, id, position, world)
+            },
+            |zombie_villager| {
+                zombie_villager.set_villager_data_finalized(finalized);
+                zombie_villager.set_villager_type(villager_type);
+                zombie_villager.set_profession(profession);
+                zombie_villager.set_villager_level(level);
+                zombie_villager.set_gossips(gossips);
+                zombie_villager.set_trade_offers(offers);
+                zombie_villager.set_villager_xp(xp);
+            },
+        );
+
+        if converted.is_some()
+            && !self.is_silent()
+            && let Some(world) = self.level()
+        {
+            // Vanilla parity: `levelEvent(null, 1026, blockPosition(), 0)`.
+            world.level_event(1026, self.block_position(), 0, None);
+        }
+        converted.is_some()
+    }
+}
+
 impl Entity for ZombieEntity {
+    /// Vanilla parity: `Zombie.killedEntity`, which on Normal and Hard turns a
+    /// villager it killed into a zombie villager instead -- and returns false
+    /// so the villager drops nothing, because it did not really die.
+    fn killed_entity(&self, victim: &dyn LivingEntity, source: &DamageSource) -> bool {
+        let perished = true;
+        let Some(world) = self.level() else {
+            return perished;
+        };
+        let difficulty = world.difficulty();
+        if difficulty != Difficulty::Normal && difficulty != Difficulty::Hard {
+            return perished;
+        }
+        let Some(villager) = victim.downcast_ref::<VillagerEntity>() else {
+            return perished;
+        };
+        // Vanilla parity: on Normal it is a coin flip; on Hard it always happens.
+        if difficulty != Difficulty::Hard && rand::random::<bool>() {
+            return perished;
+        }
+        let _ = source;
+
+        if self.convert_villager_to_zombie_villager(villager) {
+            return false;
+        }
+        perished
+    }
+
     fn base(&self) -> &EntityBase {
         &self.base
     }

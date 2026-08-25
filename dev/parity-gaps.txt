@@ -31,7 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 35
+[entities] 34
 Allay
 Armadillo
 Axolotl
@@ -66,4 +66,3 @@ WanderingTrader
 Warden
 Zoglin
 ZombieNautilus
-ZombieVillager

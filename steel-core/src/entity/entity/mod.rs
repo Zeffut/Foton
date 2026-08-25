@@ -1159,6 +1159,18 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     }
 
     /// Marks the entity as removed with the given reason.
+    /// Reacts to having killed `victim`, and says whether it really died.
+    ///
+    /// Vanilla parity: `Entity.killedEntity`. Returning `false` suppresses the
+    /// victim's loot and death game event, which is what a zombie does when it
+    /// converts the villager it killed rather than leaving a corpse.
+    fn killed_entity(&self, _victim: &dyn LivingEntity, _source: &DamageSource) -> bool {
+        true
+    }
+
+    /// Marks this entity as removed for the given reason.
+    ///
+    /// Vanilla parity: `Entity.remove(RemovalReason)`.
     fn set_removed(&self, reason: RemovalReason) {
         self.base().set_removed(reason);
     }

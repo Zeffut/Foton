@@ -31,10 +31,12 @@
 pub mod merchant_state;
 pub mod poi_links;
 mod villager;
+mod zombie_villager;
 
 pub use merchant_state::MerchantState;
 pub use poi_links::{PoiAcquisition, VillagerPoiLinks};
 pub use villager::VillagerEntity;
+pub use zombie_villager::ZombieVillagerEntity;
 
 /// Saving and loading a merchant's offers, which lives with the offer types.
 pub use steel_registry::trading::offer_nbt;

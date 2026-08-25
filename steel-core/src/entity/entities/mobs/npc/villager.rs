@@ -859,6 +859,14 @@ impl LivingEntity for VillagerEntity {
         Some(&self.villager_type().key)
     }
 
+    /// Vanilla parity: `Villager.die`, which lets go of the workstation and bed
+    /// before the death runs -- a villager killed at its bench must not leave
+    /// the bench claimed forever.
+    fn die(&self, source: &DamageSource) {
+        self.release_all_pois();
+        self.living_die(source);
+    }
+
     fn server_ai_step(&self) {
         Mob::mob_server_ai_step(self);
         let Some(world) = Entity::level(self) else {
