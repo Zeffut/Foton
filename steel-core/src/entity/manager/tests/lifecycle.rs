@@ -115,3 +115,52 @@ fn duplicate_entity_id_is_a_loud_invariant_failure() {
         EntityOwnership::ManagerOwned,
     );
 }
+
+/// A dragon's hitboxes are not live entities, so nothing in the ordinary
+/// lookup path knows about them. The manager keeps them in a second map,
+/// mirroring vanilla's `ServerLevel.dragonParts`, and both halves of that --
+/// filling it as the dragon arrives and emptying it as the dragon goes -- have
+/// to hold, or the world ends up with hittable boxes floating where a dead
+/// dragon used to be.
+#[test]
+fn a_dragons_hitboxes_are_findable_by_id_only_while_the_dragon_is_live() {
+    use crate::entity::entities::EnderDragon;
+    use crate::entity::next_entity_id;
+    use steel_registry::init_vanilla_registry;
+
+    init_vanilla_registry();
+    let manager = WorldEntityManager::new();
+    load_chunk(&manager, ChunkPos::new(0, 0));
+
+    let dragon = Arc::new(EnderDragon::new(
+        &vanilla_entities::ENDER_DRAGON,
+        next_entity_id(),
+        DVec3::new(8.5, 64.0, 8.5),
+        Weak::new(),
+    ));
+    let head_id = dragon.head().id();
+    let dragon_id = dragon.id();
+
+    let entity: SharedEntity = dragon;
+    manager
+        .add_live_entity(entity, EntityOwnership::ManagerOwned)
+        .expect("dragon should go live");
+
+    assert!(
+        manager.get_by_id(head_id).is_none(),
+        "a hitbox should never be a live entity"
+    );
+    assert!(
+        manager.get_entity_or_part(head_id).is_some(),
+        "the part lookup should find a live dragon's head"
+    );
+    assert_eq!(manager.dragon_parts().len(), 8);
+
+    manager.remove_live_entity(dragon_id, RemovalReason::Discarded);
+
+    assert!(
+        manager.get_entity_or_part(head_id).is_none(),
+        "the head hitbox outlived its dragon"
+    );
+    assert!(manager.dragon_parts().is_empty());
+}

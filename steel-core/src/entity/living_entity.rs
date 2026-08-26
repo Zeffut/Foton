@@ -710,15 +710,6 @@ pub trait LivingEntity: Entity {
         false
     }
 
-    /// Returns vanilla base living-entity invulnerability.
-    fn default_is_invulnerable_to(&self, source: &DamageSource) -> bool {
-        self.is_removed()
-            || self.is_invulnerable() && !source.bypasses_invulnerability()
-            || source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FIRE) && self.fire_immune()
-            || source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FALL)
-                && self.is_fall_damage_immune()
-    }
-
     /// Returns whether this living entity ignores a damage source.
     ///
     /// Override this to add what a specific entity shrugs off, and call
@@ -734,7 +725,7 @@ pub trait LivingEntity: Entity {
     /// for the rest rather than re-deriving the enchantment half.
     /// Runs the shared body of [`Self::is_invulnerable_to`].
     fn living_is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
-        self.default_is_invulnerable_to(source)
+        self.is_invulnerable_to_base(source)
             || enchantment_helper::is_immune_to_damage(world, self, source)
     }
 

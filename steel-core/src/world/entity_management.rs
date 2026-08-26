@@ -503,6 +503,25 @@ impl World {
         self.entity_manager.get_accessible_by_id(id)
     }
 
+    /// Gets an entity or ender dragon hitbox by its network ID, if visible.
+    ///
+    /// Vanilla parity: `ServerLevel.getEntityOrPart`. Every packet handler that
+    /// resolves a client-supplied entity ID has to go through this rather than
+    /// [`Self::get_accessible_entity_by_id`]: a hit on the dragon arrives
+    /// addressed to one of its hitboxes, and a hitbox is not a live entity.
+    #[must_use]
+    pub fn get_accessible_entity_or_part_by_id(&self, id: i32) -> Option<SharedEntity> {
+        self.entity_manager.get_accessible_entity_or_part(id)
+    }
+
+    /// Gets the ender dragon hitboxes registered in this world.
+    ///
+    /// Vanilla parity: `Level.dragonParts`.
+    #[must_use]
+    pub fn dragon_parts(&self) -> Vec<SharedEntity> {
+        self.entity_manager.dragon_parts()
+    }
+
     /// Gets an entity by its UUID.
     ///
     /// Returns `None` if the entity is not live in the world.

@@ -1,4 +1,9 @@
-//! Minimal End Crystal entity implementation for End spike worldgen.
+//! End crystal.
+//!
+//! Vanilla parity: `EndCrystal`. The thing on top of each obsidian pillar that
+//! heals the dragon, and the thing four of which are placed to bring it back.
+//! It has no health: any hit at all destroys it, and destroying it sets off a
+//! six-block blast, which is what makes clearing the pillars a chain reaction.
 
 use std::sync::Weak;
 
@@ -7,18 +12,29 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_macros::entity_behavior;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::vanilla_damage_type_tags::DamageTypeTag;
+use steel_registry::vanilla_damage_types;
 use steel_registry::vanilla_entity_data::EndCrystalEntityData;
+use steel_registry::vanilla_game_rules::BLOCK_EXPLOSION_DROP_DECAY;
 use steel_utils::{BlockPos, locks::SyncMutex};
-use steel_utils::{DowncastType, DowncastTypeKey};
+use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
-use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntitySyncedData};
+use crate::entity::damage::DamageSource;
+use crate::entity::entities::EnderDragon;
+use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntitySyncedData, RemovalReason};
 use crate::world::World;
+use crate::world::explosion::ExplosionSpec;
+
+/// How far the blast a broken crystal leaves reaches.
+///
+/// Vanilla parity: the `6.0F` of `EndCrystal.hurtServer`.
+const EXPLOSION_RADIUS: f32 = 6.0;
 
 /// End Crystal entity state needed by worldgen and persistence.
 ///
-/// Steel currently implements the synchronized data and saved fields used by generated
-/// End spikes. Portal handling, dragon fight callbacks, and explosion behavior are still
-/// intentionally left to the broader entity/combat foundations.
+/// **Gaps**: the tick is still empty. Vanilla's refreshes the fire under a
+/// crystal that belongs to a dragon fight and runs the portal check; both need
+/// `EnderDragonFight`, which is not implemented.
 #[entity_behavior(class = "EndCrystal")]
 pub struct EndCrystalEntity {
     base: EntityBase,
@@ -105,11 +121,71 @@ impl Entity for EndCrystalEntity {
         self.entity_type
     }
 
-    fn tick(&self) {
-        // TODO: Implement portal handling, fire refresh, dragon fight callbacks, and explosion behavior.
-    }
+    /// Vanilla parity: `EndCrystal.tick` also relights the fire beneath a
+    /// crystal that belongs to a dragon fight, and runs the portal check. Both
+    /// wait on `EnderDragonFight`.
+    fn tick(&self) {}
 
     fn is_pickable(&self) -> bool {
+        true
+    }
+
+    /// Vanilla parity: `EndCrystal.hurtServer`. A crystal has one point of
+    /// nothing: any hit at all removes it, and unless the hit was itself an
+    /// explosion it takes a six-block blast with it. That chain -- one arrow,
+    /// four crystals, four blasts -- is how the pillars come down.
+    ///
+    /// **Gap**: vanilla then calls `onDestroyedBy`, which tells the
+    /// `EnderDragonFight` so the fight can abort a respawn ritual, recount the
+    /// crystals, and hand the news to
+    /// [`EnderDragon::on_crystal_destroyed`](crate::entity::entities::EnderDragon::on_crystal_destroyed).
+    /// The fight is not implemented, and it is the only route vanilla has from
+    /// a crystal to a dragon, so a dragon is not yet told when the crystal it
+    /// was healing from is broken.
+    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
+        if self.is_invulnerable_to_base(source) {
+            return false;
+        }
+
+        // Vanilla parity: `source.getEntity() instanceof EnderDragon`. A dragon
+        // flying through its own crystals must not break them.
+        let dealt_by_dragon = source
+            .causing_entity_id
+            .and_then(|id| world.get_entity_by_id(id))
+            .is_some_and(|causing| causing.downcast_ref::<EnderDragon>().is_some());
+        if dealt_by_dragon {
+            return false;
+        }
+
+        if self.is_removed() {
+            return true;
+        }
+
+        self.set_removed(RemovalReason::Killed);
+        if source.is(&DamageTypeTag::IS_EXPLOSION) {
+            return true;
+        }
+
+        let Some(world) = self.level() else {
+            return true;
+        };
+        let damage_source = source.causing_entity_id.map(|causing| {
+            DamageSource::environment(&vanilla_damage_types::EXPLOSION)
+                .with_direct_entity(self.id())
+                .with_causing_entity(causing)
+        });
+        world.explode(
+            ExplosionSpec::new(
+                Some(self.id()),
+                source.causing_entity_id,
+                damage_source,
+                EXPLOSION_RADIUS,
+                false,
+                world.explosion_destroy_type(&BLOCK_EXPLOSION_DROP_DECAY),
+            ),
+            self.position(),
+        );
+
         true
     }
 
@@ -149,7 +225,15 @@ impl Entity for EndCrystalEntity {
 mod tests {
     use super::*;
 
-    use steel_registry::vanilla_entities;
+    use std::sync::Arc;
+
+    use steel_registry::{init_vanilla_registry, vanilla_damage_types, vanilla_entities};
+    use steel_utils::ChunkPos;
+
+    use crate::behavior::init_behaviors;
+    use crate::entity::entities::EnderDragon;
+    use crate::entity::{SharedEntity, init_entities, next_entity_id};
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     #[test]
     fn end_crystal_does_not_duplicate_shared_invulnerable_state() {
@@ -177,6 +261,68 @@ mod tests {
         );
 
         assert!(crystal.is_pickable());
+    }
+
+    /// A crystal used to be indestructible: with no `hurt` override the trait
+    /// default refused every hit outright, because a crystal is not a living
+    /// entity. Clearing the pillars is the first half of the dragon fight, so
+    /// this is the assertion that says the fight is winnable at all.
+    #[test]
+    fn any_hit_at_all_destroys_a_crystal() {
+        let crystal = EndCrystalEntity::new(
+            &vanilla_entities::END_CRYSTAL,
+            1,
+            DVec3::new(8.5, 64.0, 8.5),
+            Weak::new(),
+        );
+        let world = fresh_test_world("end_crystal_is_destructible");
+
+        let landed = crystal.hurt(
+            world.as_ref(),
+            &DamageSource::environment(&vanilla_damage_types::GENERIC),
+            0.0,
+        );
+
+        assert!(landed, "the crystal refused the hit");
+        assert!(crystal.is_removed(), "the crystal survived being hit");
+    }
+
+    /// Vanilla parity: the `source.getEntity() instanceof EnderDragon` guard.
+    /// A dragon flies through its own crystals constantly; without this it
+    /// would break the ones keeping it alive.
+    #[test]
+    fn a_dragon_cannot_break_the_crystal_it_is_healing_from() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_entities();
+        let world = fresh_test_world("end_crystal_ignores_its_dragon");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let dragon = Arc::new(EnderDragon::new(
+            &vanilla_entities::ENDER_DRAGON,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        let dragon_id = dragon.id();
+        world
+            .try_add_entity(dragon as SharedEntity)
+            .expect("dragon should spawn");
+
+        let crystal = EndCrystalEntity::new(
+            &vanilla_entities::END_CRYSTAL,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        );
+        let from_dragon = DamageSource::environment(&vanilla_damage_types::MOB_ATTACK)
+            .with_causing_entity(dragon_id);
+
+        assert!(!crystal.hurt(world.as_ref(), &from_dragon, 10.0));
+        assert!(
+            !crystal.is_removed(),
+            "the dragon broke the crystal it heals from"
+        );
     }
 
     #[test]

@@ -566,7 +566,9 @@ impl Player {
         }
 
         let world = self.get_world();
-        let Some(target) = world.get_accessible_entity_by_id(packet.entity_id) else {
+        // Vanilla parity: `level.getEntityOrPart(packet.entityId())`. A hit on
+        // the ender dragon names one of its hitboxes, never the dragon itself.
+        let Some(target) = world.get_accessible_entity_or_part_by_id(packet.entity_id) else {
             return;
         };
 
@@ -643,7 +645,8 @@ impl Player {
         }
 
         let world = self.get_world();
-        let target = world.get_accessible_entity_by_id(packet.entity_id);
+        // Vanilla parity: `level.getEntityOrPart(packet.entityId())`.
+        let target = world.get_accessible_entity_or_part_by_id(packet.entity_id);
         self.set_crouching(packet.using_secondary_action);
         let Some(target) = target else {
             return;

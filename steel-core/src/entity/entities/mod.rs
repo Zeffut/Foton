@@ -7,7 +7,10 @@ mod raw;
 
 pub use decoration::{ArmorStandEntity, MannequinEntity};
 pub use mobs::ambient::BatEntity;
-pub use mobs::bosses::WitherBoss;
+pub use mobs::bosses::{
+    DragonPartIndex, EnderDragon, EnderDragonPart, EnderDragonPhase, EnderDragonPhaseManager,
+    WitherBoss,
+};
 pub use mobs::hostile::{
     BlazeEntity, BoggedEntity, BreezeEntity, CaveSpiderEntity, CreakingEntity, CreeperEntity,
     DrownedEntity, ElderGuardianEntity, EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity,
