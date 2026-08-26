@@ -401,6 +401,23 @@ mod tests {
         );
     }
 
+    /// Choosing a mode in the editor swaps the block, and reading the block
+    /// back gives the mode again. The two directions have to be inverses: if
+    /// `block()` were wrong, picking "repeating" would place a chain block and
+    /// the editor would reopen showing the wrong mode.
+    #[test]
+    fn the_mode_and_the_block_it_is_stored_as_are_inverses() {
+        init_vanilla_registry();
+        for mode in [
+            CommandBlockMode::Sequence,
+            CommandBlockMode::Auto,
+            CommandBlockMode::Redstone,
+        ] {
+            let placed = command_block(mode.block().default_state());
+            assert_eq!(placed.mode(), mode, "round trip through {mode:?}");
+        }
+    }
+
     /// `readEnum` is ordinal order, and getting it wrong would silently turn
     /// every repeating block a client saves into a chain block.
     #[test]
