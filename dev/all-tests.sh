@@ -27,6 +27,7 @@ for test in dev/join-test.sh dev/sapling-test.sh dev/container-test.sh \
             dev/sculk-vibration-test.sh dev/warden-test.sh \
             dev/fishing-test.sh \
             dev/nautilus-test.sh \
+            dev/villager-day-test.sh \
             dev/raid-test.sh \
             dev/nether-test.sh dev/reload-test.sh; do
   name=$(basename "$test")
