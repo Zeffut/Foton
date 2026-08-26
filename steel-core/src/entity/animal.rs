@@ -153,6 +153,14 @@ pub trait Animal: AgeableMob {
 
     /// Returns vanilla `Animal.canMate`.
     fn can_mate(&self, partner: &dyn Animal) -> bool {
+        self.default_can_mate(partner)
+    }
+
+    /// The body of [`Self::can_mate`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob whose `canMate` narrows the shared one --
+    /// the sniffer, which refuses a partner mid-dig -- calls this for the rest.
+    fn default_can_mate(&self, partner: &dyn Animal) -> bool {
         self.uuid() != partner.uuid()
             && self.entity_type() == partner.entity_type()
             && self.is_in_love()

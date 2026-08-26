@@ -263,7 +263,29 @@ impl Brain {
     /// constructor.
     #[must_use]
     pub fn new(sensor_types: &[SensorType], activities: Vec<ActivityData>) -> Self {
+        Self::new_with_memories(sensor_types, &[], activities)
+    }
+
+    /// Builds a brain that also registers memories nothing else asks for.
+    ///
+    /// Vanilla parity: the `memoryTypes` argument of the same constructor,
+    /// which is how a sniffer's `SNIFFER_EXPLORED_POSITIONS` exists at all --
+    /// no sensor writes it and no behavior's entry condition names it, so
+    /// without this it would never be registered and every read would miss.
+    #[must_use]
+    pub fn new_with_memories(
+        sensor_types: &[SensorType],
+        memory_types: &[MemoryModuleId],
+        activities: Vec<ActivityData>,
+    ) -> Self {
         let brain = Self::empty();
+
+        {
+            let mut memories = brain.memories.lock();
+            for &memory in memory_types {
+                memories.register(memory, memory::is_saved(memory));
+            }
+        }
 
         {
             let mut runtime = brain.runtime.lock();

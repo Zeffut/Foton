@@ -31,7 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 26
+[entities] 25
 Allay
 Armadillo
 Axolotl
@@ -52,7 +52,6 @@ Nautilus
 Panda
 Parched
 Player
-Sniffer
 SpectralArrow
 SulfurCube
 ThrownLingeringPotion

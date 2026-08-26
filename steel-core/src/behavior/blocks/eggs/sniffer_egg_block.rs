@@ -15,6 +15,7 @@ use steel_utils::{BlockPos, BlockStateId};
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::BlockPlaceContext;
 use crate::entity::ai::path::PathComputationType;
+use crate::entity::entities::hatch_sniffer_from_egg;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader, World};
 
@@ -136,10 +137,7 @@ impl BlockBehavior for SnifferEggBlock {
             None,
         );
         world.destroy_block(pos, false);
-        // Vanilla spawns a baby `Sniffer` at the center of this block, facing a
-        // random yaw. Steel has no `Sniffer` entity, so the egg just disappears;
-        // the spawn belongs on this line once `EntityTypes.SNIFFER` is
-        // implemented.
+        hatch_sniffer_from_egg(world, pos);
     }
 }
 
@@ -176,6 +174,57 @@ mod tests {
         let on_stone =
             TestLevel::default().with_block(pos.below(), vanilla_blocks::STONE.default_state());
         assert!(!SnifferEggBlock::hatch_boost(&on_stone, pos));
+    }
+
+    #[test]
+    fn a_ready_egg_hatches_into_one_baby_sniffer() {
+        // This is the loop: without the spawn the egg just disappeared, which is
+        // what the comment on this line used to say.
+        use steel_registry::vanilla_entities;
+        use steel_utils::ChunkPos;
+
+        use crate::behavior::init_behaviors;
+        use crate::entity::{AgeableMob, init_entities};
+        use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+        init_vanilla_registry();
+        init_behaviors();
+        init_entities();
+        let world = fresh_test_world("sniffer_egg_hatch");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+
+        let ready = vanilla_blocks::SNIFFER_EGG
+            .default_state()
+            .set_value(HATCH, MAX_HATCH_LEVEL);
+        assert!(world.set_block(pos, ready, UpdateFlags::UPDATE_NONE));
+
+        let behavior = SnifferEggBlock::new(&vanilla_blocks::SNIFFER_EGG);
+        behavior.tick(ready, &world, pos);
+
+        assert!(
+            world.get_block_state(pos).is_air(),
+            "hatching destroys the egg"
+        );
+        let search = steel_utils::WorldAabb::new(
+            f64::from(pos.x()) - 4.0,
+            f64::from(pos.y()) - 4.0,
+            f64::from(pos.z()) - 4.0,
+            f64::from(pos.x()) + 5.0,
+            f64::from(pos.y()) + 5.0,
+            f64::from(pos.z()) + 5.0,
+        );
+        let sniffers = world.get_entities_in_aabb_matching(&search, |entity| {
+            entity.entity_type() == &vanilla_entities::SNIFFER
+        });
+
+        assert_eq!(sniffers.len(), 1, "one egg leaves one sniffer");
+        assert!(
+            sniffers[0]
+                .as_ageable_mob()
+                .is_some_and(AgeableMob::is_baby),
+            "a hatched sniffer is a calf, not a grown one"
+        );
     }
 
     #[test]

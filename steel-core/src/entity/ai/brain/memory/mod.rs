@@ -340,6 +340,18 @@ memory_module_types! {
     LONG_JUMP_MID_JUMP: bool = "minecraft:long_jump_mid_jump", saved = false;
     /// Vanilla `MemoryModuleType.UNREACHABLE_TONGUE_TARGETS`.
     UNREACHABLE_TONGUE_TARGETS: Vec<Uuid> = "minecraft:unreachable_tongue_targets", saved = false;
+    /// Vanilla `MemoryModuleType.PLAY_DEAD_TICKS`.
+    PLAY_DEAD_TICKS: i32 = "minecraft:play_dead_ticks", saved = true;
+    /// Vanilla `MemoryModuleType.SNIFF_COOLDOWN`.
+    SNIFF_COOLDOWN: Unit = "minecraft:sniff_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.SNIFFER_EXPLORED_POSITIONS`, newest first.
+    SNIFFER_EXPLORED_POSITIONS: Vec<GlobalPos> = "minecraft:sniffer_explored_positions", saved = true;
+    /// Vanilla `MemoryModuleType.SNIFFER_SNIFFING_TARGET`.
+    SNIFFER_SNIFFING_TARGET: BlockPos = "minecraft:sniffer_sniffing_target", saved = false;
+    /// Vanilla `MemoryModuleType.SNIFFER_DIGGING`.
+    SNIFFER_DIGGING: bool = "minecraft:sniffer_digging", saved = false;
+    /// Vanilla `MemoryModuleType.SNIFFER_HAPPY`.
+    SNIFFER_HAPPY: bool = "minecraft:sniffer_happy", saved = false;
 }
 
 /// Everything a brain remembers.

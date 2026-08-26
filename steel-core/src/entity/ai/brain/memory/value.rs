@@ -95,6 +95,7 @@ pub enum MemoryValue {
     BlockPos(BlockPos),
     GlobalPos(GlobalPos),
     GlobalPosSet(FxHashSet<GlobalPos>),
+    GlobalPosList(Vec<GlobalPos>),
     Uuid(Uuid),
     Uuids(Vec<Uuid>),
     Vec3(DVec3),
@@ -118,6 +119,7 @@ impl MemoryValue {
         match self {
             Self::Entities(entities) => entities.is_empty(),
             Self::GlobalPosSet(positions) => positions.is_empty(),
+            Self::GlobalPosList(positions) => positions.is_empty(),
             Self::Uuids(uuids) => uuids.is_empty(),
             _ => false,
         }
@@ -137,6 +139,10 @@ impl MemoryValue {
             Self::BlockPos(pos) => Some(block_pos_to_nbt(*pos)),
             Self::GlobalPos(pos) => Some(NbtTag::Compound(global_pos_to_nbt(pos))),
             Self::GlobalPosSet(positions) => {
+                let entries: Vec<NbtCompound> = positions.iter().map(global_pos_to_nbt).collect();
+                Some(NbtTag::List(NbtList::Compound(entries)))
+            }
+            Self::GlobalPosList(positions) => {
                 let entries: Vec<NbtCompound> = positions.iter().map(global_pos_to_nbt).collect();
                 Some(NbtTag::List(NbtList::Compound(entries)))
             }
@@ -256,6 +262,18 @@ fn read_uuid(value: &BorrowedNbtTag<'_, '_>) -> Option<Uuid> {
     Uuid::from_int_array(value.int_array()?.as_ref())
 }
 
+fn read_global_pos_list(value: &BorrowedNbtTag<'_, '_>) -> Option<Vec<GlobalPos>> {
+    Some(
+        value
+            .list()?
+            .compounds()
+            .into_iter()
+            .flatten()
+            .filter_map(|compound| global_pos_from_nbt(&compound))
+            .collect(),
+    )
+}
+
 fn read_global_pos_set(value: &BorrowedNbtTag<'_, '_>) -> Option<FxHashSet<GlobalPos>> {
     Some(
         value
@@ -291,6 +309,11 @@ impl_memory_value_type!(
     FxHashSet<GlobalPos>,
     GlobalPosSet,
     from_nbt = read_global_pos_set
+);
+impl_memory_value_type!(
+    Vec<GlobalPos>,
+    GlobalPosList,
+    from_nbt = read_global_pos_list
 );
 impl_memory_value_type!(Uuid, Uuid, from_nbt = read_uuid);
 impl_memory_value_type!(Vec<Uuid>, Uuids);

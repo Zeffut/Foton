@@ -80,6 +80,7 @@ pub use interact_with::{InteractWith, SetLookAndInteract};
 pub use look_at_target_sink::LookAtTargetSink;
 pub use move_to_target_sink::MoveToTargetSink;
 pub use random_stroll::RandomStroll;
+pub use set_entity_look_target::SetEntityLookTarget;
 pub use set_entity_look_target::SetEntityLookTargetSometimes;
 pub use set_walk_target_away_from::SetWalkTargetAwayFrom;
 pub use start_celebrating_if_target_dead::StartCelebratingIfTargetDead;
@@ -110,7 +111,6 @@ pub use {
     },
     melee_attack::MeleeAttack,
     mount::{DismountOrSkipMounting, Mount},
-    set_entity_look_target::SetEntityLookTarget,
     set_walk_target_from_attack_target::SetWalkTargetFromAttackTargetIfTargetOutOfReach,
     set_walk_target_from_look_target::SetWalkTargetFromLookTarget,
     start_attacking::StartAttacking,
@@ -202,6 +202,17 @@ pub trait TimedBehavior: Send {
     /// Vanilla parity: `Behavior.stop`.
     fn stop(&mut self, _ctx: &BrainContext<'_>) {}
 
+    /// Vanilla parity: a `stop` that reads `Behavior.timedOut(timestamp)`.
+    ///
+    /// The duration is owned by the [`Behavior`] wrapper, so a behavior whose
+    /// stop needs to know whether it ran its full length -- the sniffer's dig,
+    /// which earns its cooldown only if it finished -- overrides this instead of
+    /// [`Self::stop`]. Overriding both is a mistake: only this one is called.
+    fn stop_with_timeout(&mut self, ctx: &BrainContext<'_>, timed_out: bool) {
+        let _ = timed_out;
+        self.stop(ctx);
+    }
+
     /// Vanilla parity: `Behavior.canStillUse`, which defaults to `false` so a
     /// behavior that does not override it runs for exactly its duration.
     fn can_still_use(&mut self, _ctx: &BrainContext<'_>) -> bool {
@@ -289,7 +300,66 @@ impl<B: TimedBehavior> BehaviorControl for Behavior<B> {
 
     fn do_stop(&mut self, ctx: &BrainContext<'_>) {
         self.status = BehaviorStatus::Stopped;
-        self.inner.stop(ctx);
+        let timed_out = self.timed_out(ctx.game_time());
+        self.inner.stop_with_timeout(ctx, timed_out);
+    }
+
+    fn debug_name(&self) -> &'static str {
+        self.inner.debug_name()
+    }
+}
+
+/// Runs `hook` before a behavior's own `start`.
+///
+/// Vanilla parity: the anonymous subclasses that override `start` only to call
+/// something first and then `super.start(...)` -- `SnifferAi` writes three of
+/// them, all to reset the sniffing state. Rust has no `super`, so the prefix is
+/// a wrapper.
+pub struct OnStart<B: TimedBehavior> {
+    inner: B,
+    hook: fn(&BrainContext<'_>),
+}
+
+impl<B: TimedBehavior> OnStart<B> {
+    /// Wraps `inner` so `hook` runs first.
+    #[must_use]
+    pub const fn new(inner: B, hook: fn(&BrainContext<'_>)) -> Self {
+        Self { inner, hook }
+    }
+}
+
+impl<B: TimedBehavior> TimedBehavior for OnStart<B> {
+    fn entry_condition(&self) -> &[(MemoryModuleId, MemoryStatus)] {
+        self.inner.entry_condition()
+    }
+
+    fn duration(&self) -> (i32, i32) {
+        self.inner.duration()
+    }
+
+    fn times_out(&self) -> bool {
+        self.inner.times_out()
+    }
+
+    fn check_extra_start_conditions(&mut self, ctx: &BrainContext<'_>) -> bool {
+        self.inner.check_extra_start_conditions(ctx)
+    }
+
+    fn start(&mut self, ctx: &BrainContext<'_>) {
+        (self.hook)(ctx);
+        self.inner.start(ctx);
+    }
+
+    fn tick(&mut self, ctx: &BrainContext<'_>) {
+        self.inner.tick(ctx);
+    }
+
+    fn stop_with_timeout(&mut self, ctx: &BrainContext<'_>, timed_out: bool) {
+        self.inner.stop_with_timeout(ctx, timed_out);
+    }
+
+    fn can_still_use(&mut self, ctx: &BrainContext<'_>) -> bool {
+        self.inner.can_still_use(ctx)
     }
 
     fn debug_name(&self) -> &'static str {

@@ -22,8 +22,8 @@ pub use mobs::passive::{
     BeeEntity, CatEntity, ChickenEntity, CowEntity, DonkeyEntity, FoxEntity, FoxVariant,
     FrogEntity, GoatEntity, HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity,
     MushroomCowEntity, OcelotEntity, ParrotEntity, ParrotVariant, PigEntity, PolarBearEntity,
-    RabbitEntity, RabbitVariant, SheepEntity, SkeletonHorseEntity, StriderEntity,
-    TraderLlamaEntity, TurtleEntity, ZombieHorseEntity,
+    RabbitEntity, RabbitVariant, SheepEntity, SkeletonHorseEntity, SnifferEntity, StriderEntity,
+    TraderLlamaEntity, TurtleEntity, ZombieHorseEntity, hatch_sniffer_from_egg,
 };
 pub use mobs::water::{
     CodEntity, DolphinEntity, GlowSquidEntity, MAX_TADPOLES_SPAWN_EXCLUSIVE, MIN_TADPOLES_SPAWN,

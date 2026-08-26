@@ -15,6 +15,7 @@ mod pig;
 mod polar_bear;
 mod rabbit;
 mod sheep;
+mod sniffer;
 mod strider;
 mod turtle;
 
@@ -36,5 +37,6 @@ pub use pig::PigEntity;
 pub use polar_bear::PolarBearEntity;
 pub use rabbit::{RabbitEntity, RabbitVariant};
 pub use sheep::SheepEntity;
+pub use sniffer::{SnifferEntity, hatch_sniffer_from_egg};
 pub use strider::StriderEntity;
 pub use turtle::TurtleEntity;
