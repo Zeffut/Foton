@@ -20,7 +20,7 @@ use crate::block_entity::init_block_entities;
 use crate::entity::ai::brain::Activity;
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::gossip::{GossipType, ReputationEventType};
-use crate::entity::entities::VillagerEntity;
+use crate::entity::entities::{VillagerEntity, ZombieEntity};
 use crate::entity::{AgeableMob, LivingEntity, Mob, SharedEntity, next_entity_id};
 use crate::poi::poi_storage::OccupationStatus;
 use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
@@ -80,6 +80,28 @@ fn run_ticks(world: &Arc<World>, villager: &Arc<VillagerEntity>, ticks: i32) {
         villager.base_tick();
         villager.tick();
     }
+}
+
+/// Ticks until `reached` is true, or gives up after `ticks`.
+///
+/// A villager wanders while it waits, so a test that only looks at the end of a
+/// fixed run can miss the moment it is watching for. This watches every tick
+/// instead, which is what makes those assertions stable.
+fn run_ticks_until(
+    world: &Arc<World>,
+    villager: &Arc<VillagerEntity>,
+    ticks: i32,
+    reached: impl Fn() -> bool,
+) -> bool {
+    for _ in 0..ticks {
+        advance_time(world);
+        villager.base_tick();
+        villager.tick();
+        if reached() {
+            return true;
+        }
+    }
+    false
 }
 
 /// Moves the world clock on by a tick.
@@ -502,10 +524,32 @@ fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
 /// This enters only through `villager.tick()`, so it fails if the brain is never
 /// ticked, if the string-valued track is never sampled, or if
 /// `UpdateActivityFromSchedule` is not actually in the packages.
+///
+/// The workstation and the bell are there because vanilla gates WORK on
+/// `JOB_SITE` and MEET on `MEETING_POINT`: a villager with neither would fall
+/// back to IDLE all day, which is correct and would prove nothing.
 #[test]
 fn the_clock_walks_a_villager_through_its_working_day() {
     let world = villager_world("villager_schedule_routes");
     let villager = spawn_villager(&world);
+    assert!(world.set_block(
+        BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()),
+        vanilla_blocks::CARTOGRAPHY_TABLE.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    assert!(world.set_block(
+        BlockPos::new(STAND.x() - 1, STAND.y(), STAND.z()),
+        vanilla_blocks::BELL.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    run_ticks(&world, &villager, TICKS_TO_TAKE_A_JOB);
+    assert_eq!(villager.profession().key.path, "cartographer");
+    assert!(
+        Mob::brain(villager.as_ref())
+            .expect("a villager has a brain")
+            .has_memory_value(memory_module_types::MEETING_POINT.id()),
+        "the bell is the village's meeting point"
+    );
 
     // 2000..9000 is the WORK stretch of `Timelines.VILLAGER_SCHEDULE`.
     set_time_of_day(&world, 3_000);
@@ -528,6 +572,26 @@ fn the_clock_walks_a_villager_through_its_working_day() {
         active_activity(&villager),
         Some(Activity::Rest),
         "and sends it home at dusk"
+    );
+}
+
+/// A villager with no workstation has no working hours to keep.
+///
+/// Vanilla gates the WORK activity on `JOB_SITE`, so the schedule naming WORK
+/// is not enough on its own -- without this the whole village would clock in at
+/// an imaginary bench.
+#[test]
+fn an_unemployed_villager_stays_idle_through_the_working_hours() {
+    let world = villager_world("villager_no_work_without_a_site");
+    let villager = spawn_villager(&world);
+
+    set_time_of_day(&world, 3_000);
+    run_ticks(&world, &villager, 60);
+
+    assert_eq!(
+        active_activity(&villager),
+        Some(Activity::Idle),
+        "WORK falls back to the default activity when there is no job site"
     );
 }
 
@@ -676,6 +740,111 @@ fn two_fed_villagers_with_a_spare_bed_have_a_child() {
     assert!(
         !first.can_breed() && !second.can_breed(),
         "both parents are on the six-thousand-tick cooldown a birth costs"
+    );
+}
+
+/// The WORK package really reaches `WorkAtPoi`, which is the one behavior in it
+/// that does anything a player would call working.
+///
+/// `LAST_WORKED_AT_POI` is the only mark it leaves that outlives the tick -- the
+/// rest is a sound and a restock -- so it is what proves the package was
+/// reached rather than merely registered.
+#[test]
+fn a_villager_at_its_workstation_puts_in_a_shift() {
+    let world = villager_world("villager_works");
+    let villager = spawn_villager(&world);
+
+    let table = BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z());
+    assert!(world.set_block(
+        table,
+        vanilla_blocks::CARTOGRAPHY_TABLE.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+
+    // 2000..9000 is the WORK stretch of the schedule.
+    set_time_of_day(&world, 3_000);
+    run_ticks(&world, &villager, TICKS_TO_TAKE_A_JOB);
+    assert_eq!(villager_job_site(&villager), Some(table));
+    assert_eq!(
+        active_activity(&villager),
+        Some(Activity::Work),
+        "the clock says these are working hours"
+    );
+
+    // `WorkAtPoi` only checks every three hundred ticks, and then only on a
+    // coin flip.
+    assert!(
+        run_ticks_until(&world, &villager, 2_000, || {
+            Mob::brain(villager.as_ref())
+                .expect("a villager has a brain")
+                .has_memory_value(memory_module_types::LAST_WORKED_AT_POI.id())
+        }),
+        "a villager standing at its own workstation during working hours works at it"
+    );
+}
+
+/// Mining a villager's workstation out from under it puts it out of work.
+///
+/// Two behaviors in a row: `ValidateNearbyPoi` notices the block it remembers
+/// is no longer that kind of point of interest, and `ResetProfession` fires a
+/// villager that has lost its site and never earned anything at it.
+#[test]
+fn breaking_a_workstation_puts_its_villager_out_of_work() {
+    let world = villager_world("villager_loses_job");
+    let villager = spawn_villager(&world);
+
+    let table = BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z());
+    assert!(world.set_block(
+        table,
+        vanilla_blocks::CARTOGRAPHY_TABLE.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    run_ticks(&world, &villager, TICKS_TO_TAKE_A_JOB);
+    assert_eq!(villager.profession().key.path, "cartographer");
+
+    assert!(world.set_block(
+        table,
+        vanilla_blocks::AIR.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    run_ticks(&world, &villager, 60);
+
+    assert_eq!(
+        villager_job_site(&villager),
+        None,
+        "the block it remembered is not a workstation any more"
+    );
+    assert_eq!(
+        villager.profession().key.path,
+        "none",
+        "and a villager with no site and no experience goes back to unemployed"
+    );
+}
+
+/// The panic path, from the sensor that sees the monster to the activity switch.
+#[test]
+fn a_villager_panics_when_a_zombie_comes_close() {
+    let world = villager_world("villager_panics");
+    let villager = spawn_villager(&world);
+
+    // A zombie is frightening within eight blocks, per
+    // `VillagerHostilesSensor.ACCEPTABLE_DISTANCE_FROM_HOSTILES`.
+    let zombie = Arc::new(ZombieEntity::new(
+        &vanilla_entities::ZOMBIE,
+        next_entity_id(),
+        DVec3::new(SPAWN.x + 3.0, SPAWN.y, SPAWN.z),
+        Arc::downgrade(&world),
+    ));
+    world
+        .try_add_entity(Arc::clone(&zombie) as SharedEntity)
+        .expect("the test chunk is loaded");
+
+    // Broad daylight, so the schedule would otherwise have it idling.
+    set_time_of_day(&world, 3_000);
+    assert!(
+        run_ticks_until(&world, &villager, 400, || active_activity(&villager)
+            == Some(Activity::Panic)),
+        "a villager that can see a zombie drops what it was doing"
     );
 }
 

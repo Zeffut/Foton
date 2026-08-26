@@ -56,7 +56,9 @@ use crate::entity::ai::brain::behavior::{
     SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi, Swim, TriggerGate,
     UpdateActivityFromSchedule, ValidateNearbyPoi, VillageBoundRandomStroll, WakeUp,
 };
-use crate::entity::ai::brain::memory::{EntityMemory, MemoryModuleType, memory_module_types};
+use crate::entity::ai::brain::memory::{
+    EntityMemory, MemoryModuleType, MemoryStatus, memory_module_types,
+};
 use crate::entity::ai::brain::sensor::SensorType;
 use crate::entity::ai::brain::{Activity, ActivityData, Brain, BrainContext};
 use crate::entity::entities::mobs::npc::VillagerEntity;
@@ -373,6 +375,14 @@ fn work_package() -> ActivityData {
             (99, OneShot::boxed(UpdateActivityFromSchedule)),
         ],
     )
+    // Vanilla parity: the `ImmutableSet.of(Pair.of(JOB_SITE, VALUE_PRESENT))`
+    // the WORK activity is registered with. Without a workstation there is no
+    // work to go to, so the schedule's WORK hours fall back to the default
+    // activity instead.
+    .with_conditions(vec![(
+        memory_module_types::JOB_SITE.id(),
+        MemoryStatus::ValuePresent,
+    )])
 }
 
 /// Vanilla parity: `VillagerGoalPackages.getRestPackage`.
@@ -468,6 +478,13 @@ fn meet_package() -> ActivityData {
             (99, OneShot::boxed(UpdateActivityFromSchedule)),
         ],
     )
+    // Vanilla parity: the `ImmutableSet.of(Pair.of(MEETING_POINT, VALUE_PRESENT))`
+    // the MEET activity is registered with -- a village with no bell has
+    // nowhere to gather, so the schedule's MEET hours fall back to IDLE.
+    .with_conditions(vec![(
+        memory_module_types::MEETING_POINT.id(),
+        MemoryStatus::ValuePresent,
+    )])
 }
 
 /// Vanilla parity: `VillagerGoalPackages.getIdlePackage`.
