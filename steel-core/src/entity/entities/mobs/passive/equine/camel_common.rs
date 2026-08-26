@@ -379,7 +379,11 @@ pub(super) trait CamelLike: AbstractHorse {
 
     /// Vanilla parity: `Camel.tick`.
     fn camel_tick(&self) {
-        self.default_tick();
+        // `Entity::default_tick` is only vanilla's `Entity.baseTick`. A living
+        // entity's `super.tick()` is `tick_living_entity`, and calling the
+        // wrong one costs the mob its item use, its mob effects, its death
+        // handling and its whole AI. Nine mobs had this exact bug.
+        LivingEntity::tick_living_entity(self);
         self.tick_dash();
 
         if self.refuse_to_move() {

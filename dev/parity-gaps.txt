@@ -28,11 +28,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 10
-Breeze
-BreezeWindCharge
-CamelHusk
-Creaking
+[entities] 6
 EnderDragon
 HappyGhast
 Nautilus

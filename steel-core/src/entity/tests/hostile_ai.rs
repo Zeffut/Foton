@@ -149,7 +149,14 @@ assert_ai_runs! {
     a_piglin_brute_runs_its_brain: PiglinBruteEntity, &vanilla_entities::PIGLIN_BRUTE;
     a_hoglin_runs_its_brain: HoglinEntity, &vanilla_entities::HOGLIN;
     a_zoglin_runs_its_brain: ZoglinEntity, &vanilla_entities::ZOGLIN;
-use crate::entity::entities::{
-    BreezeEntity, CreakingEntity, WardenEntity,
-};
+    // The breeze is brain-driven too, and registers no goals at all -- without
+    // this path nothing it does ever runs.
+    a_breeze_runs_its_brain: BreezeEntity, &vanilla_entities::BREEZE;
+    // A creaking gates its move, look, jump and navigation ticks on `canMove`,
+    // so the one thing that must not be gated is the step that reaches them.
+    a_creaking_runs_its_brain: CreakingEntity, &vanilla_entities::CREAKING;
+    // The warden is brain-driven too, and it is the one mob whose brain is the
+    // whole animal: without `Brain::tick` it never emerges, never sniffs and
+    // never digs away.
+    a_warden_runs_its_brain: WardenEntity, &vanilla_entities::WARDEN;
 }
