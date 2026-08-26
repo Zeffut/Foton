@@ -20,6 +20,15 @@
 //! against vanilla, but nothing in Steel reads `PathfinderMob::get_walk_target_value`
 //! yet -- the hook is landed and unwired for every mob that overrides it, this
 //! one included.
+//!
+//! Two overrides are missing here because there is nothing under them yet.
+//! `shouldStayCloseToLeashHolder` returns false on a happy ghast, and Steel has
+//! no `PathfinderMob.closeRangeLeashBehaviour` for it to gate -- no leashed mob
+//! in Steel walks back toward its holder, so the answer is already false for
+//! everybody. `PathfinderMob.whenLeashedTo` sets a home at the holder, which is
+//! what `checkRestriction` here is skipping around while leashed; Steel's
+//! `when_leashed_to` only notifies the holder, so a leashed happy ghast keeps
+//! whatever home it had.
 
 mod happy_ghast_ai;
 
