@@ -34,6 +34,10 @@ ARMOUR = "ARMOUR"
 # onStartTravelling / resumeTravelling steps.
 travelling = "travelling"
 Travelling = "Travelling"
+# Mojang spelling in Avatar.DATA_PLAYER_MODE_CUSTOMISATION, which the generated
+# entity data mirrors as `player_mode_customisation`.
+customisation = "customisation"
+CUSTOMISATION = "CUSTOMISATION"
 
 [default]
 locale = "en-us"

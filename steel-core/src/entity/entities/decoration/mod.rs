@@ -5,5 +5,7 @@
 //! that is neither a mob nor a player.
 
 mod armor_stand;
+mod mannequin;
 
 pub use armor_stand::ArmorStandEntity;
+pub use mannequin::MannequinEntity;

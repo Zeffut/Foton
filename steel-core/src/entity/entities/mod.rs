@@ -5,7 +5,7 @@ pub mod mobs;
 pub mod objects;
 mod raw;
 
-pub use decoration::ArmorStandEntity;
+pub use decoration::{ArmorStandEntity, MannequinEntity};
 pub use mobs::ambient::BatEntity;
 pub use mobs::bosses::WitherBoss;
 pub use mobs::hostile::{

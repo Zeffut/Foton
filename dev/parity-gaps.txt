@@ -30,14 +30,13 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 12
+[entities] 11
 Breeze
 BreezeWindCharge
 CamelHusk
 Creaking
 EnderDragon
 HappyGhast
-Mannequin
 Nautilus
 Player
 SulfurCube
