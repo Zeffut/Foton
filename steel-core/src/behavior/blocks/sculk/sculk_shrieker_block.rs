@@ -6,9 +6,9 @@
 //! `stepOn`, which is why walking onto one and setting off a sculk sensor beside one both
 //! start a shriek.
 //!
-//! Not implemented: the warden. `Warden` and `WardenSpawnTracker` do not exist in Steel, so
-//! a shrieker never escalates a warning and never summons. See `SculkShriekerBlockEntity`
-//! for the response side.
+//! The shriek itself lasts ninety ticks; what answers it is on
+//! `SculkShriekerBlockEntity`, which is where the warning level climbs and where a warden
+//! is summoned from.
 
 use std::sync::{Arc, Weak};
 
