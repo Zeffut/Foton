@@ -466,14 +466,19 @@ fn a_grown_hoglin_launches_what_it_hits_and_a_baby_does_not() {
     victim.set_velocity(DVec3::ZERO);
 
     hoglin_base::throw_target(hoglin.as_ref(), &victim_entity);
+
+    // The two halves are asserted apart on purpose. Together, as one
+    // `length_squared() > 0`, the vertical push alone satisfies them, so a
+    // charge that had lost its sideways shove entirely would still pass.
     let launched = victim.velocity();
+    let horizontal = DVec3::new(launched.x, 0.0, launched.z);
     assert!(
-        launched.length_squared() > 0.0,
-        "a hoglin with attack knockback should launch its target, got {launched:?}"
+        horizontal.length_squared() > 0.0,
+        "the charge shoves its target away sideways, got {launched:?}"
     );
     assert!(
         launched.y > 0.0,
-        "the launch is upward as well as sideways, got {launched:?}"
+        "and lifts it at the same time, got {launched:?}"
     );
 }
 
@@ -870,6 +875,15 @@ fn a_structure_spawned_piglin_keeps_the_hands_it_was_given() {
 
     Mob::finalize_spawn(piglin.as_ref(), &world, EntitySpawnReason::Structure, None);
 
+    // Both halves of the skipped block are pinned, because either one alone
+    // leaves a hole: the roll makes a baby one time in five, and only the other
+    // four rewrite the weapon. Asserting the age as well is what makes a
+    // structure spawn that wrongly runs the block fail every time rather than
+    // four times in five.
+    assert!(
+        piglin.is_adult(),
+        "a structure-placed piglin should not have the baby roll run on it"
+    );
     assert!(
         piglin
             .get_item_in_hand(InteractionHand::MainHand)
