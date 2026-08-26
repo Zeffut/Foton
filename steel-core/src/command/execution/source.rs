@@ -211,6 +211,17 @@ impl CommandAuthorizationContext {
         }
     }
 
+    /// Authority for a command block: a named permission set, but no domain
+    /// confinement -- vanilla lets a command block `/execute in` another
+    /// dimension, and a block cannot walk into a domain it did not start in.
+    fn for_command_block(world: steel_utils::Identifier, permissions: PermissionSet) -> Self {
+        Self {
+            permission_context: PermissionContext::for_world(world),
+            player_permissions: Some(permissions),
+            world_scope: CommandWorldScope::Global,
+        }
+    }
+
     fn unrestricted(world: steel_utils::Identifier) -> Self {
         Self {
             permission_context: PermissionContext::for_world(world),
@@ -292,6 +303,10 @@ impl CommandSource {
             CommandSender::Console | CommandSender::Rcon => {
                 CommandAuthorizationContext::unrestricted(world.key.clone())
             }
+            CommandSender::CommandBlock(_) => CommandAuthorizationContext::for_command_block(
+                world.key.clone(),
+                server.command_block_permission_snapshot(),
+            ),
         };
 
         Self {
@@ -309,6 +324,29 @@ impl CommandSource {
             callback: CommandResultCallback::empty(),
             silent: false,
         }
+    }
+
+    /// Builds the source a command block runs its command with.
+    ///
+    /// Vanilla parity: `BaseCommandBlock.createCommandSourceStack`, which takes
+    /// the block's world, the center of the block (or the minecart's position)
+    /// and a rotation of `(0, facing.toYRot())`.
+    pub(crate) fn for_command_block(
+        block: Arc<crate::command::base_command_block::BaseCommandBlock>,
+        server: Arc<Server>,
+        world: Arc<World>,
+        position: DVec3,
+        rotation: (f32, f32),
+    ) -> Self {
+        let mut source = Self::new(CommandSender::CommandBlock(block), server);
+        source.authorization = CommandAuthorizationContext::for_command_block(
+            world.key.clone(),
+            source.server.command_block_permission_snapshot(),
+        );
+        source.world = world;
+        source.position = position;
+        source.rotation = normalize_rotation(rotation);
+        source
     }
 
     #[expect(

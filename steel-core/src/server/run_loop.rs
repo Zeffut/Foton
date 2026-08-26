@@ -15,6 +15,9 @@ impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
     /// fork background chunk-scheduling epochs through each world's task tracker.
     pub async fn run(self: Arc<Self>, cancel_token: CancellationToken) {
+        // A world is built before the server that owns it, so the link back is
+        // filled in here, before anything can tick.
+        self.attach_worlds();
         self.packet_processor.open_after_tick();
         let packet_worker_count = configured_packet_workers(self.config.packet_workers);
         let mut packet_handles = Vec::with_capacity(packet_worker_count);

@@ -4,6 +4,7 @@ use text_components::TextComponent;
 use uuid::Uuid;
 
 use crate::{
+    command::base_command_block::BaseCommandBlock,
     player::{DomainResidenceToken, Player},
     server::Server,
 };
@@ -17,6 +18,12 @@ pub enum CommandSender {
     Console,
     /// The command was sent via Rcon.
     Rcon,
+    /// The command came from a command block or a command block minecart.
+    ///
+    /// Vanilla parity: the `CommandSource` a `BaseCommandBlock` builds. Its
+    /// output goes into the block's stored last output rather than to a chat
+    /// window, which is what the editor's output line reads back.
+    CommandBlock(Arc<BaseCommandBlock>),
 }
 
 /// Stable identity used to preserve top-level command ordering while work is suspended.
@@ -25,6 +32,8 @@ pub(crate) enum CommandSenderKey {
     Player(Uuid),
     Console,
     Rcon,
+    /// Command blocks are ordered by identity, so two blocks never share a lane.
+    CommandBlock(usize),
 }
 
 /// Exact key used to coalesce suggestions from one live player residence.
@@ -81,6 +90,7 @@ impl CommandExecutionOwner {
 
     pub(crate) fn suggestion_key(&self) -> CommandSuggestionKey {
         match &self.sender {
+            CommandSender::CommandBlock(_) => CommandSuggestionKey::Console,
             CommandSender::Player(player) => CommandSuggestionKey::Player {
                 uuid: player.gameprofile.id,
                 // The owner retains this Arc while queued, so its allocation
@@ -115,6 +125,9 @@ impl CommandSender {
             Self::Player(player) => CommandSenderKey::Player(player.gameprofile.id),
             Self::Console => CommandSenderKey::Console,
             Self::Rcon => CommandSenderKey::Rcon,
+            Self::CommandBlock(block) => {
+                CommandSenderKey::CommandBlock(Arc::as_ptr(block).cast::<()>() as usize)
+            }
         }
     }
 
@@ -134,6 +147,9 @@ impl CommandSender {
             Self::Console => log::info!("{text}"),
             // TODO: Implement Rcon message sending
             Self::Rcon => log::warn!("Dropping Rcon command message until Rcon output is wired"),
+            // Vanilla parity: `CloseableCommandBlockSource.sendSystemMessage`,
+            // which stores the line on the block instead of printing it.
+            Self::CommandBlock(block) => block.record_output(text),
         }
     }
 }
@@ -147,6 +163,7 @@ impl fmt::Display for CommandSender {
                 Self::Player(p) => &p.gameprofile.name,
                 Self::Console => "Server",
                 Self::Rcon => "Rcon",
+                Self::CommandBlock(_) => "@",
             }
         )
     }

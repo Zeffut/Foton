@@ -1,8 +1,26 @@
+use std::sync::LazyLock;
+
 use super::{
-    Arc, FnServerJob, OP_GROUP, PermissionGroupManager, PermissionGroupManagerError,
-    PermissionGroupUpdateError, PermissionGroupsConfig, PermissionSet, PermissionSubjectState,
-    Player, PlayerPermissionUpdateError, Server, ServerJobContext, Uuid,
+    Arc, COMMAND_BLOCK_GROUP, FnServerJob, OP_GROUP, PermissionGroupManager,
+    PermissionGroupManagerError, PermissionGroupUpdateError, PermissionGroupsConfig, PermissionSet,
+    PermissionSubjectState, Player, PlayerPermissionUpdateError, Server, ServerJobContext, Uuid,
 };
+use crate::permission::PermissionGroups;
+
+/// The built-in `command_block` group, used when `groups.toml` defines none.
+///
+/// A server whose config predates the group would otherwise give its command
+/// blocks an empty permission set and leave every command silently refused.
+static BUILT_IN_COMMAND_BLOCK_GROUPS: LazyLock<Option<PermissionGroups>> =
+    LazyLock::new(
+        || match PermissionGroups::from_config(PermissionGroupsConfig::default()) {
+            Ok(groups) => Some(groups),
+            Err(error) => {
+                log::error!("built-in permission groups do not resolve: {error}");
+                None
+            }
+        },
+    );
 
 pub(super) fn validate_player_permission_group_update<E>(
     manager: &PermissionGroupManager,
@@ -75,6 +93,27 @@ impl Server {
         let subject = self.player_permission_state(uuid).unwrap_or_default();
         self.permission_groups
             .effective_permissions(subject.groups(), subject.overrides())
+    }
+
+    /// Captures the permissions a command block runs its command with.
+    ///
+    /// Vanilla parity: the `LevelBasedPermissionSet.GAMEMASTER` a
+    /// `BaseCommandBlock` builds its command source with. Steel resolves the
+    /// `command_block` group instead, so the same authority is nameable and
+    /// retunable; a config without that group falls back to the built-in
+    /// definition rather than to nothing.
+    #[must_use]
+    pub(crate) fn command_block_permission_snapshot(&self) -> PermissionSet {
+        let assigned = [COMMAND_BLOCK_GROUP.to_owned()];
+        if self.permission_groups.contains_group(COMMAND_BLOCK_GROUP) {
+            return self
+                .permission_groups
+                .effective_permissions(&assigned, &PermissionSet::default());
+        }
+        BUILT_IN_COMMAND_BLOCK_GROUPS
+            .as_ref()
+            .map(|groups| groups.effective_permissions(&assigned, &PermissionSet::default()))
+            .unwrap_or_default()
     }
 
     /// Atomically edits one player's persisted permission state.

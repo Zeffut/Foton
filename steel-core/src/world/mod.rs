@@ -4,7 +4,7 @@ use std::{
     io, mem,
     path::Path,
     sync::{
-        Arc, LazyLock, Weak,
+        Arc, LazyLock, OnceLock, Weak,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -305,6 +305,13 @@ pub struct World {
     pub poi_storage: SyncMutex<PointOfInterestStorage>,
     /// World-change requests queued by world-local ticks for server safe-point processing.
     pending_world_changes: SyncMutex<Vec<(SharedEntity, WorldChangeRequest)>>,
+    /// The server this world belongs to, attached once the server exists.
+    ///
+    /// Vanilla reaches the server through `Level.getServer()`. Steel builds its
+    /// worlds before the server that owns them, so the link is filled in by
+    /// [`crate::server::Server::attach_worlds`] and is absent in tests that
+    /// build a world on its own.
+    server: OnceLock<Weak<crate::server::Server>>,
 }
 
 impl World {
@@ -448,8 +455,27 @@ impl World {
                 scheduled_fluid_ticks_this_tick: SyncMutex::new(None),
                 poi_storage: SyncMutex::new(PointOfInterestStorage::new()),
                 pending_world_changes: SyncMutex::new(Vec::new()),
+                server: OnceLock::new(),
             }
         }))
+    }
+
+    /// Links this world to the server that owns it.
+    ///
+    /// Called once, from [`crate::server::Server::attach_worlds`]. A second
+    /// call is ignored rather than replacing the link.
+    pub(crate) fn attach_server(&self, server: &Arc<crate::server::Server>) {
+        let _ = self.server.set(Arc::downgrade(server));
+    }
+
+    /// Returns the server that owns this world.
+    ///
+    /// Vanilla parity: `Level.getServer`. `None` before the server is built and
+    /// in tests that construct a world on its own, so callers on a game tick
+    /// must treat a missing server as "do nothing" rather than unwrapping.
+    #[must_use]
+    pub fn server(&self) -> Option<Arc<crate::server::Server>> {
+        self.server.get().and_then(Weak::upgrade)
     }
 
     /// Cleans up the world by saving all chunks.

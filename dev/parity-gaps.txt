@@ -12,11 +12,10 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 14
+[blocks] 13
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
-CommandBlock
 CryingObsidianBlock
 HalfTransparentBlock
 JigsawBlock
@@ -31,7 +30,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 13
+[entities] 12
 Breeze
 BreezeWindCharge
 CamelHusk
@@ -39,7 +38,6 @@ Creaking
 EnderDragon
 HappyGhast
 Mannequin
-MinecartCommandBlock
 Nautilus
 Player
 SulfurCube

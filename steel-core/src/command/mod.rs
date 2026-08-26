@@ -1,6 +1,7 @@
 //! Brigadier-compatible command parsing, execution, and sender handling.
 
 mod api;
+pub(crate) mod base_command_block;
 pub(crate) mod brigadier;
 mod builtins;
 pub(crate) mod execution;

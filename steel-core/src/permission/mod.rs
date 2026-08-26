@@ -15,7 +15,7 @@ pub use context::{
     PermissionDomain, PermissionRuleContext, PermissionRuleContextError, PermissionRuleContexts,
 };
 pub use expression::PermissionExpr;
-pub(crate) use groups::OP_GROUP;
+pub(crate) use groups::{COMMAND_BLOCK_GROUP, OP_GROUP};
 pub use groups::{
     PermissionConfigError, PermissionGroup, PermissionGroupConfig, PermissionGroups,
     PermissionGroupsConfig, PermissionMetadataRuleConfig,

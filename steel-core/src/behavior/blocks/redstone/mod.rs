@@ -1,4 +1,5 @@
 mod button_block;
+mod command_block;
 mod copper_bulb_block;
 mod daylight_detector_block;
 mod diode;
@@ -27,6 +28,7 @@ pub(crate) const MAX_REDSTONE_SIGNAL: i32 = 15;
 pub(crate) const MIN_REDSTONE_SIGNAL: i32 = 0;
 
 pub use button_block::ButtonBlock;
+pub use command_block::CommandBlock;
 pub use copper_bulb_block::{CopperBulbBlock, WeatheringCopperBulbBlock};
 pub use daylight_detector_block::DaylightDetectorBlock;
 pub use diode::{ComparatorBlock, RepeaterBlock};

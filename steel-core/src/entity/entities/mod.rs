@@ -47,7 +47,8 @@ pub use objects::projectiles::{
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
-    HopperMinecartEntity, MinecartEntity, RaftEntity, SpawnerMinecartEntity, TntMinecartEntity,
+    HopperMinecartEntity, MinecartCommandBlockEntity, MinecartEntity, RaftEntity,
+    SpawnerMinecartEntity, TntMinecartEntity,
 };
 pub use objects::{
     AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity, OminousItemSpawnerEntity,

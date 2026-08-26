@@ -41,9 +41,9 @@ use crate::chunk_saver::{ChunkStorage, PersistentEntity, registry::WorldStorageR
 use crate::level_data::{LevelDataManager, RespawnData, WorldGenerationSettings};
 use crate::map::DomainMapData;
 use crate::permission::{
-    OP_GROUP, PermissionGroupManager, PermissionGroupManagerError, PermissionGroupUpdateError,
-    PermissionGroupsConfig, PermissionMetadataExpression, PermissionRuleExpression, PermissionSet,
-    PermissionSubjectIndex, PermissionSubjectState,
+    COMMAND_BLOCK_GROUP, OP_GROUP, PermissionGroupManager, PermissionGroupManagerError,
+    PermissionGroupUpdateError, PermissionGroupsConfig, PermissionMetadataExpression,
+    PermissionRuleExpression, PermissionSet, PermissionSubjectIndex, PermissionSubjectState,
 };
 use crate::player::chunk_sender::{ChunkSender, EncodedChunk};
 use crate::player::connection::NetworkConnection;
@@ -75,6 +75,7 @@ use crossbeam::queue::SegQueue;
 use glam::DVec3;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use rustc_hash::FxHashMap;
+use std::sync::atomic::{AtomicI32, Ordering as AtomicOrdering};
 use std::{
     collections::BTreeSet,
     io, mem,
@@ -767,6 +768,68 @@ impl Server {
             storage: self.save_command_storage().await,
             maps: self.map_data.save(&self.worlds).await,
         }
+    }
+
+    /// Links every loaded world back to this server.
+    ///
+    /// A world is built before the server that owns it, so the link cannot be
+    /// passed to `World::new`. Nothing that runs before this call may rely on
+    /// [`crate::world::World::server`].
+    pub fn attach_worlds(self: &Arc<Self>) {
+        for world in self.worlds.values() {
+            world.attach_server(self);
+        }
+    }
+
+    /// Runs one command to completion inside the current tick.
+    ///
+    /// Vanilla parity: the `commands.performPrefixedCommand` of
+    /// `BaseCommandBlock.performCommand`, which runs synchronously because the
+    /// command block reads its own success count in the same tick -- that count
+    /// is what a comparator reports and what gates a conditional chain.
+    ///
+    /// [`Self::submit_command`] is the queued path used by chat and the
+    /// console; it cannot serve a command block, because the queue is drained
+    /// before the world tick that would read the result.
+    ///
+    /// A command that suspends -- today only a structure search waiting on
+    /// chunk generation -- is cancelled rather than carried into the next tick,
+    /// and counts as no successes. Vanilla blocks the server thread there
+    /// instead; a game tick may not wait.
+    pub(crate) fn run_command_now(self: &Arc<Self>, source: CommandSource, command: &str) -> i32 {
+        let successes = Arc::new(AtomicI32::new(0));
+        let counter = Arc::clone(&successes);
+        let source = source.with_callback(CommandResultCallback::new(move |success, _result| {
+            if success {
+                counter.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+        }));
+
+        let command = command.strip_prefix('/').unwrap_or(command);
+        let chain = {
+            let dispatcher = self.command_dispatcher.read();
+            let parse = dispatcher.parse(command, source.clone());
+            dispatcher.context_chain(parse)
+        };
+        let chain = match chain {
+            Ok(chain) => chain,
+            Err(error) => {
+                source.handle_error(&error, false);
+                return 0;
+            }
+        };
+
+        let mut execution = CommandExecutionContext::for_source(&source);
+        let callback = source.callback();
+        execution.queue_initial_command(chain, source, callback);
+        if execution.run() == ExecutionStop::Suspended {
+            log::warn!(
+                "command block command `{command}` suspended on chunk work and was cancelled"
+            );
+            execution.cancel();
+        }
+
+        successes.load(AtomicOrdering::Relaxed)
     }
 
     /// Queues a command for execution at the start of the next game tick.

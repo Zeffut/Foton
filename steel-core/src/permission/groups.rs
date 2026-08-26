@@ -15,6 +15,15 @@ use super::{
 /// Built-in operator group assigned by `/op`.
 pub(crate) const OP_GROUP: &str = "op";
 
+/// Built-in group a command block runs its command with.
+///
+/// Vanilla runs a command block at `LevelBasedPermissionSet.GAMEMASTER`, its
+/// permission level 2: everything a map-maker needs and nothing that
+/// administers the server. Steel has permission *expressions* rather than
+/// levels, so the same idea is a group -- and unlike vanilla's fixed level, a
+/// server can retune it in `groups.toml`.
+pub(crate) const COMMAND_BLOCK_GROUP: &str = "command_block";
+
 /// Parsed `groups.toml` permission configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -33,6 +42,23 @@ impl Default for PermissionGroupsConfig {
             OP_GROUP.to_owned(),
             PermissionGroupConfig {
                 allow: vec!["*".to_owned()],
+                ..PermissionGroupConfig::default()
+            },
+        );
+        groups.insert(
+            COMMAND_BLOCK_GROUP.to_owned(),
+            PermissionGroupConfig {
+                allow: vec!["minecraft.command.*".to_owned()],
+                // Vanilla's level 2 stops short of administering the server.
+                // These are the Steel commands above that line: `stop` and
+                // `operator` are vanilla level 4 and 3, and `perms` and
+                // `domain` are Steel's own administration tools.
+                deny: vec![
+                    "minecraft.command.stop".to_owned(),
+                    "minecraft.command.operator".to_owned(),
+                    "minecraft.command.perms".to_owned(),
+                    "minecraft.command.domain".to_owned(),
+                ],
                 ..PermissionGroupConfig::default()
             },
         );

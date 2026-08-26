@@ -18,8 +18,9 @@ use steel_protocol::packets::game::{
     SContainerSlotStateChanged, SEditBook, SInteract, SMovePlayer, SMovePlayerPos,
     SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
     SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem,
-    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot,
-    SSignUpdate, SSpectatorAction, SSwing, SUseItem, SUseItemOn,
+    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCommandBlock,
+    SSetCommandMinecart, SSetCreativeModeSlot, SSignUpdate, SSpectatorAction, SSwing, SUseItem,
+    SUseItemOn,
 };
 
 use steel_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
@@ -93,6 +94,8 @@ enum ScheduledPlayPacketKind {
     SelectBundleItem(SSelectBundleItem),
     SelectTrade(SSelectTrade),
     SetBeacon(SSetBeacon),
+    SetCommandBlock(SSetCommandBlock),
+    SetCommandMinecart(SSetCommandMinecart),
     SetCreativeModeSlot(SSetCreativeModeSlot),
     PlayerInput(SPlayerInput),
     PlayerCommand(SPlayerCommand),
@@ -208,6 +211,8 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::ContainerClick(_)
             | ScheduledPlayPacketKind::ContainerSlotStateChanged(_)
             | ScheduledPlayPacketKind::SetBeacon(_)
+            | ScheduledPlayPacketKind::SetCommandBlock(_)
+            | ScheduledPlayPacketKind::SetCommandMinecart(_)
             | ScheduledPlayPacketKind::RenameItem(_)
             | ScheduledPlayPacketKind::UseItemOn(_)
             | ScheduledPlayPacketKind::UseItem(_)
@@ -330,6 +335,12 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::SelectBundleItem(_)
             | ScheduledPlayPacketKind::SelectTrade(_)
             | ScheduledPlayPacketKind::SetBeacon(_) => Self::handle_menu(kind, &player),
+            ScheduledPlayPacketKind::SetCommandBlock(packet) => {
+                player.handle_set_command_block(packet);
+            }
+            ScheduledPlayPacketKind::SetCommandMinecart(packet) => {
+                player.handle_set_command_minecart(packet);
+            }
             ScheduledPlayPacketKind::SetCreativeModeSlot(packet) => {
                 player.handle_set_creative_mode_slot(packet);
             }
@@ -767,6 +778,12 @@ impl JavaConnection {
             )),
             play::S_SET_BEACON => scheduled(ScheduledPlayPacketKind::SetBeacon(
                 SSetBeacon::read_packet(data)?,
+            )),
+            play::S_SET_COMMAND_BLOCK => scheduled(ScheduledPlayPacketKind::SetCommandBlock(
+                SSetCommandBlock::read_packet(data)?,
+            )),
+            play::S_SET_COMMAND_MINECART => scheduled(ScheduledPlayPacketKind::SetCommandMinecart(
+                SSetCommandMinecart::read_packet(data)?,
             )),
             play::S_SET_CREATIVE_MODE_SLOT => {
                 scheduled(ScheduledPlayPacketKind::SetCreativeModeSlot(

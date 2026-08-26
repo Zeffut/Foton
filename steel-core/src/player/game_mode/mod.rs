@@ -47,6 +47,7 @@ use steel_utils::axis::Axis;
 
 pub mod block_breaking;
 mod block_interaction;
+mod command_block_editing;
 mod entity_interaction;
 mod item_interaction;
 mod player_methods;

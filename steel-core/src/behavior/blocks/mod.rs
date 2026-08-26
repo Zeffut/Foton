@@ -58,13 +58,13 @@ pub use portal::{
     RespawnAnchorBlock, SoulFireBlock,
 };
 pub use redstone::{
-    ButtonBlock, ComparatorBlock, CopperBulbBlock, DaylightDetectorBlock, DetectorRailBlock,
-    LeverBlock, LightningRod, LightningRodBlock, MovingPistonBlock, NoteBlock, ObserverBlock,
-    PistonBaseBlock, PistonHeadBlock, PoweredBlock, PoweredRailBlock, PressurePlateBlock,
-    PressurePlateSensitivity, RailBlock, RedStoneOreBlock, RedStoneWireBlock, RedstoneLampBlock,
-    RedstoneTorchBlock, RedstoneWallTorchBlock, RepeaterBlock, TargetBlock, TntBlock,
-    TripWireBlock, TripWireHookBlock, WeatheringCopperBulbBlock, WeatheringLightningRodBlock,
-    WeightedPressurePlateBlock, rail_shape_at,
+    ButtonBlock, CommandBlock, ComparatorBlock, CopperBulbBlock, DaylightDetectorBlock,
+    DetectorRailBlock, LeverBlock, LightningRod, LightningRodBlock, MovingPistonBlock, NoteBlock,
+    ObserverBlock, PistonBaseBlock, PistonHeadBlock, PoweredBlock, PoweredRailBlock,
+    PressurePlateBlock, PressurePlateSensitivity, RailBlock, RedStoneOreBlock, RedStoneWireBlock,
+    RedstoneLampBlock, RedstoneTorchBlock, RedstoneWallTorchBlock, RepeaterBlock, TargetBlock,
+    TntBlock, TripWireBlock, TripWireHookBlock, WeatheringCopperBulbBlock,
+    WeatheringLightningRodBlock, WeightedPressurePlateBlock, rail_shape_at,
 };
 pub(crate) use redstone::{MAX_REDSTONE_SIGNAL, MIN_REDSTONE_SIGNAL};
 pub use sculk::behavior_of as sculk_behavior_of;
