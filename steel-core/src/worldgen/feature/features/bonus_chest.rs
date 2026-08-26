@@ -6,7 +6,7 @@ const SPAWN_BONUS_CHEST: &str = "minecraft:chests/spawn_bonus_chest";
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_bonus_chest_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
@@ -20,9 +20,9 @@ impl FeatureDecorationRunner {
 
         for x in x_positions.drain(..) {
             for &z in &z_positions {
-                let y = region.height_at(HeightmapType::MotionBlockingNoLeaves, x, z);
+                let y = region.heightmap_at(HeightmapType::MotionBlockingNoLeaves, x, z);
                 let chest_pos = BlockPos::new(x, y, z);
-                let state = region.block_state(chest_pos);
+                let state = region.get_block_state(chest_pos);
                 if state.is_air() || state.get_collision_shape_at(chest_pos).is_empty() {
                     let _ = region.set_block_state(chest_pos, chest, UpdateFlags::UPDATE_CLIENTS);
                     Self::set_loot_table_block_entity(

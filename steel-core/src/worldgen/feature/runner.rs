@@ -147,7 +147,7 @@ impl FeatureDecorationRunner {
 
     pub(crate) fn decorate(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         seed: i64,
         biome_zoom_seed: i64,
@@ -282,7 +282,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_structures_for_step(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         decoration_seed: i64,
         random: &mut WorldgenRandom,
@@ -360,7 +360,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla's decoration loop state without hiding generation inputs"
     )]
     pub(super) fn place_features_for_step(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         decoration_seed: i64,
         random: &mut WorldgenRandom,

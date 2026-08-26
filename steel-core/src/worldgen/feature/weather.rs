@@ -22,33 +22,35 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn biome_at_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         biome_zoom_seed: i64,
         pos: BlockPos,
-    ) -> BiomeRef {
+    ) -> Option<BiomeRef> {
         let biome_id = fuzzed_biome_at_block(biome_zoom_seed, pos, |quart| {
             region.noise_biome_id(quart.x, quart.y, quart.z)
-        });
+        })?;
         let Some(biome) = registry.biomes.by_id(usize::from(biome_id)) else {
             panic!("biome lookup resolved unknown biome id {biome_id}");
         };
-        biome
+        Some(biome)
     }
 
     pub(super) fn should_freeze(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         biome_zoom_seed: i64,
         pos: BlockPos,
         check_neighbors: bool,
     ) -> bool {
-        let biome = Self::biome_at_block(region, registry, biome_zoom_seed, pos);
+        let Some(biome) = Self::biome_at_block(region, registry, biome_zoom_seed, pos) else {
+            return false;
+        };
         Self::should_freeze_in_biome(region, biome, pos, check_neighbors)
     }
 
     pub(super) fn should_freeze_in_biome(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         biome: BiomeRef,
         pos: BlockPos,
         check_neighbors: bool,
@@ -60,7 +62,7 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         if state.get_block() != &vanilla_blocks::WATER
             || !get_fluid_state_from_block(state).is_water()
         {
@@ -78,7 +80,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn should_snow_in_biome(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         biome: BiomeRef,
         pos: BlockPos,
     ) -> bool {
@@ -90,7 +92,7 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         if !state.is_air() && state.get_block() != &vanilla_blocks::SNOW {
             return false;
         }
@@ -101,15 +103,15 @@ impl FeatureDecorationRunner {
             .can_survive(snow, region, pos)
     }
 
-    fn is_water_at(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
-        get_fluid_state_from_block(region.block_state(pos)).is_water()
+    fn is_water_at(region: &impl WorldGenLevel, pos: BlockPos) -> bool {
+        get_fluid_state_from_block(region.get_block_state(pos)).is_water()
     }
 
-    fn warm_enough_to_rain(region: &WorldGenRegion<'_>, biome: BiomeRef, pos: BlockPos) -> bool {
+    fn warm_enough_to_rain(region: &impl WorldGenLevel, biome: BiomeRef, pos: BlockPos) -> bool {
         Self::biome_temperature(region, biome, pos) >= 0.15
     }
 
-    fn biome_temperature(region: &WorldGenRegion<'_>, biome: BiomeRef, pos: BlockPos) -> f32 {
+    fn biome_temperature(region: &impl WorldGenLevel, biome: BiomeRef, pos: BlockPos) -> f32 {
         let base_temp = biome.temperature;
         let modified_temp = match biome.temperature_modifier {
             TemperatureModifier::None => base_temp,

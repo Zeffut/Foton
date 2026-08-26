@@ -888,7 +888,7 @@ impl<N: VanillaPostNoiseStateType> ChunkGenerator for VanillaGenerator<N> {
         worldgen_region_random_from_splitter(&self.splitter, center)
     }
 
-    fn apply_biome_decorations(&self, region: &mut WorldGenRegion<'_>) {
+    fn apply_biome_decorations(&self, region: &WorldGenRegion<'_>) {
         self.feature_runner
             .decorate(region, &REGISTRY, self.seed, self.biome_zoom_seed);
     }
@@ -969,11 +969,11 @@ fn get_fiddle(rval: i64) -> f64 {
 ///
 /// Used by carver top-material lookups where a simple unfuzzed lookup would
 /// differ from vanilla at the quart-cell boundaries.
-pub(crate) fn fuzzed_biome_at_block<F: FnMut(IVec3) -> u16>(
+pub(crate) fn fuzzed_biome_at_block<T, F: FnMut(IVec3) -> T>(
     biome_zoom_seed: i64,
     pos: BlockPos,
     mut quart_biome: F,
-) -> u16 {
+) -> T {
     let abs = pos.0 - IVec3::splat(2);
     let parent = IVec3::new(abs.x >> 2, abs.y >> 2, abs.z >> 2);
     let fract = DVec3::new(

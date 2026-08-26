@@ -411,8 +411,13 @@ impl World {
             .unwrap_or(self.dimension_type.snow_golem_melts)
     }
 
+    /// Returns the seed vanilla's `BiomeManager` fuzzes block-level biome lookups with.
+    pub(crate) fn biome_zoom_seed(&self) -> i64 {
+        obfuscate_biome_seed(self.seed())
+    }
+
     pub(crate) fn biome_at(&self, pos: BlockPos) -> Option<BiomeRef> {
-        let biome_zoom_seed = obfuscate_biome_seed(self.seed());
+        let biome_zoom_seed = self.biome_zoom_seed();
         let mut missing_chunk = false;
         let biome_id = fuzzed_biome_at_block(biome_zoom_seed, pos, |quart| {
             self.noise_biome_id(quart.x, quart.y, quart.z)
@@ -429,7 +434,7 @@ impl World {
         REGISTRY.biomes.by_id(usize::from(biome_id))
     }
 
-    pub(super) fn noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> Option<u16> {
+    pub(crate) fn noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> Option<u16> {
         let chunk_pos = ChunkPos::new(quart_x >> 2, quart_z >> 2);
         let local_quart_x = (quart_x & 3) as usize;
         let local_quart_z = (quart_z & 3) as usize;

@@ -3,14 +3,14 @@ use super::super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_root_system_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
         origin: BlockPos,
         biome_zoom_seed: i64,
     ) -> bool {
-        if !region.block_state(origin).is_air() {
+        if !region.get_block_state(origin).is_air() {
             return false;
         }
 
@@ -31,7 +31,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_dirt_and_tree(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -41,7 +41,7 @@ impl FeatureDecorationRunner {
     ) -> bool {
         for y in 0..config.root_column_max_height {
             *tree_pos = tree_pos.above();
-            if region.height_at(HeightmapType::WorldSurfaceWg, tree_pos.x(), tree_pos.z())
+            if region.heightmap_at(HeightmapType::WorldSurfaceWg, tree_pos.x(), tree_pos.z())
                 < tree_pos.y()
             {
                 return false;
@@ -58,7 +58,7 @@ impl FeatureDecorationRunner {
             }
 
             let below_pos = tree_pos.below();
-            let below_state = region.block_state(below_pos);
+            let below_state = region.get_block_state(below_pos);
             if get_fluid_state_from_block(below_state).is_lava() || !below_state.is_solid() {
                 return false;
             }
@@ -87,14 +87,14 @@ impl FeatureDecorationRunner {
     }
 
     fn root_system_space_for_tree(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         config: &RootSystemConfiguration,
         pos: BlockPos,
     ) -> bool {
         let mut column_pos = pos;
         for blocks_above_origin in 1..=config.required_vertical_space_for_tree {
             column_pos = column_pos.above();
-            let state = region.block_state(column_pos);
+            let state = region.get_block_state(column_pos);
             if !Self::root_system_allowed_tree_space(
                 state,
                 blocks_above_origin,
@@ -112,8 +112,8 @@ impl FeatureDecorationRunner {
                 Direction::East,
             ] {
                 let corner_pos = pos.relative_n(direction, config.level_test_distance);
-                let below = region.block_state(corner_pos.below_n(config.max_level_deviation));
-                let above = region.block_state(corner_pos.above_n(config.max_level_deviation));
+                let below = region.get_block_state(corner_pos.below_n(config.max_level_deviation));
+                let above = region.get_block_state(corner_pos.above_n(config.max_level_deviation));
                 if below.is_air() || !above.is_air() {
                     return false;
                 }
@@ -138,7 +138,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_dirt(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -159,7 +159,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_rooted_dirt(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -176,7 +176,7 @@ impl FeatureDecorationRunner {
                     - random.next_i32_bounded(config.root_radius),
             );
 
-            let state = region.block_state(pos);
+            let state = region.get_block_state(pos);
             if Self::block_matches_holder_set(state.get_block(), &config.root_replaceable) {
                 let replacement = Self::sample_block_state_provider(
                     region,
@@ -193,7 +193,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_hanging_roots(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -209,7 +209,7 @@ impl FeatureDecorationRunner {
                     - random.next_i32_bounded(config.hanging_root_radius),
             );
 
-            if !region.block_state(pos).is_air() {
+            if !region.get_block_state(pos).is_air() {
                 continue;
             }
 
@@ -224,7 +224,7 @@ impl FeatureDecorationRunner {
             if behavior.can_survive(state, region, pos) && {
                 let above_pos = pos.above();
                 region
-                    .block_state(above_pos)
+                    .get_block_state(above_pos)
                     .is_face_sturdy_at(above_pos, Direction::Down)
             } {
                 let _ = region.set_block_state(pos, state, UpdateFlags::UPDATE_CLIENTS);

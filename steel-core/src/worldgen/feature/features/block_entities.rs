@@ -9,7 +9,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn set_loot_table_block_entity(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         block_entity_type: BlockEntityTypeRef,
         state: BlockStateId,
@@ -25,7 +25,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn set_empty_block_entity(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         block_entity_type: BlockEntityTypeRef,
         state: BlockStateId,
@@ -34,7 +34,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn set_brushable_loot_table(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         loot_table: &'static str,
@@ -51,7 +51,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn set_spawner_entity(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         entity_id: &'static str,
@@ -81,7 +81,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn set_end_gateway_block_entity(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         exit: Option<BlockPos>,
@@ -103,11 +103,11 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn safe_set_feature_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
     ) -> bool {
-        if Self::feature_can_replace(region.block_state(pos)) {
+        if Self::feature_can_replace(region.get_block_state(pos)) {
             region.set_block_state(pos, state, UpdateFlags::UPDATE_CLIENTS)
         } else {
             false

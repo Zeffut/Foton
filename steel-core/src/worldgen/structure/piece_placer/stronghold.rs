@@ -7,7 +7,7 @@ use steel_utils::random::Random;
 use steel_utils::random::worldgen_random::WorldgenRandom;
 use steel_utils::{BlockStateId, BoundingBox, Direction};
 
-use crate::worldgen::region::WorldGenRegion;
+use crate::world::WorldGenLevel;
 use steel_worldgen::structure::stronghold::{StrongholdPieceData, StrongholdSmallDoorType};
 
 use super::{StructurePiecePlacer, scattered_feature::ScatteredFeaturePlacer};
@@ -19,7 +19,7 @@ const SILVERFISH_ENTITY: &str = "minecraft:silverfish";
 
 impl StructurePiecePlacer {
     pub(super) fn place_stronghold_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         bounding_box: BoundingBox,
         orientation: Option<Direction>,
@@ -227,7 +227,7 @@ fn smooth_stone_selector(
     reason = "mirrors vanilla StructurePiece.generateBox selector overload"
 )]
 fn stronghold_box(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     x0: i32,
     y0: i32,
@@ -255,7 +255,7 @@ fn stronghold_box(
     reason = "mirrors vanilla StructurePiece.generateMaybeBox for stronghold cobwebs"
 )]
 fn generate_maybe_box(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     probability: f32,
     x0: i32,
@@ -285,7 +285,7 @@ fn generate_maybe_box(
 }
 
 fn maybe_generate_block(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     probability: f32,
     x: i32,
@@ -299,7 +299,7 @@ fn maybe_generate_block(
 }
 
 fn generate_small_door(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     door_type: StrongholdSmallDoorType,
     foot_x: i32,
     foot_y: i32,
@@ -376,7 +376,7 @@ fn generate_small_door(
 }
 
 fn place_chest_corridor(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
     has_placed_chest: &mut bool,
@@ -403,7 +403,7 @@ fn place_chest_corridor(
     }
 }
 
-fn place_filler_corridor(placer: &mut ScatteredFeaturePlacer<'_, '_>, steps: i32) {
+fn place_filler_corridor(placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>, steps: i32) {
     let stone_bricks = stone_bricks();
     let air = cave_air();
     for i in 0..steps {
@@ -434,7 +434,7 @@ fn place_filler_corridor(placer: &mut ScatteredFeaturePlacer<'_, '_>, steps: i32
     reason = "straight transcription of vanilla StrongholdPieces.FiveCrossing"
 )]
 fn place_five_crossing(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
     left_low: bool,
@@ -478,7 +478,7 @@ fn place_five_crossing(
 }
 
 fn place_turn(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
     is_left_turn: bool,
@@ -504,7 +504,7 @@ fn place_turn(
     reason = "straight transcription of vanilla StrongholdPieces.Library"
 )]
 fn place_library(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
     is_tall: bool,
@@ -626,7 +626,7 @@ fn place_library(
 }
 
 fn place_portal_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     has_placed_spawner: &mut bool,
 ) {
@@ -717,7 +717,7 @@ fn place_portal_room(
 }
 
 fn place_prison_hall(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
 ) {
@@ -754,7 +754,7 @@ fn place_prison_hall(
 }
 
 fn place_room_crossing(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
     crossing_type: i32,
@@ -846,7 +846,7 @@ fn place_room_crossing(
 }
 
 fn place_stairs_down(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
 ) {
@@ -875,7 +875,7 @@ fn place_stairs_down(
 }
 
 fn place_straight(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
     left_child: bool,
@@ -898,7 +898,7 @@ fn place_straight(
 }
 
 fn place_straight_stairs_down(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     entry_door: StrongholdSmallDoorType,
 ) {

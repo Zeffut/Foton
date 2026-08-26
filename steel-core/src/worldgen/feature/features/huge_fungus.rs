@@ -3,14 +3,14 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_huge_fungus_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &HugeFungusConfiguration,
         origin: BlockPos,
     ) -> bool {
         let valid_base_state = Self::block_state_from_data(registry, &config.valid_base_block);
-        if region.block_state(origin.below()).get_block() != valid_base_state.get_block() {
+        if region.get_block_state(origin.below()).get_block() != valid_base_state.get_block() {
             return false;
         }
 
@@ -62,7 +62,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla HugeFungusFeature.placeStem state"
     )]
     fn place_huge_fungus_stem(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &HugeFungusConfiguration,
@@ -85,7 +85,7 @@ impl FeatureDecorationRunner {
                     }
 
                     if config.planted {
-                        if !region.block_state(pos.below()).is_air() {
+                        if !region.get_block_state(pos.below()).is_air() {
                             let _ = region.set_block_state(
                                 pos,
                                 vanilla_blocks::AIR.default_state(),
@@ -112,7 +112,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla HugeFungusFeature.placeHat state"
     )]
     fn place_huge_fungus_hat(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &HugeFungusConfiguration,
@@ -153,7 +153,7 @@ impl FeatureDecorationRunner {
                         continue;
                     }
 
-                    if config.planted && !region.block_state(pos.below()).is_air() {
+                    if config.planted && !region.get_block_state(pos.below()).is_air() {
                         let _ = region.set_block_state(
                             pos,
                             vanilla_blocks::AIR.default_state(),
@@ -215,7 +215,7 @@ impl FeatureDecorationRunner {
         reason = "vanilla hat placement uses three independent probabilities"
     )]
     fn place_huge_fungus_hat_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         hat_state: BlockStateId,
@@ -235,13 +235,13 @@ impl FeatureDecorationRunner {
     }
 
     fn place_huge_fungus_hat_drop_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         hat_state: BlockStateId,
         place_vines: bool,
     ) {
-        if region.block_state(pos.below()).get_block() == hat_state.get_block() {
+        if region.get_block_state(pos.below()).get_block() == hat_state.get_block() {
             let _ = region.set_block_state(pos, hat_state, UpdateFlags::UPDATE_ALL);
         } else if random.next_f32() < 0.15 {
             let _ = region.set_block_state(pos, hat_state, UpdateFlags::UPDATE_ALL);
@@ -252,12 +252,12 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_huge_fungus_weeping_vines(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         hat_pos: BlockPos,
     ) {
         let place_pos = hat_pos.below();
-        if !region.block_state(place_pos).is_air() {
+        if !region.get_block_state(place_pos).is_air() {
             return;
         }
 
@@ -270,13 +270,13 @@ impl FeatureDecorationRunner {
     }
 
     fn huge_fungus_is_replaceable(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         pos: BlockPos,
         config: &HugeFungusConfiguration,
         check_non_replaceable_plants: bool,
     ) -> bool {
-        if region.block_state(pos).is_replaceable() {
+        if region.get_block_state(pos).is_replaceable() {
             return true;
         }
 

@@ -10,29 +10,39 @@
 //! * **save** can work its own box out from the matching corner blocks
 //!   ([`Self::detect_size`]).
 //!
-//! What is not here is the capture and the placement themselves.
-//! `saveStructure` needs `StructureTemplate.fillFromWorld` plus a
-//! `StructureTemplateManager` to write `generated/<namespace>/structures/<path>.nbt`,
-//! and `placeStructure` needs `StructureTemplate.place_in_world` -- which in
-//! Steel takes a `WorldGenRegion` and so cannot be pointed at a live world.
-//! Both report failure the way vanilla does when the operation does not
-//! succeed, rather than pretending.
+//! Load mode places for real: `StructureTemplate::place_in_world` accepts any
+//! `WorldGenLevel`, and a live world is one.
+//!
+//! What is not here is the capture. `saveStructure` needs
+//! `StructureTemplate.fillFromWorld` plus a `StructureTemplateManager` to write
+//! `generated/<namespace>/structures/<path>.nbt`, and neither exists, so a save
+//! reports failure the way vanilla does rather than pretending. That is also why a
+//! load only finds the structures bundled with the game: nothing has been saved.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
+use glam::IVec3;
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::NbtCompound;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, StructureMode};
-use steel_registry::{vanilla_block_entity_types, vanilla_blocks};
+use steel_registry::structure::LiquidSettingsData;
+use steel_registry::structure_processor::StructureProcessorKind;
+use steel_registry::{REGISTRY, vanilla_block_entity_types, vanilla_blocks};
 use steel_utils::locks::SyncMutex;
+use steel_utils::random::legacy_random::LegacyRandom;
 use steel_utils::types::UpdateFlags;
 use steel_utils::{
-    BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey, Identifier,
+    BlockPos, BlockStateId, BoundingBox, Downcast as _, DowncastType, DowncastTypeKey, Identifier,
+    Rotation,
 };
+use steel_worldgen::structure::{StructureBlockIgnore, StructureMirror as PlacementMirror};
 
 use crate::block_entity::{BlockEntity, BlockEntityBase};
 use crate::world::{LevelReader as _, World};
+use crate::worldgen::template::{
+    StructurePlaceSettings, StructureProcessorRandom, StructureTemplate,
+};
 
 /// Furthest a structure block's corner may sit from the block itself.
 ///
@@ -99,6 +109,21 @@ impl StructureRotation {
     }
 }
 
+impl StructureRotation {
+    /// Returns the rotation template placement applies.
+    ///
+    /// The two enums are the same vanilla `Rotation`; this one carries the ordinal
+    /// the editor packet uses, the other the transform placement applies.
+    const fn placement_rotation(self) -> Rotation {
+        match self {
+            Self::None => Rotation::None,
+            Self::Clockwise90 => Rotation::Clockwise90,
+            Self::Clockwise180 => Rotation::Clockwise180,
+            Self::Counterclockwise90 => Rotation::CounterClockwise90,
+        }
+    }
+}
+
 /// How a structure block mirrors what it places.
 ///
 /// Vanilla parity: `net.minecraft.world.level.block.Mirror`.
@@ -132,6 +157,19 @@ impl StructureMirror {
             Self::None => 0,
             Self::LeftRight => 1,
             Self::FrontBack => 2,
+        }
+    }
+}
+
+impl StructureMirror {
+    /// Returns the mirror template placement applies.
+    ///
+    /// See [`StructureRotation::placement_rotation`] for why there are two enums.
+    const fn placement_mirror(self) -> PlacementMirror {
+        match self {
+            Self::None => PlacementMirror::None,
+            Self::LeftRight => PlacementMirror::LeftRight,
+            Self::FrontBack => PlacementMirror::FrontBack,
         }
     }
 }
@@ -441,6 +479,155 @@ impl StructureBlockEntity {
         true
     }
 
+    /// Loads the template this block names.
+    ///
+    /// Vanilla parity: `StructureBlockEntity.getStructureTemplate`, which asks the
+    /// level's `StructureTemplateManager`. Steel's manager side is the bundled vanilla
+    /// datapack only -- there is nowhere to save a structure to yet -- so a name that is
+    /// not a vanilla structure takes the same branch vanilla takes for a missing file.
+    fn structure_template(&self) -> Option<StructureTemplate> {
+        let key = self.state.lock().structure_name.clone()?;
+        match StructureTemplate::load_vanilla(&REGISTRY, &key) {
+            Ok(template) => Some(template),
+            Err(err) => {
+                log::debug!(
+                    "structure block at {:?} cannot load {key}: {err}",
+                    self.get_block_pos()
+                );
+                None
+            }
+        }
+    }
+
+    /// Returns whether a load block could find the structure it names.
+    ///
+    /// Vanilla parity: `StructureBlockEntity.isStructureLoadable`.
+    #[must_use]
+    pub fn is_structure_loadable(&self) -> bool {
+        self.mode() == StructureMode::Load && self.structure_template().is_some()
+    }
+
+    /// Copies the author and the size out of a loaded template.
+    ///
+    /// Vanilla parity: `StructureBlockEntity.loadStructureInfo`, which is what fills
+    /// the editor's size fields in on the first press of the load button.
+    fn load_structure_info(&self, template: &StructureTemplate) {
+        {
+            let mut state = self.state.lock();
+            template.author().clone_into(&mut state.author);
+            let size = template.size(Rotation::None);
+            state.size = (size.x, size.y, size.z);
+        }
+        self.base.set_changed();
+    }
+
+    /// Places the structure, but only once the editor already shows its size.
+    ///
+    /// Vanilla parity: `StructureBlockEntity.placeStructureIfSameSize`. The load
+    /// button takes two presses: the first fills the size in and reports "prepare",
+    /// the second places.
+    pub fn place_structure_if_same_size(&self, world: &Arc<World>) -> bool {
+        if self.mode() != StructureMode::Load {
+            return false;
+        }
+        let Some(template) = self.structure_template() else {
+            return false;
+        };
+
+        let size = template.size(Rotation::None);
+        if (size.x, size.y, size.z) != self.size() {
+            self.load_structure_info(&template);
+            return false;
+        }
+
+        self.place_loaded_structure(world, &template);
+        true
+    }
+
+    /// Places the structure this block names.
+    ///
+    /// Vanilla parity: `StructureBlockEntity.placeStructure`, what a redstone pulse on
+    /// a load block does.
+    pub fn place_structure(&self, world: &Arc<World>) -> bool {
+        let Some(template) = self.structure_template() else {
+            return false;
+        };
+        self.place_loaded_structure(world, &template);
+        true
+    }
+
+    /// Vanilla parity: the private `StructureBlockEntity.placeStructure(level, template)`.
+    fn place_loaded_structure(&self, world: &Arc<World>, template: &StructureTemplate) {
+        self.load_structure_info(template);
+        let state = self.state.lock().clone();
+
+        // Vanilla parity: `StructureBlockEntity.createRandom`. A zero seed means
+        // "pick one", which vanilla does from the wall clock and Steel does from the
+        // runtime source; either way the placement is not meant to be repeatable.
+        let seed = if state.seed == 0 {
+            rand::random()
+        } else {
+            state.seed
+        };
+
+        let rot_processor;
+        let processors: &[StructureProcessorKind] = if state.integrity < 1.0 {
+            rot_processor = [StructureProcessorKind::BlockRot {
+                rottable_blocks: None,
+                integrity: state.integrity.clamp(0.0, 1.0),
+            }];
+            &rot_processor
+        } else {
+            &[]
+        };
+
+        let settings = StructurePlaceSettings {
+            mirror: state.mirror.placement_mirror(),
+            rotation: state.rotation.placement_rotation(),
+            rotation_pivot: BlockPos::ZERO,
+            // Vanilla leaves the box unset here, which means "no limit"; Steel's
+            // placement always has one, so it gets the whole buildable column.
+            bounding_box: BoundingBox::new(
+                IVec3::new(i32::MIN, world.get_min_y(), i32::MIN),
+                IVec3::new(i32::MAX, world.get_max_y(), i32::MAX),
+            ),
+            processors,
+            block_ignore: StructureBlockIgnore::None,
+            late_block_ignore: StructureBlockIgnore::None,
+            replace_jigsaws: false,
+            projection: None,
+            processor_random: if state.integrity < 1.0 {
+                StructureProcessorRandom::Seeded(seed)
+            } else {
+                StructureProcessorRandom::Positional
+            },
+            liquid_settings: LiquidSettingsData::ApplyWaterlogging,
+            ignore_entities: state.ignore_entities,
+        };
+
+        let pos = self
+            .get_block_pos()
+            .offset(state.offset.0, state.offset.1, state.offset.2);
+        // Vanilla parity: `2 | (strict ? 816 : 0)`.
+        let mut flags = UpdateFlags::UPDATE_CLIENTS;
+        if state.strict {
+            flags |= UpdateFlags::UPDATE_KNOWN_SHAPE
+                | UpdateFlags::UPDATE_SUPPRESS_DROPS
+                | UpdateFlags::UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS
+                | UpdateFlags::UPDATE_SKIP_ON_PLACE;
+        }
+
+        template.place_in_world(
+            world,
+            &REGISTRY,
+            pos,
+            pos,
+            &settings,
+            &mut LegacyRandom::from_seed(seed as u64),
+            flags,
+        );
+    }
+
     /// Returns the positions of every corner block that belongs to this one.
     ///
     /// Vanilla parity: `StructureBlockEntity.getRelatedCorners`.
@@ -682,6 +869,157 @@ mod tests {
         let entity = structure_block(mode);
         entity.load_additional(&borrowed);
         entity
+    }
+
+    /// A load block places the bundled template it names, at its offset.
+    ///
+    /// `nether_fossils/fossil_5` is two by five by one of bone blocks and air, with
+    /// no processors, so exactly which positions it fills is fixed.
+    #[test]
+    fn a_load_block_places_the_structure_it_names() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+
+        let world = fresh_test_world("structure_block_load");
+        let pos = BlockPos::new(4, 64, 4);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+
+        let entity =
+            StructureBlockEntity::new(Arc::downgrade(&world), pos, state_for(StructureMode::Load));
+        entity.set_structure_name("minecraft:nether_fossils/fossil_5");
+        assert!(entity.place_structure(&world));
+
+        // The default offset is one block up, so the template's own origin lands there.
+        let origin = pos.above();
+        let bone_blocks = (0..2)
+            .flat_map(|x| (0..5).flat_map(move |y| (0..1).map(move |z| (x, y, z))))
+            .filter(|&(x, y, z)| {
+                world.get_block_state(origin.offset(x, y, z)).get_block()
+                    == &vanilla_blocks::BONE_BLOCK
+            })
+            .count();
+        assert!(
+            bone_blocks > 0,
+            "the load block should have placed the fossil's bone blocks"
+        );
+
+        // Loading also reports the template's size back to the editor.
+        assert_eq!(entity.size(), (2, 5, 1));
+    }
+
+    /// The load button fills the size in on the first press and places on the second.
+    ///
+    /// Vanilla parity: `placeStructureIfSameSize`, which is what makes the editor
+    /// report `structure_block.load_prepare` once and `structure_block.load_success`
+    /// after.
+    #[test]
+    fn the_load_button_prepares_before_it_places() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+
+        let world = fresh_test_world("structure_block_load_button");
+        let pos = BlockPos::new(4, 64, 4);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+
+        let entity =
+            StructureBlockEntity::new(Arc::downgrade(&world), pos, state_for(StructureMode::Load));
+        entity.set_structure_name("minecraft:nether_fossils/fossil_5");
+
+        // The editor starts with a zero size, so the first press only reports one.
+        assert!(!entity.place_structure_if_same_size(&world));
+        assert_eq!(entity.size(), (2, 5, 1));
+        assert!(
+            world.get_block_state(pos.above()).is_air(),
+            "nothing should be placed while the size is still being reported"
+        );
+
+        assert!(entity.place_structure_if_same_size(&world));
+        assert_eq!(
+            world.get_block_state(pos.above()).get_block(),
+            &vanilla_blocks::BONE_BLOCK
+        );
+    }
+
+    /// Integrity below one drops blocks from a stream seeded by the block's own seed,
+    /// not from the one the placement draws loot seeds out of.
+    ///
+    /// `igloo/middle` is three by three by three, so a repeat matching by chance is
+    /// out of the question.
+    #[test]
+    fn integrity_rots_the_structure_from_the_blocks_own_seed() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+
+        let world = fresh_test_world("structure_block_integrity");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let whole = place_igloo_middle(&world, BlockPos::new(1, 64, 1), 1.0, 4242);
+        let rotted = place_igloo_middle(&world, BlockPos::new(6, 64, 1), 0.5, 4242);
+        let again = place_igloo_middle(&world, BlockPos::new(11, 64, 1), 0.5, 4242);
+
+        assert_eq!(whole.len(), 15, "the whole template is fifteen blocks");
+        assert!(
+            rotted.len() < whole.len(),
+            "half integrity should drop some of the fifteen"
+        );
+        assert_eq!(rotted, again, "the same seed should rot the same blocks");
+    }
+
+    /// Places `igloo/middle` from a load block and returns the offsets it filled.
+    fn place_igloo_middle(
+        world: &Arc<World>,
+        pos: BlockPos,
+        integrity: f32,
+        seed: i64,
+    ) -> Vec<(i32, i32, i32)> {
+        let entity =
+            StructureBlockEntity::new(Arc::downgrade(world), pos, state_for(StructureMode::Load));
+        entity.set_structure_name("minecraft:igloo/middle");
+        entity.set_integrity(integrity);
+        entity.set_seed(seed);
+        assert!(entity.place_structure(world));
+
+        let origin = pos.above();
+        (0..3)
+            .flat_map(|x| (0..3).flat_map(move |y| (0..3).map(move |z| (x, y, z))))
+            .filter(|&(x, y, z)| !world.get_block_state(origin.offset(x, y, z)).is_air())
+            .collect()
+    }
+
+    /// A name nothing has saved is not loadable, which is what makes the editor say
+    /// "not found" instead of placing nothing and claiming success.
+    #[test]
+    fn a_load_block_naming_no_bundled_structure_is_not_loadable() {
+        init_vanilla_registry();
+        init_block_entities();
+
+        let entity = structure_block(StructureMode::Load);
+        entity.set_structure_name("minecraft:nether_fossils/fossil_5");
+        assert!(entity.is_structure_loadable());
+
+        entity.set_structure_name("mypack:a_house_nobody_saved");
+        assert!(!entity.is_structure_loadable());
+    }
+
+    /// Only a load block loads: vanilla's save and corner modes go down other
+    /// branches of the same button.
+    #[test]
+    fn only_a_load_block_is_loadable() {
+        init_vanilla_registry();
+        init_block_entities();
+
+        for mode in [
+            StructureMode::Save,
+            StructureMode::Corner,
+            StructureMode::Data,
+        ] {
+            let entity = structure_block(mode.clone());
+            entity.set_structure_name("minecraft:nether_fossils/fossil_5");
+            assert!(!entity.is_structure_loadable(), "{mode:?} should not load");
+        }
     }
 
     /// A name that will not parse as an identifier is no name at all, which is

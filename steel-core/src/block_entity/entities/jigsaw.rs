@@ -9,10 +9,23 @@
 //! jigsaw blocks when it builds a village. What was missing is the placed block:
 //! a jigsaw a map-maker puts down by hand and configures through its editor.
 //!
-//! Not implemented: `generate`. It needs `JigsawPlacement` driven against a live
-//! world, and Steel's structure placement only writes into a `WorldGenRegion` --
-//! `StructureTemplate::place_in_world` takes one. Until that is generalized the
-//! `ServerboundJigsawGeneratePacket` has nothing to call, so it stays unhandled.
+//! Not implemented: `generate`. Writing the pieces is no longer what stops it --
+//! `StructurePiecePlacer::place_piece` takes any `WorldGenLevel`, so a live world
+//! is a fine target. What is missing is the assembly:
+//!
+//! * Vanilla's `JigsawPlacement.generateJigsaw` runs the same `addPieces` a jigsaw
+//!   structure runs, against a `Structure.GenerationContext` built from the live
+//!   level's chunk source. Steel's `steel_worldgen::structure::jigsaw::assemble`
+//!   needs the terrain-height query that context provides, and the only things
+//!   implementing `StructureGenerationContext` are the per-chunk contexts a
+//!   generator owns while it is generating. A live world has no way to ask for one.
+//! * `assemble` starts from a chunk corner and a sampled start height; a jigsaw
+//!   block starts from the block in front of itself, at its own Y.
+//! * `place_pool_element` always replaces jigsaw blocks with their final state;
+//!   `generateJigsaw` has a `keepJigsaws` flag that leaves them standing.
+//!
+//! Until then the `ServerboundJigsawGeneratePacket` -- which Steel does not model
+//! either -- has nothing to call, so it stays unhandled.
 
 use std::sync::Weak;
 

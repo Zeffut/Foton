@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_end_gateway_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         config: &EndGatewayConfiguration,
         origin: BlockPos,
     ) -> bool {

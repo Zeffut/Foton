@@ -2,8 +2,9 @@ use super::{
     Direction, OceanMonumentRoomData, ScatteredFeaturePlacer, base_black, base_gray, base_light,
     generate_box_on_fill_only, generate_water_box, lamp, open, vanilla_blocks,
 };
+use crate::world::WorldGenLevel;
 
-pub(super) fn place_core_room(placer: &mut ScatteredFeaturePlacer<'_, '_>) {
+pub(super) fn place_core_room(placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>) {
     generate_box_on_fill_only(placer, 1, 8, 0, 14, 8, 14, base_gray());
     placer.generate_box(0, 7, 0, 0, 7, 15, base_light(), base_light(), false);
     placer.generate_box(15, 7, 0, 15, 7, 15, base_light(), base_light(), false);
@@ -78,7 +79,7 @@ pub(super) fn place_core_room(placer: &mut ScatteredFeaturePlacer<'_, '_>) {
 }
 
 pub(super) fn place_entry_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     room: OceanMonumentRoomData,
 ) {
     placer.generate_box(0, 3, 0, 2, 3, 7, base_light(), base_light(), false);

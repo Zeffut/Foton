@@ -3,10 +3,10 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_vines_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         origin: BlockPos,
     ) -> bool {
-        if !region.block_state(origin).is_air() {
+        if !region.get_block_state(origin).is_air() {
             return false;
         }
 

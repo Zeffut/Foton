@@ -3,11 +3,13 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_basalt_pillar_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
-        if !region.block_state(origin).is_air() || region.block_state(origin.above()).is_air() {
+        if !region.get_block_state(origin).is_air()
+            || region.get_block_state(origin.above()).is_air()
+        {
             return false;
         }
 
@@ -18,7 +20,7 @@ impl FeatureDecorationRunner {
         let mut place_west_hangoff = true;
         let mut place_east_hangoff = true;
 
-        while region.block_state(pos).is_air() {
+        while region.get_block_state(pos).is_air() {
             if region.is_outside_build_height(pos.y()) {
                 return true;
             }
@@ -58,7 +60,7 @@ impl FeatureDecorationRunner {
                     let mut base_pos = pos.offset(dx, 0, dz);
                     let mut max_drop = 3;
 
-                    while region.block_state(base_pos.below()).is_air() {
+                    while region.get_block_state(base_pos.below()).is_air() {
                         base_pos = base_pos.below();
                         max_drop -= 1;
                         if max_drop <= 0 {
@@ -66,7 +68,7 @@ impl FeatureDecorationRunner {
                         }
                     }
 
-                    if !region.block_state(base_pos.below()).is_air() {
+                    if !region.get_block_state(base_pos.below()).is_air() {
                         let _ =
                             region.set_block_state(base_pos, basalt, UpdateFlags::UPDATE_CLIENTS);
                     }
@@ -78,7 +80,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_basalt_pillar_base_hangoff(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         basalt: BlockStateId,
         pos: BlockPos,
@@ -89,7 +91,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_basalt_pillar_hangoff(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         basalt: BlockStateId,
         pos: BlockPos,

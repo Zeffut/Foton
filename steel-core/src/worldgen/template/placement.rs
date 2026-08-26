@@ -148,70 +148,34 @@ impl StructureTemplate {
     )]
     pub(crate) fn place_in_world(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         position: BlockPos,
         reference_pos: BlockPos,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
         flags: UpdateFlags,
     ) -> bool {
-        let Some(palette) = self.palette(settings, position, random) else {
+        // Vanilla keeps two random sources here: the one the caller hands to
+        // `placeInWorld`, and the one `StructurePlaceSettings` holds for palette choice
+        // and processors. Every worldgen caller passes the same source for both; a
+        // structure block seeds two of its own.
+        let processed_blocks = match settings.processor_random {
+            StructureProcessorRandom::Seeded(seed) => self.process_palette(
+                region,
+                registry,
+                position,
+                reference_pos,
+                settings,
+                &mut LegacyRandom::from_seed(seed as u64),
+            ),
+            StructureProcessorRandom::Placement | StructureProcessorRandom::Positional => {
+                self.process_palette(region, registry, position, reference_pos, settings, random)
+            }
+        };
+        let Some(processed_blocks) = processed_blocks else {
             return false;
         };
-        if (palette.blocks.is_empty() && self.entities.is_empty())
-            || [self.size.x, self.size.y, self.size.z]
-                .iter()
-                .any(|&axis| axis < 1)
-        {
-            return false;
-        }
-        let mut original_blocks = Vec::with_capacity(palette.blocks.len());
-        let mut processed_blocks = Vec::with_capacity(palette.blocks.len());
-
-        Self::palette_blocks_for_placement(
-            &palette.blocks,
-            position,
-            settings,
-            |block, world_pos| {
-                let original = ProcessedBlockInfo {
-                    template_pos: block.pos,
-                    world_pos: block.pos,
-                    state: block.state,
-                    nbt: block.nbt.clone(),
-                };
-                let processed = ProcessedBlockInfo {
-                    template_pos: block.pos,
-                    world_pos,
-                    state: block.state,
-                    nbt: block.nbt.clone(),
-                };
-
-                if let Some(processed) = Self::process_block(
-                    region,
-                    registry,
-                    &original,
-                    processed,
-                    settings,
-                    reference_pos,
-                    random,
-                ) {
-                    original_blocks.push(original);
-                    processed_blocks.push(processed);
-                }
-            },
-        );
-
-        let processed_blocks = Self::finalize_processing(
-            region,
-            registry,
-            position,
-            reference_pos,
-            settings,
-            &original_blocks,
-            processed_blocks,
-            random,
-        );
 
         let mut placed_any = false;
         let mut placed_positions = Vec::with_capacity(processed_blocks.len());
@@ -312,7 +276,7 @@ impl StructureTemplate {
             let placed_update_flags =
                 (flags & !UpdateFlags::UPDATE_NEIGHBORS) | UpdateFlags::UPDATE_KNOWN_SHAPE;
             for pos in placed_positions {
-                let state = region.block_state(pos);
+                let state = region.get_block_state(pos);
                 let new_state = Self::update_from_neighbor_shapes(region, state, pos);
                 if state != new_state {
                     let _ = region.set_block_state(pos, new_state, placed_update_flags);
@@ -320,14 +284,85 @@ impl StructureTemplate {
             }
         }
 
-        self.place_entities(region, position, settings);
+        if !settings.ignore_entities {
+            self.place_entities(region, position, settings);
+        }
 
         true
     }
 
+    /// Runs vanilla `StructureTemplate.processBlockInfos` over the chosen palette.
+    ///
+    /// Returns `None` for the cases vanilla refuses to place at all: no palette, an
+    /// empty template, or a size with a non-positive axis.
+    fn process_palette(
+        &self,
+        region: &impl WorldGenLevel,
+        registry: &Registry,
+        position: BlockPos,
+        reference_pos: BlockPos,
+        settings: &StructurePlaceSettings<'_>,
+        random: &mut impl Random,
+    ) -> Option<Vec<ProcessedBlockInfo>> {
+        let palette = self.palette(settings, position, random)?;
+        if (palette.blocks.is_empty() && self.entities.is_empty())
+            || [self.size.x, self.size.y, self.size.z]
+                .iter()
+                .any(|&axis| axis < 1)
+        {
+            return None;
+        }
+
+        let mut original_blocks = Vec::with_capacity(palette.blocks.len());
+        let mut processed_blocks = Vec::with_capacity(palette.blocks.len());
+        Self::palette_blocks_for_placement(
+            &palette.blocks,
+            position,
+            settings,
+            |block, world_pos| {
+                let original = ProcessedBlockInfo {
+                    template_pos: block.pos,
+                    world_pos: block.pos,
+                    state: block.state,
+                    nbt: block.nbt.clone(),
+                };
+                let processed = ProcessedBlockInfo {
+                    template_pos: block.pos,
+                    world_pos,
+                    state: block.state,
+                    nbt: block.nbt.clone(),
+                };
+
+                if let Some(processed) = Self::process_block(
+                    region,
+                    registry,
+                    &original,
+                    processed,
+                    settings,
+                    reference_pos,
+                    random,
+                ) {
+                    original_blocks.push(original);
+                    processed_blocks.push(processed);
+                }
+            },
+        );
+
+        Some(Self::finalize_processing(
+            region,
+            registry,
+            position,
+            reference_pos,
+            settings,
+            &original_blocks,
+            processed_blocks,
+            random,
+        ))
+    }
+
     pub(super) fn place_entities(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
     ) {
@@ -397,11 +432,11 @@ impl StructureTemplate {
 
     pub(crate) fn replace_jigsaw_final_states(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) {
         let Some(palette) = self.palette(settings, position, random) else {
             return;
@@ -432,7 +467,7 @@ impl StructureTemplate {
         registry: &Registry,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Vec<StructureDataMarker> {
         let Some(palette) = self.palette(settings, position, random) else {
             return Vec::new();
@@ -469,7 +504,7 @@ impl StructureTemplate {
     }
 
     pub(super) fn update_shape_at_edge(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         flags: UpdateFlags,
         placed_positions: &[BlockPos],
         min: BlockPos,
@@ -492,8 +527,8 @@ impl StructureTemplate {
             |direction, x, y, z| {
                 let pos = min.offset(x, y, z);
                 let neighbor_pos = pos.relative(direction);
-                let state = region.block_state(pos);
-                let neighbor_state = region.block_state(neighbor_pos);
+                let state = region.get_block_state(pos);
+                let neighbor_state = region.get_block_state(neighbor_pos);
                 let new_state = BLOCK_BEHAVIORS
                     .get_behavior(state.get_block())
                     .update_shape(state, region, pos, direction, neighbor_pos, neighbor_state);
@@ -519,14 +554,14 @@ impl StructureTemplate {
     }
 
     pub(super) fn update_from_neighbor_shapes(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         state: BlockStateId,
         pos: BlockPos,
     ) -> BlockStateId {
         let mut updated = state;
         for direction in Direction::UPDATE_SHAPE_ORDER {
             let neighbor_pos = pos.relative(direction);
-            let neighbor_state = region.block_state(neighbor_pos);
+            let neighbor_state = region.get_block_state(neighbor_pos);
             updated = BLOCK_BEHAVIORS
                 .get_behavior(updated.get_block())
                 .update_shape(
@@ -542,7 +577,7 @@ impl StructureTemplate {
     }
 
     pub(super) fn fill_neighbor_source_liquids(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         to_fill: &mut Vec<BlockPos>,
         locked_fluids: &[BlockPos],
     ) {
@@ -573,7 +608,7 @@ impl StructureTemplate {
                 }
 
                 if to_place.is_source() {
-                    let state = region.block_state(pos);
+                    let state = region.get_block_state(pos);
                     if Self::is_liquid_block_container(state) {
                         let _ = Self::place_liquid(region, pos, state, to_place);
                         filled = true;
@@ -587,8 +622,8 @@ impl StructureTemplate {
         }
     }
 
-    pub(super) fn fluid_state_at(region: &WorldGenRegion<'_>, pos: BlockPos) -> FluidState {
-        Self::fluid_state_for_block(region.block_state(pos))
+    pub(super) fn fluid_state_at(region: &impl WorldGenLevel, pos: BlockPos) -> FluidState {
+        Self::fluid_state_for_block(region.get_block_state(pos))
     }
 
     pub(super) fn fluid_state_for_block(state: BlockStateId) -> FluidState {
@@ -602,7 +637,7 @@ impl StructureTemplate {
     }
 
     pub(super) fn place_liquid(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         fluid_state: FluidState,
@@ -671,7 +706,7 @@ impl StructureTemplate {
         &self,
         settings: &StructurePlaceSettings<'_>,
         position: BlockPos,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Option<&StructureTemplatePalette> {
         if self.palettes.is_empty() {
             return None;
@@ -683,7 +718,9 @@ impl StructureTemplate {
             );
         };
         let index = match settings.processor_random {
-            StructureProcessorRandom::Placement => random.next_i32_bounded(bound),
+            StructureProcessorRandom::Placement | StructureProcessorRandom::Seeded(_) => {
+                random.next_i32_bounded(bound)
+            }
             StructureProcessorRandom::Positional => {
                 let mut random = LegacyRandom::from_seed(Self::block_pos_seed(position) as u64);
                 random.next_i32_bounded(bound)
@@ -693,7 +730,7 @@ impl StructureTemplate {
     }
 
     pub(super) fn place_block_entity(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         block_entity_type: Option<BlockEntityTypeRef>,

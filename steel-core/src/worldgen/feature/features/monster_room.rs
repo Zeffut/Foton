@@ -17,7 +17,7 @@ const MONSTER_ROOM_MOBS: [&str; 4] = [
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_monster_room_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
@@ -33,7 +33,7 @@ impl FeatureDecorationRunner {
             for dy in -1..=4 {
                 for dz in min_z..=max_z {
                     let hole_pos = origin.offset(dx, dy, dz);
-                    let state = region.block_state(hole_pos);
+                    let state = region.get_block_state(hole_pos);
                     let solid = state.is_solid();
                     if dy == -1 && !solid {
                         return false;
@@ -44,7 +44,7 @@ impl FeatureDecorationRunner {
                     if (dx == min_x || dx == max_x || dz == min_z || dz == max_z)
                         && dy == 0
                         && state.is_air()
-                        && region.block_state(hole_pos.above()).is_air()
+                        && region.get_block_state(hole_pos.above()).is_air()
                     {
                         hole_count += 1;
                     }
@@ -64,7 +64,7 @@ impl FeatureDecorationRunner {
             for dy in (-1..=3).rev() {
                 for dz in min_z..=max_z {
                     let wall_block = origin.offset(dx, dy, dz);
-                    let wall_state = region.block_state(wall_block);
+                    let wall_state = region.get_block_state(wall_block);
                     if dx == min_x
                         || dy == -1
                         || dz == min_z
@@ -73,7 +73,7 @@ impl FeatureDecorationRunner {
                         || dz == max_z
                     {
                         if wall_block.y() >= region.min_y()
-                            && !region.block_state(wall_block.below()).is_solid()
+                            && !region.get_block_state(wall_block.below()).is_solid()
                         {
                             let _ = region.set_block_state(
                                 wall_block,
@@ -104,11 +104,13 @@ impl FeatureDecorationRunner {
                 let x = origin.x() + random.next_i32_bounded(xr * 2 + 1) - xr;
                 let z = origin.z() + random.next_i32_bounded(zr * 2 + 1) - zr;
                 let chest_pos = BlockPos::new(x, origin.y(), z);
-                if region.block_state(chest_pos).is_air() {
+                if region.get_block_state(chest_pos).is_air() {
                     let wall_count = Self::VANILLA_HORIZONTAL_DIRECTIONS
                         .iter()
                         .filter(|&&direction| {
-                            region.block_state(chest_pos.relative(direction)).is_solid()
+                            region
+                                .get_block_state(chest_pos.relative(direction))
+                                .is_solid()
                         })
                         .count();
 
@@ -144,7 +146,7 @@ impl FeatureDecorationRunner {
     }
 
     fn reorient_chest(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
     ) -> BlockStateId {
@@ -152,7 +154,7 @@ impl FeatureDecorationRunner {
 
         for direction in Self::VANILLA_HORIZONTAL_DIRECTIONS {
             let relative_pos = pos.relative(direction);
-            let neighbor = region.block_state(relative_pos);
+            let neighbor = region.get_block_state(relative_pos);
             if neighbor.get_block() == &vanilla_blocks::CHEST {
                 return state;
             }
@@ -174,15 +176,15 @@ impl FeatureDecorationRunner {
         } else {
             let mut lock_dir = state.get_value(&BlockStateProperties::HORIZONTAL_FACING);
             let mut relative_pos = pos.relative(lock_dir);
-            if region.block_state(relative_pos).is_solid_render() {
+            if region.get_block_state(relative_pos).is_solid_render() {
                 lock_dir = lock_dir.opposite();
                 relative_pos = pos.relative(lock_dir);
             }
-            if region.block_state(relative_pos).is_solid_render() {
+            if region.get_block_state(relative_pos).is_solid_render() {
                 lock_dir = lock_dir.rotate_y_clockwise();
                 relative_pos = pos.relative(lock_dir);
             }
-            if region.block_state(relative_pos).is_solid_render() {
+            if region.get_block_state(relative_pos).is_solid_render() {
                 lock_dir = lock_dir.opposite();
             }
             state.set_value(&BlockStateProperties::HORIZONTAL_FACING, lock_dir)

@@ -10,7 +10,7 @@ use steel_utils::random::worldgen_random::WorldgenRandom;
 use steel_utils::{BlockPos, BoundingBox, Direction, types::UpdateFlags};
 
 use crate::chunk::heightmap::HeightmapType;
-use crate::worldgen::region::WorldGenRegion;
+use crate::world::WorldGenLevel;
 use steel_worldgen::structure::RuinedPortalProperties;
 
 use super::StructurePiecePlacer;
@@ -27,7 +27,7 @@ const RUINED_PORTAL_HORIZONTAL_DIRECTIONS: [Direction; 4] = [
 
 impl StructurePiecePlacer {
     pub(super) fn post_process_ruined_portal(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         vertical_placement: RuinedPortalPlacementData,
         properties: RuinedPortalProperties,
         portal_box: BoundingBox,
@@ -62,18 +62,18 @@ impl StructurePiecePlacer {
     }
 
     fn maybe_add_ruined_portal_vines(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         random: &mut WorldgenRandom,
     ) {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         if state.is_air() || state.get_block() == &vanilla_blocks::VINE {
             return;
         }
 
         let direction = Self::random_ruined_portal_horizontal_direction(random);
         let neighbor_pos = direction.relative(pos);
-        if !region.block_state(neighbor_pos).is_air() {
+        if !region.get_block_state(neighbor_pos).is_air() {
             return;
         }
         if !shapes::is_offset_face_full(state.get_collision_shape_at(pos), direction) {
@@ -87,18 +87,18 @@ impl StructurePiecePlacer {
     }
 
     fn maybe_add_ruined_portal_leaves(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         random: &mut WorldgenRandom,
     ) {
         if random.next_f32() >= 0.5 {
             return;
         }
-        if region.block_state(pos).get_block() != &vanilla_blocks::NETHERRACK {
+        if region.get_block_state(pos).get_block() != &vanilla_blocks::NETHERRACK {
             return;
         }
         let above = pos.above();
-        if !region.block_state(above).is_air() {
+        if !region.get_block_state(above).is_air() {
             return;
         }
 
@@ -109,7 +109,7 @@ impl StructurePiecePlacer {
     }
 
     fn add_ruined_portal_netherrack_drip_columns(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         properties: RuinedPortalProperties,
         portal_box: BoundingBox,
         random: &mut WorldgenRandom,
@@ -117,7 +117,7 @@ impl StructurePiecePlacer {
         for x in portal_box.min_x() + 1..portal_box.max_x() {
             for z in portal_box.min_z() + 1..portal_box.max_z() {
                 let pos = BlockPos::new(x, portal_box.min_y(), z);
-                if region.block_state(pos).get_block() == &vanilla_blocks::NETHERRACK {
+                if region.get_block_state(pos).get_block() == &vanilla_blocks::NETHERRACK {
                     Self::add_ruined_portal_netherrack_drip_column(
                         region,
                         properties,
@@ -130,7 +130,7 @@ impl StructurePiecePlacer {
     }
 
     fn add_ruined_portal_netherrack_drip_column(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         properties: RuinedPortalProperties,
         pos: BlockPos,
         random: &mut WorldgenRandom,
@@ -146,7 +146,7 @@ impl StructurePiecePlacer {
     }
 
     fn spread_ruined_portal_netherrack(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         vertical_placement: RuinedPortalPlacementData,
         properties: RuinedPortalProperties,
         portal_box: BoundingBox,
@@ -207,11 +207,11 @@ impl StructurePiecePlacer {
     }
 
     fn can_replace_with_ruined_portal_netherrack_or_magma(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         vertical_placement: RuinedPortalPlacementData,
         pos: BlockPos,
     ) -> bool {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         Self::can_block_be_replaced_with_ruined_portal_netherrack_or_magma(
             vertical_placement,
             state.get_block(),
@@ -230,7 +230,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_ruined_portal_netherrack_or_magma(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         properties: RuinedPortalProperties,
         pos: BlockPos,
         random: &mut WorldgenRandom,
@@ -244,7 +244,7 @@ impl StructurePiecePlacer {
     }
 
     fn ruined_portal_surface_y(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         vertical_placement: RuinedPortalPlacementData,
         x: i32,
         z: i32,
@@ -254,7 +254,7 @@ impl StructurePiecePlacer {
         } else {
             HeightmapType::WorldSurfaceWg
         };
-        region.height_at(heightmap, x, z) - 1
+        region.heightmap_at(heightmap, x, z) - 1
     }
 
     fn random_ruined_portal_horizontal_direction(random: &mut WorldgenRandom) -> Direction {

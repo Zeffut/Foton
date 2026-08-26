@@ -19,7 +19,7 @@ const VANILLA_ROTATIONS: [Rotation; 4] = [
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_fossil_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &FossilConfiguration,
@@ -83,6 +83,7 @@ impl FeatureDecorationRunner {
             projection: None,
             processor_random: StructureProcessorRandom::Placement,
             liquid_settings: LiquidSettingsData::ApplyWaterlogging,
+            ignore_entities: false,
         };
         fossil_template.place_in_world(
             region,
@@ -106,6 +107,7 @@ impl FeatureDecorationRunner {
             projection: None,
             processor_random: StructureProcessorRandom::Placement,
             liquid_settings: LiquidSettingsData::ApplyWaterlogging,
+            ignore_entities: false,
         };
         overlay_template.place_in_world(
             region,
@@ -139,7 +141,7 @@ impl FeatureDecorationRunner {
     }
 
     fn lowest_fossil_surface_y(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         low_corner: BlockPos,
         size_x: i32,
         size_z: i32,
@@ -148,7 +150,7 @@ impl FeatureDecorationRunner {
         let mut lowest = initial_y;
         for dx in 0..size_x {
             for dz in 0..size_z {
-                let y = region.height_at(
+                let y = region.heightmap_at(
                     HeightmapType::OceanFloorWg,
                     low_corner.x() + dx,
                     low_corner.z() + dz,
@@ -159,7 +161,7 @@ impl FeatureDecorationRunner {
         lowest
     }
 
-    const fn fossil_bounding_box(region: &WorldGenRegion<'_>, origin: BlockPos) -> BoundingBox {
+    fn fossil_bounding_box(region: &impl WorldGenLevel, origin: BlockPos) -> BoundingBox {
         let chunk_x = SectionPos::block_to_section_coord(origin.x());
         let chunk_z = SectionPos::block_to_section_coord(origin.z());
         let min_x = chunk_x << 4;
@@ -174,12 +176,12 @@ impl FeatureDecorationRunner {
         )
     }
 
-    fn count_empty_corners(region: &WorldGenRegion<'_>, bounding_box: BoundingBox) -> i32 {
+    fn count_empty_corners(region: &impl WorldGenLevel, bounding_box: BoundingBox) -> i32 {
         let mut count = 0;
         for x in [bounding_box.min_x(), bounding_box.max_x()] {
             for y in [bounding_box.min_y(), bounding_box.max_y()] {
                 for z in [bounding_box.min_z(), bounding_box.max_z()] {
-                    let state = region.block_state(BlockPos::new(x, y, z));
+                    let state = region.get_block_state(BlockPos::new(x, y, z));
                     let block = state.get_block();
                     if state.is_air()
                         || block == &vanilla_blocks::LAVA

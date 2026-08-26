@@ -1,3 +1,4 @@
+use crate::world::WorldGenLevel;
 use std::sync::Arc;
 
 use glam::{DVec3, IVec3};
@@ -21,7 +22,6 @@ use crate::entity::{
     next_entity_id,
 };
 use crate::fluid::FluidStateExt as _;
-use crate::worldgen::region::WorldGenRegion;
 use crate::worldgen::template::{
     StructureDataMarker, StructurePlaceSettings, StructureProcessorRandom, StructureTemplate,
 };
@@ -34,7 +34,7 @@ use super::StructurePiecePlacer;
 
 impl StructurePiecePlacer {
     pub(super) fn place_template_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         data: &mut TemplatePieceData,
         piece_bounding_box: &mut BoundingBox,
@@ -67,6 +67,7 @@ impl StructurePiecePlacer {
             projection: None,
             processor_random: StructureProcessorRandom::Positional,
             liquid_settings: data.liquid_settings,
+            ignore_entities: false,
         };
         let template_box = template.bounding_box_with_transform(
             position,
@@ -126,7 +127,7 @@ impl StructurePiecePlacer {
     }
 
     fn adjusted_template_position(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         template: &StructureTemplate,
         data: &mut TemplatePieceData,
         random: &mut WorldgenRandom,
@@ -172,7 +173,7 @@ impl StructurePiecePlacer {
     }
 
     fn adjusted_shipwreck_y(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         template: &StructureTemplate,
         position: IVec3,
         is_beached: bool,
@@ -186,14 +187,14 @@ impl StructurePiecePlacer {
         };
         let base_area = size.x * size.z;
         if base_area == 0 {
-            return region.height_at(heightmap_type, position.x, position.z);
+            return region.heightmap_at(heightmap_type, position.x, position.z);
         }
 
         let mut min_y = region.max_y_exclusive();
         let mut mean = 0;
         for z in position.z..position.z + size.z {
             for x in position.x..position.x + size.x {
-                let height = region.height_at(heightmap_type, x, z);
+                let height = region.heightmap_at(heightmap_type, x, z);
                 mean += height;
                 min_y = min_y.min(height);
             }
@@ -208,7 +209,7 @@ impl StructurePiecePlacer {
     }
 
     fn adjusted_igloo_position(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         position: IVec3,
         mirror: StructureMirror,
         rotation: Rotation,
@@ -229,7 +230,7 @@ impl StructurePiecePlacer {
             entrance_relative.y(),
             entrance_relative.z(),
         );
-        let height = region.height_at(
+        let height = region.heightmap_at(
             HeightmapType::WorldSurfaceWg,
             entrance_pos.x(),
             entrance_pos.z(),
@@ -238,11 +239,11 @@ impl StructurePiecePlacer {
     }
 
     fn adjusted_ocean_ruin_position(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         template: &StructureTemplate,
         data: &mut TemplatePieceData,
     ) -> BlockPos {
-        let ocean_floor_y = region.height_at(
+        let ocean_floor_y = region.heightmap_at(
             HeightmapType::OceanFloorWg,
             data.template_position.x,
             data.template_position.z,
@@ -259,7 +260,7 @@ impl StructurePiecePlacer {
     }
 
     fn adjusted_ocean_ruin_height(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         base: BlockPos,
         corner: BlockPos,
     ) -> i32 {
@@ -276,7 +277,7 @@ impl StructurePiecePlacer {
             for x in x0..=x1 {
                 let mut floor_y = base.y() - 1;
                 let mut pos = BlockPos::new(x, floor_y, z);
-                let mut state = region.block_state(pos);
+                let mut state = region.get_block_state(pos);
                 while (state.is_air()
                     || Self::is_water_state(state)
                     || state.get_block().has_tag(&BlockTag::ICE))
@@ -284,7 +285,7 @@ impl StructurePiecePlacer {
                 {
                     floor_y -= 1;
                     pos = BlockPos::new(x, floor_y, z);
-                    state = region.block_state(pos);
+                    state = region.get_block_state(pos);
                 }
 
                 min_y = min_y.min(floor_y);
@@ -306,7 +307,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_template_data_markers(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         template: &StructureTemplate,
         marker_handling: TemplateMarkerHandling,
@@ -354,7 +355,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_ocean_ruin_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         is_large: bool,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
@@ -367,12 +368,12 @@ impl StructurePiecePlacer {
     }
 
     fn place_ocean_ruin_marker_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         is_large: bool,
         pos: BlockPos,
         random: &mut WorldgenRandom,
     ) {
-        let waterlogged = Self::is_water_state(region.block_state(pos));
+        let waterlogged = Self::is_water_state(region.get_block_state(pos));
         let state = vanilla_blocks::CHEST
             .default_state()
             .set_value(&BlockStateProperties::WATERLOGGED, waterlogged);
@@ -389,7 +390,7 @@ impl StructurePiecePlacer {
         let _ = region.set_block_entity_data(pos, &vanilla_block_entity_types::CHEST, state, nbt);
     }
 
-    fn spawn_ocean_ruin_drowned(region: &mut WorldGenRegion<'_>, pos: BlockPos) {
+    fn spawn_ocean_ruin_drowned(region: &impl WorldGenLevel, pos: BlockPos) {
         let entity_pos = DVec3::new(
             f64::from(pos.x()) + 0.5,
             f64::from(pos.y()),
@@ -414,7 +415,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_shipwreck_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
     ) {
@@ -425,7 +426,7 @@ impl StructurePiecePlacer {
             _ => return,
         };
         let chest_pos = marker.pos.below();
-        let state = region.block_state(chest_pos);
+        let state = region.get_block_state(chest_pos);
         if state.get_block() != &vanilla_blocks::CHEST {
             return;
         }
@@ -438,7 +439,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_igloo_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
     ) {
@@ -452,7 +453,7 @@ impl StructurePiecePlacer {
             UpdateFlags::UPDATE_ALL,
         );
         let chest_pos = marker.pos.below();
-        let state = region.block_state(chest_pos);
+        let state = region.get_block_state(chest_pos);
         if state.get_block() != &vanilla_blocks::CHEST {
             return;
         }
@@ -465,7 +466,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_end_city_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         settings: &StructurePlaceSettings<'_>,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
@@ -486,11 +487,11 @@ impl StructurePiecePlacer {
     }
 
     fn place_end_city_marker_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         chest_pos: BlockPos,
         random: &mut WorldgenRandom,
     ) {
-        let state = region.block_state(chest_pos);
+        let state = region.get_block_state(chest_pos);
         if state.get_block() != &vanilla_blocks::CHEST {
             return;
         }
@@ -502,7 +503,7 @@ impl StructurePiecePlacer {
             region.set_block_entity_data(chest_pos, &vanilla_block_entity_types::CHEST, state, nbt);
     }
 
-    fn spawn_end_city_shulker(region: &mut WorldGenRegion<'_>, pos: BlockPos) {
+    fn spawn_end_city_shulker(region: &impl WorldGenLevel, pos: BlockPos) {
         let entity_pos = DVec3::new(
             f64::from(pos.x()) + 0.5,
             f64::from(pos.y()),
@@ -519,7 +520,7 @@ impl StructurePiecePlacer {
     }
 
     fn spawn_end_city_elytra_frame(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         direction: Direction,
     ) {
@@ -535,7 +536,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_mansion_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         settings: &StructurePlaceSettings<'_>,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
@@ -552,7 +553,7 @@ impl StructurePiecePlacer {
             "Warrior" => (&vanilla_entities::VINDICATOR, 1),
             "Group of Allays" => (
                 &vanilla_entities::ALLAY,
-                region.random_mut().next_i32_bounded(3) + 1,
+                region.with_level_random(|random| random.next_i32_bounded(3)) + 1,
             ),
             _ => return,
         };
@@ -583,12 +584,12 @@ impl StructurePiecePlacer {
     }
 
     fn place_mansion_marker_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         random: &mut WorldgenRandom,
     ) {
-        if region.block_state(pos).get_block() == &vanilla_blocks::CHEST {
+        if region.get_block_state(pos).get_block() == &vanilla_blocks::CHEST {
             return;
         }
         if !region.set_block_state(pos, state, UpdateFlags::UPDATE_CLIENTS) {
@@ -604,7 +605,7 @@ impl StructurePiecePlacer {
     }
 
     fn spawn_mansion_marker_mob(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         entity_type: EntityTypeRef,
     ) {
@@ -661,7 +662,7 @@ impl StructurePiecePlacer {
         reason = "postprocess needs the same placement context as vanilla TemplateStructurePiece after block placement"
     )]
     fn post_process_template_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         post_process: TemplatePostProcess,
         processors: &TemplateProcessorList,
@@ -704,7 +705,7 @@ impl StructurePiecePlacer {
     }
 
     fn post_process_igloo_top(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
     ) {
@@ -719,7 +720,7 @@ impl StructurePiecePlacer {
             trapdoor_relative.y(),
             trapdoor_relative.z(),
         );
-        let below_state = region.block_state(trapdoor_pos.below());
+        let below_state = region.get_block_state(trapdoor_pos.below());
         if below_state.is_air() || below_state.get_block() == &vanilla_blocks::LADDER {
             return;
         }
@@ -732,7 +733,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_nether_fossil_dried_ghast(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         fossil_box: BoundingBox,
         placement_clip: BoundingBox,
@@ -753,7 +754,7 @@ impl StructurePiecePlacer {
         if !placement_clip.contains_blockpos(pos) {
             return;
         }
-        if !region.block_state(pos).is_air() {
+        if !region.get_block_state(pos).is_air() {
             return;
         }
 

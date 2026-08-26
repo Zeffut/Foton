@@ -10,6 +10,7 @@
 //! Only the creature category is placed here, which is vanilla's rule and the
 //! reason cows are everywhere on day one while squid are not.
 
+use crate::world::WorldGenLevel;
 use std::sync::Arc;
 
 use steel_registry::REGISTRY;
@@ -125,7 +126,7 @@ fn biome_for_chunk(
 ) -> Option<BiomeRef> {
     let top = world.max_y_exclusive() - 1;
     let quart = BlockPos::new(chunk_pos.0.x * CHUNK_SIZE, top, chunk_pos.0.y * CHUNK_SIZE);
-    let biome_id = region.noise_biome_id(quart.x() >> 2, quart.y() >> 2, quart.z() >> 2);
+    let biome_id = region.noise_biome_id(quart.x() >> 2, quart.y() >> 2, quart.z() >> 2)?;
     REGISTRY.biomes.by_id(usize::from(biome_id))
 }
 

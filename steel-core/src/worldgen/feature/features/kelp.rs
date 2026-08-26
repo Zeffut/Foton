@@ -3,15 +3,15 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_kelp_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
         let mut placed = 0;
-        let y = region.height_at(HeightmapType::OceanFloor, origin.x(), origin.z());
+        let y = region.heightmap_at(HeightmapType::OceanFloor, origin.x(), origin.z());
         let mut kelp_pos = BlockPos::new(origin.x(), y, origin.z());
 
-        if region.block_state(kelp_pos).get_block() != &vanilla_blocks::WATER {
+        if region.get_block_state(kelp_pos).get_block() != &vanilla_blocks::WATER {
             return false;
         }
 
@@ -22,8 +22,8 @@ impl FeatureDecorationRunner {
         let height = 1 + random.next_i32_bounded(10);
 
         for h in 0..=height {
-            if region.block_state(kelp_pos).get_block() == &vanilla_blocks::WATER
-                && region.block_state(kelp_pos.above()).get_block() == &vanilla_blocks::WATER
+            if region.get_block_state(kelp_pos).get_block() == &vanilla_blocks::WATER
+                && region.get_block_state(kelp_pos.above()).get_block() == &vanilla_blocks::WATER
                 && kelp_plant_behavior.can_survive(kelp_plant, region, kelp_pos)
             {
                 if h == height {
@@ -37,7 +37,7 @@ impl FeatureDecorationRunner {
             } else if h > 0 {
                 let below = kelp_pos.below();
                 if kelp_head_behavior.can_survive(kelp_head, region, below)
-                    && region.block_state(below.below()).get_block() != &vanilla_blocks::KELP
+                    && region.get_block_state(below.below()).get_block() != &vanilla_blocks::KELP
                 {
                     let state = Self::aged_kelp_head(kelp_head, random);
                     let _ = region.set_block_state(below, state, UpdateFlags::UPDATE_CLIENTS);

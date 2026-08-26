@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_lake_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &LakeConfiguration,
@@ -59,7 +59,7 @@ impl FeatureDecorationRunner {
     }
 
     fn lake_boundary_valid(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         config: &LakeConfiguration,
         grid: &[bool],
@@ -73,7 +73,7 @@ impl FeatureDecorationRunner {
                         continue;
                     }
 
-                    let state = region.block_state(origin.offset(x, y, z));
+                    let state = region.get_block_state(origin.offset(x, y, z));
                     if y >= 4 && !get_fluid_state_from_block(state).is_empty() {
                         return false;
                     }
@@ -98,7 +98,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_lake_contents(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         config: &LakeConfiguration,
         grid: &[bool],
@@ -136,7 +136,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_lake_barrier(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &LakeConfiguration,
@@ -159,7 +159,7 @@ impl FeatureDecorationRunner {
                     }
 
                     let pos = origin.offset(x, y, z);
-                    let state = region.block_state(pos);
+                    let state = region.get_block_state(pos);
                     if state.is_solid()
                         && Self::test_block_predicate(
                             region,
@@ -177,7 +177,7 @@ impl FeatureDecorationRunner {
     }
 
     fn freeze_lake_surface(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         config: &LakeConfiguration,
         biome_zoom_seed: i64,

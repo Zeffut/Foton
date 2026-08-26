@@ -312,5 +312,5 @@ impl ChunkGenerator for FlatChunkGenerator {
         xoroshiro_worldgen_region_random(world_seed, center)
     }
 
-    fn apply_biome_decorations(&self, _region: &mut WorldGenRegion<'_>) {}
+    fn apply_biome_decorations(&self, _region: &WorldGenRegion<'_>) {}
 }

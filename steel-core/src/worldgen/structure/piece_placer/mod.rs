@@ -19,6 +19,7 @@ mod swamp_hut;
 mod template_piece;
 mod template_processors;
 
+use crate::world::WorldGenLevel;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
@@ -32,7 +33,6 @@ use steel_utils::{
     types::UpdateFlags,
 };
 
-use crate::worldgen::region::WorldGenRegion;
 use steel_worldgen::structure::{
     ProceduralPieceData, StructureMirror, StructurePiece, StructurePiecePayload,
 };
@@ -56,7 +56,7 @@ impl StructurePiecePlacer {
         reason = "single dispatch boundary for all structure piece payload families"
     )]
     pub(crate) fn place_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         piece: &mut StructurePiece,
         reference_pos: BlockPos,
@@ -176,7 +176,7 @@ impl StructurePiecePlacer {
     }
 
     pub(crate) fn after_place_structure(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         structure: StructureRef,
         pieces: &mut [StructurePiece],
         clip: BoundingBox,
@@ -194,7 +194,7 @@ impl StructurePiecePlacer {
     ];
 
     pub(super) fn reorient_chest(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
     ) -> BlockStateId {
@@ -202,7 +202,7 @@ impl StructurePiecePlacer {
 
         for direction in Self::VANILLA_HORIZONTAL_DIRECTIONS {
             let relative_pos = pos.relative(direction);
-            let neighbor = region.block_state(relative_pos);
+            let neighbor = region.get_block_state(relative_pos);
             if neighbor.get_block() == &vanilla_blocks::CHEST {
                 return state;
             }
@@ -225,29 +225,29 @@ impl StructurePiecePlacer {
 
         let mut lock_dir = state.get_value(&BlockStateProperties::HORIZONTAL_FACING);
         let mut relative_pos = pos.relative(lock_dir);
-        if region.block_state(relative_pos).is_solid_render() {
+        if region.get_block_state(relative_pos).is_solid_render() {
             lock_dir = lock_dir.opposite();
             relative_pos = pos.relative(lock_dir);
         }
-        if region.block_state(relative_pos).is_solid_render() {
+        if region.get_block_state(relative_pos).is_solid_render() {
             lock_dir = lock_dir.rotate_y_clockwise();
             relative_pos = pos.relative(lock_dir);
         }
-        if region.block_state(relative_pos).is_solid_render() {
+        if region.get_block_state(relative_pos).is_solid_render() {
             lock_dir = lock_dir.opposite();
         }
         state.set_value(&BlockStateProperties::HORIZONTAL_FACING, lock_dir)
     }
 
     pub(super) fn create_loot_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         clip: BoundingBox,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         loot_table: &'static str,
     ) -> bool {
         if !clip.contains_blockpos(pos)
-            || region.block_state(pos).get_block() == &vanilla_blocks::CHEST
+            || region.get_block_state(pos).get_block() == &vanilla_blocks::CHEST
         {
             return false;
         }
@@ -268,7 +268,7 @@ impl StructurePiecePlacer {
     }
 
     pub(super) fn set_loot_table_block_entity(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         block_entity_type: BlockEntityTypeRef,
         state: BlockStateId,
@@ -284,7 +284,7 @@ impl StructurePiecePlacer {
     }
 
     pub(super) fn set_spawner_entity(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         entity_id: &'static str,
@@ -313,7 +313,7 @@ impl StructurePiecePlacer {
     }
 
     pub(super) fn set_brushable_loot_table(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         state: BlockStateId,
         loot_table: &'static str,

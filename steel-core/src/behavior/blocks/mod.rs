@@ -87,15 +87,15 @@ pub use vegetation::{
 };
 pub use vegetation::{
     BaseCoralFanBlock, BaseCoralPlantBlock, BaseCoralWallFanBlock, BigDripleafBlock,
-    BigDripleafStemBlock, BushBlock, CarpetBlock, CaveVinesBlock, CaveVinesPlantBlock,
-    ChorusFlowerBlock, ChorusPlantBlock, CoralFanBlock, CoralPlantBlock, CoralWallFanBlock,
-    CreakingHeartBlock, DirtPathBlock, DryVegetationBlock, EyeblossomBlock, EyeblossomType,
-    FarmlandBlock, FireflyBushBlock, FlowerBedBlock, GlowLichenBlock, HangingMossBlock,
-    HangingRootsBlock, HugeMushroomBlock, KelpBlock, KelpPlantBlock, LeafLitterBlock, LilyPadBlock,
-    MangrovePropaguleBlock, MossyCarpetBlock, MushroomBlock, NetherFungusBlock, NetherRootsBlock,
-    PointedDripstoneBlock, SaplingBlock, SculkVeinBlock, SeaPickleBlock, ShortDryGrassBlock,
-    SmallDripleafBlock, SporeBlossomBlock, SulfurSpikeBlock, TallDryGrassBlock, TwistingVinesBlock,
-    TwistingVinesPlantBlock, VineBlock, WeepingVinesBlock, WeepingVinesPlantBlock, WitherRoseBlock,
-    WoolCarpetBlock,
+    BigDripleafStemBlock, BonemealableFeaturePlacerBlock, BushBlock, CarpetBlock, CaveVinesBlock,
+    CaveVinesPlantBlock, ChorusFlowerBlock, ChorusPlantBlock, CoralFanBlock, CoralPlantBlock,
+    CoralWallFanBlock, CreakingHeartBlock, DirtPathBlock, DryVegetationBlock, EyeblossomBlock,
+    EyeblossomType, FarmlandBlock, FireflyBushBlock, FlowerBedBlock, GlowLichenBlock,
+    HangingMossBlock, HangingRootsBlock, HugeMushroomBlock, KelpBlock, KelpPlantBlock,
+    LeafLitterBlock, LilyPadBlock, MangrovePropaguleBlock, MossyCarpetBlock, MushroomBlock,
+    NetherFungusBlock, NetherRootsBlock, PointedDripstoneBlock, SaplingBlock, SculkVeinBlock,
+    SeaPickleBlock, ShortDryGrassBlock, SmallDripleafBlock, SporeBlossomBlock, SulfurSpikeBlock,
+    TallDryGrassBlock, TwistingVinesBlock, TwistingVinesPlantBlock, VineBlock, WeepingVinesBlock,
+    WeepingVinesPlantBlock, WitherRoseBlock, WoolCarpetBlock,
 };
 pub(crate) use vegetation::{CREAKING_HEART_STATE, creaking_heart_awake_or_dormant};

@@ -1,3 +1,4 @@
+use crate::world::WorldGenLevel;
 use std::sync::Weak;
 
 use glam::IVec3;
@@ -11,22 +12,21 @@ use steel_utils::{BlockPos, BlockStateId, BoundingBox, Direction, types::UpdateF
 use crate::chunk::heightmap::HeightmapType;
 use crate::entity::SharedEntity;
 use crate::world::World;
-use crate::worldgen::region::WorldGenRegion;
 use crate::worldgen::template::StructureTemplate;
 
 use super::StructurePiecePlacer;
 
-pub(super) struct ScatteredFeaturePlacer<'a, 'world> {
-    region: &'a mut WorldGenRegion<'world>,
+pub(super) struct ScatteredFeaturePlacer<'a, L: WorldGenLevel> {
+    region: &'a L,
     registry: &'a Registry,
     bounding_box: &'a mut BoundingBox,
     orientation: Option<Direction>,
     clip: BoundingBox,
 }
 
-impl<'a, 'world> ScatteredFeaturePlacer<'a, 'world> {
+impl<'a, L: WorldGenLevel> ScatteredFeaturePlacer<'a, L> {
     pub(super) const fn new(
-        region: &'a mut WorldGenRegion<'world>,
+        region: &'a L,
         registry: &'a Registry,
         bounding_box: &'a mut BoundingBox,
         orientation: Option<Direction>,
@@ -57,7 +57,7 @@ impl<'a, 'world> ScatteredFeaturePlacer<'a, 'world> {
                 if self.clip.contains_blockpos(BlockPos::new(x, 64, z)) {
                     total += self
                         .region
-                        .height_at(HeightmapType::MotionBlockingNoLeaves, x, z);
+                        .heightmap_at(HeightmapType::MotionBlockingNoLeaves, x, z);
                     count += 1;
                 }
             }
@@ -162,7 +162,7 @@ impl<'a, 'world> ScatteredFeaturePlacer<'a, 'world> {
             return;
         }
 
-        while Self::is_replaceable_by_structures(self.region.block_state(pos))
+        while Self::is_replaceable_by_structures(self.region.get_block_state(pos))
             && pos.y() > self.region.min_y() + 1
         {
             let _ = self
@@ -216,7 +216,7 @@ impl<'a, 'world> ScatteredFeaturePlacer<'a, 'world> {
     ) -> bool {
         let pos = self.world_pos(x, y, z);
         if !self.clip.contains_blockpos(pos)
-            || self.region.block_state(pos).get_block() == &vanilla_blocks::DISPENSER
+            || self.region.get_block_state(pos).get_block() == &vanilla_blocks::DISPENSER
         {
             return false;
         }
@@ -292,7 +292,7 @@ impl<'a, 'world> ScatteredFeaturePlacer<'a, 'world> {
         self.clip
     }
 
-    pub(super) const fn sea_level(&self) -> i32 {
+    pub(super) fn sea_level(&self) -> i32 {
         self.region.sea_level()
     }
 
@@ -322,7 +322,7 @@ impl<'a, 'world> ScatteredFeaturePlacer<'a, 'world> {
     fn get_block(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         let pos = self.world_pos(x, y, z);
         if self.clip.contains_blockpos(pos) {
-            self.region.block_state(pos)
+            self.region.get_block_state(pos)
         } else {
             vanilla_blocks::AIR.default_state()
         }

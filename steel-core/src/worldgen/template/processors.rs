@@ -49,13 +49,13 @@ impl StructureTemplate {
     }
 
     pub(super) fn process_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         original: &ProcessedBlockInfo,
         initial: ProcessedBlockInfo,
         settings: &StructurePlaceSettings<'_>,
         reference_pos: BlockPos,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Option<ProcessedBlockInfo> {
         let mut current = initial;
         if settings.block_ignore.ignores(registry, current.state) {
@@ -92,14 +92,14 @@ impl StructureTemplate {
         reason = "processor calls mirror vanilla StructureProcessor.processBlock inputs"
     )]
     pub(super) fn process_block_with_processor(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         processor: &StructureProcessorKind,
         original: &ProcessedBlockInfo,
         current: ProcessedBlockInfo,
         settings: &StructurePlaceSettings<'_>,
         reference_pos: BlockPos,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Option<ProcessedBlockInfo> {
         match processor {
             StructureProcessorKind::BlockRot {
@@ -118,13 +118,13 @@ impl StructureTemplate {
             }
             StructureProcessorKind::ProtectedBlocks { cannot_replace } => {
                 let existing =
-                    Self::block_for_state(registry, region.block_state(current.world_pos));
+                    Self::block_for_state(registry, region.get_block_state(current.world_pos));
                 (!existing.has_tag(cannot_replace)).then_some(current)
             }
             StructureProcessorKind::Rule { rules } => {
                 let mut rule_random =
                     LegacyRandom::from_seed(Self::block_pos_seed(current.world_pos) as u64);
-                let location_state = region.block_state(current.world_pos);
+                let location_state = region.get_block_state(current.world_pos);
                 for rule in rules {
                     if Self::rule_matches(
                         registry,
@@ -146,7 +146,7 @@ impl StructureTemplate {
             )),
             StructureProcessorKind::LavaSubmergedBlock => Some(Self::process_lava_submerged_block(
                 registry,
-                region.block_state(current.world_pos),
+                region.get_block_state(current.world_pos),
                 current,
             )),
             StructureProcessorKind::BlackstoneReplace => {
@@ -161,10 +161,10 @@ impl StructureTemplate {
         current: ProcessedBlockInfo,
         mossiness: f32,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> ProcessedBlockInfo {
         match settings.processor_random {
-            StructureProcessorRandom::Placement => {
+            StructureProcessorRandom::Placement | StructureProcessorRandom::Seeded(_) => {
                 Self::process_block_age_with_random(registry, current, mossiness, random)
             }
             StructureProcessorRandom::Positional => {
@@ -459,14 +459,14 @@ impl StructureTemplate {
         reason = "processor finalization receives vanilla's full template processing context"
     )]
     pub(super) fn finalize_processing(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         position: BlockPos,
         reference_pos: BlockPos,
         settings: &StructurePlaceSettings<'_>,
         original_blocks: &[ProcessedBlockInfo],
         mut processed_blocks: Vec<ProcessedBlockInfo>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Vec<ProcessedBlockInfo> {
         for processor in settings.processors {
             if let StructureProcessorKind::Capped { delegate, limit } = processor {
@@ -492,7 +492,7 @@ impl StructureTemplate {
         reason = "matches vanilla CappedProcessor.finalizeProcessing inputs"
     )]
     pub(super) fn finalize_capped_processing(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         position: BlockPos,
         reference_pos: BlockPos,
@@ -501,7 +501,7 @@ impl StructureTemplate {
         original_blocks: &[ProcessedBlockInfo],
         mut processed_blocks: Vec<ProcessedBlockInfo>,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Vec<ProcessedBlockInfo> {
         if limit.max() == 0 || processed_blocks.is_empty() {
             return processed_blocks;
@@ -558,10 +558,12 @@ impl StructureTemplate {
     pub(super) fn processor_next_f32(
         settings: &StructurePlaceSettings<'_>,
         pos: BlockPos,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> f32 {
         match settings.processor_random {
-            StructureProcessorRandom::Placement => random.next_f32(),
+            StructureProcessorRandom::Placement | StructureProcessorRandom::Seeded(_) => {
+                random.next_f32()
+            }
             StructureProcessorRandom::Positional => {
                 let mut random = LegacyRandom::from_seed(Self::block_pos_seed(pos) as u64);
                 random.next_f32()
@@ -651,11 +653,11 @@ impl StructureTemplate {
     }
 
     pub(super) fn apply_terrain_matching_projection(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         original: &ProcessedBlockInfo,
         mut current: ProcessedBlockInfo,
     ) -> ProcessedBlockInfo {
-        let height = region.height_at(
+        let height = region.heightmap_at(
             HeightmapType::WorldSurfaceWg,
             current.world_pos.x(),
             current.world_pos.z(),

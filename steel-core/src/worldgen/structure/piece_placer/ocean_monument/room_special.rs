@@ -2,8 +2,12 @@ use super::{
     ScatteredFeaturePlacer, base_black, base_gray, base_light, generate_water_box, lamp,
     spawn_elder,
 };
+use crate::world::WorldGenLevel;
 
-pub(super) fn place_wing_room(placer: &mut ScatteredFeaturePlacer<'_, '_>, main_design: i32) {
+pub(super) fn place_wing_room(
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
+    main_design: i32,
+) {
     if main_design == 0 {
         for i in 0..4 {
             placer.generate_box(
@@ -79,7 +83,7 @@ pub(super) fn place_wing_room(placer: &mut ScatteredFeaturePlacer<'_, '_>, main_
     }
 }
 
-pub(super) fn place_penthouse(placer: &mut ScatteredFeaturePlacer<'_, '_>) {
+pub(super) fn place_penthouse(placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>) {
     placer.generate_box(2, -1, 2, 11, -1, 11, base_light(), base_light(), false);
     placer.generate_box(0, -1, 0, 1, -1, 11, base_gray(), base_gray(), false);
     placer.generate_box(12, -1, 0, 13, -1, 11, base_gray(), base_gray(), false);

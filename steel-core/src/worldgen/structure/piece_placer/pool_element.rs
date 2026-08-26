@@ -5,8 +5,8 @@ use steel_registry::{Registry, RegistryExt};
 use steel_utils::random::worldgen_random::WorldgenRandom;
 use steel_utils::{BlockPos, BoundingBox, Identifier, Rotation};
 
+use crate::world::WorldGenLevel;
 use crate::worldgen::feature::FeatureDecorationRunner;
-use crate::worldgen::region::WorldGenRegion;
 use crate::worldgen::template::{
     StructurePlaceSettings, StructureProcessorRandom, StructureTemplate,
 };
@@ -20,7 +20,7 @@ impl StructurePiecePlacer {
         reason = "mirrors StructurePoolElement.place inputs"
     )]
     pub(super) fn place_pool_element(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         element: &PoolElement,
         position: BlockPos,
@@ -108,7 +108,7 @@ impl StructurePiecePlacer {
         reason = "mirrors SinglePoolElement.place and StructureTemplate.placeInWorld"
     )]
     fn place_single_pool_element(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         location: &Identifier,
         processors: &ProcessorList,
@@ -139,6 +139,7 @@ impl StructurePiecePlacer {
             projection: Some(projection),
             processor_random: StructureProcessorRandom::Positional,
             liquid_settings,
+            ignore_entities: false,
         };
 
         template.place_in_world(

@@ -21,12 +21,12 @@ struct WindOffsetter {
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_large_dripstone_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &LargeDripstoneConfiguration,
         origin: BlockPos,
     ) -> bool {
-        if !Self::is_empty_or_water(region.block_state(origin)) {
+        if !Self::is_empty_or_water(region.get_block_state(origin)) {
             return false;
         }
 
@@ -117,11 +117,11 @@ impl FeatureDecorationRunner {
     }
 
     fn is_circle_mostly_embedded_in_stone(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         center: BlockPos,
         xz_radius: i32,
     ) -> bool {
-        if Self::is_empty_or_water_or_lava(region.block_state(center)) {
+        if Self::is_empty_or_water_or_lava(region.get_block_state(center)) {
             return false;
         }
 
@@ -130,7 +130,7 @@ impl FeatureDecorationRunner {
         while angle < TAU {
             let dx = (trig::cos(f64::from(angle)) * xz_radius as f32) as i32;
             let dz = (trig::sin(f64::from(angle)) * xz_radius as f32) as i32;
-            if Self::is_empty_or_water_or_lava(region.block_state(center.offset(dx, 0, dz))) {
+            if Self::is_empty_or_water_or_lava(region.get_block_state(center.offset(dx, 0, dz))) {
                 return false;
             }
             angle += angle_increment;
@@ -168,7 +168,7 @@ impl LargeDripstone {
 
     fn move_back_until_base_is_inside_stone(
         &mut self,
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         wind: &WindOffsetter,
     ) -> bool {
         while self.radius > 1 {
@@ -213,7 +213,7 @@ impl LargeDripstone {
 
     fn place_blocks(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         wind: &WindOffsetter,
     ) {
@@ -238,7 +238,7 @@ impl LargeDripstone {
                 let mut pos = self.root.offset(dx, 0, dz);
                 let mut has_been_out_of_stone = false;
                 let max_y = if self.pointing_up {
-                    region.height_at(HeightmapType::WorldSurfaceWg, pos.x(), pos.z())
+                    region.heightmap_at(HeightmapType::WorldSurfaceWg, pos.x(), pos.z())
                 } else {
                     i32::MAX
                 };
@@ -249,7 +249,7 @@ impl LargeDripstone {
                     }
 
                     let wind_adjusted_pos = wind.offset(pos);
-                    let state = region.block_state(wind_adjusted_pos);
+                    let state = region.get_block_state(wind_adjusted_pos);
                     if FeatureDecorationRunner::is_empty_or_water_or_lava(state) {
                         has_been_out_of_stone = true;
                         let _ = region.set_block_state(

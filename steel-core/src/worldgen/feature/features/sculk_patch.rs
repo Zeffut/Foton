@@ -12,7 +12,7 @@ use steel_registry::vanilla_block_entity_types;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_sculk_patch_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SculkPatchConfiguration,
@@ -38,7 +38,7 @@ impl FeatureDecorationRunner {
         }
 
         let below = origin.below();
-        let below_state = region.block_state(below);
+        let below_state = region.get_block_state(below);
         if random.next_f32() <= config.catalyst_chance
             && shapes::is_offset_shape_full_block(below_state.get_collision_shape_at(below))
         {
@@ -61,9 +61,9 @@ impl FeatureDecorationRunner {
                 random.next_i32_bounded(5) - 2,
             );
             let below = candidate.below();
-            if !region.block_state(candidate).is_air()
+            if !region.get_block_state(candidate).is_air()
                 || !region
-                    .block_state(below)
+                    .get_block_state(below)
                     .is_face_sturdy_at(below, Direction::Up)
             {
                 continue;
@@ -86,8 +86,8 @@ impl FeatureDecorationRunner {
     }
 
     /// Vanilla `SculkPatchFeature.canSpreadFrom`.
-    fn can_sculk_spread_from(region: &WorldGenRegion<'_>, origin: BlockPos) -> bool {
-        let start = region.block_state(origin);
+    fn can_sculk_spread_from(region: &impl WorldGenLevel, origin: BlockPos) -> bool {
+        let start = region.get_block_state(origin);
         if sculk_behavior_of(start) != SculkBehaviorKind::Default {
             return true;
         }
@@ -101,7 +101,7 @@ impl FeatureDecorationRunner {
 
         Self::VANILLA_DIRECTION_VALUES.iter().any(|direction| {
             let pos = origin.relative(*direction);
-            let state = region.block_state(pos);
+            let state = region.get_block_state(pos);
             shapes::is_offset_shape_full_block(state.get_collision_shape_at(pos))
         })
     }

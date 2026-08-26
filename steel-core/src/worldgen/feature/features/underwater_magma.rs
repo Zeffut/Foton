@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_underwater_magma_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &UnderwaterMagmaConfiguration,
         origin: BlockPos,
@@ -37,31 +37,31 @@ impl FeatureDecorationRunner {
     }
 
     fn underwater_magma_floor_y(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         origin: BlockPos,
         config: &UnderwaterMagmaConfiguration,
     ) -> Option<i32> {
-        if region.block_state(origin).get_block() != &vanilla_blocks::WATER {
+        if region.get_block_state(origin).get_block() != &vanilla_blocks::WATER {
             return None;
         }
 
         let mut pos = origin;
         for _ in 1..config.floor_search_range {
-            if region.block_state(pos).get_block() != &vanilla_blocks::WATER {
+            if region.get_block_state(pos).get_block() != &vanilla_blocks::WATER {
                 break;
             }
             pos = pos.below();
         }
 
-        if region.block_state(pos).get_block() == &vanilla_blocks::WATER {
+        if region.get_block_state(pos).get_block() == &vanilla_blocks::WATER {
             return None;
         }
 
         Some(pos.y())
     }
 
-    fn underwater_magma_valid_placement(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
-        let state = region.block_state(pos);
+    fn underwater_magma_valid_placement(region: &impl WorldGenLevel, pos: BlockPos) -> bool {
+        let state = region.get_block_state(pos);
         if Self::underwater_magma_is_water_or_air(state)
             || Self::underwater_magma_visible_from_outside(region, pos.below(), Direction::Up)
         {
@@ -86,11 +86,11 @@ impl FeatureDecorationRunner {
     }
 
     fn underwater_magma_visible_from_outside(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         covered_direction: Direction,
     ) -> bool {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         let face_occlusion_shape = state.get_occlusion_shape();
         face_occlusion_shape.is_empty()
             || !shapes::is_face_full(face_occlusion_shape, covered_direction)

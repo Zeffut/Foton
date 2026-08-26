@@ -37,9 +37,10 @@ use crate::chunk::{
 };
 use crate::entity::SharedEntity;
 use crate::world::tick_scheduler::TickPriority;
-use crate::world::{LevelAccessor, LevelReader, ScheduledTickAccess, World};
+use crate::world::{LevelAccessor, LevelReader, ScheduledTickAccess, World, WorldGenLevel};
 use crate::worldgen::feature::instrumentation::OreFeatureStats;
 use crate::worldgen::generator::context::WorldGenContext;
+use crate::worldgen::ore_access::OreLevelAccess;
 
 /// Chunk-cache backed worldgen view for the current generation step.
 ///
@@ -55,7 +56,7 @@ pub struct WorldGenRegion<'a> {
     chunk_cache_radius: i32,
     chunks: RefCell<Box<[Option<CachedWorldGenChunk<'a>>]>>,
     worldgen_heightmaps: RefCell<Box<[CachedWorldgenHeightmaps]>>,
-    random: RandomSource,
+    random: RefCell<RandomSource>,
 }
 
 /// Cached section-level access for feature code that mirrors vanilla `BulkSectionAccess`.
@@ -220,7 +221,7 @@ impl<'a> WorldGenRegion<'a> {
             chunk_cache_radius,
             chunks: RefCell::new(chunks),
             worldgen_heightmaps: RefCell::new(worldgen_heightmaps),
-            random,
+            random: RefCell::new(random),
         }
     }
 
@@ -228,11 +229,6 @@ impl<'a> WorldGenRegion<'a> {
     #[must_use]
     pub const fn center(&self) -> ChunkPos {
         self.center
-    }
-
-    /// Returns the random source exposed by vanilla `WorldGenRegion.getRandom()`.
-    pub const fn random_mut(&mut self) -> &mut RandomSource {
-        &mut self.random
     }
 
     /// Returns the minimum build height.
@@ -245,50 +241,6 @@ impl<'a> WorldGenRegion<'a> {
     #[must_use]
     pub const fn height(&self) -> i32 {
         self.context.height()
-    }
-
-    /// Returns the minimum Y coordinate used by vanilla `WorldGenerationContext`.
-    #[must_use]
-    pub fn generation_min_y(&self) -> i32 {
-        self.context.generation_min_y()
-    }
-
-    /// Returns the vertical generation depth used by vanilla `WorldGenerationContext`.
-    #[must_use]
-    pub fn generation_height(&self) -> i32 {
-        self.context.generation_height()
-    }
-
-    /// Returns this dimension's sea level.
-    #[must_use]
-    pub const fn sea_level(&self) -> i32 {
-        self.context.sea_level()
-    }
-
-    /// Returns the world seed.
-    #[must_use]
-    pub fn seed(&self) -> i64 {
-        self.context.world().seed()
-    }
-
-    /// Returns the weak world reference used by generated chunks and entities.
-    #[must_use]
-    pub fn weak_world(&self) -> Weak<World> {
-        self.context.weak_world()
-    }
-
-    /// Returns block light as seen by feature-stage worldgen.
-    ///
-    /// Vanilla routes this through the level light engine from `WorldGenRegion`, but block light
-    /// is not generated for the feature-stage proto chunks. Treating the region as dark keeps
-    /// snow and freeze checks aligned with vanilla feature placement.
-    #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "keeps light lookup callable through the region instance"
-    )]
-    pub const fn block_light_at(&self, _pos: BlockPos) -> u8 {
-        0
     }
 
     /// Returns the exclusive maximum build height.
@@ -471,8 +423,7 @@ impl<'a> WorldGenRegion<'a> {
     ///
     /// # Panics
     /// Panics if the position's chunk is outside this step's direct dependencies.
-    #[must_use]
-    pub fn noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> u16 {
+    fn region_noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> u16 {
         let chunk_x = quart_x >> 2;
         let chunk_z = quart_z >> 2;
         let local_quart_x = (quart_x & 3) as usize;
@@ -556,8 +507,7 @@ impl<'a> WorldGenRegion<'a> {
     /// This mirrors vanilla's feature paths that place a block first, then configure its block
     /// entity. If Steel does not have concrete behavior for the type yet, the raw fallback keeps
     /// the NBT intact for later save/load.
-    #[must_use]
-    pub fn set_block_entity_data(
+    fn region_set_block_entity_data(
         &self,
         pos: BlockPos,
         block_entity_type: BlockEntityTypeRef,
@@ -594,8 +544,7 @@ impl<'a> WorldGenRegion<'a> {
     }
 
     /// Removes block entity data at a writable worldgen position.
-    #[must_use]
-    pub fn remove_block_entity(&self, pos: BlockPos) -> bool {
+    fn region_remove_block_entity(&self, pos: BlockPos) -> bool {
         let Some((chunk_x, chunk_z, status)) =
             self.writable_chunk_for_pos(pos, "remove block entity")
         else {
@@ -614,8 +563,7 @@ impl<'a> WorldGenRegion<'a> {
     ///
     /// Vanilla `WorldGenRegion.addFreshEntity` does not call `ensureCanWrite`, so entity
     /// insertion is allowed anywhere covered by the generation step's chunk dependencies.
-    #[must_use]
-    pub fn add_fresh_entity(&self, entity: SharedEntity) -> bool {
+    fn region_add_fresh_entity(&self, entity: SharedEntity) -> bool {
         let pos = BlockPos::from(entity.position());
         let (chunk_x, chunk_z, status) = self.dependency_chunk_for_pos(pos, "add entity");
 
@@ -811,13 +759,6 @@ impl<'a> WorldGenRegion<'a> {
         columns
     }
 
-    pub(crate) fn bulk_section_access_for_ore<'profile>(
-        &self,
-        profile: Option<&'profile RefCell<OreFeatureStats>>,
-    ) -> WorldGenBulkSectionAccess<'_, 'a, 'profile> {
-        WorldGenBulkSectionAccess::new(self, profile)
-    }
-
     fn writable_chunk_for_pos(
         &self,
         pos: BlockPos,
@@ -920,191 +861,10 @@ impl<'region, 'world, 'profile> WorldGenBulkSectionAccess<'region, 'world, 'prof
         }
     }
 
-    pub(crate) fn record_ore_candidate_position(&mut self) {
-        self.with_ore_profile(OreFeatureStats::record_candidate_position);
-    }
-
-    pub(crate) fn record_ore_unique_position(&mut self) {
-        self.with_ore_profile(OreFeatureStats::record_unique_position);
-    }
-
-    pub(crate) fn record_ore_write_allowed_position(&mut self) {
-        self.with_ore_profile(OreFeatureStats::record_write_allowed_position);
-    }
-
-    pub(crate) fn ore_target_block_state(&mut self, pos: BlockPos) -> BlockStateId {
-        self.with_ore_profile(OreFeatureStats::record_target_read);
-        self.block_state(pos)
-    }
-
-    pub(crate) fn ore_neighbor_block_state(&mut self, pos: BlockPos) -> BlockStateId {
-        self.with_ore_profile(OreFeatureStats::record_neighbor_read);
-        self.block_state(pos)
-    }
-
-    /// Replaces an ore target block after reading it under the section write lock.
-    ///
-    /// This is only suitable for ore paths that do not need neighbor reads while deciding
-    /// whether the replacement is allowed.
-    #[must_use]
-    pub(crate) fn replace_ore_target_block_state(
-        &mut self,
-        pos: BlockPos,
-        replacement: impl FnOnce(BlockStateId) -> Option<BlockStateId>,
-    ) -> bool {
-        self.with_ore_profile(OreFeatureStats::record_target_read);
-        let ore_profile = self.ore_profile;
-        let started_at = ore_profile.map(|_| Instant::now());
-        let Some(key) = self.writable_section_key(pos) else {
-            Self::record_ore_write_time(ore_profile, started_at);
-            return false;
-        };
-
-        let chunk = self.chunk(key.chunk_x, key.chunk_z, key.status);
-        if !chunk.access_mode.allows_writes() {
-            Self::record_ore_write_time(ore_profile, started_at);
-            return false;
-        }
-        let Some(section) = chunk.chunk.sections().sections.get(key.section_index) else {
-            panic!(
-                "Worldgen bulk section write at ({}, {}, {}) resolved missing section index {}",
-                pos.x(),
-                pos.y(),
-                pos.z(),
-                key.section_index
-            );
-        };
-
-        let mut section_guard = Self::ore_section_write_guard(ore_profile, section, key);
-
-        let local_x = Self::local_coord(pos.x());
-        let local_y = Self::local_coord(pos.y());
-        let local_z = Self::local_coord(pos.z());
-        let old_state = section_guard.states.get(local_x, local_y, local_z);
-        let Some(state) = replacement(old_state) else {
-            Self::record_ore_write_time(ore_profile, started_at);
-            return false;
-        };
-
-        let old_state = Self::set_bulk_block_state(
-            chunk.holder,
-            &mut section_guard,
-            local_x,
-            local_y,
-            local_z,
-            state,
-        );
-        Self::with_ore_profile_ref(ore_profile, OreFeatureStats::record_write);
-        if old_state != state {
-            chunk.chunk.mark_dirty();
-        }
-
-        Self::record_ore_write_time(ore_profile, started_at);
-        true
-    }
-
-    /// Replaces already-filtered ore target positions that all belong to one section.
-    pub(crate) fn replace_ore_target_block_states_in_section(
-        &mut self,
-        chunk_x: i32,
-        chunk_z: i32,
-        section_index: usize,
-        positions: &[PackedSectionBlockPos],
-        mut replacement: impl FnMut(BlockStateId) -> Option<BlockStateId>,
-    ) -> u64 {
-        let ore_profile = self.ore_profile;
-        let started_at = ore_profile.map(|_| Instant::now());
-        if !self.region.can_write_to_chunk(chunk_x, chunk_z) {
-            Self::record_ore_write_time(ore_profile, started_at);
-            return 0;
-        }
-        Self::with_ore_profile_ref(ore_profile, |profile| {
-            profile.record_write_allowed_positions(positions.len() as u64);
-        });
-        let Some(status) = self.region.required_status_at(chunk_x, chunk_z) else {
-            panic!(
-                "Worldgen attempted to bulk write ore in chunk ({chunk_x}, {chunk_z}), \
-                 but {:?} declares no direct dependency for that chunk",
-                self.region.step.target_status,
-            );
-        };
-        let key = WritableSectionKey {
-            chunk_x,
-            chunk_z,
-            status,
-            section_index,
-        };
-        let chunk = self.chunk(chunk_x, chunk_z, status);
-        if !chunk.access_mode.allows_writes() {
-            Self::record_ore_write_time(ore_profile, started_at);
-            return 0;
-        }
-        let Some(section) = chunk.chunk.sections().sections.get(section_index) else {
-            panic!(
-                "Worldgen bulk section write in chunk ({chunk_x}, {chunk_z}) resolved missing section index {section_index}",
-            );
-        };
-
-        let mut section_guard = Self::ore_section_write_guard(ore_profile, section, key);
-        let mut placed = 0_u64;
-        let mut dirty = false;
-
-        if let Some(profile) = ore_profile {
-            for &pos in positions {
-                Self::with_ore_profile_ref(Some(profile), OreFeatureStats::record_target_read);
-                let local_x = usize::from(pos.x());
-                let local_y = usize::from(pos.y());
-                let local_z = usize::from(pos.z());
-                let old_state = section_guard.states.get(local_x, local_y, local_z);
-                if let Some(state) = replacement(old_state) {
-                    let old_state = Self::set_bulk_block_state(
-                        chunk.holder,
-                        &mut section_guard,
-                        local_x,
-                        local_y,
-                        local_z,
-                        state,
-                    );
-                    Self::with_ore_profile_ref(Some(profile), OreFeatureStats::record_write);
-                    dirty |= old_state != state;
-                    placed += 1;
-                }
-            }
-        } else {
-            for &pos in positions {
-                let local_x = usize::from(pos.x());
-                let local_y = usize::from(pos.y());
-                let local_z = usize::from(pos.z());
-                let old_state = section_guard.states.get(local_x, local_y, local_z);
-                if let Some(state) = replacement(old_state) {
-                    let old_state = Self::set_bulk_block_state(
-                        chunk.holder,
-                        &mut section_guard,
-                        local_x,
-                        local_y,
-                        local_z,
-                        state,
-                    );
-                    dirty |= old_state != state;
-                    placed += 1;
-                }
-            }
-        }
-
-        drop(section_guard);
-        if dirty {
-            chunk.chunk.mark_dirty();
-        }
-
-        Self::record_ore_write_time(ore_profile, started_at);
-        placed
-    }
-
     /// Reads a block state through cached section access.
     ///
     /// Out-of-height reads return air, matching vanilla `BulkSectionAccess.getBlockState`.
-    #[must_use]
-    pub(crate) fn block_state(&mut self, pos: BlockPos) -> BlockStateId {
+    fn block_state(&mut self, pos: BlockPos) -> BlockStateId {
         let ore_profile = self.ore_profile;
         let started_at = ore_profile.map(|_| Instant::now());
         let air = self.air;
@@ -1178,47 +938,6 @@ impl<'region, 'world, 'profile> WorldGenBulkSectionAccess<'region, 'world, 'prof
     /// defers section block counts until light initialization, matching the rest of its
     /// pre-light worldgen write paths.
     #[must_use]
-    pub(crate) fn set_block_state(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
-        let ore_profile = self.ore_profile;
-        let started_at = ore_profile.map(|_| Instant::now());
-        let Some(key) = self.writable_section_key(pos) else {
-            Self::record_ore_write_time(ore_profile, started_at);
-            return false;
-        };
-
-        let chunk = self.chunk(key.chunk_x, key.chunk_z, key.status);
-        if !chunk.access_mode.allows_writes() {
-            Self::record_ore_write_time(ore_profile, started_at);
-            return true;
-        }
-        let Some(section) = chunk.chunk.sections().sections.get(key.section_index) else {
-            panic!(
-                "Worldgen bulk section write at ({}, {}, {}) resolved missing section index {}",
-                pos.x(),
-                pos.y(),
-                pos.z(),
-                key.section_index
-            );
-        };
-
-        let mut section_guard = Self::ore_section_write_guard(ore_profile, section, key);
-        let old_state = Self::set_bulk_block_state(
-            chunk.holder,
-            &mut section_guard,
-            Self::local_coord(pos.x()),
-            Self::local_coord(pos.y()),
-            Self::local_coord(pos.z()),
-            state,
-        );
-        Self::with_ore_profile_ref(ore_profile, OreFeatureStats::record_write);
-        if old_state != state {
-            chunk.chunk.mark_dirty();
-        }
-
-        Self::record_ore_write_time(ore_profile, started_at);
-        true
-    }
-
     fn writable_section_key(&self, pos: BlockPos) -> Option<WritableSectionKey> {
         let (chunk_x, chunk_z, status) = self
             .region
@@ -1281,13 +1000,6 @@ impl<'region, 'world, 'profile> WorldGenBulkSectionAccess<'region, 'world, 'prof
 
     /// Returns whether a section-local write would be allowed for this position.
     #[must_use]
-    pub(crate) const fn can_write_to_pos(&self, pos: BlockPos) -> bool {
-        self.region.can_write_to_chunk(
-            SectionPos::block_to_section_coord(pos.x()),
-            SectionPos::block_to_section_coord(pos.z()),
-        )
-    }
-
     fn chunk(
         &mut self,
         chunk_x: i32,
@@ -1405,11 +1117,307 @@ impl<'region, 'world, 'profile> WorldGenBulkSectionAccess<'region, 'world, 'prof
     }
 }
 
+impl OreLevelAccess for WorldGenBulkSectionAccess<'_, '_, '_> {
+    fn record_ore_candidate_position(&mut self) {
+        self.with_ore_profile(OreFeatureStats::record_candidate_position);
+    }
+
+    fn record_ore_unique_position(&mut self) {
+        self.with_ore_profile(OreFeatureStats::record_unique_position);
+    }
+
+    fn record_ore_write_allowed_position(&mut self) {
+        self.with_ore_profile(OreFeatureStats::record_write_allowed_position);
+    }
+
+    fn ore_target_block_state(&mut self, pos: BlockPos) -> BlockStateId {
+        self.with_ore_profile(OreFeatureStats::record_target_read);
+        self.block_state(pos)
+    }
+
+    fn ore_neighbor_block_state(&mut self, pos: BlockPos) -> BlockStateId {
+        self.with_ore_profile(OreFeatureStats::record_neighbor_read);
+        self.block_state(pos)
+    }
+
+    /// Replaces an ore target block after reading it under the section write lock.
+    ///
+    /// This is only suitable for ore paths that do not need neighbor reads while deciding
+    /// whether the replacement is allowed.
+    fn replace_ore_target_block_state(
+        &mut self,
+        pos: BlockPos,
+        replacement: impl FnOnce(BlockStateId) -> Option<BlockStateId>,
+    ) -> bool {
+        self.with_ore_profile(OreFeatureStats::record_target_read);
+        let ore_profile = self.ore_profile;
+        let started_at = ore_profile.map(|_| Instant::now());
+        let Some(key) = self.writable_section_key(pos) else {
+            Self::record_ore_write_time(ore_profile, started_at);
+            return false;
+        };
+
+        let chunk = self.chunk(key.chunk_x, key.chunk_z, key.status);
+        if !chunk.access_mode.allows_writes() {
+            Self::record_ore_write_time(ore_profile, started_at);
+            return false;
+        }
+        let Some(section) = chunk.chunk.sections().sections.get(key.section_index) else {
+            panic!(
+                "Worldgen bulk section write at ({}, {}, {}) resolved missing section index {}",
+                pos.x(),
+                pos.y(),
+                pos.z(),
+                key.section_index
+            );
+        };
+
+        let mut section_guard = Self::ore_section_write_guard(ore_profile, section, key);
+
+        let local_x = Self::local_coord(pos.x());
+        let local_y = Self::local_coord(pos.y());
+        let local_z = Self::local_coord(pos.z());
+        let old_state = section_guard.states.get(local_x, local_y, local_z);
+        let Some(state) = replacement(old_state) else {
+            Self::record_ore_write_time(ore_profile, started_at);
+            return false;
+        };
+
+        let old_state = Self::set_bulk_block_state(
+            chunk.holder,
+            &mut section_guard,
+            local_x,
+            local_y,
+            local_z,
+            state,
+        );
+        Self::with_ore_profile_ref(ore_profile, OreFeatureStats::record_write);
+        if old_state != state {
+            chunk.chunk.mark_dirty();
+        }
+
+        Self::record_ore_write_time(ore_profile, started_at);
+        true
+    }
+
+    /// Replaces already-filtered ore target positions that all belong to one section.
+    fn replace_ore_target_block_states_in_section(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        section_index: usize,
+        positions: &[PackedSectionBlockPos],
+        mut replacement: impl FnMut(BlockStateId) -> Option<BlockStateId>,
+    ) -> u64 {
+        let ore_profile = self.ore_profile;
+        let started_at = ore_profile.map(|_| Instant::now());
+        if !self.region.can_write_to_chunk(chunk_x, chunk_z) {
+            Self::record_ore_write_time(ore_profile, started_at);
+            return 0;
+        }
+        Self::with_ore_profile_ref(ore_profile, |profile| {
+            profile.record_write_allowed_positions(positions.len() as u64);
+        });
+        let Some(status) = self.region.required_status_at(chunk_x, chunk_z) else {
+            panic!(
+                "Worldgen attempted to bulk write ore in chunk ({chunk_x}, {chunk_z}), \
+                 but {:?} declares no direct dependency for that chunk",
+                self.region.step.target_status,
+            );
+        };
+        let key = WritableSectionKey {
+            chunk_x,
+            chunk_z,
+            status,
+            section_index,
+        };
+        let chunk = self.chunk(chunk_x, chunk_z, status);
+        if !chunk.access_mode.allows_writes() {
+            Self::record_ore_write_time(ore_profile, started_at);
+            return 0;
+        }
+        let Some(section) = chunk.chunk.sections().sections.get(section_index) else {
+            panic!(
+                "Worldgen bulk section write in chunk ({chunk_x}, {chunk_z}) resolved missing section index {section_index}",
+            );
+        };
+
+        let mut section_guard = Self::ore_section_write_guard(ore_profile, section, key);
+        let mut placed = 0_u64;
+        let mut dirty = false;
+
+        if let Some(profile) = ore_profile {
+            for &pos in positions {
+                Self::with_ore_profile_ref(Some(profile), OreFeatureStats::record_target_read);
+                let local_x = usize::from(pos.x());
+                let local_y = usize::from(pos.y());
+                let local_z = usize::from(pos.z());
+                let old_state = section_guard.states.get(local_x, local_y, local_z);
+                if let Some(state) = replacement(old_state) {
+                    let old_state = Self::set_bulk_block_state(
+                        chunk.holder,
+                        &mut section_guard,
+                        local_x,
+                        local_y,
+                        local_z,
+                        state,
+                    );
+                    Self::with_ore_profile_ref(Some(profile), OreFeatureStats::record_write);
+                    dirty |= old_state != state;
+                    placed += 1;
+                }
+            }
+        } else {
+            for &pos in positions {
+                let local_x = usize::from(pos.x());
+                let local_y = usize::from(pos.y());
+                let local_z = usize::from(pos.z());
+                let old_state = section_guard.states.get(local_x, local_y, local_z);
+                if let Some(state) = replacement(old_state) {
+                    let old_state = Self::set_bulk_block_state(
+                        chunk.holder,
+                        &mut section_guard,
+                        local_x,
+                        local_y,
+                        local_z,
+                        state,
+                    );
+                    dirty |= old_state != state;
+                    placed += 1;
+                }
+            }
+        }
+
+        drop(section_guard);
+        if dirty {
+            chunk.chunk.mark_dirty();
+        }
+
+        Self::record_ore_write_time(ore_profile, started_at);
+        placed
+    }
+
+    fn set_ore_block_state(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
+        let ore_profile = self.ore_profile;
+        let started_at = ore_profile.map(|_| Instant::now());
+        let Some(key) = self.writable_section_key(pos) else {
+            Self::record_ore_write_time(ore_profile, started_at);
+            return false;
+        };
+
+        let chunk = self.chunk(key.chunk_x, key.chunk_z, key.status);
+        if !chunk.access_mode.allows_writes() {
+            Self::record_ore_write_time(ore_profile, started_at);
+            return true;
+        }
+        let Some(section) = chunk.chunk.sections().sections.get(key.section_index) else {
+            panic!(
+                "Worldgen bulk section write at ({}, {}, {}) resolved missing section index {}",
+                pos.x(),
+                pos.y(),
+                pos.z(),
+                key.section_index
+            );
+        };
+
+        let mut section_guard = Self::ore_section_write_guard(ore_profile, section, key);
+        let old_state = Self::set_bulk_block_state(
+            chunk.holder,
+            &mut section_guard,
+            Self::local_coord(pos.x()),
+            Self::local_coord(pos.y()),
+            Self::local_coord(pos.z()),
+            state,
+        );
+        Self::with_ore_profile_ref(ore_profile, OreFeatureStats::record_write);
+        if old_state != state {
+            chunk.chunk.mark_dirty();
+        }
+
+        Self::record_ore_write_time(ore_profile, started_at);
+        true
+    }
+
+    fn can_write_to_pos(&self, pos: BlockPos) -> bool {
+        self.region.can_write_to_chunk(
+            SectionPos::block_to_section_coord(pos.x()),
+            SectionPos::block_to_section_coord(pos.z()),
+        )
+    }
+}
+
 const fn abs_diff(left: i32, right: i32) -> i32 {
     if left >= right {
         left - right
     } else {
         right - left
+    }
+}
+
+impl<'world> WorldGenLevel for WorldGenRegion<'world> {
+    type OreAccess<'level>
+        = WorldGenBulkSectionAccess<'level, 'world, 'level>
+    where
+        Self: 'level;
+
+    fn ore_access<'level>(
+        &'level self,
+        stats: Option<&'level RefCell<OreFeatureStats>>,
+    ) -> Self::OreAccess<'level> {
+        WorldGenBulkSectionAccess::new(self, stats)
+    }
+
+    fn seed(&self) -> i64 {
+        self.context.world().seed()
+    }
+
+    fn sea_level(&self) -> i32 {
+        self.context.sea_level()
+    }
+
+    fn generation_min_y(&self) -> i32 {
+        self.context.generation_min_y()
+    }
+
+    fn generation_height(&self) -> i32 {
+        self.context.generation_height()
+    }
+
+    fn noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> Option<u16> {
+        Some(self.region_noise_biome_id(quart_x, quart_y, quart_z))
+    }
+
+    /// Feature-stage proto chunks have no block light yet, so vanilla's light-engine
+    /// query answers dark here. That is what keeps snow and freeze checks aligned
+    /// with vanilla feature placement.
+    fn block_light_at(&self, _pos: BlockPos) -> u8 {
+        0
+    }
+
+    fn with_level_random<R>(&self, apply: impl FnOnce(&mut RandomSource) -> R) -> R {
+        apply(&mut self.random.borrow_mut())
+    }
+
+    fn set_block_entity_data(
+        &self,
+        pos: BlockPos,
+        block_entity_type: BlockEntityTypeRef,
+        state: BlockStateId,
+        nbt: NbtCompound,
+    ) -> bool {
+        self.region_set_block_entity_data(pos, block_entity_type, state, nbt)
+    }
+
+    fn remove_block_entity(&self, pos: BlockPos) -> bool {
+        self.region_remove_block_entity(pos)
+    }
+
+    fn add_fresh_entity(&self, entity: SharedEntity) -> bool {
+        self.region_add_fresh_entity(entity)
+    }
+
+    fn weak_world(&self) -> Weak<World> {
+        self.context.weak_world()
     }
 }
 

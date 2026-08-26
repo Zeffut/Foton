@@ -9,7 +9,7 @@ const PLATFORM_RADIUS_CHUNKS: i32 = 1;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_void_start_platform_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         origin: BlockPos,
     ) -> bool {
         let chunk_x = SectionPos::block_to_section_coord(origin.x());

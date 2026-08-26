@@ -2,9 +2,10 @@ use super::{
     Direction, OceanMonumentRoomData, ScatteredFeaturePlacer, base_black, base_gray, base_light,
     generate_box_on_fill_only, generate_default_floor, generate_water_box, lamp, open,
 };
+use crate::world::WorldGenLevel;
 
 pub(super) fn place_double_x_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     west: OceanMonumentRoomData,
     east: OceanMonumentRoomData,
 ) {
@@ -58,7 +59,7 @@ pub(super) fn place_double_x_room(
 }
 
 pub(super) fn place_double_xy_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     west: OceanMonumentRoomData,
     east: OceanMonumentRoomData,
     west_up: OceanMonumentRoomData,
@@ -150,7 +151,7 @@ pub(super) fn place_double_xy_room(
 }
 
 pub(super) fn place_double_y_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     room: OceanMonumentRoomData,
     above: OceanMonumentRoomData,
 ) {
@@ -182,7 +183,7 @@ pub(super) fn place_double_y_room(
 }
 
 fn place_double_y_side_walls(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     room: OceanMonumentRoomData,
     y: i32,
 ) {
@@ -224,7 +225,7 @@ fn place_double_y_side_walls(
 }
 
 pub(super) fn place_double_yz_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     south: OceanMonumentRoomData,
     north: OceanMonumentRoomData,
     south_up: OceanMonumentRoomData,
@@ -312,7 +313,7 @@ pub(super) fn place_double_yz_room(
 }
 
 pub(super) fn place_double_z_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     south: OceanMonumentRoomData,
     north: OceanMonumentRoomData,
 ) {
