@@ -7,6 +7,7 @@ use steel_utils::BlockPos;
 
 use super::{BrainContext, TimedBehavior};
 
+use crate::entity::PathfinderMob;
 use crate::entity::ai::brain::memory::{
     MemoryModuleId, MemoryStatus, WalkTarget, memory_module_types,
 };
@@ -41,7 +42,11 @@ pub struct MoveToTargetSink {
     path: Option<Path>,
     last_target_pos: Option<BlockPos>,
     speed_modifier: f64,
+    extra_condition: Option<ExtraMoveCondition>,
 }
+
+/// A reason of the mob's own to refuse to walk anywhere.
+type ExtraMoveCondition = Box<dyn Fn(&dyn PathfinderMob) -> bool + Send>;
 
 impl Default for MoveToTargetSink {
     fn default() -> Self {
@@ -78,7 +83,22 @@ impl MoveToTargetSink {
             path: None,
             last_target_pos: None,
             speed_modifier: 0.0,
+            extra_condition: None,
         }
+    }
+
+    /// Adds a reason of the mob's own to stay put.
+    ///
+    /// Vanilla parity: the anonymous `MoveToTargetSink` subclass in
+    /// `ArmadilloAi.initCoreActivity`, whose `checkExtraStartConditions`
+    /// refuses outright while the armadillo is balled up.
+    #[must_use]
+    pub fn with_extra_condition(
+        mut self,
+        condition: impl Fn(&dyn PathfinderMob) -> bool + Send + 'static,
+    ) -> Self {
+        self.extra_condition = Some(Box::new(condition));
+        self
     }
 
     /// Vanilla parity: `MoveToTargetSink.reachedTarget`.
@@ -150,6 +170,13 @@ impl TimedBehavior for MoveToTargetSink {
     }
 
     fn check_extra_start_conditions(&mut self, ctx: &BrainContext<'_>) -> bool {
+        if self
+            .extra_condition
+            .as_ref()
+            .is_some_and(|condition| !condition(ctx.mob()))
+        {
+            return false;
+        }
         if self.remaining_cooldown > 0 {
             self.remaining_cooldown -= 1;
             return false;

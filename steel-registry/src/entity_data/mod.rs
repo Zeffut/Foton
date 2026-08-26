@@ -334,15 +334,19 @@ pub enum SnifferState {
 }
 
 /// Armadillo entity state.
+///
+/// Vanilla parity: `Armadillo.ArmadilloState`, whose four ids are what the
+/// client's `ByIdMap.continuous(..., ZERO)` decodes -- a fifth would come out
+/// the other end as `IDLE`, so an armadillo hiding in its shell would be drawn
+/// standing up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum ArmadilloState {
     #[default]
     Idle = 0,
-    RollingUp = 1,
-    Rolled = 2,
+    Rolling = 1,
+    Scared = 2,
     Unrolling = 3,
-    Scared = 4,
 }
 
 /// Type-erased entity data for network encoding.

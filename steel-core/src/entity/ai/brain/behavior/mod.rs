@@ -49,6 +49,7 @@ mod look_at_target_sink;
 mod melee_attack;
 mod mount;
 mod move_to_target_sink;
+mod random_look_around;
 mod random_stroll;
 mod set_entity_look_target;
 mod set_walk_target_away_from;
@@ -115,6 +116,7 @@ pub use {
     },
     melee_attack::MeleeAttack,
     mount::{DismountOrSkipMounting, Mount},
+    random_look_around::RandomLookAround,
     set_walk_target_from_attack_target::SetWalkTargetFromAttackTargetIfTargetOutOfReach,
     set_walk_target_from_look_target::SetWalkTargetFromLookTarget,
     start_attacking::StartAttacking,

@@ -5,6 +5,7 @@ mod axolotl_attackables;
 mod frog_attackables;
 mod hurt_by;
 mod is_in_water;
+mod mob_sensor;
 mod nearest_item;
 mod nearest_living_entity;
 mod piglin_specific;
@@ -16,6 +17,7 @@ pub use axolotl_attackables::AxolotlAttackablesSensor;
 pub use frog_attackables::FrogAttackablesSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
+pub use mob_sensor::MobSensor;
 pub use nearest_item::NearestItemSensor;
 pub use nearest_living_entity::NearestLivingEntitySensor;
 pub use piglin_specific::{
@@ -32,6 +34,7 @@ use super::context::BrainContext;
 use super::memory::{MemoryModuleId, memory_module_types};
 use crate::entity::LivingEntity;
 use crate::entity::ai::targeting::TargetingConditions;
+use crate::entity::entities::ArmadilloEntity;
 use crate::world::World;
 
 /// How often a sensor rescans when it does not say otherwise.
@@ -47,6 +50,12 @@ pub const DEFAULT_SCAN_RATE: i32 = 20;
 /// instead, so the constant is only the fallback when a body has no follow
 /// range attribute.
 const DEFAULT_TARGETING_RANGE: f64 = 16.0;
+
+/// Vanilla parity: the `5` scan rate of `SensorType.ARMADILLO_SCARE_DETECTED`,
+/// four times a second rather than once.
+const ARMADILLO_SCARE_SCAN_RATE: i32 = 5;
+/// Vanilla parity: the `80` tick life of the danger memory it sets.
+const ARMADILLO_DANGER_MEMORY_TICKS: i64 = 80;
 
 /// Something that periodically writes what it observes into a brain.
 ///
@@ -100,6 +109,8 @@ pub enum SensorType {
     FrogAttackables,
     /// Vanilla `SensorType.AXOLOTL_ATTACKABLES`.
     AxolotlAttackables,
+    /// Vanilla `SensorType.ARMADILLO_SCARE_DETECTED`.
+    ArmadilloScareDetected,
     /// Vanilla `SensorType.NEAREST_ADULT`.
     NearestAdult,
     /// Vanilla `SensorType.PIGLIN_SPECIFIC_SENSOR`.
@@ -132,6 +143,26 @@ impl SensorType {
             })),
             Self::FrogAttackables => Box::new(FrogAttackablesSensor),
             Self::AxolotlAttackables => Box::new(AxolotlAttackablesSensor),
+            // Vanilla parity: `SensorType.ARMADILLO_SCARE_DETECTED`, whose four
+            // arguments are the whole sensor -- the armadillo supplies both
+            // predicates itself.
+            Self::ArmadilloScareDetected => Box::new(MobSensor::new(
+                ARMADILLO_SCARE_SCAN_RATE,
+                |body, other| {
+                    use steel_utils::Downcast as _;
+
+                    body.downcast_ref::<ArmadilloEntity>()
+                        .is_some_and(|armadillo| armadillo.is_scared_by(other))
+                },
+                |body| {
+                    use steel_utils::Downcast as _;
+
+                    body.downcast_ref::<ArmadilloEntity>()
+                        .is_some_and(ArmadilloEntity::can_stay_rolled_up)
+                },
+                memory_module_types::DANGER_DETECTED_RECENTLY,
+                ARMADILLO_DANGER_MEMORY_TICKS,
+            )),
             Self::NearestAdult => Box::new(AdultSensor),
             Self::PiglinSpecific => Box::new(PiglinSpecificSensor),
             Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),

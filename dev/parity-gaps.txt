@@ -31,8 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 22
-Armadillo
+[entities] 21
 Bogged
 Breeze
 BreezeWindCharge
