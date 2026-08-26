@@ -282,7 +282,7 @@ fn a_bitten_villager_gives_its_workstation_back() {
         villager.base_tick();
         villager.tick();
     }
-    assert_eq!(villager.poi_links().job_site(), Some(table));
+    assert_eq!(villager_job_site(&villager), Some(table));
 
     let zombie = Arc::new(ZombieEntity::new(
         &vanilla_entities::ZOMBIE,
@@ -297,7 +297,8 @@ fn a_bitten_villager_gives_its_workstation_back() {
         .with_causing_entity(zombie.id());
     zombie.killed_entity(villager.as_ref(), &source);
 
-    assert_eq!(villager.poi_links().job_site(), None);
+    // Vanilla's `releasePoi` hands the ticket back without erasing the memory:
+    // the villager it is called on is being replaced by a zombie villager.
     let free_again = world.poi_storage.lock().find_closest(
         &|_| true,
         &|pos| pos == table,

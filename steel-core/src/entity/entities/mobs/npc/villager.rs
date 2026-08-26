@@ -4,11 +4,11 @@
 //! half of `AbstractVillager` that is not the `Merchant` seam (which lives in
 //! [`super::merchant_state`]).
 //!
-//! What is here is the trading loop end to end: a profession and a level, the
+//! What is here is the trading loop end to end -- a profession and a level, the
 //! trades that follow from them, the screen a player buys through, restocking,
-//! leveling up, the reputation that discounts a price, and the job site and
-//! bed this villager claims. What is not here is the villager's day -- see the
-//! module docs on [`super`] for exactly what that leaves out.
+//! leveling up, the reputation that discounts a price -- and the seam onto the
+//! brain that runs the villager's day. The day itself is in
+//! [`super::villager_ai`].
 
 use std::borrow::Cow;
 use std::str::FromStr as _;
@@ -22,28 +22,32 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::loot_table::{EntityRef, LootContext};
+use steel_registry::poi::PoiTypeRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::trading::{MerchantOffers, TradeSet, offer_nbt};
 use steel_registry::vanilla_entity_data::VillagerEntityData;
+use steel_registry::vanilla_poi_type_tags::PoiTag;
 use steel_registry::villager_profession::VillagerProfessionRef;
 use steel_registry::villager_type::VillagerTypeRef;
 use steel_registry::{
-    REGISTRY, RegistryEntry as _, RegistryExt as _, sound_events, vanilla_mob_effects,
-    vanilla_villager_professions, vanilla_villager_types,
+    REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, sound_events,
+    vanilla_mob_effects, vanilla_poi_types, vanilla_villager_professions, vanilla_villager_types,
 };
 use steel_utils::entity_events::EntityStatus;
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::InteractionHand;
-use steel_utils::{BlockPos, DowncastType, DowncastTypeKey, Identifier};
+use steel_utils::{DowncastType, DowncastTypeKey, GlobalPos, Identifier};
 use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 use uuid::Uuid;
 
 use crate::behavior::InteractionResult;
+use crate::entity::ai::brain::memory::{MemoryModuleType, memory_module_types};
+use crate::entity::ai::brain::{Brain, ScheduleAttribute};
 use crate::entity::ai::gossip::{GossipContainer, GossipType, ReputationEventType};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::mobs::npc::merchant_state::{MerchantState, villager_data};
-use crate::entity::entities::mobs::npc::poi_links::{PoiAcquisition, VillagerPoiLinks};
+use crate::entity::entities::mobs::npc::villager_ai;
 use crate::entity::{
     AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntityPose, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob,
@@ -107,9 +111,8 @@ pub struct VillagerEntity {
     /// Vanilla parity: `AbstractVillager.inventory`, a `SimpleContainer(8)`.
     inventory: SyncMutex<Vec<ItemStack>>,
     gossips: SyncMutex<GossipContainer>,
-    /// Vanilla parity: the job site, home and meeting point memories, which in
-    /// Steel are POI tickets rather than brain memories.
-    poi_links: VillagerPoiLinks,
+    /// Vanilla parity: `LivingEntity.brain`, built by `Villager.BRAIN_PROVIDER`.
+    brain: Brain,
     food_level: SyncMutex<i32>,
     last_gossip_time: SyncMutex<i64>,
     last_gossip_decay_time: SyncMutex<i64>,
@@ -162,7 +165,7 @@ impl VillagerEntity {
         let mut entity_data = VillagerEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 
-        Self {
+        let villager = Self {
             base,
             entity_type,
             living_base,
@@ -172,13 +175,29 @@ impl VillagerEntity {
             merchant: Arc::new(MerchantState::villager(id, world)),
             inventory: SyncMutex::new(vec![ItemStack::empty(); Self::INVENTORY_SIZE]),
             gossips: SyncMutex::new(GossipContainer::new()),
-            poi_links: VillagerPoiLinks::new(),
+            brain: villager_ai::make_brain(),
             food_level: SyncMutex::new(0),
             last_gossip_time: SyncMutex::new(0),
             last_gossip_decay_time: SyncMutex::new(0),
             last_restock_game_time: SyncMutex::new(0),
             number_of_restocks_today: SyncMutex::new(0),
-        }
+        };
+        villager.update_schedule();
+        villager
+    }
+
+    /// Points the brain at the schedule track for this villager's age.
+    ///
+    /// Vanilla parity: the `brain.setSchedule(...)` half of
+    /// `Villager.registerBrainGoals`. Vanilla picks the attribute while it
+    /// rebuilds the brain; Steel's brain outlives growing up, so this is called
+    /// again whenever the baby flag changes or is loaded.
+    fn update_schedule(&self) {
+        self.brain.set_schedule(if AgeableMob::is_baby(self) {
+            ScheduleAttribute::BabyVillagerActivity
+        } else {
+            ScheduleAttribute::VillagerActivity
+        });
     }
 
     /// The trading state, for a caller that needs the `Merchant` seam.
@@ -601,57 +620,65 @@ impl VillagerEntity {
         &self.inventory
     }
 
-    /// The POI tickets this villager holds.
+    /// The experience this villager has banked toward its next level.
+    ///
+    /// Vanilla parity: `Villager.getVillagerXp`.
     #[must_use]
-    pub const fn poi_links(&self) -> &VillagerPoiLinks {
-        &self.poi_links
+    pub fn villager_xp(&self) -> i32 {
+        self.merchant.xp()
     }
 
-    /// Claims a workstation and a bed if this villager has none.
+    /// Vanilla parity: `Villager.playWorkSound`.
+    pub fn play_work_sound(&self) {
+        self.make_sound(self.profession().work_sound);
+    }
+
+    /// Gives back the POI ticket a memory holds.
     ///
-    /// Vanilla parity: the `AcquirePoi` behaviors of the WORK and REST
-    /// packages, followed by `AssignProfessionFromJobSite`. Vanilla splits the
-    /// claim in two -- a `POTENTIAL_JOB_SITE` the villager then walks to, and a
-    /// `JOB_SITE` it is promoted to on arrival -- because the walking is done by
-    /// the schedule Steel does not have. Here the promotion happens as soon as
-    /// the site is claimed, so an unemployed villager standing near a free
-    /// workstation takes the job without first walking over to it.
-    fn tick_poi_links(&self, world: &Arc<World>) {
-        if AgeableMob::is_baby(self) {
+    /// Vanilla parity: `Villager.releasePoi`, which only releases when the block
+    /// is still a POI this villager's memory is allowed to hold -- so a job site
+    /// that has since become something else is left alone.
+    pub fn release_poi(&self, memory: MemoryModuleType<GlobalPos>) {
+        let Some(world) = Entity::level(self) else {
+            return;
+        };
+        let Some(held) = self.brain.get_memory(memory) else {
+            return;
+        };
+        if held.dimension != world.key {
             return;
         }
-        let game_time = world.game_time();
-        let origin = self.block_position();
-
-        // Vanilla parity: `AcquirePoi.findPathToPois` -- the site has to be
-        // reachable before the ticket is taken, or a villager would claim a
-        // workstation on the far side of a wall and hold it forever.
-        let reachable = |pos: BlockPos, range: u32| {
-            let accuracy = i32::try_from(range).unwrap_or(1);
-            self.create_path_to(pos, accuracy)
-                .is_some_and(|path| path.can_reach())
+        let mut storage = world.poi_storage.lock();
+        let Some(poi_type) = storage
+            .get_type(held.pos)
+            .and_then(|id| REGISTRY.poi_types.by_id(id))
+        else {
+            return;
         };
-
-        let profession = self.profession();
-        let held = (profession.key.path != "none" && profession.key.path != "nitwit")
-            .then(|| profession.key.clone());
-        if let PoiAcquisition::JobSite(_, poi_type) =
-            self.poi_links
-                .try_acquire_job_site(world, origin, game_time, held.as_ref(), reachable)
-        {
-            // Vanilla parity: `AssignProfessionFromJobSite`, which reads the
-            // profession off the POI it just claimed. The two share a key, so
-            // the workstation names the trade.
-            if profession.key.path == "none"
-                && let Some(taken) = REGISTRY.villager_professions.by_key(&poi_type.key)
-            {
-                self.set_profession(taken);
-            }
-            self.broadcast_entity_event(EntityStatus::VillagerHappy);
+        if self.poi_memory_accepts(memory, poi_type) {
+            let _released = storage.release_ticket(held.pos);
         }
+    }
 
-        self.poi_links
-            .try_acquire_home(world, origin, game_time, reachable);
+    /// Vanilla parity: the `POI_MEMORIES` map, which pairs each POI memory with
+    /// the predicate saying whether this villager may hold that kind of POI in
+    /// it.
+    fn poi_memory_accepts(
+        &self,
+        memory: MemoryModuleType<GlobalPos>,
+        poi_type: PoiTypeRef,
+    ) -> bool {
+        let profession = self.profession();
+        let jobless = profession.key.path == "none" || profession.key.path == "nitwit";
+        match memory.id().key() {
+            "minecraft:home" => poi_type.key == vanilla_poi_types::HOME.key,
+            "minecraft:meeting_point" => poi_type.key == vanilla_poi_types::MEETING.key,
+            "minecraft:job_site" => !jobless && poi_type.key == profession.key,
+            "minecraft:potential_job_site" => REGISTRY
+                .poi_types
+                .is_in_tag(poi_type, &PoiTag::ACQUIRABLE_JOB_SITE),
+            _ => false,
+        }
     }
 
     /// Runs the once-a-tick trading bookkeeping.
@@ -755,7 +782,7 @@ impl Entity for VillagerEntity {
         if self.merchant.offers_built() {
             nbt.insert("Offers", offer_nbt::save(&self.merchant.offers().lock()));
         }
-        self.poi_links.save(nbt);
+        self.brain.save(nbt);
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
@@ -810,18 +837,26 @@ impl Entity for VillagerEntity {
         if let Some(list) = nbt.list("Offers") {
             self.merchant.set_offers(offer_nbt::load(&list));
         }
-        self.poi_links.load(nbt);
+        self.brain.load(nbt);
+        // The age came out of the same NBT, so which schedule track this
+        // villager reads may have changed with it.
+        self.update_schedule();
     }
 }
 
 impl VillagerEntity {
-    /// Gives up the workstation and bed this villager held.
+    /// Gives up the workstation, bed and meeting point this villager held.
     ///
     /// Vanilla parity: `Villager.releaseAllPois`, called from `die` and from
     /// every conversion.
     pub fn release_all_pois(&self) {
-        if let Some(world) = Entity::level(self) {
-            self.poi_links.release_all(&world);
+        for memory in [
+            memory_module_types::HOME,
+            memory_module_types::JOB_SITE,
+            memory_module_types::POTENTIAL_JOB_SITE,
+            memory_module_types::MEETING_POINT,
+        ] {
+            self.release_poi(memory);
         }
     }
 }
@@ -867,13 +902,26 @@ impl LivingEntity for VillagerEntity {
         self.living_die(source);
     }
 
+    /// Vanilla parity: `Villager.customServerAiStep`, which ticks the brain
+    /// before the trading bookkeeping.
     fn server_ai_step(&self) {
         Mob::mob_server_ai_step(self);
         let Some(world) = Entity::level(self) else {
             return;
         };
-        self.tick_poi_links(&world);
+        self.brain.tick(&world, self);
         self.tick_merchant(&world);
+    }
+
+    /// Vanilla parity: the `Villager.stopSleeping` override, the only writer of
+    /// `LAST_WOKEN` -- which is what stops `SleepInBed` putting a villager that
+    /// was just shaken awake straight back into the bed.
+    fn stop_sleeping(&self) {
+        self.default_stop_sleeping();
+        if let Some(world) = Entity::level(self) {
+            self.brain
+                .set_memory(memory_module_types::LAST_WOKEN, world.game_time());
+        }
     }
 
     fn ai_step(&self) -> Option<MoveResult> {
@@ -916,14 +964,23 @@ impl AgeableMob for VillagerEntity {
             .set(baby);
     }
 
+    /// Vanilla parity: `Villager.ageBoundaryReached`, which rebuilds the brain
+    /// so a grown villager reads the adult schedule and gets the WORK package.
+    /// Steel registers both packages on every villager and only has to swap the
+    /// schedule track -- see the module docs on [`villager_ai`].
     fn age_boundary_changed(&self, _baby: bool) {
         self.refresh_dimensions();
+        self.update_schedule();
     }
 }
 
 impl Mob for VillagerEntity {
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
+    }
+
+    fn brain(&self) -> Option<&Brain> {
+        Some(&self.brain)
     }
 
     fn mob_flags(&self) -> i8 {

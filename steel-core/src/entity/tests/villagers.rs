@@ -10,15 +10,18 @@
 use std::io::Cursor;
 
 use simdnbt::borrow::read_compound as read_borrowed_compound;
-use steel_registry::vanilla_villager_professions;
+use steel_registry::blocks::properties::BedPart;
+use steel_registry::{vanilla_villager_professions, vanilla_world_clocks};
 use steel_utils::types::UpdateFlags;
 
 use super::*;
 use crate::behavior::init_behaviors;
 use crate::block_entity::init_block_entities;
+use crate::entity::ai::brain::Activity;
+use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::gossip::{GossipType, ReputationEventType};
 use crate::entity::entities::VillagerEntity;
-use crate::entity::{AgeableMob, LivingEntity, SharedEntity, next_entity_id};
+use crate::entity::{AgeableMob, LivingEntity, Mob, SharedEntity, next_entity_id};
 use crate::poi::poi_storage::OccupationStatus;
 use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 use crate::trading::Merchant as _;
@@ -119,7 +122,7 @@ fn claiming_a_workstation_gives_a_villager_its_profession_and_its_trades() {
         "an unemployed villager beside a free cartography table takes the job"
     );
     assert_eq!(
-        villager.poi_links().job_site(),
+        villager_job_site(&villager),
         Some(table),
         "and holds a ticket on it"
     );
@@ -150,7 +153,7 @@ fn two_villagers_cannot_claim_the_same_workstation() {
         second.tick();
     }
 
-    let claims = [first.poi_links().job_site(), second.poi_links().job_site()];
+    let claims = [villager_job_site(&first), villager_job_site(&second)];
     assert_eq!(
         claims.iter().filter(|claim| **claim == Some(table)).count(),
         1,
@@ -170,11 +173,13 @@ fn a_villager_gives_its_workstation_back_when_it_dies() {
         UpdateFlags::UPDATE_NONE,
     ));
     run_ticks(&world, &villager, 100);
-    assert_eq!(villager.poi_links().job_site(), Some(table));
+    assert_eq!(villager_job_site(&villager), Some(table));
 
     villager.release_all_pois();
 
-    assert_eq!(villager.poi_links().job_site(), None);
+    // Vanilla's `releasePoi` hands the ticket back and leaves the memory alone
+    // -- every caller is a villager that is about to stop existing, so what
+    // matters is that the workstation is free for somebody else.
     let free_again = world.poi_storage.lock().find_closest(
         &|_| true,
         &|pos| pos == table,
@@ -430,7 +435,7 @@ fn a_baby_villager_will_not_take_a_job() {
     run_ticks(&world, &villager, 100);
 
     assert_eq!(
-        villager.poi_links().job_site(),
+        villager_job_site(&villager),
         None,
         "a baby leaves the workstation for the adults"
     );
@@ -440,7 +445,146 @@ fn a_baby_villager_will_not_take_a_job() {
     // baby rather than about an unreachable table.
     let adult = spawn_villager(&world);
     run_ticks(&world, &adult, 100);
-    assert_eq!(adult.poi_links().job_site(), Some(table));
+    assert_eq!(villager_job_site(&adult), Some(table));
+}
+
+/// Puts a bed at `head`, with its foot one block further east.
+fn place_bed(world: &Arc<World>, head: BlockPos) {
+    let bed = vanilla_blocks::WHITE_BED.default_state();
+    // The head's `facing` points from the foot toward the head, so a foot to
+    // the east makes a bed that faces west.
+    assert!(
+        world.set_block(
+            head,
+            bed.set_value(&BlockStateProperties::BED_PART, BedPart::Head)
+                .set_value(
+                    &BlockStateProperties::HORIZONTAL_FACING,
+                    BlockDirection::West
+                ),
+            UpdateFlags::UPDATE_NONE,
+        )
+    );
+    assert!(
+        world.set_block(
+            BlockPos::new(head.x() + 1, head.y(), head.z()),
+            bed.set_value(&BlockStateProperties::BED_PART, BedPart::Foot)
+                .set_value(
+                    &BlockStateProperties::HORIZONTAL_FACING,
+                    BlockDirection::West
+                ),
+            UpdateFlags::UPDATE_NONE,
+        )
+    );
+}
+
+/// Moves the overworld clock, which is what the `villager_schedule` timeline
+/// samples -- game time alone does not change the hour of the day.
+fn set_time_of_day(world: &Arc<World>, ticks: i64) {
+    assert_eq!(
+        world.set_clock_total_ticks(&vanilla_world_clocks::OVERWORLD, ticks),
+        Some(()),
+        "the overworld clock should exist in a test world"
+    );
+}
+
+/// The activity the villager's own brain is currently in.
+fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
+    Mob::brain(villager.as_ref())?.active_non_core_activity()
+}
+
+/// The routing the whole day hangs off: the `villager_schedule` timeline names
+/// an activity, and the brain switches to it.
+///
+/// This enters only through `villager.tick()`, so it fails if the brain is never
+/// ticked, if the string-valued track is never sampled, or if
+/// `UpdateActivityFromSchedule` is not actually in the packages.
+#[test]
+fn the_clock_walks_a_villager_through_its_working_day() {
+    let world = villager_world("villager_schedule_routes");
+    let villager = spawn_villager(&world);
+
+    // 2000..9000 is the WORK stretch of `Timelines.VILLAGER_SCHEDULE`.
+    set_time_of_day(&world, 3_000);
+    run_ticks(&world, &villager, 60);
+    assert_eq!(
+        active_activity(&villager),
+        Some(Activity::Work),
+        "the schedule puts a villager to work in the morning"
+    );
+
+    // 9000..11000 is MEET.
+    set_time_of_day(&world, 10_000);
+    run_ticks(&world, &villager, 60);
+    assert_eq!(active_activity(&villager), Some(Activity::Meet));
+
+    // 12000 onward is REST.
+    set_time_of_day(&world, 13_000);
+    run_ticks(&world, &villager, 60);
+    assert_eq!(
+        active_activity(&villager),
+        Some(Activity::Rest),
+        "and sends it home at dusk"
+    );
+}
+
+/// A baby reads the other track of the same timeline, so the hour that puts an
+/// adult to work puts a child at play.
+#[test]
+fn a_baby_villager_plays_the_hours_an_adult_works() {
+    let world = villager_world("villager_baby_schedule");
+    let villager = spawn_villager(&world);
+    AgeableMob::set_age(&*villager, -24_000);
+    assert!(AgeableMob::is_baby(&*villager));
+
+    set_time_of_day(&world, 3_500);
+    run_ticks(&world, &villager, 60);
+    assert_eq!(
+        active_activity(&villager),
+        Some(Activity::Play),
+        "3000..6000 is PLAY on the baby track and WORK on the adult one"
+    );
+}
+
+/// The most visible thing a villager does with its day.
+///
+/// Everything between the server tick and the bed has to work for this to pass:
+/// the timeline sample, the schedule routing, `AcquirePoi` claiming the bed,
+/// the REST package reaching `SleepInBed`, and `WakeUp` in the core package
+/// getting it out again when the hour turns.
+#[test]
+fn a_villager_sleeps_in_its_bed_at_night_and_gets_up_in_the_morning() {
+    let world = villager_world("villager_sleeps");
+    let villager = spawn_villager(&world);
+    place_bed(&world, BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()));
+
+    set_time_of_day(&world, 13_000);
+    run_ticks(&world, &villager, 200);
+
+    assert_eq!(
+        villager_home(&villager),
+        Some(BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z())),
+        "a villager claims the bed it is standing next to"
+    );
+    assert!(
+        LivingEntity::is_sleeping(&*villager),
+        "and is in it once the schedule says REST"
+    );
+
+    // 2000..9000 is WORK, so the villager has no business in bed.
+    set_time_of_day(&world, 3_000);
+    run_ticks(&world, &villager, 60);
+
+    assert!(
+        !LivingEntity::is_sleeping(&*villager),
+        "and gets up when the schedule moves on"
+    );
+}
+
+/// The bed this villager holds a POI ticket on.
+fn villager_home(villager: &Arc<VillagerEntity>) -> Option<BlockPos> {
+    Mob::brain(villager.as_ref())?
+        .get_memory(memory_module_types::HOME)
+        .map(|global| global.pos)
 }
 
 #[test]

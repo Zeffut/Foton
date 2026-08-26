@@ -325,11 +325,11 @@ fn apply_timeline_bool_track(
 /// which every boolean and every activity attribute is -- with `LerpFunction.ofStep(1.0F)`:
 /// a segment holds its `from` value for every tick strictly before the next keyframe. So
 /// such a track is a step function over its keyframes, wrapped by the timeline period.
-fn sample_step_track<'a>(
-    track: &'a Track,
+fn sample_step_track(
+    track: &Track,
     period_ticks: Option<i64>,
     ticks: i64,
-) -> Option<&'a KeyframeValue> {
+) -> Option<&KeyframeValue> {
     let keyframes = track.keyframes;
     match keyframes.len() {
         0 => return None,
