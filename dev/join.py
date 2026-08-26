@@ -57,6 +57,7 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+PLAY_C_MOUNT_SCREEN_OPEN = 41
 PLAY_C_MAP_ITEM_DATA = 51
 PLAY_C_SET_EQUIPMENT = 102
 PLAY_C_UPDATE_MOB_EFFECT = 132
@@ -82,6 +83,10 @@ PLAY_S_USE_ITEM = 67
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
 PLAY_S_KEEP_ALIVE = 28
 PLAY_S_PLAYER_LOADED = 44
+PLAY_S_PLAYER_COMMAND = 42
+
+# Vanilla parity: `ServerboundPlayerCommandPacket.Action`.
+PLAYER_COMMAND_OPEN_VEHICLE_INVENTORY = 5
 
 # A joining client should not need anywhere near this many packets to be placed
 # in the world and sent its surroundings; the bound just stops a stall from
@@ -160,6 +165,8 @@ class Connection:
         # The id of the last entity spawned of each type name, so `!useentity`
         # can right-click one without the test having to guess a number.
         self.entities = {}
+        # The player's own entity id, which a player command has to carry.
+        self.player_entity_id = None
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -432,6 +439,7 @@ def run_play(connection, watch_seconds=0):
 
         if packet_id == PLAY_C_LOGIN:
             entity_id = struct.unpack(">i", payload[:4])[0]
+            connection.player_entity_id = entity_id
             print(f"  joined the world as entity {entity_id}")
             joined = True
         elif packet_id == PLAY_C_PLAYER_POSITION:
@@ -456,6 +464,8 @@ def run_play(connection, watch_seconds=0):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
+            note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
             note_map_item_data(payload)
         elif packet_id == PLAY_C_SET_EQUIPMENT:
@@ -545,6 +555,8 @@ def pump(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
+            note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
             note_map_item_data(payload)
         elif packet_id == PLAY_C_SET_EQUIPMENT:
@@ -654,6 +666,9 @@ def run_directive(connection, directive):
             if not pump(connection, 0.1, {}):
                 fail("the connection dropped while walking")
         print(f"  walked {steps} strides to {x:.2f} {y:.2f} {z:.2f}")
+    elif parts[0] == "mountscreen":
+        send_player_command(connection, PLAYER_COMMAND_OPEN_VEHICLE_INVENTORY)
+        print("  pressed the inventory key while riding")
     elif parts[0] == "close":
         send_container_close(connection)
     elif parts[0] == "button":
@@ -762,6 +777,24 @@ def note_mob_effect(payload):
     amplifier, _rest = read_varint(rest)
     name = MOB_EFFECT_NAMES.get(effect_id, f"effect {effect_id}")
     print(f"  got the effect {name} at amplifier {amplifier}")
+
+
+def note_mount_screen(connection, payload):
+    """Prints the mount screen the server just opened.
+
+    A mount screen does not arrive as an open-screen packet: the client builds
+    the menu from the entity it already tracks, so this is the only packet that
+    says a horse, camel or nautilus inventory opened at all. The column count
+    is the width of the cargo grid, and zero for a mount with no chest.
+    """
+    container_id, rest = read_varint(payload)
+    columns, rest = read_varint(rest)
+    entity_id = struct.unpack(">i", rest[:4])[0]
+    connection.open_container = container_id
+    print(
+        f"  a mount screen opened for entity {entity_id} "
+        f"with {columns} columns in container {container_id}"
+    )
 
 
 def report_passengers(payload):
@@ -891,6 +924,20 @@ def send_set_beacon(connection, primary, secondary):
     connection.send(PLAY_S_SET_BEACON, holder(primary) + holder(secondary))
 
 
+def send_player_command(connection, action, data=0):
+    """Sends one of the actions the client reports through a player command.
+
+    The inventory key while riding is one of them, and it is the only way a
+    scripted client can ask a mount to open its own screen.
+    """
+    if connection.player_entity_id is None:
+        fail("the player entity id is not known yet")
+    connection.send(
+        PLAY_S_PLAYER_COMMAND,
+        varint(connection.player_entity_id) + varint(action) + varint(data),
+    )
+
+
 def send_container_close(connection):
     """Shuts the open screen, as pressing escape does.
 
@@ -953,6 +1000,8 @@ def watch_for_spawns(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
+            note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
             note_map_item_data(payload)
         elif packet_id == PLAY_C_SET_EQUIPMENT:

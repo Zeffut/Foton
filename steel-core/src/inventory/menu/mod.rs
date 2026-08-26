@@ -43,7 +43,27 @@ pub struct Menu {
     behavior: MenuBehavior,
     layout: MenuLayout,
     kind: Box<dyn MenuKind>,
+    screen: ScreenOpener,
     overrides_player_slots: bool,
+}
+
+/// Which packet tells the client to put this menu on screen.
+///
+/// Vanilla parity: almost every menu arrives as `ClientboundOpenScreenPacket`
+/// named by its menu type. A mount's own screen does not: the client rebuilds
+/// it from the entity, so `ServerPlayer.openHorseInventory` sends
+/// `ClientboundMountScreenOpenPacket` and never names a type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenOpener {
+    /// The open-screen packet, named by the menu's registered type.
+    Screen,
+    /// The mount screen packet, named by the mount it belongs to.
+    Mount {
+        /// Columns of cargo the mount carries, zero for one with no chest.
+        inventory_columns: usize,
+        /// The mount the screen belongs to.
+        entity_id: i32,
+    },
 }
 
 impl fmt::Debug for Menu {
@@ -61,14 +81,22 @@ impl Menu {
         behavior: MenuBehavior,
         layout: MenuLayout,
         kind: Box<dyn MenuKind>,
+        screen: ScreenOpener,
         overrides_player_slots: bool,
     ) -> Self {
         Self {
             behavior,
             layout,
             kind,
+            screen,
             overrides_player_slots,
         }
+    }
+
+    /// Returns the packet that puts this menu on the client's screen.
+    #[must_use]
+    pub const fn screen_opener(&self) -> ScreenOpener {
+        self.screen
     }
 
     /// Returns a reference to the shared menu behavior.

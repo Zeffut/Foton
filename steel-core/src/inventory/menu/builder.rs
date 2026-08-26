@@ -36,10 +36,10 @@ use std::vec;
 use steel_registry::{item_stack::ItemStack, menu_type::MenuTypeRef};
 use steel_utils::locks::Shared;
 
-use crate::inventory::menu::Menu;
 use crate::inventory::menu::behavior::MenuBehavior;
 use crate::inventory::menu::kind::MenuKind;
 use crate::inventory::menu::layout::MenuLayout;
+use crate::inventory::menu::{Menu, ScreenOpener};
 use crate::inventory::{
     lock::{ContainerId, ContainerLockGuard, ContainerRef},
     slots::{NormalSlot, RestrictedRules, RestrictedSlot, ResultHandler, ResultSlot, Slot},
@@ -439,6 +439,7 @@ pub struct MenuBuilder {
     instance: MenuInstanceId,
     menu_type: Option<MenuTypeRef>,
     container_id: u8,
+    screen: ScreenOpener,
     overrides_player_slots: bool,
     slots: Vec<Box<dyn Slot>>,
     container_refs: Vec<ContainerRef>,
@@ -472,6 +473,7 @@ impl MenuBuilder {
             instance: MenuInstanceId::next(),
             menu_type: menu_type.into(),
             container_id,
+            screen: ScreenOpener::Screen,
             overrides_player_slots: false,
             slots: Vec::new(),
             container_refs: Vec::new(),
@@ -857,6 +859,21 @@ impl MenuBuilder {
         self
     }
 
+    /// Declares that this menu opens as a mount screen rather than through the
+    /// open-screen packet.
+    ///
+    /// Vanilla parity: `ServerPlayer.openHorseInventory` sends
+    /// `ClientboundMountScreenOpenPacket` instead, because the client builds
+    /// the menu from the mount it already tracks rather than from a menu type.
+    /// Such a menu has no menu type, so it must be built with `None`.
+    pub const fn mount_screen(&mut self, inventory_columns: usize, entity_id: i32) -> &mut Self {
+        self.screen = ScreenOpener::Mount {
+            inventory_columns,
+            entity_id,
+        };
+        self
+    }
+
     /// Declares that this menu paints over the client's standard 36 player slots.
     ///
     /// Pending logical inventory updates are deferred while the
@@ -913,7 +930,13 @@ impl MenuBuilder {
             routes: self.routes,
             drain_sections: self.drain_sections,
         };
-        Menu::from_parts(behavior, layout, kind, self.overrides_player_slots)
+        Menu::from_parts(
+            behavior,
+            layout,
+            kind,
+            self.screen,
+            self.overrides_player_slots,
+        )
     }
 
     /// Fake slots have special removal and persistence semantics, so no other

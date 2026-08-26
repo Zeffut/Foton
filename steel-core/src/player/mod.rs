@@ -108,7 +108,7 @@ use crate::entity::{
     MobEffectSyncPacket, RemovalReason, SharedEntity, apply_entity_look_at, start_riding_entities,
 };
 use crate::fluid::get_fluid_state;
-use crate::inventory::equipment::{EntityEquipment, EquipmentSlot};
+use crate::inventory::equipment::{EntityEquipment, EquipmentSlot, EquipmentSlotType};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::menu::Menu;
 use crate::inventory::menu::kinds::inventory_menu;
@@ -1592,6 +1592,12 @@ impl LivingEntity for Player {
 
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
+    }
+
+    /// Vanilla parity: `Player.doesEmitEquipEvent`. Only worn armor rings a
+    /// sculk sensor; a player swapping what they hold does not.
+    fn does_emit_equip_event(&self, slot: EquipmentSlot) -> bool {
+        slot.slot_type() == EquipmentSlotType::HumanoidArmor
     }
 
     fn is_using_item(&self) -> bool {

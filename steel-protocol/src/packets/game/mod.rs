@@ -25,6 +25,7 @@ mod c_level_particles;
 mod c_login;
 mod c_map_item_data;
 mod c_merchant_offers;
+mod c_mount_screen_open;
 mod c_move_entity;
 mod c_move_vehicle;
 mod c_open_book;
@@ -137,6 +138,7 @@ pub use c_login::CLogin;
 pub use c_login::CommonPlayerSpawnInfo;
 pub use c_map_item_data::{CMapItemData, MapDecorationData, MapPatch};
 pub use c_merchant_offers::CMerchantOffers;
+pub use c_mount_screen_open::CMountScreenOpen;
 pub use c_move_entity::{
     CMoveEntityPos, CMoveEntityPosRot, CMoveEntityRot, PackedEntityDelta, calc_delta, to_angle_byte,
 };

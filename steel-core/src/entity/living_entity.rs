@@ -7,7 +7,9 @@ use steel_registry::data_components::vanilla_components::{self, BLOCKS_ATTACKS};
 
 use super::*;
 use crate::behavior::ITEM_BEHAVIORS;
+use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
+use crate::player::player_inventory::PlayerInventory;
 
 /// Bit of `DATA_LIVING_ENTITY_FLAGS` that says an item is being used.
 ///
@@ -2332,6 +2334,42 @@ pub trait LivingEntity: Entity {
             .flatten()
     }
 
+    /// Announces that a slot now holds something else.
+    ///
+    /// Vanilla parity: `LivingEntity.onEquipItem`, the half of an equipment
+    /// change that a player has to hear. The write itself is not done here;
+    /// vanilla's caller does it right afterwards.
+    ///
+    /// Vanilla also skips this while `firstTick` is set, which keeps an entity
+    /// silent as it loads. Steel has no such flag, and the callers are all
+    /// player gestures on an entity that is already ticking.
+    fn on_equip_item(&self, slot: EquipmentSlot, old_stack: &ItemStack, stack: &ItemStack) {
+        if self.is_spectator() || ItemStack::is_same_item_same_components(old_stack, stack) {
+            return;
+        }
+
+        let is_equippable = stack.get_equippable().is_some_and(|e| slot == e.slot);
+        if is_equippable && let Some(sound) = self.equip_sound(slot, stack) {
+            self.play_sound(sound, 1.0, 1.0);
+        }
+        if self.does_emit_equip_event(slot) {
+            self.game_event(if stack.get_equippable().is_some() {
+                &vanilla_game_events::EQUIP
+            } else {
+                &vanilla_game_events::UNEQUIP
+            });
+        }
+    }
+
+    /// Returns whether [`Self::on_equip_item`] emits a vibration for `slot`.
+    ///
+    /// Vanilla parity: `LivingEntity.doesEmitEquipEvent`, which only the player
+    /// narrows -- to its four humanoid armor slots, so that swapping a held
+    /// item does not ring a sculk sensor.
+    fn does_emit_equip_event(&self, _slot: EquipmentSlot) -> bool {
+        true
+    }
+
     /// Runs vanilla's equippable `ItemStack.interactLivingEntity` branch.
     fn interact_living_entity_with_equippable(
         &self,
@@ -2355,13 +2393,30 @@ pub trait LivingEntity: Entity {
             return InteractionResult::Pass;
         }
 
+        // The hand and the worn slot have to move together or the item can be
+        // duplicated, and both are containers -- a mob's equipment backs the
+        // saddle and armor slots of its own screen. Locking the pair by hand
+        // would order them against an open mount screen's lock set, so they go
+        // through the one deterministic order every menu uses.
+        let (equipment, equipment_index) = self.living_base().equipment_slot_container(slot);
+        let equipment_id = ContainerId::from_arc(&equipment);
+        let inventory_id = ContainerId::from(&player.inventory);
+        let mut guard = ContainerLockGuard::lock_all(&[
+            ContainerRef::from(equipment),
+            ContainerRef::from(player.inventory.clone()),
+        ]);
+
         let equipped = {
-            let mut equipment = self.living_base().equipment().lock();
-            if !equipment.get_ref(slot).is_empty() {
+            let Some(equipment) = guard.get(equipment_id) else {
+                unreachable!("the mob's equipment was just locked");
+            };
+            if !equipment.get_item(equipment_index).is_empty() {
                 return InteractionResult::Pass;
             }
 
-            let mut inventory = player.inventory.lock();
+            let Some(inventory) = guard.get_typed_mut::<PlayerInventory>(inventory_id) else {
+                unreachable!("the player's inventory was just locked");
+            };
             if !self.is_equippable_in_slot(inventory.get_item_in_hand(hand), slot) {
                 return InteractionResult::Pass;
             }
@@ -2371,9 +2426,15 @@ pub trait LivingEntity: Entity {
                 return InteractionResult::Pass;
             }
 
-            equipment.set(slot, equipped);
-            equipment.get_ref(slot).copy_with_count(1)
+            let worn = equipped.copy_with_count(1);
+            let Some(equipment) = guard.get_mut(equipment_id) else {
+                unreachable!("the mob's equipment was just locked");
+            };
+            equipment.set_item(equipment_index, equipped);
+            equipment.set_changed();
+            worn
         };
+        drop(guard);
 
         if let Some(sound) = self.equip_sound(slot, &equipped) {
             self.play_sound(sound, 1.0, 1.0);

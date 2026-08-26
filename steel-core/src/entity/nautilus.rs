@@ -36,6 +36,7 @@ use crate::entity::{
 };
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::equipment::EquipmentSlot;
+use crate::inventory::menu::kinds::{nautilus_inventory, open_mount_screen};
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::player::movement::wrap_degrees;
@@ -670,29 +671,26 @@ pub trait AbstractNautilus: TamableAnimal {
 
     /// Applies vanilla `AbstractNautilus.openCustomInventoryScreen`.
     ///
-    /// MISSING FOUNDATION: the screen itself does not open. Three pieces are
-    /// absent and none of them is nautilus-specific:
-    /// - `ClientboundMountScreenOpenPacket` has no Steel counterpart, so there
-    ///   is no way to tell a client to open a mount screen at all;
-    /// - a menu slot is backed by a [`Container`](crate::inventory::container::Container),
-    ///   which yields `&[ItemStack]`, and a mob's saddle and body-armor slots
-    ///   live in `Shared<dyn EntityEquipment>`, which cannot be handed out as
-    ///   one -- vanilla's `Mob.createEquipmentSlotContainer` is a view, not
-    ///   storage;
-    /// - vanilla's saddle and armor slots switch off through `Slot.isActive`,
-    ///   which Steel's `Slot` has no equivalent of.
-    ///
-    /// The same gap already stops `AbstractHorse.openCustomInventoryScreen`, so
-    /// closing it closes both. The inventory the screen would bind to, its
-    /// resize and the tame/rider gate are here; `hasInventoryChanged` arrives
-    /// with the menu that would call it. In 26.2 the container is zero slots
-    /// wide anyway -- `getInventoryColumns` is `0` for both nautiluses -- so the
-    /// grid half of that screen would be empty even once it opens.
+    /// In 26.2 `getInventoryColumns` is zero for both nautiluses, so the cargo
+    /// grid of the screen is empty and only the saddle and armor slots are
+    /// live. The zero still travels: the client sizes the screen from it.
     fn open_nautilus_inventory_screen(&self, player: &Player) {
         if (self.is_vehicle() && !self.has_passenger(player)) || !self.is_tame() {
             return;
         }
-        let _ = self.abstract_nautilus_base().inventory();
+        let Some(world) = self.level() else {
+            return;
+        };
+        let Some(mount) = world.get_entity_by_id(Entity::id(self)) else {
+            return;
+        };
+        open_mount_screen(
+            &mount,
+            self.abstract_nautilus_base().inventory(),
+            self.nautilus_inventory_columns(),
+            nautilus_inventory,
+            player,
+        );
     }
 
     /// Applies vanilla `AbstractNautilus.hurtServer`, whose only addition is

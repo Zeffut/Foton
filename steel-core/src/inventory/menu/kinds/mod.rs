@@ -17,6 +17,7 @@ mod inventory_menu;
 mod lectern_menu;
 mod loom_menu;
 mod merchant_menu;
+mod mount_menu;
 mod smithing_menu;
 mod stonecutter_menu;
 
@@ -37,5 +38,8 @@ pub use inventory_menu::{INVENTORY_MENU_CONTAINER_ID, InventoryKind, inventory_m
 pub use lectern_menu::{LecternKind, lectern};
 pub use loom_menu::{LoomKind, loom};
 pub use merchant_menu::{MerchantKind, merchant_menu};
+pub use mount_menu::{
+    MountInventoryProbe, MountKind, horse_inventory, nautilus_inventory, open_mount_screen,
+};
 pub use smithing_menu::{SmithingKind, smithing};
 pub use stonecutter_menu::{StonecutterKind, stonecutter};
