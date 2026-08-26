@@ -71,6 +71,12 @@ const HEAL_BASE: i32 = 4;
 /// Vanilla parity: the `6 << amplification` of `HealOrHarmMobEffect`.
 const HARM_BASE: i32 = 6;
 
+/// Absorption each level of the effect grants.
+///
+/// Vanilla parity: the `4 * (1 + amplifier)` of
+/// `AbsorptionMobEffect.onEffectStarted`, which is two yellow hearts a level.
+const ABSORPTION_PER_LEVEL: f32 = 4.0;
+
 /// Duration in ticks of the death animation before entity removal.
 pub const DEATH_DURATION: i32 = 20;
 /// Vanilla default `SwingAnimation` duration in ticks.
@@ -247,7 +253,9 @@ impl MobEffectInstance {
         }
         // Vanilla parity: `HungerMobEffect.shouldApplyEffectTickThisTick` and
         // `AbsorptionMobEffect`'s, both of which are every tick.
-        if self.effect == vanilla_mob_effects::HUNGER {
+        if self.effect == vanilla_mob_effects::HUNGER
+            || self.effect == vanilla_mob_effects::ABSORPTION
+        {
             return true;
         }
         // Vanilla parity: `InstantaneousMobEffect.shouldApplyEffectTickThisTick`,
@@ -269,11 +277,6 @@ impl MobEffectInstance {
             return !self.is_infinite_duration() && tick_count == 1;
         }
 
-        // MISSING FOUNDATION: `AbsorptionMobEffect` ticks every tick and ends
-        // itself once the absorption is gone, but its `onEffectStarted` is what
-        // grants the absorption in the first place and Steel has no hook for
-        // that. Scheduling the tick without it would make the effect remove
-        // itself the moment it was applied.
         false
     }
 
@@ -338,6 +341,12 @@ impl MobEffectInstance {
         if self.effect == vanilla_mob_effects::INSTANT_DAMAGE {
             apply_heal_or_harm(world, entity, self.amplifier, true);
         }
+        // Vanilla parity: `AbsorptionMobEffect.applyEffectTick`, the one tick
+        // that is a check rather than an action: the effect ends the moment its
+        // shield has been chewed through.
+        if self.effect == vanilla_mob_effects::ABSORPTION {
+            return entity.get_absorption_amount() > 0.0;
+        }
         if self.effect == vanilla_mob_effects::BAD_OMEN {
             return tick_bad_omen(world, entity, self.amplifier);
         }
@@ -346,7 +355,8 @@ impl MobEffectInstance {
         }
 
         // Vanilla effect ticks return whether the effect remains active.
-        // Everything above keeps itself; only the two omens consume themselves.
+        // Everything above keeps itself; only the omens and absorption consume
+        // themselves.
         true
     }
 
@@ -1191,6 +1201,32 @@ impl LivingEntityBase {
 
     /// Adds or updates active vanilla mob-effect state.
     pub fn add_mob_effect(&self, effect: MobEffectInstance) -> bool {
+        let started = (effect.effect, effect.amplifier);
+        let changed = self.insert_mob_effect(effect);
+        // Vanilla parity: `LivingEntity.addEffect` runs `onEffectStarted` on
+        // the way out whether or not the instance changed anything, so drinking
+        // a second golden apple tops the absorption back up.
+        self.on_effect_started(started.0, started.1);
+        changed
+    }
+
+    /// Vanilla parity: `MobEffect.onEffectStarted`, whose only override is
+    /// `AbsorptionMobEffect`'s -- and it is the whole reason absorption is
+    /// worth anything: the effect itself only watches the shield it grants
+    /// here, and ends when it is gone.
+    fn on_effect_started(&self, effect: MobEffectRef, amplifier: i32) {
+        if effect != vanilla_mob_effects::ABSORPTION {
+            return;
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "the amplifier is clamped to 0..=255"
+        )]
+        let granted = ABSORPTION_PER_LEVEL * (1 + amplifier.max(0)) as f32;
+        self.set_absorption_amount(self.absorption_amount().max(granted));
+    }
+
+    fn insert_mob_effect(&self, effect: MobEffectInstance) -> bool {
         let effect_key = effect.effect;
         let mut existing_effect = None;
         let mut changed_effect = None;

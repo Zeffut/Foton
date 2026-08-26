@@ -7,15 +7,21 @@ use steel_registry::data_components::vanilla_components::{
     BLOCKS_ATTACKS, CONSUMABLE, FOOD, KINETIC_WEAPON, POTION_CONTENTS, USE_REMAINDER,
 };
 
+use glam::DVec3;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::BlockRef;
+use steel_registry::consume_effect::{
+    ApplyStatusEffectsConsumeEffect, ClearAllStatusEffectsConsumeEffect, ConsumeEffectData,
+    PlaySoundConsumeEffect, RemoveStatusEffectsConsumeEffect, TeleportRandomlyConsumeEffect,
+};
 use steel_registry::data_components::vanilla_components::ITEM_NAME;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::equipment::EquipmentSlot;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
+use steel_registry::registry::holder_set::RegistryHolderSet;
 use steel_registry::sound_events;
-use steel_registry::{REGISTRY, RegistryEntry, RegistryExt};
+use steel_registry::{REGISTRY, RegistryEntry, RegistryExt, TaggedRegistryExt as _};
 use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId};
 use text_components::TextComponent;
@@ -35,6 +41,11 @@ use steel_registry::data_components::PotionContents;
 use steel_registry::mob_effect::MobEffectRef;
 
 pub use steel_registry::data_components::vanilla_components::ItemUseAnimation;
+
+/// Spots a chorus fruit tries before giving up.
+///
+/// Vanilla parity: the `attempt < 16` of `TeleportRandomlyConsumeEffect.apply`.
+const TELEPORT_ATTEMPTS: i32 = 16;
 
 /// Applies the vanilla consume effects to `stack` and returns the resulting stack.
 ///
@@ -89,8 +100,14 @@ fn apply_consume_effects(
         }
     }
 
-    // TODO: apply the remaining `consumable.on_consume_effects()` kinds --
-    // teleport, remove-effects, play-sound -- once they are modeled.
+    // Vanilla parity: the `onConsumeEffects.forEach(action -> action.apply(..))`
+    // of `Consumable.onConsume`. This is the listener that carries everything
+    // an item does beyond feeding: the golden apple's absorption, the milk
+    // bucket's rinse, the chorus fruit's jump.
+    for effect in consumable.on_consume_effects() {
+        apply_one_consume_effect(world, user, effect);
+    }
+
     // TODO: emit the EAT / DRINK game event once game-event dispatch exists.
 
     // Vanilla `ItemStack.consume` leaves creative-mode stacks untouched.
@@ -109,6 +126,111 @@ fn apply_consume_effects(
         return remainder.convert_into().create();
     }
     consumed
+}
+
+/// Runs one of the actions a consumable carries.
+///
+/// Vanilla parity: the five `ConsumeEffect.apply` implementations. They are
+/// dispatched by the keyed type rather than a match on the value, because that
+/// is the seam a plugin would add its own kind through.
+fn apply_one_consume_effect(
+    world: &Arc<World>,
+    user: &dyn LivingEntity,
+    effect: &ConsumeEffectData,
+) {
+    if let Some(apply) = effect.downcast_ref::<ApplyStatusEffectsConsumeEffect>() {
+        // Vanilla parity: `ApplyStatusEffectsConsumeEffect.apply`. The roll
+        // comes first, so a probability below one skips the whole list rather
+        // than each effect separately.
+        if rand::random::<f32>() >= apply.probability() {
+            return;
+        }
+        for instance in apply.effects() {
+            user.add_mob_effect(MobEffectInstance::with_duration(
+                instance.effect(),
+                instance.duration(),
+                instance.amplifier(),
+            ));
+        }
+        return;
+    }
+
+    if effect
+        .downcast_ref::<ClearAllStatusEffectsConsumeEffect>()
+        .is_some()
+    {
+        // Vanilla parity: `LivingEntity.removeAllEffects`, which is the whole
+        // of what a bucket of milk does.
+        for active in user.active_mob_effects() {
+            user.remove_mob_effect(active.effect());
+        }
+        return;
+    }
+
+    if let Some(remove) = effect.downcast_ref::<RemoveStatusEffectsConsumeEffect>() {
+        // Vanilla iterates a `HolderSet` directly; Steel's is either a tag,
+        // which the registry expands, or a written-out list.
+        match remove.effects() {
+            RegistryHolderSet::Tag(tag) => {
+                for mob_effect in REGISTRY.mob_effects.iter_tag(tag) {
+                    user.remove_mob_effect(mob_effect);
+                }
+            }
+            RegistryHolderSet::Direct(entries) => {
+                for mob_effect in entries {
+                    user.remove_mob_effect(mob_effect);
+                }
+            }
+        }
+        return;
+    }
+
+    if let Some(teleport) = effect.downcast_ref::<TeleportRandomlyConsumeEffect>() {
+        teleport_randomly(world, user, f64::from(teleport.diameter()));
+        return;
+    }
+
+    if let Some(play) = effect.downcast_ref::<PlaySoundConsumeEffect>()
+        && let Some(sound) = play.sound().registry_ref()
+    {
+        world.play_sound_at(sound, user.sound_source(), user.position(), 1.0, 1.0, None);
+    }
+}
+
+/// Blinks the user somewhere nearby.
+///
+/// Vanilla parity: `TeleportRandomlyConsumeEffect.apply`, the chorus fruit. It
+/// tries sixteen spots and stops at the first that takes, which is why eating
+/// one against a wall sometimes moves you nowhere at all.
+fn teleport_randomly(world: &Arc<World>, user: &dyn LivingEntity, diameter: f64) {
+    let min_y = f64::from(world.get_min_y());
+    let max_y = min_y + f64::from(world.get_height()) - 1.0;
+
+    for _ in 0..TELEPORT_ATTEMPTS {
+        let origin = user.position();
+        let target = DVec3::new(
+            origin.x + (rand::random::<f64>() - 0.5) * diameter,
+            (origin.y + (rand::random::<f64>() - 0.5) * diameter).clamp(min_y, max_y),
+            origin.z + (rand::random::<f64>() - 0.5) * diameter,
+        );
+        if user.is_passenger() {
+            user.stop_riding();
+        }
+        if !user.random_teleport(target) {
+            continue;
+        }
+
+        world.play_sound_at(
+            &sound_events::ITEM_CHORUS_FRUIT_TELEPORT,
+            SoundSource::Players,
+            user.position(),
+            1.0,
+            1.0,
+            None,
+        );
+        user.reset_fall_distance();
+        return;
+    }
 }
 
 /// Yields every effect a potion bottle carries.
@@ -590,6 +712,137 @@ impl ItemBehaviorRegistry {
 impl Default for ItemBehaviorRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod consume_effect_tests {
+    use steel_registry::{
+        init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_items, vanilla_mob_effects,
+    };
+    use steel_utils::ChunkPos;
+    use steel_utils::types::UpdateFlags;
+
+    use super::*;
+    use crate::behavior::{ITEM_BEHAVIORS, init_behaviors};
+    use crate::entity::entities::CowEntity;
+    use crate::entity::next_entity_id;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    /// Somewhere in a loaded chunk to stand while drinking.
+    const DRINKER: DVec3 = DVec3::new(8.5, 64.0, 8.5);
+
+    fn drinker(key: &'static str) -> (Arc<World>, Arc<CowEntity>) {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let cow = Arc::new(CowEntity::new(
+            &vanilla_entities::COW,
+            next_entity_id(),
+            DRINKER,
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(cow.clone())
+            .expect("the drinker's chunk is loaded");
+        (world, cow)
+    }
+
+    /// Runs the item through the same seam a finished use does.
+    fn consume(world: &Arc<World>, user: &dyn LivingEntity, item: ItemRef) {
+        let mut stack = ItemStack::new(item);
+        assert!(
+            stack.has(CONSUMABLE),
+            "{} is not a consumable in the extracted data",
+            item.key
+        );
+        ITEM_BEHAVIORS
+            .get_behavior(item)
+            .finish_using(&mut stack, world, user);
+    }
+
+    fn has(user: &dyn LivingEntity, effect: MobEffectRef) -> bool {
+        user.active_mob_effects()
+            .iter()
+            .any(|active| active.effect() == effect)
+    }
+
+    /// The golden apple is the plainest `apply_effects` there is, and its
+    /// absorption is the one effect whose whole point is what `onEffectStarted`
+    /// grants rather than what its tick does.
+    #[test]
+    fn a_golden_apple_leaves_regeneration_and_two_yellow_hearts() {
+        let (world, cow) = drinker("consume_golden_apple");
+        consume(&world, cow.as_ref(), &vanilla_items::GOLDEN_APPLE);
+
+        assert!(has(cow.as_ref(), vanilla_mob_effects::REGENERATION));
+        assert!(has(cow.as_ref(), vanilla_mob_effects::ABSORPTION));
+        assert!((cow.get_absorption_amount() - 4.0).abs() <= f32::EPSILON);
+    }
+
+    /// Vanilla's `clear_all_effects`, and the only thing a bucket of milk does.
+    #[test]
+    fn a_bucket_of_milk_rinses_everything_off() {
+        let (world, cow) = drinker("consume_milk_bucket");
+        assert!(cow.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::POISON,
+            200,
+            0,
+        )));
+        assert!(cow.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::SPEED,
+            200,
+            0,
+        )));
+
+        consume(&world, cow.as_ref(), &vanilla_items::MILK_BUCKET);
+
+        assert!(cow.active_mob_effects().is_empty());
+    }
+
+    /// Vanilla's `remove_effects`, which names one effect rather than sweeping.
+    #[test]
+    fn a_bottle_of_honey_takes_the_poison_and_leaves_the_rest() {
+        let (world, cow) = drinker("consume_honey_bottle");
+        assert!(cow.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::POISON,
+            200,
+            0,
+        )));
+        assert!(cow.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::SPEED,
+            200,
+            0,
+        )));
+
+        consume(&world, cow.as_ref(), &vanilla_items::HONEY_BOTTLE);
+
+        assert!(!has(cow.as_ref(), vanilla_mob_effects::POISON));
+        assert!(has(cow.as_ref(), vanilla_mob_effects::SPEED));
+    }
+
+    /// The chorus fruit's half. A four-block diameter keeps every candidate
+    /// inside the floor laid below, so the sixteen attempts cannot all fail.
+    #[test]
+    fn a_random_teleport_moves_its_user() {
+        let (world, cow) = drinker("consume_teleport_randomly");
+        for x in 4..=13 {
+            for z in 4..=13 {
+                assert!(world.set_block(
+                    BlockPos::new(x, 63, z),
+                    vanilla_blocks::STONE.default_state(),
+                    UpdateFlags::UPDATE_ALL
+                ));
+            }
+        }
+
+        teleport_randomly(&world, cow.as_ref(), 4.0);
+
+        assert!(
+            cow.position() != DRINKER,
+            "sixteen tries over a solid floor should land one"
+        );
     }
 }
 
