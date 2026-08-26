@@ -444,7 +444,7 @@ impl StructureBlockEntity {
     /// Returns the positions of every corner block that belongs to this one.
     ///
     /// Vanilla parity: `StructureBlockEntity.getRelatedCorners`.
-    fn related_corners(&self, world: &World, pos: BlockPos) -> Vec<(i32, i32, i32)> {
+    fn related_corners(&self, world: &World, pos: BlockPos) -> Vec<Corner> {
         let wanted = self.state.lock().structure_name.clone();
         let mut corners = Vec::new();
 
@@ -477,13 +477,16 @@ impl StructureBlockEntity {
     }
 }
 
+/// One corner of a scanned box.
+type Corner = (i32, i32, i32);
+
+/// The low and high corners of a scanned box.
+type ScannedBounds = (Corner, Corner);
+
 /// Returns the box every corner encloses, plus `pos` when there is only one.
 ///
 /// Vanilla parity: `StructureBlockEntity.calculateEnclosingBoundingBox`.
-fn enclosing_bounds(
-    pos: BlockPos,
-    corners: &[(i32, i32, i32)],
-) -> Option<((i32, i32, i32), (i32, i32, i32))> {
+fn enclosing_bounds(pos: BlockPos, corners: &[Corner]) -> Option<ScannedBounds> {
     let (first, rest) = corners.split_first()?;
     let mut min = *first;
     let mut max = *first;
@@ -501,7 +504,7 @@ fn enclosing_bounds(
     Some((min, max))
 }
 
-fn encapsulate(min: &mut (i32, i32, i32), max: &mut (i32, i32, i32), point: (i32, i32, i32)) {
+fn encapsulate(min: &mut Corner, max: &mut Corner, point: Corner) {
     min.0 = min.0.min(point.0);
     min.1 = min.1.min(point.1);
     min.2 = min.2.min(point.2);
@@ -529,7 +532,7 @@ fn clamp_size(size: (i32, i32, i32)) -> (i32, i32, i32) {
 }
 
 /// Vanilla parity: `StructureMode.LEGACY_CODEC`, which is ordinal order.
-fn mode_ordinal(mode: &StructureMode) -> i32 {
+const fn mode_ordinal(mode: &StructureMode) -> i32 {
     match *mode {
         StructureMode::Save => 0,
         StructureMode::Load => 1,
@@ -587,18 +590,18 @@ impl BlockEntity for StructureBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let view: NbtCompoundView<'_, '_> = nbt.into();
-        let name = view.string("name").map(|value| value.to_string());
+        let name = view.string("name").map(ToString::to_string);
         self.set_structure_name(name.as_deref().unwrap_or_default());
 
         {
             let mut state = self.state.lock();
             state.author = view
                 .string("author")
-                .map(|value| value.to_string())
+                .map(ToString::to_string)
                 .unwrap_or_default();
             state.metadata = view
                 .string("metadata")
-                .map(|value| value.to_string())
+                .map(ToString::to_string)
                 .unwrap_or_default();
             state.offset = clamp_offset((
                 view.int("posX").unwrap_or(DEFAULT_OFFSET.0),

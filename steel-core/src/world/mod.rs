@@ -19,6 +19,7 @@ use crate::chunk::light::{
 use crate::chunk::status::ChunkStatus;
 use crate::poi::OccupationStatus;
 use crate::portal::WorldChangeRequest;
+use crate::server::Server;
 use crate::world::game_event::{
     DynamicListenerAction, GameEventContext, GameEventDispatcher, GameEventListenerCount,
     GameEventListenerStorage, SharedGameEventListener,
@@ -311,7 +312,7 @@ pub struct World {
     /// worlds before the server that owns them, so the link is filled in by
     /// [`crate::server::Server::attach_worlds`] and is absent in tests that
     /// build a world on its own.
-    server: OnceLock<Weak<crate::server::Server>>,
+    server: OnceLock<Weak<Server>>,
 }
 
 impl World {
@@ -464,7 +465,7 @@ impl World {
     ///
     /// Called once, from [`crate::server::Server::attach_worlds`]. A second
     /// call is ignored rather than replacing the link.
-    pub(crate) fn attach_server(&self, server: &Arc<crate::server::Server>) {
+    pub(crate) fn attach_server(&self, server: &Arc<Server>) {
         let _ = self.server.set(Arc::downgrade(server));
     }
 
@@ -474,7 +475,7 @@ impl World {
     /// in tests that construct a world on its own, so callers on a game tick
     /// must treat a missing server as "do nothing" rather than unwrapping.
     #[must_use]
-    pub fn server(&self) -> Option<Arc<crate::server::Server>> {
+    pub fn server(&self) -> Option<Arc<Server>> {
         self.server.get().and_then(Weak::upgrade)
     }
 

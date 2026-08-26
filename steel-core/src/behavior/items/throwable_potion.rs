@@ -25,6 +25,7 @@ use crate::behavior::ItemBehavior;
 use crate::behavior::context::{InteractionResult, UseItemContext};
 use crate::entity::entities::{LingeringPotionEntity, SplashPotionEntity};
 use crate::entity::{Entity, SharedEntity, ThrowableItemProjectile, next_entity_id};
+use crate::world::World;
 
 use super::dynamic_name::potion_name;
 
@@ -65,7 +66,7 @@ fn throw_potion(
     context: &mut UseItemContext<'_>,
     sound: SoundEventRef,
     source: SoundSource,
-    spawn: fn(DVec3, &Arc<crate::world::World>) -> Arc<dyn ThrownPotion>,
+    spawn: fn(DVec3, &Arc<World>) -> Arc<dyn ThrownPotion>,
 ) -> InteractionResult {
     let player = context.player;
     let world = context.world;

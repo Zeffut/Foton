@@ -21,8 +21,10 @@ use steel_protocol::packets::game::CBlockEntityData;
 use steel_registry::RegistryEntry as _;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::blocks::properties::EnumProperty;
 use steel_registry::blocks::properties::{BlockStateProperties, Direction};
 use steel_registry::vanilla_game_rules::{COMMAND_BLOCKS_WORK, MAX_COMMAND_SEQUENCE_LENGTH};
+use steel_registry::{vanilla_block_entity_types, vanilla_blocks};
 use steel_utils::serial::OptionalNbt;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 use text_components::TextComponent;
@@ -34,11 +36,10 @@ use crate::block_entity::entities::{CommandBlockEntity, CommandBlockMode};
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntity};
 use crate::command::execution::CommandSource;
 use crate::player::Player;
-use crate::world::{LevelReader as _, SignalGetter as _, World};
+use crate::world::{LevelReader, SignalGetter as _, World};
 
 /// The face the command block points at.
-const FACING: &steel_registry::blocks::properties::EnumProperty<Direction> =
-    &BlockStateProperties::FACING;
+const FACING: &EnumProperty<Direction> = &BlockStateProperties::FACING;
 
 /// Behavior for the three command blocks.
 #[block_behavior]
@@ -90,7 +91,7 @@ impl CommandBlock {
     /// Runs the stored command, or clears the count when there is none.
     ///
     /// Vanilla parity: `CommandBlock.execute`.
-    fn execute(&self, state: BlockStateId, world: &Arc<World>, pos: BlockPos, has_command: bool) {
+    fn execute(state: BlockStateId, world: &Arc<World>, pos: BlockPos, has_command: bool) {
         if let Some(shared) = world.get_block_entity(pos)
             && let Some(block_entity) = shared.downcast_ref::<CommandBlockEntity>()
         {
@@ -123,7 +124,7 @@ impl BlockBehavior for CommandBlock {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         let created = BLOCK_ENTITIES.create(
-            &steel_registry::vanilla_block_entity_types::COMMAND_BLOCK,
+            &vanilla_block_entity_types::COMMAND_BLOCK,
             level,
             pos,
             state,
@@ -198,7 +199,7 @@ impl BlockBehavior for CommandBlock {
             CommandBlockMode::Auto => {
                 block_entity.mark_condition_met();
                 if was_condition_met {
-                    self.execute(state, world, pos, has_command);
+                    Self::execute(state, world, pos, has_command);
                 } else if block_entity.is_conditional() {
                     block_entity.command_block().set_success_count(0);
                 }
@@ -209,7 +210,7 @@ impl BlockBehavior for CommandBlock {
             }
             CommandBlockMode::Redstone => {
                 if was_condition_met {
-                    self.execute(state, world, pos, has_command);
+                    Self::execute(state, world, pos, has_command);
                 } else if block_entity.is_conditional() {
                     block_entity.command_block().set_success_count(0);
                 }
@@ -265,7 +266,7 @@ impl BlockBehavior for CommandBlock {
     fn get_analog_output_signal(
         &self,
         _state: BlockStateId,
-        world: &dyn crate::world::LevelReader,
+        world: &dyn LevelReader,
         pos: BlockPos,
         _direction: Direction,
     ) -> i32 {
@@ -346,7 +347,7 @@ fn execute_chain(world: &Arc<World>, start: BlockPos, mut direction: Direction) 
         remaining -= 1;
         pos = pos.relative(direction);
         let state = world.get_block_state(pos);
-        if state.get_block() != &steel_registry::vanilla_blocks::CHAIN_COMMAND_BLOCK {
+        if state.get_block() != &vanilla_blocks::CHAIN_COMMAND_BLOCK {
             return;
         }
         let Some(shared) = world.get_block_entity(pos) else {
@@ -387,7 +388,7 @@ mod tests {
     use crate::block_entity::init_block_entities;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
-    fn behavior_for(block: steel_registry::blocks::BlockRef, automatic: bool) -> CommandBlock {
+    fn behavior_for(block: BlockRef, automatic: bool) -> CommandBlock {
         CommandBlock::new(block, automatic)
     }
 

@@ -19,13 +19,14 @@ use steel_protocol::packets::game::{
     CBlockEntityData, SSetJigsawBlock, SSetStructureBlock, StructureUpdateType,
 };
 use steel_registry::RegistryEntry as _;
-use steel_utils::{Downcast as _, Identifier, translations};
+use steel_utils::serial::OptionalNbt;
+use steel_utils::{BlockPos, Downcast as _, Identifier, translations};
 use text_components::TextComponent;
 
 use crate::block_entity::BlockEntity;
 use crate::block_entity::entities::{
-    JigsawBlockEntity, JigsawJointType, StructureBlockEntity, StructureMirror, StructureRotation,
-    structure_mode_from_ordinal,
+    JigsawBlockEntity, JigsawJointType, JigsawSettings, StructureBlockEntity, StructureMirror,
+    StructureRotation, structure_mode_from_ordinal,
 };
 use crate::player::Player;
 use crate::world::{LevelReader as _, World};
@@ -144,15 +145,15 @@ impl Player {
         // name the server does not know falls back to aligned, not to the
         // orientation default.
         let joint = JigsawJointType::from_name(&packet.joint).unwrap_or(JigsawJointType::Aligned);
-        block_entity.configure(
-            identifier_or_empty(&packet.name),
-            identifier_or_empty(&packet.target),
-            identifier_or_empty(&packet.pool),
-            packet.final_state,
+        block_entity.configure(JigsawSettings {
+            name: identifier_or_empty(&packet.name),
+            target: identifier_or_empty(&packet.target),
+            pool: identifier_or_empty(&packet.pool),
+            final_state: packet.final_state,
             joint,
-            packet.selection_priority,
-            packet.placement_priority,
-        );
+            selection_priority: packet.selection_priority,
+            placement_priority: packet.placement_priority,
+        });
 
         send_block_entity_update(self, &world, pos, block_entity);
     }
@@ -162,7 +163,7 @@ impl Player {
 fn send_block_entity_update(
     player: &Player,
     world: &Arc<World>,
-    pos: steel_utils::BlockPos,
+    pos: BlockPos,
     block_entity: &dyn BlockEntity,
 ) {
     let Some(nbt) = block_entity.get_update_tag() else {
@@ -172,7 +173,7 @@ fn send_block_entity_update(
     player.send_packet(CBlockEntityData {
         pos,
         block_entity_type: block_entity.get_type().id() as i32,
-        nbt: steel_utils::serial::OptionalNbt(Some(nbt)),
+        nbt: OptionalNbt(Some(nbt)),
     });
 }
 

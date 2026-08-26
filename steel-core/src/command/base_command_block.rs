@@ -62,7 +62,7 @@ pub struct BaseCommandBlock {
 impl BaseCommandBlock {
     /// Creates an empty command store.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             state: SyncMutex::new(CommandBlockState::new()),
         }
@@ -212,7 +212,7 @@ impl BaseCommandBlock {
         let mut state = self.state.lock();
         state.command = nbt
             .string("Command")
-            .map(|value| value.to_string())
+            .map(ToString::to_string)
             .unwrap_or_default();
         state.success_count = nbt.int("SuccessCount").unwrap_or(0);
         state.custom_name = component_at(nbt, "CustomName");

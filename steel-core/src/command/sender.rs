@@ -90,7 +90,6 @@ impl CommandExecutionOwner {
 
     pub(crate) fn suggestion_key(&self) -> CommandSuggestionKey {
         match &self.sender {
-            CommandSender::CommandBlock(_) => CommandSuggestionKey::Console,
             CommandSender::Player(player) => CommandSuggestionKey::Player {
                 uuid: player.gameprofile.id,
                 // The owner retains this Arc while queued, so its allocation
@@ -98,7 +97,11 @@ impl CommandExecutionOwner {
                 session_address: Arc::as_ptr(player) as usize,
                 residence: self.player_residence,
             },
-            CommandSender::Console => CommandSuggestionKey::Console,
+            // A command block never asks for suggestions; it coalesces with
+            // the console, which is the other non-player source.
+            CommandSender::Console | CommandSender::CommandBlock(_) => {
+                CommandSuggestionKey::Console
+            }
             CommandSender::Rcon => CommandSuggestionKey::Rcon,
         }
     }

@@ -78,7 +78,7 @@ pub use hopper::{
     HOPPER_SLOTS, HopperBlockEntity, HopperContainer, MOVE_ITEM_SPEED, insert_into_containers_at,
 };
 pub(crate) use hopper::{attached_containers_at, suck_into_at};
-pub use jigsaw::{JigsawBlockEntity, JigsawJointType, default_joint_type};
+pub use jigsaw::{JigsawBlockEntity, JigsawJointType, JigsawSettings, default_joint_type};
 pub use jukebox::JukeboxBlockEntity;
 pub use lectern::LecternBlockEntity;
 pub use piston_moving::PistonMovingBlockEntity;

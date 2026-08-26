@@ -17,6 +17,7 @@ use steel_protocol::packets::game::CBlockEntityData;
 use steel_registry::RegistryEntry as _;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::properties::StructureMode;
+use steel_registry::vanilla_block_entity_types;
 use steel_utils::serial::OptionalNbt;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 
@@ -56,7 +57,7 @@ impl BlockBehavior for StructureBlock {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         BlockEntityCreation::from_registered_factory(BLOCK_ENTITIES.create(
-            &steel_registry::vanilla_block_entity_types::STRUCTURE_BLOCK,
+            &vanilla_block_entity_types::STRUCTURE_BLOCK,
             level,
             pos,
             state,

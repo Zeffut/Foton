@@ -21,6 +21,7 @@ use simdnbt::owned::NbtCompound;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::BlockStateProperties;
 use steel_registry::vanilla_block_entity_types;
+use steel_utils::axis::Axis;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier};
 
@@ -79,7 +80,7 @@ pub fn default_joint_type(state: BlockStateId) -> JigsawJointType {
     let Some(orientation) = state.try_get_value(&BlockStateProperties::ORIENTATION) else {
         return JigsawJointType::Aligned;
     };
-    if orientation.front().axis() == steel_utils::axis::Axis::Y {
+    if orientation.front().axis() == Axis::Y {
         JigsawJointType::Rollable
     } else {
         JigsawJointType::Aligned
@@ -96,6 +97,27 @@ struct JigsawState {
     joint: JigsawJointType,
     placement_priority: i32,
     selection_priority: i32,
+}
+
+/// Everything a jigsaw editor sends in one go.
+///
+/// Vanilla passes these as seven separate setter calls; one struct keeps the
+/// two same-typed priorities from being swapped by position.
+pub struct JigsawSettings {
+    /// The name other jigsaws aim at to connect here.
+    pub name: Identifier,
+    /// The name this jigsaw aims at.
+    pub target: Identifier,
+    /// The template pool this jigsaw draws its next piece from.
+    pub pool: Identifier,
+    /// The block state left behind once the jigsaw has been used.
+    pub final_state: String,
+    /// Whether a connected piece may roll around the joint axis.
+    pub joint: JigsawJointType,
+    /// How early this jigsaw is chosen among its pool's candidates.
+    pub selection_priority: i32,
+    /// How early the piece it places is expanded.
+    pub placement_priority: i32,
 }
 
 /// A jigsaw block.
@@ -177,25 +199,16 @@ impl JigsawBlockEntity {
     /// Stores everything a jigsaw editor sends at once.
     ///
     /// Vanilla parity: the seven setters `handleSetJigsawBlock` calls in a row.
-    pub fn configure(
-        &self,
-        name: Identifier,
-        target: Identifier,
-        pool: Identifier,
-        final_state: String,
-        joint: JigsawJointType,
-        selection_priority: i32,
-        placement_priority: i32,
-    ) {
+    pub fn configure(&self, settings: JigsawSettings) {
         {
             let mut state = self.state.lock();
-            state.name = name;
-            state.target = target;
-            state.pool = pool;
-            state.final_state = final_state;
-            state.joint = joint;
-            state.selection_priority = selection_priority;
-            state.placement_priority = placement_priority;
+            state.name = settings.name;
+            state.target = settings.target;
+            state.pool = settings.pool;
+            state.final_state = settings.final_state;
+            state.joint = settings.joint;
+            state.selection_priority = settings.selection_priority;
+            state.placement_priority = settings.placement_priority;
         }
         self.base.set_changed();
     }
@@ -225,7 +238,7 @@ impl BlockEntity for JigsawBlockEntity {
         state.pool = identifier_or_empty(&view, "pool");
         state.final_state = view
             .string("final_state")
-            .map_or_else(|| DEFAULT_FINAL_STATE.to_owned(), |value| value.to_string());
+            .map_or_else(|| DEFAULT_FINAL_STATE.to_owned(), ToString::to_string);
         // Vanilla parity: a jigsaw with no stored joint takes the one its
         // orientation implies, not a flat default.
         state.joint = view
@@ -289,15 +302,15 @@ mod tests {
     fn every_configured_field_round_trips() {
         init_vanilla_registry();
         let entity = jigsaw(oriented(FrontAndTop::NorthUp));
-        entity.configure(
-            Identifier::vanilla_static("street"),
-            Identifier::vanilla_static("house"),
-            Identifier::vanilla_static("village/plains/houses"),
-            "minecraft:stone".to_owned(),
-            JigsawJointType::Aligned,
-            7,
-            3,
-        );
+        entity.configure(JigsawSettings {
+            name: Identifier::vanilla_static("street"),
+            target: Identifier::vanilla_static("house"),
+            pool: Identifier::vanilla_static("village/plains/houses"),
+            final_state: "minecraft:stone".to_owned(),
+            joint: JigsawJointType::Aligned,
+            selection_priority: 7,
+            placement_priority: 3,
+        });
 
         let mut nbt = NbtCompound::new();
         entity.save_additional(&mut nbt);

@@ -27,6 +27,7 @@ use text_components::TextComponent;
 use super::minecart_common::{self, MinecartLike, MinecartState};
 use crate::behavior::InteractionResult;
 use crate::command::base_command_block::BaseCommandBlock;
+use crate::command::execution::CommandSource;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData};
 use crate::player::Player;
 use crate::world::World;
@@ -94,7 +95,7 @@ impl MinecartCommandBlockEntity {
     ///
     /// Vanilla parity: `MinecartCommandBlock.getCommandBlock`.
     #[must_use]
-    pub fn command_block(&self) -> &Arc<BaseCommandBlock> {
+    pub const fn command_block(&self) -> &Arc<BaseCommandBlock> {
         &self.command_block
     }
 
@@ -242,7 +243,7 @@ fn perform_minecart_command(
     if world.get_game_rule(&COMMAND_BLOCKS_WORK) && !command.is_empty() {
         command_block.set_last_output(None);
         if let Some(server) = world.server() {
-            let source = crate::command::execution::CommandSource::for_command_block(
+            let source = CommandSource::for_command_block(
                 Arc::clone(command_block),
                 Arc::clone(&server),
                 Arc::clone(world),

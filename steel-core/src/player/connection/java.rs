@@ -279,6 +279,32 @@ impl ScheduledPlayPacket {
         }
     }
 
+    /// Routes the four gamemaster-block editors.
+    ///
+    /// Split out of `handle` for the same reason as [`Self::handle_menu`]: they
+    /// share a permission gate and belong together.
+    fn handle_gamemaster_block(kind: ScheduledPlayPacketKind, player: &Arc<Player>) {
+        match kind {
+            ScheduledPlayPacketKind::SetCommandBlock(packet) => {
+                player.handle_set_command_block(packet);
+            }
+            ScheduledPlayPacketKind::SetCommandMinecart(packet) => {
+                player.handle_set_command_minecart(packet);
+            }
+            ScheduledPlayPacketKind::SetJigsawBlock(packet) => {
+                player.handle_set_jigsaw_block(packet);
+            }
+            ScheduledPlayPacketKind::SetStructureBlock(packet) => {
+                player.handle_set_structure_block(*packet);
+            }
+            _ => unreachable!("handle_gamemaster_block only takes the gamemaster-block packets"),
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a flat routing match with one arm per packet; splitting it                   further scatters the routing table rather than shortening it"
+    )]
     pub(crate) fn handle(self, player: Arc<Player>, server: &Arc<Server>) {
         if !player.has_joined_world() && !self.can_process_before_join() {
             return;
@@ -339,17 +365,11 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::SelectBundleItem(_)
             | ScheduledPlayPacketKind::SelectTrade(_)
             | ScheduledPlayPacketKind::SetBeacon(_) => Self::handle_menu(kind, &player),
-            ScheduledPlayPacketKind::SetCommandBlock(packet) => {
-                player.handle_set_command_block(packet);
-            }
-            ScheduledPlayPacketKind::SetCommandMinecart(packet) => {
-                player.handle_set_command_minecart(packet);
-            }
-            ScheduledPlayPacketKind::SetJigsawBlock(packet) => {
-                player.handle_set_jigsaw_block(packet);
-            }
-            ScheduledPlayPacketKind::SetStructureBlock(packet) => {
-                player.handle_set_structure_block(*packet);
+            ScheduledPlayPacketKind::SetCommandBlock(_)
+            | ScheduledPlayPacketKind::SetCommandMinecart(_)
+            | ScheduledPlayPacketKind::SetJigsawBlock(_)
+            | ScheduledPlayPacketKind::SetStructureBlock(_) => {
+                Self::handle_gamemaster_block(kind, &player);
             }
             ScheduledPlayPacketKind::SetCreativeModeSlot(packet) => {
                 player.handle_set_creative_mode_slot(packet);

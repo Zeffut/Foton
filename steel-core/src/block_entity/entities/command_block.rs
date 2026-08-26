@@ -13,6 +13,7 @@ use std::sync::{Arc, Weak};
 use glam::DVec3;
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::NbtCompound;
+use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, Direction};
 use steel_registry::{vanilla_block_entity_types, vanilla_blocks};
@@ -57,7 +58,7 @@ impl CommandBlockMode {
     /// Vanilla parity: the `switch (packet.getMode())` of
     /// `handleSetCommandBlock`.
     #[must_use]
-    pub fn block(self) -> steel_registry::blocks::BlockRef {
+    pub const fn block(self) -> BlockRef {
         match self {
             Self::Sequence => &vanilla_blocks::CHAIN_COMMAND_BLOCK,
             Self::Auto => &vanilla_blocks::REPEATING_COMMAND_BLOCK,
@@ -116,7 +117,7 @@ impl CommandBlockEntity {
     ///
     /// Vanilla parity: `CommandBlockEntity.getCommandBlock`.
     #[must_use]
-    pub fn command_block(&self) -> &Arc<BaseCommandBlock> {
+    pub const fn command_block(&self) -> &Arc<BaseCommandBlock> {
         &self.command_block
     }
 
@@ -337,7 +338,7 @@ impl BlockEntity for CommandBlockEntity {
 ///
 /// Vanilla parity: the `instanceof CommandBlock` checks of `CommandBlockEntity`.
 #[must_use]
-pub fn is_command_block(block: steel_registry::blocks::BlockRef) -> bool {
+pub fn is_command_block(block: BlockRef) -> bool {
     block == &vanilla_blocks::COMMAND_BLOCK
         || block == &vanilla_blocks::REPEATING_COMMAND_BLOCK
         || block == &vanilla_blocks::CHAIN_COMMAND_BLOCK
@@ -349,11 +350,12 @@ pub fn is_command_block(block: steel_registry::blocks::BlockRef) -> bool {
 /// faces because a yaw cannot express them.
 const fn facing_to_y_rotation(facing: Direction) -> f32 {
     match facing {
-        Direction::South => 0.0,
         Direction::West => 90.0,
         Direction::North => 180.0,
         Direction::East => 270.0,
-        Direction::Down | Direction::Up => 0.0,
+        // Vanilla parity: a vertical face has no yaw, and `toYRot` reports
+        // zero for it -- the same answer as south.
+        Direction::South | Direction::Down | Direction::Up => 0.0,
     }
 }
 

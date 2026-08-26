@@ -291,7 +291,7 @@ fn hidden_parts_from_shown(shown: i8) -> Vec<String> {
 }
 
 /// Returns the serialized name of a pose.
-fn pose_name(pose: EntityPose) -> &'static str {
+const fn pose_name(pose: EntityPose) -> &'static str {
     match pose {
         EntityPose::Sneaking => "crouching",
         EntityPose::Swimming => "swimming",
@@ -370,16 +370,12 @@ impl Entity for MannequinEntity {
 
         let hidden: Vec<String> = nbt.list("hidden_layers").map_or_else(Vec::new, |list| {
             list.strings()
-                .map(|values| values.iter().map(|value| value.to_string()).collect())
+                .map(|values| values.iter().map(ToString::to_string).collect())
                 .unwrap_or_default()
         });
         self.set_shown_model_parts(shown_parts_from_hidden(&hidden));
 
-        let arm = match nbt
-            .string("main_hand")
-            .map(|value| value.to_string())
-            .as_deref()
-        {
+        let arm = match nbt.string("main_hand").map(ToString::to_string).as_deref() {
             Some("left") => HumanoidArm::Left,
             _ => HumanoidArm::Right,
         };
@@ -433,6 +429,8 @@ mod tests {
 
     use simdnbt::borrow::read_compound as read_borrowed_compound;
     use steel_registry::{init_vanilla_registry, vanilla_entities};
+
+    use std::string::ToString;
 
     use super::*;
     use crate::entity::next_entity_id;
@@ -517,11 +515,11 @@ mod tests {
         entity.save_additional(&mut nbt);
         assert_eq!(nbt.byte("immovable"), Some(1));
         assert_eq!(
-            nbt.string("pose").map(|v| v.to_string()),
+            nbt.string("pose").map(ToString::to_string),
             Some("sleeping".to_owned())
         );
         assert_eq!(
-            nbt.string("main_hand").map(|v| v.to_string()),
+            nbt.string("main_hand").map(ToString::to_string),
             Some("left".to_owned())
         );
 

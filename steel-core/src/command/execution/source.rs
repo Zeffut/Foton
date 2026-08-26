@@ -12,6 +12,7 @@ use text_components::{Modifier, TextComponent, format::Color};
 
 use crate::{
     command::{
+        base_command_block::BaseCommandBlock,
         brigadier::CommandSyntaxError,
         registration::{entity_selector_advanced_permission_expr, entity_selector_permission_expr},
         sender::CommandSender,
@@ -332,7 +333,7 @@ impl CommandSource {
     /// the block's world, the center of the block (or the minecart's position)
     /// and a rotation of `(0, facing.toYRot())`.
     pub(crate) fn for_command_block(
-        block: Arc<crate::command::base_command_block::BaseCommandBlock>,
+        block: Arc<BaseCommandBlock>,
         server: Arc<Server>,
         world: Arc<World>,
         position: DVec3,

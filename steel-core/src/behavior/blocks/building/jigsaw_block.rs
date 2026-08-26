@@ -20,6 +20,8 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{
     BlockStateProperties, Direction, EnumProperty, FrontAndTop,
 };
+use steel_registry::vanilla_block_entity_types;
+use steel_utils::axis::Axis;
 use steel_utils::serial::OptionalNbt;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 
@@ -54,7 +56,7 @@ impl BlockBehavior for JigsawBlock {
     /// direction the player was facing, so it lands the way it looked in hand.
     fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {
         let front = context.clicked_face();
-        let top = if front.axis() == steel_utils::axis::Axis::Y {
+        let top = if front.axis() == Axis::Y {
             context.horizontal_direction().opposite()
         } else {
             Direction::Up
@@ -74,7 +76,7 @@ impl BlockBehavior for JigsawBlock {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         BlockEntityCreation::from_registered_factory(BLOCK_ENTITIES.create(
-            &steel_registry::vanilla_block_entity_types::JIGSAW,
+            &vanilla_block_entity_types::JIGSAW,
             level,
             pos,
             state,
