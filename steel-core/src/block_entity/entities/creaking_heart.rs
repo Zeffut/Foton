@@ -79,7 +79,7 @@ const RESIN_MAX_DEPTH: u32 = 2;
 const RESIN_MAX_COUNT: usize = 64;
 /// Vanilla `CreakingHeartBlockEntity.TICKS_GRACE_PERIOD`.
 const TICKS_GRACE_PERIOD: i64 = 30;
-/// Vanilla `Creaking.CREAKING_ORANGE`, the colour of the trail running from the
+/// Vanilla `Creaking.CREAKING_ORANGE`, the color of the trail running from the
 /// heart out to the creaking.
 const CREAKING_ORANGE: i32 = 16_545_810;
 /// Vanilla `Creaking.CREAKING_GRAY`, the trail running back.
@@ -464,7 +464,7 @@ impl CreakingHeartBlockEntity {
         if emitter % HURT_CALL_INTERVAL == 0
             && let Some(target) = emitter_target
         {
-            // Vanilla re-reads the creaking's centre so the noise follows a
+            // Vanilla re-reads the creaking's center so the noise follows a
             // creaking that has moved since the blow landed.
             let target = self
                 .creaking_protector(world)

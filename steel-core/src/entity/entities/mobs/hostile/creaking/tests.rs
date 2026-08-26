@@ -145,7 +145,7 @@ fn a_creaking_stops_while_a_player_looks_at_it_and_moves_again_when_they_look_aw
 }
 
 /// Vanilla's `PLAYER_NOT_WEARING_DISGUISE_ITEM`: once a creaking is awake, a
-/// player wearing a carved pumpkin is not recognised as looking at it. That is
+/// player wearing a carved pumpkin is not recognized as looking at it. That is
 /// the only counterplay the mob has, so it has to actually be wired up.
 #[test]
 fn a_carved_pumpkin_hides_a_players_gaze_from_a_woken_creaking() {
