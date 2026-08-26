@@ -6,6 +6,7 @@ use steel_registry::{
 use steel_utils::ChunkPos;
 use steel_utils::types::UpdateFlags;
 
+use super::super::camel_common::DASH_COOLDOWN_TICKS;
 use super::*;
 use crate::behavior::init_behaviors;
 use crate::entity::{SharedEntity, next_entity_id};

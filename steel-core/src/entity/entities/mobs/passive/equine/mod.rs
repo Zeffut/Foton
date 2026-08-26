@@ -7,6 +7,9 @@
 //! still belongs here.
 
 mod camel;
+mod camel_ai;
+mod camel_common;
+mod camel_husk;
 mod donkey;
 mod horse;
 mod llama;
@@ -18,6 +21,7 @@ mod variant;
 mod zombie_horse;
 
 pub use camel::CamelEntity;
+pub use camel_husk::CamelHuskEntity;
 pub use donkey::DonkeyEntity;
 pub use horse::HorseEntity;
 pub use llama::LlamaEntity;

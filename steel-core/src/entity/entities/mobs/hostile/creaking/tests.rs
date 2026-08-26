@@ -17,6 +17,7 @@ use crate::behavior::init_behaviors;
 use crate::block_entity::{BlockEntity as _, init_block_entities};
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::next_entity_id;
+use crate::player::Player;
 use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 
 /// The one spot the test world is guaranteed to be solid ground rather than a
@@ -96,7 +97,7 @@ fn watching_player(
     creaking: &Arc<CreakingEntity>,
     position: DVec3,
     yaw: f32,
-) -> Arc<crate::player::Player> {
+) -> Arc<Player> {
     let player = TestPlayerBuilder::new(Arc::clone(world), "Watcher", next_entity_id()).build();
     player
         .try_set_position(position)
@@ -330,7 +331,7 @@ fn a_frozen_creaking_keeps_none_of_its_momentum() {
 
 /// Puts a player in both places the world keeps them: the player index the
 /// sensors read, and the entity manager `DamageSource` resolution goes through.
-fn add_player(world: &Arc<World>, player: &Arc<crate::player::Player>) {
+fn add_player(world: &Arc<World>, player: &Arc<Player>) {
     assert!(world.players.insert(Arc::clone(player)));
     world
         .try_add_entity(Arc::clone(player) as SharedEntity)

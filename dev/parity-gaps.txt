@@ -28,8 +28,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 8
-CamelHusk
+[entities] 7
 EnderDragon
 HappyGhast
 Nautilus

@@ -141,6 +141,15 @@ pub trait AgeableMob: Mob {
         BABY_START_AGE
     }
 
+    /// Returns whether this mob has a baby form at all.
+    ///
+    /// Vanilla parity: `AgeableMob.canBeABaby`. A camel husk answers `false`:
+    /// there is no young husk, so it never reads as a baby, `setBaby` does
+    /// nothing to it, and its age is not saved.
+    fn can_be_a_baby(&self) -> bool {
+        true
+    }
+
     /// Returns vanilla `AgeableMob.age`.
     fn get_age(&self) -> i32 {
         self.ageable_base().age()
@@ -156,8 +165,11 @@ pub trait AgeableMob: Mob {
     }
 
     /// Returns whether this ageable mob is a baby.
+    ///
+    /// Vanilla parity: the `final AgeableMob.isBaby`, which is gated on
+    /// [`Self::can_be_a_baby`].
     fn is_baby(&self) -> bool {
-        self.get_age() < 0
+        self.can_be_a_baby() && self.get_age() < 0
     }
 
     /// Returns vanilla `AgeableMob.forcedAge`.
@@ -311,6 +323,10 @@ pub trait AgeableMob: Mob {
 
     /// Saves vanilla ageable mob fields.
     fn save_ageable_mob(&self, nbt: &mut NbtCompound) {
+        // Vanilla parity: the `if (this.canBeABaby())` around the whole block.
+        if !self.can_be_a_baby() {
+            return;
+        }
         nbt.insert("Age", self.get_age());
         nbt.insert("ForcedAge", self.forced_age());
         nbt.insert("AgeLocked", i8::from(self.is_age_locked()));
@@ -318,6 +334,9 @@ pub trait AgeableMob: Mob {
 
     /// Loads vanilla ageable mob fields.
     fn load_ageable_mob(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        if !self.can_be_a_baby() {
+            return;
+        }
         self.set_age(nbt.int("Age").unwrap_or(0));
         self.set_forced_age(nbt.int("ForcedAge").unwrap_or(0));
         self.set_age_locked(nbt.byte("AgeLocked").is_some_and(|value| value != 0));

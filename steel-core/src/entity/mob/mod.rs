@@ -1687,6 +1687,11 @@ pub trait Mob: LivingEntity {
         let Some(ageable) = self.as_ageable_mob() else {
             return;
         };
+        // Vanilla parity: the `if (this.canBeABaby())` of the `final
+        // AgeableMob.setBaby`, which is what makes this a no-op on a camel husk.
+        if !ageable.can_be_a_baby() {
+            return;
+        }
         ageable.set_age(if baby {
             ageable.get_baby_start_age()
         } else {

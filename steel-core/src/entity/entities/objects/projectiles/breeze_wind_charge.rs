@@ -196,7 +196,7 @@ mod tests {
     use super::*;
     use crate::behavior::init_behaviors;
     use crate::entity::entities::{PigEntity, WindChargeEntity};
-    use crate::entity::next_entity_id;
+    use crate::entity::{ProjectileDeflection, next_entity_id};
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     /// Vanilla gives the breeze's charge a three-block burst against the
@@ -259,13 +259,7 @@ mod tests {
         );
         charge.set_velocity(DVec3::new(0.0, 0.0, 1.0));
 
-        assert!(charge.deflect(
-            crate::entity::ProjectileDeflection::Reverse,
-            None,
-            None,
-            None,
-            true
-        ));
+        assert!(charge.deflect(ProjectileDeflection::Reverse, None, None, None, true));
     }
 
     /// The burst is the breeze's whole attack: it has to move a bystander and

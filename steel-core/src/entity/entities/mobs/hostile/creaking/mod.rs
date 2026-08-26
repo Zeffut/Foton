@@ -328,7 +328,7 @@ impl CreakingEntity {
             let gaze_heights = [
                 eye_y,
                 scale.mul_add(0.5, position_y),
-                (eye_y + position_y) / 2.0,
+                f64::midpoint(eye_y, position_y),
             ];
             if !is_looking_at(self, living, GAZE_CONE, false, true, &gaze_heights) {
                 continue;

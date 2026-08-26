@@ -60,6 +60,10 @@ impl SpawnStrategy {
 /// mob from the entity type and asks `checkSpawnObstruction`, which Steel has
 /// no hook for -- the collision test above covers the same ground.
 #[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "vanilla's `SpawnUtil.trySpawnMob` signature, kept argument for argument"
+)]
 pub fn try_spawn_mob(
     entity_type: EntityTypeRef,
     spawn_reason: EntitySpawnReason,
@@ -99,17 +103,16 @@ pub fn try_spawn_mob(
             }
         }
 
-        let Some(entity) = ENTITIES.create(
+        // No factory, or a factory that built something that is not a mob,
+        // means this entity type can never be spawned this way; a later attempt
+        // would fail the same, so give up rather than spin.
+        let entity = ENTITIES.create(
             entity_type,
             next_entity_id(),
             position,
             Arc::downgrade(world),
-        ) else {
-            return None;
-        };
-        let Some(mob) = entity.as_mob() else {
-            return None;
-        };
+        )?;
+        let mob = entity.as_mob()?;
         if !mob.check_spawn_rules(world, spawn_reason, surface) {
             continue;
         }
@@ -152,7 +155,8 @@ fn move_to_possible_spawn_position(
 
 #[cfg(test)]
 mod tests {
-    use steel_registry::{init_vanilla_registry, vanilla_blocks};
+    use steel_registry::blocks::BlockRef;
+    use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities};
     use steel_utils::ChunkPos;
     use steel_utils::types::UpdateFlags;
 
@@ -164,7 +168,7 @@ mod tests {
     /// The heart's own spawn point, and the middle of the only loaded chunk.
     const ORIGIN: BlockPos = BlockPos::new(8, 64, 8);
 
-    fn spawn_world(key: &'static str, floor: steel_registry::blocks::BlockRef) -> Arc<World> {
+    fn spawn_world(key: &'static str, floor: BlockRef) -> Arc<World> {
         init_vanilla_registry();
         init_behaviors();
         // `try_spawn_mob` builds the mob through the generated factory table,
@@ -197,7 +201,7 @@ mod tests {
         // test chunk would otherwise make this a test about the light level
         // rather than about finding the ground.
         let spawned = try_spawn_mob(
-            &steel_registry::vanilla_entities::CREAKING,
+            &vanilla_entities::CREAKING,
             EntitySpawnReason::TrialSpawner,
             &world,
             ORIGIN,
@@ -228,7 +232,7 @@ mod tests {
         let world = spawn_world("spawn_util_no_leaves", &vanilla_blocks::PALE_OAK_LEAVES);
 
         let spawned = try_spawn_mob(
-            &steel_registry::vanilla_entities::CREAKING,
+            &vanilla_entities::CREAKING,
             EntitySpawnReason::TrialSpawner,
             &world,
             ORIGIN,

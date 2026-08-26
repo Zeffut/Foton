@@ -1,26 +1,29 @@
-//! The camel's brain.
+//! The camel's brain, shared by the camel and the camel husk.
 //!
 //! Vanilla parity: `net.minecraft.world.entity.animal.camel.CamelAi`. Two
 //! activities, and what makes it a camel rather than a horse is `RandomSitting`
 //! -- an idle camel that has been in one pose for twenty seconds flips to the
 //! other, which is why a wild camel is usually found sitting down.
+//!
+//! `CamelHusk` inherits this whole brain unchanged, `AnimalMakeLove` on
+//! `EntityType.CAMEL` included. That behavior is inert for a husk, which cannot
+//! fall in love at all, exactly as it is in vanilla.
 
-use steel_utils::Downcast as _;
 use steel_utils::value_providers::UniformIntProvider;
 
+use crate::entity::AgeableMob;
 use crate::entity::ai::brain::behavior::{
     AnimalMakeLove, AnimalPanic, BabyFollowAdult, Behavior, BehaviorControl, BehaviorStatus,
     CountDownCooldownTicks, DoNothing, FollowTemptation, LookAtTargetSink, MemoryModuleId,
-    MemoryStatus, MoveToTargetSink, OnStart, OneShot, RandomLookAround, RandomStroll, RunOne,
+    MemoryStatus, MoveToTargetSink, OneShot, RandomLookAround, RandomStroll, RunOne,
     SetEntityLookTargetSometimes, SetWalkTargetFromLookTarget, Swim, TimedBehavior,
 };
 use crate::entity::ai::brain::context::BrainContext;
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::brain::sensor::SensorType;
 use crate::entity::ai::brain::{Activity, ActivityData, Brain};
-use crate::entity::{AbstractHorse, AgeableMob, Entity as _, Mob as _, PathfinderMob};
 
-use super::CamelEntity;
+use super::camel_common::CamelHooks;
 
 use steel_registry::vanilla_entities;
 
@@ -84,12 +87,12 @@ const SENSORS: &[SensorType] = &[
 
 /// Vanilla parity: `Camel.BRAIN_PROVIDER` plus `CamelAi.getActivities`.
 #[must_use]
-pub fn make_brain() -> Brain {
-    Brain::new(SENSORS, vec![core_activity(), idle_activity()])
+pub(super) fn make_brain(hooks: CamelHooks) -> Brain {
+    Brain::new(SENSORS, vec![core_activity(hooks), idle_activity(hooks)])
 }
 
 /// Vanilla parity: `CamelAi.initCoreActivity`.
-fn core_activity() -> ActivityData {
+fn core_activity(hooks: CamelHooks) -> ActivityData {
     ActivityData::create(
         Activity::Core,
         0,
@@ -98,9 +101,7 @@ fn core_activity() -> ActivityData {
             // Vanilla parity: `CamelAi.CamelPanic`, which stands the camel up
             // instantly before it runs and refuses to fire while a player is
             // steering.
-            Behavior::boxed(OnStart::new(CamelPanic::new(), |ctx| {
-                with_camel(ctx, CamelEntity::stand_up_instantly);
-            })),
+            Behavior::boxed(CamelPanic::new(hooks)),
             Behavior::boxed(LookAtTargetSink::new(
                 LOOK_AT_TARGET_MIN_DURATION,
                 LOOK_AT_TARGET_MAX_DURATION,
@@ -117,7 +118,7 @@ fn core_activity() -> ActivityData {
 }
 
 /// Vanilla parity: `CamelAi.initIdleActivity`.
-fn idle_activity() -> ActivityData {
+fn idle_activity(hooks: CamelHooks) -> ActivityData {
     ActivityData::with_priorities(
         Activity::Idle,
         vec![
@@ -154,10 +155,13 @@ fn idle_activity() -> ActivityData {
                         1,
                     ),
                     (
-                        while_camel_will_move(OneShot::boxed(BabyFollowAdult::new(
-                            ADULT_FOLLOW_RANGE,
-                            SPEED_MULTIPLIER_WHEN_FOLLOWING_ADULT,
-                        ))),
+                        while_camel_will_move(
+                            hooks,
+                            OneShot::boxed(BabyFollowAdult::new(
+                                ADULT_FOLLOW_RANGE,
+                                SPEED_MULTIPLIER_WHEN_FOLLOWING_ADULT,
+                            )),
+                        ),
                         1,
                     ),
                 ])),
@@ -180,22 +184,25 @@ fn idle_activity() -> ActivityData {
                     )],
                     vec![
                         (
-                            while_camel_will_move(OneShot::boxed(RandomStroll::stroll(
-                                SPEED_MULTIPLIER_WHEN_IDLING,
-                            ))),
+                            while_camel_will_move(
+                                hooks,
+                                OneShot::boxed(RandomStroll::stroll(SPEED_MULTIPLIER_WHEN_IDLING)),
+                            ),
                             1,
                         ),
                         (
-                            while_camel_will_move(OneShot::boxed(
-                                SetWalkTargetFromLookTarget::new(
+                            while_camel_will_move(
+                                hooks,
+                                OneShot::boxed(SetWalkTargetFromLookTarget::new(
                                     SPEED_MULTIPLIER_WHEN_IDLING,
                                     WALK_TO_LOOK_TARGET_CLOSE_ENOUGH,
-                                ),
-                            )),
+                                )),
+                            ),
                             1,
                         ),
                         (
                             Behavior::boxed(RandomSitting::new(
+                                hooks,
                                 RANDOM_SITTING_MINIMAL_POSE_SECONDS,
                             )),
                             1,
@@ -209,26 +216,23 @@ fn idle_activity() -> ActivityData {
 }
 
 /// Vanilla parity: `CamelAi.updateActivity`.
-pub fn update_activity(brain: &Brain) {
+pub(super) fn update_activity(brain: &Brain) {
     brain.set_active_activity_to_first_valid(&[Activity::Idle]);
-}
-
-/// Runs `visit` on the body when it is a camel.
-fn with_camel(ctx: &BrainContext<'_>, visit: impl FnOnce(&CamelEntity)) {
-    if let Some(camel) = ctx.mob().downcast_ref::<CamelEntity>() {
-        visit(camel);
-    }
 }
 
 /// Vanilla parity: the `BehaviorBuilder.triggerIf(Predicate.not(Camel::refuseToMove), ...)`
 /// three of the camel's idle behaviors are wrapped in -- a sitting camel is not
 /// asked to walk anywhere in the first place.
 struct WhileCamelWillMove {
+    hooks: CamelHooks,
     inner: Box<dyn BehaviorControl>,
 }
 
-fn while_camel_will_move(inner: Box<dyn BehaviorControl>) -> Box<dyn BehaviorControl> {
-    Box::new(WhileCamelWillMove { inner })
+fn while_camel_will_move(
+    hooks: CamelHooks,
+    inner: Box<dyn BehaviorControl>,
+) -> Box<dyn BehaviorControl> {
+    Box::new(WhileCamelWillMove { hooks, inner })
 }
 
 impl BehaviorControl for WhileCamelWillMove {
@@ -241,11 +245,7 @@ impl BehaviorControl for WhileCamelWillMove {
     }
 
     fn try_start(&mut self, ctx: &BrainContext<'_>) -> bool {
-        let refuses = ctx
-            .mob()
-            .downcast_ref::<CamelEntity>()
-            .is_some_and(CamelEntity::refuse_to_move);
-        !refuses && self.inner.try_start(ctx)
+        !(self.hooks.refuses_to_move)(ctx.mob()) && self.inner.try_start(ctx)
     }
 
     fn tick_or_stop(&mut self, ctx: &BrainContext<'_>) {
@@ -262,14 +262,16 @@ impl BehaviorControl for WhileCamelWillMove {
 }
 
 /// Vanilla parity: `CamelAi.CamelPanic`, which will not fire while a player is
-/// steering.
+/// steering and stands the camel up before it runs.
 struct CamelPanic {
+    hooks: CamelHooks,
     inner: AnimalPanic,
 }
 
 impl CamelPanic {
-    fn new() -> Self {
+    fn new(hooks: CamelHooks) -> Self {
         Self {
+            hooks,
             inner: AnimalPanic::new(SPEED_MULTIPLIER_WHEN_PANICKING),
         }
     }
@@ -289,11 +291,7 @@ impl TimedBehavior for CamelPanic {
     }
 
     fn check_extra_start_conditions(&mut self, ctx: &BrainContext<'_>) -> bool {
-        let mob_controlled = ctx
-            .mob()
-            .downcast_ref::<CamelEntity>()
-            .is_some_and(AbstractHorse::is_mob_controlled);
-        !mob_controlled && self.inner.check_extra_start_conditions(ctx)
+        !(self.hooks.is_mob_controlled)(ctx.mob()) && self.inner.check_extra_start_conditions(ctx)
     }
 
     fn can_still_use(&mut self, ctx: &BrainContext<'_>) -> bool {
@@ -301,6 +299,7 @@ impl TimedBehavior for CamelPanic {
     }
 
     fn start(&mut self, ctx: &BrainContext<'_>) {
+        (self.hooks.stand_up_instantly)(ctx.mob());
         self.inner.start(ctx);
     }
 
@@ -323,12 +322,14 @@ impl TimedBehavior for CamelPanic {
 /// seconds flips to the other one, which is why an undisturbed camel spends
 /// most of its life sitting down.
 struct RandomSitting {
+    hooks: CamelHooks,
     minimal_pose_ticks: i64,
 }
 
 impl RandomSitting {
-    const fn new(minimal_pose_seconds: i64) -> Self {
+    const fn new(hooks: CamelHooks, minimal_pose_seconds: i64) -> Self {
         Self {
+            hooks,
             minimal_pose_ticks: minimal_pose_seconds * TICKS_PER_SECOND,
         }
     }
@@ -340,25 +341,11 @@ impl TimedBehavior for RandomSitting {
     }
 
     fn check_extra_start_conditions(&mut self, ctx: &BrainContext<'_>) -> bool {
-        let Some(camel) = ctx.mob().downcast_ref::<CamelEntity>() else {
-            return false;
-        };
-        !camel.is_in_water()
-            && camel.pose_time() >= self.minimal_pose_ticks
-            && !camel.is_leashed()
-            && camel.on_ground()
-            && !camel.has_controlling_passenger()
-            && camel.can_camel_change_pose()
+        (self.hooks.can_random_sit)(ctx.mob(), self.minimal_pose_ticks)
     }
 
     fn start(&mut self, ctx: &BrainContext<'_>) {
-        with_camel(ctx, |camel| {
-            if camel.is_camel_sitting() {
-                camel.stand_up();
-            } else if !camel.is_panicking() {
-                camel.sit_down();
-            }
-        });
+        (self.hooks.random_sit)(ctx.mob());
     }
 
     fn debug_name(&self) -> &'static str {

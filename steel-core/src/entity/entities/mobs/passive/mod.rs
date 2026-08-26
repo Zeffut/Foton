@@ -31,8 +31,8 @@ pub use cat::CatEntity;
 pub use chicken::ChickenEntity;
 pub use cow::CowEntity;
 pub use equine::{
-    CamelEntity, DonkeyEntity, HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity,
-    SkeletonHorseEntity, TraderLlamaEntity, ZombieHorseEntity,
+    CamelEntity, CamelHuskEntity, DonkeyEntity, HorseEntity, HorseMarkings, HorseVariant,
+    LlamaEntity, MuleEntity, SkeletonHorseEntity, TraderLlamaEntity, ZombieHorseEntity,
 };
 pub use fox::{FoxEntity, FoxVariant};
 pub use frog::FrogEntity;
