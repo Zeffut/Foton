@@ -169,9 +169,15 @@ fn a_warden_gets_angry_at_what_it_hears() {
     run_ticks(&world, &warden, 8);
 
     assert!(
-        warden.client_anger_level() > 0
-            || brain(&warden).has_memory_value(memory_module_types::VIBRATION_COOLDOWN.id()),
-        "a warden that heard a step should have taken the vibration"
+        brain(&warden).has_memory_value(memory_module_types::VIBRATION_COOLDOWN.id()),
+        "a warden that took a vibration is deaf for the next two seconds"
+    );
+    // Vanilla `Warden.DEFAULT_ANGER`: one heard vibration is worth thirty-five points,
+    // which is five short of agitated -- two steps is what it takes to stir a warden.
+    assert_eq!(
+        warden.anger_at(player.as_ref()),
+        35,
+        "hearing a step should have made the warden angry at whoever took it"
     );
     assert!(
         brain(&warden).has_memory_value(memory_module_types::DISTURBANCE_LOCATION.id()),

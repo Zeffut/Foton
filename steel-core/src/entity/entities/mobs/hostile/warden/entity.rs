@@ -193,6 +193,16 @@ impl WardenEntity {
         AngerLevel::by_anger(self.active_anger())
     }
 
+    /// Returns how angry this warden is at one entity in particular.
+    ///
+    /// Vanilla parity: the `@VisibleForTesting Warden.getAngerManagement`, narrowed to the
+    /// one question a caller outside the warden has any business asking. Handing out the
+    /// manager itself would hand out the lock it lives behind.
+    #[must_use]
+    pub fn anger_at(&self, entity: &dyn Entity) -> i32 {
+        self.state.lock().anger_management.anger_at(entity)
+    }
+
     /// Vanilla parity: `Warden.clearAnger`.
     pub fn clear_anger(&self, entity: &dyn Entity) {
         self.state.lock().anger_management.clear_anger(entity);
