@@ -1892,10 +1892,63 @@ fn living_is_dead(entity: &SharedEntity) -> bool {
 ///
 /// Vanilla parity: `MobEffect.isInstantaneous`, which only `HealOrHarmMobEffect`
 /// and `SaturationMobEffect` answer true to.
-fn is_instantaneous(effect: MobEffectRef) -> bool {
+#[must_use]
+pub fn is_instantaneous(effect: MobEffectRef) -> bool {
     effect == vanilla_mob_effects::INSTANT_HEALTH
         || effect == vanilla_mob_effects::INSTANT_DAMAGE
         || effect == vanilla_mob_effects::SATURATION
+}
+
+/// Applies an instantaneous effect on the spot instead of adding it.
+///
+/// Vanilla parity: `MobEffect.applyInstantaneousEffect`. Callers that dose an
+/// entity rather than afflict it -- an area effect cloud, a splash potion --
+/// take this branch, which is why a cloud of harming hurts at half strength
+/// while drinking the potion hurts at full.
+///
+/// The `source`/`owner` pair vanilla passes is dropped: Steel's cloud has no
+/// owner, so the damage is credited to nobody and the plain magic source is
+/// used rather than the indirect one.
+pub fn apply_instantaneous_mob_effect<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    effect: MobEffectRef,
+    amplifier: i32,
+    scale: f64,
+) {
+    if effect == vanilla_mob_effects::INSTANT_HEALTH {
+        apply_scaled_heal_or_harm(world, entity, amplifier, false, scale);
+        return;
+    }
+    if effect == vanilla_mob_effects::INSTANT_DAMAGE {
+        apply_scaled_heal_or_harm(world, entity, amplifier, true, scale);
+        return;
+    }
+    // Vanilla parity: the base `MobEffect.applyInstantaneousEffect`, which just
+    // runs one effect tick. Saturation is the only other instantaneous effect
+    // and it takes this path.
+    MobEffectInstance::with_duration(effect, 1, amplifier).apply_effect_tick(world, entity);
+}
+
+/// Vanilla parity: `HealOrHarmMobEffect.applyInstantaneousEffect`, whose
+/// rounding is `(int)(scale * base + 0.5)` rather than the plain shift its
+/// per-tick sibling uses.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "vanilla's own `(int)` cast, over amounts that fit in a health bar"
+)]
+fn apply_scaled_heal_or_harm<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    amplifier: i32,
+    is_harm: bool,
+    scale: f64,
+) {
+    let heals = is_harm == inverts_heal_and_harm(entity);
+    let base = heal_or_harm_base(amplifier, heals);
+    let amount = (scale * f64::from(base) + 0.5) as i32 as f32;
+    apply_heal_or_hurt(world, entity, heals, amount);
 }
 
 /// Heals or hurts by the amount `HealOrHarmMobEffect` picks.
@@ -1903,26 +1956,60 @@ fn is_instantaneous(effect: MobEffectRef) -> bool {
 /// Vanilla parity: `HealOrHarmMobEffect.applyEffectTick`. The two swap for
 /// anything tagged `inverted_healing_and_harm`, which is what makes a splash
 /// of healing a weapon against the undead.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "the amounts fit in a health bar many times over"
+)]
 fn apply_heal_or_harm<E: LivingEntity + ?Sized>(
     world: &World,
     entity: &E,
     amplifier: i32,
     is_harm: bool,
 ) {
-    let inverted = REGISTRY.entity_types.is_in_tag(
-        entity.entity_type(),
-        &EntityTypeTag::INVERTED_HEALING_AND_HARM,
+    let heals = is_harm == inverts_heal_and_harm(entity);
+    apply_heal_or_hurt(
+        world,
+        entity,
+        heals,
+        heal_or_harm_base(amplifier, heals) as f32,
     );
+}
+
+/// Vanilla parity: the `4 << amplification` and `6 << amplification` of
+/// `HealOrHarmMobEffect`, whose `Math.max(.., 0)` guards the heal against an
+/// amplifier that shifted the sign bit in.
+fn heal_or_harm_base(amplifier: i32, heals: bool) -> i32 {
     let shift = amplifier.max(0) as u32;
-    if is_harm == inverted {
-        entity.heal(HEAL_BASE.wrapping_shl(shift).max(0) as f32);
+    if heals {
+        HEAL_BASE.wrapping_shl(shift).max(0)
+    } else {
+        HARM_BASE.wrapping_shl(shift)
+    }
+}
+
+fn apply_heal_or_hurt<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    heals: bool,
+    amount: f32,
+) {
+    if heals {
+        entity.heal(amount);
     } else {
         entity.hurt(
             world,
             &DamageSource::environment(&vanilla_damage_types::MAGIC),
-            HARM_BASE.wrapping_shl(shift) as f32,
+            amount,
         );
     }
+}
+
+/// Vanilla parity: `LivingEntity.isInvertedHealAndHarm`.
+fn inverts_heal_and_harm<E: LivingEntity + ?Sized>(entity: &E) -> bool {
+    REGISTRY.entity_types.is_in_tag(
+        entity.entity_type(),
+        &EntityTypeTag::INVERTED_HEALING_AND_HARM,
+    )
 }
 
 /// Turns Bad Omen into Raid Omen the moment its bearer walks into a village.
