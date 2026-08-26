@@ -16,8 +16,29 @@ pub(super) const LEASH_AXIS_SPECIFIC_ELASTICITY: DVec3 = DVec3::new(0.8, 0.2, 0.
 pub(super) const LEASH_SPRING_DAMPENING: f64 = 0.7;
 pub(super) const LEASH_TORSIONAL_ELASTICITY: f64 = 10.0;
 pub(super) const LEASH_STIFFNESS: f64 = 0.11;
-pub(super) const ENTITY_LEASH_ATTACHMENT_POINT: DVec3 = DVec3::new(0.0, 0.5, 0.5);
-pub(super) const LEASHER_ATTACHMENT_POINT: DVec3 = DVec3::new(0.0, 0.5, 0.0);
+/// Where a single lead meets the leashed entity.
+///
+/// Vanilla parity: `Leashable.ENTITY_ATTACHMENT_POINT`, a one-element list.
+pub(super) const ENTITY_LEASH_ATTACHMENT_POINT: [DVec3; 1] = [DVec3::new(0.0, 0.5, 0.5)];
+/// Where a single lead meets its holder.
+///
+/// Vanilla parity: `Leashable.LEASHER_ATTACHMENT_POINT`, a one-element list.
+pub(super) const LEASHER_ATTACHMENT_POINT: [DVec3; 1] = [DVec3::new(0.0, 0.5, 0.0)];
+/// The four corners a quad leash ties to, used on both ends of the ropes.
+///
+/// Vanilla parity: `Leashable.SHARED_QUAD_ATTACHMENT_POINTS`.
+pub(super) const SHARED_QUAD_ATTACHMENT_POINTS: [DVec3; 4] = [
+    DVec3::new(-0.5, 0.5, 0.5),
+    DVec3::new(-0.5, 0.5, -0.5),
+    DVec3::new(0.5, 0.5, -0.5),
+    DVec3::new(0.5, 0.5, 0.5),
+];
+/// Share of the accumulated pull one quad leash rope carries.
+///
+/// Vanilla parity: the `scale(quadConnection ? 0.25 : 1.0)` of
+/// `Leashable.checkElasticInteractions`. Without it four ropes would yank four
+/// times as hard as one.
+pub(super) const QUAD_LEASH_WRENCH_SCALE: f64 = 0.25;
 pub(super) const DELAYED_LEASH_DROP_TICKS: i32 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +63,16 @@ pub(super) struct LeashWrench {
 impl LeashWrench {
     pub(super) const fn new(force: DVec3, torque: f64) -> Self {
         Self { force, torque }
+    }
+
+    /// Vanilla parity: `Leashable.Wrench.accumulate`, folded one rope at a time.
+    fn accumulate(self, other: Self) -> Self {
+        Self::new(self.force + other.force, self.torque + other.torque)
+    }
+
+    /// Vanilla parity: `Leashable.Wrench.scale`.
+    pub(super) fn scale(self, scale: f64) -> Self {
+        Self::new(self.force * scale, self.torque * scale)
     }
 }
 
@@ -161,32 +192,50 @@ pub(super) fn axis_specific_leash_elasticity(force: DVec3) -> DVec3 {
     force * LEASH_AXIS_SPECIFIC_ELASTICITY
 }
 
+/// Sums the pull of every rope tying `entity` to `holder`.
+///
+/// Vanilla parity: `Leashable.computeElasticInteraction`, which walks a list of
+/// attachment points and collects one wrench per taut rope. Returning the
+/// accumulated wrench instead of the list keeps vanilla's meaning: `None` is
+/// vanilla's empty list, which `checkElasticInteractions` reads as "no rope is
+/// pulling".
 pub(super) fn compute_elastic_interaction(
     entity: &dyn Entity,
     holder: &dyn Entity,
     slack_distance: f64,
+    entity_attachment_points: &[DVec3],
+    leasher_attachment_points: &[DVec3],
 ) -> Option<LeashWrench> {
+    let current_movement = leash_holder_movement(entity);
     let entity_y_rot = entity.rotation().0 * PI / 180.0;
-    let entity_attach_vector = rotate_y(
-        ENTITY_LEASH_ATTACHMENT_POINT * leash_dimensions(entity),
-        -entity_y_rot,
-    );
-    let entity_attach_pos = entity.position() + entity_attach_vector;
-
+    let entity_dimensions = leash_dimensions(entity);
     let holder_y_rot = holder.rotation().0 * PI / 180.0;
-    let holder_attach_vector = rotate_y(
-        LEASHER_ATTACHMENT_POINT * leash_dimensions(holder),
-        -holder_y_rot,
-    );
-    let holder_attach_pos = holder.position() + holder_attach_vector;
+    let holder_dimensions = leash_dimensions(holder);
 
-    compute_dampened_spring_interaction(
-        holder_attach_pos,
-        entity_attach_pos,
-        slack_distance,
-        leash_holder_movement(entity),
-        entity_attach_vector,
-    )
+    let mut accumulated: Option<LeashWrench> = None;
+    for (entity_point, leasher_point) in entity_attachment_points
+        .iter()
+        .zip(leasher_attachment_points)
+    {
+        let entity_attach_vector = rotate_y(*entity_point * entity_dimensions, -entity_y_rot);
+        let entity_attach_pos = entity.position() + entity_attach_vector;
+        let leasher_attach_vector = rotate_y(*leasher_point * holder_dimensions, -holder_y_rot);
+        let leasher_attach_pos = holder.position() + leasher_attach_vector;
+
+        let Some(wrench) = compute_dampened_spring_interaction(
+            leasher_attach_pos,
+            entity_attach_pos,
+            slack_distance,
+            current_movement,
+            entity_attach_vector,
+        ) else {
+            continue;
+        };
+
+        accumulated = Some(accumulated.map_or(wrench, |total| total.accumulate(wrench)));
+    }
+
+    accumulated
 }
 
 pub(super) fn compute_dampened_spring_interaction(

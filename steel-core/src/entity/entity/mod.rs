@@ -1250,6 +1250,13 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         self.base().set_level_callback(callback);
     }
 
+    /// Returns whether this entity can hold four leads from one leashable.
+    ///
+    /// Vanilla parity: `Entity.supportQuadLeashAsHolder`.
+    fn support_quad_leash_as_holder(&self) -> bool {
+        false
+    }
+
     /// Called by leashables while this entity is their live leash holder.
     fn notify_leash_holder(&self, _leashable: &dyn Entity) {}
 

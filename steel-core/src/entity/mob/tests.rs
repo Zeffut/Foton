@@ -11,6 +11,11 @@ use steel_registry::{
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId};
 
+use super::leash::{
+    ENTITY_LEASH_ATTACHMENT_POINT, LEASH_TORSIONAL_ELASTICITY, LEASHER_ATTACHMENT_POINT,
+    QUAD_LEASH_WRENCH_SCALE, SHARED_QUAD_ATTACHMENT_POINTS, axis_specific_leash_elasticity,
+    compute_elastic_interaction,
+};
 use super::{
     can_attempt_equipment_drop, find_ground_path_target_surface, path_end_node_can_reach_target,
 };
@@ -20,6 +25,7 @@ use crate::entity::ai::goal::GoalControl;
 use crate::entity::ai::node::Node;
 use crate::entity::ai::path::{Path, PathType};
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::{GhastEntity, HorseEntity, PigEntity};
 use crate::entity::mob::{Mob, MobBase};
 use crate::entity::{
     Entity, EntityBase, LivingEntity, LivingEntityBase, PathfinderMob, SharedEntity,
@@ -746,5 +752,143 @@ fn ground_path_target_solid_rewrites_to_first_open_block_above() {
     assert_eq!(
         find_ground_path_target_surface(&level, BlockPos::new(4, 64, 4)),
         BlockPos::new(4, 66, 4)
+    );
+}
+
+/// Ten blocks apart puts every rope of a quad leash past its six-block slack,
+/// so the four-rope sum and the one-rope pull are both live.
+const QUAD_LEASH_TEST_HOLDER_OFFSET: DVec3 = DVec3::new(10.0, 0.0, 0.0);
+
+/// Vanilla parity: `Leashable.computeElasticInteraction` walks the whole
+/// attachment-point list, and `checkElasticInteractions` divides the result by
+/// four when both ends support a quad leash. Steel used to know one rope only,
+/// so a horse on a ghast was pulled by a single lead at full strength.
+#[test]
+fn a_quad_leash_sums_four_ropes_and_pulls_with_a_quarter_of_them() {
+    init_vanilla_registry();
+
+    let horse = Arc::new(HorseEntity::new(
+        &vanilla_entities::HORSE,
+        1,
+        DVec3::ZERO,
+        Weak::new(),
+    ));
+    let ghast: SharedEntity = Arc::new(GhastEntity::new(
+        &vanilla_entities::GHAST,
+        2,
+        QUAD_LEASH_TEST_HOLDER_OFFSET,
+        Weak::new(),
+    ));
+    assert!(horse.support_quad_leash());
+    assert!(ghast.support_quad_leash_as_holder());
+    assert!(horse.set_leashed_to(&ghast));
+
+    let four_ropes = compute_elastic_interaction(
+        horse.as_ref(),
+        ghast.as_ref(),
+        horse.leash_elastic_distance(),
+        &SHARED_QUAD_ATTACHMENT_POINTS,
+        &SHARED_QUAD_ATTACHMENT_POINTS,
+    )
+    .expect("every corner of the quad leash should be taut ten blocks out");
+
+    let mut summed_force = DVec3::ZERO;
+    let mut summed_torque = 0.0;
+    for index in 0..SHARED_QUAD_ATTACHMENT_POINTS.len() {
+        let rope = compute_elastic_interaction(
+            horse.as_ref(),
+            ghast.as_ref(),
+            horse.leash_elastic_distance(),
+            &SHARED_QUAD_ATTACHMENT_POINTS[index..=index],
+            &SHARED_QUAD_ATTACHMENT_POINTS[index..=index],
+        )
+        .expect("each corner on its own should be taut ten blocks out");
+        summed_force += rope.force;
+        summed_torque += rope.torque;
+    }
+    assert!((four_ropes.force - summed_force).length() < 1.0e-12);
+    assert!((four_ropes.torque - summed_torque).abs() < 1.0e-12);
+    // A single rope is not the whole pull, so an implementation that stops at
+    // the first attachment point cannot pass the assertions below either.
+    assert!(summed_force.length() > four_ropes.force.length() / 4.0 * 1.5);
+
+    assert!(horse.check_elastic_interactions(ghast.as_ref()));
+
+    let expected_impulse =
+        axis_specific_leash_elasticity(four_ropes.force * QUAD_LEASH_WRENCH_SCALE);
+    assert!((horse.velocity() - expected_impulse).length() < 1.0e-12);
+    let expected_momentum =
+        LEASH_TORSIONAL_ELASTICITY * four_ropes.torque * QUAD_LEASH_WRENCH_SCALE;
+    assert!(
+        (horse
+            .leash_angular_momentum()
+            .expect("a leashed horse keeps leash data")
+            - expected_momentum)
+            .abs()
+            < 1.0e-12
+    );
+}
+
+/// Vanilla parity: the `leashHolder.supportQuadLeashAsHolder() &&
+/// this.supportQuadLeash()` of `Leashable.checkElasticInteractions`. Either end
+/// saying no puts the pair back on the single unscaled rope.
+#[test]
+fn one_end_without_quad_support_keeps_the_single_unscaled_rope() {
+    init_vanilla_registry();
+
+    let pig = Arc::new(PigEntity::new(
+        &vanilla_entities::PIG,
+        1,
+        DVec3::ZERO,
+        Weak::new(),
+    ));
+    let ghast: SharedEntity = Arc::new(GhastEntity::new(
+        &vanilla_entities::GHAST,
+        2,
+        QUAD_LEASH_TEST_HOLDER_OFFSET,
+        Weak::new(),
+    ));
+    assert!(!pig.support_quad_leash());
+    assert!(pig.set_leashed_to(&ghast));
+
+    let pig_rope = compute_elastic_interaction(
+        pig.as_ref(),
+        ghast.as_ref(),
+        pig.leash_elastic_distance(),
+        &ENTITY_LEASH_ATTACHMENT_POINT,
+        &LEASHER_ATTACHMENT_POINT,
+    )
+    .expect("a pig ten blocks from its holder is past the slack");
+
+    assert!(pig.check_elastic_interactions(ghast.as_ref()));
+    assert!((pig.velocity() - axis_specific_leash_elasticity(pig_rope.force)).length() < 1.0e-12);
+
+    let horse = Arc::new(HorseEntity::new(
+        &vanilla_entities::HORSE,
+        3,
+        DVec3::ZERO,
+        Weak::new(),
+    ));
+    let plain_holder: SharedEntity = Arc::new(PigEntity::new(
+        &vanilla_entities::PIG,
+        4,
+        QUAD_LEASH_TEST_HOLDER_OFFSET,
+        Weak::new(),
+    ));
+    assert!(!plain_holder.support_quad_leash_as_holder());
+    assert!(horse.set_leashed_to(&plain_holder));
+
+    let horse_rope = compute_elastic_interaction(
+        horse.as_ref(),
+        plain_holder.as_ref(),
+        horse.leash_elastic_distance(),
+        &ENTITY_LEASH_ATTACHMENT_POINT,
+        &LEASHER_ATTACHMENT_POINT,
+    )
+    .expect("a horse ten blocks from its holder is past the slack");
+
+    assert!(horse.check_elastic_interactions(plain_holder.as_ref()));
+    assert!(
+        (horse.velocity() - axis_specific_leash_elasticity(horse_rope.force)).length() < 1.0e-12
     );
 }

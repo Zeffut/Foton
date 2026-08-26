@@ -5,10 +5,9 @@
 //! nothing but its move control, faces wherever it is heading, and lobs a
 //! fireball that a player can bat straight back into it.
 //!
-//! **Gaps**: `Ghast.getMaxSpawnClusterSize` caps a natural spawn at one ghast
-//! and `supportQuadLeashAsHolder` lets four leads hang off one; Steel's natural
-//! spawner has no per-entity cluster-size hook and its leash layer has no
-//! quad-leash holder flag, so neither has anywhere to go yet.
+//! **Gaps**: `Ghast.getMaxSpawnClusterSize` caps a natural spawn at one ghast,
+//! and Steel's natural spawner has no per-entity cluster-size hook to hang that
+//! on yet.
 
 use std::sync::{Arc, Weak};
 
@@ -403,6 +402,12 @@ impl Entity for GhastEntity {
 
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
+    }
+
+    /// Vanilla parity: `Ghast.supportQuadLeashAsHolder`. A leashable that also
+    /// answers `support_quad_leash` hangs off a ghast on four ropes.
+    fn support_quad_leash_as_holder(&self) -> bool {
+        true
     }
 
     /// Vanilla parity: `Ghast.checkFallDamage` is empty.

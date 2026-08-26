@@ -573,6 +573,11 @@ impl Mob for SnifferEntity {
         &self.mob_base
     }
 
+    /// Vanilla parity: `Sniffer.supportQuadLeash`.
+    fn support_quad_leash(&self) -> bool {
+        true
+    }
+
     fn brain(&self) -> Option<&Brain> {
         Some(&self.brain)
     }
