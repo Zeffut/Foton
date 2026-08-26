@@ -30,7 +30,6 @@ use steel_registry::{
     vanilla_template_pools,
 };
 use steel_utils::random::legacy_random::LegacyRandom;
-use steel_utils::random::worldgen_random::WorldgenRandom;
 use steel_utils::random::{PositionalRandom, Random, RandomSource};
 use steel_utils::value_providers::IntProvider;
 use steel_utils::{
@@ -56,6 +55,7 @@ use steel_worldgen::structure::{StructureBlockIgnore, StructureMirror};
 /// block payload and processors, so this type mirrors vanilla's loaded `StructureTemplate`.
 #[derive(Debug, Clone)]
 pub(crate) struct StructureTemplate {
+    author: String,
     size: IVec3,
     palettes: Vec<StructureTemplatePalette>,
     entities: Vec<StructureEntityInfo>,
@@ -102,10 +102,15 @@ pub(crate) struct StructureDataMarker {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StructureProcessorRandom {
-    /// Vanilla `StructurePlaceSettings.setRandom(random)`.
+    /// Vanilla `StructurePlaceSettings.setRandom(random)`, where the settings hold
+    /// the same source the caller passes to `placeInWorld`.
     Placement,
     /// Vanilla `StructurePlaceSettings.getRandom(pos)` fallback.
     Positional,
+    /// Vanilla `setRandom(createRandom(seed))`: the settings hold a stream of their
+    /// own, seeded here, which the placement random does not share. A structure
+    /// block seeds both from the same number and still gets two streams.
+    Seeded(i64),
 }
 
 pub(crate) struct StructurePlaceSettings<'a> {
@@ -120,6 +125,8 @@ pub(crate) struct StructurePlaceSettings<'a> {
     pub(crate) projection: Option<Projection>,
     pub(crate) processor_random: StructureProcessorRandom,
     pub(crate) liquid_settings: LiquidSettingsData,
+    /// Vanilla `StructurePlaceSettings.isIgnoreEntities`.
+    pub(crate) ignore_entities: bool,
 }
 
 mod loading;

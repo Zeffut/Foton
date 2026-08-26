@@ -5,8 +5,8 @@
 //! edge into whichever action its mode names. Everything it remembers is in
 //! [`StructureBlockEntity`].
 //!
-//! A redstone pulse triggers `save` and `load`, and both are the halves Steel
-//! cannot do yet (see the block entity's own note). Corner mode's `unloadStructure`
+//! A redstone pulse on a load block places the structure. `save` is still the half
+//! Steel cannot do (see the block entity's own note). Corner mode's `unloadStructure`
 //! is a client-side bounding-box hint with no server state, and data mode does
 //! nothing on a pulse in vanilla either.
 
@@ -139,7 +139,7 @@ impl BlockBehavior for StructureBlock {
         let is_powered = block_entity.is_powered();
         if should_trigger && !is_powered {
             block_entity.set_powered(true);
-            trigger(block_entity);
+            trigger(world, block_entity);
         } else if !should_trigger && is_powered {
             block_entity.set_powered(false);
         }
@@ -151,11 +151,10 @@ impl BlockBehavior for StructureBlock {
 /// Vanilla parity: `StructureBlock.trigger`.
 ///
 /// **Gap**: `SAVE` needs `StructureTemplate.fillFromWorld` plus a
-/// `StructureTemplateManager` to write the `.nbt` file, and `LOAD` needs
-/// `StructureTemplate.place_in_world`, which in Steel writes only into a
-/// `WorldGenRegion`. Neither exists, so a pulse on those two modes is logged
-/// rather than silently doing nothing that looks like success.
-fn trigger(block_entity: &StructureBlockEntity) {
+/// `StructureTemplateManager` to write the `.nbt` file, and neither exists, so a
+/// pulse on a save block is logged rather than silently doing nothing that looks
+/// like success.
+fn trigger(world: &Arc<World>, block_entity: &StructureBlockEntity) {
     match block_entity.mode() {
         StructureMode::Save => {
             log::debug!(
@@ -164,10 +163,7 @@ fn trigger(block_entity: &StructureBlockEntity) {
             );
         }
         StructureMode::Load => {
-            log::debug!(
-                "structure block at {:?} was triggered to load, which Steel cannot do yet",
-                block_entity.get_block_pos()
-            );
+            block_entity.place_structure(world);
         }
         // Vanilla parity: `CORNER` clears the client's bounding-box preview and
         // falls through to `DATA`, which does nothing. Neither has server state.

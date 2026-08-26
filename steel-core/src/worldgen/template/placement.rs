@@ -153,65 +153,29 @@ impl StructureTemplate {
         position: BlockPos,
         reference_pos: BlockPos,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
         flags: UpdateFlags,
     ) -> bool {
-        let Some(palette) = self.palette(settings, position, random) else {
+        // Vanilla keeps two random sources here: the one the caller hands to
+        // `placeInWorld`, and the one `StructurePlaceSettings` holds for palette choice
+        // and processors. Every worldgen caller passes the same source for both; a
+        // structure block seeds two of its own.
+        let processed_blocks = match settings.processor_random {
+            StructureProcessorRandom::Seeded(seed) => self.process_palette(
+                region,
+                registry,
+                position,
+                reference_pos,
+                settings,
+                &mut LegacyRandom::from_seed(seed as u64),
+            ),
+            StructureProcessorRandom::Placement | StructureProcessorRandom::Positional => {
+                self.process_palette(region, registry, position, reference_pos, settings, random)
+            }
+        };
+        let Some(processed_blocks) = processed_blocks else {
             return false;
         };
-        if (palette.blocks.is_empty() && self.entities.is_empty())
-            || [self.size.x, self.size.y, self.size.z]
-                .iter()
-                .any(|&axis| axis < 1)
-        {
-            return false;
-        }
-        let mut original_blocks = Vec::with_capacity(palette.blocks.len());
-        let mut processed_blocks = Vec::with_capacity(palette.blocks.len());
-
-        Self::palette_blocks_for_placement(
-            &palette.blocks,
-            position,
-            settings,
-            |block, world_pos| {
-                let original = ProcessedBlockInfo {
-                    template_pos: block.pos,
-                    world_pos: block.pos,
-                    state: block.state,
-                    nbt: block.nbt.clone(),
-                };
-                let processed = ProcessedBlockInfo {
-                    template_pos: block.pos,
-                    world_pos,
-                    state: block.state,
-                    nbt: block.nbt.clone(),
-                };
-
-                if let Some(processed) = Self::process_block(
-                    region,
-                    registry,
-                    &original,
-                    processed,
-                    settings,
-                    reference_pos,
-                    random,
-                ) {
-                    original_blocks.push(original);
-                    processed_blocks.push(processed);
-                }
-            },
-        );
-
-        let processed_blocks = Self::finalize_processing(
-            region,
-            registry,
-            position,
-            reference_pos,
-            settings,
-            &original_blocks,
-            processed_blocks,
-            random,
-        );
 
         let mut placed_any = false;
         let mut placed_positions = Vec::with_capacity(processed_blocks.len());
@@ -320,9 +284,80 @@ impl StructureTemplate {
             }
         }
 
-        self.place_entities(region, position, settings);
+        if !settings.ignore_entities {
+            self.place_entities(region, position, settings);
+        }
 
         true
+    }
+
+    /// Runs vanilla `StructureTemplate.processBlockInfos` over the chosen palette.
+    ///
+    /// Returns `None` for the cases vanilla refuses to place at all: no palette, an
+    /// empty template, or a size with a non-positive axis.
+    fn process_palette(
+        &self,
+        region: &impl WorldGenLevel,
+        registry: &Registry,
+        position: BlockPos,
+        reference_pos: BlockPos,
+        settings: &StructurePlaceSettings<'_>,
+        random: &mut impl Random,
+    ) -> Option<Vec<ProcessedBlockInfo>> {
+        let palette = self.palette(settings, position, random)?;
+        if (palette.blocks.is_empty() && self.entities.is_empty())
+            || [self.size.x, self.size.y, self.size.z]
+                .iter()
+                .any(|&axis| axis < 1)
+        {
+            return None;
+        }
+
+        let mut original_blocks = Vec::with_capacity(palette.blocks.len());
+        let mut processed_blocks = Vec::with_capacity(palette.blocks.len());
+        Self::palette_blocks_for_placement(
+            &palette.blocks,
+            position,
+            settings,
+            |block, world_pos| {
+                let original = ProcessedBlockInfo {
+                    template_pos: block.pos,
+                    world_pos: block.pos,
+                    state: block.state,
+                    nbt: block.nbt.clone(),
+                };
+                let processed = ProcessedBlockInfo {
+                    template_pos: block.pos,
+                    world_pos,
+                    state: block.state,
+                    nbt: block.nbt.clone(),
+                };
+
+                if let Some(processed) = Self::process_block(
+                    region,
+                    registry,
+                    &original,
+                    processed,
+                    settings,
+                    reference_pos,
+                    random,
+                ) {
+                    original_blocks.push(original);
+                    processed_blocks.push(processed);
+                }
+            },
+        );
+
+        Some(Self::finalize_processing(
+            region,
+            registry,
+            position,
+            reference_pos,
+            settings,
+            &original_blocks,
+            processed_blocks,
+            random,
+        ))
     }
 
     pub(super) fn place_entities(
@@ -401,7 +436,7 @@ impl StructureTemplate {
         registry: &Registry,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) {
         let Some(palette) = self.palette(settings, position, random) else {
             return;
@@ -432,7 +467,7 @@ impl StructureTemplate {
         registry: &Registry,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Vec<StructureDataMarker> {
         let Some(palette) = self.palette(settings, position, random) else {
             return Vec::new();
@@ -671,7 +706,7 @@ impl StructureTemplate {
         &self,
         settings: &StructurePlaceSettings<'_>,
         position: BlockPos,
-        random: &mut WorldgenRandom,
+        random: &mut impl Random,
     ) -> Option<&StructureTemplatePalette> {
         if self.palettes.is_empty() {
             return None;
@@ -683,7 +718,9 @@ impl StructureTemplate {
             );
         };
         let index = match settings.processor_random {
-            StructureProcessorRandom::Placement => random.next_i32_bounded(bound),
+            StructureProcessorRandom::Placement | StructureProcessorRandom::Seeded(_) => {
+                random.next_i32_bounded(bound)
+            }
             StructureProcessorRandom::Positional => {
                 let mut random = LegacyRandom::from_seed(Self::block_pos_seed(position) as u64);
                 random.next_i32_bounded(bound)

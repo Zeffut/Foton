@@ -311,6 +311,7 @@ fn place_template<L: WorldGenLevel>(
         projection: None,
         processor_random: StructureProcessorRandom::Placement,
         liquid_settings: LiquidSettingsData::ApplyWaterlogging,
+        ignore_entities: false,
     };
 
     template.place_in_world(

@@ -1,5 +1,7 @@
 use std::slice;
 
+use steel_utils::random::worldgen_random::WorldgenRandom;
+
 use super::*;
 use steel_registry::blocks::properties::{DoorHingeSide, SlabType};
 use steel_registry::init_vanilla_registry;
@@ -29,6 +31,7 @@ fn palette_blocks_skips_all_out_of_bounds_for_current_chunk_processors() {
         projection: None,
         processor_random: StructureProcessorRandom::Positional,
         liquid_settings: LiquidSettingsData::IgnoreWaterlogging,
+        ignore_entities: false,
     };
     let mut processed = 0;
 
@@ -62,6 +65,7 @@ fn palette_blocks_keeps_out_of_bounds_for_capped_processors() {
         projection: None,
         processor_random: StructureProcessorRandom::Positional,
         liquid_settings: LiquidSettingsData::IgnoreWaterlogging,
+        ignore_entities: false,
     };
     let mut processed = 0;
     let mut processed_pos = None;
@@ -83,6 +87,7 @@ fn palette_blocks_keeps_out_of_bounds_for_capped_processors() {
 #[test]
 fn zero_position_with_transform_matches_vanilla_rotation_offsets() {
     let template = StructureTemplate {
+        author: String::new(),
         size: IVec3::new(6, 10, 8),
         palettes: Vec::new(),
         entities: Vec::new(),
@@ -110,6 +115,7 @@ fn zero_position_with_transform_matches_vanilla_rotation_offsets() {
 #[test]
 fn bounding_box_with_transform_matches_vanilla_mirror_rotation_pivot() {
     let template = StructureTemplate {
+        author: String::new(),
         size: IVec3::new(6, 10, 8),
         palettes: Vec::new(),
         entities: Vec::new(),
@@ -542,6 +548,7 @@ fn data_markers_read_shipwreck_structure_blocks() {
         projection: None,
         processor_random: StructureProcessorRandom::Positional,
         liquid_settings: LiquidSettingsData::ApplyWaterlogging,
+        ignore_entities: false,
     };
     let mut random = WorldgenRandom::from_seed(0);
 
@@ -573,6 +580,7 @@ fn data_markers_read_igloo_chest_structure_block() {
         projection: None,
         processor_random: StructureProcessorRandom::Positional,
         liquid_settings: LiquidSettingsData::IgnoreWaterlogging,
+        ignore_entities: false,
     };
     let mut random = WorldgenRandom::from_seed(0);
 

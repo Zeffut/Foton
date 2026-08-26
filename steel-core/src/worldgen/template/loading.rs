@@ -44,8 +44,13 @@ impl StructureTemplate {
         }
 
         let entities = Self::read_entities(registry, &compound, context)?;
+        let author = compound
+            .string("author")
+            .map(|author| author.to_str().into_owned())
+            .unwrap_or_default();
 
         Ok(Self {
+            author,
             size,
             palettes: loaded_palettes,
             entities,
@@ -371,6 +376,13 @@ impl StructureTemplate {
                 .then(left.pos.x().cmp(&right.pos.x()))
                 .then(left.pos.z().cmp(&right.pos.z()))
         });
+    }
+
+    /// Returns who saved this template, or the empty string.
+    ///
+    /// Vanilla parity: `StructureTemplate.getAuthor`.
+    pub(crate) fn author(&self) -> &str {
+        &self.author
     }
 
     pub(crate) const fn size(&self, rotation: Rotation) -> IVec3 {

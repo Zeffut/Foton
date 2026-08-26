@@ -5,13 +5,12 @@
 //! and both resend the block afterwards so an open editor agrees with the
 //! server.
 //!
-//! The structure block's editor has four buttons, and two of them Steel cannot
-//! honor yet: saving needs `StructureTemplate.fillFromWorld` and a template
-//! manager to write the file, and loading needs `place_in_world` against a live
-//! world. Those two report vanilla's own failure messages --
-//! `structure_block.save_failure` and `structure_block.load_not_found` -- which
-//! is what a player sees when the operation genuinely does not work, rather
-//! than a success message for something that did not happen.
+//! The structure block's editor has four buttons, and one of them Steel cannot
+//! honor yet: saving needs `StructureTemplate.fillFromWorld` and a template manager
+//! to write the file, so it reports vanilla's own `structure_block.save_failure`
+//! rather than a success message for something that did not happen. Loading works,
+//! over the structures bundled with the game -- which, until a save can write one,
+//! is all there are.
 
 use std::sync::Arc;
 
@@ -80,7 +79,7 @@ impl Player {
 
         if block_entity.has_structure_name() {
             let name = block_entity.structure_name();
-            self.report_structure_action(update_type, block_entity, &name);
+            self.report_structure_action(update_type, &world, block_entity, &name);
         } else {
             self.send_message(&TextComponent::translated(
                 translations::STRUCTURE_BLOCK_INVALID_STRUCTURE_NAME
@@ -96,6 +95,7 @@ impl Player {
     fn report_structure_action(
         &self,
         update_type: StructureUpdateType,
+        world: &Arc<World>,
         block_entity: &StructureBlockEntity,
         name: &str,
     ) {
@@ -108,10 +108,14 @@ impl Player {
             StructureUpdateType::SaveArea => {
                 translations::STRUCTURE_BLOCK_SAVE_FAILURE.message(named())
             }
-            // Steel has no saved structures a block could find, so this is
-            // vanilla's "not found" branch.
             StructureUpdateType::LoadArea => {
-                translations::STRUCTURE_BLOCK_LOAD_NOT_FOUND.message(named())
+                if !block_entity.is_structure_loadable() {
+                    translations::STRUCTURE_BLOCK_LOAD_NOT_FOUND.message(named())
+                } else if block_entity.place_structure_if_same_size(world) {
+                    translations::STRUCTURE_BLOCK_LOAD_SUCCESS.message(named())
+                } else {
+                    translations::STRUCTURE_BLOCK_LOAD_PREPARE.message(named())
+                }
             }
             StructureUpdateType::ScanArea => {
                 if block_entity.detect_size() {
