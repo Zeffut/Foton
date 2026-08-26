@@ -47,7 +47,7 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompound;
 use simdnbt::owned::NbtCompound;
 use steel_utils::locks::SyncMutex;
 
-pub use activity::Activity;
+pub use activity::{Activity, ScheduleAttribute};
 pub use context::BrainContext;
 
 use behavior::{BehaviorControl, BehaviorStatus};
@@ -150,6 +150,16 @@ impl ActivityData {
     }
 }
 
+/// How stale the last schedule read may be before another one is worth doing.
+///
+/// Vanilla parity: the `gameTime - this.lastScheduleUpdate > 20L` of
+/// `Brain.updateActivityFromSchedule`.
+const SCHEDULE_UPDATE_INTERVAL: i64 = 20;
+
+/// Vanilla parity: the `private long lastScheduleUpdate = -9999L` initializer,
+/// which is far enough back that the first read always happens.
+const NO_SCHEDULE_UPDATE_YET: i64 = -9999;
+
 /// Which activities are running and what they need.
 #[derive(Debug)]
 struct ActivityState {
@@ -158,6 +168,10 @@ struct ActivityState {
     default_activity: Activity,
     requirements: FxHashMap<Activity, Vec<(MemoryModuleId, MemoryStatus)>>,
     erase_when_stopped: FxHashMap<Activity, Vec<MemoryModuleId>>,
+    /// Vanilla parity: `Brain.schedule`.
+    schedule: Option<ScheduleAttribute>,
+    /// Vanilla parity: `Brain.lastScheduleUpdate`.
+    last_schedule_update: i64,
 }
 
 impl ActivityState {
@@ -168,6 +182,8 @@ impl ActivityState {
             default_activity: Activity::Idle,
             requirements: FxHashMap::default(),
             erase_when_stopped: FxHashMap::default(),
+            schedule: None,
+            last_schedule_update: NO_SCHEDULE_UPDATE_YET,
         }
     }
 }
@@ -420,6 +436,41 @@ impl Brain {
     /// Vanilla parity: `Brain.setDefaultActivity`.
     pub fn set_default_activity(&self, activity: Activity) {
         self.activities.lock().default_activity = activity;
+    }
+
+    /// Points this brain at the environment attribute that names its activity.
+    ///
+    /// Vanilla parity: `Brain.setSchedule`.
+    pub fn set_schedule(&self, schedule: ScheduleAttribute) {
+        self.activities.lock().schedule = Some(schedule);
+    }
+
+    /// Switches to whatever activity the schedule attribute currently names.
+    ///
+    /// Vanilla parity: `Brain.updateActivityFromSchedule`. Vanilla reads the
+    /// attribute at the body's position; neither activity attribute is
+    /// spatially interpolated, so [`World::scheduled_activity`] takes no
+    /// position.
+    ///
+    /// Safe to call from inside a behavior: it takes `activities` and then
+    /// `memories`, never `runtime`, which is the lock order the module docs
+    /// require of anything running under [`Self::tick`].
+    pub fn update_activity_from_schedule(&self, world: &World, game_time: i64) {
+        let schedule = {
+            let mut activities = self.activities.lock();
+            if game_time - activities.last_schedule_update <= SCHEDULE_UPDATE_INTERVAL {
+                return;
+            }
+            activities.last_schedule_update = game_time;
+            activities.schedule
+        };
+
+        let scheduled = schedule.map_or(ScheduleAttribute::DEFAULT_ACTIVITY, |schedule| {
+            world.scheduled_activity(schedule)
+        });
+        if !self.is_active(scheduled) {
+            self.set_active_activity_if_possible(scheduled);
+        }
     }
 
     /// Vanilla parity: `Brain.useDefaultActivity`.

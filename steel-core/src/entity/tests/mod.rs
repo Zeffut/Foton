@@ -30,8 +30,9 @@ use uuid::Uuid;
 
 use crate::behavior::{BlockBehavior, blocks::WitherRoseBlock, init_behaviors};
 use crate::chunk_saver::ChunkStorage;
+use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::damage::DamageSource;
-use crate::entity::entities::{ChestMinecartEntity, PigEntity};
+use crate::entity::entities::{ChestMinecartEntity, PigEntity, VillagerEntity};
 use crate::entity::mob::Mob;
 use crate::inventory::equipment::EquipmentSlot;
 use crate::portal::PortalKind;
@@ -1040,6 +1041,16 @@ fn closest_direction_with_blocked_neighbors(
             .iter()
             .any(|direction| direction.relative(origin) == neighbor_pos)
     })
+}
+
+/// The workstation a villager currently holds a POI ticket on.
+///
+/// The claim lives in the `JOB_SITE` brain memory, exactly as vanilla stores
+/// it; this is the shape the villager and cure tests want to assert on.
+fn villager_job_site(villager: &VillagerEntity) -> Option<BlockPos> {
+    Mob::brain(villager)?
+        .get_memory(memory_module_types::JOB_SITE)
+        .map(|global| global.pos)
 }
 
 mod brains;

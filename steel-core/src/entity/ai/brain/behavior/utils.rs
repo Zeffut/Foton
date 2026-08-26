@@ -82,6 +82,25 @@ pub(crate) fn can_see(brain: &Brain, target: &dyn Entity) -> bool {
         .is_some_and(|visible| visible.contains_entity(target.id()))
 }
 
+/// Whether an entity memory still names a live, visible mob of one type.
+///
+/// Vanilla parity: `BehaviorUtils.targetIsValid(brain, memory, EntityType)`.
+pub(crate) fn target_is_valid(
+    brain: &Brain,
+    memory: MemoryModuleType<EntityMemory>,
+    entity_type: EntityTypeRef,
+) -> bool {
+    let Some(target) = brain.get_memory(memory).and_then(|memory| memory.get()) else {
+        return false;
+    };
+    let Some(living) = target.as_living_entity() else {
+        return false;
+    };
+    is_of_type(target.as_ref(), entity_type)
+        && LivingEntity::is_alive(living)
+        && can_see(brain, target.as_ref())
+}
+
 /// Returns whichever of the two candidates is nearer the body.
 ///
 /// Vanilla parity: `BehaviorUtils.getNearestTarget`.

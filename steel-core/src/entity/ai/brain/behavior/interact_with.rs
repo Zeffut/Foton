@@ -3,6 +3,7 @@
 use steel_registry::entity_type::EntityTypeRef;
 
 use super::{BrainContext, Trigger, utils};
+use crate::entity::LivingEntity;
 use crate::entity::ai::brain::memory::{
     EntityMemory, MemoryModuleId, MemoryModuleType, WalkTarget, memory_module_types,
 };
@@ -14,10 +15,15 @@ use crate::entity::ai::brain::position_tracker::PositionTracker;
 pub struct InteractWith {
     entity_type: EntityTypeRef,
     interaction_range_sqr: f64,
+    self_filter: LivingFilter,
+    target_filter: LivingFilter,
     interaction_target: MemoryModuleType<EntityMemory>,
     speed_modifier: f64,
     stop_distance: i32,
 }
+
+/// A test on the body, or on a candidate to walk up to.
+type LivingFilter = Box<dyn Fn(&dyn LivingEntity) -> bool + Send>;
 
 impl InteractWith {
     /// Vanilla parity: `InteractWith.of(EntityType, int, MemoryModuleType, float, int)`.
@@ -29,9 +35,35 @@ impl InteractWith {
         speed_modifier: f64,
         stop_distance: i32,
     ) -> Self {
+        Self::of_matching(
+            entity_type,
+            interaction_range,
+            |_| true,
+            |_| true,
+            interaction_target,
+            speed_modifier,
+            stop_distance,
+        )
+    }
+
+    /// Vanilla parity: the seven-argument `InteractWith.of`, whose two
+    /// predicates are how a villager only walks up to another villager it could
+    /// actually breed with.
+    #[must_use]
+    pub fn of_matching(
+        entity_type: EntityTypeRef,
+        interaction_range: i32,
+        self_filter: impl Fn(&dyn LivingEntity) -> bool + Send + 'static,
+        target_filter: impl Fn(&dyn LivingEntity) -> bool + Send + 'static,
+        interaction_target: MemoryModuleType<EntityMemory>,
+        speed_modifier: f64,
+        stop_distance: i32,
+    ) -> Self {
         Self {
             entity_type,
             interaction_range_sqr: f64::from(interaction_range) * f64::from(interaction_range),
+            self_filter: Box::new(self_filter),
+            target_filter: Box::new(target_filter),
             interaction_target,
             speed_modifier,
             stop_distance,
@@ -59,13 +91,21 @@ impl Trigger for InteractWith {
             return false;
         };
 
-        let body_position = ctx.mob().position();
+        let mob = ctx.mob();
+        if !(self.self_filter)(mob) {
+            return false;
+        }
+
+        let body_position = mob.position();
         let entity_type = self.entity_type;
+        let target_filter = &self.target_filter;
+        let is_target_valid = |candidate: &dyn LivingEntity| {
+            utils::is_of_type(candidate.as_entity_event_source(), entity_type)
+                && target_filter(candidate)
+        };
         // Vanilla reports success as soon as any candidate of the right type is
         // visible, whether or not one is close enough to walk to.
-        let Some(any_of_type) = visible.find_closest(|candidate| {
-            utils::is_of_type(candidate.as_entity_event_source(), entity_type)
-        }) else {
+        let Some(any_of_type) = visible.find_closest(is_target_valid) else {
             return false;
         };
         drop(any_of_type);
@@ -73,7 +113,7 @@ impl Trigger for InteractWith {
         let interaction_range_sqr = self.interaction_range_sqr;
         let Some(closest) = visible.find_closest(|candidate| {
             candidate.position().distance_squared(body_position) <= interaction_range_sqr
-                && utils::is_of_type(candidate.as_entity_event_source(), entity_type)
+                && is_target_valid(candidate)
         }) else {
             return true;
         };

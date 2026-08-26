@@ -25,6 +25,7 @@
 //! each behavior states that list itself, in [`Trigger::required_memories`] or
 //! [`TimedBehavior::entry_condition`].
 
+mod acquire_poi;
 mod amphibious;
 mod animal_make_love;
 mod animal_panic;
@@ -56,6 +57,8 @@ mod set_entity_look_target;
 mod set_walk_target_away_from;
 mod set_walk_target_from_attack_target;
 mod set_walk_target_from_look_target;
+mod sleep_in_bed;
+mod socialize_at_bell;
 mod start_attacking;
 mod start_celebrating_if_target_dead;
 mod stop_attacking_if_target_invalid;
@@ -65,9 +68,13 @@ mod swim;
 pub mod transport_items_between_containers;
 mod trigger_gate;
 mod trigger_if;
+mod update_activity_from_schedule;
+mod validate_nearby_poi;
+mod village_bound_random_stroll;
 
 pub(crate) mod utils;
 
+pub use acquire_poi::AcquirePoi;
 pub use animal_make_love::AnimalMakeLove;
 pub use animal_panic::AnimalPanic;
 pub use axolotl_specific::{PlayDead, TOTAL_PLAYDEAD_TIME, ValidatePlayDead};
@@ -89,10 +96,15 @@ pub use random_stroll::RandomStroll;
 pub use set_entity_look_target::SetEntityLookTarget;
 pub use set_entity_look_target::SetEntityLookTargetSometimes;
 pub use set_walk_target_away_from::SetWalkTargetAwayFrom;
+pub use sleep_in_bed::{SleepInBed, WakeUp};
+pub use socialize_at_bell::SocializeAtBell;
 pub use start_celebrating_if_target_dead::StartCelebratingIfTargetDead;
 pub use stop_being_angry_if_target_dead::StopBeingAngryIfTargetDead;
 pub use stroll_to_poi::{StrollAroundPoi, StrollToPoi};
 pub use transport_items_between_containers::TransportItemsBetweenContainers;
+pub use update_activity_from_schedule::UpdateActivityFromSchedule;
+pub use validate_nearby_poi::ValidateNearbyPoi;
+pub use village_bound_random_stroll::VillageBoundRandomStroll;
 
 /// The general-purpose behaviors no Steel mob drives yet.
 ///

@@ -447,6 +447,14 @@ impl BlockPos {
         Self::new(a.0.x.max(b.0.x), a.0.y.max(b.0.y), a.0.z.max(b.0.z))
     }
 
+    /// Returns the Manhattan distance to another position.
+    ///
+    /// Vanilla parity: `Vec3i.distManhattan`.
+    #[must_use]
+    pub const fn dist_manhattan(self, other: Self) -> i32 {
+        (self.0.x - other.0.x).abs() + (self.0.y - other.0.y).abs() + (self.0.z - other.0.z).abs()
+    }
+
     /// Returns positions in vanilla `BlockPos.withinManhattan` order.
     #[must_use]
     pub const fn within_manhattan(

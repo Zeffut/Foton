@@ -16,6 +16,7 @@ use super::{
     RegistryEntry, RegistryExt, TemperatureModifier, World, environment, fuzzed_biome_at_block,
     obfuscate_biome_seed, vanilla_dimension_types,
 };
+use crate::entity::ai::brain::{Activity, ScheduleAttribute};
 
 /// Biome temperature below which precipitation falls as snow.
 ///
@@ -321,6 +322,17 @@ impl World {
     pub fn cat_waking_up_gift_chance(&self) -> f32 {
         let level_data = self.level_data.read();
         environment::cat_waking_up_gift_chance(self.dimension_type, level_data.world_clocks())
+    }
+
+    /// Returns the activity the given schedule attribute names right now.
+    ///
+    /// Vanilla parity: the `environmentAttributes.getValue(schedule, pos)` of
+    /// `Brain.updateActivityFromSchedule`. Neither activity attribute is
+    /// registered `spatiallyInterpolated`, so vanilla's position argument
+    /// cannot change the answer and Steel resolves it per dimension.
+    pub fn scheduled_activity(&self, schedule: ScheduleAttribute) -> Activity {
+        let level_data = self.level_data.read();
+        environment::scheduled_activity(self.dimension_type, level_data.world_clocks(), schedule)
     }
 
     /// Returns the current vanilla `CREAKING_ACTIVE` environment attribute.

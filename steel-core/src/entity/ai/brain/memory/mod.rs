@@ -209,6 +209,35 @@ pub(super) fn is_saved(memory: MemoryModuleId) -> bool {
 memory_module_types! {
     /// Vanilla `MemoryModuleType.HOME`.
     HOME: GlobalPos = "minecraft:home", saved = true;
+    /// Vanilla `MemoryModuleType.JOB_SITE`, the workstation a villager holds a
+    /// POI ticket on.
+    JOB_SITE: GlobalPos = "minecraft:job_site", saved = true;
+    /// Vanilla `MemoryModuleType.POTENTIAL_JOB_SITE`, a workstation an
+    /// unemployed villager has claimed but not yet reached.
+    POTENTIAL_JOB_SITE: GlobalPos = "minecraft:potential_job_site", saved = true;
+    /// Vanilla `MemoryModuleType.MEETING_POINT`, the village bell.
+    MEETING_POINT: GlobalPos = "minecraft:meeting_point", saved = true;
+    /// Vanilla `MemoryModuleType.SECONDARY_JOB_SITE`, the farmland a farmer
+    /// works besides its composter.
+    SECONDARY_JOB_SITE: Vec<GlobalPos> = "minecraft:secondary_job_site", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_BED`.
+    NEAREST_BED: BlockPos = "minecraft:nearest_bed", saved = false;
+    /// Vanilla `MemoryModuleType.HIDING_PLACE`.
+    HIDING_PLACE: GlobalPos = "minecraft:hiding_place", saved = false;
+    /// Vanilla `MemoryModuleType.HEARD_BELL_TIME`.
+    HEARD_BELL_TIME: i64 = "minecraft:heard_bell_time", saved = false;
+    /// Vanilla `MemoryModuleType.LAST_SLEPT`, which is also what decides
+    /// whether a village has been awake long enough to want an iron golem.
+    LAST_SLEPT: i64 = "minecraft:last_slept", saved = true;
+    /// Vanilla `MemoryModuleType.LAST_WOKEN`.
+    LAST_WOKEN: i64 = "minecraft:last_woken", saved = true;
+    /// Vanilla `MemoryModuleType.LAST_WORKED_AT_POI`, the cooldown between two
+    /// stints at a workstation.
+    LAST_WORKED_AT_POI: i64 = "minecraft:last_worked_at_poi", saved = true;
+    /// Vanilla `MemoryModuleType.GOLEM_DETECTED_RECENTLY`.
+    GOLEM_DETECTED_RECENTLY: bool = "minecraft:golem_detected_recently", saved = true;
+    /// Vanilla `MemoryModuleType.VISIBLE_VILLAGER_BABIES`.
+    VISIBLE_VILLAGER_BABIES: Vec<EntityMemory> = "minecraft:visible_villager_babies", saved = false;
     /// Vanilla `MemoryModuleType.NEAREST_LIVING_ENTITIES`, registry key `mobs`.
     NEAREST_LIVING_ENTITIES: Vec<EntityMemory> = "minecraft:mobs", saved = false;
     /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES`, registry key `visible_mobs`.
