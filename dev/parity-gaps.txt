@@ -31,11 +31,10 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 21
+[entities] 20
 Bogged
 Breeze
 BreezeWindCharge
-Camel
 CamelHusk
 Creaking
 EnderDragon

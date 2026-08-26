@@ -6,6 +6,7 @@
 //! passive/hostile folders -- the zombie horse is a `MONSTER` by category and
 //! still belongs here.
 
+mod camel;
 mod donkey;
 mod horse;
 mod llama;
@@ -16,6 +17,7 @@ mod trader_llama;
 mod variant;
 mod zombie_horse;
 
+pub use camel::CamelEntity;
 pub use donkey::DonkeyEntity;
 pub use horse::HorseEntity;
 pub use llama::LlamaEntity;

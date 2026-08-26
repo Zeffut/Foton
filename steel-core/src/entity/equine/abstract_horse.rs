@@ -1225,6 +1225,15 @@ pub trait AbstractHorse: Animal {
     /// dedicated server; it is here because a locally simulated horse still
     /// needs the pending scale that [`Self::execute_riders_jump`] consumes.
     fn on_player_jump(&self, jump_amount: i32) {
+        self.abstract_horse_on_player_jump(jump_amount);
+    }
+
+    /// The body of [`Self::on_player_jump`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition -- the camel,
+    /// which also needs to be off its dash cooldown and on the ground -- calls
+    /// this for the rest.
+    fn abstract_horse_on_player_jump(&self, jump_amount: i32) {
         if !Mob::is_saddled(self) {
             return;
         }
