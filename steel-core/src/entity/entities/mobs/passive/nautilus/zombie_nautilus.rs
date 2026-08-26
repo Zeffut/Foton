@@ -114,7 +114,7 @@ impl ZombieNautilusEntity {
         let mut entity_data = ZombieNautilusEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
 
-        Self {
+        let nautilus = Self {
             base,
             entity_type,
             living_base,
@@ -122,10 +122,14 @@ impl ZombieNautilusEntity {
             ageable_base,
             animal_base,
             tamable_base: TamableAnimalBase::new(),
-            nautilus_base: AbstractNautilusBase::new(0),
+            nautilus_base: AbstractNautilusBase::new(),
             brain: zombie_nautilus_ai::make_brain(),
             entity_data: SyncMutex::new(entity_data),
-        }
+        };
+        // Vanilla parity: the `createInventory()` of the `AbstractNautilus`
+        // constructor, which is what sizes the container to the column count.
+        nautilus.create_nautilus_inventory();
+        nautilus
     }
 
     /// Applies vanilla `ZombieNautilus.setVariant`.
@@ -572,7 +576,7 @@ impl Mob for ZombieNautilusEntity {
     fn finalize_spawn(
         &self,
         world: &Arc<World>,
-        _spawn_reason: EntitySpawnReason,
+        spawn_reason: EntitySpawnReason,
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
         let biome = world.biome_at(self.block_position());
@@ -589,7 +593,7 @@ impl Mob for ZombieNautilusEntity {
         }
 
         init_nautilus_memories(self);
-        group_data
+        self.finalize_spawn_ageable_mob(world, spawn_reason, group_data)
     }
 }
 

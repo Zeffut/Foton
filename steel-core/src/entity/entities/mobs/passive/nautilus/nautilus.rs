@@ -120,9 +120,8 @@ impl NautilusEntity {
             .set(PathType::Water, 0.0);
         let mut entity_data = NautilusEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
-        let nautilus_base = AbstractNautilusBase::new(0);
 
-        Self {
+        let nautilus = Self {
             base,
             entity_type,
             living_base,
@@ -130,10 +129,14 @@ impl NautilusEntity {
             ageable_base,
             animal_base,
             tamable_base: TamableAnimalBase::new(),
-            nautilus_base,
+            nautilus_base: AbstractNautilusBase::new(),
             brain: nautilus_ai::make_brain(),
             entity_data: SyncMutex::new(entity_data),
-        }
+        };
+        // Vanilla parity: the `createInventory()` of the `AbstractNautilus`
+        // constructor, which is what sizes the container to the column count.
+        nautilus.create_nautilus_inventory();
+        nautilus
     }
 
     /// Vanilla parity: `Nautilus.handleAirSupply`.
@@ -172,18 +175,21 @@ impl Entity for NautilusEntity {
     }
 
     /// Vanilla parity: `Nautilus.getDefaultDimensions`, a half-size baby whose
-    /// rider sits half a block up.
+    /// rider sits half a block up rather than at the calf's own height, and
+    /// then the shared `LivingEntity.getDimensions` scale on top of it.
     fn dimensions_for_pose(&self, _pose: EntityPose) -> EntityDimensions {
-        if !AgeableMob::is_baby(self) {
-            return self.entity_type.dimensions;
-        }
-        let scaled = self.entity_type.dimensions.scale(BABY_SCALE);
-        EntityDimensions::new_with_attachments(
-            scaled.width,
-            scaled.height,
-            scaled.eye_height,
-            EntityAttachments::new(&BABY_PASSENGER_ATTACHMENT, &[], &[], &[]),
-        )
+        let default = if AgeableMob::is_baby(self) {
+            let scaled = self.entity_type.dimensions.scale(BABY_SCALE);
+            EntityDimensions::new_with_attachments(
+                scaled.width,
+                scaled.height,
+                scaled.eye_height,
+                EntityAttachments::new(&BABY_PASSENGER_ATTACHMENT, &[], &[], &[]),
+            )
+        } else {
+            self.entity_type.dimensions
+        };
+        default.scale(self.get_scale())
     }
 
     /// Vanilla parity: `Nautilus.baseTick`, which reads the air left before the
@@ -625,15 +631,17 @@ impl Mob for NautilusEntity {
     }
 
     /// Vanilla parity: `AbstractNautilus.finalizeSpawn`, which seeds the long
-    /// cooldown that keeps a fresh nautilus from picking a fight immediately.
+    /// cooldown that keeps a fresh nautilus from picking a fight immediately
+    /// and then hands over to the shared ageable spawn, whose one-in-five roll
+    /// is where calves come from.
     fn finalize_spawn(
         &self,
-        _world: &Arc<World>,
-        _spawn_reason: EntitySpawnReason,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
         init_nautilus_memories(self);
-        group_data
+        self.finalize_spawn_ageable_mob(world, spawn_reason, group_data)
     }
 }
 

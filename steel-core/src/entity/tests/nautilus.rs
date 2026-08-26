@@ -18,7 +18,7 @@ use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::brain::{Activity, Brain};
 use crate::entity::entities::{NautilusEntity, PufferfishEntity, ZombieNautilusEntity};
 use crate::entity::nautilus::AbstractNautilus;
-use crate::entity::{AgeableMob, Animal, TamableAnimal, next_entity_id};
+use crate::entity::{AgeableMob, Animal, EntitySpawnReason, TamableAnimal, next_entity_id};
 use crate::test_support::TestPlayerBuilder;
 
 /// Where the nautilus swims, in blocks.
@@ -180,6 +180,40 @@ fn a_nautilus_charges_the_target_its_brain_picked() {
     assert!(
         !brain.has_memory_value(memory_module_types::ATTACK_TARGET.id()),
         "ChargeAttack.stop erases the attack target once the charge connects"
+    );
+}
+
+/// A spawning nautilus gets its long fight cooldown, and still goes through the
+/// shared ageable spawn.
+///
+/// Vanilla parity: `AbstractNautilus.finalizeSpawn`, which is `initMemories`
+/// plus `super.finalizeSpawn` -- and that `super` is the one-in-five roll every
+/// animal's calves come from. Returning the caller's group data instead would
+/// have quietly taken baby nautiluses out of the game.
+#[test]
+fn a_spawning_nautilus_seeds_its_fight_cooldown_and_joins_its_cluster() {
+    let world = nautilus_world("nautilus_finalize_spawn");
+    let nautilus = spawn_nautilus(&world);
+    let brain = Mob::brain(nautilus.as_ref()).expect("a nautilus has a brain");
+    assert!(
+        !brain.has_memory_value(memory_module_types::ATTACK_TARGET_COOLDOWN.id()),
+        "nothing has seeded the cooldown yet"
+    );
+
+    let group_data =
+        Mob::finalize_spawn(nautilus.as_ref(), &world, EntitySpawnReason::Natural, None);
+
+    let cooldown = brain
+        .get_memory(memory_module_types::ATTACK_TARGET_COOLDOWN)
+        .expect("NautilusAi.initMemories seeds TIME_BETWEEN_NON_PLAYER_ATTACKS");
+    assert!(
+        (2400..=3600).contains(&cooldown),
+        "the cooldown should be vanilla's UniformInt.of(2400, 3600), got {cooldown}"
+    );
+    assert!(
+        group_data.is_some(),
+        "AgeableMob.finalizeSpawn owns the cluster data, so skipping it also \
+         skips the roll that makes a calf"
     );
 }
 

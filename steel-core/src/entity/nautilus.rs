@@ -171,15 +171,23 @@ impl fmt::Debug for AbstractNautilusBase {
     }
 }
 
+impl Default for AbstractNautilusBase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AbstractNautilusBase {
-    /// Creates nautilus runtime state with an inventory sized for `inventory_columns`.
+    /// Creates nautilus runtime state with an empty inventory.
+    ///
+    /// The real size arrives from [`AbstractNautilus::create_nautilus_inventory`],
+    /// which the constructor calls the way vanilla's does -- the column count is
+    /// the mob's to answer, and the mob does not exist yet here.
     #[must_use]
-    pub fn new(inventory_columns: usize) -> Self {
+    pub fn new() -> Self {
         Self {
             state: SyncMutex::new(AbstractNautilusState::new()),
-            inventory: SyncMutex::new(
-                SimpleContainer::new(inventory_columns * INVENTORY_ROWS).into_shared(),
-            ),
+            inventory: SyncMutex::new(SimpleContainer::new(0).into_shared()),
         }
     }
 
@@ -270,11 +278,6 @@ pub trait AbstractNautilus: TamableAnimal {
         if base.dash_cooldown() == 0 {
             base.set_dash_cooldown(DASH_COOLDOWN_TICKS);
         }
-    }
-
-    /// Returns vanilla `AbstractNautilus.getJumpCooldown`.
-    fn jump_cooldown(&self) -> i32 {
-        self.abstract_nautilus_base().dash_cooldown()
     }
 
     /// Returns vanilla `AbstractNautilus.isFood`.
@@ -661,11 +664,6 @@ pub trait AbstractNautilus: TamableAnimal {
             .create_inventory(self.nautilus_inventory_size());
     }
 
-    /// Returns vanilla `AbstractNautilus.hasInventoryChanged`.
-    fn has_nautilus_inventory_changed(&self, other: &Shared<SimpleContainer>) -> bool {
-        !Arc::ptr_eq(&self.abstract_nautilus_base().inventory(), other)
-    }
-
     /// Applies vanilla `AbstractNautilus.openCustomInventoryScreen`.
     ///
     /// MISSING FOUNDATION: the screen itself does not open. Three pieces are
@@ -681,9 +679,11 @@ pub trait AbstractNautilus: TamableAnimal {
     ///   which Steel's `Slot` has no equivalent of.
     ///
     /// The same gap already stops `AbstractHorse.openCustomInventoryScreen`, so
-    /// closing it closes both. Everything else -- the inventory, its resize, the
-    /// identity check `hasInventoryChanged` needs, and the tame/rider gate --
-    /// is implemented, so the interaction is accepted and nothing opens.
+    /// closing it closes both. The inventory the screen would bind to, its
+    /// resize and the tame/rider gate are here; `hasInventoryChanged` arrives
+    /// with the menu that would call it. In 26.2 the container is zero slots
+    /// wide anyway -- `getInventoryColumns` is `0` for both nautiluses -- so the
+    /// grid half of that screen would be empty even once it opens.
     fn open_nautilus_inventory_screen(&self, player: &Player) {
         if (self.is_vehicle() && !self.has_passenger(player)) || !self.is_tame() {
             return;
