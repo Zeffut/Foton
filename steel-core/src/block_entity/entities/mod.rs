@@ -42,7 +42,9 @@ pub use beacon::{
     effect_range, encode_effect, required_levels_for, should_apply_this_tick, validate_effects,
 };
 pub use beehive::{
-    BEEHIVE_MAX_OCCUPANTS, BEEHIVE_MIN_OCCUPATION_TICKS_NECTARLESS, BeehiveBlockEntity,
+    BEEHIVE_MAX_OCCUPANTS, BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR,
+    BEEHIVE_MIN_OCCUPATION_TICKS_NECTARLESS, BEEHIVE_MIN_TICKS_BEFORE_REENTERING, BeeReleaseStatus,
+    BeehiveBlockEntity,
 };
 pub use brewing_stand::{
     BOTTLE_SLOTS, BREWING_STAND_SLOTS, BrewingStandBlockEntity, BrewingStandDataSlots,

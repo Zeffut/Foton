@@ -8,6 +8,7 @@ use steel_registry::data_components::vanilla_components::{
 };
 
 use steel_protocol::packets::game::SoundSource;
+use steel_registry::blocks::BlockRef;
 use steel_registry::data_components::vanilla_components::ITEM_NAME;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::equipment::EquipmentSlot;
@@ -312,6 +313,16 @@ pub trait ItemBehavior: Send + Sync {
     /// in `SignBlock.useItemOn`. Steel has no class hierarchy to ask, so a
     /// behavior that applies to signs says so here.
     fn as_sign_applicator(&self) -> Option<&dyn SignApplicator> {
+        None
+    }
+
+    /// Returns the block this item places, when it places one.
+    ///
+    /// Vanilla parity: the `itemStack.getItem() instanceof BlockItem blockItem`
+    /// test callers follow with `blockItem.getBlock()` -- `Bee.mobInteract` is
+    /// the one that matters here, because it is how a flower held out to a bee
+    /// becomes the effect the flower carries.
+    fn placed_block(&self) -> Option<BlockRef> {
         None
     }
 

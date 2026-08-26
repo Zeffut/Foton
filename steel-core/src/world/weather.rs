@@ -287,6 +287,28 @@ impl World {
         environment::creaking_active(self.dimension_type, level_data.world_clocks())
     }
 
+    /// Returns the current vanilla `BEES_STAY_IN_HIVE` environment attribute.
+    ///
+    /// This is what sends a bee home at dusk and keeps it in during a storm.
+    /// Vanilla reads it at a position; Steel resolves environment attributes per
+    /// dimension, and neither the timeline nor the weather layer varies within one.
+    pub fn bees_stay_in_hive(&self) -> bool {
+        let (rain_level, thunder_level) = if self.can_have_weather() {
+            let weather = self.weather.lock();
+            (weather.rain_level, weather.thunder_level)
+        } else {
+            (0.0, 0.0)
+        };
+
+        let level_data = self.level_data.read();
+        environment::bees_stay_in_hive(
+            self.dimension_type,
+            level_data.world_clocks(),
+            rain_level,
+            thunder_level,
+        )
+    }
+
     /// Returns sky-layer light after the current sky darkening is subtracted.
     ///
     /// Mirrors vanilla `LevelReader.getEffectiveSkyBrightness` without allowing

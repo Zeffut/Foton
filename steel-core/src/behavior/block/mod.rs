@@ -37,7 +37,9 @@ use crate::behavior::{InventoryAccess, PlacementSource};
 use crate::block_entity::{BlockEntity, BlockEntityTicker, SharedBlockEntity};
 use crate::entity::ai::path::PathComputationType;
 use crate::entity::projectile::Projectile;
-use crate::entity::{Entity, InsideBlockEffectCollector, damage::DamageSource, entity_loot_ref};
+use crate::entity::{
+    Entity, InsideBlockEffectCollector, MobEffectInstance, damage::DamageSource, entity_loot_ref,
+};
 use crate::fluid::is_water_fluid;
 use crate::inventory::lock::{AttachedContainers, ContainerRef};
 use crate::physics::collide;
@@ -1273,6 +1275,43 @@ pub trait BlockBehavior: Send + Sync {
 
     /// Returns the trait object for Blocks that have the Bonemealable trait implemented.
     fn as_bonemealable(&self) -> Option<&dyn Bonemealable> {
+        None
+    }
+
+    /// Advances this block one growth stage for a bee flying over it.
+    ///
+    /// Vanilla parity: the `instanceof` chain of `Bee.BeeGrowCropGoal.tick`,
+    /// which asks a crop, a stem, a sweet berry bush and a cave vine for their
+    /// next state in four different ways. Steel asks the block rather than
+    /// testing its Rust type from the goal, because block behaviors are not
+    /// downcastable. The one member of `#minecraft:bee_growables` that matches
+    /// none of vanilla's four branches -- the pitcher crop, which is a
+    /// `DoublePlantBlock` -- simply does not override this, so a bee leaves it
+    /// alone exactly as vanilla does.
+    ///
+    /// `None` means the bee grows nothing here and spends none of its ten crops.
+    ///
+    /// See also [`Self::bee_interaction_effect`].
+    #[expect(
+        unused_variables,
+        reason = "default trait impl; parameters used by overrides"
+    )]
+    fn bee_grown_state(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+    ) -> Option<BlockStateId> {
+        None
+    }
+
+    /// Returns the effect this flower gives a bee that touches or is fed it.
+    ///
+    /// Vanilla parity: `FlowerBlock.getBeeInteractionEffect`, which is `null` for
+    /// every flower except the wither rose and the eyeblossom. `Bee.mobInteract`
+    /// reads it when a player holds a flower out, and both overriding blocks read
+    /// it again from their own `entityInside`.
+    fn bee_interaction_effect(&self) -> Option<MobEffectInstance> {
         None
     }
 

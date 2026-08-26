@@ -130,6 +130,10 @@ impl ItemBehavior for BlockItem {
         self.place(context.build_place_context())
     }
 
+    fn placed_block(&self) -> Option<BlockRef> {
+        Some(self.block)
+    }
+
     /// Vanilla parity: `BlockItem.canFitInsideContainerItems`. Steel has no
     /// `ShulkerBoxBlock` behavior to test against, so the block tag holding
     /// exactly those seventeen blocks stands in, as it already does for banners

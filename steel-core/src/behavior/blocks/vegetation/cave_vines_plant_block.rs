@@ -109,6 +109,22 @@ impl BlockBehavior for CaveVinesPlantBlock {
     ) -> Option<ItemStack> {
         Some(ItemStack::new(&vanilla_items::GLOW_BERRIES))
     }
+
+    /// Vanilla parity: the `BonemealableBlock` branch of
+    /// `Bee.BeeGrowCropGoal.tick`; the body of a cave vine grows berries the
+    /// same way its head does.
+    fn bee_grown_state(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+    ) -> Option<BlockStateId> {
+        if !self.is_valid_bonemeal_target(state, world.as_ref(), pos) {
+            return None;
+        }
+        self.perform_bonemeal(state, world, &mut rand::rng(), pos);
+        Some(world.get_block_state(pos))
+    }
 }
 impl Bonemealable for CaveVinesPlantBlock {
     fn is_valid_bonemeal_target(

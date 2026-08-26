@@ -19,11 +19,11 @@ pub use mobs::hostile::{
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::npc::{VillagerEntity, WanderingTraderEntity, ZombieVillagerEntity};
 pub use mobs::passive::{
-    CatEntity, ChickenEntity, CowEntity, DonkeyEntity, FoxEntity, FoxVariant, GoatEntity,
-    HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity, MushroomCowEntity,
-    OcelotEntity, ParrotEntity, ParrotVariant, PigEntity, PolarBearEntity, RabbitEntity,
-    RabbitVariant, SheepEntity, SkeletonHorseEntity, StriderEntity, TraderLlamaEntity,
-    TurtleEntity, ZombieHorseEntity,
+    BeeEntity, CatEntity, ChickenEntity, CowEntity, DonkeyEntity, FoxEntity, FoxVariant,
+    GoatEntity, HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity,
+    MushroomCowEntity, OcelotEntity, ParrotEntity, ParrotVariant, PigEntity, PolarBearEntity,
+    RabbitEntity, RabbitVariant, SheepEntity, SkeletonHorseEntity, StriderEntity,
+    TraderLlamaEntity, TurtleEntity, ZombieHorseEntity,
 };
 pub use mobs::water::{
     CodEntity, DolphinEntity, GlowSquidEntity, PufferfishEntity, SalmonEntity, SquidEntity,

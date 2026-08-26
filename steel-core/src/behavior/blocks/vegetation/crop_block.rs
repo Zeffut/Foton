@@ -280,6 +280,21 @@ impl<T: CropLike + Bonemealable + Send + Sync> BlockBehavior for T {
         Some(self)
     }
 
+    /// Vanilla parity: the `instanceof CropBlock` branch of
+    /// `Bee.BeeGrowCropGoal.tick`, which advances the crop by a single stage
+    /// rather than the two-to-five bonemeal would give it.
+    fn bee_grown_state(
+        &self,
+        state: BlockStateId,
+        _world: &Arc<World>,
+        _pos: BlockPos,
+    ) -> Option<BlockStateId> {
+        if self.is_max_age(state) {
+            return None;
+        }
+        Some(self.get_state_for_age(self.get_age(state) + 1))
+    }
+
     fn get_clone_item_stack(
         &self,
         _block: BlockRef,

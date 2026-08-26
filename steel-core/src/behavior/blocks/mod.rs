@@ -3,7 +3,7 @@
 //! The actual behavior registration is auto-generated from classes.json.
 //! See `src/generated/behaviors.rs` for the generated registration code.
 
-mod building;
+pub(crate) mod building;
 mod colored;
 mod container;
 mod decoration;

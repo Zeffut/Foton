@@ -6,8 +6,12 @@ use steel_registry::blocks::properties::{
 };
 use steel_registry::blocks::{BlockRef, block_state_ext::BlockStateExt as _};
 use steel_registry::fluid::FluidState;
+use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_damage_types;
-use steel_registry::{sound_events, vanilla_blocks, vanilla_fluids, vanilla_game_events};
+use steel_registry::{
+    REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_blocks, vanilla_fluids,
+    vanilla_game_events,
+};
 use steel_utils::{BlockPos, BlockStateId, types::UpdateFlags};
 
 use crate::behavior::block::schedule_water_tick_if_waterlogged;
@@ -18,6 +22,48 @@ use crate::{
         ClipHitResult, LevelAccessor, ScheduledTickAccess, World, game_event::GameEventContext,
     },
 };
+
+/// How far below a campfire its smoke still reaches.
+///
+/// Vanilla parity: the `i <= 5` of `CampfireBlock.isSmokeyPos`.
+const SMOKE_REACH: i32 = 5;
+
+/// Returns whether smoke from a campfire reaches `pos`.
+///
+/// Vanilla parity: `CampfireBlock.isSmokeyPos`. This is what lets a player
+/// harvest a hive without the bees turning on them, and it is the whole reason
+/// beekeepers put a campfire under the hive.
+///
+/// Deviation: vanilla stops the search at a block whose collision shape
+/// intersects the thin slab just under the hive, then looks one block further.
+/// Steel has no shape-intersection helper reachable from here, so a full
+/// collision block stands in -- which agrees with vanilla for every block a
+/// player would actually put there, and differs only for shapes that are solid
+/// at the top and open at the bottom.
+#[must_use]
+pub(crate) fn is_smokey_pos(world: &Arc<World>, pos: BlockPos) -> bool {
+    for step in 1..=SMOKE_REACH {
+        let below = BlockPos::new(pos.x(), pos.y() - step, pos.z());
+        let state = world.get_block_state(below);
+        if is_lit_campfire(state) {
+            return true;
+        }
+        if world.is_collision_shape_full_block_at(below, state) {
+            let further = BlockPos::new(below.x(), below.y() - 1, below.z());
+            return is_lit_campfire(world.get_block_state(further));
+        }
+    }
+    false
+}
+
+/// Vanilla parity: `CampfireBlock.isLitCampfire`.
+#[must_use]
+pub(crate) fn is_lit_campfire(state: BlockStateId) -> bool {
+    REGISTRY
+        .blocks
+        .is_in_tag(state.get_block(), &BlockTag::CAMPFIRES)
+        && state.get_value(&BlockStateProperties::LIT)
+}
 
 /// Behavior for campfires and soul campfires.
 ///

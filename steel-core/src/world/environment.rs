@@ -12,9 +12,14 @@ const SUN_ANGLE_ATTRIBUTE: &str = "minecraft:visual/sun_angle";
 const TURTLE_EGG_HATCH_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/turtle_egg_hatch_chance";
 const CAT_WAKING_UP_GIFT_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/cat_waking_up_gift_chance";
 const CREAKING_ACTIVE_ATTRIBUTE: &str = "minecraft:gameplay/creaking_active";
+const BEES_STAY_IN_HIVE_ATTRIBUTE: &str = "minecraft:gameplay/bees_stay_in_hive";
 /// The declared default of `EnvironmentAttributes.CREAKING_ACTIVE`. No dimension type
 /// overrides it, so only the overworld `day` timeline ever turns it on.
 const DEFAULT_CREAKING_ACTIVE: bool = false;
+/// The declared default of `EnvironmentAttributes.BEES_STAY_IN_HIVE`. No dimension
+/// type overrides it, so a bee only shelters where the overworld `day` timeline or
+/// the weather layer says so.
+const DEFAULT_BEES_STAY_IN_HIVE: bool = false;
 const DEFAULT_SKY_LIGHT_LEVEL: f32 = 15.0;
 const DEFAULT_SUN_ANGLE: f32 = 0.0;
 /// Vanilla `DimensionDefaults.TURTLE_EGG_HATCH_CHANCE`, which is also the
@@ -125,6 +130,37 @@ pub(super) fn creaking_active(
         dimension_type,
         clock_manager,
         CREAKING_ACTIVE_ATTRIBUTE,
+    )
+}
+
+/// Returns the `gameplay/bees_stay_in_hive` environment attribute.
+///
+/// Two layers stack. The overworld `day` timeline turns it on for the night --
+/// vanilla's `addModifierTrack(BEES_STAY_IN_HIVE, BooleanModifier.OR, 12542 -> true,
+/// 23460 -> false)` -- and `WeatherAttributes` sets it outright while it is raining
+/// or thundering.
+///
+/// The weather layer is a plain `rain_level > 0.0` test rather than
+/// [`World::is_raining`](crate::world::World::is_raining)'s `> 0.2`, because the
+/// attribute's boolean state-change lerp is `LerpFunction.ofStep(0.0)`: it takes the
+/// weather value for any non-zero alpha, so the bees head home the moment the sky
+/// starts to darken rather than a few seconds later.
+#[must_use]
+pub(super) fn bees_stay_in_hive(
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+    rain_level: f32,
+    thunder_level: f32,
+) -> bool {
+    if rain_level > 0.0 || thunder_level > 0.0 {
+        return true;
+    }
+
+    apply_timeline_bool_attribute(
+        DEFAULT_BEES_STAY_IN_HIVE,
+        dimension_type,
+        clock_manager,
+        BEES_STAY_IN_HIVE_ATTRIBUTE,
     )
 }
 

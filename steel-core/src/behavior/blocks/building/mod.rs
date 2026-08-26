@@ -5,7 +5,7 @@ mod barrier_block;
 mod bed_block;
 mod brushable_block;
 mod budding_amethyst;
-mod campfire_block;
+pub(crate) mod campfire_block;
 mod cauldron_block;
 mod composter_block;
 mod conduit_block;

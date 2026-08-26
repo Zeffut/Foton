@@ -146,6 +146,18 @@ impl BlockBehavior for StemBlock {
         default_surviving_state(self.block, self, context)
     }
 
+    /// Vanilla parity: the `instanceof StemBlock` branch of
+    /// `Bee.BeeGrowCropGoal.tick`.
+    fn bee_grown_state(
+        &self,
+        state: BlockStateId,
+        _world: &Arc<World>,
+        _pos: BlockPos,
+    ) -> Option<BlockStateId> {
+        let age = state.get_value(AGE);
+        (age < MAX_AGE).then(|| state.set_value(AGE, age + 1))
+    }
+
     fn can_survive(&self, state: BlockStateId, world: &dyn LevelReader, pos: BlockPos) -> bool {
         vegetation_can_survive(self, state, world, pos)
     }

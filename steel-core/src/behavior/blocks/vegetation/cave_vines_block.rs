@@ -166,6 +166,23 @@ impl BlockBehavior for CaveVinesBlock {
     fn as_growing_plant_head(&self) -> Option<&dyn GrowingPlantHead> {
         Some(&self.base)
     }
+
+    /// Vanilla parity: the `BonemealableBlock` branch of
+    /// `Bee.BeeGrowCropGoal.tick`, which is the only one that goes through
+    /// bonemeal rather than an age property -- a cave vine has no age, it either
+    /// carries berries or it does not.
+    fn bee_grown_state(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+    ) -> Option<BlockStateId> {
+        if !self.is_valid_bonemeal_target(state, world.as_ref(), pos) {
+            return None;
+        }
+        self.perform_bonemeal(state, world, &mut rand::rng(), pos);
+        Some(world.get_block_state(pos))
+    }
 }
 impl Bonemealable for CaveVinesBlock {
     fn is_valid_bonemeal_target(

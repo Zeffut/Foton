@@ -4,9 +4,15 @@ use steel_macros::block_behavior;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_utils::{BlockPos, BlockStateId};
 
+use steel_registry::vanilla_mob_effects;
+
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::BlockPlaceContext;
+use crate::entity::MobEffectInstance;
 use crate::world::{LevelReader, World};
+
+/// Vanilla `EyeblossomBlock.getBeeInteractionEffect`'s duration.
+const BEE_POISON_DURATION_TICKS: i32 = 25;
 
 use super::{BlockRef, default_surviving_state, survives_on_tag};
 
@@ -47,6 +53,16 @@ impl BlockBehavior for EyeblossomBlock {
 
     fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {
         default_surviving_state(self.block, self, context)
+    }
+
+    /// Vanilla parity: `EyeblossomBlock.getBeeInteractionEffect`, which is the
+    /// same poison whether a bee walks into the flower or is fed one.
+    fn bee_interaction_effect(&self) -> Option<MobEffectInstance> {
+        Some(MobEffectInstance::with_duration(
+            vanilla_mob_effects::POISON,
+            BEE_POISON_DURATION_TICKS,
+            0,
+        ))
     }
 
     fn random_tick(&self, _state: BlockStateId, _world: &Arc<World>, _pos: BlockPos) {

@@ -139,7 +139,7 @@ pub(crate) fn land_random_pos(
     clippy::too_many_arguments,
     reason = "vanilla passes the hover band and the facing cone independently"
 )]
-pub(super) fn hover_random_pos(
+pub(crate) fn hover_random_pos(
     mob: &dyn PathfinderMob,
     horizontal_dist: i32,
     vertical_dist: i32,
@@ -176,7 +176,7 @@ pub(super) fn hover_random_pos(
 /// Picks a spot in the air or the water to drift to.
 ///
 /// Vanilla parity: `AirAndWaterRandomPos.getPos`.
-pub(super) fn air_and_water_random_pos(
+pub(crate) fn air_and_water_random_pos(
     mob: &dyn PathfinderMob,
     horizontal_dist: i32,
     vertical_dist: i32,
@@ -187,27 +187,85 @@ pub(super) fn air_and_water_random_pos(
 ) -> Option<DVec3> {
     let restrict = mob_restricted(mob, f64::from(horizontal_dist));
     generate_random_pos(mob, || {
-        let direction = {
-            let mut random = LegacyRandom::from_seed(rand::random());
-            generate_random_direction_within_radians(
-                &mut random,
-                0.0,
-                f64::from(horizontal_dist),
-                vertical_dist,
-                flying_height,
-                x_dir,
-                z_dir,
-                max_xz_radians_from_dir,
-            )
-        }?;
-        let pos = generate_random_pos_toward_direction(mob, f64::from(horizontal_dist), direction);
-        if is_outside_limits(mob, pos) || is_restricted(restrict, mob, pos) {
-            return None;
-        }
-
-        let pos = move_up_out_of_solid(mob, pos)?;
-        (!has_malus(mob, pos)).then_some(pos)
+        air_and_water_random_block_pos(
+            mob,
+            horizontal_dist,
+            vertical_dist,
+            flying_height,
+            x_dir,
+            z_dir,
+            max_xz_radians_from_dir,
+            restrict,
+        )
     })
+}
+
+/// Picks a dry spot in the air to fly toward.
+///
+/// Vanilla parity: `AirRandomPos.getPosTowards`, which is
+/// [`air_and_water_random_pos`] aimed at a point and with the water rejected --
+/// it is how a bee crosses the distance to a hive it cannot path to directly.
+pub(crate) fn air_random_pos_towards(
+    mob: &dyn PathfinderMob,
+    horizontal_dist: i32,
+    vertical_dist: i32,
+    flying_height: i32,
+    towards_pos: DVec3,
+    max_xz_radians_from_dir: f64,
+) -> Option<DVec3> {
+    let dir = towards_pos - mob.position();
+    let restrict = mob_restricted(mob, f64::from(horizontal_dist));
+    generate_random_pos(mob, || {
+        let pos = air_and_water_random_block_pos(
+            mob,
+            horizontal_dist,
+            vertical_dist,
+            flying_height,
+            dir.x,
+            dir.z,
+            max_xz_radians_from_dir,
+            restrict,
+        )?;
+        (!is_water(mob, pos)).then_some(pos)
+    })
+}
+
+/// Vanilla parity: the static `AirAndWaterRandomPos.generateRandomPos`, shared
+/// by `AirAndWaterRandomPos.getPos` and `AirRandomPos.getPosTowards`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "vanilla passes the flying band and the facing cone independently"
+)]
+fn air_and_water_random_block_pos(
+    mob: &dyn PathfinderMob,
+    horizontal_dist: i32,
+    vertical_dist: i32,
+    flying_height: i32,
+    x_dir: f64,
+    z_dir: f64,
+    max_xz_radians_from_dir: f64,
+    restrict: bool,
+) -> Option<BlockPos> {
+    let direction = {
+        let mut random = LegacyRandom::from_seed(rand::random());
+        generate_random_direction_within_radians(
+            &mut random,
+            0.0,
+            f64::from(horizontal_dist),
+            vertical_dist,
+            flying_height,
+            x_dir,
+            z_dir,
+            max_xz_radians_from_dir,
+        )
+    }?;
+    let pos = generate_random_pos_toward_direction(mob, f64::from(horizontal_dist), direction);
+    if is_outside_limits(mob, pos) || is_restricted(restrict, mob, pos) {
+        return None;
+    }
+
+    let pos = move_up_out_of_solid(mob, pos)?;
+    (!has_malus(mob, pos)).then_some(pos)
 }
 
 /// Climbs out of a solid column, then keeps rising up to `above_solid_amount`.

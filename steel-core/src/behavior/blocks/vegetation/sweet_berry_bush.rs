@@ -43,6 +43,8 @@ pub struct SweetBerryBushBlock {
 }
 
 const AGE: &IntProperty = &BlockStateProperties::AGE_3;
+/// Vanilla `SweetBerryBushBlock.MAX_AGE`.
+const MAX_AGE: u8 = 3;
 
 impl SweetBerryBushBlock {
     /// Creates a new Sweet Berry Bush Block Behavior
@@ -53,6 +55,18 @@ impl SweetBerryBushBlock {
 }
 
 impl BlockBehavior for SweetBerryBushBlock {
+    /// Vanilla parity: the `Blocks.SWEET_BERRY_BUSH` branch of
+    /// `Bee.BeeGrowCropGoal.tick`.
+    fn bee_grown_state(
+        &self,
+        state: BlockStateId,
+        _world: &Arc<World>,
+        _pos: BlockPos,
+    ) -> Option<BlockStateId> {
+        let age = state.get_value(AGE);
+        (age < MAX_AGE).then(|| state.set_value(AGE, age + 1))
+    }
+
     fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {
         if self.may_place_on(
             context.world.get_block_state(context.place_pos().below()),

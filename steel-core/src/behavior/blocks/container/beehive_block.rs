@@ -3,24 +3,27 @@
 use std::sync::{Arc, Weak};
 
 use steel_macros::block_behavior;
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::blocks::properties::{
-    BlockStateProperties, BoolProperty, Direction, EnumProperty, IntProperty,
+    BlockStateProperties, Direction, EnumProperty, IntProperty,
 };
 use steel_registry::item_stack::ItemStack;
-use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::{
-    REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_block_entity_types,
-    vanilla_game_events, vanilla_items,
+    sound_events, vanilla_block_entity_types, vanilla_game_events, vanilla_items,
 };
 use steel_utils::types::{InteractionHand, UpdateFlags};
-use steel_utils::{BlockPos, BlockStateId};
+use steel_utils::{BlockPos, BlockStateId, Downcast as _, WorldAabb};
 
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
+use crate::behavior::blocks::building::campfire_block::is_smokey_pos;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
-use crate::block_entity::BLOCK_ENTITIES;
+use crate::block_entity::entities::{BeeReleaseStatus, BeehiveBlockEntity};
+use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
+use crate::entity::Mob;
+use crate::entity::entities::BeeEntity;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader, World};
@@ -36,51 +39,15 @@ const FULL_HONEY_LEVEL: u8 = 5;
 /// Steel has no loot tables, so the number is written out.
 const HONEYCOMB_PER_HARVEST: i32 = 3;
 
-/// How far below a hive a campfire still calms its bees.
+/// How far around a broken or harvested hive its bees are roused.
 ///
-/// Vanilla parity: the `i <= 5` of `CampfireBlock.isSmokeyPos`.
-const SMOKE_REACH: i32 = 5;
-
-/// Whether a campfire is lit.
-const LIT: &BoolProperty = &BlockStateProperties::LIT;
-
-/// Returns whether smoke from a campfire reaches `pos`.
-///
-/// Vanilla parity: `CampfireBlock.isSmokeyPos`. This is what lets a player
-/// harvest a hive without the bees turning on them, and it is the whole reason
-/// beekeepers put a campfire under the hive.
-///
-/// Deviation: vanilla stops the search at a block whose collision shape
-/// intersects the thin slab just under the hive, then looks one block further.
-/// Steel has no shape-intersection helper reachable from here, so a full
-/// collision block stands in -- which agrees with vanilla for every block a
-/// player would actually put there, and differs only for shapes that are solid
-/// at the top and open at the bottom.
-fn is_smokey_pos(world: &Arc<World>, pos: BlockPos) -> bool {
-    for step in 1..=SMOKE_REACH {
-        let below = BlockPos::new(pos.x(), pos.y() - step, pos.z());
-        let state = world.get_block_state(below);
-        if is_lit_campfire(state) {
-            return true;
-        }
-        if world.is_collision_shape_full_block_at(below, state) {
-            let further = BlockPos::new(below.x(), below.y() - 1, below.z());
-            return is_lit_campfire(world.get_block_state(further));
-        }
-    }
-    false
-}
-
-/// Vanilla parity: `CampfireBlock.isLitCampfire`.
-fn is_lit_campfire(state: BlockStateId) -> bool {
-    REGISTRY
-        .blocks
-        .is_in_tag(state.get_block(), &BlockTag::CAMPFIRES)
-        && state.get_value(LIT)
-}
+/// Vanilla parity: the `new AABB(pos).inflate(8.0, 6.0, 8.0)` of
+/// `BeehiveBlock.angerNearbyBees`.
+const ANGER_RANGE_XZ: f64 = 8.0;
+/// The vertical half of that box.
+const ANGER_RANGE_Y: f64 = 6.0;
 
 /// Behavior for beehive and bee nest blocks.
-// TODO: Implement full vanilla beehive interactions, bee release, smoke/fire handling, loot/data components, and ticking.
 #[block_behavior]
 pub struct BeehiveBlock {
     block: BlockRef,
@@ -95,18 +62,94 @@ impl BeehiveBlock {
     pub const fn new(block: BlockRef) -> Self {
         Self { block }
     }
+
+    /// Empties the hive and drops its honey level back to zero.
+    ///
+    /// Vanilla parity: `BeehiveBlock.releaseBeesAndResetHoneyLevel`.
+    fn release_bees_and_reset_honey_level(
+        &self,
+        world: &Arc<World>,
+        state: BlockStateId,
+        pos: BlockPos,
+        player: Option<&Player>,
+        release_status: BeeReleaseStatus,
+    ) {
+        Self::reset_honey_level(world, state, pos);
+        let Some(block_entity) = world.get_block_entity(pos) else {
+            return;
+        };
+        let Some(hive) = block_entity.downcast_ref::<BeehiveBlockEntity>() else {
+            return;
+        };
+        hive.empty_all_living_from_hive(player, state, release_status);
+    }
+
+    /// Vanilla parity: `BeehiveBlock.resetHoneyLevel`.
+    fn reset_honey_level(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
+        world.set_block(
+            pos,
+            state.set_value(LEVEL_HONEY, 0),
+            UpdateFlags::UPDATE_ALL,
+        );
+    }
+
+    /// Vanilla parity: `BeehiveBlock.hiveContainsBees`.
+    fn hive_contains_bees(world: &Arc<World>, pos: BlockPos) -> bool {
+        world.get_block_entity(pos).is_some_and(|block_entity| {
+            block_entity
+                .downcast_ref::<BeehiveBlockEntity>()
+                .is_some_and(|hive| !hive.is_empty())
+        })
+    }
+
+    /// Turns every bee within eight blocks on a random nearby player.
+    ///
+    /// Vanilla parity: `BeehiveBlock.angerNearbyBees`. This is the half of the
+    /// harvest that reaches bees already out flying, as opposed to the ones the
+    /// hive itself lets out.
+    fn anger_nearby_bees(world: &Arc<World>, pos: BlockPos) {
+        let area = WorldAabb::new(
+            f64::from(pos.x()),
+            f64::from(pos.y()),
+            f64::from(pos.z()),
+            f64::from(pos.x() + 1),
+            f64::from(pos.y() + 1),
+            f64::from(pos.z() + 1),
+        )
+        .inflate_xyz(ANGER_RANGE_XZ, ANGER_RANGE_Y, ANGER_RANGE_XZ);
+
+        let bees = world.get_entities_in_aabb_matching(&area, |entity| {
+            entity.downcast_ref::<BeeEntity>().is_some()
+        });
+        if bees.is_empty() {
+            return;
+        }
+        let players =
+            world.get_entities_in_aabb_matching(&area, |entity| entity.as_player().is_some());
+        if players.is_empty() {
+            return;
+        }
+
+        for bee_entity in bees {
+            let Some(bee) = bee_entity.downcast_ref::<BeeEntity>() else {
+                continue;
+            };
+            if bee.target().is_some() {
+                continue;
+            }
+            let index = rand::random_range(0..players.len());
+            bee.set_target(Some(&players[index]));
+        }
+    }
 }
 
 impl BlockBehavior for BeehiveBlock {
-    /// Vanilla parity: `BeehiveBlock.useItemOn`. A full hive gives honeycomb
-    /// to shears and a honey bottle to a glass bottle, and empties either way.
+    /// Vanilla parity: `BeehiveBlock.useItemOn`. A full hive gives honeycomb to
+    /// shears and a honey bottle to a glass bottle, and empties either way.
     ///
-    /// Not implemented: the bees. Vanilla turns every bee within eight blocks
-    /// on the harvester unless a campfire is smoking below, and empties the
-    /// hive of its occupants at the same time. Steel has no bee entity, so the
-    /// campfire check is here and does nothing yet -- it is what the anger
-    /// would hang off, and leaving it out would make the honey free forever
-    /// once bees arrive.
+    /// Whether the harvester gets away with it is decided by the campfire below:
+    /// with smoke the hive merely loses its honey, without it every bee in range
+    /// turns on the player and the hive empties itself as an emergency.
     fn use_item_on(
         &self,
         state: BlockStateId,
@@ -155,13 +198,20 @@ impl BlockBehavior for BeehiveBlock {
         }
 
         // TODO: Award stat ITEM_USED; Steel has no statistics registry.
-        // TODO: Anger the nearby bees and empty the hive when there is no
-        // smoke, once Steel has a bee entity.
-        let _calm = is_smokey_pos(world, pos);
-        world.set_block(
+        if is_smokey_pos(world, pos) {
+            Self::reset_honey_level(world, state, pos);
+            return InteractionResult::Success;
+        }
+
+        if Self::hive_contains_bees(world, pos) {
+            Self::anger_nearby_bees(world, pos);
+        }
+        self.release_bees_and_reset_honey_level(
+            world,
+            state,
             pos,
-            state.set_value(LEVEL_HONEY, 0),
-            UpdateFlags::UPDATE_ALL,
+            Some(player),
+            BeeReleaseStatus::Emergency,
         );
         InteractionResult::Success
     }
@@ -186,6 +236,20 @@ impl BlockBehavior for BeehiveBlock {
             pos,
             state,
         ))
+    }
+
+    /// Vanilla parity: the ticker `BeehiveBlock.getTicker` installs, which is
+    /// what counts an occupant's stay down and lets it back out.
+    fn get_block_entity_ticker(
+        &self,
+        _world: &Arc<World>,
+        _state: BlockStateId,
+        block_entity_type: BlockEntityTypeRef,
+    ) -> Option<BlockEntityTicker> {
+        BlockEntityTicker::for_matching_entity_tick(
+            block_entity_type,
+            &vanilla_block_entity_types::BEEHIVE,
+        )
     }
 
     fn has_analog_output_signal(&self, _state: BlockStateId) -> bool {

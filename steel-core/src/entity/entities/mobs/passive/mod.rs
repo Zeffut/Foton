@@ -1,5 +1,6 @@
 //! Passive entity implementations.
 /// Those mobs are passive creatures that run away when attacked by a player.
+mod bee;
 mod cat;
 mod chicken;
 mod cow;
@@ -16,6 +17,7 @@ mod sheep;
 mod strider;
 mod turtle;
 
+pub use bee::BeeEntity;
 pub use cat::CatEntity;
 pub use chicken::ChickenEntity;
 pub use cow::CowEntity;

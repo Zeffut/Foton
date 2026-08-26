@@ -14,6 +14,9 @@ use crate::{behavior::block::BlockBehavior, world::World};
 
 use super::{BlockRef, default_surviving_state, survives_on_tag};
 
+/// Vanilla `WitherRoseBlock.getBeeInteractionEffect`'s duration.
+const WITHER_DURATION_TICKS: i32 = 40;
+
 /// Behavior for wither roses.
 #[block_behavior]
 pub struct WitherRoseBlock {
@@ -67,10 +70,19 @@ impl BlockBehavior for WitherRoseBlock {
         ) {
             return;
         }
-        living_entity.add_mob_effect(MobEffectInstance::with_duration(
-            vanilla_mob_effects::WITHER,
-            40,
-            0,
-        ));
+        living_entity.add_mob_effect(self.bee_interaction_effect_instance());
+    }
+
+    /// Vanilla parity: `WitherRoseBlock.getBeeInteractionEffect`.
+    fn bee_interaction_effect(&self) -> Option<MobEffectInstance> {
+        Some(self.bee_interaction_effect_instance())
+    }
+}
+
+impl WitherRoseBlock {
+    /// The wither a rose hands out, both to whatever walks into it and to a bee
+    /// a player feeds it to.
+    fn bee_interaction_effect_instance(&self) -> MobEffectInstance {
+        MobEffectInstance::with_duration(vanilla_mob_effects::WITHER, WITHER_DURATION_TICKS, 0)
     }
 }
