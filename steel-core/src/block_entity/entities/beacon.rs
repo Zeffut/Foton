@@ -5,21 +5,26 @@
 //! every four seconds hands its two chosen effects to every player within
 //! range.
 //!
-//! Not implemented: the colored beam. Vanilla walks the column above the
-//! beacon collecting the stained glass it passes through, and sends the
-//! resulting sections to the client to draw. Steel keeps only the part of that
-//! walk the server needs -- whether the column is clear at all, which is what
-//! decides if the beacon works.
+//! VANILLA CLIENT-LOCAL: the colored beam. Vanilla's column walk collects
+//! `BeaconBeamOwner.Section`s as it passes stained glass, but nothing on the
+//! server ever reads them -- `getBeamSections` has exactly one caller,
+//! `BeaconRenderer`, and the list is in neither `saveAdditional` nor
+//! `getUpdateTag`. The client runs the same walk on its own copy and colors
+//! the beam from the glass it can already see, so Steel keeps only the half of
+//! the walk the server needs: whether the column is clear at all, which is
+//! what decides if the beacon works.
 
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::NbtCompound;
+use steel_protocol::packets::game::SoundSource;
 use steel_registry::mob_effect::MobEffectRef;
+use steel_registry::sound_event::SoundEventRef;
 use steel_registry::{
-    REGISTRY, RegistryEntry, RegistryExt as _, TaggedRegistryExt as _, vanilla_block_entity_types,
-    vanilla_block_tags::BlockTag,
+    REGISTRY, RegistryEntry, RegistryExt as _, TaggedRegistryExt as _, sound_events,
+    vanilla_block_entity_types, vanilla_block_tags::BlockTag, vanilla_blocks,
 };
 
 use steel_utils::locks::SyncMutex;
@@ -294,27 +299,54 @@ impl BlockEntity for BeaconBlockEntity {
         }
 
         let pos = self.get_block_pos();
-        let levels = if sky_is_clear(world, pos) {
+        let beam_is_clear = sky_is_clear(world, pos);
+        let previous_levels = self.data.levels();
+        // Vanilla only recounts the pyramid while the beam is clear, so a
+        // beacon someone roofs over keeps the level it last had. Nothing reads
+        // that stale number except the menu, which is why a covered beacon
+        // still shows its rings while handing out nothing.
+        let levels = if beam_is_clear {
             count_pyramid_levels(world, pos)
         } else {
-            0
+            previous_levels
         };
         self.data.levels.store(levels, Ordering::Relaxed);
-        if levels <= 0 {
-            return;
+
+        if levels > 0 && beam_is_clear {
+            play_beacon_sound(world, pos, &sound_events::BLOCK_BEACON_AMBIENT);
+
+            // Vanilla drops an effect the pyramid no longer supports the next
+            // time the menu validates it; doing it here means a beacon that
+            // loses a ring stops handing out what it can no longer offer,
+            // rather than carrying on until someone opens it.
+            let primary = self.data.primary();
+            let secondary = self.data.secondary();
+            if validate_effects(primary, secondary, levels) {
+                apply_effects(world, pos, levels, primary, secondary);
+            }
         }
 
-        // Vanilla drops an effect the pyramid no longer supports the next time
-        // the menu validates it; doing it here means a beacon that loses a ring
-        // stops handing out what it can no longer offer, rather than carrying
-        // on until someone opens it.
-        let primary = self.data.primary();
-        let secondary = self.data.secondary();
-        if !validate_effects(primary, secondary, levels) {
-            return;
+        // Vanilla parity: the `wasActive`/`isActive` pair at the end of
+        // `tick`. Because the level survives the beam being covered, this only
+        // fires when the pyramid itself is built or broken.
+        match (previous_levels > 0, levels > 0) {
+            (false, true) => play_beacon_sound(world, pos, &sound_events::BLOCK_BEACON_ACTIVATE),
+            (true, false) => play_beacon_sound(world, pos, &sound_events::BLOCK_BEACON_DEACTIVATE),
+            _ => {}
         }
+    }
 
-        apply_effects(world, pos, levels, primary, secondary);
+    /// Vanilla parity: `BeaconBlockEntity.setRemoved`, which signs off with the
+    /// deactivation note whether or not the beacon was lit.
+    fn on_set_removed(&self) {
+        let Some(world) = self.base().level() else {
+            return;
+        };
+        play_beacon_sound(
+            &world,
+            self.get_block_pos(),
+            &sound_events::BLOCK_BEACON_DEACTIVATE,
+        );
     }
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
@@ -404,8 +436,133 @@ pub const fn effect_range(levels: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use steel_registry::{init_vanilla_registry, vanilla_mob_effects};
+    use steel_utils::ChunkPos;
+    use steel_utils::types::UpdateFlags;
 
     use super::*;
+    use crate::behavior::init_behaviors;
+    use crate::block_entity::{SharedBlockEntity, init_block_entities};
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use crate::world::LevelReader as _;
+    use steel_utils::Downcast as _;
+
+    /// A beacon on a single ring of iron, in a loaded chunk.
+    fn lit_beacon(key: &'static str, pos: BlockPos) -> Arc<World> {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+
+        for x in (pos.x() - 1)..=(pos.x() + 1) {
+            for z in (pos.z() - 1)..=(pos.z() + 1) {
+                assert!(world.set_block(
+                    BlockPos::new(x, pos.y() - 1, z),
+                    vanilla_blocks::IRON_BLOCK.default_state(),
+                    UpdateFlags::UPDATE_ALL
+                ));
+            }
+        }
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::BEACON.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        world
+    }
+
+    fn beacon_at(world: &Arc<World>, pos: BlockPos) -> SharedBlockEntity {
+        let entity = world
+            .get_block_entity(pos)
+            .expect("placing a beacon should create its block entity");
+        assert!(
+            entity
+                .as_ref()
+                .downcast_ref::<BeaconBlockEntity>()
+                .is_some(),
+            "the block entity under a beacon should be a beacon"
+        );
+        entity
+    }
+
+    fn beacon_data(entity: &SharedBlockEntity) -> Arc<BeaconDataSlots> {
+        entity
+            .as_ref()
+            .downcast_ref::<BeaconBlockEntity>()
+            .expect("checked above")
+            .data()
+    }
+
+    /// Vanilla's column walk spells out `&& !state.is(Blocks.BEDROCK)`, which
+    /// is the only reason a beacon works under the Nether roof.
+    #[test]
+    fn bedrock_is_the_one_solid_block_a_beacon_sees_through() {
+        let pos = BlockPos::new(8, 64, 8);
+        let world = lit_beacon("beacon_sees_through_bedrock", pos);
+        let roof = BlockPos::new(pos.x(), pos.y() + 6, pos.z());
+
+        assert!(sky_is_clear(&world, pos), "an open column is clear");
+
+        assert!(world.set_block(
+            roof,
+            vanilla_blocks::STONE.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        assert!(!sky_is_clear(&world, pos), "stone blocks the column");
+
+        assert!(world.set_block(
+            roof,
+            vanilla_blocks::BEDROCK.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        assert!(sky_is_clear(&world, pos), "bedrock does not");
+    }
+
+    /// Vanilla only recounts the pyramid while the beam is clear, so a covered
+    /// beacon keeps the level it last had. Zeroing it instead would make the
+    /// menu lie about the pyramid and turn every roofing into a deactivation.
+    #[test]
+    fn a_covered_beacon_keeps_the_level_it_had() {
+        let pos = BlockPos::new(8, 64, 8);
+        let world = lit_beacon("beacon_keeps_level_when_covered", pos);
+        let beacon = beacon_at(&world, pos);
+
+        world.level_data.write().set_game_time(80);
+        beacon.tick(&world);
+        assert_eq!(
+            beacon_data(&beacon).levels(),
+            1,
+            "one ring of iron is one level"
+        );
+
+        assert!(world.set_block(
+            BlockPos::new(pos.x(), pos.y() + 6, pos.z()),
+            vanilla_blocks::STONE.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        world.level_data.write().set_game_time(160);
+        beacon.tick(&world);
+        assert_eq!(
+            beacon_data(&beacon).levels(),
+            1,
+            "the level survives the roof"
+        );
+
+        // And the pyramid coming apart under a clear sky does zero it.
+        assert!(world.set_block(
+            BlockPos::new(pos.x(), pos.y() + 6, pos.z()),
+            vanilla_blocks::AIR.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        assert!(world.set_block(
+            BlockPos::new(pos.x(), pos.y() - 1, pos.z()),
+            vanilla_blocks::DIRT.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        world.level_data.write().set_game_time(240);
+        beacon.tick(&world);
+        assert_eq!(beacon_data(&beacon).levels(), 0);
+    }
 
     fn speed() -> MobEffectRef {
         init_vanilla_registry();
@@ -525,8 +682,13 @@ mod tests {
 ///
 /// Vanilla parity: the column walk of `BeaconBlockEntity.tick`, which clears
 /// the beam the moment it meets a block that dampens light fully. Stained
-/// glass and tinted glass do not, which is what lets them color the beam
-/// rather than block it.
+/// glass does not, which is what lets it color the beam rather than block it;
+/// tinted glass does, which is why it is the one glass that kills a beacon.
+///
+/// Bedrock is vanilla's one exception, spelled out as `&& !state.is(BEDROCK)`.
+/// It dampens light fully like any other solid block, so without the exception
+/// a beacon under the Nether roof would refuse to work -- and in vanilla one
+/// does.
 #[must_use]
 pub fn sky_is_clear(world: &Arc<World>, pos: BlockPos) -> bool {
     use crate::world::LevelReader as _;
@@ -535,12 +697,20 @@ pub fn sky_is_clear(world: &Arc<World>, pos: BlockPos) -> bool {
     let mut y = pos.y() + 1;
     while y <= surface {
         let above = BlockPos::new(pos.x(), y, pos.z());
-        if world.get_block_state(above).get_light_dampening() >= FULL_LIGHT_DAMPENING {
+        let state = world.get_block_state(above);
+        if state.get_light_dampening() >= FULL_LIGHT_DAMPENING
+            && state.get_block() != &vanilla_blocks::BEDROCK
+        {
             return false;
         }
         y += 1;
     }
     true
+}
+
+/// Vanilla parity: the private `BeaconBlockEntity.playSound`.
+fn play_beacon_sound(world: &Arc<World>, pos: BlockPos, sound: SoundEventRef) {
+    world.play_sound(sound, SoundSource::Blocks, pos, 1.0, 1.0, None);
 }
 
 /// Hands the beacon's effects to every player in range.
