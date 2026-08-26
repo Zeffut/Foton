@@ -328,6 +328,10 @@ impl PlayerInventory {
 }
 
 impl EntityEquipment for PlayerInventory {
+    fn container_index(&self, slot: EquipmentSlot) -> usize {
+        self.equipment_slot_index(slot)
+    }
+
     fn get_ref(&self, slot: EquipmentSlot) -> &ItemStack {
         &self.items[self.equipment_slot_index(slot)]
     }

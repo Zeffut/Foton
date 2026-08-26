@@ -30,6 +30,7 @@ use crate::entity::attribute::{AttributeMap, AttributeModifier, AttributeModifie
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity as _, LivingEntity, SharedEntity, WeakEntity};
 use crate::inventory::equipment::{EntityEquipment, EquipmentSlot, OwnedEntityEquipment};
+use crate::inventory::lock::SharedContainer;
 use crate::raid::DEFAULT_MAX_RAID_OMEN_LEVEL;
 use crate::world::World;
 
@@ -738,6 +739,11 @@ pub struct LivingEntityBase {
     active_mob_effects: SyncMutex<FxHashMap<MobEffectRef, ActiveMobEffect>>,
     dirty_mob_effects: SyncMutex<Vec<MobEffectSyncChange>>,
     equipment: Shared<dyn EntityEquipment>,
+    /// The same allocation as [`Self::equipment`], erased to the container
+    /// trait instead. A menu slot can only sit on a [`SharedContainer`], and
+    /// `Arc<Mutex<dyn A>>` cannot be re-erased to `Arc<Mutex<dyn B>>`, so the
+    /// second handle is made where the concrete type is still known.
+    equipment_container: SharedContainer,
     last_equipment_items: SyncMutex<[ItemStack; EquipmentSlot::ALL.len()]>,
     pending_equipment_changes: SyncMutex<[Option<ItemStack>; EquipmentSlot::ALL.len()]>,
     equipment_attribute_modifiers:
@@ -760,24 +766,27 @@ impl LivingEntityBase {
     /// Creates living runtime state from an explicit attribute map.
     #[must_use]
     pub fn with_attributes(attributes: AttributeMap) -> Self {
-        let equipment: Shared<dyn EntityEquipment> = OwnedEntityEquipment::new().into_shared();
-        Self::with_attributes_and_equipment(attributes, equipment)
+        Self::with_attributes_and_equipment(attributes, OwnedEntityEquipment::new().into_shared())
     }
 
     /// Creates living runtime state with an explicit canonical equipment backing.
     #[must_use]
-    pub fn with_equipment(
+    pub fn with_equipment<T: EntityEquipment + 'static>(
         entity_type: EntityTypeRef,
-        equipment: Shared<dyn EntityEquipment>,
+        equipment: Shared<T>,
     ) -> Self {
         Self::with_attributes_and_equipment(AttributeMap::new_for_entity(entity_type), equipment)
     }
 
-    fn with_attributes_and_equipment(
+    /// The concrete equipment type is still visible here, which is what lets
+    /// the one allocation be erased to both of the traits it implements.
+    fn with_attributes_and_equipment<T: EntityEquipment + 'static>(
         attributes: AttributeMap,
-        equipment: Shared<dyn EntityEquipment>,
+        equipment: Shared<T>,
     ) -> Self {
         let speed = attributes.required_value(vanilla_attributes::MOVEMENT_SPEED) as f32;
+        let equipment_container: SharedContainer = equipment.clone();
+        let equipment: Shared<dyn EntityEquipment> = equipment;
 
         Self {
             state: SyncMutex::new(LivingEntityState::new(speed)),
@@ -785,6 +794,7 @@ impl LivingEntityBase {
             active_mob_effects: SyncMutex::new(FxHashMap::default()),
             dirty_mob_effects: SyncMutex::new(Vec::new()),
             equipment,
+            equipment_container,
             last_equipment_items: SyncMutex::new(array::from_fn(|_| ItemStack::empty())),
             pending_equipment_changes: SyncMutex::new(array::from_fn(|_| None)),
             equipment_attribute_modifiers: SyncMutex::new(array::from_fn(|_| Vec::new())),
@@ -813,6 +823,18 @@ impl LivingEntityBase {
     #[inline]
     pub const fn equipment(&self) -> &Shared<dyn EntityEquipment> {
         &self.equipment
+    }
+
+    /// The same storage as [`Self::equipment`], read as a container, together
+    /// with the index `slot` occupies in it.
+    ///
+    /// This is what a mount screen's saddle and body-armor slots sit on. The
+    /// index comes from the storage itself because a player keeps its worn
+    /// items among its 41 inventory slots while a mob keeps them in eight.
+    #[must_use]
+    pub fn equipment_slot_container(&self, slot: EquipmentSlot) -> (SharedContainer, usize) {
+        let index = self.equipment.lock().container_index(slot);
+        (Arc::clone(&self.equipment_container), index)
     }
 
     /// Collects equipment changes against Vanilla's previous-tick snapshots.
