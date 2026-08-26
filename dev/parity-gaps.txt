@@ -33,5 +33,5 @@ EnderDragon
 HappyGhast
 Nautilus
 Player
-SulfurCube
+Warden
 ZombieNautilus

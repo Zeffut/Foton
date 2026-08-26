@@ -61,6 +61,7 @@ use crate::{
     sound_events,
     structure::StructureRegistry,
     structure_processor::StructureProcessorListRegistry,
+    sulfur_cube_archetype::SulfurCubeArchetypeRegistry,
     template_pool,
     timeline::TimelineRegistry,
     trading::{TradeSetRegistry, VillagerTradeRegistry},
@@ -81,10 +82,11 @@ use crate::{
     vanilla_pig_sound_variants, vanilla_pig_variants, vanilla_placed_features,
     vanilla_poi_type_tags, vanilla_poi_types, vanilla_position_source_types, vanilla_potion_tags,
     vanilla_potions, vanilla_recipes, vanilla_structure_processors, vanilla_structure_tags,
-    vanilla_structures, vanilla_template_pools, vanilla_timeline_tags, vanilla_timelines,
-    vanilla_trim_materials, vanilla_trim_patterns, vanilla_villager_professions,
-    vanilla_villager_trades, vanilla_villager_types, vanilla_wolf_sound_variants,
-    vanilla_wolf_variants, vanilla_world_clocks, vanilla_zombie_nautilus_variants,
+    vanilla_structures, vanilla_sulfur_cube_archetypes, vanilla_template_pools,
+    vanilla_timeline_tags, vanilla_timelines, vanilla_trim_materials, vanilla_trim_patterns,
+    vanilla_villager_professions, vanilla_villager_trades, vanilla_villager_types,
+    vanilla_wolf_sound_variants, vanilla_wolf_variants, vanilla_world_clocks,
+    vanilla_zombie_nautilus_variants,
     villager_profession::VillagerProfessionRegistry,
     villager_type::VillagerTypeRegistry,
     wolf_sound_variant::WolfSoundVariantRegistry,
@@ -262,6 +264,7 @@ pub struct Registry {
     pub mob_effects: MobEffectRegistry,
     pub map_decoration_types: MapDecorationTypeRegistry,
     pub potions: PotionRegistry,
+    pub sulfur_cube_archetypes: SulfurCubeArchetypeRegistry,
     pub zombie_nautilus_variants: ZombieNautilusVariantRegistry,
     pub timelines: TimelineRegistry,
     pub recipes: RecipeRegistry,
@@ -373,6 +376,9 @@ impl Registry {
         vanilla_zombie_nautilus_variants::register_zombie_nautilus_variants(
             &mut registry.zombie_nautilus_variants,
         );
+        vanilla_sulfur_cube_archetypes::register_sulfur_cube_archetypes(
+            &mut registry.sulfur_cube_archetypes,
+        );
         vanilla_timelines::register_timelines(&mut registry.timelines);
         vanilla_timeline_tags::TimelineTag::register_timeline_tags(&mut registry.timelines);
         vanilla_recipes::register_recipes(&mut registry.recipes);
@@ -457,6 +463,7 @@ impl Registry {
         self.mob_effects.freeze();
         self.map_decoration_types.freeze();
         self.potions.freeze();
+        self.sulfur_cube_archetypes.freeze();
         self.zombie_nautilus_variants.freeze();
         self.timelines.freeze();
         self.recipes.freeze();
@@ -715,6 +722,7 @@ impl Registry {
             mob_effects: MobEffectRegistry::new(),
             map_decoration_types: MapDecorationTypeRegistry::new(),
             potions: PotionRegistry::new(),
+            sulfur_cube_archetypes: SulfurCubeArchetypeRegistry::new(),
             zombie_nautilus_variants: ZombieNautilusVariantRegistry::new(),
             timelines: TimelineRegistry::new(),
             recipes: RecipeRegistry::new(),

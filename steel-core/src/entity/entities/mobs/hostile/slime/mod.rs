@@ -17,6 +17,7 @@ use steel_registry::entity_data::EntityPose;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
+use steel_registry::vanilla_attributes;
 use steel_registry::vanilla_biome_tags::BiomeTag;
 use steel_registry::vanilla_entity_data::SlimeEntityData;
 use steel_utils::locks::SyncMutex;
@@ -382,13 +383,18 @@ impl Mob for SlimeEntity {
 }
 
 impl CubeLike for SlimeEntity {
-    /// Vanilla parity: `Slime.setSize`, whose only additions over the shared
-    /// body are the attack damage -- which `apply_size` already sets -- and the
-    /// experience. The reward is here rather than in `apply_size` because
-    /// `SulfurCube` overrides `setSize` too and deliberately sets neither.
+    /// Vanilla parity: `Slime.setSize`, which adds the bite and the experience
+    /// on top of the shared body. Both are here rather than in `apply_size`
+    /// because `SulfurCube` overrides `setSize` too and deliberately sets
+    /// neither -- it has no attack damage attribute at all.
     fn set_size(&self, size: i32, update_health: bool) {
         cube_common::apply_size(self, size, update_health);
-        self.set_xp_reward(self.size());
+
+        let size = self.size();
+        self.set_xp_reward(size);
+        self.attributes()
+            .lock()
+            .set_base_value(vanilla_attributes::ATTACK_DAMAGE, f64::from(size));
     }
 
     fn cube_state(&self) -> &SyncMutex<CubeState> {

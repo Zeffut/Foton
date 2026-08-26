@@ -14,9 +14,9 @@ pub use mobs::hostile::{
     GiantEntity, GuardianEntity, HoglinEntity, HuskEntity, IllusionerEntity,
     MAX_WARDEN_WARNING_LEVEL, MagmaCubeEntity, ParchedEntity, PhantomEntity, PiglinBruteEntity,
     PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity,
-    SlimeEntity, SpiderEntity, StrayEntity, VexEntity, VindicatorEntity, WardenEntity,
-    WardenSpawnTracker, WitchEntity, WitherSkeletonEntity, ZoglinEntity, ZombieEntity,
-    ZombifiedPiglinEntity, try_warn_of_warden,
+    SlimeEntity, SpiderEntity, StrayEntity, SulfurCubeEntity, VexEntity, VindicatorEntity,
+    WardenEntity, WardenSpawnTracker, WitchEntity, WitherSkeletonEntity, ZoglinEntity,
+    ZombieEntity, ZombifiedPiglinEntity, try_warn_of_warden,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::npc::{VillagerEntity, WanderingTraderEntity, ZombieVillagerEntity};

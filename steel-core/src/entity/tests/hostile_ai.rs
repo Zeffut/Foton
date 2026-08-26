@@ -22,8 +22,8 @@ use crate::entity::entities::{
     PandaEntity, ParchedEntity, PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity,
     PolarBearEntity, PufferfishEntity, RavagerEntity, ShulkerEntity, SilverfishEntity,
     SkeletonEntity, SlimeEntity, SnifferEntity, SnowGolemEntity, SpiderEntity, StrayEntity,
-    VexEntity, VindicatorEntity, WardenEntity, WitchEntity, WitherBoss, WitherSkeletonEntity,
-    ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
+    SulfurCubeEntity, VexEntity, VindicatorEntity, WardenEntity, WitchEntity, WitherBoss,
+    WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{Entity, LivingEntity, Mob, MobEffectInstance, next_entity_id};
 use steel_registry::{vanilla_entities, vanilla_mob_effects};
@@ -131,6 +131,7 @@ assert_ai_runs! {
     a_ravager_runs_its_goals: RavagerEntity, &vanilla_entities::RAVAGER;
     a_slime_runs_its_goals: SlimeEntity, &vanilla_entities::SLIME;
     a_magma_cube_runs_its_goals: MagmaCubeEntity, &vanilla_entities::MAGMA_CUBE;
+    a_sulfur_cube_runs_its_goals: SulfurCubeEntity, &vanilla_entities::SULFUR_CUBE;
     an_iron_golem_runs_its_goals: IronGolemEntity, &vanilla_entities::IRON_GOLEM;
     a_snow_golem_runs_its_goals: SnowGolemEntity, &vanilla_entities::SNOW_GOLEM;
     a_blaze_runs_its_goals: BlazeEntity, &vanilla_entities::BLAZE;

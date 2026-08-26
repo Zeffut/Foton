@@ -23,7 +23,10 @@ use steel_utils::{BlockPos, BlockStateId, Downcast as _, translations};
 use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 
-use super::dispense_behavior::{DispenseOutcome, DispenseSource, dispense_behavior_for};
+use super::dispense_behavior::{
+    DispenseOutcome, DispenseSource, dispense_behavior_for, feed_sulfur_cube,
+    is_sulfur_cube_swallowable,
+};
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
@@ -268,6 +271,18 @@ fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
     let source = DispenseSource { world, pos, facing };
 
     let Some(behavior) = dispense_behavior_for(stack.item()) else {
+        // Vanilla parity: the sulfur-cube branch of
+        // `DispenserBlock.getDefaultDispenseMethod`, which offers the block to a
+        // cube standing in front of the dispenser and throws it only when no
+        // cube takes it.
+        if is_sulfur_cube_swallowable(stack.item())
+            && feed_sulfur_cube(world, pos.relative(facing), &mut stack)
+        {
+            dispenser.set_item(slot, stack);
+            play_dispense_effects(world, pos, facing);
+            return;
+        }
+
         let thrown = stack.split(1);
         spawn_dispensed_item(world, pos, facing, thrown);
         dispenser.set_item(slot, stack);

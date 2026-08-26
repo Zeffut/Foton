@@ -32,6 +32,7 @@ mod skeleton;
 mod slime;
 mod spider;
 mod stray;
+mod sulfur_cube;
 mod vex;
 mod vindicator;
 mod warden;
@@ -70,6 +71,7 @@ pub use skeleton::SkeletonEntity;
 pub use slime::SlimeEntity;
 pub use spider::SpiderEntity;
 pub use stray::StrayEntity;
+pub use sulfur_cube::SulfurCubeEntity;
 pub use vex::VexEntity;
 pub use vindicator::VindicatorEntity;
 pub use warden::{
