@@ -383,7 +383,15 @@ pub trait LivingEntity: Entity {
     }
 
     /// Returns vanilla `LivingEntity.getHurtSound`.
-    fn hurt_sound(&self, _source: &DamageSource) -> Option<SoundEventRef> {
+    fn hurt_sound(&self, source: &DamageSource) -> Option<SoundEventRef> {
+        self.default_hurt_sound(source)
+    }
+
+    /// The body of [`Self::hurt_sound`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition calls this for
+    /// the rest.
+    fn default_hurt_sound(&self, _source: &DamageSource) -> Option<SoundEventRef> {
         Some(&sound_events::ENTITY_GENERIC_HURT)
     }
 
@@ -1020,7 +1028,15 @@ pub trait LivingEntity: Entity {
     }
 
     /// Applies vanilla `LivingEntity.knockback`.
-    fn knockback(&self, mut power: f64, mut xd: f64, mut zd: f64) {
+    fn knockback(&self, power: f64, xd: f64, zd: f64) {
+        self.default_knockback(power, xd, zd);
+    }
+
+    /// The body of [`Self::knockback`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only refuses knockback under some
+    /// condition -- a creaking a player is staring at -- calls this for the rest.
+    fn default_knockback(&self, mut power: f64, mut xd: f64, mut zd: f64) {
         power *= 1.0 - self.knockback_resistance();
         if power <= 0.0 {
             return;
@@ -1281,6 +1297,14 @@ pub trait LivingEntity: Entity {
 
     /// Ticks the vanilla living death animation and removes the entity at completion.
     fn tick_death(&self) {
+        self.default_tick_death();
+    }
+
+    /// The body of [`Self::tick_death`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition calls this for
+    /// the rest.
+    fn default_tick_death(&self) {
         let death_time = self.living_base().increment_death_time();
         if death_time >= DEATH_DURATION && !self.is_removed() {
             self.broadcast_entity_event(EntityStatus::Poof);

@@ -1645,6 +1645,18 @@ pub trait Mob: LivingEntity {
         ));
     }
 
+    /// Stops the mob where it stands, without dropping it out of the air.
+    ///
+    /// Vanilla parity: `LivingEntity.stopInPlace`. Vanilla keeps it on
+    /// `LivingEntity`; here it needs the navigation, which only a `Mob` has.
+    fn stop_in_place(&self) {
+        self.mob_base().navigation().lock().stop();
+        self.set_travel_input(LivingTravelInput::ZERO);
+        self.set_mob_speed(0.0);
+        let velocity = self.velocity();
+        self.set_velocity(DVec3::new(0.0, velocity.y, 0.0));
+    }
+
     /// How far around itself a mob reaches for dropped items.
     ///
     /// Vanilla parity: `Mob.getPickupReach`, whose `ITEM_PICKUP_REACH` is one
@@ -2265,6 +2277,14 @@ pub trait Mob: LivingEntity {
     }
 
     fn tick_jump_control(&self) {
+        self.default_tick_jump_control();
+    }
+
+    /// The body of [`Self::tick_jump_control`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition calls this for
+    /// the rest.
+    fn default_tick_jump_control(&self) {
         let jumping = self.mob_base().controls().lock().jump_control.tick();
         self.set_jumping(jumping);
     }

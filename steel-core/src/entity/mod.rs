@@ -776,6 +776,7 @@ pub mod raider;
 mod registry;
 mod spawn;
 pub mod spawn_rules;
+pub mod spawn_util;
 pub mod spellcaster_illager;
 mod storage;
 mod synced_data;

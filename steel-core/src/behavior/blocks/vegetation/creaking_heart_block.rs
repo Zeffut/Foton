@@ -8,12 +8,15 @@
 //! twenty-odd experience a naturally generated one drops when a player breaks it, and the
 //! comparator output.
 //!
-//! Not implemented: the creaking. Steel has no `Creaking` entity, so the heart never spawns
-//! one, never tears one down, and its comparator therefore always reads zero -- vanilla
-//! scales that output by how far the creaking has wandered, and with no creaking vanilla
-//! reads zero too. Everything a player can see without a creaking in the world behaves as
-//! vanilla does; the moment `Creaking` lands, `CreakingHeartBlockEntity` is where the spawn,
-//! the tether and the hurt-transfer belong.
+//! The spawn, the tether and the hurt-transfer all live on
+//! `CreakingHeartBlockEntity`; what the block adds is breaking the heart, which
+//! kills the creaking with the breaker credited for it.
+//!
+//! Not implemented: `onExplosionHit`, which does the same for a heart blown up
+//! rather than mined. Steel's explosions have no per-block callback, so a heart
+//! destroyed by a blast still tears its creaking down -- through
+//! `pre_remove_side_effects` -- but as an anonymous crumble rather than a death
+//! the blast is credited with.
 
 use std::ops::RangeInclusive;
 use std::sync::{Arc, Weak};
@@ -26,16 +29,18 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{
     BlockStateProperties, BoolProperty, CreakingHeartState, Direction, EnumProperty,
 };
-use steel_registry::vanilla_block_entity_types;
 use steel_registry::vanilla_block_tags::BlockTag;
+use steel_registry::{vanilla_block_entity_types, vanilla_damage_types};
 use steel_utils::axis::Axis;
 use steel_utils::types::UpdateFlags;
-use steel_utils::{BlockPos, BlockStateId};
+use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 
 use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::BlockPlaceContext;
+use crate::block_entity::entities::CreakingHeartBlockEntity;
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::entity::Entity as _;
+use crate::entity::damage::DamageSource;
 use crate::player::Player;
 use crate::world::{LevelReader, ScheduledTickAccess, World};
 
@@ -187,7 +192,11 @@ impl BlockBehavior for CreakingHeartBlock {
         world.update_neighbor_for_output_signal(pos, state.get_block());
     }
 
-    /// Vanilla `CreakingHeartBlock.playerWillDestroy`, minus the creaking it would tear down.
+    /// Vanilla `CreakingHeartBlock.playerWillDestroy`.
+    ///
+    /// Breaking the heart is how a player is rid of the creaking, and the blow
+    /// is credited to them: the creaking dies of a player attack rather than
+    /// simply crumbling, which is what makes the kill count.
     fn player_will_destroy(
         &self,
         state: BlockStateId,
@@ -195,6 +204,15 @@ impl BlockBehavior for CreakingHeartBlock {
         pos: BlockPos,
         player: &Player,
     ) -> BlockStateId {
+        if let Some(block_entity) = world.get_block_entity(pos)
+            && let Some(heart) = block_entity.downcast_ref::<CreakingHeartBlockEntity>()
+        {
+            let source = DamageSource::environment(&vanilla_damage_types::PLAYER_ATTACK)
+                .with_causing_entity(player.id())
+                .with_direct_entity(player.id());
+            heart.remove_protector(Some(&source));
+        }
+
         // Vanilla `Player.preventsBlockDrops` is the creative `instabuild` ability.
         if !player.is_spectator() && !player.has_infinite_materials() && state.get_value(NATURAL) {
             world.pop_experience(pos, rand::rng().random_range(NATURAL_BREAK_EXPERIENCE));
@@ -207,15 +225,23 @@ impl BlockBehavior for CreakingHeartBlock {
     }
 
     /// Vanilla `CreakingHeartBlock.getAnalogOutputSignal`, which scales with how far the
-    /// creaking has wandered. With no creaking to measure, vanilla reads zero too.
+    /// creaking has wandered: fifteen at the heart, falling to zero at the edge of the
+    /// thirty-two block roam radius. A heart with no creaking reads zero.
     fn get_analog_output_signal(
         &self,
-        _state: BlockStateId,
-        _world: &dyn LevelReader,
-        _pos: BlockPos,
+        state: BlockStateId,
+        world: &dyn LevelReader,
+        pos: BlockPos,
         _direction: Direction,
     ) -> i32 {
-        0
+        if state.get_value(STATE) == CreakingHeartState::Uprooted {
+            return 0;
+        }
+        world.get_block_entity(pos).map_or(0, |block_entity| {
+            block_entity
+                .downcast_ref::<CreakingHeartBlockEntity>()
+                .map_or(0, CreakingHeartBlockEntity::analog_output_signal)
+        })
     }
 }
 

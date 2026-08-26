@@ -353,6 +353,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Mirrors vanilla `Entity.isPushable`. Base entities are not pushable unless
     /// a concrete entity type opts in.
     fn is_pushable(&self) -> bool {
+        self.default_is_pushable()
+    }
+
+    /// The body of [`Self::is_pushable`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition calls this for
+    /// the rest.
+    fn default_is_pushable(&self) -> bool {
         let Some(living) = self.as_living_entity() else {
             return false;
         };
@@ -812,6 +820,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     ///
     /// Mirrors vanilla `Entity.push(double, double, double)`.
     fn push_impulse(&self, impulse: DVec3) {
+        self.default_push_impulse(impulse);
+    }
+
+    /// The body of [`Self::push_impulse`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition calls this for
+    /// the rest.
+    fn default_push_impulse(&self, impulse: DVec3) {
         if !impulse.is_finite() {
             return;
         }
@@ -1125,6 +1141,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Mirrors vanilla `Entity.canUsePortal`, including `LivingEntity` sleeping
     /// suppression.
     fn can_use_portal(&self, ignore_passenger: bool) -> bool {
+        self.default_can_use_portal(ignore_passenger)
+    }
+
+    /// The body of [`Self::can_use_portal`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a condition calls this for
+    /// the rest.
+    fn default_can_use_portal(&self, ignore_passenger: bool) -> bool {
         let entity_type = self.entity_type();
         if entity_type == &vanilla_entities::FISHING_BOBBER
             || entity_type == &vanilla_entities::ENDER_DRAGON

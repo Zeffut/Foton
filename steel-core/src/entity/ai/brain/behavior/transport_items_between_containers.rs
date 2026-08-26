@@ -14,12 +14,11 @@ use crate::behavior::blocks::ChestBlock;
 use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext};
 use crate::block_entity::SharedBlockEntity;
 use crate::block_entity::entities::attached_containers_at;
-use crate::entity::PathfinderMob;
 use crate::entity::ai::brain::behavior::utils::set_walk_and_look_target_memories;
 use crate::entity::ai::brain::memory::{MemoryModuleId, MemoryStatus, memory_module_types};
 use crate::entity::ai::brain::position_tracker::PositionTracker;
 use crate::entity::ai::path::Path;
-use crate::entity::living_base::LivingTravelInput;
+use crate::entity::{Mob, PathfinderMob};
 use crate::inventory::container::Container;
 use crate::inventory::equipment::EquipmentSlot;
 use crate::inventory::lock::{AttachedContainers, ContainerLockGuard};
@@ -621,7 +620,7 @@ impl TransportItemsBetweenContainers {
 
     /// Vanilla parity: `startQueuing`.
     fn start_queuing(&mut self, ctx: &BrainContext<'_>) {
-        Self::stop_in_place(ctx.mob());
+        Mob::stop_in_place(ctx.mob());
         self.state = TransportItemState::Queuing;
     }
 
@@ -689,7 +688,7 @@ impl TransportItemsBetweenContainers {
             memory_module_types::LOOK_TARGET,
             PositionTracker::of_block(target.pos),
         );
-        Self::stop_in_place(ctx.mob());
+        Mob::stop_in_place(ctx.mob());
         let Some(interaction_state) = self.interaction_state else {
             return;
         };
@@ -916,15 +915,6 @@ impl TransportItemsBetweenContainers {
             .erase_memory(memory_module_types::VISITED_BLOCK_POSITIONS.id());
         ctx.brain()
             .erase_memory(memory_module_types::UNREACHABLE_TRANSPORT_BLOCK_POSITIONS.id());
-    }
-
-    /// Vanilla parity: `stopInPlace`.
-    fn stop_in_place(mob: &dyn PathfinderMob) {
-        mob.mob_base().navigation().lock().stop();
-        mob.set_travel_input(LivingTravelInput::ZERO);
-        mob.set_mob_speed(0.0);
-        let velocity = mob.velocity();
-        mob.set_velocity(DVec3::new(0.0, velocity.y, 0.0));
     }
 }
 
