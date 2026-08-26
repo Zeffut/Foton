@@ -427,10 +427,21 @@ pub trait LivingEntity: Entity {
 
     /// Returns vanilla `LivingEntity.getScale()`.
     fn get_scale(&self) -> f32 {
-        self.attributes()
-            .lock()
-            .get_value(vanilla_attributes::SCALE)
-            .unwrap_or(1.0) as f32
+        self.sanitize_scale(
+            self.attributes()
+                .lock()
+                .get_value(vanilla_attributes::SCALE)
+                .unwrap_or(1.0) as f32,
+        )
+    }
+
+    /// Clamps the scale attribute to what this entity can be drawn at.
+    ///
+    /// Vanilla parity: `LivingEntity.sanitizeScale`, which is the identity for
+    /// every mob but the happy ghast -- a mob four players ride cannot be
+    /// scaled past the harness they sit on.
+    fn sanitize_scale(&self, scale: f32) -> f32 {
+        scale
     }
 
     /// Returns true if the entity is alive (health > 0).
@@ -2245,6 +2256,14 @@ pub trait LivingEntity: Entity {
             };
         }
         value
+    }
+
+    /// Returns whether this entity is wearing something in its body slot.
+    ///
+    /// Vanilla parity: `LivingEntity.isWearingBodyArmor`, which is what a wolf's
+    /// armour and a happy ghast's harness are both read through.
+    fn is_wearing_body_armor(&self) -> bool {
+        self.has_item_in_slot(EquipmentSlot::Body)
     }
 
     /// Returns whether this entity currently has an item in `slot`.

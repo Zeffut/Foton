@@ -46,6 +46,11 @@ impl<T: Entity> EntityEventSource for T {
 /// `PlayerRideableJumping.getPlayerJumpPendingScale`.
 const MAX_PLAYER_JUMP_CHARGE: i32 = 90;
 
+/// How thick the cloud layer is.
+///
+/// Vanilla parity: the `cloudBottom + 4.0F` of `Entity.isInClouds`.
+const CLOUD_LAYER_THICKNESS: f64 = 4.0;
+
 /// A trait for entities.
 ///
 /// This trait provides the core functionality for entities.
@@ -1254,6 +1259,57 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Sets the level callback for lifecycle events (movement, removal).
     fn set_level_callback(&self, callback: Arc<dyn EntityLevelCallback>) {
         self.base().set_level_callback(callback);
+    }
+
+    /// Returns whether this entity can hold four leads from one leashable.
+    ///
+    /// Vanilla parity: `Entity.supportQuadLeashAsHolder`.
+    fn support_quad_leash_as_holder(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this entity's position must be sent in full every tick.
+    ///
+    /// Vanilla parity: `Entity.getRequiresPrecisePosition`. A delta position is
+    /// rounded to a sixteenth of a block, which a mob that is meant to hang
+    /// perfectly still under four riders cannot afford.
+    fn requires_precise_position(&self) -> bool {
+        self.base().requires_precise_position()
+    }
+
+    /// Vanilla parity: `Entity.setRequiresPrecisePosition`.
+    fn set_requires_precise_position(&self, requires_precise_position: bool) {
+        self.base()
+            .set_requires_precise_position(requires_precise_position);
+    }
+
+    /// Called on the vehicle after `passenger` has boarded.
+    ///
+    /// Vanilla parity: `Entity.addPassenger`, whose overrides run once the link
+    /// exists. Restoring a saved passenger does not call it, exactly as vanilla
+    /// rebuilds the link without running the boarding side effects.
+    fn on_passenger_added(&self, _passenger: &dyn Entity) {}
+
+    /// Called on the vehicle after `passenger` has got off.
+    ///
+    /// Vanilla parity: `Entity.removePassenger`.
+    fn on_passenger_removed(&self, _passenger: &dyn Entity) {}
+
+    /// Returns whether this entity is inside the cloud layer.
+    ///
+    /// Vanilla parity: `Entity.isInClouds`, which is four blocks thick and
+    /// starts at the dimension's cloud height.
+    fn is_in_clouds(&self) -> bool {
+        let Some(world) = self.level() else {
+            return false;
+        };
+        let Some(cloud_bottom) = world.cloud_bottom() else {
+            return false;
+        };
+        let cloud_bottom = f64::from(cloud_bottom);
+        let bounding_box = self.bounding_box();
+        bounding_box.max_y() >= cloud_bottom
+            && bounding_box.min_y() <= cloud_bottom + CLOUD_LAYER_THICKNESS
     }
 
     /// Called by leashables while this entity is their live leash holder.

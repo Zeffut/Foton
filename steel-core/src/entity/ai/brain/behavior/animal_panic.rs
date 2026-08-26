@@ -1,5 +1,7 @@
 //! Vanilla `AnimalPanic`.
 
+use std::f64::consts::FRAC_PI_2;
+
 use glam::DVec3;
 use steel_registry::vanilla_damage_type_tags;
 use steel_utils::Identifier;
@@ -9,7 +11,9 @@ use crate::entity::PathfinderMob;
 use crate::entity::ai::brain::memory::{
     MemoryModuleId, MemoryStatus, WalkTarget, memory_module_types,
 };
-use crate::entity::ai::goal::{block_pos_corner, land_random_pos, look_for_water};
+use crate::entity::ai::goal::{
+    air_and_water_random_pos, block_pos_corner, land_random_pos, look_for_water,
+};
 
 /// Vanilla parity: `AnimalPanic.PANIC_MIN_DURATION`.
 const PANIC_MIN_DURATION: i32 = 100;
@@ -19,6 +23,8 @@ const PANIC_MAX_DURATION: i32 = 120;
 const PANIC_DISTANCE_HORIZONTAL: i32 = 5;
 /// Vanilla parity: `AnimalPanic.PANIC_DISTANCE_VERTICAL`.
 const PANIC_DISTANCE_VERTICAL: i32 = 4;
+/// Vanilla parity: the `(float) (Math.PI / 2)` a flying panic searches within.
+const PANIC_MAX_RADIANS_FROM_VIEW: f64 = FRAC_PI_2;
 
 /// Where a panicking mob runs to.
 type PanicPositionPicker = Box<dyn Fn(&dyn PathfinderMob) -> Option<DVec3> + Send>;
@@ -46,6 +52,29 @@ impl AnimalPanic {
             speed_multiplier,
             vanilla_damage_type_tags::DamageTypeTag::PANIC_CAUSES,
         )
+    }
+
+    /// Panics into the air rather than across the ground.
+    ///
+    /// Vanilla parity: `new AnimalPanic<>(float, int)`, whose flight height a
+    /// flier picks its escape at. A happy ghast passes zero, which is level
+    /// with itself -- it bolts sideways, not upward.
+    #[must_use]
+    pub fn flying(speed_multiplier: f64, flying_height: i32) -> Self {
+        let mut panic = Self::new(speed_multiplier);
+        panic.position_getter = Box::new(move |mob| {
+            let view = mob.look_angle();
+            air_and_water_random_pos(
+                mob,
+                PANIC_DISTANCE_HORIZONTAL,
+                PANIC_DISTANCE_VERTICAL,
+                flying_height,
+                view.x,
+                view.z,
+                PANIC_MAX_RADIANS_FROM_VIEW,
+            )
+        });
+        panic
     }
 
     /// Panics only at damage in `panic_causing_damage_types`.

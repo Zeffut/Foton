@@ -2,7 +2,7 @@
 
 use steel_utils::value_providers::UniformIntProvider;
 
-use super::{BrainContext, Trigger, utils};
+use super::{BrainContext, Trigger};
 use crate::entity::PathfinderMob;
 use crate::entity::ai::brain::memory::EntityMemory;
 use crate::entity::ai::brain::memory::{
@@ -17,6 +17,7 @@ pub struct BabyFollowAdult {
     follow_range: UniformIntProvider,
     speed_modifier: SpeedModifier,
     nearest_visible_adult: MemoryModuleType<EntityMemory>,
+    target_eye: bool,
 }
 
 /// How fast the baby closes the gap, which the body may decide per tick.
@@ -43,6 +44,7 @@ impl BabyFollowAdult {
             follow_range,
             speed_modifier: Box::new(speed_modifier),
             nearest_visible_adult: memory_module_types::NEAREST_VISIBLE_ADULT,
+            target_eye: false,
         }
     }
 
@@ -53,6 +55,18 @@ impl BabyFollowAdult {
     #[must_use]
     pub const fn following(mut self, memory: MemoryModuleType<EntityMemory>) -> Self {
         self.nearest_visible_adult = memory;
+        self
+    }
+
+    /// Follows the adult's eyes rather than its feet.
+    ///
+    /// Vanilla parity: the `targetEye` argument of the four-argument
+    /// `BabyFollowAdult.create`. A ghastling hovers, and the feet of the
+    /// four-block-tall adult it is following are four blocks below where it
+    /// wants to be.
+    #[must_use]
+    pub const fn targeting_eye(mut self) -> Self {
+        self.target_eye = true;
         self
     }
 }
@@ -90,18 +104,16 @@ impl Trigger for BabyFollowAdult {
 
         brain.set_memory(
             memory_module_types::LOOK_TARGET,
-            PositionTracker::of_entity(&adult, true),
+            PositionTracker::of_entity_targeting(&adult, true, self.target_eye),
         );
         brain.set_memory(
             memory_module_types::WALK_TARGET,
-            WalkTarget::of_entity(
-                &adult,
+            WalkTarget::new(
+                PositionTracker::of_entity_targeting(&adult, self.target_eye, self.target_eye),
                 (self.speed_modifier)(ctx.mob()),
                 self.follow_range.min_inclusive - 1,
             ),
         );
-        // Touch the helper module so a future eye-height variant keeps a home.
-        let _ = utils::in_same_world;
         true
     }
 

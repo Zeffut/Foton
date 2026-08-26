@@ -234,6 +234,7 @@ pub struct EntityBaseState {
     no_physics: bool,
     needs_velocity_sync: bool,
     hurt_marked: bool,
+    requires_precise_position: bool,
 }
 
 impl EntityBaseState {
@@ -266,6 +267,7 @@ impl EntityBaseState {
             no_physics: false,
             needs_velocity_sync: false,
             hurt_marked: false,
+            requires_precise_position: false,
         }
     }
 
@@ -750,6 +752,19 @@ impl EntityBase {
         self.state.lock().hurt_marked
     }
 
+    /// Returns whether vanilla `ServerEntity` must send this entity's position
+    /// in full rather than as a delta.
+    #[inline]
+    pub fn requires_precise_position(&self) -> bool {
+        self.state.lock().requires_precise_position
+    }
+
+    /// Vanilla parity: `Entity.setRequiresPrecisePosition`.
+    #[inline]
+    pub fn set_requires_precise_position(&self, requires_precise_position: bool) {
+        self.state.lock().requires_precise_position = requires_precise_position;
+    }
+
     /// Gets the world this entity is in.
     ///
     /// Returns `None` if the world has been dropped.
@@ -1032,9 +1047,18 @@ impl EntityBase {
             vehicle
         };
 
-        if let Some(vehicle) = vehicle {
-            vehicle.base().remove_passenger_id(self.id);
-            self.set_boarding_cooldown(60);
+        let Some(vehicle) = vehicle else {
+            return;
+        };
+        vehicle.base().remove_passenger_id(self.id);
+        self.set_boarding_cooldown(60);
+        // Vanilla parity: `Entity.removePassenger`, whose overrides run once the
+        // link is gone. `EntityBase` has no view of the entity that owns it, so
+        // the passenger comes back out of the world by id.
+        if let Some(world) = vehicle.level()
+            && let Some(passenger) = world.get_entity_by_id(self.id)
+        {
+            vehicle.on_passenger_removed(passenger.as_ref());
         }
     }
 

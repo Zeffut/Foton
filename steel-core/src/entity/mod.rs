@@ -970,6 +970,7 @@ pub(crate) fn start_riding_entities(
 
     passenger.set_pose(EntityPose::Standing);
     EntityBase::start_riding_relationship(entity_to_ride, passenger);
+    entity_to_ride.on_passenger_added(passenger.as_ref());
     // TODO: Emit ENTITY_MOUNT game event and riding advancement trigger once those foundations exist.
     true
 }

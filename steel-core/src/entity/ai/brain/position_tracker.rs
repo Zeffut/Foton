@@ -63,10 +63,24 @@ impl PositionTracker {
     /// Vanilla parity: `new EntityTracker(Entity, boolean)`.
     #[must_use]
     pub fn of_entity(entity: &SharedEntity, track_eye_height: bool) -> Self {
+        Self::of_entity_targeting(entity, track_eye_height, false)
+    }
+
+    /// Tracks an entity and says which of its heights to aim at.
+    ///
+    /// Vanilla parity: the three-argument `EntityTracker(entity, trackEyeHeight,
+    /// targetEyeHeight)`. A mob that hovers walks to the eyes of what it is
+    /// following, not to its feet.
+    #[must_use]
+    pub fn of_entity_targeting(
+        entity: &SharedEntity,
+        track_eye_height: bool,
+        target_eye_height: bool,
+    ) -> Self {
         Self::Entity {
             entity: EntityMemory::new(entity),
             track_eye_height,
-            target_eye_height: false,
+            target_eye_height,
         }
     }
 

@@ -11,6 +11,7 @@ pub mod equine;
 mod fox;
 mod frog;
 mod goat;
+mod happy_ghast;
 mod mooshroom;
 mod nautilus;
 mod ocelot;
@@ -38,6 +39,7 @@ pub use equine::{
 pub use fox::{FoxEntity, FoxVariant};
 pub use frog::FrogEntity;
 pub use goat::GoatEntity;
+pub use happy_ghast::HappyGhastEntity;
 pub use mooshroom::MushroomCowEntity;
 pub use nautilus::{NautilusEntity, ZombieNautilusEntity};
 pub use ocelot::OcelotEntity;

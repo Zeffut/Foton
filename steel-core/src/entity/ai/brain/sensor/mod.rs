@@ -14,7 +14,7 @@ mod player;
 mod tempting;
 mod warden_specific;
 
-pub use adult::AdultSensor;
+pub use adult::{AdultSensor, AdultSensorAnyType};
 pub use axolotl_attackables::AxolotlAttackablesSensor;
 pub use breeze_attack_entity::BreezeAttackEntitySensor;
 pub use frog_attackables::FrogAttackablesSensor;
@@ -119,6 +119,8 @@ pub enum SensorType {
     ArmadilloScareDetected,
     /// Vanilla `SensorType.NEAREST_ADULT`.
     NearestAdult,
+    /// Vanilla `SensorType.NEAREST_ADULT_ANY_TYPE`.
+    NearestAdultAnyType,
     /// Vanilla `SensorType.PIGLIN_SPECIFIC_SENSOR`.
     PiglinSpecific,
     /// Vanilla `SensorType.PIGLIN_BRUTE_SPECIFIC_SENSOR`.
@@ -183,6 +185,7 @@ impl SensorType {
                 ARMADILLO_DANGER_MEMORY_TICKS,
             )),
             Self::NearestAdult => Box::new(AdultSensor),
+            Self::NearestAdultAnyType => Box::new(AdultSensorAnyType),
             Self::PiglinSpecific => Box::new(PiglinSpecificSensor),
             Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),
             Self::HoglinSpecific => Box::new(HoglinSpecificSensor),

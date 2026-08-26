@@ -22,6 +22,7 @@ for test in dev/join-test.sh dev/sapling-test.sh dev/container-test.sh \
             dev/map-test.sh \
             dev/lightning-test.sh \
             dev/dragon-test.sh \
+            dev/leash-test.sh dev/happy-ghast-test.sh \
             dev/shelf-test.sh \
             dev/spawner-test.sh dev/catalyst-test.sh \
             dev/sculk-vibration-test.sh dev/warden-test.sh \

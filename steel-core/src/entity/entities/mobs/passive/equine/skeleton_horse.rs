@@ -512,6 +512,11 @@ impl Mob for SkeletonHorseEntity {
         &self.mob_base
     }
 
+    /// Vanilla parity: `AbstractHorse.supportQuadLeash`.
+    fn support_quad_leash(&self) -> bool {
+        true
+    }
+
     fn check_spawn_rules(
         &self,
         world: &Arc<World>,

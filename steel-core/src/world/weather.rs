@@ -17,6 +17,24 @@ use super::{
     obfuscate_biome_seed, vanilla_dimension_types,
 };
 
+/// Biome temperature below which precipitation falls as snow.
+///
+/// Vanilla parity: the threshold of `Biome.coldEnoughToSnow`.
+const COLD_ENOUGH_TO_SNOW: f32 = 0.15;
+
+/// What is falling out of the sky somewhere.
+///
+/// Vanilla parity: `Biome.Precipitation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Precipitation {
+    /// Nothing is falling.
+    None,
+    /// Rain is falling.
+    Rain,
+    /// Snow is falling.
+    Snow,
+}
+
 static BIOME_TEMPERATURE_NOISE: LazyLock<PerlinSimplexNoise> = LazyLock::new(|| {
     let mut random = RandomSource::Legacy(LegacyRandom::from_seed(1234));
     PerlinSimplexNoise::new(&mut random, &[0])
@@ -193,18 +211,45 @@ impl World {
         self.is_raining_with_guard(&guard)
     }
 
-    /// Checks whether rain reaches the given block position.
+    /// Returns what is falling out of the sky at `pos`.
     ///
-    /// Mirrors vanilla `Level.isRainingAt`: global rain state, sky exposure,
-    /// motion-blocking height, and biome precipitation must all allow rain.
-    pub fn is_raining_at(&self, pos: BlockPos) -> bool {
+    /// Mirrors vanilla `Level.precipitationAt` followed by
+    /// `Biome.getPrecipitationAt`: global rain state, sky exposure and biome
+    /// precipitation gate it, then the biome temperature decides rain from snow.
+    pub fn precipitation_at(&self, pos: BlockPos) -> Precipitation {
         if !self.is_raining() || !self.can_see_sky_for_precipitation(pos) {
-            return false;
+            return Precipitation::None;
         }
 
-        self.biome_at(pos).is_some_and(|biome| {
-            biome.has_precipitation && self.biome_temperature(biome, pos) >= 0.15
-        })
+        let Some(biome) = self.biome_at(pos) else {
+            return Precipitation::None;
+        };
+        if !biome.has_precipitation {
+            return Precipitation::None;
+        }
+
+        if self.biome_temperature(biome, pos) < COLD_ENOUGH_TO_SNOW {
+            Precipitation::Snow
+        } else {
+            Precipitation::Rain
+        }
+    }
+
+    /// Checks whether rain reaches the given block position.
+    ///
+    /// Mirrors vanilla `Level.isRainingAt`, which is `precipitationAt` narrowed
+    /// to rain -- a snowy biome is precipitating without raining.
+    pub fn is_raining_at(&self, pos: BlockPos) -> bool {
+        self.precipitation_at(pos) == Precipitation::Rain
+    }
+
+    /// Returns the height the cloud layer starts at here, or `None` in a
+    /// dimension with no clouds.
+    ///
+    /// Vanilla parity: the `visual/cloud_height` environment attribute.
+    #[must_use]
+    pub fn cloud_bottom(&self) -> Option<f32> {
+        environment::cloud_bottom(self.dimension_type)
     }
 
     /// Checks whether the rain level is sufficient to render rain clientside using the provided guard.

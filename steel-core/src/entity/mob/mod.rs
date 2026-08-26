@@ -5,9 +5,11 @@ mod pathfinder;
 
 pub use leash::LeashAttachment;
 use leash::{
-    DELAYED_LEASH_DROP_TICKS, LEASH_ELASTIC_DISTANCE, LEASH_SNAP_DISTANCE, LEASH_STIFFNESS,
-    LEASH_TORSIONAL_ELASTICITY, LeashData, axis_specific_leash_elasticity,
-    compute_elastic_interaction, leash_bounding_box_center, leash_holder_movement,
+    DELAYED_LEASH_DROP_TICKS, ENTITY_LEASH_ATTACHMENT_POINT, LEASH_ELASTIC_DISTANCE,
+    LEASH_SNAP_DISTANCE, LEASH_STIFFNESS, LEASH_TORSIONAL_ELASTICITY, LEASHER_ATTACHMENT_POINT,
+    LeashData, QUAD_LEASH_WRENCH_SCALE, SHARED_QUAD_ATTACHMENT_POINTS,
+    axis_specific_leash_elasticity, compute_elastic_interaction, leash_bounding_box_center,
+    leash_holder_movement,
 };
 use pathfinder::tick_path_navigation_target;
 pub use pathfinder::{NavigationKind, PathfinderMob};
@@ -1016,13 +1018,41 @@ pub trait Mob: LivingEntity {
 
     fn close_range_leash_behavior(&self, _holder: &dyn Entity) {}
 
+    /// Returns whether this mob hangs four leads off a single holder.
+    ///
+    /// Vanilla parity: `Leashable.supportQuadLeash`. Only a mob whose holder
+    /// also answers `support_quad_leash_as_holder` gets the four-rope
+    /// treatment; anything else stays on the single-rope path.
+    fn support_quad_leash(&self) -> bool {
+        false
+    }
+
+    /// Vanilla parity: `Leashable.checkElasticInteractions`.
     fn check_elastic_interactions(&self, holder: &dyn Entity) -> bool {
+        let quad_connection = holder.support_quad_leash_as_holder() && self.support_quad_leash();
+        let (entity_attachment_points, leasher_attachment_points): (&[DVec3], &[DVec3]) =
+            if quad_connection {
+                (
+                    &SHARED_QUAD_ATTACHMENT_POINTS,
+                    &SHARED_QUAD_ATTACHMENT_POINTS,
+                )
+            } else {
+                (&ENTITY_LEASH_ATTACHMENT_POINT, &LEASHER_ATTACHMENT_POINT)
+            };
+
         let Some(wrench) = compute_elastic_interaction(
             self.as_entity_event_source(),
             holder,
             self.leash_elastic_distance(),
+            entity_attachment_points,
+            leasher_attachment_points,
         ) else {
             return false;
+        };
+        let wrench = if quad_connection {
+            wrench.scale(QUAD_LEASH_WRENCH_SCALE)
+        } else {
+            wrench
         };
 
         {
@@ -2337,7 +2367,19 @@ pub trait Mob: LivingEntity {
         selector.set_control(GoalControl::Look, no_controller);
     }
 
+    /// Override this to change how the head follows the body, and call
+    /// [`Self::default_tick_body_rotation_control`] from the override; Rust has
+    /// no `super`, so the base body lives in its own method.
     fn tick_body_rotation_control(&self) {
+        self.default_tick_body_rotation_control();
+    }
+
+    /// The body of [`Self::tick_body_rotation_control`], callable from an
+    /// override.
+    ///
+    /// Vanilla parity: `BodyRotationControl.clientTick`, which despite its name
+    /// is what `Mob.tickHeadTurn` runs on the server too.
+    fn default_tick_body_rotation_control(&self) {
         let moving = {
             let delta = self.position() - self.old_position();
             delta.x.mul_add(delta.x, delta.z * delta.z) > BODY_ROTATION_MOVING_DISTANCE_SQR
@@ -2437,7 +2479,22 @@ pub(crate) fn rotlerp(a: f32, b: f32, max: f32) -> f32 {
     result
 }
 
-fn wrap_degrees(mut degrees: f32) -> f32 {
+/// Wraps an angle into the quarter turn nearest zero.
+///
+/// Vanilla parity: `Mth.wrapDegrees90`, which the happy ghast uses to square
+/// itself up with the world while it holds still for its riders.
+pub(crate) fn wrap_degrees_90(angle: f32) -> f32 {
+    let normalized = angle % 90.0;
+    if normalized >= 45.0 {
+        return normalized - 90.0;
+    }
+    if normalized < -45.0 {
+        return normalized + 90.0;
+    }
+    normalized
+}
+
+pub(crate) fn wrap_degrees(mut degrees: f32) -> f32 {
     degrees %= 360.0;
     if degrees >= 180.0 {
         degrees -= 360.0;

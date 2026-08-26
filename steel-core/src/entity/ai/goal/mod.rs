@@ -80,7 +80,7 @@ pub(crate) use follow_mob::FollowMobGoal;
 pub(crate) use follow_owner::FollowOwnerGoal;
 pub(crate) use follow_parent::FollowParentGoal;
 pub(crate) use follow_player_ridden_entity::FollowPlayerRiddenEntityGoal;
-pub(crate) use ghast_look::GhastLookGoal;
+pub(crate) use ghast_look::{GhastLookGoal, face_movement_direction};
 pub(crate) use hold_ground_attack::HoldGroundAttackGoal;
 pub(crate) use hurt_by_target::HurtByTargetGoal;
 pub(crate) use land_on_owners_shoulder::LandOnOwnersShoulderGoal;

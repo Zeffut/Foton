@@ -489,6 +489,11 @@ impl Mob for ZombieHorseEntity {
         &self.mob_base
     }
 
+    /// Vanilla parity: `AbstractHorse.supportQuadLeash`.
+    fn support_quad_leash(&self) -> bool {
+        true
+    }
+
     /// Vanilla parity: `SpawnPlacements` registers the zombie horse with
     /// `Monster::checkMonsterSpawnRules`, not the animal rule its horse cousins
     /// use -- it is a `MONSTER` and wants the dark.

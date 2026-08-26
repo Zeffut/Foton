@@ -508,6 +508,8 @@ pub struct ServerEntityMovementSyncUpdate {
     pub has_dirty_entity_data: bool,
     /// Vanilla living fall-flying velocity sync exception.
     pub force_velocity_sync: bool,
+    /// Vanilla `Entity.getRequiresPrecisePosition`.
+    pub requires_precise_position: bool,
 }
 
 /// Movement packets and side effects selected by one `ServerEntity.sendChanges` pass.
@@ -630,7 +632,8 @@ impl ServerEntityMovementSyncState {
         let should_send_position =
             position_changed || self.tick_count % FORCED_POS_UPDATE_PERIOD == 0;
         let delta_too_big = self.position.packed_delta(update.position).is_none();
-        let force_full = delta_too_big
+        let force_full = update.requires_precise_position
+            || delta_too_big
             || self.teleport_delay > FORCED_TELEPORT_PERIOD
             || self.was_riding
             || self.was_on_ground != update.on_ground;
@@ -1072,6 +1075,7 @@ mod tests {
             needs_velocity_sync: false,
             has_dirty_entity_data: false,
             force_velocity_sync: false,
+            requires_precise_position: false,
         }
     }
 
