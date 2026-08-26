@@ -387,10 +387,11 @@ mobs that need it.
       Copper chests weather with the rest of the copper. The light block cycles
       its level for an operator only.
 
-      Left on the ledger deliberately: `BonemealableFeaturePlacerBlock` (moss),
-      because placing its patch needs the worldgen placement dispatcher, and a
-      `perform_bonemeal` that placed nothing would still eat the bone meal --
-      worse than the no-op there now.
+      Bone meal on a moss block places its patch for real now. That was the last
+      block waiting on `WorldGenLevel`: vanilla's `BonemealableFeaturePlacerBlock`
+      runs a whole configured feature, and Steel's feature dispatcher only knew how
+      to write into a mid-generation `WorldGenRegion`. It now writes into anything
+      that implements `WorldGenLevel`, which a live world does.
 
 ### 3. The end of the game
 

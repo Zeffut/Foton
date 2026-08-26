@@ -32,7 +32,7 @@ impl FeatureDecorationRunner {
         Self::place_configured_feature_kind(region, registry, random, kind, origin, biome_zoom_seed)
     }
 
-    pub(super) fn place_configured_feature_kind(
+    pub(crate) fn place_configured_feature_kind(
         region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
