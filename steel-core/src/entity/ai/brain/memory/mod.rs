@@ -364,6 +364,29 @@ memory_module_types! {
     SNIFFER_DIGGING: bool = "minecraft:sniffer_digging", saved = false;
     /// Vanilla `MemoryModuleType.SNIFFER_HAPPY`.
     SNIFFER_HAPPY: bool = "minecraft:sniffer_happy", saved = false;
+    /// Vanilla `MemoryModuleType.BREEZE_JUMP_COOLDOWN`, the pause between long
+    /// jumps -- two ticks if something has just hurt the breeze, ten otherwise.
+    BREEZE_JUMP_COOLDOWN: Unit = "minecraft:breeze_jump_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.BREEZE_SHOOT`, set while the breeze has a
+    /// reason to fire and cleared once it has.
+    BREEZE_SHOOT: Unit = "minecraft:breeze_shoot", saved = true;
+    /// Vanilla `MemoryModuleType.BREEZE_SHOOT_CHARGING`, the inhale before the
+    /// wind charge leaves.
+    BREEZE_SHOOT_CHARGING: Unit = "minecraft:breeze_shoot_charging", saved = true;
+    /// Vanilla `MemoryModuleType.BREEZE_SHOOT_RECOVERING`, registry key
+    /// `breeze_shoot_recover`.
+    BREEZE_SHOOT_RECOVERING: Unit = "minecraft:breeze_shoot_recover", saved = true;
+    /// Vanilla `MemoryModuleType.BREEZE_SHOOT_COOLDOWN`.
+    BREEZE_SHOOT_COOLDOWN: Unit = "minecraft:breeze_shoot_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.BREEZE_JUMP_INHALING`, the crouch before a
+    /// long jump.
+    BREEZE_JUMP_INHALING: Unit = "minecraft:breeze_jump_inhaling", saved = true;
+    /// Vanilla `MemoryModuleType.BREEZE_JUMP_TARGET`, the block a breeze has
+    /// picked to land on.
+    BREEZE_JUMP_TARGET: BlockPos = "minecraft:breeze_jump_target", saved = true;
+    /// Vanilla `MemoryModuleType.BREEZE_LEAVING_WATER`, which tells a jump that
+    /// started in water not to read the water it is still in as a landing.
+    BREEZE_LEAVING_WATER: Unit = "minecraft:breeze_leaving_water", saved = true;
 }
 
 /// Everything a brain remembers.

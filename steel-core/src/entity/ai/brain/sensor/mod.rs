@@ -2,6 +2,7 @@
 
 mod adult;
 mod axolotl_attackables;
+mod breeze_attack_entity;
 mod frog_attackables;
 mod hurt_by;
 mod is_in_water;
@@ -14,6 +15,7 @@ mod tempting;
 
 pub use adult::AdultSensor;
 pub use axolotl_attackables::AxolotlAttackablesSensor;
+pub use breeze_attack_entity::BreezeAttackEntitySensor;
 pub use frog_attackables::FrogAttackablesSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
@@ -119,6 +121,8 @@ pub enum SensorType {
     PiglinBruteSpecific,
     /// Vanilla `SensorType.HOGLIN_SPECIFIC_SENSOR`.
     HoglinSpecific,
+    /// Vanilla `SensorType.BREEZE_ATTACK_ENTITY_SENSOR`.
+    BreezeAttackEntity,
 }
 
 impl SensorType {
@@ -167,6 +171,7 @@ impl SensorType {
             Self::PiglinSpecific => Box::new(PiglinSpecificSensor),
             Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),
             Self::HoglinSpecific => Box::new(HoglinSpecificSensor),
+            Self::BreezeAttackEntity => Box::new(BreezeAttackEntitySensor::new()),
         }
     }
 }

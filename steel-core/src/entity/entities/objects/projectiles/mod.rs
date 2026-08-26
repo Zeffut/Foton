@@ -1,6 +1,7 @@
 //! Projectile entity implementations.
 
 mod arrow;
+mod breeze_wind_charge;
 mod dragon_fireball;
 mod ender_pearl;
 mod evoker_fangs;
@@ -19,9 +20,11 @@ mod splash_potion;
 mod thrown_egg;
 mod thrown_trident;
 mod wind_charge;
+mod wind_charge_common;
 mod wither_skull;
 
 pub use arrow::ArrowEntity;
+pub use breeze_wind_charge::BreezeWindChargeEntity;
 pub use dragon_fireball::DragonFireballEntity;
 pub use ender_pearl::EnderPearlEntity;
 pub use evoker_fangs::EvokerFangsEntity;

@@ -102,7 +102,7 @@ pub(crate) use random_look_around::RandomLookAroundGoal;
 /// Vanilla parity: `DefaultRandomPos.getPosTowards`, used by mobs that steer
 /// toward a remote point rather than wandering, such as the turtle heading home.
 pub(crate) use random_pos::{
-    air_and_water_random_pos, air_random_pos_towards, default_random_pos,
+    air_and_water_random_pos, air_random_pos_towards, default_random_pos, default_random_pos_away,
     default_random_pos_towards, hover_random_pos, land_random_pos, land_random_pos_away,
 };
 pub(crate) use random_stand::RandomStandGoal;

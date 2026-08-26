@@ -2,6 +2,7 @@
 
 mod blaze;
 mod bogged;
+mod breeze;
 mod cave_spider;
 mod creeper;
 mod cube_common;
@@ -40,6 +41,7 @@ mod zombified_piglin;
 
 pub use blaze::BlazeEntity;
 pub use bogged::BoggedEntity;
+pub use breeze::BreezeEntity;
 pub use cave_spider::CaveSpiderEntity;
 pub use creeper::CreeperEntity;
 pub use drowned::DrownedEntity;

@@ -11,10 +11,10 @@
 
 use super::*;
 use crate::entity::entities::{
-    BoggedEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, GiantEntity,
-    HoglinEntity, HuskEntity, ParchedEntity, PiglinBruteEntity, PiglinEntity, SilverfishEntity,
-    SkeletonEntity, SpiderEntity, StrayEntity, WitchEntity, WitherSkeletonEntity, ZoglinEntity,
-    ZombieEntity, ZombifiedPiglinEntity,
+    BoggedEntity, BreezeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity,
+    GiantEntity, HoglinEntity, HuskEntity, ParchedEntity, PiglinBruteEntity, PiglinEntity,
+    SilverfishEntity, SkeletonEntity, SpiderEntity, StrayEntity, WitchEntity, WitherSkeletonEntity,
+    ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -57,6 +57,20 @@ assert_monster_reward! {
     a_piglin_is_worth_five: PiglinEntity, &vanilla_entities::PIGLIN;
     a_hoglin_is_worth_five: HoglinEntity, &vanilla_entities::HOGLIN;
     a_zoglin_is_worth_five: ZoglinEntity, &vanilla_entities::ZOGLIN;
+}
+
+/// Vanilla parity: the `this.xpReward = 10` of the `Breeze` constructor, twice
+/// what the `Monster` constructor would have given it.
+#[test]
+fn a_breeze_is_worth_twice_an_ordinary_monster() {
+    init_vanilla_registry();
+    let breeze = BreezeEntity::new(
+        &vanilla_entities::BREEZE,
+        next_entity_id(),
+        DVec3::ZERO,
+        Weak::new(),
+    );
+    assert_eq!(breeze.xp_reward(), 10);
 }
 
 /// Vanilla parity: the `this.xpReward = 20` of the `PiglinBrute` constructor,

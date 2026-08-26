@@ -713,6 +713,15 @@ pub trait LivingEntity: Entity {
 
     /// Returns whether this living entity ignores a damage source.
     fn is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
+        self.living_is_invulnerable_to(world, source)
+    }
+
+    /// The body of [`Self::is_invulnerable_to`], callable from an override.
+    ///
+    /// Rust has no `super`, so a mob that only adds a reason to shrug off a
+    /// source -- a breeze, which ignores another breeze's gust -- calls this
+    /// for the rest rather than re-deriving the enchantment half.
+    fn living_is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
         self.default_is_invulnerable_to(source)
             || enchantment_helper::is_immune_to_damage(world, self, source)
     }

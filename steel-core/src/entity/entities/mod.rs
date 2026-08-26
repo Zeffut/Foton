@@ -9,10 +9,10 @@ pub use decoration::{ArmorStandEntity, MannequinEntity};
 pub use mobs::ambient::BatEntity;
 pub use mobs::bosses::WitherBoss;
 pub use mobs::hostile::{
-    BlazeEntity, BoggedEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
-    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity, GuardianEntity,
-    HoglinEntity, HuskEntity, IllusionerEntity, MagmaCubeEntity, ParchedEntity, PhantomEntity,
-    PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
+    BlazeEntity, BoggedEntity, BreezeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity,
+    ElderGuardianEntity, EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity,
+    GuardianEntity, HoglinEntity, HuskEntity, IllusionerEntity, MagmaCubeEntity, ParchedEntity,
+    PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
     SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, VexEntity,
     VindicatorEntity, WitchEntity, WitherSkeletonEntity, ZoglinEntity, ZombieEntity,
     ZombifiedPiglinEntity,
@@ -39,11 +39,11 @@ pub use objects::display_ui::{
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
-    ArrowEntity, DragonFireballEntity, EnderPearlEntity, EvokerFangsEntity, ExperienceBottleEntity,
-    EyeOfEnderEntity, FireworkRocketEntity, FishingHookEntity, LargeFireballEntity,
-    LingeringPotionEntity, LlamaSpitEntity, ShulkerBulletEntity, SmallFireballEntity,
-    SnowballEntity, SpectralArrowEntity, SplashPotionEntity, ThrownEggEntity, ThrownTridentEntity,
-    TridentPickup, WindChargeEntity, WitherSkullEntity,
+    ArrowEntity, BreezeWindChargeEntity, DragonFireballEntity, EnderPearlEntity, EvokerFangsEntity,
+    ExperienceBottleEntity, EyeOfEnderEntity, FireworkRocketEntity, FishingHookEntity,
+    LargeFireballEntity, LingeringPotionEntity, LlamaSpitEntity, ShulkerBulletEntity,
+    SmallFireballEntity, SnowballEntity, SpectralArrowEntity, SplashPotionEntity, ThrownEggEntity,
+    ThrownTridentEntity, TridentPickup, WindChargeEntity, WitherSkullEntity,
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,

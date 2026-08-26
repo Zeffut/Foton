@@ -201,7 +201,8 @@ fn is_block_floor_valid(block_floor_height: f64) -> bool {
     !block_floor_height.is_infinite() && block_floor_height < 1.0
 }
 
-fn is_block_dangerous(entity: &dyn Entity, state: BlockStateId) -> bool {
+/// Vanilla parity: `EntityType.isBlockDangerous`.
+pub(crate) fn is_block_dangerous(entity: &dyn Entity, state: BlockStateId) -> bool {
     // TODO: mirror vanilla entitytype.immuneto when the entity types carry entity specific immune block tag
     if !entity.fire_immune() && WalkPathEvaluator::is_burning_block(state) {
         return true;

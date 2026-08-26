@@ -15,13 +15,13 @@
 
 use super::*;
 use crate::entity::entities::{
-    BlazeEntity, BoggedEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
-    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity, GuardianEntity,
-    HoglinEntity, HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity, ParchedEntity,
-    PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
-    SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity, SpiderEntity, StrayEntity,
-    VexEntity, VindicatorEntity, WitchEntity, WitherBoss, WitherSkeletonEntity, ZoglinEntity,
-    ZombieEntity, ZombifiedPiglinEntity,
+    BlazeEntity, BoggedEntity, BreezeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity,
+    ElderGuardianEntity, EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity,
+    GuardianEntity, HoglinEntity, HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity,
+    ParchedEntity, PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity,
+    ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity, SpiderEntity,
+    StrayEntity, VexEntity, VindicatorEntity, WitchEntity, WitherBoss, WitherSkeletonEntity,
+    ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -96,4 +96,7 @@ assert_ai_runs! {
     a_piglin_brute_runs_its_brain: PiglinBruteEntity, &vanilla_entities::PIGLIN_BRUTE;
     a_hoglin_runs_its_brain: HoglinEntity, &vanilla_entities::HOGLIN;
     a_zoglin_runs_its_brain: ZoglinEntity, &vanilla_entities::ZOGLIN;
+    // The breeze is brain-driven too, and registers no goals at all -- without
+    // this path nothing it does ever runs.
+    a_breeze_runs_its_brain: BreezeEntity, &vanilla_entities::BREEZE;
 }

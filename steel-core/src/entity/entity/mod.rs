@@ -499,7 +499,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     }
 
     /// Returns this entity's Vanilla projectile deflection behavior.
-    fn deflection(&self, _projectile: &dyn Projectile) -> ProjectileDeflection {
+    fn deflection(&self, projectile: &dyn Projectile) -> ProjectileDeflection {
+        self.default_deflection(projectile)
+    }
+
+    /// The body of [`Self::deflection`], callable from an override.
+    ///
+    /// Rust has no `super`, so an entity that only exempts certain projectiles
+    /// -- a breeze, which lets a wind charge through -- calls this for the rest.
+    fn default_deflection(&self, _projectile: &dyn Projectile) -> ProjectileDeflection {
         if REGISTRY
             .entity_types
             .is_in_tag(self.entity_type(), &EntityTypeTag::DEFLECTS_PROJECTILES)
