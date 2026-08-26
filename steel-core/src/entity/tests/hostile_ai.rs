@@ -19,11 +19,12 @@ use crate::entity::entities::{
     CaveSpiderEntity, CreakingEntity, CreeperEntity, DolphinEntity, DrownedEntity,
     ElderGuardianEntity, EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity,
     GuardianEntity, HoglinEntity, HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity,
-    PandaEntity, ParchedEntity, PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity,
-    PolarBearEntity, PufferfishEntity, RavagerEntity, ShulkerEntity, SilverfishEntity,
-    SkeletonEntity, SlimeEntity, SnifferEntity, SnowGolemEntity, SpiderEntity, StrayEntity,
-    SulfurCubeEntity, VexEntity, VindicatorEntity, WardenEntity, WitchEntity, WitherBoss,
-    WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
+    NautilusEntity, PandaEntity, ParchedEntity, PhantomEntity, PiglinBruteEntity, PiglinEntity,
+    PillagerEntity, PolarBearEntity, PufferfishEntity, RavagerEntity, ShulkerEntity,
+    SilverfishEntity, SkeletonEntity, SlimeEntity, SnifferEntity, SnowGolemEntity, SpiderEntity,
+    StrayEntity, SulfurCubeEntity, VexEntity, VindicatorEntity, WardenEntity, WitchEntity,
+    WitherBoss, WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombieNautilusEntity,
+    ZombifiedPiglinEntity,
 };
 use crate::entity::{Entity, LivingEntity, Mob, MobEffectInstance, next_entity_id};
 use steel_registry::{vanilla_entities, vanilla_mob_effects};
@@ -75,6 +76,8 @@ assert_living_tick_runs! {
     a_camel_runs_its_living_tick: CamelEntity, &vanilla_entities::CAMEL;
     a_pufferfish_runs_its_living_tick: PufferfishEntity, &vanilla_entities::PUFFERFISH;
     a_dolphin_runs_its_living_tick: DolphinEntity, &vanilla_entities::DOLPHIN;
+    a_nautilus_runs_its_living_tick: NautilusEntity, &vanilla_entities::NAUTILUS;
+    a_zombie_nautilus_runs_its_living_tick: ZombieNautilusEntity, &vanilla_entities::ZOMBIE_NAUTILUS;
     a_vex_runs_its_living_tick: VexEntity, &vanilla_entities::VEX;
     a_shulker_runs_its_living_tick: ShulkerEntity, &vanilla_entities::SHULKER;
 }
@@ -160,4 +163,9 @@ assert_ai_runs! {
     // whole animal: without `Brain::tick` it never emerges, never sniffs and
     // never digs away.
     a_warden_runs_its_brain: WardenEntity, &vanilla_entities::WARDEN;
+    // Both nautilus mobs are brain-driven and override `Entity::tick` for their
+    // dash clock, so they have two ways to fall out of the tick: this is the
+    // one that proves `server_ai_step` still reaches `Brain::tick`.
+    a_nautilus_runs_its_brain: NautilusEntity, &vanilla_entities::NAUTILUS;
+    a_zombie_nautilus_runs_its_brain: ZombieNautilusEntity, &vanilla_entities::ZOMBIE_NAUTILUS;
 }

@@ -792,6 +792,7 @@ mod living_entity;
 mod manager;
 mod mob;
 mod movement_sync;
+pub mod nautilus;
 pub mod neutral_mob;
 pub mod patrolling_monster;
 pub mod projectile;
@@ -863,6 +864,7 @@ pub use movement_sync::{
     EntityRotationSyncState, EntityVelocitySyncState, POSITION_SYNC_THRESHOLD,
     PackedEntityRotation, ServerEntityMovementSyncState, ServerEntityMovementSyncUpdate,
 };
+pub(crate) use nautilus::{AbstractNautilus, AbstractNautilusBase};
 pub use neutral_mob::NeutralMob;
 pub use patrolling_monster::{PatrolState, PatrollingMonster};
 pub use projectile::{

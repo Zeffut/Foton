@@ -109,6 +109,8 @@ pub enum SensorType {
     FoodTemptations,
     /// Vanilla `SensorType.FROG_TEMPTATIONS`.
     FrogTemptations,
+    /// Vanilla `SensorType.NAUTILUS_TEMPTATIONS`.
+    NautilusTemptations,
     /// Vanilla `SensorType.FROG_ATTACKABLES`.
     FrogAttackables,
     /// Vanilla `SensorType.AXOLOTL_ATTACKABLES`.
@@ -148,6 +150,15 @@ impl SensorType {
                 REGISTRY
                     .items
                     .is_in_tag(item_stack.item(), &ItemTag::FROG_FOOD)
+            })),
+            // Vanilla parity: `SensorType.NAUTILUS_TEMPTATIONS`, built from
+            // `NautilusAi.getTemptations()` -- the `#minecraft:nautilus_food`
+            // tag, not the mob's own `isFood`, so an untamed nautilus that only
+            // eats its taming items still follows a player holding food.
+            Self::NautilusTemptations => Box::new(TemptingSensor::new(|_, item_stack| {
+                REGISTRY
+                    .items
+                    .is_in_tag(item_stack.item(), &ItemTag::NAUTILUS_FOOD)
             })),
             Self::FrogAttackables => Box::new(FrogAttackablesSensor),
             Self::AxolotlAttackables => Box::new(AxolotlAttackablesSensor),
@@ -222,6 +233,27 @@ pub(crate) fn is_entity_attackable(
     target: &dyn LivingEntity,
 ) -> bool {
     let conditions = TargetingConditions::for_combat().range(follow_range(body));
+    let conditions = if is_current_attack_target(body, target) {
+        conditions.ignore_invisibility_testing()
+    } else {
+        conditions
+    };
+    conditions.test(world, Some(body), target)
+}
+
+/// Returns whether `body` could attack `target` even without seeing it.
+///
+/// Vanilla parity: `Sensor.isEntityAttackableIgnoringLineOfSight`, which is how
+/// a nautilus stays angry at something that swam behind a rock.
+#[must_use]
+pub(crate) fn is_entity_attackable_ignoring_line_of_sight(
+    world: &World,
+    body: &dyn LivingEntity,
+    target: &dyn LivingEntity,
+) -> bool {
+    let conditions = TargetingConditions::for_combat()
+        .range(follow_range(body))
+        .ignore_line_of_sight();
     let conditions = if is_current_attack_target(body, target) {
         conditions.ignore_invisibility_testing()
     } else {

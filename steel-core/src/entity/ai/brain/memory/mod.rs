@@ -229,6 +229,12 @@ memory_module_types! {
     ATTACK_TARGET: EntityMemory = "minecraft:attack_target", saved = false;
     /// Vanilla `MemoryModuleType.ATTACK_COOLING_DOWN`.
     ATTACK_COOLING_DOWN: bool = "minecraft:attack_cooling_down", saved = false;
+    /// Vanilla `MemoryModuleType.ATTACK_TARGET_COOLDOWN`, the long pause a
+    /// nautilus takes between picking fights nobody started.
+    ATTACK_TARGET_COOLDOWN: i32 = "minecraft:attack_target_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.CHARGE_COOLDOWN_TICKS`, what keeps a charging
+    /// mob from charging again the moment it lands one.
+    CHARGE_COOLDOWN_TICKS: i32 = "minecraft:charge_cooldown_ticks", saved = true;
     /// Vanilla `MemoryModuleType.INTERACTION_TARGET`.
     INTERACTION_TARGET: EntityMemory = "minecraft:interaction_target", saved = false;
     /// Vanilla `MemoryModuleType.PATH`.

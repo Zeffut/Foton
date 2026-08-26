@@ -274,17 +274,6 @@ fn is_wood_sound_type(sound_type: SoundType) -> bool {
         .any(|wood| is_same_sound_type(sound_type, wood))
 }
 
-/// Converts a client's jump charge into the impulse scale a horse jumps with.
-///
-/// Vanilla parity: `PlayerRideableJumping.getPlayerJumpPendingScale`.
-pub(crate) fn player_jump_pending_scale(jump_amount: i32) -> f32 {
-    if jump_amount >= 90 {
-        1.0
-    } else {
-        0.4f32.mul_add(jump_amount as f32 / 90.0, 0.4)
-    }
-}
-
 /// Counters and rearing state vanilla keeps on `AbstractHorse` itself.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct AbstractHorseState {
@@ -1248,7 +1237,7 @@ pub trait AbstractHorse: Animal {
         self.abstract_horse_base()
             .state
             .lock()
-            .player_jump_pending_scale = player_jump_pending_scale(jump_amount);
+            .player_jump_pending_scale = Entity::player_jump_pending_scale(self, jump_amount);
     }
 
     /// Applies vanilla `AbstractHorse.handleStartJump`.

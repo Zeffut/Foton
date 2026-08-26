@@ -1053,6 +1053,7 @@ mod item_use;
 mod living_state;
 mod monster_experience;
 mod movement;
+mod nautilus;
 mod nether_ocean_end_hostiles;
 mod pets;
 mod portals;

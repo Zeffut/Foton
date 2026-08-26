@@ -40,6 +40,12 @@ impl<T: Entity> EntityEventSource for T {
     }
 }
 
+/// The jump charge at which a rider's charged jump is at full strength.
+///
+/// Vanilla parity: the `jumpAmount >= 90` of
+/// `PlayerRideableJumping.getPlayerJumpPendingScale`.
+const MAX_PLAYER_JUMP_CHARGE: i32 = 90;
+
 /// A trait for entities.
 ///
 /// This trait provides the core functionality for entities.
@@ -1757,6 +1763,22 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     ///
     /// Mirrors vanilla `PlayerRideableJumping.handleStopJump`.
     fn handle_stop_jump(&self) {}
+
+    /// Converts a rider's jump charge into the impulse scale to jump with.
+    ///
+    /// Mirrors vanilla `PlayerRideableJumping.getPlayerJumpPendingScale`.
+    fn player_jump_pending_scale(&self, jump_amount: i32) -> f32 {
+        if jump_amount >= MAX_PLAYER_JUMP_CHARGE {
+            1.0
+        } else {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a jump charge in 0..90, which vanilla widens the same way"
+            )]
+            let charge = jump_amount as f32;
+            0.4f32.mul_add(charge / 90.0, 0.4)
+        }
+    }
 
     /// Opens this entity's own inventory screen for `player`.
     ///

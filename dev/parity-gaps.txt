@@ -28,8 +28,6 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 4
+[entities] 2
 HappyGhast
-Nautilus
 Player
-ZombieNautilus
