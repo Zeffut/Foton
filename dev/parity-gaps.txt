@@ -31,7 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 34
+[entities] 33
 Allay
 Armadillo
 Axolotl
@@ -62,7 +62,6 @@ SpectralArrow
 SulfurCube
 Tadpole
 ThrownLingeringPotion
-WanderingTrader
 Warden
 Zoglin
 ZombieNautilus

@@ -31,11 +31,13 @@
 pub mod merchant_state;
 pub mod poi_links;
 mod villager;
+mod wandering_trader;
 mod zombie_villager;
 
 pub use merchant_state::MerchantState;
 pub use poi_links::{PoiAcquisition, VillagerPoiLinks};
 pub use villager::VillagerEntity;
+pub use wandering_trader::WanderingTraderEntity;
 pub use zombie_villager::ZombieVillagerEntity;
 
 /// Saving and loading a merchant's offers, which lives with the offer types.

@@ -1058,4 +1058,5 @@ mod portals;
 mod riding_and_leashes;
 mod travel;
 mod villagers;
+mod wandering_traders;
 mod zombie_villagers;
