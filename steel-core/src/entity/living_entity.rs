@@ -2258,6 +2258,14 @@ pub trait LivingEntity: Entity {
         value
     }
 
+    /// Returns whether this entity is wearing something in its body slot.
+    ///
+    /// Vanilla parity: `LivingEntity.isWearingBodyArmor`, which is what a wolf's
+    /// armour and a happy ghast's harness are both read through.
+    fn is_wearing_body_armor(&self) -> bool {
+        self.has_item_in_slot(EquipmentSlot::Body)
+    }
+
     /// Returns whether this entity currently has an item in `slot`.
     fn has_item_in_slot(&self, slot: EquipmentSlot) -> bool {
         let mut has_item = false;

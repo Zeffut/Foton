@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use glam::DVec3;
 use steel_macros::block_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::BlockRef;
@@ -10,7 +11,7 @@ use steel_registry::blocks::properties::{
     BlockStateProperties, BoolProperty, Direction, EnumProperty, IntProperty,
 };
 use steel_registry::fluid::FluidState;
-use steel_registry::{sound_events, vanilla_game_events};
+use steel_registry::{sound_events, vanilla_entities, vanilla_game_events};
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId};
 
@@ -20,6 +21,7 @@ use crate::behavior::block::{
 };
 use crate::behavior::context::BlockPlaceContext;
 use crate::entity::ai::path::PathComputationType;
+use crate::entity::{ENTITIES, next_entity_id};
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelAccessor, ScheduledTickAccess, World};
 
@@ -73,7 +75,7 @@ impl DriedGhastBlock {
     /// Vanilla `DriedGhastBlock.tickWaterlogged`.
     fn tick_waterlogged(state: BlockStateId, world: &Arc<World>, pos: BlockPos) {
         if Self::is_ready_to_spawn(state) {
-            Self::spawn_ghastling(world, pos);
+            Self::spawn_ghastling(state, world, pos);
             return;
         }
 
@@ -89,12 +91,40 @@ impl DriedGhastBlock {
     }
 
     /// Vanilla `DriedGhastBlock.spawnGhastling`.
-    fn spawn_ghastling(world: &Arc<World>, pos: BlockPos) {
+    fn spawn_ghastling(state: BlockStateId, world: &Arc<World>, pos: BlockPos) {
+        let facing_yaw = state.get_value(FACING).to_yaw();
         world.remove_block(pos, false);
-        // Vanilla then adds a baby `HappyGhast` at the bottom center of this
-        // block, facing the way the block did, and plays `GHASTLING_SPAWN` on
-        // it. Steel has no `HappyGhast` entity, so the block just disappears;
-        // the spawn and its sound belong on this line once the entity exists.
+
+        let (x, _, z) = pos.get_center();
+        let Some(ghastling) = ENTITIES.create(
+            &vanilla_entities::HAPPY_GHAST,
+            next_entity_id(),
+            DVec3::new(x, f64::from(pos.y()), z),
+            Arc::downgrade(world),
+        ) else {
+            return;
+        };
+
+        if let Some(mob) = ghastling.as_mob() {
+            mob.set_baby(true);
+        }
+        ghastling.set_rotation((facing_yaw, 0.0));
+        if let Some(living) = ghastling.as_living_entity() {
+            living.set_y_head_rot(facing_yaw);
+        }
+        ghastling.set_old_position_to_current();
+        if world.try_add_entity(ghastling).is_err() {
+            return;
+        }
+
+        world.play_sound(
+            &sound_events::ENTITY_GHASTLING_SPAWN,
+            SoundSource::Blocks,
+            pos,
+            SOUND_VOLUME,
+            SOUND_PITCH,
+            None,
+        );
     }
 }
 

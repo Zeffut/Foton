@@ -2367,7 +2367,19 @@ pub trait Mob: LivingEntity {
         selector.set_control(GoalControl::Look, no_controller);
     }
 
+    /// Override this to change how the head follows the body, and call
+    /// [`Self::default_tick_body_rotation_control`] from the override; Rust has
+    /// no `super`, so the base body lives in its own method.
     fn tick_body_rotation_control(&self) {
+        self.default_tick_body_rotation_control();
+    }
+
+    /// The body of [`Self::tick_body_rotation_control`], callable from an
+    /// override.
+    ///
+    /// Vanilla parity: `BodyRotationControl.clientTick`, which despite its name
+    /// is what `Mob.tickHeadTurn` runs on the server too.
+    fn default_tick_body_rotation_control(&self) {
         let moving = {
             let delta = self.position() - self.old_position();
             delta.x.mul_add(delta.x, delta.z * delta.z) > BODY_ROTATION_MOVING_DISTANCE_SQR
@@ -2467,7 +2479,22 @@ pub(crate) fn rotlerp(a: f32, b: f32, max: f32) -> f32 {
     result
 }
 
-fn wrap_degrees(mut degrees: f32) -> f32 {
+/// Wraps an angle into the quarter turn nearest zero.
+///
+/// Vanilla parity: `Mth.wrapDegrees90`, which the happy ghast uses to square
+/// itself up with the world while it holds still for its riders.
+pub(crate) fn wrap_degrees_90(angle: f32) -> f32 {
+    let normalized = angle % 90.0;
+    if normalized >= 45.0 {
+        return normalized - 90.0;
+    }
+    if normalized < -45.0 {
+        return normalized + 90.0;
+    }
+    normalized
+}
+
+pub(crate) fn wrap_degrees(mut degrees: f32) -> f32 {
     degrees %= 360.0;
     if degrees >= 180.0 {
         degrees -= 360.0;

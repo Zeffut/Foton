@@ -12,7 +12,7 @@ use crate::player::Player;
 
 const DEFAULT_STOP_DISTANCE: f64 = 2.5;
 
-type TemptItemPredicate = Box<dyn Fn(&ItemStack) -> bool + Send + Sync>;
+type TemptItemPredicate = Box<dyn Fn(&dyn PathfinderMob, &ItemStack) -> bool + Send + Sync>;
 
 /// A subclass override of how easily the tempted mob is scared off.
 ///
@@ -84,6 +84,25 @@ impl TemptGoal {
         can_scare: bool,
         stop_distance: f64,
     ) -> Self {
+        Self::mob_aware(
+            speed_modifier,
+            move |_, item_stack| items(item_stack),
+            can_scare,
+            stop_distance,
+        )
+    }
+
+    /// Tempts on items the mob's own state decides.
+    ///
+    /// Vanilla parity: a `Predicate<ItemStack>` a mob closes over itself -- a
+    /// happy ghast follows the harness list until it wears one, and food after.
+    #[must_use]
+    pub(crate) fn mob_aware(
+        speed_modifier: f64,
+        items: impl Fn(&dyn PathfinderMob, &ItemStack) -> bool + Send + Sync + 'static,
+        can_scare: bool,
+        stop_distance: f64,
+    ) -> Self {
         Self {
             player: None,
             player_position: DVec3::ZERO,
@@ -144,8 +163,8 @@ impl TemptGoal {
         self.is_running
     }
 
-    fn should_follow(&self, player: &dyn LivingEntity) -> bool {
-        player.is_holding(&mut |item_stack| (self.items)(item_stack))
+    fn should_follow(&self, mob: &dyn PathfinderMob, player: &dyn LivingEntity) -> bool {
+        player.is_holding(&mut |item_stack| (self.items)(mob, item_stack))
     }
 
     fn can_scare(&mut self, mob: &dyn PathfinderMob) -> bool {
@@ -212,7 +231,7 @@ impl Goal for TemptGoal {
         let targeting_conditions = Self::targeting_conditions(range);
         self.player = world.nearest_player(mob.position(), range, |player| {
             targeting_conditions.test(world.as_ref(), Some(mob), player)
-                && self.should_follow(player)
+                && self.should_follow(mob, player)
         });
         self.player.is_some()
     }
@@ -295,12 +314,12 @@ mod tests {
         );
         let pig = PigEntity::new(&vanilla_entities::PIG, 1, DVec3::ZERO, Weak::new());
 
-        assert!(!goal.should_follow(&pig));
+        assert!(!goal.should_follow(&pig, &pig));
 
         pig.with_equipment_slot_mut(EquipmentSlot::OffHand, &mut |item_stack| {
             *item_stack = ItemStack::new(&vanilla_items::CARROT);
         });
 
-        assert!(goal.should_follow(&pig));
+        assert!(goal.should_follow(&pig, &pig));
     }
 }
