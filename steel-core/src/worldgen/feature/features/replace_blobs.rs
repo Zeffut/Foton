@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_netherrack_replace_blobs_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &NetherrackReplaceBlobsConfiguration,
@@ -34,7 +34,7 @@ impl FeatureDecorationRunner {
                 return false;
             }
 
-            if region.block_state(pos).get_block() == target_block {
+            if region.get_block_state(pos).get_block() == target_block {
                 let _ = region.set_block_state(pos, replacement, UpdateFlags::UPDATE_CLIENTS);
                 replaced_any = true;
             }
@@ -46,13 +46,13 @@ impl FeatureDecorationRunner {
     }
 
     fn find_replace_blobs_target(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         mut cursor: BlockPos,
         target: BlockStateId,
     ) -> Option<BlockPos> {
         let target_block = target.get_block();
         while cursor.y() > region.min_y() + 1 {
-            if region.block_state(cursor).get_block() == target_block {
+            if region.get_block_state(cursor).get_block() == target_block {
                 return Some(cursor);
             }
             cursor = cursor.below();

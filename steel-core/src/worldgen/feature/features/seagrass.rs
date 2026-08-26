@@ -3,17 +3,17 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_seagrass_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &SeagrassConfiguration,
         origin: BlockPos,
     ) -> bool {
         let x = random.next_i32_bounded(8) - random.next_i32_bounded(8);
         let z = random.next_i32_bounded(8) - random.next_i32_bounded(8);
-        let y = region.height_at(HeightmapType::OceanFloor, origin.x() + x, origin.z() + z);
+        let y = region.heightmap_at(HeightmapType::OceanFloor, origin.x() + x, origin.z() + z);
         let grass_pos = BlockPos::new(origin.x() + x, y, origin.z() + z);
 
-        if region.block_state(grass_pos).get_block() != &vanilla_blocks::WATER {
+        if region.get_block_state(grass_pos).get_block() != &vanilla_blocks::WATER {
             return false;
         }
 
@@ -33,7 +33,7 @@ impl FeatureDecorationRunner {
 
         if is_tall {
             let upper_pos = grass_pos.above();
-            if region.block_state(upper_pos).get_block() == &vanilla_blocks::WATER {
+            if region.get_block_state(upper_pos).get_block() == &vanilla_blocks::WATER {
                 let upper_state = state.set_value(
                     &BlockStateProperties::DOUBLE_BLOCK_HALF,
                     DoubleBlockHalf::Upper,

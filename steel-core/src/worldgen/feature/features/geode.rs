@@ -13,7 +13,7 @@ static GEODE_NOISE_BY_SEED: LazyLock<SyncMutex<FxHashMap<i64, NormalNoise>>> =
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_geode_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &GeodeConfiguration,
@@ -178,7 +178,7 @@ impl FeatureDecorationRunner {
     }
 
     fn geode_distribution_points(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         registry: &Registry,
         config: &GeodeConfiguration,
@@ -193,7 +193,7 @@ impl FeatureDecorationRunner {
                 config.outer_wall_distance.sample(random),
                 config.outer_wall_distance.sample(random),
             );
-            let state = region.block_state(point);
+            let state = region.get_block_state(point);
             if state.is_air()
                 || registry
                     .blocks
@@ -271,13 +271,13 @@ impl FeatureDecorationRunner {
     }
 
     fn safe_set_geode_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         pos: BlockPos,
         state: BlockStateId,
         cannot_replace: &Identifier,
     ) {
-        let current = region.block_state(pos);
+        let current = region.get_block_state(pos);
         if !registry
             .blocks
             .is_in_tag(current.get_block(), cannot_replace)
@@ -286,10 +286,10 @@ impl FeatureDecorationRunner {
         }
     }
 
-    fn schedule_geode_adjacent_fluid_ticks(region: &WorldGenRegion<'_>, pos: BlockPos) {
+    fn schedule_geode_adjacent_fluid_ticks(region: &impl WorldGenLevel, pos: BlockPos) {
         for direction in Self::VANILLA_DIRECTION_VALUES {
             let adjacent = pos.relative(direction);
-            let fluid_state = get_fluid_state_from_block(region.block_state(adjacent));
+            let fluid_state = get_fluid_state_from_block(region.get_block_state(adjacent));
             if !fluid_state.is_empty() {
                 let _ = region.schedule_fluid_tick_default(adjacent, fluid_state.fluid_id, 0);
             }
@@ -297,7 +297,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_geode_crystals(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         blocks: &GeodeBlockSettings,
@@ -322,7 +322,7 @@ impl FeatureDecorationRunner {
                 }
 
                 let place_pos = crystal_pos.relative(direction);
-                let place_state = region.block_state(place_pos);
+                let place_state = region.get_block_state(place_pos);
                 if state
                     .try_get_value(&BlockStateProperties::WATERLOGGED)
                     .is_some()

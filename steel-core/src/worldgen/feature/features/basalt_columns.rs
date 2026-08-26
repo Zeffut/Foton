@@ -8,7 +8,7 @@ const UNCLUSTERED_SIZE: i32 = 15;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_basalt_columns_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &BasaltColumnsConfiguration,
         origin: BlockPos,
@@ -54,7 +54,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_basalt_column(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         lava_sea_level: i32,
         origin: BlockPos,
         column_height: i32,
@@ -87,7 +87,7 @@ impl FeatureDecorationRunner {
                         placed_any = true;
                         cursor = cursor.above();
                     } else {
-                        if region.block_state(cursor).get_block() != &vanilla_blocks::BASALT {
+                        if region.get_block_state(cursor).get_block() != &vanilla_blocks::BASALT {
                             break;
                         }
                         cursor = cursor.above();
@@ -102,7 +102,7 @@ impl FeatureDecorationRunner {
     }
 
     fn find_basalt_column_surface(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         lava_sea_level: i32,
         mut cursor: BlockPos,
         mut limit: i32,
@@ -119,13 +119,13 @@ impl FeatureDecorationRunner {
     }
 
     fn find_basalt_column_air(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         mut cursor: BlockPos,
         mut limit: i32,
     ) -> Option<BlockPos> {
         while cursor.y() < region.max_y_exclusive() && limit > 0 {
             limit -= 1;
-            let state = region.block_state(cursor);
+            let state = region.get_block_state(cursor);
             if Self::basalt_columns_cannot_place_on(state.get_block()) {
                 return None;
             }
@@ -141,7 +141,7 @@ impl FeatureDecorationRunner {
     }
 
     fn can_place_basalt_column_at(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         lava_sea_level: i32,
         pos: BlockPos,
     ) -> bool {
@@ -149,16 +149,16 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        let below = region.block_state(pos.below());
+        let below = region.get_block_state(pos.below());
         !below.is_air() && !Self::basalt_columns_cannot_place_on(below.get_block())
     }
 
     fn is_air_or_lava_ocean(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         lava_sea_level: i32,
         pos: BlockPos,
     ) -> bool {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         state.is_air() || state.get_block() == &vanilla_blocks::LAVA && pos.y() <= lava_sea_level
     }
 

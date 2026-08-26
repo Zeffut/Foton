@@ -15,7 +15,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn biome_allows_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         biome_zoom_seed: i64,
         origin: BlockPos,

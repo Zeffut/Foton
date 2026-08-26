@@ -5,7 +5,7 @@ use super::super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_pointed_dripstone_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &PointedDripstoneConfiguration,
         origin: BlockPos,
@@ -18,7 +18,7 @@ impl FeatureDecorationRunner {
         let root_pos = origin.relative(tip_direction.opposite());
         Self::create_patch_of_dripstone_blocks(region, random, root_pos, config);
         let height = if random.next_f32() < config.chance_of_taller_dripstone
-            && Self::is_empty_or_water(region.block_state(origin.relative(tip_direction)))
+            && Self::is_empty_or_water(region.get_block_state(origin.relative(tip_direction)))
         {
             2
         } else {
@@ -29,12 +29,12 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn pointed_dripstone_tip_direction(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
     ) -> Option<Direction> {
-        let can_place_above = Self::is_dripstone_base(region.block_state(pos.above()));
-        let can_place_below = Self::is_dripstone_base(region.block_state(pos.below()));
+        let can_place_above = Self::is_dripstone_base(region.get_block_state(pos.above()));
+        let can_place_below = Self::is_dripstone_base(region.get_block_state(pos.below()));
         if can_place_above && can_place_below {
             Some(if random.next_bool() {
                 Direction::Down
@@ -51,7 +51,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_patch_of_dripstone_blocks(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         config: &PointedDripstoneConfiguration,
@@ -81,14 +81,14 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn grow_pointed_dripstone(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         start_pos: BlockPos,
         tip_direction: Direction,
         height: i32,
         merged_tip: bool,
     ) {
         if !Self::is_dripstone_base(
-            region.block_state(start_pos.relative(tip_direction.opposite())),
+            region.get_block_state(start_pos.relative(tip_direction.opposite())),
         ) {
             return;
         }
@@ -98,7 +98,7 @@ impl FeatureDecorationRunner {
             let state = if state.get_block() == &vanilla_blocks::POINTED_DRIPSTONE {
                 state.set_value(
                     &BlockStateProperties::WATERLOGGED,
-                    get_fluid_state_from_block(region.block_state(pos)).is_water(),
+                    get_fluid_state_from_block(region.get_block_state(pos)).is_water(),
                 )
             } else {
                 state
@@ -147,10 +147,10 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_dripstone_block_if_possible(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
     ) -> bool {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         if !state
             .get_block()
             .has_tag(&BlockTag::DRIPSTONE_REPLACEABLE_BLOCKS)

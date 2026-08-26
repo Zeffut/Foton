@@ -3,15 +3,15 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_weeping_vines_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
-        if !region.block_state(origin).is_air() {
+        if !region.get_block_state(origin).is_air() {
             return false;
         }
 
-        let above_block = region.block_state(origin.above()).get_block();
+        let above_block = region.get_block_state(origin.above()).get_block();
         if above_block != &vanilla_blocks::NETHERRACK
             && above_block != &vanilla_blocks::NETHER_WART_BLOCK
         {
@@ -24,7 +24,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_roof_nether_wart(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) {
@@ -37,14 +37,14 @@ impl FeatureDecorationRunner {
                 random.next_i32_bounded(2) - random.next_i32_bounded(5),
                 random.next_i32_bounded(6) - random.next_i32_bounded(6),
             );
-            if !region.block_state(place_pos).is_air() {
+            if !region.get_block_state(place_pos).is_air() {
                 continue;
             }
 
             let mut neighbors = 0;
             for direction in Self::VANILLA_DIRECTION_VALUES {
                 let neighbor_block = region
-                    .block_state(place_pos.relative(direction))
+                    .get_block_state(place_pos.relative(direction))
                     .get_block();
                 if neighbor_block == &vanilla_blocks::NETHERRACK
                     || neighbor_block == &vanilla_blocks::NETHER_WART_BLOCK
@@ -64,7 +64,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_roof_weeping_vines(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) {
@@ -74,11 +74,11 @@ impl FeatureDecorationRunner {
                 random.next_i32_bounded(2) - random.next_i32_bounded(7),
                 random.next_i32_bounded(8) - random.next_i32_bounded(8),
             );
-            if !region.block_state(place_pos).is_air() {
+            if !region.get_block_state(place_pos).is_air() {
                 continue;
             }
 
-            let above_block = region.block_state(place_pos.above()).get_block();
+            let above_block = region.get_block_state(place_pos.above()).get_block();
             if above_block == &vanilla_blocks::NETHERRACK
                 || above_block == &vanilla_blocks::NETHER_WART_BLOCK
             {
@@ -97,7 +97,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_weeping_vines_column(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         mut place_pos: BlockPos,
         total_height: i32,
@@ -105,8 +105,8 @@ impl FeatureDecorationRunner {
         max_age: u8,
     ) {
         for height in 0..=total_height {
-            if region.block_state(place_pos).is_air() {
-                if height == total_height || !region.block_state(place_pos.below()).is_air() {
+            if region.get_block_state(place_pos).is_air() {
+                if height == total_height || !region.get_block_state(place_pos.below()).is_air() {
                     let state = vanilla_blocks::WEEPING_VINES.default_state().set_value(
                         &BlockStateProperties::AGE_25,
                         random.next_i32_between(i32::from(min_age), i32::from(max_age)) as u8,

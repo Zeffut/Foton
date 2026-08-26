@@ -14,7 +14,7 @@ enum BiomeFilterMode<'a> {
 
 impl FeatureDecorationRunner {
     pub(super) fn place_placed_feature_entry(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -38,7 +38,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_placed_feature_data(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -63,7 +63,7 @@ impl FeatureDecorationRunner {
         reason = "threading vanilla placed-feature stream state explicitly"
     )]
     fn place_placed_feature_from_modifier(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -233,7 +233,7 @@ impl FeatureDecorationRunner {
                 );
             }
             PlacementModifier::Heightmap { heightmap } => {
-                let height = region.height_at(
+                let height = region.heightmap_at(
                     Self::feature_heightmap_type(*heightmap),
                     origin.x(),
                     origin.z(),
@@ -370,7 +370,7 @@ impl FeatureDecorationRunner {
                 min_inclusive,
                 max_inclusive,
             } => {
-                let surface_y = i64::from(region.height_at(
+                let surface_y = i64::from(region.heightmap_at(
                     Self::feature_heightmap_type(*heightmap),
                     origin.x(),
                     origin.z(),
@@ -393,8 +393,9 @@ impl FeatureDecorationRunner {
             }
             PlacementModifier::SurfaceWaterDepthFilter { max_water_depth } => {
                 let ocean_floor =
-                    region.height_at(HeightmapType::OceanFloor, origin.x(), origin.z());
-                let surface = region.height_at(HeightmapType::WorldSurface, origin.x(), origin.z());
+                    region.heightmap_at(HeightmapType::OceanFloor, origin.x(), origin.z());
+                let surface =
+                    region.heightmap_at(HeightmapType::WorldSurface, origin.x(), origin.z());
                 if surface - ocean_floor <= *max_water_depth {
                     placed = Self::place_placed_feature_from_modifier(
                         region,
@@ -414,7 +415,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_placed_feature_ref(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -438,7 +439,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(crate) fn place_structure_pool_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,

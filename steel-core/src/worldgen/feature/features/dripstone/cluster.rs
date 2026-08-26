@@ -32,12 +32,12 @@ impl DripstoneColumn {
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_dripstone_cluster_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &DripstoneClusterConfiguration,
         origin: BlockPos,
     ) -> bool {
-        if !Self::is_empty_or_water(region.block_state(origin)) {
+        if !Self::is_empty_or_water(region.get_block_state(origin)) {
             return false;
         }
 
@@ -66,7 +66,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla DripstoneClusterFeature.placeColumn state"
     )]
     fn place_dripstone_cluster_column(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         dx: i32,
@@ -208,7 +208,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn scan_dripstone_column<I, V>(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         search_range: i32,
         inside_column: I,
@@ -218,7 +218,7 @@ impl FeatureDecorationRunner {
         I: Fn(BlockStateId) -> bool,
         V: Fn(BlockStateId) -> bool,
     {
-        if !inside_column(region.block_state(pos)) {
+        if !inside_column(region.get_block_state(pos)) {
             return None;
         }
 
@@ -243,7 +243,7 @@ impl FeatureDecorationRunner {
     }
 
     fn scan_dripstone_column_direction<I, V>(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         mut pos: BlockPos,
         search_range: i32,
         inside_column: &I,
@@ -255,13 +255,13 @@ impl FeatureDecorationRunner {
         V: Fn(BlockStateId) -> bool,
     {
         for _ in 1..search_range {
-            if !inside_column(region.block_state(pos)) {
+            if !inside_column(region.get_block_state(pos)) {
                 break;
             }
             pos = pos.relative(direction);
         }
 
-        valid_edge(region.block_state(pos)).then_some(pos.y())
+        valid_edge(region.get_block_state(pos)).then_some(pos.y())
     }
 
     fn dripstone_cluster_height(
@@ -293,8 +293,8 @@ impl FeatureDecorationRunner {
         ) as i32
     }
 
-    fn can_place_dripstone_pool(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
-        let state = region.block_state(pos);
+    fn can_place_dripstone_pool(region: &impl WorldGenLevel, pos: BlockPos) -> bool {
+        let state = region.get_block_state(pos);
         let block = state.get_block();
         if block == &vanilla_blocks::WATER
             || block == &vanilla_blocks::DRIPSTONE_BLOCK
@@ -303,7 +303,7 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        if get_fluid_state_from_block(region.block_state(pos.above())).is_water() {
+        if get_fluid_state_from_block(region.get_block_state(pos.above())).is_water() {
             return false;
         }
 
@@ -316,14 +316,14 @@ impl FeatureDecorationRunner {
         Self::can_be_adjacent_to_dripstone_pool_water(region, pos.below())
     }
 
-    fn can_be_adjacent_to_dripstone_pool_water(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
-        let state = region.block_state(pos);
+    fn can_be_adjacent_to_dripstone_pool_water(region: &impl WorldGenLevel, pos: BlockPos) -> bool {
+        let state = region.get_block_state(pos);
         state.get_block().has_tag(&BlockTag::BASE_STONE_OVERWORLD)
             || get_fluid_state_from_block(state).is_water()
     }
 
     fn replace_blocks_with_dripstone_blocks(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         mut pos: BlockPos,
         max_count: i32,
         direction: Direction,
@@ -367,10 +367,10 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn is_lava(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
     ) -> bool {
-        region.block_state(pos).get_block() == &vanilla_blocks::LAVA
+        region.get_block_state(pos).get_block() == &vanilla_blocks::LAVA
     }
 
     pub(in crate::worldgen::feature) fn clamped_map_f32(

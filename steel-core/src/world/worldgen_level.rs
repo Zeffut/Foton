@@ -1,5 +1,6 @@
 //! The level surface vanilla features and structure templates place into.
 
+use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 
 use simdnbt::owned::NbtCompound;
@@ -12,6 +13,8 @@ use crate::block_entity::BLOCK_ENTITIES;
 use crate::chunk::light::LightLayer;
 use crate::entity::SharedEntity;
 use crate::world::{LevelAccessor, World};
+use crate::worldgen::feature::instrumentation::OreFeatureStats;
+use crate::worldgen::ore_access::{LevelOreAccess, OreLevelAccess};
 
 /// Level access needed to place a feature or a structure template.
 ///
@@ -25,7 +28,21 @@ use crate::world::{LevelAccessor, World};
 /// generation bounds, biome and light lookups, and the three writes a plain
 /// `set_block_state` cannot express -- block entity data, entities, and the level's own
 /// random source.
-pub trait WorldGenLevel: LevelAccessor {
+pub(crate) trait WorldGenLevel: LevelAccessor {
+    /// The view an ore vein reads and writes through on this level surface.
+    type OreAccess<'level>: OreLevelAccess
+    where
+        Self: 'level;
+
+    /// Opens the ore-writing view for one vein.
+    ///
+    /// Vanilla parity: the `BulkSectionAccess` `OreFeature` builds over the level.
+    /// `stats` is the generation profile the region counts into, if one is running.
+    fn ore_access<'level>(
+        &'level self,
+        stats: Option<&'level RefCell<OreFeatureStats>>,
+    ) -> Self::OreAccess<'level>;
+
     /// Returns the world seed.
     ///
     /// Vanilla parity: `WorldGenLevel.getSeed`, which a live level answers through
@@ -84,6 +101,17 @@ pub trait WorldGenLevel: LevelAccessor {
 }
 
 impl WorldGenLevel for Arc<World> {
+    type OreAccess<'level> = LevelOreAccess<'level, Self>;
+
+    /// A live world has no per-vein section cache to hold open, and no generation
+    /// profile to count into, so the ore vein writes through the world block by block.
+    fn ore_access<'level>(
+        &'level self,
+        _stats: Option<&'level RefCell<OreFeatureStats>>,
+    ) -> Self::OreAccess<'level> {
+        LevelOreAccess::new(self)
+    }
+
     fn seed(&self) -> i64 {
         World::seed(self)
     }

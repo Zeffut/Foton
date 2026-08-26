@@ -49,7 +49,7 @@ impl StructureTemplate {
     }
 
     pub(super) fn process_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         original: &ProcessedBlockInfo,
         initial: ProcessedBlockInfo,
@@ -92,7 +92,7 @@ impl StructureTemplate {
         reason = "processor calls mirror vanilla StructureProcessor.processBlock inputs"
     )]
     pub(super) fn process_block_with_processor(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         processor: &StructureProcessorKind,
         original: &ProcessedBlockInfo,
@@ -118,13 +118,13 @@ impl StructureTemplate {
             }
             StructureProcessorKind::ProtectedBlocks { cannot_replace } => {
                 let existing =
-                    Self::block_for_state(registry, region.block_state(current.world_pos));
+                    Self::block_for_state(registry, region.get_block_state(current.world_pos));
                 (!existing.has_tag(cannot_replace)).then_some(current)
             }
             StructureProcessorKind::Rule { rules } => {
                 let mut rule_random =
                     LegacyRandom::from_seed(Self::block_pos_seed(current.world_pos) as u64);
-                let location_state = region.block_state(current.world_pos);
+                let location_state = region.get_block_state(current.world_pos);
                 for rule in rules {
                     if Self::rule_matches(
                         registry,
@@ -146,7 +146,7 @@ impl StructureTemplate {
             )),
             StructureProcessorKind::LavaSubmergedBlock => Some(Self::process_lava_submerged_block(
                 registry,
-                region.block_state(current.world_pos),
+                region.get_block_state(current.world_pos),
                 current,
             )),
             StructureProcessorKind::BlackstoneReplace => {
@@ -459,7 +459,7 @@ impl StructureTemplate {
         reason = "processor finalization receives vanilla's full template processing context"
     )]
     pub(super) fn finalize_processing(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         position: BlockPos,
         reference_pos: BlockPos,
@@ -492,7 +492,7 @@ impl StructureTemplate {
         reason = "matches vanilla CappedProcessor.finalizeProcessing inputs"
     )]
     pub(super) fn finalize_capped_processing(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         position: BlockPos,
         reference_pos: BlockPos,
@@ -651,11 +651,11 @@ impl StructureTemplate {
     }
 
     pub(super) fn apply_terrain_matching_projection(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         original: &ProcessedBlockInfo,
         mut current: ProcessedBlockInfo,
     ) -> ProcessedBlockInfo {
-        let height = region.height_at(
+        let height = region.heightmap_at(
             HeightmapType::WorldSurfaceWg,
             current.world_pos.x(),
             current.world_pos.z(),

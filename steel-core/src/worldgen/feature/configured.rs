@@ -8,22 +8,20 @@ use steel_registry::structure::LiquidSettingsData;
 use steel_utils::BoundingBox;
 use steel_worldgen::structure::{StructureBlockIgnore, StructureMirror};
 
-struct ConfiguredFeaturePlaceContext<'a, 'region> {
-    region: &'a WorldGenRegion<'region>,
+struct ConfiguredFeaturePlaceContext<'a, L> {
+    region: &'a L,
     registry: &'a Registry,
     random: &'a mut WorldgenRandom,
     origin: BlockPos,
     biome_zoom_seed: i64,
 }
 
-type ConfiguredFeaturePlacer = for<'a, 'region> fn(
-    &mut ConfiguredFeaturePlaceContext<'a, 'region>,
-    &ConfiguredFeatureKind,
-) -> bool;
+type ConfiguredFeaturePlacer<L> =
+    for<'a> fn(&mut ConfiguredFeaturePlaceContext<'a, L>, &ConfiguredFeatureKind) -> bool;
 
 impl FeatureDecorationRunner {
     pub(super) fn place_configured_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         feature: &ConfiguredFeatureRef,
@@ -35,7 +33,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_configured_feature_kind(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         kind: &ConfiguredFeatureKind,
@@ -69,7 +67,9 @@ impl FeatureDecorationRunner {
         }
     }
 
-    fn configured_feature_placer(kind: &ConfiguredFeatureKind) -> ConfiguredFeaturePlacer {
+    fn configured_feature_placer<L: WorldGenLevel>(
+        kind: &ConfiguredFeatureKind,
+    ) -> ConfiguredFeaturePlacer<L> {
         match kind {
             ConfiguredFeatureKind::Bamboo(_) => place_bamboo,
             ConfiguredFeatureKind::BasaltColumns(_) => place_basalt_columns,
@@ -139,8 +139,8 @@ impl FeatureDecorationRunner {
     }
 }
 
-fn place_random_boolean_selector(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_random_boolean_selector<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::RandomBooleanSelector(config) = kind else {
@@ -161,8 +161,8 @@ fn place_random_boolean_selector(
     )
 }
 
-fn place_random_selector(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_random_selector<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::RandomSelector(config) = kind else {
@@ -192,8 +192,8 @@ fn place_random_selector(
     )
 }
 
-fn place_weighted_random_selector(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_weighted_random_selector<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::WeightedRandomSelector(config) = kind else {
@@ -216,8 +216,8 @@ fn place_weighted_random_selector(
     )
 }
 
-fn place_simple_random_selector(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_simple_random_selector<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::SimpleRandomSelector(config) = kind else {
@@ -244,8 +244,8 @@ fn place_simple_random_selector(
     )
 }
 
-fn place_sequence(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_sequence<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Sequence(config) = kind else {
@@ -266,8 +266,8 @@ fn place_sequence(
     true
 }
 
-fn place_template(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_template<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Template(config) = kind else {
@@ -359,15 +359,15 @@ const fn template_feature_position(origin: BlockPos, rotation: Rotation, size: I
     )
 }
 
-const fn template_feature_bounding_box(region: &WorldGenRegion<'_>) -> BoundingBox {
+fn template_feature_bounding_box(region: &impl WorldGenLevel) -> BoundingBox {
     BoundingBox::new(
         IVec3::new(i32::MIN, region.min_y(), i32::MIN),
         IVec3::new(i32::MAX, region.max_y_exclusive() - 1, i32::MAX),
     )
 }
 
-fn place_bamboo(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_bamboo<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Bamboo(config) = kind else {
@@ -381,8 +381,8 @@ fn place_bamboo(
     )
 }
 
-fn place_simple_block(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_simple_block<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::SimpleBlock(config) = kind else {
@@ -397,8 +397,8 @@ fn place_simple_block(
     )
 }
 
-fn place_block_blob(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_block_blob<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::BlockBlob(config) = kind else {
@@ -413,8 +413,8 @@ fn place_block_blob(
     )
 }
 
-fn place_vegetation_patch(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_vegetation_patch<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::VegetationPatch(config) = kind else {
@@ -430,8 +430,8 @@ fn place_vegetation_patch(
     )
 }
 
-fn place_waterlogged_vegetation_patch(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_waterlogged_vegetation_patch<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::WaterloggedVegetationPatch(config) = kind else {
@@ -447,8 +447,8 @@ fn place_waterlogged_vegetation_patch(
     )
 }
 
-fn place_block_column(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_block_column<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::BlockColumn(config) = kind else {
@@ -463,8 +463,8 @@ fn place_block_column(
     )
 }
 
-fn place_block_pile(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_block_pile<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::BlockPile(config) = kind else {
@@ -479,8 +479,8 @@ fn place_block_pile(
     )
 }
 
-fn place_disk(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_disk<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Disk(config) = kind else {
@@ -495,8 +495,8 @@ fn place_disk(
     )
 }
 
-fn place_basalt_pillar(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_basalt_pillar<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::BasaltPillar = kind else {
@@ -509,8 +509,8 @@ fn place_basalt_pillar(
     )
 }
 
-fn place_basalt_columns(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_basalt_columns<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::BasaltColumns(config) = kind else {
@@ -524,8 +524,8 @@ fn place_basalt_columns(
     )
 }
 
-fn place_blue_ice(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_blue_ice<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::BlueIce = kind else {
@@ -534,8 +534,8 @@ fn place_blue_ice(
     FeatureDecorationRunner::place_blue_ice_feature(context.region, context.random, context.origin)
 }
 
-fn place_bonus_chest(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_bonus_chest<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::BonusChest = kind else {
@@ -548,8 +548,8 @@ fn place_bonus_chest(
     )
 }
 
-fn place_chorus_plant(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_chorus_plant<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::ChorusPlant = kind else {
@@ -562,8 +562,8 @@ fn place_chorus_plant(
     )
 }
 
-fn place_coral_claw(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_coral_claw<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::CoralClaw = kind else {
@@ -577,8 +577,8 @@ fn place_coral_claw(
     )
 }
 
-fn place_coral_mushroom(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_coral_mushroom<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::CoralMushroom = kind else {
@@ -592,8 +592,8 @@ fn place_coral_mushroom(
     )
 }
 
-fn place_coral_tree(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_coral_tree<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::CoralTree = kind else {
@@ -607,8 +607,8 @@ fn place_coral_tree(
     )
 }
 
-fn place_delta_feature(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_delta_feature<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::DeltaFeature(config) = kind else {
@@ -623,8 +623,8 @@ fn place_delta_feature(
     )
 }
 
-fn place_desert_well(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_desert_well<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::DesertWell = kind else {
@@ -637,8 +637,8 @@ fn place_desert_well(
     )
 }
 
-fn place_end_gateway(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_end_gateway<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::EndGateway(config) = kind else {
@@ -647,8 +647,8 @@ fn place_end_gateway(
     FeatureDecorationRunner::place_end_gateway_feature(context.region, config, context.origin)
 }
 
-fn place_end_island(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_end_island<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::EndIsland = kind else {
@@ -661,8 +661,8 @@ fn place_end_island(
     )
 }
 
-fn place_end_platform(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_end_platform<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::EndPlatform = kind else {
@@ -671,8 +671,8 @@ fn place_end_platform(
     FeatureDecorationRunner::place_end_platform_feature(context.region, context.origin)
 }
 
-fn place_end_spike(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_end_spike<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::EndSpike(config) = kind else {
@@ -686,8 +686,8 @@ fn place_end_spike(
     )
 }
 
-fn place_geode(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_geode<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Geode(config) = kind else {
@@ -702,8 +702,8 @@ fn place_geode(
     )
 }
 
-fn place_glowstone_blob(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_glowstone_blob<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::GlowstoneBlob = kind else {
@@ -716,8 +716,8 @@ fn place_glowstone_blob(
     )
 }
 
-fn place_huge_brown_mushroom(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_huge_brown_mushroom<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::HugeBrownMushroom(config) = kind else {
@@ -732,8 +732,8 @@ fn place_huge_brown_mushroom(
     )
 }
 
-fn place_huge_red_mushroom(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_huge_red_mushroom<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::HugeRedMushroom(config) = kind else {
@@ -748,8 +748,8 @@ fn place_huge_red_mushroom(
     )
 }
 
-fn place_huge_fungus(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_huge_fungus<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::HugeFungus(config) = kind else {
@@ -764,8 +764,8 @@ fn place_huge_fungus(
     )
 }
 
-fn place_iceberg(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_iceberg<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Iceberg(config) = kind else {
@@ -780,8 +780,8 @@ fn place_iceberg(
     )
 }
 
-fn place_netherrack_replace_blobs(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_netherrack_replace_blobs<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::NetherrackReplaceBlobs(config) = kind else {
@@ -796,8 +796,8 @@ fn place_netherrack_replace_blobs(
     )
 }
 
-fn place_nether_forest_vegetation(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_nether_forest_vegetation<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::NetherForestVegetation(config) = kind else {
@@ -812,8 +812,8 @@ fn place_nether_forest_vegetation(
     )
 }
 
-fn place_twisting_vines(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_twisting_vines<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::TwistingVines(config) = kind else {
@@ -827,8 +827,8 @@ fn place_twisting_vines(
     )
 }
 
-fn place_vines(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_vines<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Vines = kind else {
@@ -837,8 +837,8 @@ fn place_vines(
     FeatureDecorationRunner::place_vines_feature(context.region, context.origin)
 }
 
-fn place_void_start_platform(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_void_start_platform<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::VoidStartPlatform = kind else {
@@ -847,8 +847,8 @@ fn place_void_start_platform(
     FeatureDecorationRunner::place_void_start_platform_feature(context.region, context.origin)
 }
 
-fn place_weeping_vines(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_weeping_vines<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::WeepingVines = kind else {
@@ -861,8 +861,8 @@ fn place_weeping_vines(
     )
 }
 
-fn place_spring_feature(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_spring_feature<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::SpringFeature(config) = kind else {
@@ -876,8 +876,8 @@ fn place_spring_feature(
     )
 }
 
-fn place_kelp(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_kelp<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Kelp = kind else {
@@ -886,8 +886,8 @@ fn place_kelp(
     FeatureDecorationRunner::place_kelp_feature(context.region, context.random, context.origin)
 }
 
-fn place_lake(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_lake<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Lake(config) = kind else {
@@ -903,8 +903,8 @@ fn place_lake(
     )
 }
 
-fn place_monster_room(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_monster_room<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::MonsterRoom = kind else {
@@ -917,8 +917,8 @@ fn place_monster_room(
     )
 }
 
-fn place_freeze_top_layer(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_freeze_top_layer<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::FreezeTopLayer = kind else {
@@ -932,8 +932,8 @@ fn place_freeze_top_layer(
     )
 }
 
-fn place_multiface_growth(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_multiface_growth<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::MultifaceGrowth(config) = kind else {
@@ -948,8 +948,8 @@ fn place_multiface_growth(
     )
 }
 
-fn place_sea_pickle(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_sea_pickle<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::SeaPickle(config) = kind else {
@@ -963,8 +963,8 @@ fn place_sea_pickle(
     )
 }
 
-fn place_seagrass(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_seagrass<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Seagrass(config) = kind else {
@@ -978,8 +978,8 @@ fn place_seagrass(
     )
 }
 
-fn place_underwater_magma(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_underwater_magma<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::UnderwaterMagma(config) = kind else {
@@ -993,8 +993,8 @@ fn place_underwater_magma(
     )
 }
 
-fn place_pointed_dripstone(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_pointed_dripstone<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::PointedDripstone(config) = kind else {
@@ -1008,8 +1008,8 @@ fn place_pointed_dripstone(
     )
 }
 
-fn place_dripstone_cluster(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_dripstone_cluster<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::DripstoneCluster(config) = kind else {
@@ -1023,8 +1023,8 @@ fn place_dripstone_cluster(
     )
 }
 
-fn place_speleothem(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_speleothem<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Speleothem(config) = kind else {
@@ -1038,8 +1038,8 @@ fn place_speleothem(
     )
 }
 
-fn place_speleothem_cluster(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_speleothem_cluster<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::SpeleothemCluster(config) = kind else {
@@ -1053,8 +1053,8 @@ fn place_speleothem_cluster(
     )
 }
 
-fn place_large_dripstone(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_large_dripstone<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::LargeDripstone(config) = kind else {
@@ -1068,8 +1068,8 @@ fn place_large_dripstone(
     )
 }
 
-fn place_spike(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_spike<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Spike(config) = kind else {
@@ -1084,8 +1084,8 @@ fn place_spike(
     )
 }
 
-fn place_ore(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_ore<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Ore(config) = kind else {
@@ -1100,8 +1100,8 @@ fn place_ore(
     )
 }
 
-fn place_scattered_ore(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_scattered_ore<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::ScatteredOre(config) = kind else {
@@ -1116,8 +1116,8 @@ fn place_scattered_ore(
     )
 }
 
-fn place_sculk_patch(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_sculk_patch<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::SculkPatch(config) = kind else {
@@ -1132,8 +1132,8 @@ fn place_sculk_patch(
     )
 }
 
-fn place_tree(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_tree<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Tree(config) = kind else {
@@ -1166,8 +1166,8 @@ fn place_tree(
 /// The tree code runs over any `LevelAccessor` so a sapling can grow one, and a
 /// nested configured feature can only be placed from this dispatcher, so the
 /// decorators hand back where they wanted one and this puts it there.
-fn place_tree_ground_features(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_tree_ground_features<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     origins: &[BlockPos],
 ) {
     if origins.is_empty() {
@@ -1198,8 +1198,8 @@ fn place_tree_ground_features(
     }
 }
 
-fn place_fallen_tree(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_fallen_tree<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::FallenTree(config) = kind else {
@@ -1220,8 +1220,8 @@ fn place_fallen_tree(
     placed
 }
 
-fn place_fossil(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_fossil<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::Fossil(config) = kind else {
@@ -1236,8 +1236,8 @@ fn place_fossil(
     )
 }
 
-fn place_root_system(
-    context: &mut ConfiguredFeaturePlaceContext<'_, '_>,
+fn place_root_system<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
 ) -> bool {
     let ConfiguredFeatureKind::RootSystem(config) = kind else {

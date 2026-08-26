@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_blue_ice_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
@@ -11,8 +11,8 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        if !Self::is_water(region.block_state(origin))
-            && !Self::is_water(region.block_state(origin.below()))
+        if !Self::is_water(region.get_block_state(origin))
+            && !Self::is_water(region.get_block_state(origin.below()))
         {
             return false;
         }
@@ -20,7 +20,9 @@ impl FeatureDecorationRunner {
         let mut found_packed_ice = false;
         for direction in Self::VANILLA_DIRECTION_VALUES {
             if direction != Direction::Down
-                && region.block_state(origin.relative(direction)).get_block()
+                && region
+                    .get_block_state(origin.relative(direction))
+                    .get_block()
                     == &vanilla_blocks::PACKED_ICE
             {
                 found_packed_ice = true;
@@ -48,7 +50,7 @@ impl FeatureDecorationRunner {
                 y_offset,
                 random.next_i32_bounded(xz_diff) - random.next_i32_bounded(xz_diff),
             );
-            let place_state = region.block_state(place_pos);
+            let place_state = region.get_block_state(place_pos);
             if !place_state.is_air()
                 && !Self::is_water(place_state)
                 && place_state.get_block() != &vanilla_blocks::PACKED_ICE
@@ -59,7 +61,7 @@ impl FeatureDecorationRunner {
 
             for direction in Self::VANILLA_DIRECTION_VALUES {
                 if region
-                    .block_state(place_pos.relative(direction))
+                    .get_block_state(place_pos.relative(direction))
                     .get_block()
                     == &vanilla_blocks::BLUE_ICE
                 {

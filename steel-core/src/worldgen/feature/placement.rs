@@ -14,7 +14,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn count_on_every_layer_positions(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
         count: &IntProvider,
@@ -27,7 +27,7 @@ impl FeatureDecorationRunner {
             for _ in 0..count.sample(random) {
                 let x = origin.x() + random.next_i32_bounded(16);
                 let z = origin.z() + random.next_i32_bounded(16);
-                let start_y = region.height_at(HeightmapType::MotionBlocking, x, z);
+                let start_y = region.heightmap_at(HeightmapType::MotionBlocking, x, z);
                 if let Some(y) = Self::find_on_ground_y_position(region, x, start_y, z, layer) {
                     positions.push(BlockPos::new(x, y, z));
                     found_any = true;
@@ -44,17 +44,17 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn find_on_ground_y_position(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         x: i32,
         start_y: i32,
         z: i32,
         layer_to_place_on: i32,
     ) -> Option<i32> {
         let mut current_layer = 0;
-        let mut current_block = region.block_state(BlockPos::new(x, start_y, z));
+        let mut current_block = region.get_block_state(BlockPos::new(x, start_y, z));
 
         for y in (region.min_y() + 1..=start_y).rev() {
-            let below_block = region.block_state(BlockPos::new(x, y - 1, z));
+            let below_block = region.get_block_state(BlockPos::new(x, y - 1, z));
             if !Self::is_empty_layer_block(below_block)
                 && Self::is_empty_layer_block(current_block)
                 && below_block.get_block() != &vanilla_blocks::BEDROCK
@@ -78,7 +78,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn environment_scan_position(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         origin: BlockPos,
         direction_of_search: steel_utils::Direction,

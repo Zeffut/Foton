@@ -5,7 +5,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_speleothem_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &SpeleothemConfiguration,
         origin: BlockPos,
@@ -19,7 +19,7 @@ impl FeatureDecorationRunner {
         Self::create_patch_of_speleothem_base_blocks(region, random, root_pos, config);
         let height = if random.next_f32() < config.chance_of_taller_generation
             && Self::speleothem_is_empty_or_water(
-                region.block_state(origin.relative(tip_direction)),
+                region.get_block_state(origin.relative(tip_direction)),
             ) {
             2
         } else {
@@ -39,12 +39,12 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_speleothem_cluster_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &SpeleothemClusterConfiguration,
         origin: BlockPos,
     ) -> bool {
-        if !Self::speleothem_is_empty_or_water(region.block_state(origin)) {
+        if !Self::speleothem_is_empty_or_water(region.get_block_state(origin)) {
             return false;
         }
 
@@ -68,18 +68,18 @@ impl FeatureDecorationRunner {
     }
 
     fn speleothem_tip_direction(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &SpeleothemConfiguration,
         pos: BlockPos,
     ) -> Option<Direction> {
         let can_place_above = Self::is_speleothem_base(
-            region.block_state(pos.above()),
+            region.get_block_state(pos.above()),
             config.base_block.block,
             &config.replaceable_blocks,
         );
         let can_place_below = Self::is_speleothem_base(
-            region.block_state(pos.below()),
+            region.get_block_state(pos.below()),
             config.base_block.block,
             &config.replaceable_blocks,
         );
@@ -99,7 +99,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_patch_of_speleothem_base_blocks(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         config: &SpeleothemConfiguration,
@@ -157,7 +157,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla SpeleothemClusterFeature.placeColumn flow"
     )]
     fn place_speleothem_cluster_column(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         dx: i32,
@@ -314,7 +314,7 @@ impl FeatureDecorationRunner {
         reason = "keeps vanilla speleothem growth parameters explicit"
     )]
     fn grow_speleothem(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         start_pos: BlockPos,
         tip_direction: Direction,
         height: i32,
@@ -324,7 +324,7 @@ impl FeatureDecorationRunner {
         replaceable_blocks: &BlockHolderSet,
     ) {
         if !Self::is_speleothem_base(
-            region.block_state(start_pos.relative(tip_direction.opposite())),
+            region.get_block_state(start_pos.relative(tip_direction.opposite())),
             base_block,
             replaceable_blocks,
         ) {
@@ -341,7 +341,7 @@ impl FeatureDecorationRunner {
                 let state = if state.get_block() == pointed_block {
                     state.set_value(
                         &BlockStateProperties::WATERLOGGED,
-                        get_fluid_state_from_block(region.block_state(pos)).is_water(),
+                        get_fluid_state_from_block(region.get_block_state(pos)).is_water(),
                     )
                 } else {
                     state
@@ -410,13 +410,15 @@ impl FeatureDecorationRunner {
     }
 
     fn place_speleothem_base_block_if_possible(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         base_block: BlockRef,
         replaceable_blocks: &BlockHolderSet,
     ) -> bool {
-        if !Self::block_matches_holder_set(region.block_state(pos).get_block(), replaceable_blocks)
-        {
+        if !Self::block_matches_holder_set(
+            region.get_block_state(pos).get_block(),
+            replaceable_blocks,
+        ) {
             return false;
         }
 
@@ -433,11 +435,11 @@ impl FeatureDecorationRunner {
     }
 
     fn can_place_speleothem_pool(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         config: &SpeleothemClusterConfiguration,
     ) -> bool {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         let block = state.get_block();
         if block == &vanilla_blocks::WATER
             || block == config.base_block.block
@@ -446,7 +448,7 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        if get_fluid_state_from_block(region.block_state(pos.above())).is_water() {
+        if get_fluid_state_from_block(region.get_block_state(pos.above())).is_water() {
             return false;
         }
 
@@ -460,16 +462,16 @@ impl FeatureDecorationRunner {
     }
 
     fn can_be_adjacent_to_speleothem_pool_water(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
     ) -> bool {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         state.get_block().has_tag(&BlockTag::BASE_STONE_OVERWORLD)
             || get_fluid_state_from_block(state).is_water()
     }
 
     fn replace_blocks_with_speleothem_base_blocks(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         mut pos: BlockPos,
         max_count: i32,
         direction: Direction,

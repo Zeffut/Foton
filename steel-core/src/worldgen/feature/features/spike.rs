@@ -8,13 +8,13 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_spike_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SpikeConfiguration,
         mut origin: BlockPos,
     ) -> bool {
-        while region.block_state(origin).is_air() && origin.y() > region.min_y() + 2 {
+        while region.get_block_state(origin).is_air() && origin.y() > region.min_y() + 2 {
             origin = origin.below();
         }
 
@@ -46,7 +46,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_spike_body(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SpikeConfiguration,
@@ -98,7 +98,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_spike_base(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SpikeConfiguration,
@@ -116,7 +116,7 @@ impl FeatureDecorationRunner {
                 }
 
                 while cursor.y() > 50 {
-                    let state = region.block_state(cursor);
+                    let state = region.get_block_state(cursor);
                     if !state.is_air()
                         && !Self::test_block_predicate(
                             region,
@@ -142,13 +142,13 @@ impl FeatureDecorationRunner {
     }
 
     fn place_spike_block_if_replaceable(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         config: &SpikeConfiguration,
         pos: BlockPos,
         spike_state: BlockStateId,
     ) {
-        let state = region.block_state(pos);
+        let state = region.get_block_state(pos);
         if state.is_air() || Self::test_block_predicate(region, registry, &config.can_replace, pos)
         {
             let _ = region.set_block_state(pos, spike_state, UpdateFlags::UPDATE_ALL);

@@ -165,7 +165,7 @@ pub(crate) use signal_getter::{
     get_best_neighbor_signal, get_control_input_signal, get_signal, is_redstone_conductor,
 };
 pub use tick_scheduler::ScheduledTick;
-pub use worldgen_level::WorldGenLevel;
+pub(crate) use worldgen_level::WorldGenLevel;
 
 #[cfg(test)]
 use level_effects::sound_is_within_range;

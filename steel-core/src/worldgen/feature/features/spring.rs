@@ -3,13 +3,13 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_spring_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         config: &SpringConfiguration,
         origin: BlockPos,
     ) -> bool {
         if !Self::block_matches_holder_set(
-            region.block_state(origin.above()).get_block(),
+            region.get_block_state(origin.above()).get_block(),
             &config.valid_blocks,
         ) {
             return false;
@@ -17,14 +17,14 @@ impl FeatureDecorationRunner {
 
         if config.requires_block_below
             && !Self::block_matches_holder_set(
-                region.block_state(origin.below()).get_block(),
+                region.get_block_state(origin.below()).get_block(),
                 &config.valid_blocks,
             )
         {
             return false;
         }
 
-        let current_state = region.block_state(origin);
+        let current_state = region.get_block_state(origin);
         if !current_state.is_air()
             && !Self::block_matches_holder_set(current_state.get_block(), &config.valid_blocks)
         {
@@ -41,7 +41,7 @@ impl FeatureDecorationRunner {
         .into_iter()
         .filter(|&pos| {
             Self::block_matches_holder_set(
-                region.block_state(pos).get_block(),
+                region.get_block_state(pos).get_block(),
                 &config.valid_blocks,
             )
         })
@@ -55,7 +55,7 @@ impl FeatureDecorationRunner {
             origin.below(),
         ]
         .into_iter()
-        .filter(|&pos| region.block_state(pos).is_air())
+        .filter(|&pos| region.get_block_state(pos).is_air())
         .count();
 
         let Ok(expected_rock_count) = usize::try_from(config.rock_count) else {

@@ -6,7 +6,7 @@ use crate::behavior::blocks::MossyCarpetBlock;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_simple_block_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SimpleBlockConfiguration,
@@ -57,7 +57,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_double_plant(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         state: BlockStateId,
         lower_pos: BlockPos,
     ) {
@@ -99,7 +99,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_mossy_carpet(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
     ) {
         let simple_carpet_layer = vanilla_blocks::PALE_MOSS_CARPET.default_state();
@@ -117,7 +117,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn create_mossy_carpet_topper(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
     ) -> BlockStateId {
         let above = pos.above();
@@ -154,7 +154,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn can_attach_to_multiface(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         direction_towards_neighbor: Direction,
     ) -> bool {

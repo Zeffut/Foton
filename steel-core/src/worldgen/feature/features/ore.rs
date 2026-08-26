@@ -1,6 +1,7 @@
 use super::super::instrumentation::OreFeatureProfile;
 use super::super::prelude::*;
 use super::super::runner::FeatureDecorationRunner;
+use crate::worldgen::ore_access::OreLevelAccess;
 use smallvec::SmallVec;
 use std::f32::consts::PI;
 use std::time::Instant;
@@ -10,7 +11,7 @@ use steel_worldgen::state_resolver::WorldgenStateResolver;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_ore_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -39,7 +40,7 @@ impl FeatureDecorationRunner {
 
         for x_probe in x_start..=x_start + size_xz {
             for z_probe in z_start..=z_start + size_xz {
-                if y_start <= region.height_at(HeightmapType::OceanFloorWg, x_probe, z_probe) {
+                if y_start <= region.heightmap_at(HeightmapType::OceanFloorWg, x_probe, z_probe) {
                     return Self::do_place_ore(
                         region, registry, random, config, x0, x1, z0, z1, y0, y1, x_start, y_start,
                         z_start, size_xz, size_y,
@@ -57,7 +58,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla ore vein placement inputs"
     )]
     pub(in crate::worldgen::feature) fn do_place_ore(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -128,7 +129,7 @@ impl FeatureDecorationRunner {
         let height = region.height();
 
         {
-            let mut sections = region.bulk_section_access_for_ore(profile.stats());
+            let mut sections = region.ore_access(profile.stats());
             let candidate_started_at = profile.stats().map(|_| Instant::now());
 
             placed += if profile.stats().is_some() {
@@ -206,7 +207,7 @@ impl FeatureDecorationRunner {
         reason = "keeps the vanilla ore candidate loop monomorphized without hiding state"
     )]
     fn collect_ore_candidates<const PROFILE: bool>(
-        sections: &mut WorldGenBulkSectionAccess<'_, '_, '_>,
+        sections: &mut impl OreLevelAccess,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -315,7 +316,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_scattered_ore_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -355,14 +356,14 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_resolved_ore_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
         targets: &ResolvedOreTargets,
         pos: BlockPos,
     ) -> bool {
-        let block_state = region.block_state(pos);
+        let block_state = region.get_block_state(pos);
         let block_id = ResolvedOreTargets::block_id_for_state(registry, block_state);
         for target in targets.iter() {
             if Self::can_place_resolved_ore(region, registry, random, config, target, pos, block_id)
@@ -375,7 +376,7 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_ore_block_in_bulk(
-        sections: &mut WorldGenBulkSectionAccess<'_, '_, '_>,
+        sections: &mut impl OreLevelAccess,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -394,7 +395,7 @@ impl FeatureDecorationRunner {
             if Self::can_place_resolved_ore_in_bulk(
                 sections, registry, random, config, target, pos, block_id,
             ) {
-                return sections.set_block_state(pos, target.state);
+                return sections.set_ore_block_state(pos, target.state);
             }
         }
 
@@ -402,7 +403,7 @@ impl FeatureDecorationRunner {
     }
 
     fn can_place_resolved_ore(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -422,7 +423,7 @@ impl FeatureDecorationRunner {
     }
 
     fn can_place_resolved_ore_in_bulk(
-        sections: &mut WorldGenBulkSectionAccess<'_, '_, '_>,
+        sections: &mut impl OreLevelAccess,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -455,18 +456,18 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn is_adjacent_to_air(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         pos: BlockPos,
     ) -> bool {
         Direction::ALL.into_iter().any(|direction| {
-            let neighbor = region.block_state(pos.relative(direction));
+            let neighbor = region.get_block_state(pos.relative(direction));
             Self::is_air_block_state(registry, neighbor)
         })
     }
 
     pub(in crate::worldgen::feature) fn is_adjacent_to_air_in_bulk(
-        sections: &mut WorldGenBulkSectionAccess<'_, '_, '_>,
+        sections: &mut impl OreLevelAccess,
         registry: &Registry,
         pos: BlockPos,
     ) -> bool {

@@ -4,7 +4,7 @@ use super::super::vanilla_collections::JavaBlockPosSet;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_vegetation_patch_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -29,7 +29,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_waterlogged_vegetation_patch_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -63,7 +63,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_vegetation_patch_ground(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -95,21 +95,21 @@ impl FeatureDecorationRunner {
 
                 let mut pos = origin.offset(dx, 0, dz);
                 for _ in 0..config.vertical_range {
-                    if !region.block_state(pos).is_air() {
+                    if !region.get_block_state(pos).is_air() {
                         break;
                     }
                     pos = pos.relative(inwards);
                 }
                 for _ in 0..config.vertical_range {
-                    if region.block_state(pos).is_air() {
+                    if region.get_block_state(pos).is_air() {
                         break;
                     }
                     pos = pos.relative(outwards);
                 }
 
                 let below_pos = pos.relative(inwards);
-                let below_state = region.block_state(below_pos);
-                if !region.block_state(pos).is_air()
+                let below_state = region.get_block_state(below_pos);
+                if !region.get_block_state(pos).is_air()
                     || !below_state.is_face_sturdy_at(below_pos, outwards)
                 {
                     continue;
@@ -140,7 +140,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_vegetation_patch_ground_column(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -156,7 +156,7 @@ impl FeatureDecorationRunner {
                 &config.ground_state,
                 *pos,
             );
-            let current_state = region.block_state(*pos);
+            let current_state = region.get_block_state(*pos);
             if state_to_place.get_block() != current_state.get_block() {
                 if !registry
                     .blocks
@@ -174,7 +174,7 @@ impl FeatureDecorationRunner {
     }
 
     fn distribute_vegetation_patch(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -206,7 +206,7 @@ impl FeatureDecorationRunner {
                 biome_zoom_seed,
             );
             if waterlogged && placed {
-                let state = region.block_state(surface_pos);
+                let state = region.get_block_state(surface_pos);
                 if let Some(false) = state.try_get_value(&BlockStateProperties::WATERLOGGED) {
                     let _ = region.set_block_state(
                         surface_pos,
@@ -219,7 +219,7 @@ impl FeatureDecorationRunner {
     }
 
     fn waterlogged_vegetation_patch_surface(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         surface: &JavaBlockPosSet,
     ) -> JavaBlockPosSet {
         let mut water_surface = JavaBlockPosSet::default();
@@ -231,7 +231,7 @@ impl FeatureDecorationRunner {
         water_surface
     }
 
-    fn vegetation_patch_surface_exposed(region: &WorldGenRegion<'_>, pos: BlockPos) -> bool {
+    fn vegetation_patch_surface_exposed(region: &impl WorldGenLevel, pos: BlockPos) -> bool {
         [
             Direction::North,
             Direction::East,
@@ -243,7 +243,7 @@ impl FeatureDecorationRunner {
         .any(|direction| {
             let neighbor_pos = pos.relative(direction);
             !region
-                .block_state(neighbor_pos)
+                .get_block_state(neighbor_pos)
                 .is_face_sturdy_at(neighbor_pos, direction.opposite())
         })
     }

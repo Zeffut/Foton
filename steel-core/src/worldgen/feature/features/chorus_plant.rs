@@ -7,13 +7,13 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_chorus_plant_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
-        if !region.block_state(origin).is_air()
+        if !region.get_block_state(origin).is_air()
             || !region
-                .block_state(origin.below())
+                .get_block_state(origin.below())
                 .get_block()
                 .has_tag(&BlockTag::SUPPORTS_CHORUS_PLANT)
         {
@@ -25,7 +25,7 @@ impl FeatureDecorationRunner {
     }
 
     fn generate_chorus_plant(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         target: BlockPos,
         max_horizontal_spread: i32,
@@ -37,7 +37,7 @@ impl FeatureDecorationRunner {
     }
 
     fn grow_chorus_tree_recursive(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         current: BlockPos,
         start_pos: BlockPos,
@@ -76,8 +76,8 @@ impl FeatureDecorationRunner {
                 let target = current.above_n(height).relative(direction);
                 if (target.x() - start_pos.x()).abs() >= max_horizontal_spread
                     || (target.z() - start_pos.z()).abs() >= max_horizontal_spread
-                    || !region.block_state(target).is_air()
-                    || !region.block_state(target.below()).is_air()
+                    || !region.get_block_state(target).is_air()
+                    || !region.get_block_state(target.below()).is_air()
                     || !Self::chorus_all_neighbors_empty(region, target, Some(direction.opposite()))
                 {
                     continue;
@@ -115,12 +115,14 @@ impl FeatureDecorationRunner {
     }
 
     fn chorus_all_neighbors_empty(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pos: BlockPos,
         ignore: Option<Direction>,
     ) -> bool {
         for direction in Self::VANILLA_HORIZONTAL_DIRECTIONS {
-            if Some(direction) != ignore && !region.block_state(pos.relative(direction)).is_air() {
+            if Some(direction) != ignore
+                && !region.get_block_state(pos.relative(direction)).is_air()
+            {
                 return false;
             }
         }

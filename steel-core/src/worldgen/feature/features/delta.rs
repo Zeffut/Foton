@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_delta_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &DeltaFeatureConfiguration,
@@ -53,8 +53,8 @@ impl FeatureDecorationRunner {
         any_placed
     }
 
-    fn delta_is_clear(region: &WorldGenRegion<'_>, pos: BlockPos, contents: BlockStateId) -> bool {
-        let state = region.block_state(pos);
+    fn delta_is_clear(region: &impl WorldGenLevel, pos: BlockPos, contents: BlockStateId) -> bool {
+        let state = region.get_block_state(pos);
         if state.get_block() == contents.get_block() {
             return false;
         }
@@ -64,7 +64,7 @@ impl FeatureDecorationRunner {
         }
 
         for direction in Self::VANILLA_DIRECTION_VALUES {
-            let is_air = region.block_state(pos.relative(direction)).is_air();
+            let is_air = region.get_block_state(pos.relative(direction)).is_air();
             if (is_air && direction != Direction::Up) || (!is_air && direction == Direction::Up) {
                 return false;
             }

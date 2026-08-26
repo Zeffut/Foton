@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_block_pile_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &BlockPileConfiguration,
@@ -35,13 +35,14 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn try_place_block_pile_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &BlockPileConfiguration,
         pos: BlockPos,
     ) {
-        if !region.block_state(pos).is_air() || !Self::block_pile_may_place_on(region, random, pos)
+        if !region.get_block_state(pos).is_air()
+            || !Self::block_pile_may_place_on(region, random, pos)
         {
             return;
         }
@@ -57,12 +58,12 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn block_pile_may_place_on(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         pos: BlockPos,
     ) -> bool {
         let below_pos = pos.below();
-        let below = region.block_state(below_pos);
+        let below = region.get_block_state(below_pos);
         if below.get_block() == &vanilla_blocks::DIRT_PATH {
             return random.next_bool();
         }

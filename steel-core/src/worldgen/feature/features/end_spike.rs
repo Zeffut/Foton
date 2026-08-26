@@ -17,7 +17,7 @@ const END_SPIKE_CAGE_HEIGHT: i32 = 3;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_end_spike_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &EndSpikeConfiguration,
         origin: BlockPos,
@@ -76,7 +76,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_end_spike(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &EndSpikeConfiguration,
         spike: &EndSpike,
@@ -88,7 +88,7 @@ impl FeatureDecorationRunner {
         Self::place_end_spike_crystal(region, random, config, spike);
     }
 
-    fn place_end_spike_body(region: &WorldGenRegion<'_>, spike: &EndSpike) {
+    fn place_end_spike_body(region: &impl WorldGenLevel, spike: &EndSpike) {
         let radius_squared_plus_one = spike.radius * spike.radius + 1;
         let obsidian = REGISTRY
             .blocks
@@ -121,7 +121,7 @@ impl FeatureDecorationRunner {
         dx * dx + dz * dz <= f64::from(radius_squared_plus_one)
     }
 
-    fn place_end_spike_cage(region: &WorldGenRegion<'_>, spike: &EndSpike) {
+    fn place_end_spike_cage(region: &impl WorldGenLevel, spike: &EndSpike) {
         for dx in -END_SPIKE_CAGE_RADIUS..=END_SPIKE_CAGE_RADIUS {
             for dz in -END_SPIKE_CAGE_RADIUS..=END_SPIKE_CAGE_RADIUS {
                 for dy in 0..=END_SPIKE_CAGE_HEIGHT {
@@ -166,7 +166,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_end_spike_crystal(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &EndSpikeConfiguration,
         spike: &EndSpike,

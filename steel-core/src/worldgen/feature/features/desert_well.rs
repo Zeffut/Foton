@@ -10,23 +10,23 @@ const DESERT_WELL_ARCHAEOLOGY: &str = "minecraft:archaeology/desert_well";
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_desert_well_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
         let mut origin = origin.above();
-        while region.block_state(origin).is_air() && origin.y() > region.min_y() + 2 {
+        while region.get_block_state(origin).is_air() && origin.y() > region.min_y() + 2 {
             origin = origin.below();
         }
 
-        if region.block_state(origin).get_block() != &vanilla_blocks::SAND {
+        if region.get_block_state(origin).get_block() != &vanilla_blocks::SAND {
             return false;
         }
 
         for ox in -2..=2 {
             for oz in -2..=2 {
-                if region.block_state(origin.offset(ox, -1, oz)).is_air()
-                    && region.block_state(origin.offset(ox, -2, oz)).is_air()
+                if region.get_block_state(origin.offset(ox, -1, oz)).is_air()
+                    && region.get_block_state(origin.offset(ox, -2, oz)).is_air()
                 {
                     return false;
                 }
@@ -154,7 +154,7 @@ impl FeatureDecorationRunner {
         true
     }
 
-    fn place_suspicious_sand(region: &WorldGenRegion<'_>, pos: BlockPos) {
+    fn place_suspicious_sand(region: &impl WorldGenLevel, pos: BlockPos) {
         let state = vanilla_blocks::SUSPICIOUS_SAND.default_state();
         if region.set_block_state(pos, state, UpdateFlags::UPDATE_ALL) {
             Self::set_brushable_loot_table(region, pos, state, DESERT_WELL_ARCHAEOLOGY);

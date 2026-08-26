@@ -46,7 +46,6 @@ use crate::entity::{
     MAX_ENTITY_TAGS,
 };
 use crate::world::WorldGenLevel;
-use crate::worldgen::region::WorldGenRegion;
 use steel_worldgen::state_resolver::WorldgenStateResolver;
 use steel_worldgen::structure::{StructureBlockIgnore, StructureMirror};
 

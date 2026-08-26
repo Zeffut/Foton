@@ -3,15 +3,15 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_glowstone_blob_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
-        if !region.block_state(origin).is_air() {
+        if !region.get_block_state(origin).is_air() {
             return false;
         }
 
-        let above_block = region.block_state(origin.above()).get_block();
+        let above_block = region.get_block_state(origin.above()).get_block();
         if above_block != &vanilla_blocks::NETHERRACK
             && above_block != &vanilla_blocks::BASALT
             && above_block != &vanilla_blocks::BLACKSTONE
@@ -28,14 +28,14 @@ impl FeatureDecorationRunner {
                 -random.next_i32_bounded(12),
                 random.next_i32_bounded(8) - random.next_i32_bounded(8),
             );
-            if !region.block_state(place_pos).is_air() {
+            if !region.get_block_state(place_pos).is_air() {
                 continue;
             }
 
             let mut neighbors = 0;
             for direction in Self::VANILLA_DIRECTION_VALUES {
                 if region
-                    .block_state(place_pos.relative(direction))
+                    .get_block_state(place_pos.relative(direction))
                     .get_block()
                     == &vanilla_blocks::GLOWSTONE
                 {

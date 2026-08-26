@@ -5,7 +5,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_bamboo_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         config: &BambooConfiguration,
         origin: BlockPos,
@@ -13,7 +13,7 @@ impl FeatureDecorationRunner {
         let mut placed = 0;
         let mut bamboo_pos = origin;
 
-        if region.block_state(bamboo_pos).is_air() {
+        if region.get_block_state(bamboo_pos).is_air() {
             let bamboo = vanilla_blocks::BAMBOO.default_state();
             let behavior = BLOCK_BEHAVIORS.get_behavior(&vanilla_blocks::BAMBOO);
             if behavior.can_survive(bamboo, region, bamboo_pos) {
@@ -24,7 +24,7 @@ impl FeatureDecorationRunner {
 
                 let trunk = Self::bamboo_trunk_state();
                 for _ in 0..height {
-                    if !region.block_state(bamboo_pos).is_air() {
+                    if !region.get_block_state(bamboo_pos).is_air() {
                         break;
                     }
                     let _ = region.set_block_state(bamboo_pos, trunk, UpdateFlags::UPDATE_CLIENTS);
@@ -59,7 +59,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_bamboo_podzol_disc(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) {
@@ -72,9 +72,9 @@ impl FeatureDecorationRunner {
                     continue;
                 }
 
-                let y = region.height_at(HeightmapType::WorldSurface, x, z) - 1;
+                let y = region.heightmap_at(HeightmapType::WorldSurface, x, z) - 1;
                 let pos = BlockPos::new(x, y, z);
-                let state = region.block_state(pos);
+                let state = region.get_block_state(pos);
                 if state
                     .get_block()
                     .has_tag(&BlockTag::BENEATH_BAMBOO_PODZOL_REPLACEABLE)

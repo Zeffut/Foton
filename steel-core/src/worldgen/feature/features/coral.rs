@@ -5,7 +5,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_coral_claw_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -74,7 +74,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_coral_mushroom_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -109,7 +109,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_coral_tree_feature(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -155,14 +155,14 @@ impl FeatureDecorationRunner {
     }
 
     fn place_coral_block(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         state: BlockStateId,
     ) -> bool {
         let above = pos.above();
-        let target_state = region.block_state(pos);
+        let target_state = region.get_block_state(pos);
         if target_state.get_block() != &vanilla_blocks::WATER
             && !registry
                 .blocks
@@ -171,7 +171,7 @@ impl FeatureDecorationRunner {
             return false;
         }
 
-        if region.block_state(above).get_block() != &vanilla_blocks::WATER {
+        if region.get_block_state(above).get_block() != &vanilla_blocks::WATER {
             return false;
         }
 
@@ -198,7 +198,7 @@ impl FeatureDecorationRunner {
             }
 
             let relative_pos = pos.relative(direction);
-            if region.block_state(relative_pos).get_block() != &vanilla_blocks::WATER {
+            if region.get_block_state(relative_pos).get_block() != &vanilla_blocks::WATER {
                 continue;
             }
 
