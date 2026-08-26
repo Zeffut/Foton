@@ -153,29 +153,33 @@ fn taking_an_allays_item_back_returns_everything_it_gathered() {
     );
 }
 
+/// Counts the allays in the test world.
+fn count_allays(world: &Arc<World>) -> usize {
+    world
+        .get_entities_in_aabb_matching(
+            &steel_utils::WorldAabb::new(
+                TEST_POSITION.x - 8.0,
+                TEST_POSITION.y - 8.0,
+                TEST_POSITION.z - 8.0,
+                TEST_POSITION.x + 8.0,
+                TEST_POSITION.y + 8.0,
+                TEST_POSITION.z + 8.0,
+            ),
+            |entity| entity.entity_type() == &vanilla_entities::ALLAY,
+        )
+        .len()
+}
+
 #[test]
 fn a_dancing_allay_given_an_amethyst_shard_becomes_two() {
-    // Every condition matters: it has to be dancing, and it has to be off
-    // cooldown. Both allays then owe five minutes before either can do it again,
-    // which is what stops one shard becoming an army.
+    // Both allays then owe five minutes before either can do it again, which is
+    // what stops one shard becoming an army.
     let world = allay_world("allay_duplication");
     let allay = live_allay(&world);
     let player = test_player(&world);
-    give(
-        &player,
-        ItemStack::with_count(&vanilla_items::AMETHYST_SHARD, 2),
-    );
+    give(&player, ItemStack::new(&vanilla_items::AMETHYST_SHARD));
+    let before = count_allays(&world);
 
-    let count_allays = || {
-        world
-            .get_entities_in_aabb_matching(&allay.bounding_box().inflate(8.0), |entity| {
-                entity.entity_type() == &vanilla_entities::ALLAY
-            })
-            .len()
-    };
-    let before = count_allays();
-
-    // Not dancing yet: the shard does nothing but get taken as a fetch item.
     assert!(allay.can_duplicate());
     allay.set_dancing(true);
     assert_eq!(
@@ -183,17 +187,91 @@ fn a_dancing_allay_given_an_amethyst_shard_becomes_two() {
         InteractionResult::Success
     );
 
-    assert_eq!(count_allays(), before + 1);
+    assert_eq!(count_allays(&world), before + 1);
     assert!(!allay.can_duplicate(), "the parent owes a cooldown");
     assert_eq!(allay.duplication_cooldown(), 6000);
+    assert!(
+        !allay.has_item_in_hand(),
+        "a shard that duplicated is spent, not taken as a fetch item"
+    );
+}
 
-    // The shard is spent, and a second try is refused.
+#[test]
+fn an_allay_that_is_not_dancing_takes_the_shard_instead_of_duplicating() {
+    // The dance is the gate: an allay standing still treats an amethyst shard
+    // as one more thing to fetch.
+    let world = allay_world("allay_duplication_not_dancing");
+    let allay = live_allay(&world);
+    let player = test_player(&world);
+    give(&player, ItemStack::new(&vanilla_items::AMETHYST_SHARD));
+    let before = count_allays(&world);
+
+    assert!(!allay.is_dancing());
     assert_eq!(
         allay.mob_interact(&player, InteractionHand::MainHand),
-        InteractionResult::Success,
-        "an allay off cooldown still takes the shard as an item to fetch"
+        InteractionResult::Success
     );
-    assert_eq!(count_allays(), before + 1);
+
+    assert_eq!(count_allays(&world), before);
+    assert!(allay.can_duplicate(), "nothing was duplicated");
+    assert!(
+        allay
+            .get_item_in_hand(InteractionHand::MainHand)
+            .is(&vanilla_items::AMETHYST_SHARD),
+        "the shard became a fetch item instead"
+    );
+}
+
+#[test]
+fn only_an_amethyst_shard_duplicates_a_dancing_allay() {
+    // `#minecraft:duplicates_allays` is one item long. A dancing allay handed
+    // anything else simply takes it.
+    let world = allay_world("allay_duplication_wrong_item");
+    let allay = live_allay(&world);
+    let player = test_player(&world);
+    give(&player, ItemStack::new(&vanilla_items::DIAMOND));
+    let before = count_allays(&world);
+
+    allay.set_dancing(true);
+    assert_eq!(
+        allay.mob_interact(&player, InteractionHand::MainHand),
+        InteractionResult::Success
+    );
+
+    assert_eq!(count_allays(&world), before);
+    assert!(allay.can_duplicate(), "a diamond duplicates nothing");
+    assert!(
+        allay
+            .get_item_in_hand(InteractionHand::MainHand)
+            .is(&vanilla_items::DIAMOND)
+    );
+}
+
+#[test]
+fn an_allay_on_cooldown_will_not_duplicate_again() {
+    // The five minutes is the only thing between one shard and the next.
+    let world = allay_world("allay_duplication_cooldown");
+    let allay = live_allay(&world);
+    let player = test_player(&world);
+    give(&player, ItemStack::new(&vanilla_items::AMETHYST_SHARD));
+    let before = count_allays(&world);
+
+    allay.set_dancing(true);
+    allay.reset_duplication_cooldown();
+    assert!(!allay.can_duplicate());
+
+    assert_eq!(
+        allay.mob_interact(&player, InteractionHand::MainHand),
+        InteractionResult::Success
+    );
+
+    assert_eq!(count_allays(&world), before);
+    assert!(
+        allay
+            .get_item_in_hand(InteractionHand::MainHand)
+            .is(&vanilla_items::AMETHYST_SHARD),
+        "an allay on cooldown takes the shard rather than spending it"
+    );
 }
 
 #[test]
@@ -286,6 +364,48 @@ fn an_allay_hears_a_note_block_and_serves_it_until_the_clock_runs_out() {
             .map(|liked| liked.pos),
         Some(TEST_POS),
         "an allay keeps the first note block it liked"
+    );
+}
+
+#[test]
+fn hearing_a_second_note_block_does_not_move_an_allay_to_it() {
+    // This is `hearNoteblock` itself rather than the listener filter above it:
+    // even asked directly, an allay that already likes a note block keeps it
+    // and refuses to refresh the clock for anything else.
+    let world = allay_world("allay_hear_noteblock");
+    let allay = live_allay(&world);
+    let other = BlockPos::new(TEST_POS.x() + 3, TEST_POS.y(), TEST_POS.z());
+
+    allay_ai::hear_noteblock(&allay.brain, &world, TEST_POS);
+    allay
+        .brain
+        .set_memory(memory_module_types::LIKED_NOTEBLOCK_COOLDOWN_TICKS, 100);
+
+    allay_ai::hear_noteblock(&allay.brain, &world, other);
+
+    assert_eq!(
+        allay
+            .brain
+            .get_memory(memory_module_types::LIKED_NOTEBLOCK_POSITION)
+            .map(|liked| liked.pos),
+        Some(TEST_POS),
+        "the first note block keeps the allay"
+    );
+    assert_eq!(
+        allay
+            .brain
+            .get_memory(memory_module_types::LIKED_NOTEBLOCK_COOLDOWN_TICKS),
+        Some(100),
+        "another note block does not refresh the clock either"
+    );
+
+    // The one it does like refreshes it.
+    allay_ai::hear_noteblock(&allay.brain, &world, TEST_POS);
+    assert_eq!(
+        allay
+            .brain
+            .get_memory(memory_module_types::LIKED_NOTEBLOCK_COOLDOWN_TICKS),
+        Some(600)
     );
 }
 
