@@ -12,19 +12,24 @@ use std::sync::Arc;
 use glam::DVec3;
 use simdnbt::borrow::{NbtCompound as NbtCompoundView, read_compound as read_borrowed_compound};
 use simdnbt::owned::NbtCompound;
+use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::blocks::properties::BlockStateProperties;
 use steel_registry::vanilla_blocks;
 use steel_registry::{init_vanilla_registry, vanilla_entities, vanilla_game_events};
 use steel_utils::types::UpdateFlags;
-use steel_utils::{BlockPos, ChunkPos};
+use steel_utils::{BlockPos, ChunkPos, Downcast as _, WorldAabb};
 
 use super::anger::{AngerLevel, AngerManagement};
 use super::entity::WardenEntity;
 use super::warden_ai;
 use crate::behavior::init_behaviors;
+use crate::block_entity::entities::SculkShriekerBlockEntity;
 use crate::block_entity::init_block_entities;
 use crate::entity::ai::brain::memory::{Unit, memory_module_types};
 use crate::entity::ai::brain::{Activity, Brain};
+use crate::entity::init_entities;
 use crate::entity::{Entity, LivingEntity, SharedEntity, next_entity_id};
+use crate::player::ResetReason;
 use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -38,6 +43,7 @@ fn warden_world(key: &'static str) -> Arc<World> {
     init_vanilla_registry();
     init_behaviors();
     init_block_entities();
+    init_entities();
     let world = fresh_test_world(key);
     for x in -1..=1 {
         for z in -1..=1 {
@@ -183,6 +189,114 @@ fn a_warden_gets_angry_at_what_it_hears() {
         brain(&warden).has_memory_value(memory_module_types::DISTURBANCE_LOCATION.id()),
         "a warden that is not yet angry goes to look at what it heard"
     );
+}
+
+/// Four shrieks summon a warden, and not one shriek sooner. The count lives on the player,
+/// so this is also the check that the shrieker reads it from there rather than from itself.
+#[test]
+fn four_shrieks_summon_a_warden() {
+    let world = warden_world("warden_summoned_by_shrieks");
+    let shrieker_pos = BlockPos::new(STAND.x(), STAND.y(), STAND.z());
+    assert!(
+        world.set_block(
+            shrieker_pos,
+            vanilla_blocks::SCULK_SHRIEKER
+                .default_state()
+                .set_value(&BlockStateProperties::CAN_SUMMON, true),
+            UpdateFlags::UPDATE_ALL,
+        )
+    );
+    let player =
+        TestPlayerBuilder::new(Arc::clone(&world), "shrieked_at", next_entity_id()).build();
+    player
+        .try_set_position(DVec3::new(
+            f64::from(STAND.x()) + 0.5,
+            f64::from(STAND.y()) + 1.0,
+            f64::from(STAND.z()) + 0.5,
+        ))
+        .expect("the test chunk is loaded");
+    // A shrieker asks the world for the players near it, and that index is the one a
+    // joining player is put into -- `try_add_entity` alone would leave it empty.
+    assert!(world.add_player(Arc::clone(&player), ResetReason::InitialJoin));
+
+    let shrieker = |world: &Arc<World>| {
+        world
+            .get_block_entity(shrieker_pos)
+            .and_then(|block_entity| {
+                block_entity
+                    .downcast_ref::<SculkShriekerBlockEntity>()
+                    .map(SculkShriekerBlockEntity::warning_level)
+            })
+            .expect("placing a shrieker creates its block entity")
+    };
+
+    for expected in 1..=4 {
+        // The block state has to be quiet again before the next shriek, and the player has
+        // to be out of the ten-second cooldown between warnings. Ending the shriek by hand
+        // stands in for the ninety-tick scheduled tick that would end it in a live world.
+        let state = world.get_block_state(shrieker_pos);
+        if state.get_value(&BlockStateProperties::SHRIEKING) {
+            assert!(world.set_block(
+                shrieker_pos,
+                state.set_value(&BlockStateProperties::SHRIEKING, false),
+                UpdateFlags::UPDATE_ALL,
+            ));
+        }
+        with_shrieker(&world, shrieker_pos, |block_entity| {
+            block_entity.try_shriek(&world, &player);
+        });
+        assert_eq!(
+            shrieker(&world),
+            expected,
+            "each allowed shriek should move the player one step closer to a warden"
+        );
+        for _ in 0..210 {
+            player.tick();
+        }
+    }
+
+    assert!(
+        wardens_in(&world).is_empty(),
+        "the warden arrives with the answer to the fourth shriek, not with the shriek"
+    );
+    with_shrieker(&world, shrieker_pos, |block_entity| {
+        block_entity.try_respond(&world);
+    });
+    assert_eq!(
+        wardens_in(&world).len(),
+        1,
+        "a shrieker answering its fourth warning summons exactly one warden"
+    );
+}
+
+fn with_shrieker(
+    world: &Arc<World>,
+    pos: BlockPos,
+    action: impl FnOnce(&SculkShriekerBlockEntity),
+) {
+    let block_entity = world
+        .get_block_entity(pos)
+        .expect("placing a shrieker creates its block entity");
+    let shrieker = block_entity
+        .downcast_ref::<SculkShriekerBlockEntity>()
+        .expect("the sculk shrieker block entity is the one that was created");
+    action(shrieker);
+}
+
+fn wardens_in(world: &Arc<World>) -> Vec<SharedEntity> {
+    world.get_entities_in_aabb_matching(
+        &WorldAabb::of_size(
+            DVec3::new(
+                f64::from(STAND.x()),
+                f64::from(STAND.y()),
+                f64::from(STAND.z()),
+            ),
+            64.0,
+            64.0,
+            64.0,
+        ),
+        |entity| entity.entity_type() == &vanilla_entities::WARDEN,
+    )
 }
 
 /// Anger decays a point a second, which is what makes standing still work as a way to

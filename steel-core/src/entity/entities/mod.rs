@@ -11,11 +11,11 @@ pub use mobs::bosses::WitherBoss;
 pub use mobs::hostile::{
     BlazeEntity, BoggedEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
     EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity, GuardianEntity,
-    HoglinEntity, HuskEntity, IllusionerEntity, MagmaCubeEntity, ParchedEntity, PhantomEntity,
-    PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
-    SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, VexEntity,
-    VindicatorEntity, WardenEntity, WitchEntity, WitherSkeletonEntity, ZoglinEntity, ZombieEntity,
-    ZombifiedPiglinEntity,
+    HoglinEntity, HuskEntity, IllusionerEntity, MAX_WARDEN_WARNING_LEVEL, MagmaCubeEntity,
+    ParchedEntity, PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity,
+    ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity,
+    VexEntity, VindicatorEntity, WardenEntity, WardenSpawnTracker, WitchEntity,
+    WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity, try_warn_of_warden,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::npc::{VillagerEntity, WanderingTraderEntity, ZombieVillagerEntity};

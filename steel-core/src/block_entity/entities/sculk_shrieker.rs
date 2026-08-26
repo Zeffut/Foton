@@ -6,11 +6,8 @@
 //! events are only `sculk_sensor_tendrils_clicking`: it answers a sensor that just fired
 //! near it, not the footstep the sensor heard.
 //!
-//! Not implemented: the warden. `Warden`, `WardenSpawnTracker` and `SpawnUtil.trySpawnMob`
-//! do not exist in Steel, so nothing here can raise the warning level, summon a warden, or
-//! apply darkness. What survives is everything a player can see and hear without one: the
-//! shriek itself, its 90-tick duration, and the warden reply sound a shrieker plays when a
-//! world already carries a warning level.
+//! Four warnings summon a warden. The count is not kept here -- it lives on the player,
+//! so walking to a different shrieker does not restart it.
 
 use std::sync::{Arc, Weak};
 
@@ -25,7 +22,9 @@ use steel_registry::game_events::GameEventRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_game_event_tags::GameEventTag;
 use steel_registry::vanilla_game_rules::SPAWN_WARDENS;
-use steel_registry::{level_events, sound_events, vanilla_block_entity_types, vanilla_game_events};
+use steel_registry::{
+    level_events, sound_events, vanilla_block_entity_types, vanilla_entities, vanilla_game_events,
+};
 use steel_utils::types::{Difficulty, UpdateFlags};
 use steel_utils::{
     BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey, Identifier,
@@ -33,13 +32,15 @@ use steel_utils::{
 };
 
 use crate::block_entity::{BlockEntity, BlockEntityBase};
-use crate::entity::Entity;
+use crate::entity::entities::{MAX_WARDEN_WARNING_LEVEL, WardenEntity, try_warn_of_warden};
+use crate::entity::{Entity, EntitySpawnReason};
 use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::vibrations::{
     VIBRATION_DATA_TAG, VibrationListener, VibrationPositionSource, VibrationUser,
 };
 use crate::world::game_event::{GameEventContext, SharedGameEventListener};
+use crate::world::spawn_util::SpawnStrategy;
 
 /// Vanilla `SculkShriekerBlockEntity.SHRIEKING_TICKS`.
 const SHRIEKING_TICKS: i32 = 90;
@@ -49,6 +50,14 @@ const WARNING_SOUND_RADIUS: i32 = 10;
 const DEFAULT_WARNING_LEVEL: i32 = 0;
 /// Vanilla `SculkShriekerBlockEntity.VibrationUser.LISTENER_RADIUS`.
 const LISTENER_RADIUS: i32 = 8;
+/// Vanilla `SculkShriekerBlockEntity.WARDEN_SPAWN_ATTEMPTS`.
+const WARDEN_SPAWN_ATTEMPTS: i32 = 20;
+/// Vanilla `SculkShriekerBlockEntity.WARDEN_SPAWN_RANGE_XZ`.
+const WARDEN_SPAWN_RANGE_XZ: i32 = 5;
+/// Vanilla `SculkShriekerBlockEntity.WARDEN_SPAWN_RANGE_Y`.
+const WARDEN_SPAWN_RANGE_Y: i32 = 6;
+/// Vanilla `SculkShriekerBlockEntity.DARKNESS_RADIUS`.
+const DARKNESS_RADIUS: f64 = 40.0;
 
 const SHRIEKING: &BoolProperty = &BlockStateProperties::SHRIEKING;
 const CAN_SUMMON: &BoolProperty = &BlockStateProperties::CAN_SUMMON;
@@ -132,12 +141,9 @@ impl SculkShriekerBlockEntity {
 
     /// Runs vanilla `SculkShriekerBlockEntity.tryShriek`.
     ///
-    /// Deviation: vanilla only shrieks when the shrieker cannot summon, or when
-    /// `WardenSpawnTracker.tryWarn` grants a warning -- a per-player cooldown and range
-    /// check that also decides the new warning level. Steel has no warden spawn tracker, so
-    /// a summoning shrieker shrieks on every step instead of on every allowed warning. The
-    /// warning level is still cleared here the way vanilla clears it, but nothing raises it
-    /// afterwards, so it never climbs toward a spawn.
+    /// A shrieker that cannot summon always shrieks; one that can only shrieks when the
+    /// player has earned a warning, which is what stops a player farming four shrieks out
+    /// of ten seconds on one block.
     pub fn try_shriek(&self, world: &Arc<World>, player: &Player) {
         let state = self.get_block_state();
         if state.get_value(SHRIEKING) {
@@ -145,7 +151,18 @@ impl SculkShriekerBlockEntity {
         }
 
         self.state.lock().warning_level = DEFAULT_WARNING_LEVEL;
-        self.shriek(world, player);
+        if !self.can_respond(world) || self.try_to_warn(world, player) {
+            self.shriek(world, player);
+        }
+    }
+
+    /// Runs vanilla `SculkShriekerBlockEntity.tryToWarn`.
+    fn try_to_warn(&self, world: &Arc<World>, player: &Player) -> bool {
+        let Some(warning_level) = try_warn_of_warden(world, self.get_block_pos(), player) else {
+            return false;
+        };
+        self.state.lock().warning_level = warning_level;
+        true
     }
 
     /// Runs vanilla `SculkShriekerBlockEntity.shriek`.
@@ -175,20 +192,47 @@ impl SculkShriekerBlockEntity {
 
     /// Runs vanilla `SculkShriekerBlockEntity.tryRespond`.
     ///
-    /// Not implemented: `trySummonWarden` and `Warden.applyDarknessAround`. Steel has no
-    /// warden entity, so the response never gets past the reply sound and never blinds
-    /// anyone. Nothing in Steel raises the warning level either, so this only fires for a
-    /// shrieker loaded out of a world that vanilla had already warned through.
+    /// The answer to a shriek is either a warden or the sound of one getting closer, and
+    /// either way everybody nearby goes blind.
     pub fn try_respond(&self, world: &Arc<World>) {
         let warning_level = self.warning_level();
         if !self.can_respond(world) || warning_level <= 0 {
             return;
         }
 
-        // Vanilla tries to summon a warden at warning level four and only plays the reply
-        // sound when that spawn fails. Steel has no warden to spawn, so the spawn always
-        // fails and the reply sound is the whole response.
-        self.play_warden_reply_sound(world, warning_level);
+        if !self.try_summon_warden(world, warning_level) {
+            self.play_warden_reply_sound(world, warning_level);
+        }
+
+        let pos = self.get_block_pos();
+        WardenEntity::apply_darkness_around(
+            world,
+            DVec3::new(
+                f64::from(pos.x()) + 0.5,
+                f64::from(pos.y()) + 0.5,
+                f64::from(pos.z()) + 0.5,
+            ),
+            None,
+            DARKNESS_RADIUS,
+        );
+    }
+
+    /// Runs vanilla `SculkShriekerBlockEntity.trySummonWarden`.
+    fn try_summon_warden(&self, world: &Arc<World>, warning_level: i32) -> bool {
+        if warning_level < MAX_WARDEN_WARNING_LEVEL {
+            return false;
+        }
+        world
+            .try_spawn_mob(
+                &vanilla_entities::WARDEN,
+                EntitySpawnReason::Triggered,
+                self.get_block_pos(),
+                WARDEN_SPAWN_ATTEMPTS,
+                WARDEN_SPAWN_RANGE_XZ,
+                WARDEN_SPAWN_RANGE_Y,
+                SpawnStrategy::OnTopOfCollider,
+            )
+            .is_some()
     }
 
     /// Runs vanilla `SculkShriekerBlockEntity.playWardenReplySound`.
