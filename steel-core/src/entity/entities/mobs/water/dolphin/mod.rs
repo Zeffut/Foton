@@ -354,7 +354,7 @@ impl Entity for DolphinEntity {
 
     /// Vanilla parity: `Dolphin.tick`.
     fn tick(&self) {
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
         self.tick_moistness();
     }
 

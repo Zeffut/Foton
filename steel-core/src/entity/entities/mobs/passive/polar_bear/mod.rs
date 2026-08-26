@@ -304,7 +304,7 @@ impl Entity for PolarBearEntity {
     /// Vanilla parity: `PolarBear.tick`, whose server half is the warning
     /// cooldown and the anger clock. The stand animation is client-local.
     fn tick(&self) {
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
 
         {
             let mut warning_sound_ticks = self.warning_sound_ticks.lock();

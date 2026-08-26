@@ -353,11 +353,15 @@ fn an_allay_hears_a_note_block_and_serves_it_until_the_clock_runs_out() {
         Some(TEST_POS),
         "an allay in range should remember the note block it heard"
     );
-    assert_eq!(
-        allay
-            .brain
-            .get_memory(memory_module_types::LIKED_NOTEBLOCK_COOLDOWN_TICKS),
-        Some(600)
+    // The clock starts at 600 and the brain counts it down from the tick the vibration
+    // arrived on, which is a tick or two into the run.
+    let cooldown = allay
+        .brain
+        .get_memory(memory_module_types::LIKED_NOTEBLOCK_COOLDOWN_TICKS)
+        .expect("hearing a note block starts its ten-second clock");
+    assert!(
+        (590..=600).contains(&cooldown),
+        "the note block clock should have just started, got {cooldown}"
     );
 
     // A second note block somewhere else does not steal it.

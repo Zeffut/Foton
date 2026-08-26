@@ -394,7 +394,7 @@ impl Entity for SnifferEntity {
         if self.state() == SnifferState::Digging {
             self.drop_seed();
         }
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
     }
 
     fn play_step_sound(&self, _pos: BlockPos, _block_state: BlockStateId) {

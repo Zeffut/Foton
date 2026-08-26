@@ -864,7 +864,7 @@ impl Entity for PandaEntity {
 
     /// Vanilla parity: `Panda.tick`.
     fn tick(&self) {
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
 
         if self.is_worried() {
             let thundering = self.level().is_some_and(|world| world.is_thundering());

@@ -15,6 +15,10 @@
 
 use super::*;
 use crate::entity::entities::{
+    AllayEntity, ArmadilloEntity, CamelEntity, DolphinEntity, PandaEntity, PolarBearEntity,
+    PufferfishEntity, SnifferEntity,
+};
+use crate::entity::entities::{
     BlazeEntity, BoggedEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
     EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity, GuardianEntity,
     HoglinEntity, HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity, ParchedEntity,
@@ -23,8 +27,59 @@ use crate::entity::entities::{
     VexEntity, VindicatorEntity, WardenEntity, WitchEntity, WitherBoss, WitherSkeletonEntity,
     ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
-use crate::entity::{LivingEntity, Mob, next_entity_id};
-use steel_registry::vanilla_entities;
+use crate::entity::{Entity, LivingEntity, Mob, MobEffectInstance, next_entity_id};
+use steel_registry::{vanilla_entities, vanilla_mob_effects};
+
+/// A living entity's own tick is the door every one of the above comes through.
+///
+/// `Entity::tick` defaults to `LivingEntity::tick_living_entity`, and a mob that overrides
+/// it has to call that itself -- `Entity::default_tick` is only `baseTick`, so a mob that
+/// reached for it instead lost its item use, its mob effects, its death handling and its
+/// whole `ai_step`. Nine mobs did. The witness is a mob effect's duration, because
+/// `tick_mob_effects` is near the top of the living tick and needs no world.
+fn living_tick_runs(mob: &impl LivingEntity) -> bool {
+    mob.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::GLOWING,
+        100,
+        0,
+    ));
+    Entity::tick(mob);
+    mob.mob_effect(vanilla_mob_effects::GLOWING)
+        .is_some_and(|effect| effect.duration() < 100)
+}
+
+macro_rules! assert_living_tick_runs {
+    ($($name:ident: $ty:ty, $entity_type:expr;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                init_vanilla_registry();
+                let mob = <$ty>::new($entity_type, next_entity_id(), DVec3::ZERO, Weak::new());
+                assert!(
+                    living_tick_runs(&mob),
+                    "this mob's own tick never reaches `LivingEntity::tick_living_entity`, \
+                     so nothing below `Entity.baseTick` runs for it"
+                );
+            }
+        )*
+    };
+}
+
+// Only the mobs that override `Entity::tick` need this: the rest inherit the default,
+// which is `tick_living_entity` itself.
+assert_living_tick_runs! {
+    a_warden_runs_its_living_tick: WardenEntity, &vanilla_entities::WARDEN;
+    an_allay_runs_its_living_tick: AllayEntity, &vanilla_entities::ALLAY;
+    a_polar_bear_runs_its_living_tick: PolarBearEntity, &vanilla_entities::POLAR_BEAR;
+    an_armadillo_runs_its_living_tick: ArmadilloEntity, &vanilla_entities::ARMADILLO;
+    a_panda_runs_its_living_tick: PandaEntity, &vanilla_entities::PANDA;
+    a_sniffer_runs_its_living_tick: SnifferEntity, &vanilla_entities::SNIFFER;
+    a_camel_runs_its_living_tick: CamelEntity, &vanilla_entities::CAMEL;
+    a_pufferfish_runs_its_living_tick: PufferfishEntity, &vanilla_entities::PUFFERFISH;
+    a_dolphin_runs_its_living_tick: DolphinEntity, &vanilla_entities::DOLPHIN;
+    a_vex_runs_its_living_tick: VexEntity, &vanilla_entities::VEX;
+    a_shulker_runs_its_living_tick: ShulkerEntity, &vanilla_entities::SHULKER;
+}
 
 /// `mob_server_ai_step` bumps `no_action_time` before it does anything else,
 /// which makes it the cheapest possible witness that the whole body ran.

@@ -391,7 +391,7 @@ impl Entity for CamelEntity {
 
     /// Vanilla parity: `Camel.tick`.
     fn tick(&self) {
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
         self.tick_dash();
 
         if self.refuse_to_move() {

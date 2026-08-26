@@ -373,19 +373,20 @@ impl Entity for WardenEntity {
 
     /// Vanilla parity: the server half of `Warden.tick`.
     fn tick(&self) {
-        let Some(world) = self.level() else {
-            return;
-        };
-        self.ensure_listener(&world);
-        if let Some(listener) = self.listener() {
-            listener.tick(&world);
-        }
-        // A warden a player has kept loaded never digs itself back into the ground.
-        if self.is_persistence_required() || self.requires_custom_persistence() {
-            warden_ai::set_dig_cooldown(&self.brain);
+        // Vanilla guards this half with `level() instanceof ServerLevel` and then falls
+        // through to `super.tick()` either way.
+        if let Some(world) = self.level() {
+            self.ensure_listener(&world);
+            if let Some(listener) = self.listener() {
+                listener.tick(&world);
+            }
+            // A warden a player has kept loaded never digs itself back into the ground.
+            if self.is_persistence_required() || self.requires_custom_persistence() {
+                warden_ai::set_dig_cooldown(&self.brain);
+            }
         }
 
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
     }
 
     /// Vanilla parity: `Warden.dampensVibrations`, which is what stops a warden's own

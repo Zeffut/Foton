@@ -613,7 +613,7 @@ impl Entity for AllayEntity {
                 listener.tick(&world);
             }
         }
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
         if self.is_panicking() {
             self.set_dancing(false);
         }

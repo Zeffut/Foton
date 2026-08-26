@@ -331,7 +331,7 @@ impl Entity for PufferfishEntity {
     /// tick, and `WaterAnimal.baseTick` reads the air left before it is spent.
     fn tick(&self) {
         self.tick_puff_state();
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
     }
 
     fn base_tick(&self) {
