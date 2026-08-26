@@ -450,9 +450,9 @@ fn a_piglin_arm_pose_follows_what_it_is_doing() {
 }
 
 // The charge.
-/// The hoglin's hit launches its target, and a baby's does not.
+/// The hoglin's charge throws its target away and up at the same time.
 #[test]
-fn a_grown_hoglin_launches_what_it_hits_and_a_baby_does_not() {
+fn a_hoglin_charge_shoves_its_target_sideways_and_upward() {
     let world = piglin_world("hoglin_knockback");
     let hoglin = spawn_hoglin(&world);
     // Stand the victim off to one side, so the push has a direction to take.
@@ -479,6 +479,57 @@ fn a_grown_hoglin_launches_what_it_hits_and_a_baby_does_not() {
     assert!(
         launched.y > 0.0,
         "and lifts it at the same time, got {launched:?}"
+    );
+}
+
+/// The other half of the charge: a baby hoglin hurts what it hits but never
+/// throws it.
+///
+/// Vanilla parity: the `!body.isBaby()` gate around the `throwTarget` call in
+/// `HoglinBase.hurtAndThrowTarget`. The launch test above goes straight to
+/// `throw_target`, which has no age check of its own, so without this the gate
+/// is not covered at all.
+#[test]
+fn a_baby_hoglin_hurts_what_it_hits_without_launching_it() {
+    let world = piglin_world("hoglin_baby_no_launch");
+
+    let grown = spawn_hoglin(&world);
+    let grown_victim = spawn_piglin_at(&world, SPAWN + DVec3::new(1.0, 0.0, 0.0));
+    grown
+        .attributes()
+        .lock()
+        .set_base_value(vanilla_attributes::ATTACK_KNOCKBACK, 1.0);
+    grown_victim.set_velocity(DVec3::ZERO);
+    hoglin_base::hurt_and_throw_target(
+        &world,
+        grown.as_ref(),
+        &(Arc::clone(&grown_victim) as SharedEntity),
+    );
+    // Both victims are shoved sideways, because `hurt` applies its own
+    // knockback either way. The lift is what only the charge adds, so the
+    // vertical component is the half that tells the two apart.
+    assert!(
+        grown_victim.velocity().y > 0.0,
+        "a grown hoglin lifts what it hurts, got {:?}",
+        grown_victim.velocity()
+    );
+
+    let baby = spawn_hoglin(&world);
+    Mob::set_baby(baby.as_ref(), true);
+    let baby_victim = spawn_piglin_at(&world, SPAWN + DVec3::new(-1.0, 0.0, 0.0));
+    baby.attributes()
+        .lock()
+        .set_base_value(vanilla_attributes::ATTACK_KNOCKBACK, 1.0);
+    baby_victim.set_velocity(DVec3::ZERO);
+    hoglin_base::hurt_and_throw_target(
+        &world,
+        baby.as_ref(),
+        &(Arc::clone(&baby_victim) as SharedEntity),
+    );
+    assert!(
+        baby_victim.velocity().y <= 0.0,
+        "a baby hoglin hurts without lifting, however much knockback it has, got {:?}",
+        baby_victim.velocity()
     );
 }
 
