@@ -35,6 +35,7 @@
 //! [`Brain::update_activity_from_schedule`]: crate::entity::ai::brain::Brain::update_activity_from_schedule
 //! [`ScheduleAttribute`]: crate::entity::ai::brain::ScheduleAttribute
 
+mod breed;
 mod job_site;
 mod panic;
 mod trade;
@@ -47,12 +48,13 @@ use steel_utils::entity_events::EntityStatus;
 use steel_utils::{BlockPos, Downcast as _};
 
 use crate::behavior::BlockStateBehaviorExt as _;
+use crate::entity::LivingEntity;
 use crate::entity::ai::brain::behavior::{
-    AcquirePoi, Behavior, BehaviorControl, DoNothing, GoToWantedItem, InteractWith,
-    LookAtTargetSink, MoveToTargetSink, OneShot, RunOne, SetEntityLookTarget, SetLookAndInteract,
-    SetWalkTargetAwayFrom, SetWalkTargetFromLookTarget, SleepInBed, SocializeAtBell,
-    StrollAroundPoi, StrollToPoi, Swim, TriggerGate, UpdateActivityFromSchedule, ValidateNearbyPoi,
-    VillageBoundRandomStroll, WakeUp,
+    AcquirePoi, Behavior, BehaviorControl, DoNothing, GateBehavior, GoToWantedItem, InteractWith,
+    LookAtTargetSink, MoveToTargetSink, OneShot, OrderPolicy, RunOne, RunningPolicy,
+    SetEntityLookTarget, SetLookAndInteract, SetWalkTargetAwayFrom, SetWalkTargetFromLookTarget,
+    SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi, Swim, TriggerGate,
+    UpdateActivityFromSchedule, ValidateNearbyPoi, VillageBoundRandomStroll, WakeUp,
 };
 use crate::entity::ai::brain::memory::{EntityMemory, MemoryModuleType, memory_module_types};
 use crate::entity::ai::brain::sensor::SensorType;
@@ -60,6 +62,7 @@ use crate::entity::ai::brain::{Activity, ActivityData, Brain, BrainContext};
 use crate::entity::entities::mobs::npc::VillagerEntity;
 use crate::world::World;
 
+pub use breed::VillagerMakeLove;
 pub use job_site::{
     AssignProfessionFromJobSite, GoToPotentialJobSite, PoiCompetitorScan, ResetProfession,
     SetWalkTargetFromBlockMemory, WorkAtPoi, YieldJobSite,
@@ -487,6 +490,18 @@ fn idle_package() -> ActivityData {
                         2,
                     ),
                     (
+                        OneShot::boxed(InteractWith::of_matching(
+                            &vanilla_entities::VILLAGER,
+                            INTERACT_RANGE,
+                            can_breed,
+                            can_breed,
+                            memory_module_types::BREED_TARGET,
+                            SPEED_MODIFIER,
+                            INTERACT_WALKUP_DIST,
+                        )),
+                        1,
+                    ),
+                    (
                         OneShot::boxed(interact_with(
                             &vanilla_entities::CAT,
                             memory_module_types::INTERACTION_TARGET,
@@ -524,10 +539,31 @@ fn idle_package() -> ActivityData {
                     SHOW_TRADES_MAX_DURATION,
                 )),
             ),
+            // Vanilla parity: the `GateBehavior` that erases `BREED_TARGET` when
+            // it stops, so a courtship that is interrupted does not leave the
+            // pair bound to each other.
+            (
+                3,
+                Box::new(GateBehavior::new(
+                    Vec::new(),
+                    vec![memory_module_types::BREED_TARGET.id()],
+                    OrderPolicy::Ordered,
+                    RunningPolicy::RunOne,
+                    vec![(Behavior::boxed(VillagerMakeLove::new()), 1)],
+                )),
+            ),
             full_look_behavior(),
             (99, OneShot::boxed(UpdateActivityFromSchedule)),
         ],
     )
+}
+
+/// Vanilla parity: the `AgeableMob::canBreed` used as both the self filter and
+/// the target filter of the breeding `InteractWith`.
+fn can_breed(candidate: &dyn LivingEntity) -> bool {
+    candidate
+        .downcast_ref::<VillagerEntity>()
+        .is_some_and(VillagerEntity::can_breed)
 }
 
 /// Vanilla parity: `VillagerGoalPackages.getPlayPackage`.

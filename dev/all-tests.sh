@@ -4,7 +4,7 @@
 # They are run one at a time on purpose: they each start a server on their own
 # port but several share a run directory naming pattern, and two at once tread
 # on each other.
-cd /root/SteelMC || exit 1
+cd "$(dirname "$0")/.." || exit 1
 export PATH="$HOME/.cargo/bin:$PATH"
 
 pass=0

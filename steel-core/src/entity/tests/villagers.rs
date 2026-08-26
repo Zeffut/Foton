@@ -591,6 +591,94 @@ fn villager_home(villager: &Arc<VillagerEntity>) -> Option<BlockPos> {
         .map(|global| global.pos)
 }
 
+/// The courtship is 275 to 325 ticks once it starts, and the pair have to pick
+/// each other out of the idle gate before that.
+const TICKS_TO_RAISE_A_CHILD: i32 = 800;
+
+/// Fills a villager's inventory with enough bread to be willing to breed.
+///
+/// Vanilla parity: `Villager.canBreed` adds the food level to the food points
+/// in the inventory and wants twelve; bread is four points each.
+fn feed_for_breeding(villager: &Arc<VillagerEntity>) {
+    villager.inventory().lock()[0] = ItemStack::with_count(&vanilla_items::BREAD, 3);
+    assert!(
+        villager.can_breed(),
+        "three bread is the breeding threshold"
+    );
+}
+
+/// Finds a baby villager near the village, which is what a birth leaves behind.
+fn find_baby_villager(world: &Arc<World>) -> Option<SharedEntity> {
+    let around_the_village = WorldAabb::new(
+        f64::from(STAND.x() - 16),
+        f64::from(STAND.y() - 8),
+        f64::from(STAND.z() - 16),
+        f64::from(STAND.x() + 16),
+        f64::from(STAND.y() + 8),
+        f64::from(STAND.z() + 16),
+    );
+    world
+        .get_entities_in_aabb_matching(&around_the_village, |entity| {
+            entity
+                .downcast_ref::<VillagerEntity>()
+                .is_some_and(AgeableMob::is_baby)
+        })
+        .into_iter()
+        .next()
+}
+
+/// A village grows on its own, which it could not do at all before the brain.
+///
+/// This enters only through the two villagers' own ticks: the idle gate has to
+/// pick a breeding partner, `VillagerMakeLove` has to court it, and the pair
+/// have to take a bed for the child before it can be born.
+///
+/// Three beds for two villagers, because the two claim one each as their own
+/// home the moment they see them -- a village only grows when it has a bed
+/// spare, which is exactly what makes adding beds the way a player grows one.
+#[test]
+fn two_fed_villagers_with_a_spare_bed_have_a_child() {
+    let world = villager_world("villager_breeding");
+    let first = spawn_villager(&world);
+    let second = spawn_villager(&world);
+    feed_for_breeding(&first);
+    feed_for_breeding(&second);
+    let beds = [
+        BlockPos::new(STAND.x() - 3, STAND.y(), STAND.z() - 2),
+        BlockPos::new(STAND.x() - 3, STAND.y(), STAND.z()),
+        BlockPos::new(STAND.x() - 3, STAND.y(), STAND.z() + 2),
+    ];
+    for bed in beds {
+        place_bed(&world, bed);
+    }
+
+    // 10..2000 is the IDLE stretch, which is the package the breeding gate is in.
+    set_time_of_day(&world, 1_000);
+    for _ in 0..TICKS_TO_RAISE_A_CHILD {
+        advance_time(&world);
+        first.base_tick();
+        first.tick();
+        second.base_tick();
+        second.tick();
+    }
+
+    let baby = find_baby_villager(&world).expect("the pair should have had a child");
+    let baby = baby
+        .downcast_ref::<VillagerEntity>()
+        .expect("find_baby_villager only returns villagers");
+    let child_home = Mob::brain(baby)
+        .and_then(|brain| brain.get_memory(memory_module_types::HOME))
+        .map(|home| home.pos);
+    assert!(
+        child_home.is_some_and(|home| beds.contains(&home)),
+        "the bed the parents took for it is already the child's home, got {child_home:?}"
+    );
+    assert!(
+        !first.can_breed() && !second.can_breed(),
+        "both parents are on the six-thousand-tick cooldown a birth costs"
+    );
+}
+
 #[test]
 fn a_villagers_biome_variant_reaches_the_trades_that_are_gated_on_it() {
     let world = villager_world("villager_variant_gates_trades");
