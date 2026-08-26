@@ -102,7 +102,7 @@ fn distance_sq(a: BlockPos, b: BlockPos) -> i64 {
 ///
 /// Vanilla parity: the `e.is(PoiTypeTags.VILLAGE)` predicate of
 /// `PoiManager.isVillageCenter`.
-fn is_village_type(type_id: usize) -> bool {
+pub(crate) fn is_village_type(type_id: usize) -> bool {
     REGISTRY
         .poi_types
         .by_id(type_id)

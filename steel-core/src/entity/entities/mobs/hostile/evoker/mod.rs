@@ -23,7 +23,8 @@ use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 use crate::entity::abstract_illager::{AbstractIllager, IllagerArmPose};
 use crate::entity::ai::goal::{
     AvoidEntityGoal, FloatGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
-    NearestAttackableTargetGoal, RaiderCelebrationGoal, RandomStrollGoal,
+    NearestAttackableTargetGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal,
+    RaiderCelebrationGoal, RaiderMoveThroughVillageGoal, RandomStrollGoal,
     SpellcasterCastingSpellGoal, no_creative_or_spectator,
 };
 use crate::entity::damage::DamageSource;
@@ -89,6 +90,15 @@ const PATROL_SPEED: f64 = 0.7;
 
 /// Speed the captain patrols at.
 const PATROL_LEADER_SPEED: f64 = 0.595;
+/// Speed a raider walks the streets of the village it is raiding at.
+///
+/// Vanilla parity: the `1.05F` of `new RaiderMoveThroughVillageGoal(this, 1.05F, 1)`.
+const VILLAGE_WALK_SPEED_MODIFIER: f64 = 1.05;
+
+/// How close to a house counts as having reached it.
+///
+/// Vanilla parity: the `1` of the same goal.
+const VILLAGE_POI_ARRIVAL_DISTANCE: f64 = 1.0;
 
 /// An evoker.
 #[entity_behavior(class = "Evoker")]
@@ -159,6 +169,15 @@ impl EvokerEntity {
                 LongDistancePatrolGoal::new(PATROL_SPEED, PATROL_LEADER_SPEED),
             );
             goals.add_goal(5, EvokerAttackSpellGoal::new());
+            goals.add_goal(1, ObtainRaidLeaderBannerGoal::new());
+            goals.add_goal(3, PathfindToRaidGoal::new());
+            goals.add_goal(
+                4,
+                RaiderMoveThroughVillageGoal::new(
+                    VILLAGE_WALK_SPEED_MODIFIER,
+                    VILLAGE_POI_ARRIVAL_DISTANCE,
+                ),
+            );
             goals.add_goal(5, RaiderCelebrationGoal::new());
             goals.add_goal(6, EvokerWololoSpellGoal::new());
             goals.add_goal(8, RandomStrollGoal::new(STROLL_SPEED_MODIFIER));

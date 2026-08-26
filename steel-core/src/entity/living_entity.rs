@@ -735,6 +735,12 @@ pub trait LivingEntity: Entity {
     /// Runs the shared body of [`Self::hurt_server`].
     /// The shared part of vanilla `LivingEntity.hurtServer`.
     fn living_hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
+        // Vanilla parity: the `Raider.hurtServer` override, which redraws the
+        // raid bar before the damage is resolved so the bar shrinks even when
+        // the hit is refused.
+        if let Some(raider) = self.as_raider() {
+            raider::hurt_server_raider(raider);
+        }
         if self.is_invulnerable_to(world, source) {
             return false;
         }
@@ -1095,6 +1101,13 @@ pub trait LivingEntity: Entity {
         }
         if !self.living_base().mark_death_processed() {
             return;
+        }
+
+        // Vanilla parity: the raid half of `Raider.die`, which runs before the
+        // shared body. It is here rather than in six mob overrides for the same
+        // reason the pickup is: every raider would repeat it verbatim.
+        if let Some(raider) = self.as_raider() {
+            raider::die_raider(raider, source);
         }
 
         // Vanilla parity: `sourceEntity == null || sourceEntity.killedEntity(..)`

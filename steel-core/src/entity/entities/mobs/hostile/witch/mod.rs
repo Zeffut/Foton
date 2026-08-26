@@ -8,6 +8,8 @@
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::PotionContents;
@@ -27,15 +29,24 @@ use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 use crate::behavior::potion_effects;
 use crate::entity::Enemy;
 use crate::entity::ai::goal::{
-    FloatGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
-    RandomLookAroundGoal, RangedAttackGoal, WaterAvoidingRandomStrollGoal,
+    FloatGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
+    NearestAttackableTargetGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal,
+    RaiderCelebrationGoal, RaiderMoveThroughVillageGoal, RandomLookAroundGoal, RangedAttackGoal,
+    WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::SplashPotionEntity;
+use crate::entity::patrolling_monster::{
+    PatrolState, PatrollingMonster, read_patrol_state, write_patrol_state,
+};
 use crate::entity::projectile::{Projectile, ThrowableItemProjectile};
+use crate::entity::raider::{
+    Raider, RaiderState, finalize_spawn_raider, read_raider_state, write_raider_state,
+};
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
-    MobBase, MobEffectInstance, PathfinderMob, SharedEntity, next_entity_id,
+    Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData, LivingEntity,
+    LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob, SharedEntity, SpawnGroupData,
+    next_entity_id,
 };
 use crate::inventory::equipment::EquipmentSlot;
 use crate::world::World;
@@ -98,6 +109,24 @@ const POISON_HEALTH_THRESHOLD: f32 = 8.0;
 /// throwing her own poison back barely works.
 const MAGIC_RESISTANCE: f32 = 0.15;
 
+/// Speed a follower patrols at.
+///
+/// Vanilla parity: the `0.7` of `PatrollingMonster.registerGoals`.
+const PATROL_SPEED: f64 = 0.7;
+
+/// Speed the captain patrols at, so the group keeps up.
+const PATROL_LEADER_SPEED: f64 = 0.595;
+
+/// Speed a raider walks the streets of the village it is raiding at.
+///
+/// Vanilla parity: the `1.05F` of `new RaiderMoveThroughVillageGoal(this, 1.05F, 1)`.
+const VILLAGE_WALK_SPEED_MODIFIER: f64 = 1.05;
+
+/// How close to a house counts as having reached it.
+///
+/// Vanilla parity: the `1` of the same goal.
+const VILLAGE_POI_ARRIVAL_DISTANCE: f64 = 1.0;
+
 /// A witch.
 #[entity_behavior(class = "Witch")]
 pub struct WitchEntity {
@@ -106,6 +135,8 @@ pub struct WitchEntity {
     living_base: LivingEntityBase,
     mob_base: MobBase,
     entity_data: SyncMutex<WitchEntityData>,
+    patrol_state: PatrolState,
+    raider_state: RaiderState,
     /// Ticks left on the bottle currently being drunk.
     using_time: SyncMutex<i32>,
 }
@@ -157,17 +188,39 @@ impl WitchEntity {
             goals.add_goal(2, WaterAvoidingRandomStrollGoal::new(STROLL_SPEED_MODIFIER));
             goals.add_goal(3, LookAtPlayerGoal::new(LOOK_AT_PLAYER_RANGE));
             goals.add_goal(3, RandomLookAroundGoal::new());
+            // Vanilla parity: the goals `PatrollingMonster` and `Raider` add
+            // above the witch's own. A swamp-hut witch never patrols -- nothing
+            // sets her patrolling -- but a witch pulled into a raid uses all
+            // four of these.
+            goals.add_goal(
+                4,
+                LongDistancePatrolGoal::new(PATROL_SPEED, PATROL_LEADER_SPEED),
+            );
+            goals.add_goal(1, ObtainRaidLeaderBannerGoal::new());
+            goals.add_goal(3, PathfindToRaidGoal::new());
+            goals.add_goal(
+                4,
+                RaiderMoveThroughVillageGoal::new(
+                    VILLAGE_WALK_SPEED_MODIFIER,
+                    VILLAGE_POI_ARRIVAL_DISTANCE,
+                ),
+            );
+            goals.add_goal(5, RaiderCelebrationGoal::new());
         }
 
         {
             let mut targets = mob_base.target_selector().lock();
-            targets.add_goal(1, HurtByTargetGoal::new());
+            targets.add_goal(
+                1,
+                HurtByTargetGoal::new()
+                    .with_ignored_damage_filter(|entity| entity.as_raider().is_some()),
+            );
             targets.add_goal(
                 3,
                 NearestAttackableTargetGoal::new_for_players(true, |_, _, _| true),
             );
-            // TODO: vanilla also heals other raiders at priority 2; raids do not
-            // exist yet, and neither does the goal.
+            // TODO: vanilla also heals other raiders at priority 2 through
+            // `NearestHealableRaiderTargetGoal`, which Steel does not have.
         }
 
         Self {
@@ -176,6 +229,8 @@ impl WitchEntity {
             living_base,
             mob_base,
             entity_data: SyncMutex::new(entity_data),
+            patrol_state: PatrolState::new(),
+            raider_state: RaiderState::new(),
             using_time: SyncMutex::new(0),
         }
     }
@@ -389,6 +444,21 @@ impl Entity for WitchEntity {
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
     }
+
+    /// Vanilla parity: `AbstractIllager.isAlliedTo` is not shared with the
+    /// witch, but `Raider` is -- her wave and her patrol are saved the same way
+    /// every other raider's are.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_mob(nbt);
+        write_patrol_state(self, nbt);
+        write_raider_state(self, nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_mob(nbt);
+        read_patrol_state(self, nbt);
+        read_raider_state(self, nbt);
+    }
 }
 
 impl LivingEntity for WitchEntity {
@@ -489,6 +559,30 @@ impl Mob for WitchEntity {
         }
     }
 
+    fn finalize_spawn(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        group_data: Option<SpawnGroupData>,
+    ) -> Option<SpawnGroupData> {
+        finalize_spawn_raider(self, spawn_reason);
+        self.finalize_spawn_mob_base(world, spawn_reason, group_data)
+    }
+
+    fn remove_when_far_away(&self, dist_sqr: f64) -> bool {
+        self.remove_when_far_away_raider(dist_sqr)
+    }
+
+    fn requires_custom_persistence(&self) -> bool {
+        self.requires_custom_persistence_raider() || self.is_passenger() || self.is_leashed()
+    }
+
+    /// Vanilla parity: `Raider.updateNoActionTime`.
+    fn update_no_action_time(&self) {
+        self.increment_no_action_time();
+        self.increment_no_action_time();
+    }
+
     fn mob_flags(&self) -> i8 {
         *self.entity_data.lock().mob().mob_flags.get()
     }
@@ -499,5 +593,47 @@ impl Mob for WitchEntity {
 }
 
 impl PathfinderMob for WitchEntity {}
+
+impl PatrollingMonster for WitchEntity {
+    fn patrol_state(&self) -> &PatrolState {
+        &self.patrol_state
+    }
+
+    /// Vanilla parity: `Witch.canBeLeader`, the one raider besides the ravager
+    /// that refuses the banner.
+    fn can_be_leader(&self) -> bool {
+        false
+    }
+
+    fn can_join_patrol(&self) -> bool {
+        self.can_join_patrol_raider()
+    }
+}
+
+impl Raider for WitchEntity {
+    fn raider_state(&self) -> &RaiderState {
+        &self.raider_state
+    }
+
+    /// Vanilla parity: `Witch.applyRaidBuffs`, which is empty -- she brings her
+    /// own potions and needs nothing from the wave.
+    fn apply_raid_buffs(&self, _wave: i32, _is_captain: bool) {}
+
+    fn celebrate_sound(&self) -> SoundEventRef {
+        &sound_events::ENTITY_WITCH_CELEBRATE
+    }
+
+    fn is_celebrating(&self) -> bool {
+        *self.entity_data.lock().raider().is_celebrating.get()
+    }
+
+    fn set_celebrating(&self, celebrating: bool) {
+        self.entity_data
+            .lock()
+            .raider_mut()
+            .is_celebrating
+            .set(celebrating);
+    }
+}
 
 impl Enemy for WitchEntity {}

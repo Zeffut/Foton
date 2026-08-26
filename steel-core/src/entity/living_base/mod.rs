@@ -22,15 +22,23 @@ use steel_registry::vanilla_attributes;
 use steel_registry::vanilla_entity_data::VanillaLivingEntityData;
 use steel_registry::{vanilla_damage_types, vanilla_mob_effects};
 use steel_utils::locks::{IntoShared, Shared, SyncMutex};
-use steel_utils::types::InteractionHand;
+use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, Identifier};
 use uuid::Uuid;
 
 use crate::entity::attribute::{AttributeMap, AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
-use crate::entity::{LivingEntity, SharedEntity, WeakEntity};
+use crate::entity::{Entity as _, LivingEntity, SharedEntity, WeakEntity};
 use crate::inventory::equipment::{EntityEquipment, EquipmentSlot, OwnedEntityEquipment};
+use crate::raid::DEFAULT_MAX_RAID_OMEN_LEVEL;
 use crate::world::World;
+
+/// Ticks of Raid Omen a Bad Omen turns into.
+///
+/// Vanilla parity: the `new MobEffectInstance(MobEffects.RAID_OMEN, 600, ..)`
+/// of `BadOmenMobEffect.applyEffectTick`. Thirty seconds of warning before the
+/// horn sounds.
+const RAID_OMEN_DURATION: i32 = 600;
 
 /// Duration in ticks of the death animation before entity removal.
 pub const DEATH_DURATION: i32 = 20;
@@ -193,6 +201,18 @@ impl MobEffectInstance {
             let interval = 40_i32.wrapping_shr(self.amplifier as u32);
             return interval <= 0 || tick_count % interval == 0;
         }
+        // Vanilla parity: `BadOmenMobEffect.shouldApplyEffectTickThisTick`,
+        // which is every tick -- the effect is watching for the moment the
+        // player steps into a village.
+        if self.effect == vanilla_mob_effects::BAD_OMEN {
+            return true;
+        }
+        // Vanilla parity: `RaidOmenMobEffect.shouldApplyEffectTickThisTick`,
+        // which fires once, on the last tick of the effect. That is what makes
+        // the raid start thirty seconds after the omen was absorbed.
+        if self.effect == vanilla_mob_effects::RAID_OMEN {
+            return !self.is_infinite_duration() && tick_count == 1;
+        }
 
         // TODO: Add the remaining vanilla effect schedules as their gameplay systems land.
         false
@@ -209,6 +229,12 @@ impl MobEffectInstance {
                 &DamageSource::environment(&vanilla_damage_types::WITHER),
                 1.0,
             );
+        }
+        if self.effect == vanilla_mob_effects::BAD_OMEN {
+            return tick_bad_omen(world, entity, self.amplifier);
+        }
+        if self.effect == vanilla_mob_effects::RAID_OMEN {
+            return tick_raid_omen(world, entity);
         }
 
         // Vanilla effect ticks return whether the effect remains active. Wither
@@ -1740,6 +1766,58 @@ fn living_is_dead(entity: &SharedEntity) -> bool {
     entity
         .as_living_entity()
         .is_none_or(|living| !LivingEntity::is_alive(living))
+}
+
+/// Turns Bad Omen into Raid Omen the moment its bearer walks into a village.
+///
+/// Vanilla parity: `BadOmenMobEffect.applyEffectTick`. Returning `false` is how
+/// a vanilla effect tick removes itself, which is what consumes the Bad Omen.
+fn tick_bad_omen<E: LivingEntity + ?Sized>(world: &World, entity: &E, amplifier: i32) -> bool {
+    let Some(player) = entity.as_player() else {
+        return true;
+    };
+    if player.is_spectator()
+        || world.difficulty() == Difficulty::Peaceful
+        || !world.is_village(player.block_position())
+    {
+        return true;
+    }
+
+    let raid = world.get_raid_at(player.block_position());
+    let room_for_more =
+        raid.is_none_or(|raid| raid.raid_omen_level() < DEFAULT_MAX_RAID_OMEN_LEVEL);
+    if !room_for_more {
+        return true;
+    }
+
+    player.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::RAID_OMEN,
+        RAID_OMEN_DURATION,
+        amplifier,
+    ));
+    player.set_raid_omen_position(player.block_position());
+    false
+}
+
+/// Starts the raid the moment Raid Omen runs out.
+///
+/// Vanilla parity: `RaidOmenMobEffect.applyEffectTick`.
+fn tick_raid_omen<E: LivingEntity + ?Sized>(world: &World, entity: &E) -> bool {
+    let Some(player) = entity.as_player() else {
+        return true;
+    };
+    if player.is_spectator() {
+        return true;
+    }
+    let Some(raid_omen_position) = player.raid_omen_position() else {
+        return true;
+    };
+
+    world
+        .raids()
+        .create_or_extend_raid(world, player, raid_omen_position);
+    player.clear_raid_omen_position();
+    false
 }
 
 #[cfg(test)]

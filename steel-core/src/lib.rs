@@ -26,6 +26,7 @@ pub mod physics;
 pub mod player;
 pub mod poi;
 pub(crate) mod portal;
+pub mod raid;
 pub mod scoreboard;
 pub mod server;
 #[cfg(test)]

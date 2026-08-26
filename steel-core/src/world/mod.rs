@@ -19,6 +19,7 @@ use crate::chunk::light::{
 use crate::chunk::status::ChunkStatus;
 use crate::poi::OccupationStatus;
 use crate::portal::WorldChangeRequest;
+use crate::raid::{PersistentRaids, Raids};
 use crate::server::Server;
 use crate::world::game_event::{
     DynamicListenerAction, GameEventContext, GameEventDispatcher, GameEventListenerCount,
@@ -135,6 +136,7 @@ mod sleep_status;
 mod spawn;
 pub mod spawn_placement;
 pub mod tick_scheduler;
+mod village;
 mod weather;
 mod world_entities;
 
@@ -304,6 +306,12 @@ pub struct World {
         SyncMutex<Option<Arc<tick_scheduler::ScheduledTickRunBatch<FluidRef>>>>,
     /// Point of interest storage for efficient spatial queries of special blocks.
     pub poi_storage: SyncMutex<PointOfInterestStorage>,
+    /// Village raids running in this loaded world, saved as `data/raids.toml`.
+    ///
+    /// Vanilla parity: the `ServerLevel.raids` saved data. Per loaded world
+    /// rather than per domain, like the chunk tickets above it: a raid belongs
+    /// to the dimension whose village it besieges.
+    raids: Raids,
     /// World-change requests queued by world-local ticks for server safe-point processing.
     pending_world_changes: SyncMutex<Vec<(SharedEntity, WorldChangeRequest)>>,
     /// The server this world belongs to, attached once the server exists.
@@ -388,6 +396,9 @@ impl World {
             .load_or_default(saved_data_names::CHUNK_TICKETS)
             .await?;
         let timed_chunk_tickets = TimedChunkTickets::from_persistent(persistent_chunk_tickets);
+        let persistent_raids: PersistentRaids =
+            saved_data.load_or_default(saved_data_names::RAIDS).await?;
+        let raids = Raids::from_persistent(persistent_raids);
         let world_border = WorldBorder::new(level_data.data().world_border)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         // let generator = Arc::new(ChunkGeneratorType::Flat(FlatChunkGenerator::new(
@@ -455,6 +466,7 @@ impl World {
                 scheduled_block_ticks_this_tick: SyncMutex::new(None),
                 scheduled_fluid_ticks_this_tick: SyncMutex::new(None),
                 poi_storage: SyncMutex::new(PointOfInterestStorage::new()),
+                raids,
                 pending_world_changes: SyncMutex::new(Vec::new()),
                 server: OnceLock::new(),
             }
@@ -499,6 +511,12 @@ impl World {
         {
             Ok(()) => log::info!("World {} saved chunk ticket data successfully", self.key),
             Err(e) => log::error!("Failed to save world chunk ticket data: {e}"),
+        }
+
+        let raids = self.raids.to_persistent();
+        match self.saved_data.save(saved_data_names::RAIDS, &raids).await {
+            Ok(()) => log::info!("World {} saved raid data successfully", self.key),
+            Err(e) => log::error!("Failed to save world raid data: {e}"),
         }
 
         match self.save_all_chunks().await {
@@ -551,6 +569,10 @@ impl World {
         if runs_normally {
             self.tick_time();
             self.tick_natural_spawn(tick_count);
+            // Vanilla parity: the `profiler.popPush("raid")` step of
+            // `ServerLevel.tick`, which runs after the world's own clocks and
+            // before block events and entities.
+            self.raids.tick(self);
         }
 
         let random_tick_speed = self.get_game_rule(&RANDOM_TICK_SPEED) as u32;

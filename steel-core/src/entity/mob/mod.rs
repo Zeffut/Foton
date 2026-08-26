@@ -56,6 +56,7 @@ use crate::entity::attribute::{AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::{ItemEntity, LeashFenceKnotEntity};
 use crate::entity::entity_loot_ref;
+use crate::entity::raider;
 use crate::entity::spawn_rules::check_mob_spawn_rules;
 use crate::entity::{
     Entity, EntitySpawnReason, LivingEntity, LivingTravelInput, RemovalReason, SharedEntity,
@@ -726,6 +727,13 @@ pub trait Mob: LivingEntity {
             .drop_chances()
             .lock()
             .set_guaranteed_drop(slot);
+    }
+
+    /// Returns how likely one slot is to drop.
+    ///
+    /// Vanilla parity: `Mob.getDropChances().byEquipment`.
+    fn drop_chance(&self, slot: EquipmentSlot) -> f32 {
+        self.mob_base().drop_chances().lock().by_equipment(slot)
     }
 
     /// Sets how likely one slot is to drop, refusing a negative chance.
@@ -1911,7 +1919,21 @@ pub trait Mob: LivingEntity {
     /// Steel has no `getEquipmentSlotForItem` yet, so only mobs that override
     /// this -- the fox -- pick anything up. Nothing regresses: before this loop
     /// existed no Steel mob picked up items at all.
-    fn pick_up_item(&self, _world: &Arc<World>, _item_entity: &SharedEntity) {}
+    fn pick_up_item(&self, world: &Arc<World>, item_entity: &SharedEntity) {
+        self.default_pick_up_item(world, item_entity);
+    }
+
+    /// The body of [`Self::pick_up_item`], callable from an override.
+    ///
+    /// Vanilla parity: `Raider.pickUpItem`, which is what promotes whichever
+    /// raider reaches the fallen captain's banner first. It sits on the shared
+    /// body because Steel's raiders would otherwise repeat the same override
+    /// six times.
+    fn default_pick_up_item(&self, world: &Arc<World>, item_entity: &SharedEntity) {
+        if let Some(raider) = self.as_raider() {
+            raider::pick_up_banner(raider, world, item_entity);
+        }
+    }
 
     /// Runs the item-pickup half of vanilla `Mob.aiStep`.
     fn pick_up_nearby_items(&self) {
@@ -1953,6 +1975,13 @@ pub trait Mob: LivingEntity {
 
     fn mob_server_ai_step(&self) {
         self.update_no_action_time();
+        // Vanilla runs this from `Raider.aiStep`, an override of
+        // `LivingEntity.aiStep`. Steel's mobs reach their server-side tick
+        // through this method instead, so the raid half of a raider's tick
+        // lives here rather than in six identical overrides.
+        if let Some(raider) = self.as_raider() {
+            raider::ai_step_raider(raider);
+        }
         self.pick_up_nearby_items();
         self.mob_base().sensing().lock().tick();
         if self.tick_count() % 5 == 0 {

@@ -51,6 +51,30 @@ pub(crate) fn fresh_test_world_in_domain(domain: &'static str, key: &'static str
 }
 
 pub(crate) fn insert_ready_full_chunk(world: &Arc<World>, pos: ChunkPos) -> Arc<ChunkHolder> {
+    insert_ready_chunk(world, pos, TickingReadiness::BlockTicking)
+}
+
+/// Inserts a chunk that also counts as entity-ticking.
+///
+/// Vanilla parity: the difference between `hasChunkAt` and
+/// `isPositionEntityTicking`. A raid refuses to spawn a wave anywhere the
+/// second is false, so a test that only loads block-ticking chunks watches the
+/// raid give up rather than watching it work.
+pub(crate) fn insert_entity_ticking_chunk(world: &Arc<World>, pos: ChunkPos) -> Arc<ChunkHolder> {
+    insert_ready_chunk(world, pos, TickingReadiness::EntityTicking)
+}
+
+fn insert_ready_chunk(
+    world: &Arc<World>,
+    pos: ChunkPos,
+    readiness: TickingReadiness,
+) -> Arc<ChunkHolder> {
+    let ticket_level = match readiness {
+        TickingReadiness::EntityTicking => ChunkTicketLevel::ENTITY_TICKING_CHUNK,
+        TickingReadiness::BlockTicking | TickingReadiness::Unready => {
+            ChunkTicketLevel::BLOCK_TICKING_CHUNK
+        }
+    };
     let min_y = world.get_min_y();
     let height = world.get_height();
     let sections = (0..height / 16)
@@ -67,14 +91,14 @@ pub(crate) fn insert_ready_full_chunk(world: &Arc<World>, pos: ChunkPos) -> Arc<
     let _ = proto.promote_to_full();
     let holder = Arc::new(ChunkHolder::new(
         pos,
-        ChunkTicketLevel::BLOCK_TICKING_CHUNK,
-        Some(ChunkTicketLevel::BLOCK_TICKING_CHUNK),
+        ticket_level,
+        Some(ticket_level),
         min_y,
         height,
     ));
     holder.insert_chunk(proto, ChunkStatus::Full);
     assert_eq!(
-        holder.transition_ticking_readiness(TickingReadiness::BlockTicking),
+        holder.transition_ticking_readiness(readiness),
         Some(TickingReadiness::Unready)
     );
     let _ = world.chunk_map.chunks.insert_sync(pos, Arc::clone(&holder));
