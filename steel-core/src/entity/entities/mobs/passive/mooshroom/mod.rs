@@ -28,6 +28,7 @@ use steel_registry::{
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey};
+use uuid::Uuid;
 
 use crate::behavior::InteractionResult;
 use crate::entity::ai::goal::{
@@ -134,6 +135,10 @@ pub struct MushroomCowEntity {
     /// entity data. Set by feeding a suspicious-effect item to a brown mooshroom and
     /// consumed the next time it's milked with a bowl.
     stew_effects: SyncMutex<Option<SuspiciousStewEffects>>,
+    /// Vanilla `MushroomCow.lastLightningBoltUUID`: the bolt that last flipped
+    /// this mooshroom. A bolt sweeps for entities on every tick it is alive, so
+    /// without this the variant would flicker back and forth under one strike.
+    last_lightning_bolt_uuid: SyncMutex<Option<Uuid>>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `MushroomCowEntity`.
@@ -202,6 +207,7 @@ impl MushroomCowEntity {
             animal_base,
             entity_data: SyncMutex::new(entity_data),
             stew_effects: SyncMutex::new(None),
+            last_lightning_bolt_uuid: SyncMutex::new(None),
         }
     }
 
@@ -215,12 +221,6 @@ impl MushroomCowEntity {
     pub fn set_variant(&self, variant: MushroomCowVariant) {
         self.entity_data.lock().variant_type.set(variant.id());
     }
-
-    // TODO: vanilla `MushroomCow.thunderHit` flips this entity between RED and BROWN
-    // when struck by lightning (deduplicated per lightning-bolt UUID via
-    // `lastLightningBoltUUID`) and plays `MOOSHROOM_CONVERT`. `Entity::thunder_hit`
-    // is now the seam to override; what is still missing is the per-bolt UUID the
-    // deduplication needs, which the strike does not hand to the struck entity.
 
     fn update_dirty_mob_effect_entity_data(&self) {
         if !self.living_base.take_effects_dirty() {
@@ -420,6 +420,26 @@ impl Entity for MushroomCowEntity {
 
     fn update_data_before_sync(&self) {
         self.update_dirty_mob_effect_entity_data();
+    }
+
+    /// Vanilla parity: `MushroomCow.thunderHit`, which flips the variant and
+    /// takes neither the damage nor the fire -- there is no `super` call here,
+    /// so a mooshroom rides a strike out unharmed.
+    fn thunder_hit(&self, _world: &World, bolt: &dyn Entity) {
+        let bolt_uuid = bolt.uuid();
+        {
+            let mut last = self.last_lightning_bolt_uuid.lock();
+            if *last == Some(bolt_uuid) {
+                return;
+            }
+            *last = Some(bolt_uuid);
+        }
+
+        self.set_variant(match self.variant() {
+            MushroomCowVariant::Red => MushroomCowVariant::Brown,
+            MushroomCowVariant::Brown => MushroomCowVariant::Red,
+        });
+        self.play_sound(&sound_events::ENTITY_MOOSHROOM_CONVERT, 2.0, 1.0);
     }
 
     fn max_up_step(&self) -> f32 {

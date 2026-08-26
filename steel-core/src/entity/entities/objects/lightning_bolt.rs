@@ -7,13 +7,14 @@
 //! the ground alight and another sweep of damage over whatever is standing in
 //! the six-block column above it.
 //!
-//! Not implemented: the mob conversions. Vanilla routes the hit through
-//! `Entity.thunderHit`, which `Creeper`, `Villager`, `Pig`, `MushroomCow`,
-//! `Turtle`, `CopperGolem`, `ArmorStand` and `BlockAttachedEntity` override to
-//! charge, transform or break themselves. Steel has no `Entity::thunder_hit`
-//! seam for those overrides to hang off, so [`thunder_hit`] below carries only
-//! the base-class body -- the damage and the fire tick -- and a struck pig
-//! stays a pig until that hook exists.
+//! The mob reactions hang off [`crate::entity::Entity::thunder_hit`], which
+//! `Creeper`, `Pig`, `MushroomCow`, `Turtle`, `CopperGolem`, `ArmorStand` and
+//! the block-attached entities each override to charge, transform or shrug the
+//! strike off; [`default_thunder_hit`] below is the base-class body everything
+//! else gets.
+//!
+//! Not implemented: `Villager.thunderHit`, the witch conversion. It needs
+//! `releaseAllPois` and the villager brain, which live elsewhere.
 //!
 //! Not implemented either: `CriteriaTriggers.LIGHTNING_STRIKE` and
 //! `CHANNELED_LIGHTNING`. Both are advancement triggers and Steel has no
@@ -464,14 +465,19 @@ fn random_step_cleaning_copper(world: &Arc<World>, pos: BlockPos) -> Option<Bloc
 #[cfg(test)]
 mod tests {
     use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty};
-    use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities};
-    use steel_utils::ChunkPos;
+    use steel_registry::item_stack::ItemStack;
+    use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_items};
+    use steel_utils::types::InteractionHand;
+    use steel_utils::{ChunkPos, Downcast as _};
 
     use super::*;
     use crate::behavior::init_behaviors;
-    use crate::entity::LivingEntity as _;
-    use crate::entity::entities::PigEntity;
+    use crate::entity::entities::{
+        ArmorStandEntity, CowEntity, CreeperEntity, ItemFrameEntity, MushroomCowEntity,
+        MushroomCowVariant, PigEntity, ZombifiedPiglinEntity,
+    };
     use crate::entity::next_entity_id;
+    use crate::entity::{LivingEntity as _, Mob as _};
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     const POWERED: &BoolProperty = &BlockStateProperties::POWERED;
@@ -497,6 +503,34 @@ mod tests {
         bolt
     }
 
+    fn has_zombified_piglin(world: &Arc<World>) -> bool {
+        let everywhere = WorldAabb::new(-32.0, 0.0, -32.0, 32.0, 128.0, 32.0);
+        world
+            .get_entities_in_aabb(&everywhere)
+            .iter()
+            .any(|entity| {
+                entity
+                    .as_ref()
+                    .downcast_ref::<ZombifiedPiglinEntity>()
+                    .is_some()
+            })
+    }
+
+    fn zombified_piglin_weapon(world: &Arc<World>) -> Option<ItemStack> {
+        let everywhere = WorldAabb::new(-32.0, 0.0, -32.0, 32.0, 128.0, 32.0);
+        world
+            .get_entities_in_aabb(&everywhere)
+            .iter()
+            .find_map(|entity| {
+                let piglin = entity.as_ref().downcast_ref::<ZombifiedPiglinEntity>()?;
+                assert!(
+                    piglin.is_persistence_required(),
+                    "vanilla marks a converted piglin persistent"
+                );
+                Some(piglin.get_item_in_hand(InteractionHand::MainHand))
+            })
+    }
+
     fn tick_until_gone(bolt: &Arc<LightningBoltEntity>) -> i32 {
         for ticks in 1..=200 {
             bolt.tick();
@@ -520,24 +554,24 @@ mod tests {
     #[test]
     fn a_bolt_shocks_and_singes_everything_standing_in_its_box() {
         let world = bolt_world("lightning_bolt_shocks_bystanders");
-        let pig = Arc::new(PigEntity::new(
-            &vanilla_entities::PIG,
+        let cow = Arc::new(CowEntity::new(
+            &vanilla_entities::COW,
             next_entity_id(),
             DVec3::new(5.5, 64.0, 4.5),
             Arc::downgrade(&world),
         ));
         world
-            .try_add_entity(pig.clone())
-            .expect("the pig's chunk is loaded");
-        let full_health = pig.get_health();
+            .try_add_entity(cow.clone())
+            .expect("the cow's chunk is loaded");
+        let full_health = cow.get_health();
 
         let bolt = strike_at(&world, DVec3::new(4.5, 64.0, 4.5));
         bolt.tick();
 
-        assert!(pig.get_health() < full_health);
+        assert!(cow.get_health() < full_health);
         // Vanilla's `thunderHit` only bumps the counter by one, so the burn is
         // a single tick rather than the eight seconds the dead branch names.
-        assert_eq!(pig.remaining_fire_ticks(), 1);
+        assert_eq!(cow.remaining_fire_ticks(), 1);
     }
 
     #[test]
@@ -551,23 +585,23 @@ mod tests {
             UpdateFlags::UPDATE_ALL
         ));
 
-        let pig = Arc::new(PigEntity::new(
-            &vanilla_entities::PIG,
+        let cow = Arc::new(CowEntity::new(
+            &vanilla_entities::COW,
             next_entity_id(),
             DVec3::new(4.5, 64.0, 4.5),
             Arc::downgrade(&world),
         ));
         world
-            .try_add_entity(pig.clone())
-            .expect("the pig's chunk is loaded");
-        let full_health = pig.get_health();
+            .try_add_entity(cow.clone())
+            .expect("the cow's chunk is loaded");
+        let full_health = cow.get_health();
 
         let bolt = strike_at(&world, DVec3::new(4.5, 64.0, 4.5));
         bolt.set_visual_only(true);
         bolt.tick();
 
-        assert_eq!(pig.get_health().to_bits(), full_health.to_bits());
-        assert_eq!(pig.remaining_fire_ticks(), 0);
+        assert_eq!(cow.get_health().to_bits(), full_health.to_bits());
+        assert_eq!(cow.remaining_fire_ticks(), 0);
         assert_eq!(bolt.blocks_set_on_fire(), 0);
         assert!(world.get_block_state(ground.above()).is_air());
     }
@@ -644,5 +678,131 @@ mod tests {
             world.get_block_state(copper_pos).get_block(),
             &vanilla_blocks::COPPER_BLOCK
         );
+    }
+
+    #[test]
+    fn a_struck_creeper_stays_charged() {
+        let world = bolt_world("lightning_bolt_charges_a_creeper");
+        let creeper = Arc::new(CreeperEntity::new(
+            &vanilla_entities::CREEPER,
+            next_entity_id(),
+            DVec3::new(4.5, 64.0, 4.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(creeper.clone())
+            .expect("the creeper's chunk is loaded");
+        assert!(!creeper.is_powered());
+
+        strike_at(&world, DVec3::new(4.5, 64.0, 4.5)).tick();
+
+        assert!(creeper.is_powered());
+        // The charge rides on top of the ordinary strike, not instead of it.
+        assert_eq!(creeper.remaining_fire_ticks(), 1);
+    }
+
+    #[test]
+    fn a_struck_pig_becomes_an_armed_zombified_piglin() {
+        let world = bolt_world("lightning_bolt_zombifies_a_pig");
+        let pig = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            DVec3::new(4.5, 64.0, 4.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(pig.clone())
+            .expect("the pig's chunk is loaded");
+
+        strike_at(&world, DVec3::new(4.5, 64.0, 4.5)).tick();
+
+        assert!(pig.is_removed());
+        // Vanilla arms it from `populateDefaultEquipmentSlots`, so a bare hand
+        // means the conversion callback never ran.
+        let weapon = zombified_piglin_weapon(&world).expect("the pig zombified");
+        assert!(
+            weapon.is(&vanilla_items::GOLDEN_SWORD) || weapon.is(&vanilla_items::GOLDEN_SPEAR),
+            "a zombified piglin spawns holding gold"
+        );
+    }
+
+    #[test]
+    fn a_struck_pig_on_peaceful_stays_a_pig() {
+        let world = bolt_world("lightning_bolt_spares_a_peaceful_pig");
+        world.set_difficulty(Difficulty::Peaceful);
+        let pig = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            DVec3::new(4.5, 64.0, 4.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(pig.clone())
+            .expect("the pig's chunk is loaded");
+
+        strike_at(&world, DVec3::new(4.5, 64.0, 4.5)).tick();
+
+        assert!(!pig.is_removed());
+        assert!(!has_zombified_piglin(&world));
+        // Peaceful falls through to the base body, which still singes.
+        assert_eq!(pig.remaining_fire_ticks(), 1);
+    }
+
+    #[test]
+    fn one_bolt_flips_a_mooshroom_once_however_long_it_flashes() {
+        let world = bolt_world("lightning_bolt_flips_a_mooshroom");
+        let mooshroom = Arc::new(MushroomCowEntity::new(
+            &vanilla_entities::MOOSHROOM,
+            next_entity_id(),
+            DVec3::new(4.5, 64.0, 4.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(mooshroom.clone())
+            .expect("the mooshroom's chunk is loaded");
+        assert_eq!(mooshroom.variant(), MushroomCowVariant::Red);
+        let full_health = mooshroom.get_health();
+
+        // A bolt sweeps for entities on every tick it is alive, so ticking it
+        // out is what proves the per-bolt guard rather than a lucky single hit.
+        let bolt = strike_at(&world, DVec3::new(4.5, 64.0, 4.5));
+        tick_until_gone(&bolt);
+
+        assert_eq!(mooshroom.variant(), MushroomCowVariant::Brown);
+        // Vanilla's override has no `super` call: the flip is the whole effect.
+        assert_eq!(mooshroom.get_health().to_bits(), full_health.to_bits());
+        assert_eq!(mooshroom.remaining_fire_ticks(), 0);
+    }
+
+    #[test]
+    fn a_strike_leaves_an_armor_stand_and_an_item_frame_untouched() {
+        let world = bolt_world("lightning_bolt_spares_decoration");
+        let stand = Arc::new(ArmorStandEntity::new(
+            &vanilla_entities::ARMOR_STAND,
+            next_entity_id(),
+            DVec3::new(4.5, 64.0, 4.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(stand.clone())
+            .expect("the stand's chunk is loaded");
+        let stand_health = stand.get_health();
+
+        let frame = Arc::new(ItemFrameEntity::new(
+            &vanilla_entities::ITEM_FRAME,
+            next_entity_id(),
+            DVec3::new(5.5, 64.0, 4.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(frame.clone())
+            .expect("the frame's chunk is loaded");
+
+        strike_at(&world, DVec3::new(4.5, 64.0, 4.5)).tick();
+
+        assert_eq!(stand.get_health().to_bits(), stand_health.to_bits());
+        assert_eq!(stand.remaining_fire_ticks(), 0);
+        assert!(!frame.is_removed());
+        assert_eq!(frame.remaining_fire_ticks(), 0);
     }
 }

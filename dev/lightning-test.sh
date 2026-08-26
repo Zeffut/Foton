@@ -91,6 +91,21 @@ CMDS="$CMDS;;setblock 0 100 32 minecraft:lightning_rod[facing=up,powered=false]"
 CMDS="$CMDS;;setblock 1 100 32 minecraft:tnt"
 CMDS="$CMDS;;execute if block 1 100 32 minecraft:tnt run tellraw @s \"UNSTRUCKRODLITNOTHING\""
 
+# `Pig.thunderHit`: a struck pig becomes a zombified piglin. Two pigs on two
+# perches sixteen blocks apart, one struck and one not, so the conversion has to
+# be the bolt rather than anything the summon itself did. The perches are up at
+# y=100 where the selector radius cannot reach a pig the world generated.
+CMDS="$CMDS;;setblock 0 99 -64 minecraft:stone"
+CMDS="$CMDS;;setblock 0 99 -48 minecraft:stone"
+CMDS="$CMDS;;teleport @s 8 100 -56"
+CMDS="$CMDS;;summon minecraft:pig 0.5 100 -63.5"
+CMDS="$CMDS;;summon minecraft:pig 0.5 100 -47.5"
+CMDS="$CMDS;;execute positioned 0.5 100 -63.5 if entity @e[type=minecraft:pig,distance=..3] run tellraw @s \"PIGSTARTSAPIG\""
+
+CMDS="$CMDS;;summon minecraft:lightning_bolt 0.5 101 -63.5"
+CMDS="$CMDS;;execute positioned 0.5 100 -63.5 if entity @e[type=minecraft:zombified_piglin,distance=..5] run tellraw @s \"STRUCKPIGZOMBIFIED\""
+CMDS="$CMDS;;execute positioned 0.5 100 -47.5 if entity @e[type=minecraft:pig,distance=..3] run tellraw @s \"UNSTRUCKPIGSTAYSAPIG\""
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -99,7 +114,7 @@ cleanup
 
 echo "=== what happened ==="
 grep "server says" join.log \
-  | grep -oE "COPPERSTARTSOXIDIZED|COPPERSCRUBBEDCLEAN|RODSTARTSCOLD|TNTSTARTSPLACED|RODLITTHETNT|RODWENTCOLDAGAIN|UNSTRUCKRODLITNOTHING"
+  | grep -oE "COPPERSTARTSOXIDIZED|COPPERSCRUBBEDCLEAN|RODSTARTSCOLD|TNTSTARTSPLACED|RODLITTHETNT|RODWENTCOLDAGAIN|UNSTRUCKRODLITNOTHING|PIGSTARTSAPIG|STRUCKPIGZOMBIFIED|UNSTRUCKPIGSTAYSAPIG"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic" | tail -5
 
@@ -114,4 +129,7 @@ said TNTSTARTSPLACED        || fail "the witness TNT was never placed"
 said RODLITTHETNT           || fail "a bolt on the rod sent no redstone pulse"
 said RODWENTCOLDAGAIN       || fail "the rod never stopped being powered"
 said UNSTRUCKRODLITNOTHING  || fail "a rod nobody struck lit the TNT anyway"
+said PIGSTARTSAPIG          || fail "the pig never arrived on its perch"
+said STRUCKPIGZOMBIFIED     || fail "a bolt did not turn the pig into a zombified piglin"
+said UNSTRUCKPIGSTAYSAPIG   || fail "the pig nobody struck zombified anyway"
 echo "########## LIGHTNING TEST PASSED ##########"

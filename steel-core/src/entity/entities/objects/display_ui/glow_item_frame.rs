@@ -233,6 +233,10 @@ impl Entity for GlowItemFrameEntity {
         direction_3d_data_value(*self.entity_data.lock().hanging_entity().direction.get())
     }
 
+    /// Vanilla parity: `BlockAttachedEntity.thunderHit`, an empty override.
+    /// Lightning passes straight through anything hung on a block.
+    fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
+
     fn spawn_position(&self) -> DVec3 {
         let block_pos = *self.block_pos.lock();
         DVec3::new(

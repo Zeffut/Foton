@@ -214,6 +214,10 @@ impl Entity for LeashFenceKnotEntity {
         self.entity_type
     }
 
+    /// Vanilla parity: `BlockAttachedEntity.thunderHit`, an empty override.
+    /// Lightning passes straight through anything hung on a block.
+    fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
+
     fn spawn_position(&self) -> DVec3 {
         let block_pos = self.block_pos();
         DVec3::new(

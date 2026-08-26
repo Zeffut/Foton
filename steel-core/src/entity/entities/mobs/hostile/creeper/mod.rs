@@ -299,6 +299,13 @@ impl Entity for CreeperEntity {
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
     }
+
+    /// Vanilla parity: `Creeper.thunderHit`, which takes the damage and the
+    /// singeing like anything else and then stays charged for good.
+    fn thunder_hit(&self, world: &World, _bolt: &dyn Entity) {
+        self.entity_thunder_hit(world);
+        self.entity_data.lock().is_powered.set(true);
+    }
 }
 
 impl LivingEntity for CreeperEntity {

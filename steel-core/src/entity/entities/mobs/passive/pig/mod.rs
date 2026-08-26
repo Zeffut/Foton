@@ -20,11 +20,11 @@ use steel_registry::vanilla_entity_data::PigEntityData;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::{
     REGISTRY, RegistryExt, RegistryReference, TaggedRegistryExt, sound_events, vanilla_attributes,
-    vanilla_items,
+    vanilla_entities, vanilla_items,
 };
 use steel_utils::locks::SyncMutex;
 use steel_utils::random::legacy_random::LegacyRandom;
-use steel_utils::types::InteractionHand;
+use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier};
 
 use crate::behavior::InteractionResult;
@@ -32,7 +32,9 @@ use crate::entity::ai::goal::{
     BreedGoal, FloatGoal, FollowParentGoal, LookAtPlayerGoal, PanicGoal, RandomLookAroundGoal,
     TemptGoal, WaterAvoidingRandomStrollGoal,
 };
+use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::ZombifiedPiglinEntity;
 use crate::entity::{
     AgeableMob, AgeableMobBase, Animal, AnimalBase, Entity, EntityBase, EntityBaseLoad, EntityPose,
     EntitySpawnReason, EntitySyncedData, ItemBasedSteering, ItemSteerable, LivingEntity,
@@ -277,6 +279,34 @@ impl Entity for PigEntity {
 
     fn play_step_sound(&self, _pos: BlockPos, _block_state: BlockStateId) {
         self.play_sound(self.current_sound_set().step_sound, 0.15, 1.0);
+    }
+
+    /// Vanilla parity: `Pig.thunderHit`, which zombifies the pig instead of
+    /// hurting it. On Peaceful, and whenever the conversion cannot happen, the
+    /// strike falls through to the ordinary damage and singeing.
+    fn thunder_hit(&self, world: &World, _bolt: &dyn Entity) {
+        if world.difficulty() == Difficulty::Peaceful {
+            self.entity_thunder_hit(world);
+            return;
+        }
+
+        // Vanilla's `ConversionParams.single(this, false, true)`: the pig's
+        // saddle is left behind rather than carried over.
+        let converted = convert_to(
+            self,
+            ConversionParams::single(false, true),
+            |id, position, world| {
+                ZombifiedPiglinEntity::new(&vanilla_entities::ZOMBIFIED_PIGLIN, id, position, world)
+            },
+            |zombified_piglin| {
+                zombified_piglin.populate_default_equipment_slots();
+                Mob::set_persistence_required(zombified_piglin.as_ref());
+            },
+        );
+
+        if converted.is_none() {
+            self.entity_thunder_hit(world);
+        }
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {

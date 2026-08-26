@@ -344,6 +344,10 @@ impl Entity for PaintingEntity {
         self.direction().get_3d_data_value()
     }
 
+    /// Vanilla parity: `BlockAttachedEntity.thunderHit`, an empty override.
+    /// Lightning passes straight through anything hung on a block.
+    fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
+
     /// Vanilla parity: `Painting.trackingPosition`, the lower corner of the
     /// block rather than the middle of the canvas.
     fn spawn_position(&self) -> DVec3 {

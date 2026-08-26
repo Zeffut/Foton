@@ -40,7 +40,7 @@ pub use fox::{FoxEntity, FoxVariant};
 pub use frog::FrogEntity;
 pub use goat::GoatEntity;
 pub use happy_ghast::HappyGhastEntity;
-pub use mooshroom::MushroomCowEntity;
+pub use mooshroom::{MushroomCowEntity, MushroomCowVariant};
 pub use nautilus::{NautilusEntity, ZombieNautilusEntity};
 pub use ocelot::OcelotEntity;
 pub use panda::{PandaEntity, PandaGene};
