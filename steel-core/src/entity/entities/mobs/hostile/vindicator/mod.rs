@@ -27,7 +27,8 @@ use text_components::TextComponent;
 use crate::entity::abstract_illager::{AbstractIllager, IllagerArmPose};
 use crate::entity::ai::goal::{
     FloatGoal, HoldGroundAttackGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
-    MeleeAttackGoal, NearestAttackableTargetGoal, RaiderCelebrationGoal, RandomStrollGoal,
+    MeleeAttackGoal, NearestAttackableTargetGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal,
+    RaiderCelebrationGoal, RaiderMoveThroughVillageGoal, RandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::patrolling_monster::{
@@ -86,6 +87,15 @@ const PATROL_SPEED: f64 = 0.7;
 
 /// Speed the captain patrols at.
 const PATROL_LEADER_SPEED: f64 = 0.595;
+/// Speed a raider walks the streets of the village it is raiding at.
+///
+/// Vanilla parity: the `1.05F` of `new RaiderMoveThroughVillageGoal(this, 1.05F, 1)`.
+const VILLAGE_WALK_SPEED_MODIFIER: f64 = 1.05;
+
+/// How close to a house counts as having reached it.
+///
+/// Vanilla parity: the `1` of the same goal.
+const VILLAGE_POI_ARRIVAL_DISTANCE: f64 = 1.0;
 
 /// A vindicator.
 #[entity_behavior(class = "Vindicator")]
@@ -144,6 +154,15 @@ impl VindicatorEntity {
                 LongDistancePatrolGoal::new(PATROL_SPEED, PATROL_LEADER_SPEED),
             );
             goals.add_goal(5, MeleeAttackGoal::new(MELEE_SPEED_MODIFIER, false));
+            goals.add_goal(1, ObtainRaidLeaderBannerGoal::new());
+            goals.add_goal(3, PathfindToRaidGoal::new());
+            goals.add_goal(
+                4,
+                RaiderMoveThroughVillageGoal::new(
+                    VILLAGE_WALK_SPEED_MODIFIER,
+                    VILLAGE_POI_ARRIVAL_DISTANCE,
+                ),
+            );
             goals.add_goal(5, RaiderCelebrationGoal::new());
             goals.add_goal(8, RandomStrollGoal::new(STROLL_SPEED_MODIFIER));
             goals.add_goal(

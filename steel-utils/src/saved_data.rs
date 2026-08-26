@@ -23,6 +23,11 @@ pub mod names {
     /// Cached concentric-ring positions, persisted as `data/structure_rings.bin`.
     pub const STRUCTURE_RINGS: WincodeSavedDataName =
         WincodeSavedDataName::trusted("structure_rings", *b"STLR", 2);
+    /// Vanilla `Raids.TYPE`, persisted as `data/raids.toml`.
+    ///
+    /// Per loaded world rather than per domain, the way `chunk_tickets` is: a
+    /// raid belongs to the dimension whose village it besieges.
+    pub const RAIDS: SavedDataName = SavedDataName::trusted("raids");
     /// Domain command scoreboard, persisted through the domain default world.
     pub const SCOREBOARD: SavedDataName = SavedDataName::trusted("scoreboard");
     /// Domain command storage, persisted through the domain default world.

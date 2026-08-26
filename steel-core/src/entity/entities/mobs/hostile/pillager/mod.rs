@@ -27,7 +27,9 @@ use crate::chunk::light::LightLayer;
 use crate::entity::abstract_illager::{AbstractIllager, IllagerArmPose};
 use crate::entity::ai::goal::{
     FloatGoal, HoldGroundAttackGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
-    NearestAttackableTargetGoal, RaiderCelebrationGoal, RandomStrollGoal, RangedCrossbowAttackGoal,
+    NearestAttackableTargetGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal,
+    RaiderCelebrationGoal, RaiderMoveThroughVillageGoal, RandomStrollGoal,
+    RangedCrossbowAttackGoal,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ArrowEntity;
@@ -128,6 +130,15 @@ const SPAWN_ENCHANT_DENOMINATOR: i32 = 300;
 /// alone, not the combined brightness a monster's dark check uses, so a patrol
 /// may appear in broad daylight but not next to a torch.
 const MAX_PATROL_SPAWN_BLOCK_LIGHT: u8 = 8;
+/// Speed a raider walks the streets of the village it is raiding at.
+///
+/// Vanilla parity: the `1.05F` of `new RaiderMoveThroughVillageGoal(this, 1.05F, 1)`.
+const VILLAGE_WALK_SPEED_MODIFIER: f64 = 1.05;
+
+/// How close to a house counts as having reached it.
+///
+/// Vanilla parity: the `1` of the same goal.
+const VILLAGE_POI_ARRIVAL_DISTANCE: f64 = 1.0;
 
 /// A pillager.
 #[entity_behavior(class = "Pillager")]
@@ -193,6 +204,15 @@ impl PillagerEntity {
             goals.add_goal(
                 4,
                 LongDistancePatrolGoal::new(PATROL_SPEED, PATROL_LEADER_SPEED),
+            );
+            goals.add_goal(1, ObtainRaidLeaderBannerGoal::new());
+            goals.add_goal(3, PathfindToRaidGoal::new());
+            goals.add_goal(
+                4,
+                RaiderMoveThroughVillageGoal::new(
+                    VILLAGE_WALK_SPEED_MODIFIER,
+                    VILLAGE_POI_ARRIVAL_DISTANCE,
+                ),
             );
             goals.add_goal(5, RaiderCelebrationGoal::new());
             goals.add_goal(8, RandomStrollGoal::new(STROLL_SPEED_MODIFIER));
@@ -527,16 +547,13 @@ impl Raider for PillagerEntity {
         &self.raider_state
     }
 
-    /// Vanilla parity: `Pillager.applyRaidBuffs`. Steel has no enchantment
-    /// providers, so the wave-scaled crossbow arrives unenchanted; the wave
-    /// thresholds vanilla picks the provider from need a live raid to read and
-    /// are left to the raid manager.
-    fn apply_raid_buffs(&self, _wave: i32, _is_captain: bool) {
-        self.living_base().equipment().lock().set(
-            EquipmentSlot::MainHand,
-            ItemStack::new(&vanilla_items::CROSSBOW),
-        );
-    }
+    /// Vanilla parity: `Pillager.applyRaidBuffs`, which replaces the crossbow
+    /// only when the wave's enchantment provider fires -- `RAID_PILLAGER_POST_WAVE_3`
+    /// above wave three, `RAID_PILLAGER_POST_WAVE_5` above wave five, and
+    /// nothing at all below. Steel has no enchantment providers, so the
+    /// replacement would be a plain crossbow for a plain crossbow and the
+    /// method does what vanilla does when no provider applies: nothing.
+    fn apply_raid_buffs(&self, _wave: i32, _is_captain: bool) {}
 
     fn celebrate_sound(&self) -> SoundEventRef {
         &sound_events::ENTITY_PILLAGER_CELEBRATE

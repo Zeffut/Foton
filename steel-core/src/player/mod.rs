@@ -293,6 +293,17 @@ pub struct Player {
     /// Held weakly: the hook lives in the world's entity table, and this field
     /// only answers whether a bobber is already out when the rod is used again.
     fishing: SyncMutex<Option<Weak<dyn Entity>>>,
+    /// Where this player was standing when Bad Omen turned into Raid Omen.
+    ///
+    /// Vanilla parity: `ServerPlayer.raidOmenPosition`, which is what the Raid
+    /// Omen effect raids when it runs out -- the village the omen was absorbed
+    /// in, not wherever the player has wandered to thirty seconds later.
+    ///
+    /// Vanilla persists this in the player file; Steel does not, so a player
+    /// who logs out inside the thirty-second window and back in loses the
+    /// pending raid. The effect itself is not persisted across that boundary
+    /// either, so the two gaps line up.
+    raid_omen_position: SyncMutex<Option<BlockPos>>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `Player`.
@@ -462,6 +473,7 @@ impl Player {
             residence: SyncMutex::new(PlayerResidenceState::new()),
             ender_pearls: SyncMutex::new(Vec::new()),
             fishing: SyncMutex::new(None),
+            raid_omen_position: SyncMutex::new(None),
         }
     }
 
@@ -1011,6 +1023,28 @@ impl Player {
     /// Sets or clears this player's fishing hook (vanilla `Player.fishing`).
     pub fn set_fishing_hook(&self, hook: Option<&SharedEntity>) {
         *self.fishing.lock() = hook.map(Arc::downgrade);
+    }
+
+    /// Returns where this player absorbed a Bad Omen, if one is pending.
+    ///
+    /// Vanilla parity: `ServerPlayer.getRaidOmenPosition`.
+    #[must_use]
+    pub fn raid_omen_position(&self) -> Option<BlockPos> {
+        *self.raid_omen_position.lock()
+    }
+
+    /// Remembers where this player absorbed a Bad Omen.
+    ///
+    /// Vanilla parity: `ServerPlayer.setRaidOmenPosition`.
+    pub fn set_raid_omen_position(&self, pos: BlockPos) {
+        *self.raid_omen_position.lock() = Some(pos);
+    }
+
+    /// Forgets the pending raid position.
+    ///
+    /// Vanilla parity: `ServerPlayer.clearRaidOmenPosition`.
+    pub fn clear_raid_omen_position(&self) {
+        *self.raid_omen_position.lock() = None;
     }
 
     /// Registers a thrown ender pearl so it persists with this player and

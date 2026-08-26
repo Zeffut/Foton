@@ -6,21 +6,19 @@
 //! recruited, the captain's banner, the celebration it breaks into when the
 //! village falls.
 //!
-//! **Steel has no raid.** `Raid` and `Raids` stand on villagers, an occupied
-//! village point-of-interest index, a saved-data manager and a boss bar. The
-//! boss bar is now here -- vanilla's raid bar is a plain
-//! [`ServerBossEvent`](crate::boss_event::ServerBossEvent), which is what
-//! `crate::boss_event` provides -- and the other three are still missing.
-//! Every member of this trait that vanilla
-//! answers from a live `Raid` therefore answers from nothing here and is marked
-//! as such; the raid-independent half -- the patrol captaincy, the banner, the
-//! two-per-tick idle clock, the celebration flag and the per-mob raid buffs --
-//! is real. Landing `Raid` later means giving [`Raider::current_raid_status`]
-//! something to read and nothing else in this file has to move.
+//! A raider carries the id of the raid it belongs to rather than a reference to
+//! it: the raid lives in [`crate::raid::Raids`], which the world owns, and a
+//! strong reference from mob to raid would be a cycle through the world.
+//! [`Raider::current_raid`] resolves the id, and
+//! [`Raider::current_raid_status`] is the cheap read the goals branch on --
+//! three atomics behind one short map lock, so a mob can ask what its raid is
+//! doing from inside its own tick.
 
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 use std::borrow::Cow;
+use std::sync::Arc;
+use steel_protocol::packets::game::CTakeItemEntity;
 use steel_registry::data_components::vanilla_components::{
     BANNER_PATTERNS, ITEM_NAME, RARITY, Rarity, TOOLTIP_DISPLAY, TooltipDisplay,
 };
@@ -28,18 +26,26 @@ use steel_registry::data_components::{BannerPatternLayer, BannerPatternLayers};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::registry::holder::RegistryHolder;
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::{DyeColor, vanilla_banner_patterns, vanilla_items};
+use steel_registry::{DyeColor, vanilla_banner_patterns, vanilla_entities, vanilla_items};
+use steel_utils::ChunkPos;
+use steel_utils::Downcast as _;
 use steel_utils::locks::SyncMutex;
 use text_components::{TextComponent, translation::TranslatedMessage};
 
+use crate::entity::damage::DamageSource;
+use crate::entity::entities::ItemEntity;
 use crate::entity::patrolling_monster::{PATROL_LEADER_SPAWN_CHANCE, PatrollingMonster};
-use crate::entity::{EntitySpawnReason, LivingEntity};
+use crate::entity::{EntitySpawnReason, LivingEntity, RemovalReason, SharedEntity};
 use crate::inventory::equipment::EquipmentSlot;
+use crate::raid::Raid;
+use crate::world::World;
 
 /// NBT key vanilla stores the raid wave under.
 pub const TAG_WAVE: &str = "Wave";
 /// NBT key vanilla stores the recruitable flag under.
 pub const TAG_CAN_JOIN_RAID: &str = "CanJoinRaid";
+/// NBT key vanilla stores the id of the raid this mob belongs to under.
+pub const TAG_RAID_ID: &str = "RaidId";
 
 /// Drop chance vanilla gives the captain's banner.
 ///
@@ -57,10 +63,9 @@ pub const MAX_NO_ACTION_TIME: i32 = 2400;
 ///
 /// Vanilla reads `getCurrentRaid()` and then asks the raid three questions:
 /// whether it is still running, whether the village lost, and whether it is
-/// over. Steel has no raid to ask, so the three answers are bundled here and
-/// [`Raider::current_raid_status`] returns `None` for every mob. The type
-/// exists so the goals that branch on it are written the vanilla way rather
-/// than around a hole.
+/// over. The three answers are bundled here because they are the whole of what
+/// a goal needs and they are the only part of a raid that can be read from
+/// inside a mob's own tick without touching the raid's state lock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RaidStatus {
     /// Vanilla parity: `Raid.isActive`.
@@ -83,6 +88,10 @@ pub struct RaiderState {
     can_join_raid: SyncMutex<bool>,
     /// Ticks this mob has spent away from the raid it belongs to.
     ticks_outside_raid: SyncMutex<i32>,
+    /// The raid this mob belongs to, by its key in [`crate::raid::Raids`].
+    ///
+    /// Vanilla parity: `Raider.raid`, which is the raid object itself.
+    raid_id: SyncMutex<Option<i32>>,
 }
 
 impl RaiderState {
@@ -93,6 +102,7 @@ impl RaiderState {
             wave: SyncMutex::new(0),
             can_join_raid: SyncMutex::new(false),
             ticks_outside_raid: SyncMutex::new(0),
+            raid_id: SyncMutex::new(None),
         }
     }
 }
@@ -112,10 +122,10 @@ pub trait Raider: PatrollingMonster {
 
     /// Upgrades this mob's gear for the wave it arrived with.
     ///
-    /// Vanilla parity: `applyRaidBuffs`. Steel never calls it -- nothing spawns
-    /// a wave -- but each mob implements it, so the day a raid manager exists
-    /// the pillagers arrive with enchanted crossbows without any of these mobs
-    /// being touched.
+    /// Vanilla parity: `applyRaidBuffs`, called from `Raid.joinRaid` as each
+    /// mob is dropped into its wave. Every vanilla buff is an enchantment
+    /// provider, which Steel does not have, so what lands is the unenchanted
+    /// half: the vindicator's iron axe, and nothing for anybody else.
     fn apply_raid_buffs(&self, wave: i32, is_captain: bool);
 
     /// Returns the sound this mob makes over a fallen village.
@@ -132,12 +142,37 @@ pub trait Raider: PatrollingMonster {
     /// Sets whether this mob is visibly celebrating.
     fn set_celebrating(&self, celebrating: bool);
 
+    /// Returns the raid this mob belongs to.
+    ///
+    /// Vanilla parity: `getCurrentRaid`.
+    fn current_raid(&self) -> Option<Arc<Raid>> {
+        let raid_id = (*self.raider_state().raid_id.lock())?;
+        self.level()?.raids().get(raid_id)
+    }
+
+    /// Puts this mob in a raid, or takes it out of one.
+    ///
+    /// Vanilla parity: `setCurrentRaid`.
+    fn set_current_raid(&self, raid_id: Option<i32>) {
+        *self.raider_state().raid_id.lock() = raid_id;
+    }
+
     /// Returns what the raid this mob belongs to is doing.
     ///
     /// Vanilla parity: `getCurrentRaid`, collapsed to the three flags its
-    /// callers actually read. Always `None` in Steel: see the module comment.
+    /// callers actually read.
     fn current_raid_status(&self) -> Option<RaidStatus> {
-        None
+        self.current_raid().map(|raid| raid.status())
+    }
+
+    /// Returns whether this mob is in a raid, or standing in one.
+    ///
+    /// Vanilla parity: `Raider.hasRaid`.
+    fn has_raid(&self) -> bool {
+        let Some(world) = self.level() else {
+            return false;
+        };
+        self.current_raid().is_some() || world.is_raided(self.block_position())
     }
 
     /// Returns whether this mob belongs to a raid that is still running.
@@ -335,25 +370,165 @@ pub fn finalize_spawn_raider(raider: &dyn Raider, spawn_reason: EntitySpawnReaso
         raider.set_patrolling(true);
     }
 
-    // Vanilla parity: `Raider.finalizeSpawn`, which only holds a naturally
-    // spawned witch out of raids. Steel's witch is not a raider yet, so every
-    // raider that spawns here is recruitable.
-    raider.set_can_join_raid(true);
+    // Vanilla parity: `Raider.finalizeSpawn`, which holds a naturally spawned
+    // witch out of raids -- a swamp hut witch is not a raider looking for a
+    // village -- and lets every other raider be recruited.
+    raider.set_can_join_raid(
+        raider.entity_type() != &vanilla_entities::WITCH
+            || spawn_reason != EntitySpawnReason::Natural,
+    );
 }
 
 /// Writes the raid membership the way vanilla does.
 ///
-/// Vanilla parity: `Raider.addAdditionalSaveData`, minus the `RaidId` it writes
-/// for a live raid.
+/// Vanilla parity: `Raider.addAdditionalSaveData`.
 pub fn write_raider_state(mob: &dyn Raider, nbt: &mut NbtCompound) {
     nbt.insert(TAG_WAVE, mob.wave());
     nbt.insert(TAG_CAN_JOIN_RAID, i8::from(mob.can_join_raid()));
+    if let Some(raid_id) = *mob.raider_state().raid_id.lock() {
+        nbt.insert(TAG_RAID_ID, raid_id);
+    }
 }
 
 /// Reads the raid membership the way vanilla does.
 ///
-/// Vanilla parity: `Raider.readAdditionalSaveData`, minus the `RaidId` lookup.
+/// Vanilla parity: `Raider.readAdditionalSaveData`, including the way a mob
+/// puts itself back into its wave: a raid does not persist its raiders, so a
+/// reloaded one has to re-register or the wave would look empty and the next
+/// one would spawn on top of it.
 pub fn read_raider_state(mob: &dyn Raider, nbt: BorrowedNbtCompoundView<'_, '_>) {
     mob.set_wave(nbt.int(TAG_WAVE).unwrap_or(0));
     mob.set_can_join_raid(nbt.byte(TAG_CAN_JOIN_RAID).is_some_and(|value| value != 0));
+
+    let Some(raid_id) = nbt.int(TAG_RAID_ID) else {
+        return;
+    };
+    let Some(world) = mob.level() else {
+        return;
+    };
+    let Some(raid) = world.raids().get(raid_id) else {
+        return;
+    };
+    mob.set_current_raid(Some(raid_id));
+    raid.add_wave_mob(&world, mob.wave(), mob, false);
+    if mob.is_patrol_leader() {
+        raid.set_leader(mob.wave(), mob);
+    }
+}
+
+/// Runs the raid half of a raider's tick.
+///
+/// Vanilla parity: `Raider.aiStep`. A raider that wandered into a raid it does
+/// not belong to is recruited by it, once a second; a raider already in one is
+/// kept from counting as idle while it has a player or a golem to fight.
+pub fn ai_step_raider(mob: &dyn Raider) {
+    let Some(world) = mob.level() else {
+        return;
+    };
+    if !LivingEntity::is_alive(mob) || !mob.can_join_raid() {
+        return;
+    }
+
+    let Some(raid) = mob.current_raid() else {
+        if world.game_time() % 20 != 0 {
+            return;
+        }
+        let Some(nearby_raid) = world.get_raid_at(mob.block_position()) else {
+            return;
+        };
+        if mob.is_recruitable() {
+            nearby_raid.join_raid(&world, nearby_raid.groups_spawned(), mob, None, true);
+        }
+        return;
+    };
+    drop(raid);
+
+    let Some(target) = mob.target() else {
+        return;
+    };
+    let target_type = target.entity_type();
+    if target_type == &vanilla_entities::PLAYER || target_type == &vanilla_entities::IRON_GOLEM {
+        mob.set_no_action_time(0);
+    }
+}
+
+/// Takes a dying raider out of its raid.
+///
+/// Vanilla parity: the raid half of `Raider.die`, which runs before the shared
+/// body. The killer becoming a Hero of the Village is decided here, on every
+/// raider's death, and only paid out if the village wins.
+pub fn die_raider(mob: &dyn Raider, source: &DamageSource) {
+    let Some(world) = mob.level() else {
+        return;
+    };
+    let Some(raid) = mob.current_raid() else {
+        return;
+    };
+
+    if mob.is_patrol_leader() {
+        raid.remove_leader(mob.wave());
+    }
+    if let Some(killer_id) = source.causing_entity_id
+        && let Some(killer) = world.get_entity_by_id(killer_id)
+        && killer.entity_type() == &vanilla_entities::PLAYER
+    {
+        raid.add_hero_of_the_village(killer.uuid());
+    }
+    raid.remove_from_raid(&world, mob.id(), false);
+}
+
+/// Redraws the raid bar when one of its mobs is hurt.
+///
+/// Vanilla parity: the `hasActiveRaid()` guard of `Raider.hurtServer`.
+pub fn hurt_server_raider(mob: &dyn Raider) {
+    let Some(world) = mob.level() else {
+        return;
+    };
+    let Some(raid) = mob.current_raid() else {
+        return;
+    };
+    if raid.is_active() {
+        raid.update_boss_bar(&world);
+    }
+}
+
+/// Lets a raider take the wave's banner off the ground and become its captain.
+///
+/// Vanilla parity: `Raider.pickUpItem`. Returns whether the banner was taken,
+/// so the caller can fall through to whatever else that mob picks up.
+pub fn pick_up_banner(mob: &dyn Raider, world: &Arc<World>, item_entity: &SharedEntity) -> bool {
+    let Some(raid) = mob.current_raid() else {
+        return false;
+    };
+    if !raid.is_active() || raid.leader(mob.wave()).is_some() {
+        return false;
+    }
+    let Some(item) = item_entity.downcast_ref::<ItemEntity>() else {
+        return false;
+    };
+    let banner = item.get_item();
+    if !is_ominous_banner(&banner) {
+        return false;
+    }
+
+    let slot = EquipmentSlot::Head;
+    let mut current = ItemStack::empty();
+    mob.with_equipment_slot(slot, &mut |stack| {
+        current = stack.copy_with_count(stack.count());
+    });
+    if !current.is_empty() && (rand::random::<f32>() - 0.1).max(0.0) < mob.drop_chance(slot) {
+        mob.spawn_at_location(current, 0.0);
+    }
+
+    let count = banner.count();
+    mob.living_base().equipment().lock().set(slot, banner);
+    world.broadcast_to_nearby(
+        ChunkPos::from_entity_pos(item_entity.position()),
+        CTakeItemEntity::new(item_entity.id(), mob.id(), count),
+        None,
+    );
+    item_entity.set_removed(RemovalReason::Discarded);
+    raid.set_leader(mob.wave(), mob);
+    mob.set_patrol_leader(true);
+    true
 }
