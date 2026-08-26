@@ -126,6 +126,53 @@ fn one_world_tick_of_an_occupied_end_puts_a_dragon_in_the_sky() {
     );
 }
 
+/// The bar belongs to the fight, and its membership is by distance from the
+/// arena rather than by who can see the entity -- which is why a player who
+/// walks away from the island loses it while the dragon is still in view.
+#[test]
+fn the_fight_puts_everyone_near_the_arena_on_the_boss_bar() {
+    let (world, dragon_entity) = started_end("dragon_fight_boss_bar");
+    let fight = world.dragon_fight().expect("the End should carry a fight");
+
+    assert!(
+        fight.boss_event().has_players(),
+        "the player standing in the arena should be on the boss bar"
+    );
+
+    // The bar follows the dragon through `updateDragon`, which the dragon calls
+    // from its own tick. A fresh bar already reads full, so this halves the
+    // dragon's health first -- otherwise the assertion would hold whether the
+    // fight ever heard about the dragon or not.
+    let dragon = dragon_entity
+        .downcast_ref::<EnderDragon>()
+        .expect("the fight's entity should be a dragon");
+    dragon.set_health(dragon.get_max_health() / 2.0);
+    world.tick_game(2, true);
+
+    assert!(
+        (fight.boss_event().progress() - 0.5).abs() < 1.0e-3,
+        "the bar should have followed the dragon down to half, not stayed full"
+    );
+}
+
+/// Every dragon killed opens one of the twenty gateways, and the gateway is the
+/// only way to the outer islands.
+#[test]
+fn killing_the_dragon_opens_a_gateway() {
+    let (world, dragon_entity) = started_end("dragon_fight_gateway");
+    assert!(
+        find_gateway(&world).is_none(),
+        "no gateway should stand before the first dragon dies"
+    );
+
+    dragon_entity.kill(world.as_ref());
+
+    assert!(
+        find_gateway(&world).is_some(),
+        "killing the dragon should have opened one of the twenty gateways"
+    );
+}
+
 /// An End nobody is in runs nothing at all, which is what keeps an idle server
 /// from holding the arena loaded and respawning dragons into an empty world.
 #[test]
@@ -312,6 +359,20 @@ fn exit_portal_y(world: &Arc<World>) -> i32 {
 fn column_holds(world: &Arc<World>, column: BlockPos, block: BlockRef) -> bool {
     let floor = world.get_min_y();
     (floor..floor + 16).any(|y| world.get_block_state(column.at_y(y)).get_block() == block)
+}
+
+/// Looks for a gateway anywhere on the ring the fight places them on.
+///
+/// The slot a fight opens is drawn from a shuffle of twenty, so the position is
+/// not known ahead of time; the ring itself is, at ninety-six blocks out and
+/// seventy-five up.
+fn find_gateway(world: &Arc<World>) -> Option<BlockPos> {
+    const RING: i32 = 96;
+    const RING_Y: i32 = 75;
+
+    (-RING..=RING)
+        .flat_map(|x| (-RING..=RING).map(move |z| BlockPos::new(x, RING_Y, z)))
+        .find(|pos| world.get_block_state(*pos).get_block() == &vanilla_blocks::END_GATEWAY)
 }
 
 fn experience_in(world: &Arc<World>) -> i32 {
