@@ -94,6 +94,7 @@ pub mod structure;
 pub use structure::processor as structure_processor;
 pub use structure::set as structure_set;
 pub use structure::template_pool;
+pub mod sulfur_cube_archetype;
 pub mod timeline;
 pub mod trial_spawner_config;
 pub mod trim_material;
@@ -313,6 +314,11 @@ pub mod vanilla_potions;
 #[rustfmt::skip]
 #[path = "generated/vanilla_zombie_nautilus_variants.rs"]
 pub mod vanilla_zombie_nautilus_variants;
+
+#[expect(warnings)]
+#[rustfmt::skip]
+#[path = "generated/vanilla_sulfur_cube_archetypes.rs"]
+pub mod vanilla_sulfur_cube_archetypes;
 
 #[expect(warnings)]
 #[rustfmt::skip]

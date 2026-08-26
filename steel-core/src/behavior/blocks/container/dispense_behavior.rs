@@ -15,13 +15,15 @@ use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::vanilla_game_rules::TNT_EXPLODES;
+use steel_registry::vanilla_item_tags::ItemTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _};
 use steel_registry::{level_events, sound_events, vanilla_blocks, vanilla_entities, vanilla_items};
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, Direction, Downcast as _, Identifier, WorldAabb};
 
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::behavior::blocks::FireBlock;
-use crate::entity::entities::{ArrowEntity, PrimedTntEntity, SheepEntity};
+use crate::entity::entities::{ArrowEntity, PrimedTntEntity, SheepEntity, SulfurCubeEntity};
 use crate::entity::{Entity, Projectile as _, next_entity_id};
 use crate::world::World;
 
@@ -172,6 +174,10 @@ impl DispenseItemBehavior for TntDispenseBehavior {
         }
 
         let target = source.pos.relative(source.facing);
+        if feed_sulfur_cube(source.world, target, &mut stack) {
+            return DispenseOutcome::acted(stack);
+        }
+
         let tnt = PrimedTntEntity::prime(source.world, target, None);
         source.world.play_sound_at(
             &sound_events::ENTITY_TNT_PRIMED,
@@ -182,9 +188,8 @@ impl DispenseItemBehavior for TntDispenseBehavior {
             None,
         );
 
-        // TODO: vanilla also fires the ENTITY_PLACE game event, and checks
-        // `SulfurCubeBlockDispenseItemBehavior.dispenseBlock` first so a sulfur
-        // cube swallows the charge; Steel has neither yet.
+        // TODO: vanilla also fires the ENTITY_PLACE game event, which Steel
+        // does not have here yet.
         stack.shrink(1);
         DispenseOutcome::acted(stack)
     }
@@ -237,7 +242,10 @@ impl DispenseItemBehavior for BoneMealDispenseBehavior {
 ///
 /// Vanilla parity: `FlintAndSteelDispenseItemBehavior`.
 ///
-/// TODO: vanilla also lights sulfur cubes, which Steel has no entity for.
+///
+/// TODO: vanilla also lights a sulfur cube standing in front of the
+/// dispenser, through `SulfurCube.primeTime`. Steel's flint and steel only
+/// reaches blocks.
 struct FlintAndSteelDispenseBehavior;
 
 impl DispenseItemBehavior for FlintAndSteelDispenseBehavior {
@@ -362,6 +370,44 @@ static DISPENSE_BEHAVIORS: LazyLock<FxHashMap<Identifier, Box<dyn DispenseItemBe
         behaviors
     });
 
+/// Feeds a block to a sulfur cube standing in front of the dispenser.
+///
+/// Vanilla parity: `SulfurCubeBlockDispenseItemBehavior.dispenseBlock`, which
+/// is how a dispenser loads a cube -- it is checked before the ordinary
+/// behavior, so a dispenser aimed at a cube feeds it rather than throwing.
+/// Returns whether a cube took the block.
+pub(super) fn feed_sulfur_cube(world: &Arc<World>, pos: BlockPos, stack: &mut ItemStack) -> bool {
+    let bounds = WorldAabb::new(
+        f64::from(pos.x()),
+        f64::from(pos.y()),
+        f64::from(pos.z()),
+        f64::from(pos.x()) + 1.0,
+        f64::from(pos.y()) + 1.0,
+        f64::from(pos.z()) + 1.0,
+    );
+    for entity in world.get_entities_in_aabb(&bounds) {
+        let Some(cube) = entity.downcast_ref::<SulfurCubeEntity>() else {
+            continue;
+        };
+        if cube.equip_item(stack) {
+            stack.shrink(1);
+            return true;
+        }
+    }
+    false
+}
+
+/// Returns whether a sulfur cube would swallow this item.
+///
+/// Vanilla parity: the `itemStack.is(ItemTags.SULFUR_CUBE_SWALLOWABLE)` branch
+/// of `DispenserBlock.getDefaultDispenseMethod`.
+#[must_use]
+pub(super) fn is_sulfur_cube_swallowable(item: ItemRef) -> bool {
+    REGISTRY
+        .items
+        .is_in_tag(item, &ItemTag::SULFUR_CUBE_SWALLOWABLE)
+}
+
 /// Returns the behavior registered for `item`, if any.
 ///
 /// Vanilla parity: the `DISPENSER_REGISTRY.get` of
@@ -377,7 +423,7 @@ mod tests {
 
     use super::*;
     use crate::behavior::init_behaviors;
-    use crate::test_support::fresh_test_world;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     #[test]
     fn every_item_steel_handles_specially_is_registered() {
@@ -413,6 +459,54 @@ mod tests {
         assert!(
             !can_be_lit(vanilla_blocks::STONE.default_state()),
             "stone has no lit property to set"
+        );
+    }
+
+    /// Vanilla parity: `SulfurCubeBlockDispenseItemBehavior.dispenseBlock`,
+    /// reached through the sulfur-cube branch of
+    /// `DispenserBlock.getDefaultDispenseMethod`. A dispenser aimed at a cube
+    /// loads it instead of throwing the block on the floor.
+    #[test]
+    fn a_dispenser_aimed_at_a_sulfur_cube_feeds_it() {
+        use std::sync::Arc;
+
+        use glam::DVec3;
+        use steel_registry::vanilla_entities;
+
+        use crate::entity::entities::SulfurCubeEntity;
+        use crate::entity::{LivingEntity as _, next_entity_id};
+        use crate::inventory::equipment::EquipmentSlot;
+
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("dispenser_feeds_sulfur_cube");
+        insert_ready_full_chunk(&world, steel_utils::ChunkPos::new(0, 0));
+        let target = BlockPos::new(8, 64, 8);
+
+        let cube = Arc::new(SulfurCubeEntity::new(
+            &vanilla_entities::SULFUR_CUBE,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        cube.set_cube_size(2, true);
+        world
+            .try_add_entity(cube.clone())
+            .expect("the test world accepts a sulfur cube");
+
+        assert!(is_sulfur_cube_swallowable(&vanilla_items::TNT));
+        let mut stack = ItemStack::new(&vanilla_items::TNT);
+        stack.set_count(3);
+        assert!(feed_sulfur_cube(&world, target, &mut stack));
+        assert_eq!(stack.count(), 2, "the dispenser gave up exactly one");
+        assert!(
+            cube.get_item_by_slot(EquipmentSlot::Body)
+                .is(&vanilla_items::TNT)
+        );
+
+        assert!(
+            !feed_sulfur_cube(&world, target, &mut stack),
+            "a cube already holding that block takes no more"
         );
     }
 

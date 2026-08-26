@@ -125,7 +125,7 @@ pub(crate) use sit_when_ordered_to::SitWhenOrderedToGoal;
 pub(crate) use spellcaster_casting_spell::SpellcasterCastingSpellGoal;
 pub(crate) use spellcaster_use_spell::{DEFAULT_CAST_WARMUP_TIME, SpellcasterUseSpellBase};
 pub(crate) use tamable_animal_panic::TamableAnimalPanicGoal;
-pub(crate) use tempt_goal::{TemptGoal, TemptScareRule};
+pub(crate) use tempt_goal::{TemptGoal, TemptNavigation, TemptScareRule};
 pub(crate) use try_find_water::TryFindWaterGoal;
 pub(crate) use water_avoiding_random_flying::{
     WaterAvoidingRandomFlyingGoal, flying_stroll_position,

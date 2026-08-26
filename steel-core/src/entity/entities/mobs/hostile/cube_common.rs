@@ -147,6 +147,15 @@ pub(super) trait CubeLike: Mob {
     fn is_tiny(&self) -> bool {
         self.size() <= TINY_SIZE
     }
+
+    /// Returns the health a cube of this size has.
+    ///
+    /// Vanilla parity: `AbstractCubeMob.setcubeMobHealth`, which squares the
+    /// size. The sulfur cube overrides exactly this and grows linearly instead,
+    /// which is why it is a hook rather than a line of [`apply_size`].
+    fn max_health_for_size(&self, size: i32) -> f64 {
+        f64::from(size * size)
+    }
 }
 
 /// How a shared goal reaches the cube it was handed.
@@ -198,8 +207,10 @@ where
 
 /// Applies everything the size decides.
 ///
-/// Vanilla parity: `AbstractCubeMob.setSize` together with the
-/// `getAttribute(ATTACK_DAMAGE).setBaseValue(size)` both subclasses add.
+/// Vanilla parity: `AbstractCubeMob.setSize` exactly -- health and speed and
+/// nothing else. The attack damage and the experience reward are each
+/// subclass's own `setSize` override, because `SulfurCube` overrides `setSize`
+/// too and deliberately sets neither.
 pub(super) fn apply_size<C: CubeLike + ?Sized>(cube: &C, size: i32, update_health: bool) {
     let size = size.clamp(1, MAX_SIZE);
     cube.store_size(size);
@@ -207,12 +218,14 @@ pub(super) fn apply_size<C: CubeLike + ?Sized>(cube: &C, size: i32, update_healt
 
     {
         let mut attributes = cube.attributes().lock();
-        attributes.set_base_value(vanilla_attributes::MAX_HEALTH, f64::from(size * size));
+        attributes.set_base_value(
+            vanilla_attributes::MAX_HEALTH,
+            cube.max_health_for_size(size),
+        );
         attributes.set_base_value(
             vanilla_attributes::MOVEMENT_SPEED,
             SPEED_PER_SIZE.mul_add(f64::from(size), BASE_SPEED),
         );
-        attributes.set_base_value(vanilla_attributes::ATTACK_DAMAGE, f64::from(size));
     }
 
     if update_health {

@@ -70,6 +70,7 @@ mod recipes;
 mod sound_events;
 mod sound_types;
 mod structure;
+mod sulfur_cube_archetypes;
 mod timelines;
 mod trial_spawner_configs;
 mod trim_materials;
@@ -138,6 +139,7 @@ const POTION_TAGS: &str = "potion_tags";
 const TIMELINES: &str = "timelines";
 const TIMELINE_TAGS: &str = "timeline_tags";
 const ZOMBIE_NAUTILUS_VARIANTS: &str = "zombie_nautilus_variants";
+const SULFUR_CUBE_ARCHETYPES: &str = "sulfur_cube_archetypes";
 const RECIPES: &str = "recipes";
 const VANILLA_ENTITIES: &str = "entities";
 const ENTITY_DATA: &str = "entity_data";
@@ -223,6 +225,7 @@ pub fn main() {
         (timelines::build(), TIMELINES),
         (tags::timeline(), TIMELINE_TAGS),
         (zombie_nautilus_variants::build(), ZOMBIE_NAUTILUS_VARIANTS),
+        (sulfur_cube_archetypes::build(), SULFUR_CUBE_ARCHETYPES),
         (recipes::build(), RECIPES),
         (entities::build(), VANILLA_ENTITIES),
         (entity_data::build(), ENTITY_DATA),

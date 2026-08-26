@@ -2368,7 +2368,8 @@ pub trait LivingEntity: Entity {
             return;
         }
 
-        for (slot, _, current) in &changes {
+        for (slot, previous, current) in &changes {
+            self.on_equipment_changed(*slot, previous, current);
             self.living_base()
                 .refresh_equipment_attribute_modifiers(*slot, current);
         }
@@ -2407,6 +2408,21 @@ pub trait LivingEntity: Entity {
                 .into_iter()
                 .map(|(slot, _, current)| (slot, current)),
         );
+    }
+
+    /// Reacts to one equipment slot holding something new.
+    ///
+    /// Vanilla parity: the body of a `collectEquipmentChanges` override, which
+    /// is where a mob whose behavior depends on what it is wearing reacts.
+    /// `SulfurCube` swaps its whole archetype here, so what it swallowed
+    /// changes it however it arrived -- a player's hand, a dispenser, an item
+    /// on the ground or a command.
+    fn on_equipment_changed(
+        &self,
+        _slot: EquipmentSlot,
+        _previous: &ItemStack,
+        _current: &ItemStack,
+    ) {
     }
 
     /// Packs non-empty living equipment slots for initial spawn pairing.
@@ -3347,7 +3363,16 @@ pub trait LivingEntity: Entity {
     }
 
     /// Mirrors vanilla `LivingEntity.travelInFluid()`.
+    ///
+    /// Override this to add what a specific entity does in a fluid, and call
+    /// [`Self::default_travel_in_fluid`] from the override for the shared
+    /// behavior; Rust has no `super`, so the base body lives in its own method.
     fn travel_in_fluid(&self, input: DVec3) -> Option<MoveResult> {
+        self.default_travel_in_fluid(input)
+    }
+
+    /// Runs the shared body of [`Self::travel_in_fluid`].
+    fn default_travel_in_fluid(&self, input: DVec3) -> Option<MoveResult> {
         let is_falling = self.velocity().y <= 0.0;
         let old_y = self.position().y;
         let base_gravity = self.get_effective_gravity();

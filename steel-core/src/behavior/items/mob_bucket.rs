@@ -26,16 +26,14 @@ use super::bucket::{
 /// Vanilla parity: `MobBucketItem`, which extends `BucketItem` and adds the
 /// spawn in `checkExtraContent`.
 ///
-/// Steel gap: the mob only appears once Steel implements its entity. Cod,
-/// salmon and the axolotl do; the sulfur cube does not yet, so its bucket
-/// places its water and empties without producing anything. That is the same
-/// shape as Vanilla's `EntityType.create` returning null, which
+/// Steel gap: the mob only appears once Steel implements its entity, which is
+/// the same shape as Vanilla's `EntityType.create` returning null and which
 /// `MobBucketItem.spawn` already guards against.
 ///
-/// Steel gap: only the axolotl implements [`Bucketable`] so far, so only an
-/// axolotl comes back out of its bucket as the animal that went in. Every other
-/// mob bucket still spawns a fresh mob -- the loop below is ready for them, and
-/// each one closes by implementing the trait.
+/// Steel gap: only the axolotl and the sulfur cube implement [`Bucketable`] so
+/// far, so only those two come back out of a bucket as the animal that went in.
+/// Every other mob bucket still spawns a fresh mob -- the loop below is ready
+/// for them, and each one closes by implementing the trait.
 #[item_behavior]
 pub struct MobBucketItem {
     #[json_arg(vanilla_entities, json = "type")]

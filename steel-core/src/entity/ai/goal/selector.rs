@@ -196,6 +196,24 @@ impl GoalSelector {
             .push(WrappedGoal::new(priority, Box::new(goal)));
     }
 
+    /// Drops every registered goal, stopping the ones that were running.
+    ///
+    /// Vanilla parity: `Mob.removeAllGoals(goal -> true)`. A sulfur cube that
+    /// swallows a block loses its whole goal set until the block comes out
+    /// again, which is why it sits still with something in it.
+    pub fn remove_all_goals(&mut self, mob: &dyn PathfinderMob) {
+        for goal in &mut self.available_goals {
+            goal.stop(mob);
+        }
+        self.available_goals.clear();
+    }
+
+    /// Returns how many goals are registered.
+    #[must_use]
+    pub const fn goal_count(&self) -> usize {
+        self.available_goals.len()
+    }
+
     pub fn tick(&mut self, mob: &dyn PathfinderMob) {
         for index in 0..self.available_goals.len() {
             let should_stop = {

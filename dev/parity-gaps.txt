@@ -28,11 +28,10 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 7
+[entities] 6
 EnderDragon
 HappyGhast
 Nautilus
 Player
-SulfurCube
 Warden
 ZombieNautilus

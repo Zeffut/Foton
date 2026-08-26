@@ -37,6 +37,20 @@ pub(crate) trait TemptScareRule: Send {
     ) -> bool;
 }
 
+/// How a tempted mob moves toward the player holding the food.
+///
+/// Vanilla parity: the `stopNavigation` / `navigateTowards` pair of
+/// `TemptGoal`, which `TemptGoal.ForNonPathfinders` and `SulfurCube` override.
+/// A cube has no navigation at all -- it turns in place and hops -- so it
+/// steers its move control instead of asking for a path.
+pub(crate) trait TemptNavigation: Send {
+    /// Vanilla parity: `TemptGoal.stopNavigation`.
+    fn stop_navigation(&self, mob: &dyn PathfinderMob);
+
+    /// Vanilla parity: `TemptGoal.navigateTowards`.
+    fn navigate_towards(&self, mob: &dyn PathfinderMob, player: &Arc<Player>, speed_modifier: f64);
+}
+
 pub struct TemptGoal {
     player: Option<Arc<Player>>,
     player_position: DVec3,
@@ -49,6 +63,8 @@ pub struct TemptGoal {
     can_scare: bool,
     stop_distance: f64,
     scare_rule: Option<Box<dyn TemptScareRule>>,
+    navigation: Option<Box<dyn TemptNavigation>>,
+    controls: GoalControls,
 }
 
 impl TemptGoal {
@@ -80,6 +96,39 @@ impl TemptGoal {
             can_scare,
             stop_distance,
             scare_rule: None,
+            navigation: None,
+            controls: GoalControls::MOVE | GoalControls::LOOK,
+        }
+    }
+
+    /// Replaces vanilla `TemptGoal.stopNavigation` / `navigateTowards`.
+    ///
+    /// Vanilla parity: subclassing `TemptGoal.ForNonPathfinders`, which is how
+    /// a mob without a path navigation is tempted.
+    #[must_use]
+    pub(crate) fn with_navigation(
+        mut self,
+        navigation: impl TemptNavigation + 'static,
+        controls: GoalControls,
+    ) -> Self {
+        self.navigation = Some(Box::new(navigation));
+        self.controls = controls;
+        self
+    }
+
+    fn stop_navigation(&self, mob: &dyn PathfinderMob) {
+        match &self.navigation {
+            Some(navigation) => navigation.stop_navigation(mob),
+            None => mob.mob_base().navigation().lock().stop(),
+        }
+    }
+
+    fn navigate_towards(&self, mob: &dyn PathfinderMob, player: &Arc<Player>) {
+        match &self.navigation {
+            Some(navigation) => navigation.navigate_towards(mob, player, self.speed_modifier),
+            None => {
+                let _ = mob.move_to_pos(player.position(), self.speed_modifier);
+            }
         }
     }
 
@@ -144,7 +193,7 @@ impl Goal for TemptGoal {
     }
 
     fn controls(&self) -> GoalControls {
-        GoalControls::MOVE | GoalControls::LOOK
+        self.controls
     }
 
     fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
@@ -185,7 +234,7 @@ impl Goal for TemptGoal {
 
     fn stop(&mut self, mob: &dyn PathfinderMob) {
         self.player = None;
-        mob.mob_base().navigation().lock().stop();
+        self.stop_navigation(mob);
         self.calm_down = reduced_tick_delay(100);
         self.is_running = false;
     }
@@ -210,9 +259,9 @@ impl Goal for TemptGoal {
         if mob.position().distance_squared(player_position)
             < self.stop_distance * self.stop_distance
         {
-            mob.mob_base().navigation().lock().stop();
+            self.stop_navigation(mob);
         } else {
-            mob.move_to_pos(player_position, self.speed_modifier);
+            self.navigate_towards(mob, &player);
         }
     }
 }
