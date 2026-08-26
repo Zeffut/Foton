@@ -1,6 +1,7 @@
 //! Sensors: what writes the world into a brain's memories.
 
 mod adult;
+mod axolotl_attackables;
 mod frog_attackables;
 mod hurt_by;
 mod is_in_water;
@@ -11,6 +12,7 @@ mod player;
 mod tempting;
 
 pub use adult::AdultSensor;
+pub use axolotl_attackables::AxolotlAttackablesSensor;
 pub use frog_attackables::FrogAttackablesSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
@@ -77,7 +79,7 @@ pub trait Sensor: Send {
 /// list that never reaches a packet or a save file, and `SteelExtractor` emits no
 /// `sensor_type` asset, so the constants are mirrored as an enum. Only the
 /// sensors a Steel mob drives are here; the rest (`WARDEN_ENTITY_SENSOR`,
-/// `AXOLOTL_ATTACKABLES`, ...) arrive with their mobs.
+/// `GOLEM_DETECTED`, ...) arrive with their mobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SensorType {
     /// Vanilla `SensorType.NEAREST_LIVING_ENTITIES`.
@@ -96,6 +98,8 @@ pub enum SensorType {
     FrogTemptations,
     /// Vanilla `SensorType.FROG_ATTACKABLES`.
     FrogAttackables,
+    /// Vanilla `SensorType.AXOLOTL_ATTACKABLES`.
+    AxolotlAttackables,
     /// Vanilla `SensorType.NEAREST_ADULT`.
     NearestAdult,
     /// Vanilla `SensorType.PIGLIN_SPECIFIC_SENSOR`.
@@ -127,6 +131,7 @@ impl SensorType {
                     .is_in_tag(item_stack.item(), &ItemTag::FROG_FOOD)
             })),
             Self::FrogAttackables => Box::new(FrogAttackablesSensor),
+            Self::AxolotlAttackables => Box::new(AxolotlAttackablesSensor),
             Self::NearestAdult => Box::new(AdultSensor),
             Self::PiglinSpecific => Box::new(PiglinSpecificSensor),
             Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),

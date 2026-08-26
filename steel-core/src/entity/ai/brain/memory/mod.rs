@@ -342,6 +342,8 @@ memory_module_types! {
     UNREACHABLE_TONGUE_TARGETS: Vec<Uuid> = "minecraft:unreachable_tongue_targets", saved = false;
     /// Vanilla `MemoryModuleType.PLAY_DEAD_TICKS`.
     PLAY_DEAD_TICKS: i32 = "minecraft:play_dead_ticks", saved = true;
+    /// Vanilla `MemoryModuleType.HAS_HUNTING_COOLDOWN`.
+    HAS_HUNTING_COOLDOWN: bool = "minecraft:has_hunting_cooldown", saved = true;
     /// Vanilla `MemoryModuleType.SNIFF_COOLDOWN`.
     SNIFF_COOLDOWN: Unit = "minecraft:sniff_cooldown", saved = true;
     /// Vanilla `MemoryModuleType.SNIFFER_EXPLORED_POSITIONS`, newest first.

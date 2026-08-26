@@ -43,6 +43,7 @@ use steel_utils::{BlockPos, Downcast as _, Identifier, WorldAabb, axis::Axis};
 use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext, ITEM_BEHAVIORS, InteractionResult};
 use crate::enchantment_helper::{self, EnchantmentDamageContext, EnchantmentPostAttackContext};
 use crate::entity::ai::brain::Brain;
+use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::control::{
     BodyRotationInput, MobControls, MoveControlOperation, rotate_if_necessary, rotate_towards,
 };
@@ -437,6 +438,23 @@ pub trait Mob: LivingEntity {
     fn target(&self) -> Option<SharedEntity> {
         self.mob_base()
             .target(|target| self.is_valid_target(target))
+    }
+
+    /// Returns whatever this mob's brain is attacking.
+    ///
+    /// Vanilla parity: `Mob.getTargetFromBrain`. A brain mob has no `target`
+    /// field of its own -- the memory is the target -- so a mob whose `getTarget`
+    /// is `getTargetFromBrain` overrides [`Self::target`] with this.
+    fn target_from_brain(&self) -> Option<SharedEntity> {
+        let target = self
+            .brain()?
+            .get_memory(memory_module_types::ATTACK_TARGET)
+            .and_then(|memory| memory.get())?;
+        let living = target.as_living_entity()?;
+        if !self.is_valid_target(living) {
+            return None;
+        }
+        Some(target)
     }
 
     /// Sets vanilla `Mob.target`.

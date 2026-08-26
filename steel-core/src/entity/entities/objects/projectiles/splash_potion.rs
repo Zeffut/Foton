@@ -25,11 +25,11 @@ use steel_registry::level_events::{
 use steel_registry::vanilla_entity_data::SplashPotionEntityData;
 use steel_registry::{vanilla_damage_types, vanilla_entities, vanilla_items, vanilla_potions};
 use steel_utils::locks::SyncMutex;
-use steel_utils::{DowncastType, DowncastTypeKey, WorldAabb};
+use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey, WorldAabb};
 
 use crate::behavior::potion_effects;
 use crate::entity::damage::DamageSource;
-use crate::entity::entities::AreaEffectCloudEntity;
+use crate::entity::entities::{AreaEffectCloudEntity, AxolotlEntity};
 use crate::entity::next_entity_id;
 use crate::entity::projectile::{
     Projectile, ProjectileBase, ProjectileHit, ThrowableItemProjectile, ThrowableProjectile,
@@ -144,6 +144,15 @@ impl SplashPotionEntity {
 
             if entity.is_on_fire() && Entity::is_alive(entity.as_ref()) {
                 entity.clear_fire();
+            }
+        }
+
+        // Vanilla parity: the second loop of `onHitAsWater`, which has no
+        // distance test of its own -- an axolotl anywhere in the splash box
+        // gets its air back, even one further out than the dousing reaches.
+        for entity in self.entities_in_splash(world) {
+            if let Some(axolotl) = entity.downcast_ref::<AxolotlEntity>() {
+                axolotl.rehydrate();
             }
         }
     }

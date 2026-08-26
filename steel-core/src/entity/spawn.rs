@@ -1,3 +1,5 @@
+use steel_registry::entity_variant::AxolotlVariant;
+
 use crate::entity::LlamaVariant;
 use crate::entity::entities::{HorseVariant, RabbitVariant, TropicalFishVariant};
 
@@ -53,6 +55,9 @@ pub enum SpawnGroupData {
     Horse(HorseGroupData),
     /// Vanilla `Llama.LlamaGroupData`, the same idea for a llama herd.
     Llama(LlamaGroupData),
+    /// Vanilla `Axolotl.AxolotlGroupData`, which carries the two colors a
+    /// cluster draws from rather than one shared color.
+    Axolotl(AxolotlGroupData),
 }
 
 impl SpawnGroupData {
@@ -64,6 +69,7 @@ impl SpawnGroupData {
             Self::Rabbit(group_data) => Some(&group_data.ageable),
             Self::Horse(group_data) => Some(&group_data.ageable),
             Self::Llama(group_data) => Some(&group_data.ageable),
+            Self::Axolotl(group_data) => Some(&group_data.ageable),
             Self::TropicalFish(_) => None,
         }
     }
@@ -76,6 +82,7 @@ impl SpawnGroupData {
             Self::Rabbit(group_data) => Some(&mut group_data.ageable),
             Self::Horse(group_data) => Some(&mut group_data.ageable),
             Self::Llama(group_data) => Some(&mut group_data.ageable),
+            Self::Axolotl(group_data) => Some(&mut group_data.ageable),
             Self::TropicalFish(_) => None,
         }
     }
@@ -129,6 +136,45 @@ impl LlamaGroupData {
     #[must_use]
     pub const fn variant(self) -> LlamaVariant {
         self.variant
+    }
+}
+
+/// Vanilla `Axolotl.AxolotlGroupData`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AxolotlGroupData {
+    ageable: AgeableMobGroupData,
+    types: [AxolotlVariant; 2],
+}
+
+impl AxolotlGroupData {
+    /// Creates group data for a cluster of axolotls.
+    ///
+    /// Vanilla parity: `AxolotlGroupData(Variant...)` calls `super(false)`, so
+    /// the cluster never rolls the shared baby chance -- the axolotl decides
+    /// that for itself from the group size instead.
+    #[must_use]
+    pub const fn new(types: [AxolotlVariant; 2]) -> Self {
+        Self {
+            ageable: AgeableMobGroupData::with_should_spawn_baby(false),
+            types,
+        }
+    }
+
+    /// How many axolotls of the cluster have spawned already.
+    ///
+    /// Vanilla parity: the inherited `AgeableMobGroupData.getGroupSize`, which
+    /// the axolotl reads itself rather than leaving to the shared baby roll.
+    #[must_use]
+    pub const fn group_size(self) -> i32 {
+        self.ageable.group_size()
+    }
+
+    /// Picks one of the two colors the cluster draws from.
+    ///
+    /// Vanilla parity: `AxolotlGroupData.getVariant`.
+    #[must_use]
+    pub fn variant(self, pick: impl FnOnce(usize) -> usize) -> AxolotlVariant {
+        self.types[pick(self.types.len()) % self.types.len()]
     }
 }
 

@@ -1611,6 +1611,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn AgeableMob>(self)
     }
 
+    /// Returns this entity as a bucketable mob when a bucket can pick it up.
+    ///
+    /// Mirrors vanilla's `instanceof Bucketable` branches, which is how
+    /// `MobBucketItem` restores the mob that went into the bucket rather than
+    /// spawning a fresh one.
+    fn as_bucketable(&self) -> Option<&dyn Bucketable> {
+        try_as_dyn::<Self, dyn Bucketable>(self)
+    }
+
     /// Returns this entity as a tameable animal when it can be tamed.
     ///
     /// Mirrors vanilla's frequent `instanceof TamableAnimal` branches.

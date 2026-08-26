@@ -31,10 +31,9 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 25
+[entities] 24
 Allay
 Armadillo
-Axolotl
 Bogged
 Breeze
 BreezeWindCharge

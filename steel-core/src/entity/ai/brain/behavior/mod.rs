@@ -28,6 +28,7 @@
 mod amphibious;
 mod animal_make_love;
 mod animal_panic;
+mod axolotl_specific;
 mod baby_follow_adult;
 mod back_up_if_too_close;
 mod become_passive_if_memory_present;
@@ -66,6 +67,7 @@ pub(crate) mod utils;
 
 pub use animal_make_love::AnimalMakeLove;
 pub use animal_panic::AnimalPanic;
+pub use axolotl_specific::{PlayDead, TOTAL_PLAYDEAD_TIME, ValidatePlayDead};
 pub use baby_follow_adult::BabyFollowAdult;
 pub use become_passive_if_memory_present::BecomePassiveIfMemoryPresent;
 pub use copy_memory_with_expiry::CopyMemoryWithExpiry;
@@ -100,7 +102,7 @@ pub use transport_items_between_containers::TransportItemsBetweenContainers;
     reason = "framework re-exports waiting for the brain mobs they were ported for"
 )]
 pub use {
-    amphibious::{TryFindLand, TryFindLandNearWater, TryLaySpawnOnFluidNearLand},
+    amphibious::{TryFindLand, TryFindLandNearWater, TryFindWater, TryLaySpawnOnFluidNearLand},
     back_up_if_too_close::BackUpIfTooClose,
     follow_temptation::{DEFAULT_CLOSE_ENOUGH_DIST, FollowTemptation},
     frog_specific::{Croak, ShootTongue},

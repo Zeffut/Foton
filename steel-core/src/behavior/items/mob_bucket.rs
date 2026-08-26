@@ -12,6 +12,7 @@ use steel_utils::BlockPos;
 
 use crate::behavior::item_utils::create_filled_result;
 use crate::behavior::{InteractionResult, ItemBehavior, UseItemContext};
+use crate::entity::bucketable::read_bucket_entity_data;
 use crate::entity::{ENTITIES, EntitySpawnReason, next_entity_id};
 use crate::world::game_event::GameEventContext;
 
@@ -25,16 +26,16 @@ use super::bucket::{
 /// Vanilla parity: `MobBucketItem`, which extends `BucketItem` and adds the
 /// spawn in `checkExtraContent`.
 ///
-/// Steel gap: the mob only appears once Steel implements its entity. Cod and
-/// salmon do; pufferfish, tropical fish, axolotl, tadpole and the sulfur cube
-/// do not yet, so those buckets place their water and empty without producing
-/// anything. That is the same shape as Vanilla's `EntityType.create` returning
-/// null, which `MobBucketItem.spawn` already guards against.
+/// Steel gap: the mob only appears once Steel implements its entity. Cod,
+/// salmon and the axolotl do; the sulfur cube does not yet, so its bucket
+/// places its water and empties without producing anything. That is the same
+/// shape as Vanilla's `EntityType.create` returning null, which
+/// `MobBucketItem.spawn` already guards against.
 ///
-/// Steel gap: Vanilla also replays the mob's saved state from
-/// `minecraft:bucket_entity_data` through `Bucketable.loadFromBucketTag` and
-/// marks it `fromBucket`. Steel has no `Bucketable` interface and no mob-side
-/// bucket pickup, so a bucketed fish is spawned fresh rather than restored.
+/// Steel gap: only the axolotl implements [`Bucketable`] so far, so only an
+/// axolotl comes back out of its bucket as the animal that went in. Every other
+/// mob bucket still spawns a fresh mob -- the loop below is ready for them, and
+/// each one closes by implementing the trait.
 #[item_behavior]
 pub struct MobBucketItem {
     #[json_arg(vanilla_entities, json = "type")]
@@ -77,6 +78,17 @@ impl MobBucketItem {
         if let Some(mob) = entity.as_mob() {
             let _ = mob.finalize_spawn(world, EntitySpawnReason::Bucket, None);
         }
+
+        // Vanilla parity: the `instanceof Bucketable` half of
+        // `MobBucketItem.spawn`, which replays what the bucket saved before the
+        // mob joins the world.
+        if let Some(bucketable) = entity.as_bucketable() {
+            context.inv.with_item(|item| {
+                read_bucket_entity_data(item, |tag| bucketable.load_from_bucket_tag(tag));
+            });
+            bucketable.set_from_bucket(true);
+        }
+
         if let Err(error) = world.try_add_entity(entity) {
             log::warn!("Failed to spawn bucketed mob: {error}");
             return;

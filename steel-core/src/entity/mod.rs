@@ -739,6 +739,7 @@ mod animal;
 pub mod attribute;
 mod base;
 mod block_effects;
+pub mod bucketable;
 mod callback;
 mod combat_rules;
 pub mod conversion;
@@ -795,6 +796,7 @@ pub use base::{
     EntityMovementProgress, EntityVerticalMovementStateUpdate, MAX_ENTITY_TAGS,
     PendingWorldChangeToken,
 };
+pub use bucketable::Bucketable;
 pub use callback::{
     EntityChunkCallback, EntityLevelCallback, InactiveEntityCallback, NullEntityCallback,
     PlayerEntityCallback, RemovalReason,
@@ -846,7 +848,8 @@ pub use projectile::{
 pub use raider::{RaidStatus, Raider, RaiderState};
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
 pub(crate) use spawn::{
-    AgeableMobGroupData, EntitySpawnReason, HorseGroupData, LlamaGroupData, SpawnGroupData,
+    AgeableMobGroupData, AxolotlGroupData, EntitySpawnReason, HorseGroupData, LlamaGroupData,
+    SpawnGroupData,
 };
 pub use spellcaster_illager::{IllagerSpell, SpellcasterIllager, SpellcasterState};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
