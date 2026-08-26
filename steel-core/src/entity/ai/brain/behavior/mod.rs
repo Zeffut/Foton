@@ -65,6 +65,7 @@ mod swim;
 pub mod transport_items_between_containers;
 mod trigger_gate;
 mod trigger_if;
+mod update_activity_from_schedule;
 
 pub(crate) mod utils;
 
@@ -93,6 +94,7 @@ pub use start_celebrating_if_target_dead::StartCelebratingIfTargetDead;
 pub use stop_being_angry_if_target_dead::StopBeingAngryIfTargetDead;
 pub use stroll_to_poi::{StrollAroundPoi, StrollToPoi};
 pub use transport_items_between_containers::TransportItemsBetweenContainers;
+pub use update_activity_from_schedule::UpdateActivityFromSchedule;
 
 /// The general-purpose behaviors no Steel mob drives yet.
 ///

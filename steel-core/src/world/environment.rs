@@ -6,6 +6,7 @@ use steel_registry::{REGISTRY, RegistryExt as _, TaggedRegistryExt as _};
 use steel_utils::Identifier;
 
 use super::clock::WorldClockManager;
+use crate::entity::ai::brain::{Activity, ScheduleAttribute};
 
 const SKY_LIGHT_LEVEL_ATTRIBUTE: &str = "minecraft:gameplay/sky_light_level";
 const SUN_ANGLE_ATTRIBUTE: &str = "minecraft:visual/sun_angle";
@@ -164,63 +165,132 @@ pub(super) fn bees_stay_in_hive(
     )
 }
 
+/// Returns the activity-valued environment attribute `schedule` names.
+///
+/// This is the whole of a villager's day: the `villager_schedule` timeline is in
+/// `#minecraft:universal`, so every dimension carries it, and its two tracks
+/// step a villager -- or a baby -- between IDLE, WORK, MEET, PLAY and REST as
+/// the overworld clock turns.
+#[must_use]
+pub(super) fn scheduled_activity(
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+    schedule: ScheduleAttribute,
+) -> Activity {
+    apply_timeline_activity_attribute(
+        ScheduleAttribute::DEFAULT_ACTIVITY,
+        dimension_type,
+        clock_manager,
+        schedule.attribute_name(),
+    )
+}
+
 #[must_use]
 pub(super) fn sky_darkening(sky_light_level: f32) -> u8 {
     (MAX_SKY_LIGHT_LEVEL - sky_light_level.clamp(MIN_SKY_LIGHT_LEVEL, MAX_SKY_LIGHT_LEVEL)) as u8
 }
 
+/// Layers every timeline the dimension declares over `value`.
+///
+/// Vanilla parity: the way `EnvironmentAttributeSystem` stacks one
+/// `AttributeTrackSampler` per timeline in `DimensionType.timelines()` over the
+/// attribute's base value, in declaration order.
+fn apply_timeline_attribute<T>(
+    mut value: T,
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+    attribute: &str,
+    apply_track: fn(T, TimelineRef, &WorldClockManager, &str) -> T,
+) -> T {
+    let Some(timelines) = dimension_type.timelines else {
+        return value;
+    };
+    if let Some(tag) = timelines.strip_prefix('#') {
+        let Ok(tag) = Identifier::from_str(tag) else {
+            return value;
+        };
+        for timeline in REGISTRY.timelines.iter_tag(&tag) {
+            value = apply_track(value, timeline, clock_manager, attribute);
+        }
+        return value;
+    }
+
+    let Ok(key) = Identifier::from_str(timelines) else {
+        return value;
+    };
+    let Some(timeline) = REGISTRY.timelines.by_key(&key) else {
+        return value;
+    };
+    apply_track(value, timeline, clock_manager, attribute)
+}
+
 fn apply_timeline_float_attribute(
-    mut value: f32,
+    value: f32,
     dimension_type: DimensionTypeRef,
     clock_manager: &WorldClockManager,
     attribute: &str,
 ) -> f32 {
-    let Some(timelines) = dimension_type.timelines else {
-        return value;
-    };
-    if let Some(tag) = timelines.strip_prefix('#') {
-        let Ok(tag) = Identifier::from_str(tag) else {
-            return value;
-        };
-        for timeline in REGISTRY.timelines.iter_tag(&tag) {
-            value = apply_timeline_float_track(value, timeline, clock_manager, attribute);
-        }
-        return value;
-    }
-
-    let Ok(key) = Identifier::from_str(timelines) else {
-        return value;
-    };
-    REGISTRY.timelines.by_key(&key).map_or(value, |timeline| {
-        apply_timeline_float_track(value, timeline, clock_manager, attribute)
-    })
+    apply_timeline_attribute(
+        value,
+        dimension_type,
+        clock_manager,
+        attribute,
+        apply_timeline_float_track,
+    )
 }
 
 fn apply_timeline_bool_attribute(
-    mut value: bool,
+    value: bool,
     dimension_type: DimensionTypeRef,
     clock_manager: &WorldClockManager,
     attribute: &str,
 ) -> bool {
-    let Some(timelines) = dimension_type.timelines else {
-        return value;
-    };
-    if let Some(tag) = timelines.strip_prefix('#') {
-        let Ok(tag) = Identifier::from_str(tag) else {
-            return value;
-        };
-        for timeline in REGISTRY.timelines.iter_tag(&tag) {
-            value = apply_timeline_bool_track(value, timeline, clock_manager, attribute);
-        }
-        return value;
-    }
+    apply_timeline_attribute(
+        value,
+        dimension_type,
+        clock_manager,
+        attribute,
+        apply_timeline_bool_track,
+    )
+}
 
-    let Ok(key) = Identifier::from_str(timelines) else {
+fn apply_timeline_activity_attribute(
+    value: Activity,
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+    attribute: &str,
+) -> Activity {
+    apply_timeline_attribute(
+        value,
+        dimension_type,
+        clock_manager,
+        attribute,
+        apply_timeline_activity_track,
+    )
+}
+
+/// Reads the activity a step track names at the clock's current tick.
+///
+/// `AttributeTypes.ACTIVITY` is `ofNotInterpolated`, so no modifier library
+/// applies: a track that names one simply replaces the value, which is what
+/// vanilla's only two activity tracks -- the villager schedule's -- do.
+fn apply_timeline_activity_track(
+    value: Activity,
+    timeline: TimelineRef,
+    clock_manager: &WorldClockManager,
+    attribute: &str,
+) -> Activity {
+    let Some(track) = timeline.tracks.iter().find(|track| track.name == attribute) else {
         return value;
     };
-    REGISTRY.timelines.by_key(&key).map_or(value, |timeline| {
-        apply_timeline_bool_track(value, timeline, clock_manager, attribute)
-    })
+    let Some(total_ticks) = clock_manager.total_ticks(timeline.clock) else {
+        return value;
+    };
+    let Some(sample) = sample_step_track(track, timeline.period_ticks.map(i64::from), total_ticks)
+    else {
+        return value;
+    };
+    keyframe_activity_value(sample).unwrap_or(value)
 }
 
 fn apply_timeline_bool_track(
@@ -235,7 +305,8 @@ fn apply_timeline_bool_track(
     let Some(total_ticks) = clock_manager.total_ticks(timeline.clock) else {
         return value;
     };
-    let Some(sample) = sample_bool_track(track, timeline.period_ticks.map(i64::from), total_ticks)
+    let Some(sample) = sample_step_track(track, timeline.period_ticks.map(i64::from), total_ticks)
+        .and_then(keyframe_bool_value)
     else {
         return value;
     };
@@ -248,17 +319,21 @@ fn apply_timeline_bool_track(
     }
 }
 
-/// Samples a boolean keyframe track.
+/// Samples a keyframe track that steps rather than interpolates.
 ///
-/// Vanilla bakes non-numeric tracks with `LerpFunction.ofConstant()`, which is
-/// `ofStep(1.0)`: a segment holds its `from` value for every tick strictly before the next
-/// keyframe. So a boolean track is a step function over its keyframes, wrapped by the
-/// timeline period.
-fn sample_bool_track(track: &Track, period_ticks: Option<i64>, ticks: i64) -> Option<bool> {
+/// Vanilla bakes a non-numeric attribute's track -- `AttributeType.ofNotInterpolated`,
+/// which every boolean and every activity attribute is -- with `LerpFunction.ofStep(1.0F)`:
+/// a segment holds its `from` value for every tick strictly before the next keyframe. So
+/// such a track is a step function over its keyframes, wrapped by the timeline period.
+fn sample_step_track<'a>(
+    track: &'a Track,
+    period_ticks: Option<i64>,
+    ticks: i64,
+) -> Option<&'a KeyframeValue> {
     let keyframes = track.keyframes;
     match keyframes.len() {
         0 => return None,
-        1 => return keyframe_bool_value(&keyframes[0].value),
+        1 => return Some(&keyframes[0].value),
         _ => {}
     }
 
@@ -267,21 +342,29 @@ fn sample_bool_track(track: &Track, period_ticks: Option<i64>, ticks: i64) -> Op
     let last = &keyframes[keyframes.len() - 1];
 
     if period_ticks.is_some() && sample_ticks < first.ticks {
-        return keyframe_bool_value(&last.value);
+        return Some(&last.value);
     }
 
     for segment in keyframes.windows(2) {
         if sample_ticks < segment[1].ticks {
-            return keyframe_bool_value(&segment[0].value);
+            return Some(&segment[0].value);
         }
     }
 
-    keyframe_bool_value(&last.value)
+    Some(&last.value)
 }
 
 const fn keyframe_bool_value(value: &KeyframeValue) -> Option<bool> {
     match value {
         KeyframeValue::Bool(value) => Some(*value),
+        _ => None,
+    }
+}
+
+/// Reads an activity out of a keyframe, which stores it as its registry key.
+fn keyframe_activity_value(value: &KeyframeValue) -> Option<Activity> {
+    match value {
+        KeyframeValue::String(key) => Activity::by_key(key),
         _ => None,
     }
 }
@@ -705,6 +788,75 @@ mod tests {
             &THE_NETHER,
             &clock_manager_at(OVERWORLD_MIDNIGHT_TICKS)
         ));
+    }
+
+    /// The whole of a villager's day comes out of this one string-valued track,
+    /// and every boundary below is a keyframe of `Timelines.VILLAGER_SCHEDULE`.
+    /// Reading a step track as if it interpolated, or forgetting that the period
+    /// wraps the stretch before the first keyframe onto the last one, would put
+    /// a village to bed at the wrong hour.
+    #[test]
+    fn the_villager_schedule_steps_an_adult_through_its_working_day() {
+        init_vanilla_registry();
+
+        let at = |ticks| {
+            scheduled_activity(
+                &OVERWORLD,
+                &clock_manager_at(ticks),
+                ScheduleAttribute::VillagerActivity,
+            )
+        };
+
+        // Before the first keyframe the period wraps back onto the last one.
+        assert_eq!(at(0), Activity::Rest);
+        assert_eq!(at(9), Activity::Rest);
+        assert_eq!(at(10), Activity::Idle);
+        assert_eq!(at(1_999), Activity::Idle);
+        assert_eq!(at(2_000), Activity::Work);
+        assert_eq!(at(8_999), Activity::Work);
+        assert_eq!(at(9_000), Activity::Meet);
+        assert_eq!(at(10_999), Activity::Meet);
+        assert_eq!(at(11_000), Activity::Idle);
+        assert_eq!(at(12_000), Activity::Rest);
+        assert_eq!(at(23_999), Activity::Rest);
+        // A second day samples the same as the first.
+        assert_eq!(at(24_000 + 2_000), Activity::Work);
+    }
+
+    #[test]
+    fn a_baby_plays_where_an_adult_works() {
+        init_vanilla_registry();
+
+        let at = |ticks| {
+            scheduled_activity(
+                &OVERWORLD,
+                &clock_manager_at(ticks),
+                ScheduleAttribute::BabyVillagerActivity,
+            )
+        };
+
+        assert_eq!(at(10), Activity::Idle);
+        assert_eq!(at(3_000), Activity::Play);
+        assert_eq!(at(6_000), Activity::Idle);
+        assert_eq!(at(10_000), Activity::Play);
+        assert_eq!(at(12_000), Activity::Rest);
+    }
+
+    /// `villager_schedule` is tagged `#minecraft:universal`, which every
+    /// dimension's timeline tag nests, so a villager taken to the nether keeps
+    /// the same day. This also proves the tag loader expands a nested tag.
+    #[test]
+    fn the_villager_schedule_reaches_every_dimension() {
+        init_vanilla_registry();
+
+        assert_eq!(
+            scheduled_activity(
+                &THE_NETHER,
+                &clock_manager_at(OVERWORLD_NOON_TICKS),
+                ScheduleAttribute::VillagerActivity,
+            ),
+            Activity::Work
+        );
     }
 
     #[test]
