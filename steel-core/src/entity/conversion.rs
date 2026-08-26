@@ -140,6 +140,19 @@ fn copy_common_state(from: &dyn Mob, to: &dyn Mob, params: ConversionParams) {
         to.living_base().add_mob_effect(effect);
     }
 
+    // Vanilla parity: the baby flag and, for two ageable mobs, the whole age
+    // clock. Without this no conversion carried age at all: a baby hoglin came
+    // back from the overworld as a grown zoglin, and a cured zombie villager
+    // lost however far along its child was.
+    if from.is_baby() {
+        to.set_baby(true);
+    }
+    if let (Some(old_ageable), Some(new_ageable)) = (from.as_ageable_mob(), to.as_ageable_mob()) {
+        new_ageable.set_age(old_ageable.get_age());
+        new_ageable.set_forced_age(old_ageable.forced_age());
+        new_ageable.set_forced_age_timer(old_ageable.forced_age_timer());
+    }
+
     if params.preserve_can_pick_up_loot {
         to.set_can_pick_up_loot(*from.mob_base().can_pick_up_loot().lock());
     }
@@ -164,6 +177,7 @@ fn copy_common_state(from: &dyn Mob, to: &dyn Mob, params: ConversionParams) {
     // across, copies `CUSTOM_DATA`, moves the `ANGRY_AT` brain memory, and
     // re-registers the scoreboard team. Steel has no scoreboard teams, and the
     // rest are not reachable from a `&dyn Mob` yet. None of them are load
-    // bearing for the villager/zombie-villager pair this was written for: a
-    // villager cannot be leashed, and neither side keeps an anger memory.
+    // bearing for the pairs this serves today: neither a villager nor a piglin
+    // can be leashed, and a converting piglin has already had its anger erased
+    // by `PiglinAi.cancelAdmiring`.
 }

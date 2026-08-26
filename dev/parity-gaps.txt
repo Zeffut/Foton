@@ -31,7 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 33
+[entities] 29
 Allay
 Armadillo
 Axolotl
@@ -48,14 +48,11 @@ Frog
 Giant
 GlowItemFrame
 HappyGhast
-Hoglin
 Mannequin
 MinecartCommandBlock
 Nautilus
 Panda
 Parched
-Piglin
-PiglinBrute
 Player
 Sniffer
 SpectralArrow
@@ -63,5 +60,4 @@ SulfurCube
 Tadpole
 ThrownLingeringPotion
 Warden
-Zoglin
 ZombieNautilus

@@ -11,7 +11,8 @@ use glam::DVec3;
 use rustc_hash::{FxHashMap, FxHashSet};
 use simdnbt::borrow::{NbtCompound as BorrowedNbtCompound, NbtTag as BorrowedNbtTag};
 use simdnbt::owned::{NbtCompound, NbtTag};
-use steel_utils::GlobalPos;
+use steel_utils::{BlockPos, GlobalPos};
+use uuid::Uuid;
 
 pub use nearest_visible::NearestVisibleLivingEntities;
 pub use value::{EntityMemory, MemoryValue, MemoryValueType, Unit};
@@ -175,8 +176,9 @@ macro_rules! memory_module_types {
         /// the rest arrive with the mobs that read them.
         pub mod memory_module_types {
             use super::{
-                DVec3, DamageSource, EntityMemory, FxHashSet, GlobalPos, MemoryModuleType,
-                NearestVisibleLivingEntities, Path, PositionTracker, Unit, WalkTarget,
+                BlockPos, DVec3, DamageSource, EntityMemory, FxHashSet, GlobalPos,
+                MemoryModuleType, NearestVisibleLivingEntities, Path, PositionTracker, Unit, Uuid,
+                WalkTarget,
             };
 
             $(
@@ -274,6 +276,60 @@ memory_module_types! {
     RAM_TARGET: DVec3 = "minecraft:ram_target", saved = false;
     /// Vanilla `MemoryModuleType.RAM_COOLDOWN_TICKS`.
     RAM_COOLDOWN_TICKS: i32 = "minecraft:ram_cooldown_ticks", saved = true;
+    /// Vanilla `MemoryModuleType.BREED_TARGET`.
+    BREED_TARGET: EntityMemory = "minecraft:breed_target", saved = false;
+    /// Vanilla `MemoryModuleType.RIDE_TARGET`.
+    RIDE_TARGET: EntityMemory = "minecraft:ride_target", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_NEMESIS`.
+    NEAREST_VISIBLE_NEMESIS: EntityMemory = "minecraft:nearest_visible_nemesis", saved = false;
+    /// Vanilla `MemoryModuleType.ANGRY_AT`.
+    ANGRY_AT: Uuid = "minecraft:angry_at", saved = true;
+    /// Vanilla `MemoryModuleType.UNIVERSAL_ANGER`.
+    UNIVERSAL_ANGER: bool = "minecraft:universal_anger", saved = true;
+    /// Vanilla `MemoryModuleType.ADMIRING_ITEM`.
+    ADMIRING_ITEM: bool = "minecraft:admiring_item", saved = true;
+    /// Vanilla `MemoryModuleType.TIME_TRYING_TO_REACH_ADMIRE_ITEM`.
+    TIME_TRYING_TO_REACH_ADMIRE_ITEM: i32 = "minecraft:time_trying_to_reach_admire_item", saved = false;
+    /// Vanilla `MemoryModuleType.DISABLE_WALK_TO_ADMIRE_ITEM`.
+    DISABLE_WALK_TO_ADMIRE_ITEM: bool = "minecraft:disable_walk_to_admire_item", saved = false;
+    /// Vanilla `MemoryModuleType.ADMIRING_DISABLED`.
+    ADMIRING_DISABLED: bool = "minecraft:admiring_disabled", saved = true;
+    /// Vanilla `MemoryModuleType.HUNTED_RECENTLY`.
+    HUNTED_RECENTLY: bool = "minecraft:hunted_recently", saved = true;
+    /// Vanilla `MemoryModuleType.CELEBRATE_LOCATION`.
+    CELEBRATE_LOCATION: BlockPos = "minecraft:celebrate_location", saved = false;
+    /// Vanilla `MemoryModuleType.DANCING`.
+    DANCING: bool = "minecraft:dancing", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_HUNTABLE_HOGLIN`.
+    NEAREST_VISIBLE_HUNTABLE_HOGLIN: EntityMemory = "minecraft:nearest_visible_huntable_hoglin", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_BABY_HOGLIN`.
+    NEAREST_VISIBLE_BABY_HOGLIN: EntityMemory = "minecraft:nearest_visible_baby_hoglin", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_TARGETABLE_PLAYER_NOT_WEARING_GOLD`.
+    NEAREST_TARGETABLE_PLAYER_NOT_WEARING_GOLD: EntityMemory = "minecraft:nearest_targetable_player_not_wearing_gold", saved = false;
+    /// Vanilla `MemoryModuleType.NEARBY_ADULT_PIGLINS`.
+    NEARBY_ADULT_PIGLINS: Vec<EntityMemory> = "minecraft:nearby_adult_piglins", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_ADULT_PIGLINS`.
+    NEAREST_VISIBLE_ADULT_PIGLINS: Vec<EntityMemory> = "minecraft:nearest_visible_adult_piglins", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_ADULT_HOGLINS`.
+    NEAREST_VISIBLE_ADULT_HOGLINS: Vec<EntityMemory> = "minecraft:nearest_visible_adult_hoglins", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_ADULT_PIGLIN`.
+    NEAREST_VISIBLE_ADULT_PIGLIN: EntityMemory = "minecraft:nearest_visible_adult_piglin", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_VISIBLE_ZOMBIFIED`.
+    NEAREST_VISIBLE_ZOMBIFIED: EntityMemory = "minecraft:nearest_visible_zombified", saved = false;
+    /// Vanilla `MemoryModuleType.VISIBLE_ADULT_PIGLIN_COUNT`.
+    VISIBLE_ADULT_PIGLIN_COUNT: i32 = "minecraft:visible_adult_piglin_count", saved = false;
+    /// Vanilla `MemoryModuleType.VISIBLE_ADULT_HOGLIN_COUNT`.
+    VISIBLE_ADULT_HOGLIN_COUNT: i32 = "minecraft:visible_adult_hoglin_count", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_PLAYER_HOLDING_WANTED_ITEM`.
+    NEAREST_PLAYER_HOLDING_WANTED_ITEM: EntityMemory = "minecraft:nearest_player_holding_wanted_item", saved = false;
+    /// Vanilla `MemoryModuleType.ATE_RECENTLY`.
+    ATE_RECENTLY: bool = "minecraft:ate_recently", saved = false;
+    /// Vanilla `MemoryModuleType.NEAREST_REPELLENT`.
+    NEAREST_REPELLENT: BlockPos = "minecraft:nearest_repellent", saved = false;
+    /// Vanilla `MemoryModuleType.PACIFIED`.
+    PACIFIED: bool = "minecraft:pacified", saved = false;
+    /// Vanilla `MemoryModuleType.ITEM_PICKUP_COOLDOWN_TICKS`.
+    ITEM_PICKUP_COOLDOWN_TICKS: i32 = "minecraft:item_pickup_cooldown_ticks", saved = true;
 }
 
 /// Everything a brain remembers.

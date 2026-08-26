@@ -10,10 +10,11 @@ pub use mobs::ambient::BatEntity;
 pub use mobs::bosses::WitherBoss;
 pub use mobs::hostile::{
     BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
-    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HuskEntity,
-    IllusionerEntity, MagmaCubeEntity, PhantomEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
-    SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, VexEntity,
-    VindicatorEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
+    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HoglinEntity,
+    HuskEntity, IllusionerEntity, MagmaCubeEntity, PhantomEntity, PiglinBruteEntity, PiglinEntity,
+    PillagerEntity, RavagerEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity,
+    SpiderEntity, StrayEntity, VexEntity, VindicatorEntity, WitchEntity, WitherSkeletonEntity,
+    ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
 pub use mobs::npc::{VillagerEntity, WanderingTraderEntity, ZombieVillagerEntity};

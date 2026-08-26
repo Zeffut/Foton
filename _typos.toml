@@ -28,6 +28,8 @@ convertable = "convertable"
 # Mojang spelling in ThrownTrident.isAcceptibleReturnOwner.
 acceptible = "acceptible"
 Acceptible = "Acceptible"
+# Mojang spelling in Piglin.CHANCE_OF_WEARING_EACH_ARMOUR_ITEM.
+ARMOUR = "ARMOUR"
 # Vanilla names in TransportItemsBetweenContainers: the TRAVELLING state and its
 # onStartTravelling / resumeTravelling steps.
 travelling = "travelling"

@@ -722,7 +722,7 @@ mod tests {
         let chicken = test_chicken();
         let adult = Entity::dimensions_for_pose(&chicken, EntityPose::Standing);
 
-        AgeableMob::set_baby(&chicken, true);
+        Mob::set_baby(&chicken, true);
         let baby = Entity::dimensions_for_pose(&chicken, EntityPose::Standing);
 
         assert!(

@@ -764,7 +764,7 @@ mod tests {
         let mooshroom = new_mooshroom(1);
         assert!(mooshroom.ready_for_shearing());
 
-        AgeableMob::set_baby(&mooshroom, true);
+        Mob::set_baby(&mooshroom, true);
         assert!(!mooshroom.ready_for_shearing());
     }
 

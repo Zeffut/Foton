@@ -160,11 +160,6 @@ pub trait AgeableMob: Mob {
         self.get_age() < 0
     }
 
-    /// Sets the vanilla baby state using the `AgeableMob` start age.
-    fn set_baby(&self, baby: bool) {
-        self.set_age(if baby { self.get_baby_start_age() } else { 0 });
-    }
-
     /// Returns vanilla `AgeableMob.forcedAge`.
     fn forced_age(&self) -> i32 {
         self.ageable_base().forced_age()

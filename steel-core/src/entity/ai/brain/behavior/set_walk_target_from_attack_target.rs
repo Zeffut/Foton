@@ -1,6 +1,11 @@
 //! Vanilla `SetWalkTargetFromAttackTargetIfTargetOutOfReach`.
 
 use super::{BrainContext, Trigger};
+
+/// Vanilla parity: `SetWalkTargetFromAttackTargetIfTargetOutOfReach.PROJECTILE_ATTACK_RANGE_BUFFER`,
+/// which pulls a shooting mob one block inside its weapon's range so it does
+/// not hover exactly on the edge of it.
+const PROJECTILE_ATTACK_RANGE_BUFFER: i32 = 1;
 use crate::entity::PathfinderMob;
 use crate::entity::ai::brain::memory::{MemoryModuleId, WalkTarget, memory_module_types};
 use crate::entity::ai::brain::position_tracker::PositionTracker;
@@ -61,7 +66,11 @@ impl Trigger for SetWalkTargetFromAttackTargetIfTargetOutOfReach {
         let within_range = brain
             .get_memory(memory_module_types::NEAREST_VISIBLE_LIVING_ENTITIES)
             .is_some_and(|visible| visible.contains_entity(remembered.id()))
-            && ctx.mob().is_within_melee_attack_range(living_target);
+            && super::utils::is_within_attack_range(
+                ctx.mob(),
+                living_target,
+                PROJECTILE_ATTACK_RANGE_BUFFER,
+            );
 
         if within_range {
             brain.erase_memory(memory_module_types::WALK_TARGET.id());

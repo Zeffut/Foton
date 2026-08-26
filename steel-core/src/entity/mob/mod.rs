@@ -1635,13 +1635,251 @@ pub trait Mob: LivingEntity {
         DVec3::new(1.0, 0.0, 1.0)
     }
 
+    /// Whether this mob would rather shoot `item_stack` than swing it.
+    ///
+    /// Vanilla parity: `Mob.canUseNonMeleeWeapon`, which is false for every mob
+    /// but the three that carry a bow or a crossbow. It is what stops a piglin
+    /// punching with a loaded crossbow in its hand, and what lets it hang back
+    /// and fire instead.
+    fn can_use_non_melee_weapon(&self, _item_stack: &ItemStack) -> bool {
+        false
+    }
+
+    /// Sets whether this mob is a baby.
+    ///
+    /// Vanilla parity: `Mob.setBaby`, which is a no-op on `Mob` itself and is
+    /// overridden by `AgeableMob` and by the four monsters that carry a baby
+    /// flag of their own. The default here is the `AgeableMob` override,
+    /// reached through [`crate::entity::Entity::as_ageable_mob`], so an ageable
+    /// mob needs no override at all and a non-ageable one that has no baby form
+    /// correctly does nothing.
+    fn set_baby(&self, baby: bool) {
+        let Some(ageable) = self.as_ageable_mob() else {
+            return;
+        };
+        ageable.set_age(if baby {
+            ageable.get_baby_start_age()
+        } else {
+            0
+        });
+    }
+
     /// Returns vanilla `Mob.canHoldItem`.
     fn can_hold_item(&self, _item_stack: &ItemStack) -> bool {
         true
     }
 
+    /// Whether this mob is allowed to start a hunt.
+    ///
+    /// Vanilla parity: `AbstractPiglin.canHunt`, which only the two piglins
+    /// answer -- a piglin by its `cannotHunt` flag and a brute always with no.
+    fn can_hunt(&self) -> bool {
+        false
+    }
+
+    /// The weapon tag this mob would rather carry than any other.
+    ///
+    /// Vanilla parity: `Mob.getPreferredWeaponType`, which is null for every
+    /// mob but the piglin.
+    fn preferred_weapon_type(&self) -> Option<&'static steel_utils::Identifier> {
+        None
+    }
+
+    /// Puts `item_stack` in `slot` and guarantees it drops on death.
+    ///
+    /// Vanilla parity: `Mob.setItemSlotAndDropWhenKilled`.
+    fn set_item_slot_and_drop_when_killed(&self, slot: EquipmentSlot, item_stack: ItemStack) {
+        self.set_item_slot(slot, item_stack);
+        Mob::set_guaranteed_drop(self, slot);
+    }
+
+    /// Returns whether this mob would swap `current_item_stack` for `new_item_stack`.
+    ///
+    /// Vanilla parity: `Mob.canReplaceCurrentItem(ItemStack, ItemStack, EquipmentSlot)`.
+    /// A mob that overrides this calls [`Self::mob_can_replace_current_item`]
+    /// for the base body, which is where vanilla writes `super`.
+    fn can_replace_current_item(
+        &self,
+        new_item_stack: &ItemStack,
+        current_item_stack: &ItemStack,
+        slot: EquipmentSlot,
+    ) -> bool {
+        self.mob_can_replace_current_item(new_item_stack, current_item_stack, slot)
+    }
+
+    /// The shared part of vanilla `Mob.canReplaceCurrentItem`.
+    fn mob_can_replace_current_item(
+        &self,
+        new_item_stack: &ItemStack,
+        current_item_stack: &ItemStack,
+        slot: EquipmentSlot,
+    ) -> bool {
+        if current_item_stack.is_empty() {
+            return true;
+        }
+        if slot.is_armor() {
+            return self.compare_armor(new_item_stack, current_item_stack, slot);
+        }
+        slot == EquipmentSlot::MainHand
+            && self.compare_weapons(new_item_stack, current_item_stack, slot)
+    }
+
+    /// Vanilla parity: the private `Mob.compareArmor`.
+    #[expect(
+        clippy::float_cmp,
+        reason = "vanilla compares the two attribute values exactly; an epsilon here \
+                  would change which armor a mob swaps for"
+    )]
+    fn compare_armor(
+        &self,
+        new_item_stack: &ItemStack,
+        current_item_stack: &ItemStack,
+        slot: EquipmentSlot,
+    ) -> bool {
+        if current_item_stack.has_enchantment_effect(EnchantmentEffectComponent::PreventArmorChange)
+        {
+            return false;
+        }
+
+        let new_defense =
+            self.approximate_attribute_with(new_item_stack, vanilla_attributes::ARMOR, slot);
+        let old_defense =
+            self.approximate_attribute_with(current_item_stack, vanilla_attributes::ARMOR, slot);
+        if new_defense != old_defense {
+            return new_defense > old_defense;
+        }
+
+        let new_toughness = self.approximate_attribute_with(
+            new_item_stack,
+            vanilla_attributes::ARMOR_TOUGHNESS,
+            slot,
+        );
+        let old_toughness = self.approximate_attribute_with(
+            current_item_stack,
+            vanilla_attributes::ARMOR_TOUGHNESS,
+            slot,
+        );
+        if new_toughness != old_toughness {
+            return new_toughness > old_toughness;
+        }
+        self.can_replace_equal_item(new_item_stack, current_item_stack)
+    }
+
+    /// Vanilla parity: the private `Mob.compareWeapons`.
+    #[expect(
+        clippy::float_cmp,
+        reason = "vanilla compares the two attack damages exactly; an epsilon here \
+                  would change which weapon a mob swaps for"
+    )]
+    fn compare_weapons(
+        &self,
+        new_item_stack: &ItemStack,
+        current_item_stack: &ItemStack,
+        slot: EquipmentSlot,
+    ) -> bool {
+        if let Some(preferred) = self.preferred_weapon_type() {
+            let current_preferred = REGISTRY
+                .items
+                .is_in_tag(current_item_stack.item(), preferred);
+            let new_preferred = REGISTRY.items.is_in_tag(new_item_stack.item(), preferred);
+            if current_preferred && !new_preferred {
+                return false;
+            }
+            if !current_preferred && new_preferred {
+                return true;
+            }
+        }
+
+        let new_damage = self.approximate_attribute_with(
+            new_item_stack,
+            vanilla_attributes::ATTACK_DAMAGE,
+            slot,
+        );
+        let old_damage = self.approximate_attribute_with(
+            current_item_stack,
+            vanilla_attributes::ATTACK_DAMAGE,
+            slot,
+        );
+        if new_damage != old_damage {
+            return new_damage > old_damage;
+        }
+        self.can_replace_equal_item(new_item_stack, current_item_stack)
+    }
+
+    /// Breaks a tie between two equally good items.
+    ///
+    /// Vanilla parity: `Mob.canReplaceEqualItem` -- more enchantments wins,
+    /// then less damage, then a named item over an unnamed one.
+    fn can_replace_equal_item(
+        &self,
+        new_item_stack: &ItemStack,
+        current_item_stack: &ItemStack,
+    ) -> bool {
+        use steel_registry::data_components::vanilla_components::{
+            CUSTOM_NAME, ENCHANTMENTS, ItemEnchantments,
+        };
+
+        let new_enchantments = new_item_stack
+            .get(ENCHANTMENTS)
+            .map_or(0, ItemEnchantments::len);
+        let current_enchantments = current_item_stack
+            .get(ENCHANTMENTS)
+            .map_or(0, ItemEnchantments::len);
+        if new_enchantments != current_enchantments {
+            return new_enchantments > current_enchantments;
+        }
+
+        let new_damage = new_item_stack.get_damage_value();
+        let current_damage = current_item_stack.get_damage_value();
+        if new_damage != current_damage {
+            return new_damage < current_damage;
+        }
+        new_item_stack.get(CUSTOM_NAME).is_some() && current_item_stack.get(CUSTOM_NAME).is_none()
+    }
+
+    /// Wears or holds `item_stack` when it beats what is already there.
+    ///
+    /// Vanilla parity: `Mob.equipItemIfPossible`. Returns what was actually
+    /// equipped, so an empty stack means the mob turned it down. Armor the mob
+    /// will not swap falls back to the main hand, which is how a piglin ends up
+    /// carrying a helmet it is not wearing. Vanilla also takes the level, which
+    /// Steel reads off the entity instead.
+    fn equip_item_if_possible(&self, item_stack: &ItemStack) -> ItemStack {
+        let mut slot = self.equipment_slot_for_item(item_stack);
+        if !self.is_equippable_in_slot(item_stack, slot) {
+            return ItemStack::empty();
+        }
+
+        let mut current = self.get_item_by_slot(slot);
+        let mut can_replace = self.can_replace_current_item(item_stack, &current, slot);
+        if slot.is_armor() && !can_replace {
+            slot = EquipmentSlot::MainHand;
+            current = self.get_item_by_slot(slot);
+            can_replace = current.is_empty();
+        }
+
+        if !can_replace || !self.can_hold_item(item_stack) {
+            return ItemStack::empty();
+        }
+
+        let drop_chance = self.equipment_drop_chance(slot);
+        if !current.is_empty() && (rand::random::<f32>() - 0.1).max(0.0) < drop_chance {
+            self.spawn_at_location(current, 0.0);
+        }
+
+        let to_equip = item_stack.copy_with_count(slot.limit(item_stack.count()));
+        self.set_item_slot_and_drop_when_killed(slot, to_equip.clone());
+        Mob::set_persistence_required(self);
+        to_equip
+    }
+
     /// Returns vanilla `Mob.wantsToPickUp`.
     fn wants_to_pick_up(&self, world: &World, item_stack: &ItemStack) -> bool {
+        self.mob_wants_to_pick_up(world, item_stack)
+    }
+
+    /// The shared part of vanilla `Mob.wantsToPickUp`.
+    fn mob_wants_to_pick_up(&self, world: &World, item_stack: &ItemStack) -> bool {
         world.get_game_rule(&MOB_GRIEFING)
             && Mob::can_pick_up_loot(self)
             && self.can_hold_item(item_stack)

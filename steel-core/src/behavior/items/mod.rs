@@ -82,9 +82,16 @@ pub use bucket::BucketItem;
 pub use bundle::{BundleItem, MutableBundleContents, can_item_be_in_bundle};
 pub use compass::CompassItem;
 pub use crossbow::CrossbowItem;
+/// Vanilla parity: `CrossbowItem.MOB_ARROW_POWER`.
+pub(crate) use crossbow::MOB_ARROW_POWER;
 /// Vanilla parity: `CrossbowItem.getChargeDuration`, which a mob's crossbow
 /// goal has to know because it winds the weapon itself.
 pub(crate) use crossbow::charge_duration as crossbow_charge_duration;
+/// Vanilla parity: `CrossbowItem.isCharged`, which a piglin's arm pose reads.
+pub(crate) use crossbow::is_charged as crossbow_is_charged;
+/// Vanilla parity: `CrossbowAttackMob.performCrossbowAttack`, the entry point a
+/// crossbow-carrying mob fires through.
+pub(crate) use crossbow::perform_crossbow_attack;
 pub use debug_stick::DebugStickItem;
 pub use default::DefaultItemBehavior;
 pub use dye::DyeItem;

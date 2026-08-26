@@ -135,6 +135,34 @@ impl EquipmentSlot {
         }
     }
 
+    /// How many items this slot holds at once.
+    ///
+    /// Vanilla parity: the `countLimit` field of `EquipmentSlot`, whose
+    /// `NO_COUNT_LIMIT` of zero means "the whole stack" -- the two hands, which
+    /// is how a mob can hold sixty-four blocks in one.
+    #[must_use]
+    pub const fn count_limit(self) -> i32 {
+        match self {
+            EquipmentSlot::MainHand | EquipmentSlot::OffHand => 0,
+            _ => 1,
+        }
+    }
+
+    /// Splits off as much of `count` as this slot accepts.
+    ///
+    /// Vanilla parity: `EquipmentSlot.limit`, minus the mutation: vanilla
+    /// `split`s the caller's stack, so the caller is left holding the
+    /// remainder, and the two Steel callers both want the count instead.
+    #[must_use]
+    pub const fn limit(self, count: i32) -> i32 {
+        let count_limit = self.count_limit();
+        if count_limit > 0 && count > count_limit {
+            count_limit
+        } else {
+            count
+        }
+    }
+
     /// Returns true if this is an armor slot (humanoid or animal).
     #[must_use]
     pub const fn is_armor(self) -> bool {

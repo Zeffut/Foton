@@ -131,14 +131,6 @@ impl HuskEntity {
     pub fn is_baby(&self) -> bool {
         *self.entity_data.lock().zombie.baby.get()
     }
-
-    /// Sets whether this husk is a baby.
-    ///
-    /// Vanilla parity: `Zombie.setBaby` also swaps in a movement-speed modifier;
-    /// Steel only syncs the flag so far.
-    pub fn set_baby(&self, baby: bool) {
-        self.entity_data.lock().zombie.baby.set(baby);
-    }
 }
 
 impl Entity for HuskEntity {
@@ -199,6 +191,14 @@ impl LivingEntity for HuskEntity {
 }
 
 impl Mob for HuskEntity {
+    /// Sets whether this husk is a baby.
+    ///
+    /// Vanilla parity: `Zombie.setBaby` also swaps in a movement-speed modifier;
+    /// Steel only syncs the flag so far.
+    fn set_baby(&self, baby: bool) {
+        self.entity_data.lock().zombie.baby.set(baby);
+    }
+
     /// Vanilla parity: `Husk` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true

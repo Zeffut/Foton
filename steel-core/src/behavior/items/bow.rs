@@ -77,6 +77,11 @@ fn take_one_arrow(player: &Player) -> Option<ItemStack> {
     Some(taken)
 }
 
+/// How far a mob will stand off and still fire a bow.
+///
+/// Vanilla parity: `BowItem.getDefaultProjectileRange`.
+const BOW_PROJECTILE_RANGE: i32 = 15;
+
 /// Behavior for the bow.
 #[item_behavior]
 pub struct BowItem;
@@ -113,6 +118,13 @@ impl ItemBehavior for BowItem {
         }
         context.player.start_using_item(context.hand);
         InteractionResult::Consume
+    }
+
+    /// Vanilla parity: `BowItem.getDefaultProjectileRange`, nearly twice a
+    /// crossbow's -- which is why a skeleton opens fire from much further off
+    /// than a piglin does.
+    fn default_projectile_range(&self) -> Option<i32> {
+        Some(BOW_PROJECTILE_RANGE)
     }
 
     fn get_use_duration(&self, _stack: &ItemStack, _user: &dyn LivingEntity) -> i32 {

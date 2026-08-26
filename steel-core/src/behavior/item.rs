@@ -400,6 +400,15 @@ pub trait ItemBehavior: Send + Sync {
         }
     }
 
+    /// How far a mob will stand off and still fire this weapon.
+    ///
+    /// Vanilla parity: `ProjectileWeaponItem.getDefaultProjectileRange`, which
+    /// only the bow and the crossbow answer. `None` means "not a projectile
+    /// weapon", which is what puts a mob holding it back in melee range.
+    fn default_projectile_range(&self) -> Option<i32> {
+        None
+    }
+
     /// Returns vanilla `Item.getUseDuration`.
     fn get_use_duration(&self, stack: &ItemStack, _user: &dyn LivingEntity) -> i32 {
         if let Some(consumable) = stack.get(CONSUMABLE) {

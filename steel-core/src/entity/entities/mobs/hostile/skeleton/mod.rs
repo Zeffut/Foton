@@ -9,9 +9,11 @@ use glam::DVec3;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
 use steel_registry::vanilla_entity_data::SkeletonEntityData;
+use steel_registry::vanilla_items;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
@@ -235,6 +237,11 @@ impl LivingEntity for SkeletonEntity {
 }
 
 impl Mob for SkeletonEntity {
+    /// Vanilla parity: `AbstractSkeleton.canUseNonMeleeWeapon`.
+    fn can_use_non_melee_weapon(&self, item_stack: &ItemStack) -> bool {
+        item_stack.is(&vanilla_items::BOW)
+    }
+
     /// Vanilla parity: `Skeleton` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true

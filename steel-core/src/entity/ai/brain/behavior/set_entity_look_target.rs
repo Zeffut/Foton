@@ -124,13 +124,33 @@ impl SetEntityLookTargetSometimes {
         max_dist: f64,
         interval: UniformIntProvider,
     ) -> Self {
+        Self::around(
+            SetEntityLookTarget::of_type(entity_type, max_dist),
+            interval,
+        )
+    }
+
+    /// Looks at any nearby entity, on `interval`.
+    ///
+    /// Vanilla parity: `SetEntityLookTargetSometimes.create(float, UniformInt)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `interval` could fire on consecutive ticks, matching the
+    /// `IllegalArgumentException` of vanilla's `Ticker` constructor.
+    #[must_use]
+    pub fn any_within(max_dist: f64, interval: UniformIntProvider) -> Self {
+        Self::around(SetEntityLookTarget::any_within(max_dist), interval)
+    }
+
+    fn around(inner: SetEntityLookTarget, interval: UniformIntProvider) -> Self {
         assert!(
             interval.min_inclusive > 1,
             "a look interval of {} would retrigger every tick",
             interval.min_inclusive
         );
         Self {
-            inner: SetEntityLookTarget::of_type(entity_type, max_dist),
+            inner,
             interval,
             ticks_until_next_start: 0,
         }

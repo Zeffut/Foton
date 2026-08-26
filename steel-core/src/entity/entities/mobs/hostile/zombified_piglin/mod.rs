@@ -318,6 +318,12 @@ impl LivingEntity for ZombifiedPiglinEntity {
 }
 
 impl Mob for ZombifiedPiglinEntity {
+    /// Vanilla parity: the `Zombie.setBaby` a zombified piglin inherits.
+    fn set_baby(&self, baby: bool) {
+        self.entity_data.lock().zombie_mut().baby.set(baby);
+        self.refresh_dimensions();
+    }
+
     /// Vanilla parity: `ZombifiedPiglin` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true

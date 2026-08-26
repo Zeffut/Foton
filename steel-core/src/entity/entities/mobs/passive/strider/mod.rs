@@ -1008,7 +1008,7 @@ mod tests {
         let mob = strider();
         let adult = mob.dimensions_for_pose(EntityPose::Standing);
 
-        AgeableMob::set_baby(&mob, true);
+        Mob::set_baby(&mob, true);
         let baby = mob.dimensions_for_pose(EntityPose::Standing);
 
         assert!(baby.width < adult.width);
@@ -1022,7 +1022,7 @@ mod tests {
         let mob = strider();
 
         assert!(mob.can_use_slot(EquipmentSlot::Saddle));
-        AgeableMob::set_baby(&mob, true);
+        Mob::set_baby(&mob, true);
         assert!(!mob.can_use_slot(EquipmentSlot::Saddle));
     }
 

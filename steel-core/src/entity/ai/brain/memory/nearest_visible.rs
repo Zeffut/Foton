@@ -61,6 +61,31 @@ impl NearestVisibleLivingEntities {
         None
     }
 
+    /// Returns every visible entity matching `filter`, nearest first.
+    ///
+    /// Vanilla parity: `NearestVisibleLivingEntities.findAll`, which returns a
+    /// lazy `Iterable`; Steel collects, because the underlying weak handles have
+    /// to be upgraded to be filtered at all and holding the upgrades is what the
+    /// caller wanted anyway.
+    pub fn find_all(&self, mut filter: impl FnMut(&dyn LivingEntity) -> bool) -> Vec<SharedEntity> {
+        let mut found = Vec::new();
+        for candidate in &self.nearby {
+            if !self.visible.contains(&candidate.id()) {
+                continue;
+            }
+            let Some(entity) = candidate.get() else {
+                continue;
+            };
+            let Some(living) = entity.as_living_entity() else {
+                continue;
+            };
+            if filter(living) {
+                found.push(entity);
+            }
+        }
+        found
+    }
+
     /// Returns whether the entity with this id is nearby and visible.
     ///
     /// Vanilla parity: `NearestVisibleLivingEntities.contains(LivingEntity)`.

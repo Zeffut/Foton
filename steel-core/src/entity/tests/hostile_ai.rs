@@ -16,11 +16,12 @@
 use super::*;
 use crate::entity::entities::{
     BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
-    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HuskEntity,
-    IllusionerEntity, IronGolemEntity, MagmaCubeEntity, PhantomEntity, PillagerEntity,
-    RavagerEntity, ShulkerEntity, SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity,
-    SpiderEntity, StrayEntity, VexEntity, VindicatorEntity, WitchEntity, WitherBoss,
-    WitherSkeletonEntity, ZombieEntity, ZombifiedPiglinEntity,
+    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HoglinEntity,
+    HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity, PhantomEntity,
+    PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
+    SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity, SpiderEntity, StrayEntity,
+    VexEntity, VindicatorEntity, WitchEntity, WitherBoss, WitherSkeletonEntity, ZoglinEntity,
+    ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -85,4 +86,11 @@ assert_ai_runs! {
     a_phantom_runs_its_goals: PhantomEntity, &vanilla_entities::PHANTOM;
     a_shulker_runs_its_goals: ShulkerEntity, &vanilla_entities::SHULKER;
     a_wither_runs_its_goals: WitherBoss, &vanilla_entities::WITHER;
+    // The four piglin-family mobs are brain-driven rather than goal-driven, so
+    // for them this is the check that `server_ai_step` reaches
+    // `custom_server_ai_step`, and so `Brain::tick`, at all.
+    a_piglin_runs_its_brain: PiglinEntity, &vanilla_entities::PIGLIN;
+    a_piglin_brute_runs_its_brain: PiglinBruteEntity, &vanilla_entities::PIGLIN_BRUTE;
+    a_hoglin_runs_its_brain: HoglinEntity, &vanilla_entities::HOGLIN;
+    a_zoglin_runs_its_brain: ZoglinEntity, &vanilla_entities::ZOGLIN;
 }

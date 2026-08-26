@@ -758,6 +758,7 @@ mod fluid_contact;
 #[rustfmt::skip]
 #[path = "generated/entities.rs"]
 mod generated_entities;
+pub mod hoglin_base;
 mod inside_block_effects;
 mod item_based_steering;
 mod item_frame;
@@ -821,6 +822,7 @@ pub use living_base::{
     MobEffectSyncChange, MobEffectSyncPacket,
 };
 pub use living_entity::LivingEntity;
+pub(crate) use living_entity::barter_loot_items;
 pub use manager::{
     AddEntityError, ChunkEntityLoadResult, EntityLifecycleChanges, EntityMoveError,
     EntityMoveUpdate, EntityOwnership, EntityVisibility, WorldEntityManager,

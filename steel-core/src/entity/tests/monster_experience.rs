@@ -11,9 +11,9 @@
 
 use super::*;
 use crate::entity::entities::{
-    CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HuskEntity, SilverfishEntity,
-    SkeletonEntity, SpiderEntity, StrayEntity, WitchEntity, WitherSkeletonEntity, ZombieEntity,
-    ZombifiedPiglinEntity,
+    CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HoglinEntity, HuskEntity,
+    PiglinBruteEntity, PiglinEntity, SilverfishEntity, SkeletonEntity, SpiderEntity, StrayEntity,
+    WitchEntity, WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -50,6 +50,23 @@ assert_monster_reward! {
     an_enderman_is_worth_five: EndermanEntity, &vanilla_entities::ENDERMAN;
     a_silverfish_is_worth_five: SilverfishEntity, &vanilla_entities::SILVERFISH;
     a_witch_is_worth_five: WitchEntity, &vanilla_entities::WITCH;
+    a_piglin_is_worth_five: PiglinEntity, &vanilla_entities::PIGLIN;
+    a_hoglin_is_worth_five: HoglinEntity, &vanilla_entities::HOGLIN;
+    a_zoglin_is_worth_five: ZoglinEntity, &vanilla_entities::ZOGLIN;
+}
+
+/// Vanilla parity: the `this.xpReward = 20` of the `PiglinBrute` constructor,
+/// which is the one monster worth more than five without being a boss.
+#[test]
+fn a_piglin_brute_is_worth_four_times_a_monster() {
+    init_vanilla_registry();
+    let brute = PiglinBruteEntity::new(
+        &vanilla_entities::PIGLIN_BRUTE,
+        next_entity_id(),
+        DVec3::ZERO,
+        Weak::new(),
+    );
+    assert_eq!(brute.xp_reward(), 20);
 }
 
 /// Vanilla parity: `Zombie.getBaseExperienceReward`, which multiplies a baby's

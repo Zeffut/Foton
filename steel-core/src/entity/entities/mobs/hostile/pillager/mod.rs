@@ -430,6 +430,11 @@ impl LivingEntity for PillagerEntity {
 }
 
 impl Mob for PillagerEntity {
+    /// Vanilla parity: `Pillager.canUseNonMeleeWeapon`.
+    fn can_use_non_melee_weapon(&self, item_stack: &ItemStack) -> bool {
+        item_stack.is(&vanilla_items::CROSSBOW)
+    }
+
     /// Vanilla parity: `Pillager` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true

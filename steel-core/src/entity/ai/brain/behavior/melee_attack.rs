@@ -71,7 +71,13 @@ impl Trigger for MeleeAttack {
             return false;
         };
 
+        // Vanilla parity: `MeleeAttack.isHoldingUsableNonMeleeWeapon`, which is
+        // what stops a crossbow piglin punching instead of shooting.
+        let holding_ranged_weapon = ctx
+            .mob()
+            .is_holding(&mut |item| Mob::can_use_non_melee_weapon(ctx.mob(), item));
         if !(self.can_attack)(ctx.mob())
+            || holding_ranged_weapon
             || !ctx.mob().is_within_melee_attack_range(living_target)
             || !visible.contains_entity(remembered.id())
         {

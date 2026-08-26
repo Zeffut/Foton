@@ -6,7 +6,9 @@ use glam::DVec3;
 use rustc_hash::FxHashSet;
 use simdnbt::borrow::{NbtCompound as BorrowedNbtCompound, NbtTag as BorrowedNbtTag};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+use steel_utils::uuid_ext::UuidExt as _;
 use steel_utils::{BlockPos, GlobalPos, Identifier};
+use uuid::Uuid;
 
 use super::super::position_tracker::PositionTracker;
 use super::nearest_visible::NearestVisibleLivingEntities;
@@ -93,6 +95,7 @@ pub enum MemoryValue {
     BlockPos(BlockPos),
     GlobalPos(GlobalPos),
     GlobalPosSet(FxHashSet<GlobalPos>),
+    Uuid(Uuid),
     Vec3(DVec3),
     Entity(EntityMemory),
     Entities(Vec<EntityMemory>),
@@ -135,6 +138,7 @@ impl MemoryValue {
                 let entries: Vec<NbtCompound> = positions.iter().map(global_pos_to_nbt).collect();
                 Some(NbtTag::List(NbtList::Compound(entries)))
             }
+            Self::Uuid(uuid) => Some(NbtTag::IntArray(uuid.to_int_array().to_vec())),
             Self::Vec3(_)
             | Self::Entity(_)
             | Self::Entities(_)
@@ -245,6 +249,10 @@ fn read_global_pos(value: &BorrowedNbtTag<'_, '_>) -> Option<GlobalPos> {
     global_pos_from_nbt(&value.compound()?)
 }
 
+fn read_uuid(value: &BorrowedNbtTag<'_, '_>) -> Option<Uuid> {
+    Uuid::from_int_array(value.int_array()?.as_ref())
+}
+
 fn read_global_pos_set(value: &BorrowedNbtTag<'_, '_>) -> Option<FxHashSet<GlobalPos>> {
     Some(
         value
@@ -281,6 +289,7 @@ impl_memory_value_type!(
     GlobalPosSet,
     from_nbt = read_global_pos_set
 );
+impl_memory_value_type!(Uuid, Uuid, from_nbt = read_uuid);
 impl_memory_value_type!(DVec3, Vec3);
 impl_memory_value_type!(EntityMemory, Entity);
 impl_memory_value_type!(Vec<EntityMemory>, Entities);

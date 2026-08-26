@@ -128,14 +128,6 @@ impl ZombieEntity {
     pub fn is_baby(&self) -> bool {
         *self.entity_data.lock().baby.get()
     }
-
-    /// Sets whether this zombie is a baby.
-    ///
-    /// Vanilla parity: `Zombie.setBaby` also swaps in a movement-speed modifier;
-    /// Steel only syncs the flag so far.
-    pub fn set_baby(&self, baby: bool) {
-        self.entity_data.lock().baby.set(baby);
-    }
 }
 
 impl ZombieEntity {
@@ -290,6 +282,14 @@ impl LivingEntity for ZombieEntity {
 }
 
 impl Mob for ZombieEntity {
+    /// Sets whether this zombie is a baby.
+    ///
+    /// Vanilla parity: `Zombie.setBaby` also swaps in a movement-speed modifier;
+    /// Steel only syncs the flag so far.
+    fn set_baby(&self, baby: bool) {
+        self.entity_data.lock().baby.set(baby);
+    }
+
     /// Vanilla parity: `Zombie` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true

@@ -18,7 +18,7 @@ use crate::entity::entities::{
 };
 use crate::entity::{
     AbstractChestedHorse, AbstractHorse, AgeableMob, Animal, Entity, LivingEntity, Llama,
-    LlamaVariant,
+    LlamaVariant, Mob,
 };
 use crate::inventory::container::Container as _;
 use crate::inventory::equipment::EquipmentSlot;

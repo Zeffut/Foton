@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 
 use steel_registry::DyeColor;
+use steel_registry::attribute::AttributeRef;
 use steel_registry::data_components::components::ItemDamageFunction;
 use steel_registry::data_components::vanilla_components::BLOCKS_ATTACKS;
 
@@ -1750,6 +1751,36 @@ pub trait LivingEntity: Entity {
             .map(|active| active.hand())
     }
 
+    /// Returns the stack this entity is holding up, if any.
+    ///
+    /// Vanilla parity: `LivingEntity.getUseItem`. Vanilla caches the stack in
+    /// a field; Steel reads the hand back, because the hand is where the stack
+    /// actually lives between item hooks.
+    fn use_item(&self) -> Option<ItemStack> {
+        let active = self.living_base().active_item_use()?;
+        let item = self.get_item_in_hand(active.hand());
+        (item.item() == active.item()).then_some(item)
+    }
+
+    /// Returns how many ticks this entity has been holding its item up.
+    ///
+    /// Vanilla parity: `LivingEntity.getTicksUsingItem`, which counts up from
+    /// zero while `getUseItemRemainingTicks` counts down.
+    fn ticks_using_item(&self) -> i32 {
+        self.living_base()
+            .active_item_use()
+            .map_or(0, |active| active.duration() - active.remaining_ticks())
+    }
+
+    /// Returns how many ticks of the current item use are left.
+    ///
+    /// Vanilla parity: `LivingEntity.getUseItemRemainingTicks`.
+    fn use_item_remaining_ticks(&self) -> i32 {
+        self.living_base()
+            .active_item_use()
+            .map_or(0, |active| active.remaining_ticks())
+    }
+
     /// Returns what this entity holds in `hand`.
     ///
     /// Vanilla parity: `LivingEntity.getItemInHand`, which reads the two hand
@@ -2094,6 +2125,67 @@ pub trait LivingEntity: Entity {
     ) {
         let mut equipment = self.living_base().equipment().lock();
         visitor(equipment.get_mut(slot));
+    }
+
+    /// Returns the item in a vanilla living-entity equipment slot.
+    ///
+    /// Vanilla parity: `LivingEntity.getItemBySlot`.
+    fn get_item_by_slot(&self, slot: EquipmentSlot) -> ItemStack {
+        self.living_base().equipment().lock().get_ref(slot).clone()
+    }
+
+    /// Puts `item_stack` in an equipment slot.
+    ///
+    /// Vanilla parity: `LivingEntity.setItemSlot`.
+    fn set_item_slot(&self, slot: EquipmentSlot, item_stack: ItemStack) {
+        self.living_base().equipment().lock().set(slot, item_stack);
+    }
+
+    /// Returns the slot `item_stack` would be worn or held in.
+    ///
+    /// Vanilla parity: `LivingEntity.getEquipmentSlotForItem`. Anything with no
+    /// `equippable` component is held rather than worn, which is why a piglin
+    /// picking up a sword ends up with it in its hand.
+    fn equipment_slot_for_item(&self, item_stack: &ItemStack) -> EquipmentSlot {
+        item_stack
+            .get_equippable_slot()
+            .filter(|slot| self.can_use_slot(*slot))
+            .unwrap_or(EquipmentSlot::MainHand)
+    }
+
+    /// Returns what an attribute would read with `item_stack` in `slot`.
+    ///
+    /// Vanilla parity: the private `Mob.getApproximateAttributeWith` plus
+    /// `ItemAttributeModifiers.compute`. It is an approximation because it
+    /// ignores every modifier that is not the item's own -- which is exactly
+    /// what makes it cheap enough to run on every item a mob walks past.
+    fn approximate_attribute_with(
+        &self,
+        item_stack: &ItemStack,
+        attribute: AttributeRef,
+        slot: EquipmentSlot,
+    ) -> f64 {
+        let base_value = self
+            .attributes()
+            .lock()
+            .get_base_value(attribute)
+            .unwrap_or(0.0);
+        let Some(modifiers) = item_stack.get_attribute_modifiers() else {
+            return base_value;
+        };
+
+        let mut value = base_value;
+        for entry in modifiers.for_slot(slot) {
+            if entry.attribute.key != attribute.key {
+                continue;
+            }
+            value += match entry.operation {
+                AttributeModifierOperation::AddValue => entry.amount,
+                AttributeModifierOperation::AddMultipliedBase => entry.amount * base_value,
+                AttributeModifierOperation::AddMultipliedTotal => entry.amount * value,
+            };
+        }
+        value
     }
 
     /// Returns whether this entity currently has an item in `slot`.
@@ -3739,6 +3831,28 @@ pub(crate) fn gift_loot_items_with_rng<R: rand::Rng, E: LivingEntity + ?Sized>(
 ) -> Vec<ItemStack> {
     let position = entity.position();
     let mut context = LootContext::new(rng)
+        .with_origin(position.x, position.y, position.z)
+        .with_this_entity(living_entity_loot_ref(entity));
+    if let Some(level) = entity.level() {
+        context = context.with_game_time(level.game_time());
+    }
+    loot_table.get_random_items(&mut context)
+}
+
+/// Rolls the piglin barter table for one entity.
+///
+/// Vanilla parity: `PiglinAi.getBarterResponseItems`, whose
+/// `LootContextParamSets.PIGLIN_BARTER` requires only `THIS_ENTITY`. It is
+/// separate from the gift roll because they are different vanilla parameter
+/// sets, and a barter can grow a `killer` parameter the way vanilla's has
+/// before.
+pub(crate) fn barter_loot_items<E: LivingEntity + ?Sized>(
+    entity: &E,
+    loot_table: LootTableRef,
+) -> Vec<ItemStack> {
+    let position = entity.position();
+    let mut rng = rand::rng();
+    let mut context = LootContext::new(&mut rng)
         .with_origin(position.x, position.y, position.z)
         .with_this_entity(living_entity_loot_ref(entity));
     if let Some(level) = entity.level() {

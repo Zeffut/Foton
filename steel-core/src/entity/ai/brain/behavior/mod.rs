@@ -25,34 +25,61 @@
 //! each behavior states that list itself, in [`Trigger::required_memories`] or
 //! [`TimedBehavior::entry_condition`].
 
+mod animal_make_love;
 mod animal_panic;
+mod baby_follow_adult;
 mod back_up_if_too_close;
+mod become_passive_if_memory_present;
+mod copy_memory_with_expiry;
 mod count_down_cooldown_ticks;
+mod crossbow_attack;
 mod do_nothing;
+mod erase_memory_if;
 mod gate_behavior;
+mod go_to_target_location;
+mod go_to_wanted_item;
+mod interact_with;
 mod look_at_target_sink;
 mod melee_attack;
+mod mount;
 mod move_to_target_sink;
 mod random_stroll;
 mod set_entity_look_target;
+mod set_walk_target_away_from;
 mod set_walk_target_from_attack_target;
 mod set_walk_target_from_look_target;
 mod start_attacking;
+mod start_celebrating_if_target_dead;
 mod stop_attacking_if_target_invalid;
+mod stop_being_angry_if_target_dead;
+mod stroll_to_poi;
 mod swim;
 pub mod transport_items_between_containers;
 mod trigger_gate;
 
 pub(crate) mod utils;
 
+pub use animal_make_love::AnimalMakeLove;
 pub use animal_panic::AnimalPanic;
+pub use baby_follow_adult::BabyFollowAdult;
+pub use become_passive_if_memory_present::BecomePassiveIfMemoryPresent;
+pub use copy_memory_with_expiry::CopyMemoryWithExpiry;
 pub use count_down_cooldown_ticks::CountDownCooldownTicks;
+pub use crossbow_attack::{CrossbowAttack, CrossbowAttackHooks};
 pub use do_nothing::DoNothing;
+pub use erase_memory_if::EraseMemoryIf;
 pub use gate_behavior::RunOne;
+pub use go_to_target_location::GoToTargetLocation;
+pub use go_to_wanted_item::GoToWantedItem;
+pub use interact_with::{InteractWith, SetLookAndInteract};
 pub use look_at_target_sink::LookAtTargetSink;
 pub use move_to_target_sink::MoveToTargetSink;
 pub use random_stroll::RandomStroll;
 pub use set_entity_look_target::SetEntityLookTargetSometimes;
+pub use set_walk_target_away_from::SetWalkTargetAwayFrom;
+pub use start_celebrating_if_target_dead::StartCelebratingIfTargetDead;
+pub use stop_being_angry_if_target_dead::StopBeingAngryIfTargetDead;
+pub use stroll_to_poi::{StrollAroundPoi, StrollToPoi};
 pub use transport_items_between_containers::TransportItemsBetweenContainers;
 
 /// The general-purpose behaviors no Steel mob drives yet.
@@ -70,6 +97,7 @@ pub use {
     back_up_if_too_close::BackUpIfTooClose,
     gate_behavior::{GateBehavior, OrderPolicy, RunningPolicy, ShufflingList},
     melee_attack::MeleeAttack,
+    mount::{DismountOrSkipMounting, Mount},
     set_entity_look_target::SetEntityLookTarget,
     set_walk_target_from_attack_target::SetWalkTargetFromAttackTargetIfTargetOutOfReach,
     set_walk_target_from_look_target::SetWalkTargetFromLookTarget,
@@ -79,8 +107,8 @@ pub use {
     trigger_gate::TriggerGate,
 };
 
-use super::context::BrainContext;
-use super::memory::{MemoryModuleId, MemoryStatus};
+pub use super::context::BrainContext;
+pub use super::memory::{MemoryModuleId, MemoryStatus};
 
 /// How long a [`TimedBehavior`] runs when it does not say otherwise.
 ///

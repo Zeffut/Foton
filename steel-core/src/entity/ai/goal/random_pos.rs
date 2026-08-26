@@ -77,6 +77,47 @@ pub(super) fn default_random_pos_away(
     })
 }
 
+/// Picks a walkable spot pointing away from `avoid_pos`.
+///
+/// Vanilla parity: `LandRandomPos.getPosAway`. The difference from
+/// [`default_random_pos_away`] is the landing check: this one insists the spot
+/// is out of a solid block and neither water nor a penalized node, which is
+/// what a fleeing land mob needs.
+pub(crate) fn land_random_pos_away(
+    mob: &dyn PathfinderMob,
+    horizontal_dist: i32,
+    vertical_dist: i32,
+    avoid_pos: DVec3,
+) -> Option<DVec3> {
+    let mut dir_away = mob.position() - avoid_pos;
+    if dir_away.length() == 0.0 {
+        dir_away = DVec3::new(
+            rand::random::<f64>() - 0.5,
+            0.0,
+            rand::random::<f64>() - 0.5,
+        );
+    }
+    let restrict = mob_restricted(mob, f64::from(horizontal_dist));
+    generate_random_pos(mob, || {
+        let direction = {
+            let mut random = LegacyRandom::from_seed(rand::random());
+            generate_random_direction_within_radians(
+                &mut random,
+                0.0,
+                f64::from(horizontal_dist),
+                vertical_dist,
+                0,
+                dir_away.x,
+                dir_away.z,
+                FRAC_PI_2,
+            )
+        }?;
+        let pos =
+            land_random_pos_toward_direction(mob, f64::from(horizontal_dist), restrict, direction)?;
+        land_move_pos_up_out_of_solid(mob, pos)
+    })
+}
+
 pub(crate) fn land_random_pos(
     mob: &dyn PathfinderMob,
     horizontal_dist: i32,

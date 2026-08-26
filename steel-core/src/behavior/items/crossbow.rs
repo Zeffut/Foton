@@ -5,10 +5,21 @@
 //! charge completes the ammunition leaves the inventory and moves into the
 //! stack's `charged_projectiles` component, and the crossbow stays loaded until
 //! the next right-click fires it.
+//!
+//! Every step but `use` takes a `&dyn LivingEntity`, exactly as vanilla does:
+//! `onUseTick`, `tryLoadProjectiles`, `performShooting`, `shoot`,
+//! `createProjectile` and `shootProjectile` are all `LivingEntity`-typed
+//! upstream, and only `Item.use(Level, Player, InteractionHand)` is not. A mob
+//! draws through [`perform_crossbow_attack`], which is vanilla
+//! `CrossbowAttackMob.performCrossbowAttack`; its ammunition comes from
+//! `Monster.getProjectile`, which is the held stack or a plain arrow, so a mob
+//! needs no quiver of its own.
 
 use std::sync::Arc;
 
-use glam::DQuat;
+use std::f64::consts::FRAC_PI_2;
+
+use glam::{DQuat, DVec3};
 use steel_macros::item_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::vanilla_components::{
@@ -31,7 +42,6 @@ use crate::entity::entities::{ArrowEntity, FireworkRocketEntity};
 use crate::entity::{Entity, LivingEntity, Projectile as _, SharedEntity, next_entity_id};
 use crate::inventory::container::Container as _;
 use crate::inventory::equipment::EquipmentSlot;
-use crate::player::Player;
 use crate::world::World;
 
 /// Seconds a crossbow takes to charge before Quick Charge scales it.
@@ -64,6 +74,38 @@ const ARROW_POWER: f32 = 3.15;
 ///
 /// Vanilla parity: `CrossbowItem.FIREWORK_POWER`.
 const FIREWORK_POWER: f32 = 1.6;
+
+/// How far a mob will stand off and still fire a crossbow.
+///
+/// Vanilla parity: `CrossbowItem.getDefaultProjectileRange`, which is half a
+/// bow's -- a crossbow piglin closes much further than a skeleton does.
+const CROSSBOW_PROJECTILE_RANGE: i32 = 8;
+
+/// Speed a mob's bolt leaves the crossbow at.
+///
+/// Vanilla parity: `CrossbowItem.MOB_ARROW_POWER`. Half a player's, which is
+/// why a piglin's bolt arcs visibly and a player's barely does.
+pub(crate) const MOB_ARROW_POWER: f32 = 1.6;
+
+/// A mob's aim spread before difficulty is taken off it.
+///
+/// Vanilla parity: the `14 - difficulty.getId() * 4` of
+/// `CrossbowAttackMob.performCrossbowAttack`.
+const MOB_UNCERTAINTY_BASE: f32 = 14.0;
+
+/// How much each difficulty step tightens a mob's aim.
+const MOB_UNCERTAINTY_PER_DIFFICULTY: f32 = 4.0;
+
+/// Fraction of the way up a target a mob aims for.
+///
+/// Vanilla parity: the `targetOverride.getY(0.3333333333333333)` of
+/// `CrossbowItem.shootProjectile`.
+const MOB_AIM_HEIGHT_FRACTION: f64 = 1.0 / 3.0;
+
+/// How much a mob lifts its aim per block of horizontal distance.
+///
+/// Vanilla parity: the `distanceToTarget * 0.2F` of the same branch.
+const MOB_AIM_LIFT_PER_BLOCK: f64 = 0.2;
 
 /// Spread applied to every crossbow shot.
 ///
@@ -105,6 +147,12 @@ enum AmmoSource {
     /// Vanilla parity: the `hasInfiniteMaterials()` tail of
     /// `Player.getProjectile`, which conjures an arrow rather than refusing.
     Creative,
+    /// A mob with nothing in either hand.
+    ///
+    /// Vanilla parity: the `new ItemStack(Items.ARROW)` fallback of
+    /// `Monster.getProjectile`. A mob has no pack to search, so it always has
+    /// exactly one bolt and never pays for it.
+    MobFallback,
 }
 
 /// Behavior for the crossbow.
@@ -126,6 +174,7 @@ impl ItemBehavior for CrossbowItem {
                 &mut weapon,
                 power,
                 SHOT_UNCERTAINTY,
+                None,
             );
             context.inv.with_item(|item| *item = weapon);
             return InteractionResult::Consume;
@@ -137,6 +186,11 @@ impl ItemBehavior for CrossbowItem {
 
         context.player.start_using_item(context.hand);
         InteractionResult::Consume
+    }
+
+    /// Vanilla parity: `CrossbowItem.getDefaultProjectileRange`.
+    fn default_projectile_range(&self) -> Option<i32> {
+        Some(CROSSBOW_PROJECTILE_RANGE)
     }
 
     fn get_use_duration(&self, _stack: &ItemStack, _user: &dyn LivingEntity) -> i32 {
@@ -157,13 +211,6 @@ impl ItemBehavior for CrossbowItem {
         stack: &mut ItemStack,
         ticks_remaining: i32,
     ) {
-        // Vanilla lets any `LivingEntity` charge a crossbow, which is how a
-        // pillager reloads. Steel has no mob ammunition inventory, so only a
-        // player can charge one here.
-        let Some(player) = user.as_player() else {
-            return;
-        };
-
         let charge_ticks = charge_duration(stack);
         let time_held = CROSSBOW_USE_DURATION - ticks_remaining;
         let percent = charge_percent(time_held, charge_ticks);
@@ -187,7 +234,7 @@ impl ItemBehavior for CrossbowItem {
 
         if percent >= 1.0
             && !is_charged(stack)
-            && try_load_projectiles(player, stack)
+            && try_load_projectiles(user, stack)
             && let Some(sound) = sounds.end
         {
             let pitch = 0.5f32.mul_add(rand::random::<f32>(), 1.0).recip() + 0.2;
@@ -271,7 +318,7 @@ const fn crosses(previous: f32, current: f32, threshold: f32) -> bool {
 }
 
 /// Returns vanilla `CrossbowItem.isCharged`.
-fn is_charged(crossbow: &ItemStack) -> bool {
+pub(crate) fn is_charged(crossbow: &ItemStack) -> bool {
     crossbow
         .get(CHARGED_PROJECTILES)
         .is_some_and(|projectiles| !projectiles.items().is_empty())
@@ -314,20 +361,29 @@ fn is_arrow(stack: &ItemStack) -> bool {
 
 /// Locates the ammunition the next charge will draw from.
 ///
-/// Vanilla parity: `Player.getProjectile`. A held arrow or rocket wins, then
-/// the first arrow in the pack, then creative's free arrow.
-fn find_ammo(player: &Player) -> Option<AmmoSource> {
-    {
-        let inventory = player.inventory.lock();
-        for hand in [InteractionHand::OffHand, InteractionHand::MainHand] {
-            if is_held_projectile(inventory.get_item_in_hand(hand)) {
-                return Some(AmmoSource::Hand(hand));
-            }
+/// Vanilla parity: `Player.getProjectile` for a player and
+/// `Monster.getProjectile` for anything else. A held arrow or rocket wins for
+/// both; only a player then searches its pack, and only a mob falls back to a
+/// conjured arrow it never has to own.
+fn find_ammo(shooter: &dyn LivingEntity) -> Option<AmmoSource> {
+    for hand in [InteractionHand::OffHand, InteractionHand::MainHand] {
+        if is_held_projectile(&shooter.get_item_in_hand(hand)) {
+            return Some(AmmoSource::Hand(hand));
         }
+    }
 
-        if let Some(slot) = inventory.get_items().iter().position(is_arrow) {
-            return Some(AmmoSource::Inventory(slot));
-        }
+    let Some(player) = shooter.as_player() else {
+        return Some(AmmoSource::MobFallback);
+    };
+
+    if let Some(slot) = player
+        .inventory
+        .lock()
+        .get_items()
+        .iter()
+        .position(is_arrow)
+    {
+        return Some(AmmoSource::Inventory(slot));
     }
 
     player
@@ -336,28 +392,42 @@ fn find_ammo(player: &Player) -> Option<AmmoSource> {
 }
 
 /// Reads the ammunition stack a source points at.
-fn ammo_stack(player: &Player, source: AmmoSource) -> ItemStack {
+fn ammo_stack(shooter: &dyn LivingEntity, source: AmmoSource) -> ItemStack {
     match source {
-        AmmoSource::Hand(hand) => player.inventory.lock().get_item_in_hand(hand).clone(),
-        AmmoSource::Inventory(slot) => player.inventory.lock().get_item(slot).clone(),
-        AmmoSource::Creative => ItemStack::new(&vanilla_items::ARROW),
+        AmmoSource::Hand(hand) => shooter.get_item_in_hand(hand),
+        AmmoSource::Inventory(slot) => {
+            shooter.as_player().map_or_else(ItemStack::empty, |player| {
+                player.inventory.lock().get_item(slot).clone()
+            })
+        }
+        AmmoSource::Creative | AmmoSource::MobFallback => ItemStack::new(&vanilla_items::ARROW),
     }
 }
 
 /// Removes `amount` ammunition from its source and returns what came out.
-fn take_ammo(player: &Player, source: AmmoSource, amount: i32) -> Option<ItemStack> {
-    let mut inventory = player.inventory.lock();
+fn take_ammo(shooter: &dyn LivingEntity, source: AmmoSource, amount: i32) -> Option<ItemStack> {
     let taken = match source {
-        AmmoSource::Hand(hand) => inventory.split_item_in_hand(hand, amount),
+        // Vanilla's `ItemStack.split` writes through the live stack; Steel's
+        // hand hands back a clone, so the remainder is put away explicitly.
+        AmmoSource::Hand(hand) => {
+            let mut stack = shooter.get_item_in_hand(hand);
+            let taken = stack.split(amount);
+            shooter.set_item_in_hand(hand, stack);
+            taken
+        }
         AmmoSource::Inventory(slot) => {
+            let player = shooter.as_player()?;
+            let mut inventory = player.inventory.lock();
             let mut stack = inventory.get_item(slot).clone();
             let taken = stack.split(amount);
             inventory.set_item(slot, stack);
             taken
         }
-        // Only reachable if a creative player somehow pays for ammunition;
-        // `use_ammo` short-circuits infinite materials to a free copy first.
-        AmmoSource::Creative => ItemStack::with_count(&vanilla_items::ARROW, amount),
+        // Only reachable if a creative player somehow pays for ammunition, or a
+        // mob does; `use_ammo` short-circuits both to a free copy first.
+        AmmoSource::Creative | AmmoSource::MobFallback => {
+            ItemStack::with_count(&vanilla_items::ARROW, amount)
+        }
     };
     (!taken.is_empty()).then_some(taken)
 }
@@ -370,11 +440,16 @@ fn take_ammo(player: &Player, source: AmmoSource, amount: i32) -> Option<ItemSta
 fn use_ammo(
     weapon: &ItemStack,
     ammo: &ItemStack,
-    player: &Player,
+    shooter: &dyn LivingEntity,
     source: AmmoSource,
     force_infinite: bool,
 ) -> Option<ItemStackTemplate> {
-    let ammo_to_use = if force_infinite || player.has_infinite_materials() {
+    // A mob's fallback arrow is conjured rather than carried, so it costs
+    // nothing the same way creative's does; vanilla splits it out of a
+    // throwaway stack and discards the remainder.
+    let free =
+        force_infinite || shooter.has_infinite_materials() || source == AmmoSource::MobFallback;
+    let ammo_to_use = if free {
         0
     } else {
         enchantment_helper::process_ammo_use(weapon, 1)
@@ -392,7 +467,7 @@ fn use_ammo(
         return ItemStackTemplate::from_stack(&free_copy).ok();
     }
 
-    let used = take_ammo(player, source, ammo_to_use)?;
+    let used = take_ammo(shooter, source, ammo_to_use)?;
     ItemStackTemplate::from_stack(&used).ok()
 }
 
@@ -400,11 +475,11 @@ fn use_ammo(
 ///
 /// Vanilla parity: `ProjectileWeaponItem.draw`. Multishot raises the count; only
 /// the first draw is paid for.
-fn draw(weapon: &ItemStack, player: &Player) -> Vec<ItemStackTemplate> {
-    let Some(source) = find_ammo(player) else {
+fn draw(weapon: &ItemStack, shooter: &dyn LivingEntity) -> Vec<ItemStackTemplate> {
+    let Some(source) = find_ammo(shooter) else {
         return Vec::new();
     };
-    let ammo = ammo_stack(player, source);
+    let ammo = ammo_stack(shooter, source);
     if ammo.is_empty() {
         return Vec::new();
     }
@@ -412,7 +487,7 @@ fn draw(weapon: &ItemStack, player: &Player) -> Vec<ItemStackTemplate> {
     let count = enchantment_helper::process_projectile_count(weapon, 1);
     let mut drawn = Vec::new();
     for index in 0..count {
-        if let Some(template) = use_ammo(weapon, &ammo, player, source, index > 0) {
+        if let Some(template) = use_ammo(weapon, &ammo, shooter, source, index > 0) {
             drawn.push(template);
         }
     }
@@ -422,8 +497,8 @@ fn draw(weapon: &ItemStack, player: &Player) -> Vec<ItemStackTemplate> {
 /// Moves the drawn ammunition into the crossbow.
 ///
 /// Vanilla parity: `CrossbowItem.tryLoadProjectiles`.
-fn try_load_projectiles(player: &Player, weapon: &mut ItemStack) -> bool {
-    let drawn = draw(weapon, player);
+fn try_load_projectiles(shooter: &dyn LivingEntity, weapon: &mut ItemStack) -> bool {
+    let drawn = draw(weapon, shooter);
     if drawn.is_empty() {
         return false;
     }
@@ -440,16 +515,56 @@ fn try_load_projectiles(player: &Player, weapon: &mut ItemStack) -> bool {
     }
 }
 
+/// Winds nothing and simply fires a mob's loaded crossbow at `target`.
+///
+/// Vanilla parity: `CrossbowAttackMob.performCrossbowAttack`, which picks the
+/// hand holding the crossbow, reads the difficulty-scaled spread, and hands the
+/// target down so `shootProjectile` lobs the bolt instead of firing it along
+/// the shooter's look vector.
+pub(crate) fn perform_crossbow_attack(
+    world: &Arc<World>,
+    shooter: &dyn LivingEntity,
+    target: &SharedEntity,
+    power: f32,
+) {
+    let hand = if shooter
+        .get_item_in_hand(InteractionHand::MainHand)
+        .is(&vanilla_items::CROSSBOW)
+    {
+        InteractionHand::MainHand
+    } else {
+        InteractionHand::OffHand
+    };
+    let mut weapon = shooter.get_item_in_hand(hand);
+    if !weapon.is(&vanilla_items::CROSSBOW) {
+        return;
+    }
+
+    let difficulty = f32::from(u8::from(world.difficulty()));
+    let uncertainty = MOB_UNCERTAINTY_PER_DIFFICULTY.mul_add(-difficulty, MOB_UNCERTAINTY_BASE);
+    perform_shooting(
+        world,
+        shooter,
+        hand,
+        &mut weapon,
+        power,
+        uncertainty,
+        Some(target),
+    );
+    shooter.set_item_in_hand(hand, weapon);
+}
+
 /// Empties the crossbow and launches what was in it.
 ///
 /// Vanilla parity: `CrossbowItem.performShooting`.
 fn perform_shooting(
     world: &Arc<World>,
-    shooter: &Player,
+    shooter: &dyn LivingEntity,
     hand: InteractionHand,
     weapon: &mut ItemStack,
     power: f32,
     uncertainty: f32,
+    target_override: Option<&SharedEntity>,
 ) {
     let charged = weapon
         .get(CHARGED_PROJECTILES)
@@ -468,6 +583,7 @@ fn perform_shooting(
         charged.items(),
         power,
         uncertainty,
+        target_override,
     );
 
     // TODO: fire the SHOT_CROSSBOW advancement trigger and award the ITEM_USED
@@ -478,14 +594,19 @@ fn perform_shooting(
 ///
 /// Vanilla parity: `ProjectileWeaponItem.shoot`. The fan alternates sides of
 /// the aim line, which is why three bolts land left, center and right.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "vanilla ProjectileWeaponItem.shoot takes the same nine"
+)]
 fn shoot(
     world: &Arc<World>,
-    shooter: &Player,
+    shooter: &dyn LivingEntity,
     hand: InteractionHand,
     weapon: &mut ItemStack,
     projectiles: &[ItemStackTemplate],
     power: f32,
     uncertainty: f32,
+    target_override: Option<&SharedEntity>,
 ) {
     let max_angle = enchantment_helper::process_projectile_spread(weapon, 0.0);
     let count = projectiles.len();
@@ -517,6 +638,7 @@ fn shoot(
             power,
             uncertainty,
             angle,
+            target_override,
         );
         if let Err(error) = world.try_add_entity(Arc::clone(&projectile)) {
             log::debug!("failed to spawn crossbow projectile: {error}");
@@ -529,14 +651,14 @@ fn shoot(
             world,
             &mut ammo,
             projectile.as_ref(),
-            Some(shooter),
+            Some(shooter.as_entity_event_source()),
         );
         if !ammo.is(&vanilla_items::FIREWORK_ROCKET) {
             enchantment_helper::on_projectile_spawned(
                 world,
                 weapon,
                 projectile.as_ref(),
-                Some(shooter),
+                Some(shooter.as_entity_event_source()),
             );
         }
 
@@ -552,7 +674,11 @@ fn shoot(
 /// Builds the entity one loaded projectile becomes.
 ///
 /// Vanilla parity: `CrossbowItem.createProjectile`.
-fn create_projectile(world: &Arc<World>, shooter: &Player, ammo: &ItemStack) -> SharedEntity {
+fn create_projectile(
+    world: &Arc<World>,
+    shooter: &dyn LivingEntity,
+    ammo: &ItemStack,
+) -> SharedEntity {
     let position = shooter.position();
 
     if ammo.is(&vanilla_items::FIREWORK_ROCKET) {
@@ -585,28 +711,48 @@ fn create_projectile(world: &Arc<World>, shooter: &Player, ammo: &ItemStack) -> 
 
 /// Aims and launches one projectile, then plays the shot.
 ///
-/// Vanilla parity: `CrossbowItem.shootProjectile` without the mob-only target
-/// override. Steel's crossbow illagers count their own charge and fire through
-/// `RangedCrossbowAttackGoal` instead of coming through here, because this
-/// whole shooting path still reads a `PlayerInventory` for its ammunition.
+/// Vanilla parity: `CrossbowItem.shootProjectile`, both branches. Without a
+/// target the bolt leaves along the shooter's look vector; with one it is lobbed
+/// at a third of the target's height plus a fifth of the horizontal distance,
+/// which is the arc a piglin's bolt visibly takes.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "vanilla ProjectileWeaponItem.shootProjectile takes the same seven, plus the world"
+)]
 fn shoot_projectile(
     world: &Arc<World>,
-    shooter: &Player,
+    shooter: &dyn LivingEntity,
     projectile: &dyn Entity,
     index: usize,
     power: f32,
     uncertainty: f32,
     angle: f32,
+    target_override: Option<&SharedEntity>,
 ) {
+    let projectile_position = projectile.position();
     let Some(projectile) = projectile.as_projectile() else {
         return;
     };
 
-    let (yaw, pitch) = shooter.rotation();
-    // Vanilla `Entity.getUpVector` is the view vector pitched a quarter turn up.
-    let up = shooter.calculate_view_vector(pitch - 90.0, yaw);
-    let rotation = DQuat::from_axis_angle(up.normalize(), f64::from(angle.to_radians()));
-    projectile.shoot(rotation * shooter.look_angle(), power, uncertainty);
+    let shot_vector = if let Some(target) = target_override {
+        let shooter_position = shooter.position();
+        let target_position = target.position();
+        let dx = target_position.x - shooter_position.x;
+        let dz = target_position.z - shooter_position.z;
+        let distance_to_target = dx.hypot(dz);
+        let aim_y = f64::from(target.base().dimensions().height)
+            .mul_add(MOB_AIM_HEIGHT_FRACTION, target_position.y);
+        let dy = distance_to_target.mul_add(MOB_AIM_LIFT_PER_BLOCK, aim_y - projectile_position.y);
+        projectile_shot_vector(shooter, DVec3::new(dx, dy, dz), angle)
+    } else {
+        let (yaw, pitch) = shooter.rotation();
+        // Vanilla `Entity.getUpVector` is the view vector pitched a quarter
+        // turn up.
+        let up = shooter.calculate_view_vector(pitch - 90.0, yaw);
+        let rotation = DQuat::from_axis_angle(up.normalize(), f64::from(angle.to_radians()));
+        rotation * shooter.look_angle()
+    };
+    projectile.shoot(shot_vector, power, uncertainty);
 
     world.play_sound_at(
         &sound_events::ITEM_CROSSBOW_SHOOT,
@@ -616,6 +762,31 @@ fn shoot_projectile(
         shot_pitch(index),
         None,
     );
+}
+
+/// Rotates an aim vector by the Multishot fan angle.
+///
+/// Vanilla parity: `CrossbowItem.getProjectileShotVector`. The fan turns about
+/// an axis perpendicular to the aim rather than about the world's up, so a
+/// volley fired steeply upward still spreads sideways.
+fn projectile_shot_vector(shooter: &dyn LivingEntity, aim: DVec3, angle: f32) -> DVec3 {
+    let view = aim.normalize_or_zero();
+    let mut right = view.cross(DVec3::Y);
+    if right.length_squared() <= 1.0e-7 {
+        let (yaw, pitch) = shooter.rotation();
+        right = view.cross(shooter.calculate_view_vector(pitch - 90.0, yaw));
+    }
+    let Some(right) = right.try_normalize() else {
+        return view;
+    };
+
+    // Vanilla rotates the view a quarter turn about `right` to get the axis the
+    // fan opens around.
+    let fan_axis = DQuat::from_axis_angle(right, FRAC_PI_2) * view;
+    let Some(fan_axis) = fan_axis.try_normalize() else {
+        return view;
+    };
+    DQuat::from_axis_angle(fan_axis, f64::from(angle.to_radians())) * view
 }
 
 /// Returns the pitch the shot sound plays at.
@@ -658,6 +829,7 @@ mod tests {
 
     use super::*;
     use crate::bootstrap::init_globals_once;
+    use crate::player::Player;
     use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 
     /// Slot holding the crossbow, which is also the selected hotbar slot.
@@ -774,6 +946,75 @@ mod tests {
         assert_eq!(loaded.items().len(), 1);
         assert_eq!(loaded.items()[0].item(), &*vanilla_items::ARROW);
         assert_eq!(arrows_left(&player), 4);
+    }
+
+    /// Widening the shooting path from `&Player` to `&dyn LivingEntity` moved the
+    /// held-ammunition lookup off `PlayerInventory` and onto the equipment
+    /// slots. For a player the two are the same storage, and this is the case
+    /// that proves it: arrows held in the off hand, none in the pack, still
+    /// charge the crossbow and still get paid for.
+    ///
+    /// Vanilla parity: `ProjectileWeaponItem.getHeldProjectile`, which prefers
+    /// a hand over the pack.
+    #[test]
+    fn a_player_charges_from_arrows_held_in_the_off_hand() {
+        init_globals_once();
+        let world = fresh_test_world("crossbow_offhand_quiver");
+        insert_ready_full_chunk(&world, TEST_CHUNK);
+        let player = test_player(&world);
+        {
+            let mut inventory = player.inventory.lock();
+            inventory.set_item(WEAPON_SLOT, crossbow_with(None));
+            // Nothing in the pack: the off hand is the only ammunition there is.
+            inventory.set_item_in_hand(
+                InteractionHand::OffHand,
+                ItemStack::with_count(&vanilla_items::ARROW, 3),
+            );
+        }
+
+        let charged = charge_to_completion(&world, &player);
+
+        assert!(
+            is_charged(&charged),
+            "a player holding arrows in the off hand should be able to charge"
+        );
+        let loaded = charged
+            .get(CHARGED_PROJECTILES)
+            .expect("a charged crossbow carries the component");
+        assert_eq!(loaded.items().len(), 1);
+        assert_eq!(
+            player
+                .inventory
+                .lock()
+                .get_item_in_hand(InteractionHand::OffHand)
+                .count(),
+            2,
+            "the bolt is paid for out of the off hand it was drawn from"
+        );
+    }
+
+    /// A player is still charged for the arrow, unlike a mob, whose fallback
+    /// bolt is conjured. This is the survival-mode half of the widened path.
+    #[test]
+    fn a_survival_player_still_pays_for_every_bolt() {
+        init_globals_once();
+        let world = fresh_test_world("crossbow_survival_pays");
+        insert_ready_full_chunk(&world, TEST_CHUNK);
+        let player = test_player(&world);
+        {
+            let mut inventory = player.inventory.lock();
+            inventory.set_item(WEAPON_SLOT, crossbow_with(None));
+            inventory.set_item(QUIVER_SLOT, ItemStack::with_count(&vanilla_items::ARROW, 1));
+        }
+
+        let charged = charge_to_completion(&world, &player);
+
+        assert!(is_charged(&charged));
+        assert_eq!(
+            arrows_left(&player),
+            0,
+            "the last arrow in the pack is spent, not conjured"
+        );
     }
 
     #[test]

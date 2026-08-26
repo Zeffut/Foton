@@ -1,16 +1,22 @@
 //! Sensors: what writes the world into a brain's memories.
 
+mod adult;
 mod hurt_by;
 mod is_in_water;
 mod nearest_item;
 mod nearest_living_entity;
+mod piglin_specific;
 mod player;
 mod tempting;
 
+pub use adult::AdultSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
 pub use nearest_item::NearestItemSensor;
 pub use nearest_living_entity::NearestLivingEntitySensor;
+pub use piglin_specific::{
+    HoglinSpecificSensor, PiglinBruteSpecificSensor, PiglinSpecificSensor, is_zombified,
+};
 pub use player::PlayerSensor;
 pub use tempting::TemptingSensor;
 
@@ -66,9 +72,8 @@ pub trait Sensor: Send {
 /// `Activity` and `MemoryModuleType`, vanilla's registry is a hardcoded Java
 /// list that never reaches a packet or a save file, and `SteelExtractor` emits no
 /// `sensor_type` asset, so the constants are mirrored as an enum. Only the
-/// general-purpose sensors are here; the mob-specific ones
-/// (`PIGLIN_SPECIFIC_SENSOR`, `WARDEN_ENTITY_SENSOR`, ...) arrive with their
-/// mobs.
+/// sensors a Steel mob drives are here; the rest (`WARDEN_ENTITY_SENSOR`,
+/// `AXOLOTL_ATTACKABLES`, ...) arrive with their mobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SensorType {
     /// Vanilla `SensorType.NEAREST_LIVING_ENTITIES`.
@@ -83,6 +88,14 @@ pub enum SensorType {
     IsInWater,
     /// Vanilla `SensorType.FOOD_TEMPTATIONS`.
     FoodTemptations,
+    /// Vanilla `SensorType.NEAREST_ADULT`.
+    NearestAdult,
+    /// Vanilla `SensorType.PIGLIN_SPECIFIC_SENSOR`.
+    PiglinSpecific,
+    /// Vanilla `SensorType.PIGLIN_BRUTE_SPECIFIC_SENSOR`.
+    PiglinBruteSpecific,
+    /// Vanilla `SensorType.HOGLIN_SPECIFIC_SENSOR`.
+    HoglinSpecific,
 }
 
 impl SensorType {
@@ -96,6 +109,10 @@ impl SensorType {
             Self::HurtBy => Box::new(HurtBySensor),
             Self::IsInWater => Box::new(IsInWaterSensor),
             Self::FoodTemptations => Box::new(TemptingSensor::for_animal()),
+            Self::NearestAdult => Box::new(AdultSensor),
+            Self::PiglinSpecific => Box::new(PiglinSpecificSensor),
+            Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),
+            Self::HoglinSpecific => Box::new(HoglinSpecificSensor),
         }
     }
 }
