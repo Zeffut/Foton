@@ -13,7 +13,7 @@ mod spreader;
 pub use sculk_block::SculkBlock;
 pub use sculk_catalyst_block::SculkCatalystBlock;
 pub use sculk_sensor_block::{
-    CalibratedSculkSensorBlock, SculkSensorBlock, can_activate_sculk_sensor,
+    CalibratedSculkSensorBlock, SculkSensorBlock, activate_sculk_sensor, can_activate_sculk_sensor,
     deactivate_sculk_sensor, sculk_sensor_phase, try_resonate_vibration,
 };
 pub use sculk_shrieker_block::SculkShriekerBlock;

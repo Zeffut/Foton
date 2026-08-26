@@ -2,6 +2,10 @@
 //!
 //! Vanilla parity: `SculkShriekerBlockEntity`.
 //!
+//! A shrieker hears through a vibration listener like the sensors do, but its listenable
+//! events are only `sculk_sensor_tendrils_clicking`: it answers a sensor that just fired
+//! near it, not the footstep the sensor heard.
+//!
 //! Not implemented: the warden. `Warden`, `WardenSpawnTracker` and `SpawnUtil.trySpawnMob`
 //! do not exist in Steel, so nothing here can raise the warning level, summon a warden, or
 //! apply darkness. What survives is everything a player can see and hear without one: the
@@ -17,17 +21,25 @@ use simdnbt::owned::NbtCompound;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty};
+use steel_registry::game_events::GameEventRef;
 use steel_registry::sound_event::SoundEventRef;
+use steel_registry::vanilla_game_event_tags::GameEventTag;
 use steel_registry::vanilla_game_rules::SPAWN_WARDENS;
 use steel_registry::{level_events, sound_events, vanilla_block_entity_types, vanilla_game_events};
 use steel_utils::types::{Difficulty, UpdateFlags};
-use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, locks::SyncMutex};
+use steel_utils::{
+    BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey, Identifier,
+    locks::SyncMutex,
+};
 
 use crate::block_entity::{BlockEntity, BlockEntityBase};
 use crate::entity::Entity;
 use crate::player::Player;
 use crate::world::World;
-use crate::world::game_event::GameEventContext;
+use crate::world::game_event::vibrations::{
+    VIBRATION_DATA_TAG, VibrationListener, VibrationPositionSource, VibrationUser,
+};
+use crate::world::game_event::{GameEventContext, SharedGameEventListener};
 
 /// Vanilla `SculkShriekerBlockEntity.SHRIEKING_TICKS`.
 const SHRIEKING_TICKS: i32 = 90;
@@ -35,19 +47,21 @@ const SHRIEKING_TICKS: i32 = 90;
 const WARNING_SOUND_RADIUS: i32 = 10;
 /// Vanilla `SculkShriekerBlockEntity.DEFAULT_WARNING_LEVEL`.
 const DEFAULT_WARNING_LEVEL: i32 = 0;
+/// Vanilla `SculkShriekerBlockEntity.VibrationUser.LISTENER_RADIUS`.
+const LISTENER_RADIUS: i32 = 8;
 
 const SHRIEKING: &BoolProperty = &BlockStateProperties::SHRIEKING;
 const CAN_SUMMON: &BoolProperty = &BlockStateProperties::CAN_SUMMON;
 
 struct SculkShriekerState {
     warning_level: i32,
-    listener: Option<NbtCompound>,
 }
 
 /// Vanilla `SculkShriekerBlockEntity`.
 pub struct SculkShriekerBlockEntity {
     base: BlockEntityBase,
     state: SyncMutex<SculkShriekerState>,
+    listener: Arc<VibrationListener>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `SculkShriekerBlockEntity`.
@@ -86,6 +100,10 @@ impl SculkShriekerBlockEntity {
     /// Creates sculk shrieker storage.
     #[must_use]
     pub fn new(world: Weak<World>, pos: BlockPos, state: BlockStateId) -> Self {
+        let user = Arc::new(SculkShriekerVibrationUser {
+            world: Weak::clone(&world),
+            block_pos: pos,
+        });
         Self {
             base: BlockEntityBase::new(
                 &vanilla_block_entity_types::SCULK_SHRIEKER,
@@ -95,9 +113,15 @@ impl SculkShriekerBlockEntity {
             ),
             state: SyncMutex::new(SculkShriekerState {
                 warning_level: DEFAULT_WARNING_LEVEL,
-                listener: None,
             }),
+            listener: Arc::new(VibrationListener::new(user)),
         }
+    }
+
+    /// Returns vanilla `SculkShriekerBlockEntity.getListener`.
+    #[must_use]
+    pub const fn listener(&self) -> &Arc<VibrationListener> {
+        &self.listener
     }
 
     /// Returns the stored warden warning level.
@@ -201,19 +225,27 @@ impl BlockEntity for SculkShriekerBlockEntity {
         &self.base
     }
 
+    /// Vanilla `SculkShriekerBlock.getTicker`, which is `VibrationSystem.Ticker.tick`.
+    fn tick(&self, world: &Arc<World>) {
+        self.listener.tick(world);
+    }
+
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt: NbtCompoundView<'_, '_> = nbt.into();
-        let mut state = self.state.lock();
-        state.warning_level = nbt.int("warning_level").unwrap_or(DEFAULT_WARNING_LEVEL);
-        state.listener = nbt.compound("listener").map(|listener| listener.to_owned());
+        self.state.lock().warning_level = nbt.int("warning_level").unwrap_or(DEFAULT_WARNING_LEVEL);
+        self.listener
+            .load(nbt.compound(VIBRATION_DATA_TAG).as_ref());
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
-        let state = self.state.lock();
-        nbt.insert("warning_level", state.warning_level);
-        if let Some(listener) = state.listener.clone() {
-            nbt.insert("listener", listener);
-        }
+        nbt.insert("warning_level", self.state.lock().warning_level);
+        let mut listener = NbtCompound::new();
+        self.listener.save(&mut listener);
+        nbt.insert(VIBRATION_DATA_TAG, listener);
+    }
+
+    fn game_event_listener(&self) -> Option<SharedGameEventListener> {
+        Some(Arc::clone(&self.listener) as SharedGameEventListener)
     }
 
     /// Vanilla parity: `SculkShriekerBlockEntity.preRemoveSideEffects`.
@@ -228,6 +260,81 @@ impl BlockEntity for SculkShriekerBlockEntity {
             return;
         };
         self.try_respond(&world);
+    }
+}
+
+/// Vanilla `SculkShriekerBlockEntity.VibrationUser`.
+///
+/// Its listenable events are only `sculk_sensor_tendrils_clicking`, so a shrieker answers a
+/// sculk sensor going off nearby rather than hearing the player itself.
+struct SculkShriekerVibrationUser {
+    world: Weak<World>,
+    block_pos: BlockPos,
+}
+
+impl SculkShriekerVibrationUser {
+    fn with_shrieker<R>(&self, action: impl FnOnce(&SculkShriekerBlockEntity) -> R) -> Option<R> {
+        let world = self.world.upgrade()?;
+        let block_entity = world.get_block_entity(self.block_pos)?;
+        let shrieker = block_entity.downcast_ref::<SculkShriekerBlockEntity>()?;
+        Some(action(shrieker))
+    }
+}
+
+impl VibrationUser for SculkShriekerVibrationUser {
+    fn listener_radius(&self) -> i32 {
+        LISTENER_RADIUS
+    }
+
+    fn position_source(&self) -> VibrationPositionSource {
+        VibrationPositionSource::Block(self.block_pos)
+    }
+
+    fn listenable_events(&self) -> Identifier {
+        GameEventTag::SHRIEKER_CAN_LISTEN
+    }
+
+    fn requires_adjacent_chunks_to_be_ticking(&self) -> bool {
+        true
+    }
+
+    /// Vanilla `SculkShriekerBlockEntity.VibrationUser.canReceiveVibration`.
+    fn can_receive_vibration(
+        &self,
+        world: &Arc<World>,
+        _pos: BlockPos,
+        _event: GameEventRef,
+        context: &GameEventContext<'_>,
+    ) -> bool {
+        if world.get_block_state(self.block_pos).get_value(SHRIEKING) {
+            return false;
+        }
+        context
+            .source_entity()
+            .and_then(|source| with_shrieking_player(source, |_| ()))
+            .is_some()
+    }
+
+    /// Vanilla `SculkShriekerBlockEntity.VibrationUser.onReceiveVibration`.
+    fn on_receive_vibration(
+        &self,
+        world: &Arc<World>,
+        _pos: BlockPos,
+        _event: GameEventRef,
+        source_entity: Option<&dyn Entity>,
+        projectile_owner: Option<&dyn Entity>,
+        _receiving_distance: f32,
+    ) {
+        let Some(source) = projectile_owner.or(source_entity) else {
+            return;
+        };
+        with_shrieking_player(source, |player| {
+            self.with_shrieker(|shrieker| shrieker.try_shriek(world, player));
+        });
+    }
+
+    fn on_data_changed(&self) {
+        self.with_shrieker(BlockEntity::set_changed);
     }
 }
 

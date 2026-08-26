@@ -2,28 +2,25 @@
 //!
 //! Vanilla parity: `SculkSensorBlock` and `CalibratedSculkSensorBlock`.
 //!
-//! Not implemented: vibrations. Steel has game events and game-event listeners, but no
-//! vibration layer on top of them -- there is no `VibrationSystem`, no `VibrationSelector`,
-//! no game-event frequency table and no `VibrationSystem.Listener` for a block entity to
-//! provide. Everything below the vibration is here and works: the phase machine, the
-//! redstone output, the comparator read, waterlogging and the experience drop.
-//! [`SculkSensorBlock::activate`] is the seam a vibration system attaches to; until one
-//! exists nothing in Steel calls it, so a sensor placed in the world stays inactive.
+//! A vibration reaching the block entity's listener ends in [`activate_sculk_sensor`],
+//! which drives the phase machine, the redstone output, the comparator read and the
+//! resonance that amethyst beside the sensor re-emits.
 
 use std::sync::{Arc, Weak};
 
 use steel_macros::block_behavior;
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{
     BlockStateProperties, BoolProperty, Direction, EnumProperty, IntProperty, SculkSensorPhase,
 };
 use steel_registry::fluid::FluidStateExt as _;
-use steel_registry::game_events::GameEventRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::{
-    REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_block_entity_types, vanilla_game_events,
+    REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_block_entity_types, vanilla_blocks,
+    vanilla_game_events,
 };
 use steel_utils::types::UpdateFlags;
 use steel_utils::value_providers::IntProvider;
@@ -35,12 +32,13 @@ use crate::behavior::block::{
 use crate::behavior::blocks::NoteBlock;
 use crate::behavior::context::BlockPlaceContext;
 use crate::behavior::try_drop_experience;
-use crate::block_entity::BLOCK_ENTITIES;
 use crate::block_entity::entities::SculkSensorBlockEntity;
+use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::entity::Entity;
 use crate::entity::ai::path::PathComputationType;
 use crate::fluid::get_fluid_state;
 use crate::world::game_event::GameEventContext;
+use crate::world::game_event::vibrations::resonance_event_by_frequency;
 use crate::world::{
     LevelReader, ScheduledTickAccess, SignalGetter as _, SignalQueryContext, World,
 };
@@ -97,32 +95,6 @@ pub fn deactivate_sculk_sensor(world: &Arc<World>, pos: BlockPos, state: BlockSt
     update_neighbors(world, pos, state);
 }
 
-/// Vanilla `VibrationSystem.getResonanceEventByFrequency`.
-///
-/// Steel has no `VibrationSystem`, but the fifteen `resonate_*` game events it indexes are
-/// registered and amethyst beside a sensor is the one part of resonance that is a plain
-/// block interaction. The mapping lives here because the sensor is its only caller.
-const fn resonance_event_by_frequency(frequency: i32) -> Option<GameEventRef> {
-    match frequency {
-        1 => Some(&vanilla_game_events::RESONATE_1),
-        2 => Some(&vanilla_game_events::RESONATE_2),
-        3 => Some(&vanilla_game_events::RESONATE_3),
-        4 => Some(&vanilla_game_events::RESONATE_4),
-        5 => Some(&vanilla_game_events::RESONATE_5),
-        6 => Some(&vanilla_game_events::RESONATE_6),
-        7 => Some(&vanilla_game_events::RESONATE_7),
-        8 => Some(&vanilla_game_events::RESONATE_8),
-        9 => Some(&vanilla_game_events::RESONATE_9),
-        10 => Some(&vanilla_game_events::RESONATE_10),
-        11 => Some(&vanilla_game_events::RESONATE_11),
-        12 => Some(&vanilla_game_events::RESONATE_12),
-        13 => Some(&vanilla_game_events::RESONATE_13),
-        14 => Some(&vanilla_game_events::RESONATE_14),
-        15 => Some(&vanilla_game_events::RESONATE_15),
-        _ => None,
-    }
-}
-
 /// Vanilla `SculkSensorBlock.RESONANCE_PITCH_BEND`, kept as the notes it bends to.
 ///
 /// Vanilla derives the sixteen pitches from this tone map through
@@ -170,6 +142,71 @@ pub fn try_resonate_vibration(
             relative_pos,
             1.0,
             NoteBlock::pitch_from_note(*tone),
+            None,
+        );
+    }
+}
+
+/// Vanilla `SculkSensorBlock.activate`, reached from the block entity's vibration user.
+///
+/// Vanilla dispatches on the block instance the sensor's state names. The two sensors differ
+/// only in how long they stay active, so the state selects that here instead of a downcast
+/// back to the behavior.
+pub fn activate_sculk_sensor(
+    source_entity: Option<&dyn Entity>,
+    world: &Arc<World>,
+    pos: BlockPos,
+    state: BlockStateId,
+    calculated_power: u8,
+    vibration_frequency: i32,
+) {
+    let active_ticks = if state.get_block() == &vanilla_blocks::CALIBRATED_SCULK_SENSOR {
+        CALIBRATED_ACTIVE_TICKS
+    } else {
+        ACTIVE_TICKS
+    };
+    activate(
+        source_entity,
+        world,
+        pos,
+        state,
+        calculated_power,
+        vibration_frequency,
+        active_ticks,
+    );
+}
+
+/// Vanilla `SculkSensorBlock.activate`.
+fn activate(
+    source_entity: Option<&dyn Entity>,
+    world: &Arc<World>,
+    pos: BlockPos,
+    state: BlockStateId,
+    calculated_power: u8,
+    vibration_frequency: i32,
+    active_ticks: i32,
+) {
+    world.set_block(
+        pos,
+        state
+            .set_value(PHASE, SculkSensorPhase::Active)
+            .set_value(POWER, calculated_power),
+        UpdateFlags::UPDATE_ALL,
+    );
+    world.schedule_block_tick_default(pos, state.get_block(), active_ticks);
+    update_neighbors(world, pos, state);
+    try_resonate_vibration(source_entity, world, pos, vibration_frequency);
+    world.game_event(
+        &vanilla_game_events::SCULK_SENSOR_TENDRILS_CLICKING,
+        pos,
+        &GameEventContext::new(source_entity, None),
+    );
+    if !state.get_value(WATERLOGGED) {
+        world.play_block_sound(
+            &sound_events::BLOCK_SCULK_SENSOR_CLICKING,
+            pos,
+            1.0,
+            rand::random::<f32>().mul_add(0.2, 0.8),
             None,
         );
     }
@@ -231,30 +268,15 @@ impl SculkSensorCore {
         calculated_power: u8,
         vibration_frequency: i32,
     ) {
-        world.set_block(
+        activate(
+            source_entity,
+            world,
             pos,
-            state
-                .set_value(PHASE, SculkSensorPhase::Active)
-                .set_value(POWER, calculated_power),
-            UpdateFlags::UPDATE_ALL,
+            state,
+            calculated_power,
+            vibration_frequency,
+            self.active_ticks,
         );
-        world.schedule_block_tick_default(pos, state.get_block(), self.active_ticks);
-        update_neighbors(world, pos, state);
-        try_resonate_vibration(source_entity, world, pos, vibration_frequency);
-        world.game_event(
-            &vanilla_game_events::SCULK_SENSOR_TENDRILS_CLICKING,
-            pos,
-            &GameEventContext::new(source_entity, None),
-        );
-        if !state.get_value(WATERLOGGED) {
-            world.play_block_sound(
-                &sound_events::BLOCK_SCULK_SENSOR_CLICKING,
-                pos,
-                1.0,
-                rand::random::<f32>().mul_add(0.2, 0.8),
-                None,
-            );
-        }
     }
 
     /// Vanilla `SculkSensorBlock.onPlace`.
@@ -309,6 +331,19 @@ impl SculkSensorCore {
             pos,
             state,
         ))
+    }
+
+    /// Vanilla `SculkSensorBlock.getTicker`, which only ticks the vibration system.
+    fn block_entity_ticker(
+        &self,
+        block_entity_type: BlockEntityTypeRef,
+    ) -> Option<BlockEntityTicker> {
+        let expected = if self.calibrated {
+            &vanilla_block_entity_types::CALIBRATED_SCULK_SENSOR
+        } else {
+            &vanilla_block_entity_types::SCULK_SENSOR
+        };
+        BlockEntityTicker::for_matching_entity_tick(block_entity_type, expected)
     }
 
     /// Vanilla `SculkSensorBlock.getAnalogOutputSignal`.
@@ -420,6 +455,15 @@ impl BlockBehavior for SculkSensorBlock {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         self.core.new_block_entity(level, pos, state)
+    }
+
+    fn get_block_entity_ticker(
+        &self,
+        _world: &Arc<World>,
+        _state: BlockStateId,
+        block_entity_type: BlockEntityTypeRef,
+    ) -> Option<BlockEntityTicker> {
+        self.core.block_entity_ticker(block_entity_type)
     }
 
     fn is_signal_source(&self, _state: BlockStateId, _context: SignalQueryContext) -> bool {
@@ -594,6 +638,15 @@ impl BlockBehavior for CalibratedSculkSensorBlock {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         self.core.new_block_entity(level, pos, state)
+    }
+
+    fn get_block_entity_ticker(
+        &self,
+        _world: &Arc<World>,
+        _state: BlockStateId,
+        block_entity_type: BlockEntityTypeRef,
+    ) -> Option<BlockEntityTicker> {
+        self.core.block_entity_ticker(block_entity_type)
     }
 
     fn is_signal_source(&self, _state: BlockStateId, _context: SignalQueryContext) -> bool {

@@ -2,14 +2,18 @@
 //!
 //! Vanilla parity: `SculkShriekerBlock`.
 //!
-//! Not implemented: the warden and vibrations. `Warden` and `WardenSpawnTracker` do not
-//! exist in Steel, so a shrieker never escalates a warning and never summons; and with no
-//! `VibrationSystem` it only hears the player who walks on it, not the ones it would hear
-//! from eight blocks away. See `SculkShriekerBlockEntity` for the response side.
+//! A shrieker hears through the block entity's vibration listener as well as through
+//! `stepOn`, which is why walking onto one and setting off a sculk sensor beside one both
+//! start a shriek.
+//!
+//! Not implemented: the warden. `Warden` and `WardenSpawnTracker` do not exist in Steel, so
+//! a shrieker never escalates a warning and never summons. See `SculkShriekerBlockEntity`
+//! for the response side.
 
 use std::sync::{Arc, Weak};
 
 use steel_macros::block_behavior;
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty, Direction};
@@ -25,8 +29,8 @@ use crate::behavior::block::{
 };
 use crate::behavior::context::BlockPlaceContext;
 use crate::behavior::try_drop_experience;
-use crate::block_entity::BLOCK_ENTITIES;
 use crate::block_entity::entities::{SculkShriekerBlockEntity, with_shrieking_player};
+use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::entity::Entity;
 use crate::fluid::get_fluid_state;
 use crate::world::{ScheduledTickAccess, World};
@@ -121,6 +125,19 @@ impl BlockBehavior for SculkShriekerBlock {
             pos,
             state,
         ))
+    }
+
+    /// Vanilla `SculkShriekerBlock.getTicker`, which only ticks the vibration system.
+    fn get_block_entity_ticker(
+        &self,
+        _world: &Arc<World>,
+        _state: BlockStateId,
+        block_entity_type: BlockEntityTypeRef,
+    ) -> Option<BlockEntityTicker> {
+        BlockEntityTicker::for_matching_entity_tick(
+            block_entity_type,
+            &vanilla_block_entity_types::SCULK_SHRIEKER,
+        )
     }
 
     fn spawn_after_break(

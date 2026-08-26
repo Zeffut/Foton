@@ -11,6 +11,8 @@ use steel_macros::entity_behavior;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_damage_types;
+use steel_registry::vanilla_item_tags::ItemTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _};
 use steel_registry::vanilla_entity_data::ItemEntityData;
 use steel_utils::UuidExt;
 use steel_utils::locks::SyncMutex;
@@ -526,6 +528,14 @@ impl Entity for ItemEntity {
 
     fn entity_type(&self) -> EntityTypeRef {
         self.entity_type
+    }
+
+    /// Vanilla `ItemEntity.dampensVibrations`: wool lying on a sculk sensor silences the
+    /// item, which is one half of how a player hides from the deep dark.
+    fn dampens_vibrations(&self) -> bool {
+        REGISTRY
+            .items
+            .is_in_tag(self.get_item().item(), &ItemTag::DAMPENS_VIBRATIONS)
     }
 
     fn tick(&self) {

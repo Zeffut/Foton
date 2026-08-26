@@ -1787,6 +1787,13 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         self.is_suppressing_bounce()
     }
 
+    /// Returns true when this entity swallows the vibrations it would otherwise emit.
+    ///
+    /// Vanilla parity: `Entity.dampensVibrations`.
+    fn dampens_vibrations(&self) -> bool {
+        false
+    }
+
     /// Returns true when vanilla collision context should treat the entity as descending.
     fn is_descending(&self) -> bool {
         self.synced_data()
