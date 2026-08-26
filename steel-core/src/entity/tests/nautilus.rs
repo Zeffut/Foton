@@ -252,6 +252,65 @@ fn only_a_tame_nautilus_eats_anything_but_its_taming_items() {
     );
 }
 
+/// Feeding an untamed nautilus spends one fish and comes back.
+///
+/// `AbstractNautilus.usePlayerItem` is what `Mob::use_player_item` is overridden
+/// with, so the branch that is meant to be `Mob.usePlayerItem` cannot call it:
+/// Rust has no `super`, and the call comes straight back. It did, and a
+/// right-click with a pufferfish overflowed the stack and killed the server --
+/// found by a real client, not by any of the tests above it.
+#[test]
+fn feeding_an_untamed_nautilus_spends_one_fish() {
+    let world = nautilus_world("nautilus_feed");
+    let nautilus = spawn_nautilus(&world);
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Feeder", next_entity_id()).build();
+    player.set_item_in_hand(
+        InteractionHand::MainHand,
+        ItemStack::with_count(&vanilla_items::PUFFERFISH, 4),
+    );
+
+    let result = Mob::mob_interact(nautilus.as_ref(), &player, InteractionHand::MainHand);
+
+    assert!(
+        result.consumes_action(),
+        "an untamed nautilus takes its taming item"
+    );
+    assert_eq!(
+        player.get_item_in_hand(InteractionHand::MainHand).count(),
+        3,
+        "feeding spends exactly one fish"
+    );
+}
+
+/// A bucket of fish leaves the bucket behind.
+///
+/// Vanilla parity: the `ItemUtils.createFilledResult` branch of
+/// `AbstractNautilus.usePlayerItem`, which is the only reason that override
+/// exists at all.
+#[test]
+fn feeding_a_nautilus_a_bucket_of_fish_hands_the_bucket_back() {
+    let world = nautilus_world("nautilus_feed_bucket");
+    let nautilus = spawn_nautilus(&world);
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Bucketeer", next_entity_id()).build();
+    player.set_item_in_hand(
+        InteractionHand::MainHand,
+        ItemStack::new(&vanilla_items::PUFFERFISH_BUCKET),
+    );
+
+    let result = Mob::mob_interact(nautilus.as_ref(), &player, InteractionHand::MainHand);
+
+    assert!(
+        result.consumes_action(),
+        "a bucket of pufferfish is in #minecraft:nautilus_taming_items"
+    );
+    assert!(
+        player
+            .get_item_in_hand(InteractionHand::MainHand)
+            .is(&vanilla_items::WATER_BUCKET),
+        "the emptied bucket comes back as a water bucket"
+    );
+}
+
 /// A rider's charged jump arms the dash on the server.
 ///
 /// The impulse itself is the controlling client's, but the flag, the cooldown

@@ -295,6 +295,10 @@ pub trait AbstractNautilus: TamableAnimal {
 
     /// Applies vanilla `AbstractNautilus.usePlayerItem`, which hands back the
     /// water bucket a bucket of fish leaves behind.
+    ///
+    /// Rust has no `super`, and this is what `Mob::use_player_item` is
+    /// overridden with, so the `else` branch spells `Mob.usePlayerItem` out
+    /// rather than calling it -- calling it would come straight back here.
     fn use_nautilus_player_item(&self, player: &Player, hand: InteractionHand) {
         let is_bucket_food = {
             let inventory = player.inventory.lock();
@@ -304,7 +308,7 @@ pub trait AbstractNautilus: TamableAnimal {
             )
         };
         if !is_bucket_food {
-            Mob::use_player_item(self, player, hand);
+            player.inventory.lock().shrink_item_in_hand(hand, 1);
             return;
         }
 
