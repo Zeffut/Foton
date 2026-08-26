@@ -28,6 +28,5 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 2
-HappyGhast
+[entities] 1
 Player
