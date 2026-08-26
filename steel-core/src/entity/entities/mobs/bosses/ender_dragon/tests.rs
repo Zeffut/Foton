@@ -242,3 +242,58 @@ fn a_hit_that_is_neither_a_player_nor_an_explosion_is_swallowed_but_reported_as_
         before - dragon.get_health()
     );
 }
+
+/// Vanilla parity: `EnderDragon.hurtServer` routes a hit that arrives on the
+/// dragon itself -- a command, a potion, a fall -- through the body hitbox, so
+/// it takes the same quarter damage a body hit takes. Everything else in this
+/// file comes in through a part; this is the other door, and `/damage` is what
+/// walks through it.
+#[test]
+fn a_hit_addressed_to_the_dragon_itself_goes_through_the_body_hitbox() {
+    let world = prepared_world("dragon_direct_hurt_routes_through_body");
+    let dragon = world_dragon(&world);
+    let entity: SharedEntity = dragon.clone();
+    world
+        .try_add_entity(entity.clone())
+        .expect("dragon should spawn");
+
+    let before = dragon.get_health();
+    let landed = entity.hurt(world.as_ref(), &accepted_hit(), 40.0);
+    let taken = before - dragon.get_health();
+
+    assert!(landed, "the hit on the dragon was refused");
+    assert!(
+        (taken - (40.0 / 4.0 + 1.0)).abs() < 0.001,
+        "the dragon took {taken} where a body hitbox's eleven was expected"
+    );
+}
+
+/// Hovering counts as sitting, so a beating accumulates towards a takeoff.
+/// Vanilla parity: the `sittingDamageReceived > 0.25F * getMaxHealth()` of
+/// `EnderDragon.hurt`, which is what stops a landed dragon being a free kill.
+#[test]
+fn beating_a_sitting_dragon_past_a_quarter_of_its_health_makes_it_take_off() {
+    let world = prepared_world("dragon_sitting_damage_takes_off");
+    let dragon = world_dragon(&world);
+    world
+        .try_add_entity(dragon.clone() as SharedEntity)
+        .expect("dragon should spawn");
+    assert!(
+        dragon.phase_manager().current_instance().is_sitting(),
+        "a new dragon should be hovering, which counts as sitting"
+    );
+
+    // Each hit clears the damage cooldown first, the way twenty ticks apart
+    // would in the world.
+    for _ in 0..6 {
+        dragon.living_base().set_invulnerable_time(0);
+        dragon
+            .part(DragonPartIndex::Body)
+            .hurt(world.as_ref(), &accepted_hit(), 40.0);
+    }
+
+    assert_eq!(
+        dragon.phase_manager().current_phase(),
+        EnderDragonPhase::Takeoff
+    );
+}
