@@ -5,25 +5,28 @@
 //! It has no health: any hit at all destroys it, and destroying it sets off a
 //! six-block blast, which is what makes clearing the pillars a chain reaction.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_macros::entity_behavior;
+use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::vanilla_damage_type_tags::DamageTypeTag;
 use steel_registry::vanilla_damage_types;
 use steel_registry::vanilla_entity_data::EndCrystalEntityData;
 use steel_registry::vanilla_game_rules::BLOCK_EXPLOSION_DROP_DECAY;
+use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, locks::SyncMutex};
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::behavior::blocks::FireBlock;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::EnderDragon;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntitySyncedData, RemovalReason};
-use crate::world::World;
 use crate::world::explosion::ExplosionSpec;
+use crate::world::{LevelAccessor as _, LevelReader as _, World};
 
 /// How far the blast a broken crystal leaves reaches.
 ///
@@ -31,10 +34,6 @@ use crate::world::explosion::ExplosionSpec;
 const EXPLOSION_RADIUS: f32 = 6.0;
 
 /// End Crystal entity state needed by worldgen and persistence.
-///
-/// **Gaps**: the tick is still empty. Vanilla's refreshes the fire under a
-/// crystal that belongs to a dragon fight and runs the portal check; both need
-/// `EnderDragonFight`, which is not implemented.
 #[entity_behavior(class = "EndCrystal")]
 pub struct EndCrystalEntity {
     base: EntityBase,
@@ -110,6 +109,15 @@ impl EndCrystalEntity {
     const fn nbt_bool(value: bool) -> i8 {
         if value { 1 } else { 0 }
     }
+
+    /// Tells the fight one of its crystals is gone.
+    ///
+    /// Vanilla parity: `EndCrystal.onDestroyedBy`.
+    fn on_destroyed_by(&self, world: &Arc<World>, source: &DamageSource) {
+        if let Some(fight) = world.dragon_fight() {
+            fight.on_crystal_destroyed(world, self, source);
+        }
+    }
 }
 
 impl Entity for EndCrystalEntity {
@@ -121,10 +129,29 @@ impl Entity for EndCrystalEntity {
         self.entity_type
     }
 
-    /// Vanilla parity: `EndCrystal.tick` also relights the fire beneath a
-    /// crystal that belongs to a dragon fight, and runs the portal check. Both
-    /// wait on `EnderDragonFight`.
-    fn tick(&self) {}
+    /// Vanilla parity: `EndCrystal.tick`. The only server work in it is
+    /// relighting the fire a crystal of a dragon fight sits in, which is what
+    /// makes the pillar crystals burn again after a blast has put them out.
+    ///
+    /// **Gap**: `applyEffectsFromBlocks` and `handlePortal` are not carried.
+    fn tick(&self) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        if world.dragon_fight().is_none() {
+            return;
+        }
+
+        let pos = self.block_position();
+        if !world.get_block_state(pos).is_air() {
+            return;
+        }
+        world.set_block_state(
+            pos,
+            FireBlock::get_state(world.as_ref(), pos),
+            UpdateFlags::UPDATE_ALL,
+        );
+    }
 
     fn is_pickable(&self) -> bool {
         true
@@ -135,13 +162,10 @@ impl Entity for EndCrystalEntity {
     /// explosion it takes a six-block blast with it. That chain -- one arrow,
     /// four crystals, four blasts -- is how the pillars come down.
     ///
-    /// **Gap**: vanilla then calls `onDestroyedBy`, which tells the
-    /// `EnderDragonFight` so the fight can abort a respawn ritual, recount the
-    /// crystals, and hand the news to
+    /// Breaking one then calls `onDestroyedBy`, which is the only route from a
+    /// crystal to a dragon: the fight aborts a respawn ritual, recounts the
+    /// crystals, and hands the news to
     /// [`EnderDragon::on_crystal_destroyed`](crate::entity::entities::EnderDragon::on_crystal_destroyed).
-    /// The fight is not implemented, and it is the only route vanilla has from
-    /// a crystal to a dragon, so a dragon is not yet told when the crystal it
-    /// was healing from is broken.
     fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
         if self.is_invulnerable_to_base(source) {
             return false;
@@ -162,30 +186,31 @@ impl Entity for EndCrystalEntity {
         }
 
         self.set_removed(RemovalReason::Killed);
-        if source.is(&DamageTypeTag::IS_EXPLOSION) {
-            return true;
-        }
 
         let Some(world) = self.level() else {
             return true;
         };
-        let damage_source = source.causing_entity_id.map(|causing| {
-            DamageSource::environment(&vanilla_damage_types::EXPLOSION)
-                .with_direct_entity(self.id())
-                .with_causing_entity(causing)
-        });
-        world.explode(
-            ExplosionSpec::new(
-                Some(self.id()),
-                source.causing_entity_id,
-                damage_source,
-                EXPLOSION_RADIUS,
-                false,
-                world.explosion_destroy_type(&BLOCK_EXPLOSION_DROP_DECAY),
-            ),
-            self.position(),
-        );
 
+        if !source.is(&DamageTypeTag::IS_EXPLOSION) {
+            let damage_source = source.causing_entity_id.map(|causing| {
+                DamageSource::environment(&vanilla_damage_types::EXPLOSION)
+                    .with_direct_entity(self.id())
+                    .with_causing_entity(causing)
+            });
+            world.explode(
+                ExplosionSpec::new(
+                    Some(self.id()),
+                    source.causing_entity_id,
+                    damage_source,
+                    EXPLOSION_RADIUS,
+                    false,
+                    world.explosion_destroy_type(&BLOCK_EXPLOSION_DROP_DECAY),
+                ),
+                self.position(),
+            );
+        }
+
+        self.on_destroyed_by(&world, source);
         true
     }
 

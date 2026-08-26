@@ -28,6 +28,11 @@ pub mod names {
     /// Per loaded world rather than per domain, the way `chunk_tickets` is: a
     /// raid belongs to the dimension whose village it besieges.
     pub const RAIDS: SavedDataName = SavedDataName::trusted("raids");
+    /// Vanilla `EnderDragonFight.TYPE`, persisted as `data/ender_dragon_fight.toml`.
+    ///
+    /// Per loaded world, like the two above it: a fight belongs to the End it
+    /// runs in, and a server can host more than one.
+    pub const ENDER_DRAGON_FIGHT: SavedDataName = SavedDataName::trusted("ender_dragon_fight");
     /// Domain command scoreboard, persisted through the domain default world.
     pub const SCOREBOARD: SavedDataName = SavedDataName::trusted("scoreboard");
     /// Domain command storage, persisted through the domain default world.

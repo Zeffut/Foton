@@ -14,6 +14,7 @@ pub mod chunk;
 pub mod chunk_saver;
 pub mod command;
 pub mod config;
+pub mod dimension;
 pub(crate) mod enchantment_helper;
 pub(crate) mod enchantment_selection;
 pub mod entity;

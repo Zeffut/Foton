@@ -39,7 +39,7 @@ impl FeatureDecorationRunner {
         true
     }
 
-    fn end_spikes_for_level(seed: i64) -> Vec<EndSpike> {
+    pub(crate) fn end_spikes_for_level(seed: i64) -> Vec<EndSpike> {
         let mut seed_random = LegacyRandom::from_seed(seed as u64);
         let cache_key = seed_random.next_i64() & 65_535;
         let mut random = LegacyRandom::from_seed(cache_key as u64);

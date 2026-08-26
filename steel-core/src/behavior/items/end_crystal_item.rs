@@ -17,11 +17,9 @@ use steel_utils::WorldAabb;
 
 /// Places an end crystal on obsidian or bedrock.
 ///
-/// Vanilla parity: `EndCrystalItem`.
-///
-/// Steel gap: Vanilla finishes by asking the End's `EnderDragonFight` to
-/// `tryRespawn`. Steel has no dragon fight, so four crystals on the portal
-/// place normally and simply do nothing more.
+/// Vanilla parity: `EndCrystalItem`. Placing one in the End also asks the
+/// [fight](crate::dimension::end::EnderDragonFight) whether the four crystals
+/// of the respawn ritual are now standing, which is the ritual's only trigger.
 #[item_behavior]
 pub struct EndCrystalItem;
 
@@ -66,6 +64,9 @@ impl ItemBehavior for EndCrystalItem {
             above,
             &GameEventContext::new(Some(context.player), None),
         );
+        if let Some(fight) = context.world.dragon_fight() {
+            fight.try_respawn(context.world);
+        }
         context.inv.with_item(|item| item.shrink(1));
 
         InteractionResult::Success

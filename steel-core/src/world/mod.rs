@@ -17,6 +17,8 @@ use crate::chunk::light::{
     LightLayer, LightSectionEmptinessChange, MAX_LIGHT_LEVEL, has_different_light_properties,
 };
 use crate::chunk::status::ChunkStatus;
+use crate::dimension::end::EnderDragonFight;
+use crate::dimension::end::fight::PersistentEnderDragonFight;
 use crate::poi::OccupationStatus;
 use crate::portal::WorldChangeRequest;
 use crate::raid::{PersistentRaids, Raids};
@@ -188,6 +190,26 @@ const fn initialize_border_packet(snapshot: WorldBorderSnapshot) -> CInitializeB
     }
 }
 
+/// Loads the dragon fight of a world whose dimension type runs one.
+///
+/// Vanilla parity: the `if (this.dimensionType().hasEnderDragonFight())` of
+/// `ServerLevel`'s constructor, which reads the saved fight and immediately
+/// hands it the level, the seed and `BlockPos.ZERO`.
+async fn load_dragon_fight(
+    saved_data: &SavedDataManager,
+    dimension_type: DimensionTypeRef,
+    seed: i64,
+) -> io::Result<Option<EnderDragonFight>> {
+    if !dimension_type.has_ender_dragon_fight {
+        return Ok(None);
+    }
+
+    let persistent: PersistentEnderDragonFight = saved_data
+        .load_or_default(saved_data_names::ENDER_DRAGON_FIGHT)
+        .await?;
+    Ok(Some(EnderDragonFight::from_persistent(persistent, seed)))
+}
+
 /// Timing information for a world game tick.
 #[derive(Debug)]
 pub struct WorldGameTickTimings {
@@ -317,6 +339,12 @@ pub struct World {
     /// rather than per domain, like the chunk tickets above it: a raid belongs
     /// to the dimension whose village it besieges.
     raids: Raids,
+    /// The dragon fight this loaded world runs, saved as
+    /// `data/ender_dragon_fight.toml`.
+    ///
+    /// Vanilla parity: `ServerLevel.dragonFight`, which exists only on a
+    /// dimension whose type has `has_ender_dragon_fight`.
+    dragon_fight: Option<EnderDragonFight>,
     /// World-change requests queued by world-local ticks for server safe-point processing.
     pending_world_changes: SyncMutex<Vec<(SharedEntity, WorldChangeRequest)>>,
     /// The level's own random source.
@@ -410,6 +438,7 @@ impl World {
         let persistent_raids: PersistentRaids =
             saved_data.load_or_default(saved_data_names::RAIDS).await?;
         let raids = Raids::from_persistent(persistent_raids);
+        let dragon_fight = load_dragon_fight(&saved_data, dimension_type, seed).await?;
         let world_border = WorldBorder::new(level_data.data().world_border)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         // let generator = Arc::new(ChunkGeneratorType::Flat(FlatChunkGenerator::new(
@@ -478,6 +507,7 @@ impl World {
                 scheduled_fluid_ticks_this_tick: SyncMutex::new(None),
                 poi_storage: SyncMutex::new(PointOfInterestStorage::new()),
                 raids,
+                dragon_fight,
                 pending_world_changes: SyncMutex::new(Vec::new()),
                 level_random: SyncMutex::new(RandomSource::Legacy(LegacyRandom::from_seed(
                     rand::random(),
@@ -533,6 +563,18 @@ impl World {
             Err(e) => log::error!("Failed to save world raid data: {e}"),
         }
 
+        if let Some(fight) = self.dragon_fight.as_ref() {
+            let fight = fight.to_persistent();
+            match self
+                .saved_data
+                .save(saved_data_names::ENDER_DRAGON_FIGHT, &fight)
+                .await
+            {
+                Ok(()) => log::info!("World {} saved dragon fight data successfully", self.key),
+                Err(e) => log::error!("Failed to save world dragon fight data: {e}"),
+            }
+        }
+
         match self.save_all_chunks().await {
             Ok(count) => *total_saved += count,
             Err(e) => log::error!("Failed to save world chunks: {e}"),
@@ -543,6 +585,16 @@ impl World {
     #[must_use]
     pub fn domain(&self) -> &str {
         self.key.namespace.as_ref()
+    }
+
+    /// Returns the dragon fight this world runs, if it runs one.
+    ///
+    /// Vanilla parity: `ServerLevel.getDragonFight`. `None` outside the End,
+    /// which is what makes a dragon summoned anywhere else fightless -- no boss
+    /// bar, no crystals, no exit portal, exactly as in vanilla.
+    #[must_use]
+    pub const fn dragon_fight(&self) -> Option<&EnderDragonFight> {
+        self.dragon_fight.as_ref()
     }
 
     /// Returns whether this world uses vanilla's Nether dimension type.
@@ -602,6 +654,14 @@ impl World {
 
         // Vanilla clears this before ticking entities and block entities.
         self.handling_tick.store(false, Ordering::Relaxed);
+
+        // Vanilla parity: the `profiler.push("dragonFight")` step of
+        // `ServerLevel.tick`, which opens the entity phase -- the fight decides
+        // whether a dragon exists before the dragon gets its tick.
+        if runs_normally && let Some(fight) = self.dragon_fight.as_ref() {
+            let _span = tracing::trace_span!("dragon_fight").entered();
+            fight.tick(self);
+        }
 
         let entity_tick = {
             let _span = tracing::trace_span!("entity_tick").entered();
