@@ -387,6 +387,32 @@ memory_module_types! {
     /// Vanilla `MemoryModuleType.BREEZE_LEAVING_WATER`, which tells a jump that
     /// started in water not to read the water it is still in as a landing.
     BREEZE_LEAVING_WATER: Unit = "minecraft:breeze_leaving_water", saved = true;
+    /// Vanilla `MemoryModuleType.ROAR_TARGET`, who a warden is about to roar at.
+    ROAR_TARGET: EntityMemory = "minecraft:roar_target", saved = false;
+    /// Vanilla `MemoryModuleType.DISTURBANCE_LOCATION`, where a warden last heard something.
+    DISTURBANCE_LOCATION: BlockPos = "minecraft:disturbance_location", saved = false;
+    /// Vanilla `MemoryModuleType.RECENT_PROJECTILE`.
+    RECENT_PROJECTILE: Unit = "minecraft:recent_projectile", saved = true;
+    /// Vanilla `MemoryModuleType.IS_SNIFFING`.
+    IS_SNIFFING: Unit = "minecraft:is_sniffing", saved = true;
+    /// Vanilla `MemoryModuleType.IS_EMERGING`.
+    IS_EMERGING: Unit = "minecraft:is_emerging", saved = true;
+    /// Vanilla `MemoryModuleType.ROAR_SOUND_DELAY`.
+    ROAR_SOUND_DELAY: Unit = "minecraft:roar_sound_delay", saved = true;
+    /// Vanilla `MemoryModuleType.DIG_COOLDOWN`.
+    DIG_COOLDOWN: Unit = "minecraft:dig_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.ROAR_SOUND_COOLDOWN`.
+    ROAR_SOUND_COOLDOWN: Unit = "minecraft:roar_sound_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.TOUCH_COOLDOWN`.
+    TOUCH_COOLDOWN: Unit = "minecraft:touch_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.VIBRATION_COOLDOWN`.
+    VIBRATION_COOLDOWN: Unit = "minecraft:vibration_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.SONIC_BOOM_COOLDOWN`.
+    SONIC_BOOM_COOLDOWN: Unit = "minecraft:sonic_boom_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.SONIC_BOOM_SOUND_COOLDOWN`.
+    SONIC_BOOM_SOUND_COOLDOWN: Unit = "minecraft:sonic_boom_sound_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.SONIC_BOOM_SOUND_DELAY`.
+    SONIC_BOOM_SOUND_DELAY: Unit = "minecraft:sonic_boom_sound_delay", saved = true;
 }
 
 /// Everything a brain remembers.

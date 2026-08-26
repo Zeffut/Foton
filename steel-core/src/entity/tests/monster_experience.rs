@@ -13,8 +13,8 @@ use super::*;
 use crate::entity::entities::{
     BoggedEntity, BreezeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity,
     GiantEntity, HoglinEntity, HuskEntity, ParchedEntity, PiglinBruteEntity, PiglinEntity,
-    SilverfishEntity, SkeletonEntity, SpiderEntity, StrayEntity, WitchEntity, WitherSkeletonEntity,
-    ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
+    SilverfishEntity, SkeletonEntity, SpiderEntity, StrayEntity, WardenEntity, WitchEntity,
+    WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -66,11 +66,19 @@ fn a_breeze_is_worth_twice_an_ordinary_monster() {
     init_vanilla_registry();
     let breeze = BreezeEntity::new(
         &vanilla_entities::BREEZE,
+/// Vanilla parity: the `this.xpReward = 5` of the `Warden` constructor. A warden is a
+/// monster like any other on the way out, however little like one it is to fight.
+#[test]
+fn a_warden_is_worth_five() {
+    init_vanilla_registry();
+    let warden = WardenEntity::new(
+        &vanilla_entities::WARDEN,
         next_entity_id(),
         DVec3::ZERO,
         Weak::new(),
     );
     assert_eq!(breeze.xp_reward(), 10);
+    assert_eq!(warden.xp_reward(), 5);
 }
 
 /// Vanilla parity: the `this.xpReward = 20` of the `PiglinBrute` constructor,

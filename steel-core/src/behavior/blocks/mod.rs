@@ -70,8 +70,8 @@ pub(crate) use redstone::{MAX_REDSTONE_SIGNAL, MIN_REDSTONE_SIGNAL};
 pub use sculk::behavior_of as sculk_behavior_of;
 pub use sculk::{
     CalibratedSculkSensorBlock, ChargeCursor, SculkBehaviorKind, SculkBlock, SculkCatalystBlock,
-    SculkSensorBlock, SculkShriekerBlock, SculkSpreader, can_activate_sculk_sensor,
-    deactivate_sculk_sensor, sculk_sensor_phase, try_resonate_vibration,
+    SculkSensorBlock, SculkShriekerBlock, SculkSpreader, activate_sculk_sensor,
+    can_activate_sculk_sensor, deactivate_sculk_sensor, sculk_sensor_phase, try_resonate_vibration,
 };
 pub use spawner::{SpawnerBlock, TrialSpawnerBlock, VaultBlock};
 pub(crate) use utils::multiface_face_property;

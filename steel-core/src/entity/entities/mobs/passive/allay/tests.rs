@@ -32,6 +32,18 @@ fn live_allay(world: &Arc<World>) -> Arc<AllayEntity> {
     allay
 }
 
+/// Runs `ticks` allay ticks with the world clock, which is what a vibration needs to be
+/// selected and then travel.
+fn run_ticks(world: &Arc<World>, allay: &Arc<AllayEntity>, ticks: i32) {
+    for _ in 0..ticks {
+        let now = world.game_time();
+        world.level_data.write().set_game_time(now + 1);
+        allay.advance_tick_count();
+        allay.base_tick();
+        Entity::tick(allay.as_ref());
+    }
+}
+
 fn test_player(world: &Arc<World>) -> Arc<Player> {
     TestPlayerBuilder::new(Arc::clone(world), "AllayFriend", next_entity_id()).build()
 }
@@ -314,7 +326,9 @@ fn an_empty_handed_allay_picks_nothing_up() {
 #[test]
 fn an_allay_hears_a_note_block_and_serves_it_until_the_clock_runs_out() {
     // The note block is what an allay deposits at instead of a player, and the
-    // ten-second clock is what makes it stop when nobody plays it any more.
+    // ten-second clock is what makes it stop when nobody plays it any more. The note
+    // block reaches the allay as a vibration, so it is heard a tick or two after it is
+    // struck rather than the instant it is.
     let world = allay_world("allay_noteblock");
     let allay = live_allay(&world);
     assert!(world.set_block(
@@ -322,12 +336,14 @@ fn an_allay_hears_a_note_block_and_serves_it_until_the_clock_runs_out() {
         vanilla_blocks::NOTE_BLOCK.default_state(),
         UpdateFlags::UPDATE_NONE
     ));
+    run_ticks(&world, &allay, 1);
 
     world.game_event(
         &vanilla_game_events::NOTE_BLOCK_PLAY,
         TEST_POS,
         &GameEventContext::new(None, None),
     );
+    run_ticks(&world, &allay, 4);
 
     assert_eq!(
         allay
@@ -337,11 +353,15 @@ fn an_allay_hears_a_note_block_and_serves_it_until_the_clock_runs_out() {
         Some(TEST_POS),
         "an allay in range should remember the note block it heard"
     );
-    assert_eq!(
-        allay
-            .brain
-            .get_memory(memory_module_types::LIKED_NOTEBLOCK_COOLDOWN_TICKS),
-        Some(600)
+    // The clock starts at 600 and the brain counts it down from the tick the vibration
+    // arrived on, which is a tick or two into the run.
+    let cooldown = allay
+        .brain
+        .get_memory(memory_module_types::LIKED_NOTEBLOCK_COOLDOWN_TICKS)
+        .expect("hearing a note block starts its ten-second clock");
+    assert!(
+        (590..=600).contains(&cooldown),
+        "the note block clock should have just started, got {cooldown}"
     );
 
     // A second note block somewhere else does not steal it.
@@ -356,6 +376,7 @@ fn an_allay_hears_a_note_block_and_serves_it_until_the_clock_runs_out() {
         other,
         &GameEventContext::new(None, None),
     );
+    run_ticks(&world, &allay, 6);
 
     assert_eq!(
         allay

@@ -409,7 +409,7 @@ impl Entity for ArmadilloEntity {
     /// Vanilla parity: `Armadillo.tick`. The head clamp is what stops a balled
     /// armadillo swiveling to watch what frightened it.
     fn tick(&self) {
-        self.default_tick();
+        LivingEntity::tick_living_entity(self);
         if self.is_scared() {
             self.set_y_head_rot(self.y_body_rot());
         }

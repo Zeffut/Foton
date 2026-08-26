@@ -360,6 +360,9 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     ///
     /// Rust has no `super`, so a mob that only adds a condition calls this for
     /// the rest.
+    /// Runs the shared body of [`Self::is_pushable`].
+    /// Rust has no `super`, so an entity that only adds a condition -- the warden, which
+    /// cannot be shoved while it is in the ground -- calls this for the rest.
     fn default_is_pushable(&self) -> bool {
         let Some(living) = self.as_living_entity() else {
             return false;
@@ -1817,6 +1820,13 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Returns true when vanilla block step-on hooks should treat this entity as careful.
     fn is_stepping_carefully(&self) -> bool {
         self.is_suppressing_bounce()
+    }
+
+    /// Returns true when this entity swallows the vibrations it would otherwise emit.
+    ///
+    /// Vanilla parity: `Entity.dampensVibrations`.
+    fn dampens_vibrations(&self) -> bool {
+        false
     }
 
     /// Returns true when vanilla collision context should treat the entity as descending.

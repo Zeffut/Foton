@@ -13,8 +13,23 @@ pub(crate) use item::build as item;
 
 macro_rules! simple_tag_builder {
     ($function:ident, $tag_subdir:literal, $registry_module:literal, $registry_type:literal) => {
+        simple_tag_builder!(
+            $function,
+            $tag_subdir,
+            $registry_module,
+            $registry_type,
+            $registry_module
+        );
+    };
+    (
+        $function:ident,
+        $tag_subdir:literal,
+        $registry_module:literal,
+        $registry_type:literal,
+        $singular:literal
+    ) => {
         pub(crate) fn $function() -> TokenStream {
-            common::build_simple_tags($tag_subdir, $registry_module, $registry_type)
+            common::build_simple_tags($tag_subdir, $registry_module, $registry_type, $singular)
         }
     };
 }
@@ -44,6 +59,13 @@ simple_tag_builder!(
     "entity_type",
     "entity_type",
     "EntityTypeRegistry"
+);
+simple_tag_builder!(
+    game_event,
+    "game_event",
+    "game_events",
+    "GameEventRegistry",
+    "game_event"
 );
 simple_tag_builder!(instrument, "instrument", "instrument", "InstrumentRegistry");
 simple_tag_builder!(

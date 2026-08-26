@@ -99,6 +99,7 @@ struct PlayerDataFile {
     experience_total: i32,
     score: i32,
     seen_credits: bool,
+    warden_spawn_tracker: [i32; 3],
     root_vehicle: Option<RootVehicleFile>,
     respawn_config: Option<RespawnConfigFile>,
     ender_pearls: Vec<EnderPearlFile>,
@@ -643,6 +644,7 @@ impl PlayerDataFile {
             experience_total: data.experience_total,
             score: data.score,
             seen_credits: data.seen_credits,
+            warden_spawn_tracker: data.warden_spawn_tracker,
             root_vehicle: data
                 .root_vehicle
                 .clone()
@@ -729,6 +731,7 @@ impl PlayerDataFile {
             experience_total: self.experience_total,
             score: self.score,
             seen_credits: self.seen_credits,
+            warden_spawn_tracker: self.warden_spawn_tracker,
             root_vehicle: self.root_vehicle.map(|root_vehicle| PersistentRootVehicle {
                 attach: root_vehicle.attach,
                 entity: root_vehicle.entity,
@@ -959,6 +962,7 @@ mod tests {
             experience_total: 32,
             score: 9,
             seen_credits: true,
+            warden_spawn_tracker: [0, 0, 0],
             root_vehicle: None,
             respawn_config: None,
             ender_pearls: Vec::new(),

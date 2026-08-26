@@ -695,6 +695,17 @@ impl Player {
         *self.seen_credits.lock() = seen_credits;
     }
 
+    /// Returns vanilla `ServerPlayer.getWardenSpawnTracker`.
+    #[must_use]
+    pub fn warden_spawn_tracker(&self) -> WardenSpawnTracker {
+        *self.warden_spawn_tracker.lock()
+    }
+
+    /// Replaces vanilla `ServerPlayer.wardenSpawnTracker`.
+    pub fn set_warden_spawn_tracker(&self, tracker: WardenSpawnTracker) {
+        *self.warden_spawn_tracker.lock() = tracker;
+    }
+
     /// Returns vanilla `ServerPlayer.wonGame`.
     #[must_use]
     pub(crate) fn has_won_game(&self) -> bool {

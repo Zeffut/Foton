@@ -12,6 +12,7 @@ mod nearest_living_entity;
 mod piglin_specific;
 mod player;
 mod tempting;
+mod warden_specific;
 
 pub use adult::AdultSensor;
 pub use axolotl_attackables::AxolotlAttackablesSensor;
@@ -27,6 +28,7 @@ pub use piglin_specific::{
 };
 pub use player::PlayerSensor;
 pub use tempting::TemptingSensor;
+pub use warden_specific::WardenEntitySensor;
 
 use steel_registry::vanilla_attributes;
 use steel_registry::vanilla_item_tags::ItemTag;
@@ -123,6 +125,8 @@ pub enum SensorType {
     HoglinSpecific,
     /// Vanilla `SensorType.BREEZE_ATTACK_ENTITY_SENSOR`.
     BreezeAttackEntity,
+    /// Vanilla `SensorType.WARDEN_ENTITY_SENSOR`.
+    WardenEntity,
 }
 
 impl SensorType {
@@ -172,6 +176,7 @@ impl SensorType {
             Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),
             Self::HoglinSpecific => Box::new(HoglinSpecificSensor),
             Self::BreezeAttackEntity => Box::new(BreezeAttackEntitySensor::new()),
+            Self::WardenEntity => Box::new(WardenEntitySensor),
         }
     }
 }

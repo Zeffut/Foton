@@ -48,6 +48,9 @@ use crate::entity::{
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::equipment::EquipmentSlot;
 use crate::player::Player;
+use crate::world::game_event::vibrations::{
+    VIBRATION_DATA_TAG, VibrationListener, VibrationPositionSource, VibrationUser,
+};
 use crate::world::game_event::{
     DynamicGameEventListener, DynamicListenerAction, GameEventContext, GameEventListener,
     SharedGameEventListener,
@@ -55,6 +58,8 @@ use crate::world::game_event::{
 use crate::world::{LevelReader as _, World};
 
 use steel_registry::vanilla_entity_data::AllayEntityData;
+use steel_registry::vanilla_game_event_tags::GameEventTag;
+use steel_utils::Identifier;
 
 /// Vanilla parity: `Allay.ITEM_PICKUP_REACH`, which unlike every other mob's
 /// reaches a block upward as well as sideways -- an allay hovers.
@@ -80,6 +85,8 @@ const DUPLICATION_HEARTS_EVENT: EntityStatus = EntityStatus::InLoveHearts;
 const INTERACTION_SOUND_VOLUME: f32 = 2.0;
 /// Vanilla parity: `Allay.VibrationUser.VIBRATION_EVENT_LISTENER_RANGE`.
 const NOTE_BLOCK_LISTENER_RADIUS: i32 = 16;
+/// Vanilla parity: the `1024` of `GlobalPos.isCloseEnough` in `canReceiveVibration`.
+const LIKED_NOTEBLOCK_RANGE: f64 = 1024.0;
 
 /// An allay.
 #[entity_behavior(class = "Allay")]
@@ -99,6 +106,9 @@ pub struct AllayEntity {
     /// The two listeners vanilla hangs on the allay, kept together so
     /// [`Entity::update_dynamic_game_event_listener`] can move both at once.
     listeners: SyncMutex<Vec<DynamicGameEventListener>>,
+    /// Vanilla parity: the `VibrationSystem.Listener` of the pair, kept separately
+    /// because the allay has to tick it as well as move it.
+    vibration_listener: SyncMutex<Option<Arc<VibrationListener>>>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `AllayEntity`.
@@ -150,6 +160,7 @@ impl AllayEntity {
             duplication_cooldown: SyncMutex::new(0),
             entity_data: SyncMutex::new(entity_data),
             listeners: SyncMutex::new(Vec::new()),
+            vibration_listener: SyncMutex::new(None),
         }
     }
 
@@ -172,9 +183,18 @@ impl AllayEntity {
         let jukebox: SharedGameEventListener = Arc::new(JukeboxListener {
             allay: source.clone(),
         });
-        let note_block: SharedGameEventListener = Arc::new(NoteBlockListener { allay: source });
+        let vibration = Arc::new(VibrationListener::new(Arc::new(AllayVibrationUser {
+            allay: source,
+        })));
         listeners.push(DynamicGameEventListener::new(jukebox));
-        listeners.push(DynamicGameEventListener::new(note_block));
+        listeners.push(DynamicGameEventListener::new(
+            Arc::clone(&vibration) as SharedGameEventListener
+        ));
+        *self.vibration_listener.lock() = Some(vibration);
+    }
+
+    fn vibration_listener(&self) -> Option<Arc<VibrationListener>> {
+        self.vibration_listener.lock().clone()
     }
 
     /// Returns vanilla `Allay.isDancing`.
@@ -484,64 +504,85 @@ impl GameEventListener for JukeboxListener {
     }
 }
 
-/// The listener that teaches an allay which note block to serve.
+/// Vanilla `Allay.VibrationUser`.
 ///
-/// MISSING FOUNDATION: vanilla reaches `AllayAi.hearNoteblock` through
-/// `VibrationSystem` -- `Allay.VibrationUser`, whose `canReceiveVibration`
-/// narrows the events to the liked note block and whose `onReceiveVibration`
-/// fires after a delay proportional to the distance traveled. Steel has the
-/// game-event listener plumbing but no vibration layer on top of it (the sculk
-/// sensor records the same gap), so this listens for `NOTE_BLOCK_PLAY` directly.
-/// What is lost is the travel delay, the one-vibration-per-tick selector and the
-/// occlusion test; what an allay actually does with the event is unchanged,
-/// because `hearNoteblock` is all `onReceiveVibration` calls.
-struct NoteBlockListener {
+/// An allay that has not been given a note block yet hears every one; once it likes one,
+/// it hears only that one, and only while it is still within a thousand blocks of it.
+struct AllayVibrationUser {
     allay: ListenerSource,
 }
 
-impl GameEventListener for NoteBlockListener {
-    fn listener_pos(&self) -> Option<DVec3> {
-        self.allay.eye_position()
-    }
-
+impl VibrationUser for AllayVibrationUser {
     fn listener_radius(&self) -> i32 {
         NOTE_BLOCK_LISTENER_RADIUS
     }
 
-    fn handle_game_event(
+    fn position_source(&self) -> VibrationPositionSource {
+        VibrationPositionSource::Entity {
+            world: Weak::clone(&self.allay.world),
+            entity_id: self.allay.entity_id,
+            y_offset: self
+                .allay
+                .with_allay(|allay| allay.get_eye_height() as f32)
+                .unwrap_or(0.0),
+        }
+    }
+
+    fn listenable_events(&self) -> Identifier {
+        GameEventTag::ALLAY_CAN_LISTEN
+    }
+
+    fn can_receive_vibration(
         &self,
         world: &Arc<World>,
-        event: GameEventRef,
+        pos: BlockPos,
+        _event: GameEventRef,
         _context: &GameEventContext<'_>,
-        source_pos: DVec3,
     ) -> bool {
-        if event.key != vanilla_game_events::NOTE_BLOCK_PLAY.key {
-            return false;
-        }
-        let source = BlockPos::from(source_pos);
-
         self.allay
             .with_allay(|allay| {
                 if allay.is_no_ai() {
                     return false;
                 }
-                // Vanilla parity: the `canReceiveVibration` filter, which is the
-                // half of the vibration user that survives without the vibration
-                // layer -- an allay that already likes a note block ignores
-                // every other one.
-                if let Some(liked) = allay
+                let Some(liked) = allay
                     .brain
                     .get_memory(memory_module_types::LIKED_NOTEBLOCK_POSITION)
-                    && !(liked.dimension == world.key && liked.pos == source)
-                {
-                    return false;
-                }
-
-                allay_ai::hear_noteblock(&allay.brain, world, source);
-                true
+                else {
+                    return true;
+                };
+                liked.dimension == world.key
+                    && block_closer_than(liked.pos, allay.block_position(), LIKED_NOTEBLOCK_RANGE)
+                    && liked.pos == pos
             })
             .unwrap_or(false)
     }
+
+    fn on_receive_vibration(
+        &self,
+        world: &Arc<World>,
+        pos: BlockPos,
+        event: GameEventRef,
+        _source_entity: Option<&dyn Entity>,
+        _projectile_owner: Option<&dyn Entity>,
+        _receiving_distance: f32,
+    ) {
+        if event.key != vanilla_game_events::NOTE_BLOCK_PLAY.key {
+            return;
+        }
+        self.allay.with_allay(|allay| {
+            allay_ai::hear_noteblock(&allay.brain, world, pos);
+        });
+    }
+}
+
+/// Vanilla `GlobalPos.isCloseEnough`, which measures the block positions themselves.
+fn block_closer_than(from: BlockPos, to: BlockPos, distance: f64) -> bool {
+    let delta = from.0 - to.0;
+    let distance_squared = f64::from(delta.x).mul_add(
+        f64::from(delta.x),
+        f64::from(delta.y).mul_add(f64::from(delta.y), f64::from(delta.z) * f64::from(delta.z)),
+    );
+    distance_squared < distance * distance
 }
 
 impl Entity for AllayEntity {
@@ -564,7 +605,15 @@ impl Entity for AllayEntity {
     /// Vanilla parity: the server half of `Allay.tick`, which stops a panicking
     /// allay dancing.
     fn tick(&self) {
-        self.default_tick();
+        // Vanilla parity: the `VibrationSystem.Ticker.tick` of `Allay.tick`, which is what
+        // makes a note block heard across the room arrive a moment after it was struck.
+        if let Some(world) = self.level() {
+            self.ensure_listeners(&world);
+            if let Some(listener) = self.vibration_listener() {
+                listener.tick(&world);
+            }
+        }
+        LivingEntity::tick_living_entity(self);
         if self.is_panicking() {
             self.set_dancing(false);
         }
@@ -616,6 +665,11 @@ impl Entity for AllayEntity {
     fn save_additional(&self, nbt: &mut NbtCompound) {
         self.save_mob(nbt);
         save_inventory(&self.inventory.lock(), nbt);
+        if let Some(listener) = self.vibration_listener() {
+            let mut data = NbtCompound::new();
+            listener.save(&mut data);
+            nbt.insert(VIBRATION_DATA_TAG, data);
+        }
         nbt.insert("DuplicationCooldown", self.duplication_cooldown());
         self.brain.save(nbt);
     }
@@ -623,6 +677,12 @@ impl Entity for AllayEntity {
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
         self.load_mob(nbt);
         load_inventory(&mut self.inventory.lock(), nbt);
+        if let Some(world) = self.level() {
+            self.ensure_listeners(&world);
+        }
+        if let Some(listener) = self.vibration_listener() {
+            listener.load(nbt.compound(VIBRATION_DATA_TAG).as_ref());
+        }
         self.set_duplication_cooldown(nbt.long("DuplicationCooldown").unwrap_or(0));
         self.brain.load(nbt);
     }

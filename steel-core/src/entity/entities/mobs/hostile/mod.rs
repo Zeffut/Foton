@@ -34,6 +34,7 @@ mod spider;
 mod stray;
 mod vex;
 mod vindicator;
+mod warden;
 mod witch;
 mod wither_skeleton;
 mod zoglin;
@@ -71,6 +72,10 @@ pub use spider::SpiderEntity;
 pub use stray::StrayEntity;
 pub use vex::VexEntity;
 pub use vindicator::VindicatorEntity;
+pub use warden::{
+    AngerLevel, AngerManagement, MAX_WARNING_LEVEL as MAX_WARDEN_WARNING_LEVEL, WardenEntity,
+    WardenSpawnTracker, try_warn as try_warn_of_warden,
+};
 pub use witch::WitchEntity;
 pub use wither_skeleton::WitherSkeletonEntity;
 pub use zoglin::ZoglinEntity;

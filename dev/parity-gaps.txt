@@ -28,11 +28,14 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 7
+[entities] 10
+Breeze
+BreezeWindCharge
+CamelHusk
+Creaking
 EnderDragon
 HappyGhast
 Nautilus
 Player
 SulfurCube
-Warden
 ZombieNautilus

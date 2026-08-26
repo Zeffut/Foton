@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use steel_registry::DyeColor;
 use steel_registry::attribute::AttributeRef;
 use steel_registry::data_components::components::ItemDamageFunction;
-use steel_registry::data_components::vanilla_components::BLOCKS_ATTACKS;
+use steel_registry::data_components::vanilla_components::{self, BLOCKS_ATTACKS};
 
 use super::*;
 use crate::behavior::ITEM_BEHAVIORS;
@@ -720,6 +720,9 @@ pub trait LivingEntity: Entity {
     }
 
     /// Returns whether this living entity ignores a damage source.
+    ///
+    /// Override this to add what a specific entity shrugs off, and call
+    /// [`Self::living_is_invulnerable_to`] from the override for the shared behavior.
     fn is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
         self.living_is_invulnerable_to(world, source)
     }
@@ -729,6 +732,7 @@ pub trait LivingEntity: Entity {
     /// Rust has no `super`, so a mob that only adds a reason to shrug off a
     /// source -- a breeze, which ignores another breeze's gust -- calls this
     /// for the rest rather than re-deriving the enchantment half.
+    /// Runs the shared body of [`Self::is_invulnerable_to`].
     fn living_is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
         self.default_is_invulnerable_to(source)
             || enchantment_helper::is_immune_to_damage(world, self, source)
@@ -1893,17 +1897,35 @@ pub trait LivingEntity: Entity {
 
         self.set_living_entity_flag(USING_ITEM_FLAG, true);
         self.set_living_entity_flag(OFF_HAND_ACTIVE_ITEM_FLAG, hand == InteractionHand::OffHand);
-        // TODO: emit `GameEvent.ITEM_INTERACT_START` once item use vibrations
-        // are modeled; `KINETIC_WEAPON` recent-enemy tracking has no home yet.
+        self.cause_use_vibration(&item, &vanilla_game_events::ITEM_INTERACT_START);
+        // TODO: `KINETIC_WEAPON` recent-enemy tracking has no home yet.
+    }
+
+    /// Emits the game event an item's use is worth, if its use is audible at all.
+    ///
+    /// Vanilla parity: `ItemStack.causeUseVibration`. Eating and drinking are loud, which
+    /// is exactly what a sculk sensor a few blocks away is there to measure.
+    fn cause_use_vibration(&self, item: &ItemStack, event: GameEventRef) {
+        if item
+            .get(vanilla_components::USE_EFFECTS)
+            .is_some_and(|use_effects| use_effects.interact_vibrations)
+        {
+            self.game_event(event);
+        }
     }
 
     /// Stops active item use without running any item hook.
     ///
     /// Vanilla parity: `LivingEntity.stopUsingItem`.
     fn stop_using_item(&self) {
+        // Vanilla reads the stack off its own field, which still holds it here; Steel reads
+        // the hand, so the stack has to be taken before the use state is dropped.
+        let item = self.use_item();
         self.living_base().stop_using_item();
         self.set_living_entity_flag(USING_ITEM_FLAG, false);
-        // TODO: emit `GameEvent.ITEM_INTERACT_FINISH` with item use vibrations.
+        if let Some(item) = item {
+            self.cause_use_vibration(&item, &vanilla_game_events::ITEM_INTERACT_FINISH);
+        }
     }
 
     /// Lets go of the item early and runs its release hook.

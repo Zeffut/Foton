@@ -101,7 +101,7 @@ use crate::chunk::chunk_request::{ChunkRequestHandle, ChunkRequestState};
 use crate::config::RuntimeConfig;
 use crate::enchantment_helper;
 use crate::entity::damage::DamageSource;
-use crate::entity::entities::ExperienceOrbEntity;
+use crate::entity::entities::{ExperienceOrbEntity, WardenSpawnTracker};
 use crate::entity::{
     DEATH_DURATION, Entity, EntityAnchor, EntityBase, EntityEventSource, EntityMovementEmission,
     EntitySyncedData, LivingEntity, LivingEntityBase, LivingEntitySyncedData, MobEffectSyncChange,
@@ -275,6 +275,8 @@ pub struct Player {
 
     /// Whether the player has completed the vanilla End credits flow.
     seen_credits: SyncMutex<bool>,
+    /// Vanilla `ServerPlayer.wardenSpawnTracker`, how close this player is to a warden.
+    warden_spawn_tracker: SyncMutex<WardenSpawnTracker>,
 
     /// Vanilla `ServerPlayer.wonGame`; transient while the End credits screen is open.
     won_game: SyncMutex<bool>,
@@ -468,6 +470,7 @@ impl Player {
             enchantment_seed: SyncMutex::new(rand::random()),
             permissions: SyncMutex::new(PlayerPermissionState::default()),
             seen_credits: SyncMutex::new(false),
+            warden_spawn_tracker: SyncMutex::new(WardenSpawnTracker::default()),
             won_game: SyncMutex::new(false),
             chunk_send_epoch: SyncMutex::new(0),
             residence: SyncMutex::new(PlayerResidenceState::new()),
@@ -489,6 +492,8 @@ impl Player {
     )]
     pub fn tick(&self) {
         self.advance_tick();
+        // Vanilla parity: the `this.wardenSpawnTracker.tick()` of `ServerPlayer.tick`.
+        self.warden_spawn_tracker.lock().tick();
         self.tick_item_cooldowns();
         self.tick_attack_strength();
         self.tick_spam_throttlers();

@@ -119,11 +119,15 @@ pub fn resolve_all_tags(all_tags: &FxHashMap<String, Vec<String>>) -> Vec<(Strin
 /// - `tag_subdir`: directory under `tags/` (e.g., `"damage_type"`)
 /// - `registry_module`: crate module name (e.g., `"damage_type"`)
 /// - `registry_type`: type name (e.g., `"DamageTypeRegistry"`)
-/// - `register_fn`: function name (e.g., `"register_damage_type_tags"`)
+/// - `singular`: the registry's singular name, which names the generated tag
+///   category and register function (e.g., `"damage_type"` gives `DamageTypeTag`
+///   and `register_damage_type_tags`). It differs from `registry_module` only
+///   where the module is plural.
 pub fn build_simple_tags(
     tag_subdir: &str,
     registry_module: &str,
     registry_type: &str,
+    singular: &str,
 ) -> TokenStream {
     let tag_dir =
         format!("../steel-utils/build_assets/builtin_datapacks/minecraft/tags/{tag_subdir}");
@@ -134,12 +138,9 @@ pub fn build_simple_tags(
 
     let registry_module_ident = Ident::new(registry_module, Span::call_site());
     let registry_type_ident = Ident::new(registry_type, Span::call_site());
-    let register_fn_ident = Ident::new(
-        &format!("register_{registry_module}_tags"),
-        Span::call_site(),
-    );
+    let register_fn_ident = Ident::new(&format!("register_{singular}_tags"), Span::call_site());
     let tag_category_ident = Ident::new(
-        &format!("{}Tag", registry_module.to_upper_camel_case()),
+        &format!("{}Tag", singular.to_upper_camel_case()),
         Span::call_site(),
     );
 

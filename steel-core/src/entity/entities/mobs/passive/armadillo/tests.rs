@@ -231,6 +231,11 @@ fn rolling_up_becomes_scared_once_the_animation_has_run() {
     // build that switched at once would skip the roll the client draws.
     let world = armadillo_world("armadillo_roll_timing");
     let armadillo = live_armadillo(&world);
+    // The gate is what the brain reads, so the brain is switched off to read it directly.
+    // Left on, it would answer correctly and then act: an armadillo with nothing to fear
+    // balls up, peeks and unrolls again inside these eleven ticks, which is what the
+    // world-driven test beside this one is for.
+    Mob::set_no_ai(armadillo.as_ref(), true);
 
     armadillo.roll_up();
     assert_eq!(armadillo.state(), ArmadilloState::Rolling);

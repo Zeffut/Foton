@@ -8,6 +8,7 @@ use steel_utils::types::GameType;
 
 use crate::{
     chunk_saver::{ChunkStorage, PersistentEntity},
+    entity::entities::WardenSpawnTracker,
     entity::{Entity, EntityFireFreezeState, LivingEntity},
     inventory::container::Container,
 };
@@ -19,7 +20,7 @@ use super::{
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 7;
+pub const PLAYER_DATA_VERSION: i32 = 8;
 
 /// Persistent player data saved by Steel's storage backend.
 ///
@@ -113,6 +114,12 @@ pub struct PersistentPlayerData {
 
     /// Vanilla `ServerPlayer.seenCredits`.
     pub seen_credits: bool,
+
+    /// Vanilla `ServerPlayer.wardenSpawnTracker`, as its three saved counters.
+    ///
+    /// The count is what a shrieker escalates and what a warden costs, so losing it on a
+    /// reload would mean the deep dark forgave every player every log-out.
+    pub warden_spawn_tracker: [i32; 3],
 
     /// Vanilla one-player root vehicle tree stored with the player instead of chunk data.
     pub root_vehicle: Option<PersistentRootVehicle>,
@@ -266,6 +273,7 @@ impl PersistentPlayerData {
             experience_total,
             score,
             seen_credits: player.has_seen_credits(),
+            warden_spawn_tracker: warden_spawn_tracker_fields(player.warden_spawn_tracker()),
             root_vehicle,
             respawn_config: player.respawn_config(),
 
@@ -332,7 +340,21 @@ impl Player {
 
         self.set_score(0);
         self.set_seen_credits(false);
+        // Vanilla parity: the `this.wardenSpawnTracker.reset()` of `ServerPlayer.reset`,
+        // which is what makes dying to a warden clear the way to the next one.
+        let mut tracker = self.warden_spawn_tracker();
+        tracker.reset();
+        self.set_warden_spawn_tracker(tracker);
     }
+}
+
+/// Vanilla parity: `WardenSpawnTracker.CODEC`, whose three fields are all it holds.
+const fn warden_spawn_tracker_fields(tracker: WardenSpawnTracker) -> [i32; 3] {
+    [
+        tracker.ticks_since_last_warning(),
+        tracker.warning_level(),
+        tracker.cooldown_ticks(),
+    ]
 }
 
 impl Default for PersistentAbilities {
@@ -489,5 +511,11 @@ impl PersistentPlayerData {
         }
         player.set_score(self.score);
         player.set_seen_credits(self.seen_credits);
+        let [ticks_since_last_warning, warning_level, cooldown_ticks] = self.warden_spawn_tracker;
+        player.set_warden_spawn_tracker(WardenSpawnTracker::new(
+            ticks_since_last_warning,
+            warning_level,
+            cooldown_ticks,
+        ));
     }
 }
