@@ -353,6 +353,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Mirrors vanilla `Entity.isPushable`. Base entities are not pushable unless
     /// a concrete entity type opts in.
     fn is_pushable(&self) -> bool {
+        self.default_is_pushable()
+    }
+
+    /// Runs the shared body of [`Self::is_pushable`].
+    ///
+    /// Rust has no `super`, so an entity that only adds a condition -- the warden, which
+    /// cannot be shoved while it is in the ground -- calls this for the rest.
+    fn default_is_pushable(&self) -> bool {
         let Some(living) = self.as_living_entity() else {
             return false;
         };

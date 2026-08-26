@@ -20,8 +20,8 @@ use crate::entity::entities::{
     HoglinEntity, HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity, ParchedEntity,
     PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
     SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity, SpiderEntity, StrayEntity,
-    VexEntity, VindicatorEntity, WitchEntity, WitherBoss, WitherSkeletonEntity, ZoglinEntity,
-    ZombieEntity, ZombifiedPiglinEntity,
+    VexEntity, VindicatorEntity, WardenEntity, WitchEntity, WitherBoss, WitherSkeletonEntity,
+    ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -96,4 +96,7 @@ assert_ai_runs! {
     a_piglin_brute_runs_its_brain: PiglinBruteEntity, &vanilla_entities::PIGLIN_BRUTE;
     a_hoglin_runs_its_brain: HoglinEntity, &vanilla_entities::HOGLIN;
     a_zoglin_runs_its_brain: ZoglinEntity, &vanilla_entities::ZOGLIN;
+    // The warden is brain-driven too, and it is the one mob whose brain is the whole
+    // animal: without `Brain::tick` it never emerges, never sniffs and never digs away.
+    a_warden_runs_its_brain: WardenEntity, &vanilla_entities::WARDEN;
 }

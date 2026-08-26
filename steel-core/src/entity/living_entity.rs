@@ -712,7 +712,15 @@ pub trait LivingEntity: Entity {
     }
 
     /// Returns whether this living entity ignores a damage source.
+    ///
+    /// Override this to add what a specific entity shrugs off, and call
+    /// [`Self::living_is_invulnerable_to`] from the override for the shared behavior.
     fn is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
+        self.living_is_invulnerable_to(world, source)
+    }
+
+    /// Runs the shared body of [`Self::is_invulnerable_to`].
+    fn living_is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
         self.default_is_invulnerable_to(source)
             || enchantment_helper::is_immune_to_damage(world, self, source)
     }

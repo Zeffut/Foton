@@ -28,7 +28,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 11
+[entities] 10
 Breeze
 BreezeWindCharge
 CamelHusk
@@ -38,5 +38,4 @@ HappyGhast
 Nautilus
 Player
 SulfurCube
-Warden
 ZombieNautilus

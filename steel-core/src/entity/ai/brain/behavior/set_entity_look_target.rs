@@ -11,7 +11,10 @@ use crate::entity::ai::brain::position_tracker::PositionTracker;
 use crate::entity::{LivingEntity, SharedEntity};
 
 /// Which nearby entities are worth looking at.
-type LookFilter = Box<dyn Fn(&dyn LivingEntity) -> bool + Send>;
+///
+/// Vanilla's predicate takes only the candidate; the warden's also needs the brain, to ask
+/// whether the candidate is the entity it is already attacking.
+type LookFilter = Box<dyn Fn(&BrainContext<'_>, &dyn LivingEntity) -> bool + Send>;
 
 /// Looks at the nearest visible entity matching a filter.
 ///
@@ -49,6 +52,18 @@ impl SetEntityLookTarget {
         filter: impl Fn(&dyn LivingEntity) -> bool + Send + 'static,
         max_dist: f64,
     ) -> Self {
+        Self::matching_in_context(move |_, candidate| filter(candidate), max_dist)
+    }
+
+    /// Looks at the nearest entity the filter accepts, asking the brain as well.
+    ///
+    /// Vanilla parity: the same `SetEntityLookTarget.create(Predicate<LivingEntity>, float)`,
+    /// reached from `WardenAi` with a predicate that closes over the body's brain.
+    #[must_use]
+    pub fn matching_in_context(
+        filter: impl Fn(&BrainContext<'_>, &dyn LivingEntity) -> bool + Send + 'static,
+        max_dist: f64,
+    ) -> Self {
         Self {
             filter: Box::new(filter),
             max_dist_sqr: max_dist * max_dist,
@@ -63,7 +78,7 @@ impl SetEntityLookTarget {
             .find_closest(|candidate| {
                 candidate.id() != body_id
                     && candidate.position().distance_squared(body_position) <= self.max_dist_sqr
-                    && (self.filter)(candidate)
+                    && (self.filter)(ctx, candidate)
             })
     }
 }

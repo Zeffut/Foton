@@ -14,7 +14,7 @@ pub use mobs::hostile::{
     HoglinEntity, HuskEntity, IllusionerEntity, MagmaCubeEntity, ParchedEntity, PhantomEntity,
     PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
     SilverfishEntity, SkeletonEntity, SlimeEntity, SpiderEntity, StrayEntity, VexEntity,
-    VindicatorEntity, WitchEntity, WitherSkeletonEntity, ZoglinEntity, ZombieEntity,
+    VindicatorEntity, WardenEntity, WitchEntity, WitherSkeletonEntity, ZoglinEntity, ZombieEntity,
     ZombifiedPiglinEntity,
 };
 pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, WolfEntity};
