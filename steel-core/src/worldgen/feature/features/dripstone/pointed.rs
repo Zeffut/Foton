@@ -5,7 +5,7 @@ use super::super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_pointed_dripstone_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         config: &PointedDripstoneConfiguration,
         origin: BlockPos,
@@ -51,7 +51,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_patch_of_dripstone_blocks(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         config: &PointedDripstoneConfiguration,
@@ -81,7 +81,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn grow_pointed_dripstone(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         start_pos: BlockPos,
         tip_direction: Direction,
         height: i32,
@@ -147,7 +147,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_dripstone_block_if_possible(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
     ) -> bool {
         let state = region.block_state(pos);

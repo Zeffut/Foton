@@ -34,7 +34,7 @@ use super::StructurePiecePlacer;
 
 impl StructurePiecePlacer {
     pub(super) fn place_template_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         data: &mut TemplatePieceData,
         piece_bounding_box: &mut BoundingBox,
@@ -306,7 +306,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_template_data_markers(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         template: &StructureTemplate,
         marker_handling: TemplateMarkerHandling,
@@ -354,7 +354,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_ocean_ruin_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         is_large: bool,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
@@ -367,7 +367,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_ocean_ruin_marker_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         is_large: bool,
         pos: BlockPos,
         random: &mut WorldgenRandom,
@@ -389,7 +389,7 @@ impl StructurePiecePlacer {
         let _ = region.set_block_entity_data(pos, &vanilla_block_entity_types::CHEST, state, nbt);
     }
 
-    fn spawn_ocean_ruin_drowned(region: &mut WorldGenRegion<'_>, pos: BlockPos) {
+    fn spawn_ocean_ruin_drowned(region: &WorldGenRegion<'_>, pos: BlockPos) {
         let entity_pos = DVec3::new(
             f64::from(pos.x()) + 0.5,
             f64::from(pos.y()),
@@ -414,7 +414,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_shipwreck_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
     ) {
@@ -438,7 +438,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_igloo_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
     ) {
@@ -465,7 +465,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_end_city_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         settings: &StructurePlaceSettings<'_>,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
@@ -486,7 +486,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_end_city_marker_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         chest_pos: BlockPos,
         random: &mut WorldgenRandom,
     ) {
@@ -502,7 +502,7 @@ impl StructurePiecePlacer {
             region.set_block_entity_data(chest_pos, &vanilla_block_entity_types::CHEST, state, nbt);
     }
 
-    fn spawn_end_city_shulker(region: &mut WorldGenRegion<'_>, pos: BlockPos) {
+    fn spawn_end_city_shulker(region: &WorldGenRegion<'_>, pos: BlockPos) {
         let entity_pos = DVec3::new(
             f64::from(pos.x()) + 0.5,
             f64::from(pos.y()),
@@ -519,7 +519,7 @@ impl StructurePiecePlacer {
     }
 
     fn spawn_end_city_elytra_frame(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
         direction: Direction,
     ) {
@@ -535,7 +535,7 @@ impl StructurePiecePlacer {
     }
 
     fn handle_mansion_marker(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         settings: &StructurePlaceSettings<'_>,
         marker: &StructureDataMarker,
         random: &mut WorldgenRandom,
@@ -552,7 +552,7 @@ impl StructurePiecePlacer {
             "Warrior" => (&vanilla_entities::VINDICATOR, 1),
             "Group of Allays" => (
                 &vanilla_entities::ALLAY,
-                region.random_mut().next_i32_bounded(3) + 1,
+                region.with_random(|random| random.next_i32_bounded(3)) + 1,
             ),
             _ => return,
         };
@@ -583,7 +583,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_mansion_marker_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
         state: BlockStateId,
         random: &mut WorldgenRandom,
@@ -604,7 +604,7 @@ impl StructurePiecePlacer {
     }
 
     fn spawn_mansion_marker_mob(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
         entity_type: EntityTypeRef,
     ) {
@@ -661,7 +661,7 @@ impl StructurePiecePlacer {
         reason = "postprocess needs the same placement context as vanilla TemplateStructurePiece after block placement"
     )]
     fn post_process_template_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         post_process: TemplatePostProcess,
         processors: &TemplateProcessorList,
@@ -704,7 +704,7 @@ impl StructurePiecePlacer {
     }
 
     fn post_process_igloo_top(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
     ) {
@@ -732,7 +732,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_nether_fossil_dried_ghast(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         fossil_box: BoundingBox,
         placement_clip: BoundingBox,

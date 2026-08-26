@@ -29,7 +29,7 @@ const HORIZONTAL_PLANE: [Direction; 4] = [
 
 impl StructurePiecePlacer {
     pub(super) fn place_desert_pyramid_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         bounding_box: &mut BoundingBox,
         orientation: Option<Direction>,
@@ -55,7 +55,7 @@ impl StructurePiecePlacer {
     }
 
     pub(super) fn after_place_desert_pyramid(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pieces: &mut [StructurePiece],
         clip: BoundingBox,
     ) {
@@ -108,7 +108,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_desert_pyramid_suspicious_sand(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         clip: BoundingBox,
         pos: BlockPos,
     ) {
@@ -140,7 +140,7 @@ impl StructurePiecePlacer {
 }
 
 struct DesertPyramidPlacer<'a, 'world> {
-    region: &'a mut WorldGenRegion<'world>,
+    region: &'a WorldGenRegion<'world>,
     registry: &'a Registry,
     bounding_box: &'a mut BoundingBox,
     orientation: Option<Direction>,
@@ -462,7 +462,7 @@ impl DesertPyramidPlacer<'_, '_> {
         self.place_block(stairs, 13, -1, 17);
         self.place_block(stairs, 14, -2, 17);
         self.place_block(stairs, 15, -3, 17);
-        let variant = self.region.random_mut().next_bool();
+        let variant = self.region.with_random(Random::next_bool);
         self.place_block(sand, 12, 0, 17);
         self.place_block(sand, 13, 0, 17);
         self.place_block(sand, 14, 0, 17);
@@ -662,7 +662,7 @@ impl DesertPyramidPlacer<'_, '_> {
     }
 
     fn place_collapsed_roof_piece(&mut self, x: i32, y: i32, z: i32) {
-        let state = if self.region.random_mut().next_f32() < 0.33 {
+        let state = if self.region.with_random(Random::next_f32) < 0.33 {
             vanilla_blocks::SANDSTONE.default_state()
         } else {
             vanilla_blocks::SAND.default_state()

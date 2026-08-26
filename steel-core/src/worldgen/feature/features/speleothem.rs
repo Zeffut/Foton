@@ -5,7 +5,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_speleothem_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         config: &SpeleothemConfiguration,
         origin: BlockPos,
@@ -39,7 +39,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_speleothem_cluster_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         config: &SpeleothemClusterConfiguration,
         origin: BlockPos,
@@ -99,7 +99,7 @@ impl FeatureDecorationRunner {
     }
 
     fn create_patch_of_speleothem_base_blocks(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         config: &SpeleothemConfiguration,
@@ -157,7 +157,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla SpeleothemClusterFeature.placeColumn flow"
     )]
     fn place_speleothem_cluster_column(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         dx: i32,
@@ -314,7 +314,7 @@ impl FeatureDecorationRunner {
         reason = "keeps vanilla speleothem growth parameters explicit"
     )]
     fn grow_speleothem(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         start_pos: BlockPos,
         tip_direction: Direction,
         height: i32,
@@ -410,7 +410,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_speleothem_base_block_if_possible(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
         base_block: BlockRef,
         replaceable_blocks: &BlockHolderSet,
@@ -469,7 +469,7 @@ impl FeatureDecorationRunner {
     }
 
     fn replace_blocks_with_speleothem_base_blocks(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         mut pos: BlockPos,
         max_count: i32,
         direction: Direction,

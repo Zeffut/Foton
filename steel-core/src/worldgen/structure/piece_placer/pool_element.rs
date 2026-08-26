@@ -20,7 +20,7 @@ impl StructurePiecePlacer {
         reason = "mirrors StructurePoolElement.place inputs"
     )]
     pub(super) fn place_pool_element(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         element: &PoolElement,
         position: BlockPos,
@@ -108,7 +108,7 @@ impl StructurePiecePlacer {
         reason = "mirrors SinglePoolElement.place and StructureTemplate.placeInWorld"
     )]
     fn place_single_pool_element(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         location: &Identifier,
         processors: &ProcessorList,

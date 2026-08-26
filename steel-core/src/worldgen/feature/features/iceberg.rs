@@ -11,7 +11,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_iceberg_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &BlockStateData,
@@ -149,7 +149,7 @@ impl FeatureDecorationRunner {
         reason = "Mirrors vanilla IcebergFeature call shape"
     )]
     fn generate_iceberg_cut_out(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         width: i32,
         height: i32,
@@ -222,7 +222,7 @@ impl FeatureDecorationRunner {
         reason = "Mirrors vanilla IcebergFeature call shape"
     )]
     fn carve_iceberg(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         radius: i32,
         y_offset: i32,
         global_origin: BlockPos,
@@ -261,7 +261,7 @@ impl FeatureDecorationRunner {
         }
     }
 
-    fn remove_floating_snow_layer(region: &mut WorldGenRegion<'_>, pos: BlockPos) {
+    fn remove_floating_snow_layer(region: &WorldGenRegion<'_>, pos: BlockPos) {
         let above = pos.above();
         if region.block_state(above).get_block() == &vanilla_blocks::SNOW {
             Self::set_iceberg_block(region, above, vanilla_blocks::AIR.default_state());
@@ -273,7 +273,7 @@ impl FeatureDecorationRunner {
         reason = "Mirrors vanilla IcebergFeature call shape"
     )]
     fn generate_iceberg_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         origin: BlockPos,
         height: i32,
@@ -332,7 +332,7 @@ impl FeatureDecorationRunner {
         reason = "Mirrors vanilla IcebergFeature call shape"
     )]
     fn set_iceberg_shape_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         height_difference: i32,
@@ -449,7 +449,7 @@ impl FeatureDecorationRunner {
     }
 
     fn smooth_iceberg(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         origin: BlockPos,
         width: i32,
         height: i32,
@@ -498,7 +498,7 @@ impl FeatureDecorationRunner {
         }
     }
 
-    fn set_iceberg_block(region: &mut WorldGenRegion<'_>, pos: BlockPos, state: BlockStateId) {
+    fn set_iceberg_block(region: &WorldGenRegion<'_>, pos: BlockPos, state: BlockStateId) {
         let _ = region.set_block_state(pos, state, UpdateFlags::UPDATE_ALL);
     }
 }

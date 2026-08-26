@@ -21,7 +21,7 @@ const VANILLA_DIRECTION_VALUES: [Direction; 6] = [
 
 impl StructurePiecePlacer {
     pub(super) fn place_buried_treasure_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         bounding_box: &mut BoundingBox,
         clip: BoundingBox,
         random: &mut WorldgenRandom,
@@ -91,7 +91,7 @@ impl StructurePiecePlacer {
     }
 
     fn create_buried_treasure_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         clip: BoundingBox,
         random: &mut WorldgenRandom,
         pos: BlockPos,

@@ -56,7 +56,7 @@ impl StructurePiecePlacer {
         reason = "single dispatch boundary for all structure piece payload families"
     )]
     pub(crate) fn place_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         piece: &mut StructurePiece,
         reference_pos: BlockPos,
@@ -176,7 +176,7 @@ impl StructurePiecePlacer {
     }
 
     pub(crate) fn after_place_structure(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         structure: StructureRef,
         pieces: &mut [StructurePiece],
         clip: BoundingBox,
@@ -240,7 +240,7 @@ impl StructurePiecePlacer {
     }
 
     pub(super) fn create_loot_chest(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         clip: BoundingBox,
         random: &mut WorldgenRandom,
         pos: BlockPos,

@@ -55,7 +55,7 @@ pub struct WorldGenRegion<'a> {
     chunk_cache_radius: i32,
     chunks: RefCell<Box<[Option<CachedWorldGenChunk<'a>>]>>,
     worldgen_heightmaps: RefCell<Box<[CachedWorldgenHeightmaps]>>,
-    random: RandomSource,
+    random: RefCell<RandomSource>,
 }
 
 /// Cached section-level access for feature code that mirrors vanilla `BulkSectionAccess`.
@@ -220,7 +220,7 @@ impl<'a> WorldGenRegion<'a> {
             chunk_cache_radius,
             chunks: RefCell::new(chunks),
             worldgen_heightmaps: RefCell::new(worldgen_heightmaps),
-            random,
+            random: RefCell::new(random),
         }
     }
 
@@ -230,9 +230,13 @@ impl<'a> WorldGenRegion<'a> {
         self.center
     }
 
-    /// Returns the random source exposed by vanilla `WorldGenRegion.getRandom()`.
-    pub const fn random_mut(&mut self) -> &mut RandomSource {
-        &mut self.random
+    /// Runs `apply` against the random source vanilla exposes as
+    /// `WorldGenRegion.getRandom()`.
+    ///
+    /// The stream is positional and seeded from the center chunk, so draws from it
+    /// stay part of deterministic generation.
+    pub fn with_random<R>(&self, apply: impl FnOnce(&mut RandomSource) -> R) -> R {
+        apply(&mut self.random.borrow_mut())
     }
 
     /// Returns the minimum build height.

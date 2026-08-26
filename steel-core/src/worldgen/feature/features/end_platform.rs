@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_end_platform_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         origin: BlockPos,
     ) -> bool {
         Self::create_end_platform(region, origin);
@@ -11,7 +11,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn create_end_platform(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         origin: BlockPos,
     ) {
         let obsidian = vanilla_blocks::OBSIDIAN.default_state();

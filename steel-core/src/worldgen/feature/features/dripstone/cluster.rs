@@ -32,7 +32,7 @@ impl DripstoneColumn {
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_dripstone_cluster_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         config: &DripstoneClusterConfiguration,
         origin: BlockPos,
@@ -66,7 +66,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla DripstoneClusterFeature.placeColumn state"
     )]
     fn place_dripstone_cluster_column(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         dx: i32,
@@ -323,7 +323,7 @@ impl FeatureDecorationRunner {
     }
 
     fn replace_blocks_with_dripstone_blocks(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         mut pos: BlockPos,
         max_count: i32,
         direction: Direction,

@@ -5,7 +5,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_coral_claw_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -74,7 +74,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_coral_mushroom_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -109,7 +109,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_coral_tree_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -155,7 +155,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_coral_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         pos: BlockPos,

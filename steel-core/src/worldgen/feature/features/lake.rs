@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_lake_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &LakeConfiguration,
@@ -98,7 +98,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_lake_contents(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         config: &LakeConfiguration,
         grid: &[bool],
@@ -136,7 +136,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_lake_barrier(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &LakeConfiguration,
@@ -177,7 +177,7 @@ impl FeatureDecorationRunner {
     }
 
     fn freeze_lake_surface(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         config: &LakeConfiguration,
         biome_zoom_seed: i64,

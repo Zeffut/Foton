@@ -12,7 +12,7 @@ use steel_registry::vanilla_block_entity_types;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_sculk_patch_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SculkPatchConfiguration,

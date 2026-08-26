@@ -19,7 +19,7 @@ use super::scattered_feature::ScatteredFeaturePlacer;
 
 impl StructurePiecePlacer {
     pub(super) fn place_ocean_monument_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         bounding_box: BoundingBox,
         orientation: Option<Direction>,

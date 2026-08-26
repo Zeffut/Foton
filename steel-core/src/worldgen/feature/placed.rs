@@ -14,7 +14,7 @@ enum BiomeFilterMode<'a> {
 
 impl FeatureDecorationRunner {
     pub(super) fn place_placed_feature_entry(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -38,7 +38,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_placed_feature_data(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -63,7 +63,7 @@ impl FeatureDecorationRunner {
         reason = "threading vanilla placed-feature stream state explicitly"
     )]
     fn place_placed_feature_from_modifier(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -414,7 +414,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_placed_feature_ref(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,
@@ -438,7 +438,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(crate) fn place_structure_pool_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         origin: BlockPos,

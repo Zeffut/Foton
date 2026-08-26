@@ -888,7 +888,7 @@ impl<N: VanillaPostNoiseStateType> ChunkGenerator for VanillaGenerator<N> {
         worldgen_region_random_from_splitter(&self.splitter, center)
     }
 
-    fn apply_biome_decorations(&self, region: &mut WorldGenRegion<'_>) {
+    fn apply_biome_decorations(&self, region: &WorldGenRegion<'_>) {
         self.feature_runner
             .decorate(region, &REGISTRY, self.seed, self.biome_zoom_seed);
     }

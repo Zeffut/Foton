@@ -30,7 +30,7 @@ impl StructurePiecePlacer {
         reason = "structure-piece placement carries vanilla postProcess inputs"
     )]
     pub(super) fn place_mineshaft_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         bounding_box: BoundingBox,
         orientation: Option<Direction>,
@@ -80,7 +80,7 @@ impl StructurePiecePlacer {
 }
 
 struct MineshaftPlacer<'a, 'world> {
-    region: &'a mut WorldGenRegion<'world>,
+    region: &'a WorldGenRegion<'world>,
     registry: &'a Registry,
     bounding_box: BoundingBox,
     orientation: Option<Direction>,

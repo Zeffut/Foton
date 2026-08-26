@@ -8,7 +8,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_spike_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SpikeConfiguration,
@@ -46,7 +46,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_spike_body(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SpikeConfiguration,
@@ -98,7 +98,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_spike_base(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SpikeConfiguration,
@@ -142,7 +142,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_spike_block_if_replaceable(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         config: &SpikeConfiguration,
         pos: BlockPos,

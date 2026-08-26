@@ -16,7 +16,7 @@ const JUNGLE_TEMPLE_DISPENSER_LOOT: &str = "minecraft:chests/jungle_temple_dispe
 
 impl StructurePiecePlacer {
     pub(super) fn place_jungle_temple_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         bounding_box: &mut BoundingBox,
         orientation: Option<Direction>,

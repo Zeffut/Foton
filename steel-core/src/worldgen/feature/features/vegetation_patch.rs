@@ -4,7 +4,7 @@ use super::super::vanilla_collections::JavaBlockPosSet;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_vegetation_patch_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -29,7 +29,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_waterlogged_vegetation_patch_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -63,7 +63,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_vegetation_patch_ground(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -140,7 +140,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_vegetation_patch_ground_column(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,
@@ -174,7 +174,7 @@ impl FeatureDecorationRunner {
     }
 
     fn distribute_vegetation_patch(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &VegetationPatchConfiguration,

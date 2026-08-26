@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_freeze_top_layer_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         origin: BlockPos,
         biome_zoom_seed: i64,
@@ -34,7 +34,7 @@ impl FeatureDecorationRunner {
         true
     }
 
-    fn set_snowy_below(region: &mut WorldGenRegion<'_>, below_pos: BlockPos) {
+    fn set_snowy_below(region: &WorldGenRegion<'_>, below_pos: BlockPos) {
         let below_state = region.block_state(below_pos);
         if below_state
             .try_get_value(&BlockStateProperties::SNOWY)

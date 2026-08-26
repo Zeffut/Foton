@@ -17,7 +17,7 @@ use crate::worldgen::template::StructureTemplate;
 use super::StructurePiecePlacer;
 
 pub(super) struct ScatteredFeaturePlacer<'a, 'world> {
-    region: &'a mut WorldGenRegion<'world>,
+    region: &'a WorldGenRegion<'world>,
     registry: &'a Registry,
     bounding_box: &'a mut BoundingBox,
     orientation: Option<Direction>,
@@ -26,7 +26,7 @@ pub(super) struct ScatteredFeaturePlacer<'a, 'world> {
 
 impl<'a, 'world> ScatteredFeaturePlacer<'a, 'world> {
     pub(super) const fn new(
-        region: &'a mut WorldGenRegion<'world>,
+        region: &'a WorldGenRegion<'world>,
         registry: &'a Registry,
         bounding_box: &'a mut BoundingBox,
         orientation: Option<Direction>,

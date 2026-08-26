@@ -13,7 +13,7 @@ static GEODE_NOISE_BY_SEED: LazyLock<SyncMutex<FxHashMap<i64, NormalNoise>>> =
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_geode_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &GeodeConfiguration,
@@ -271,7 +271,7 @@ impl FeatureDecorationRunner {
     }
 
     fn safe_set_geode_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         pos: BlockPos,
         state: BlockStateId,
@@ -297,7 +297,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_geode_crystals(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         blocks: &GeodeBlockSettings,

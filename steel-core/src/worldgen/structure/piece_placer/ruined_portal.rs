@@ -27,7 +27,7 @@ const RUINED_PORTAL_HORIZONTAL_DIRECTIONS: [Direction; 4] = [
 
 impl StructurePiecePlacer {
     pub(super) fn post_process_ruined_portal(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         vertical_placement: RuinedPortalPlacementData,
         properties: RuinedPortalProperties,
         portal_box: BoundingBox,
@@ -62,7 +62,7 @@ impl StructurePiecePlacer {
     }
 
     fn maybe_add_ruined_portal_vines(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
         random: &mut WorldgenRandom,
     ) {
@@ -87,7 +87,7 @@ impl StructurePiecePlacer {
     }
 
     fn maybe_add_ruined_portal_leaves(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
         random: &mut WorldgenRandom,
     ) {
@@ -109,7 +109,7 @@ impl StructurePiecePlacer {
     }
 
     fn add_ruined_portal_netherrack_drip_columns(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         properties: RuinedPortalProperties,
         portal_box: BoundingBox,
         random: &mut WorldgenRandom,
@@ -130,7 +130,7 @@ impl StructurePiecePlacer {
     }
 
     fn add_ruined_portal_netherrack_drip_column(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         properties: RuinedPortalProperties,
         pos: BlockPos,
         random: &mut WorldgenRandom,
@@ -146,7 +146,7 @@ impl StructurePiecePlacer {
     }
 
     fn spread_ruined_portal_netherrack(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         vertical_placement: RuinedPortalPlacementData,
         properties: RuinedPortalProperties,
         portal_box: BoundingBox,
@@ -230,7 +230,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_ruined_portal_netherrack_or_magma(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         properties: RuinedPortalProperties,
         pos: BlockPos,
         random: &mut WorldgenRandom,

@@ -16,7 +16,7 @@ const BLAZE_ENTITY: &str = "minecraft:blaze";
 
 impl StructurePiecePlacer {
     pub(super) fn place_nether_fortress_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         bounding_box: BoundingBox,
         orientation: Option<Direction>,

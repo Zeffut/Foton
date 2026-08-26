@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_huge_fungus_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &HugeFungusConfiguration,
@@ -62,7 +62,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla HugeFungusFeature.placeStem state"
     )]
     fn place_huge_fungus_stem(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &HugeFungusConfiguration,
@@ -112,7 +112,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla HugeFungusFeature.placeHat state"
     )]
     fn place_huge_fungus_hat(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &HugeFungusConfiguration,
@@ -215,7 +215,7 @@ impl FeatureDecorationRunner {
         reason = "vanilla hat placement uses three independent probabilities"
     )]
     fn place_huge_fungus_hat_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         hat_state: BlockStateId,
@@ -235,7 +235,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_huge_fungus_hat_drop_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         hat_state: BlockStateId,
@@ -252,7 +252,7 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_huge_fungus_weeping_vines(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         hat_pos: BlockPos,
     ) {

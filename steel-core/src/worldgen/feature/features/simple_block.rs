@@ -4,7 +4,7 @@ use crate::behavior::blocks::MossyCarpetBlock;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_simple_block_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &SimpleBlockConfiguration,
@@ -55,7 +55,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_double_plant(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         state: BlockStateId,
         lower_pos: BlockPos,
     ) {
@@ -97,7 +97,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_mossy_carpet(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
     ) {
         let simple_carpet_layer = vanilla_blocks::PALE_MOSS_CARPET.default_state();
@@ -115,7 +115,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn create_mossy_carpet_topper(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
     ) -> BlockStateId {
         let above = pos.above();
@@ -135,7 +135,7 @@ impl FeatureDecorationRunner {
             for direction in MossyCarpetBlock::HORIZONTAL_DIRECTIONS {
                 let property = MossyCarpetBlock::wall_property(direction);
                 if above_state.get_value(property) != WallSide::None
-                    && !region.random_mut().next_bool()
+                    && !region.with_random(|random| random.next_bool())
                 {
                     above_state = above_state.set_value(property, WallSide::None);
                 }

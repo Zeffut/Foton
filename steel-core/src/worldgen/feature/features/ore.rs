@@ -10,7 +10,7 @@ use steel_worldgen::state_resolver::WorldgenStateResolver;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_ore_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -57,7 +57,7 @@ impl FeatureDecorationRunner {
         reason = "mirrors vanilla ore vein placement inputs"
     )]
     pub(in crate::worldgen::feature) fn do_place_ore(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -315,7 +315,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_scattered_ore_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,
@@ -355,7 +355,7 @@ impl FeatureDecorationRunner {
     }
 
     fn try_place_resolved_ore_block(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &OreConfiguration,

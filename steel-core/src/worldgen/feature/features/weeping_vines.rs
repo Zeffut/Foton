@@ -3,7 +3,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_weeping_vines_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
@@ -24,7 +24,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_roof_nether_wart(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) {
@@ -64,7 +64,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_roof_weeping_vines(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) {
@@ -97,7 +97,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(in crate::worldgen::feature) fn place_weeping_vines_column(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         mut place_pos: BlockPos,
         total_height: i32,

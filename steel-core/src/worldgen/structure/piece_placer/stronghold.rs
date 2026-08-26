@@ -19,7 +19,7 @@ const SILVERFISH_ENTITY: &str = "minecraft:silverfish";
 
 impl StructurePiecePlacer {
     pub(super) fn place_stronghold_piece(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         bounding_box: BoundingBox,
         orientation: Option<Direction>,

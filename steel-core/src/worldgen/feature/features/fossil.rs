@@ -19,7 +19,7 @@ const VANILLA_ROTATIONS: [Rotation; 4] = [
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_fossil_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &FossilConfiguration,

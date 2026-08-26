@@ -9,7 +9,7 @@ use steel_utils::BoundingBox;
 use steel_worldgen::structure::{StructureBlockIgnore, StructureMirror};
 
 struct ConfiguredFeaturePlaceContext<'a, 'region> {
-    region: &'a mut WorldGenRegion<'region>,
+    region: &'a WorldGenRegion<'region>,
     registry: &'a Registry,
     random: &'a mut WorldgenRandom,
     origin: BlockPos,
@@ -23,7 +23,7 @@ type ConfiguredFeaturePlacer = for<'a, 'region> fn(
 
 impl FeatureDecorationRunner {
     pub(super) fn place_configured_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         feature: &ConfiguredFeatureRef,
@@ -35,7 +35,7 @@ impl FeatureDecorationRunner {
     }
 
     pub(super) fn place_configured_feature_kind(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         kind: &ConfiguredFeatureKind,

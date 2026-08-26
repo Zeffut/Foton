@@ -94,7 +94,7 @@ pub trait ChunkGenerator: Send + Sync {
     fn create_worldgen_region_random(&self, world_seed: i64, center: ChunkPos) -> RandomSource;
 
     /// Applies structure piece placement and biome feature decorations.
-    fn apply_biome_decorations(&self, region: &mut WorldGenRegion<'_>);
+    fn apply_biome_decorations(&self, region: &WorldGenRegion<'_>);
 }
 
 pub(crate) fn worldgen_region_random_from_splitter(

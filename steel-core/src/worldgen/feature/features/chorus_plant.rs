@@ -7,7 +7,7 @@ use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_chorus_plant_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         origin: BlockPos,
     ) -> bool {
@@ -25,7 +25,7 @@ impl FeatureDecorationRunner {
     }
 
     fn generate_chorus_plant(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         target: BlockPos,
         max_horizontal_spread: i32,
@@ -37,7 +37,7 @@ impl FeatureDecorationRunner {
     }
 
     fn grow_chorus_tree_recursive(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         current: BlockPos,
         start_pos: BlockPos,

@@ -8,7 +8,7 @@ const UNCLUSTERED_SIZE: i32 = 15;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_basalt_columns_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         config: &BasaltColumnsConfiguration,
         origin: BlockPos,
@@ -54,7 +54,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_basalt_column(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         lava_sea_level: i32,
         origin: BlockPos,
         column_height: i32,

@@ -21,7 +21,7 @@ struct WindOffsetter {
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_large_dripstone_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         config: &LargeDripstoneConfiguration,
         origin: BlockPos,
@@ -213,7 +213,7 @@ impl LargeDripstone {
 
     fn place_blocks(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         wind: &WindOffsetter,
     ) {

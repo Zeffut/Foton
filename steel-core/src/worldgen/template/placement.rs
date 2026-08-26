@@ -148,7 +148,7 @@ impl StructureTemplate {
     )]
     pub(crate) fn place_in_world(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         position: BlockPos,
         reference_pos: BlockPos,
@@ -327,7 +327,7 @@ impl StructureTemplate {
 
     pub(super) fn place_entities(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
     ) {
@@ -397,7 +397,7 @@ impl StructureTemplate {
 
     pub(crate) fn replace_jigsaw_final_states(
         &self,
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         position: BlockPos,
         settings: &StructurePlaceSettings<'_>,
@@ -693,7 +693,7 @@ impl StructureTemplate {
     }
 
     pub(super) fn place_block_entity(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         pos: BlockPos,
         state: BlockStateId,
         block_entity_type: Option<BlockEntityTypeRef>,

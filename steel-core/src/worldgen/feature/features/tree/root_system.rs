@@ -3,7 +3,7 @@ use super::super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_root_system_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -31,7 +31,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_dirt_and_tree(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -138,7 +138,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_dirt(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -159,7 +159,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_rooted_dirt(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,
@@ -193,7 +193,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_root_system_hanging_roots(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &RootSystemConfiguration,

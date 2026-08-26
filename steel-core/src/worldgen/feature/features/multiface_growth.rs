@@ -19,7 +19,7 @@ type MultifaceDirections = SmallVec<[Direction; 6]>;
 
 impl FeatureDecorationRunner {
     pub(in crate::worldgen::feature) fn place_multiface_growth_feature(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         registry: &Registry,
         random: &mut WorldgenRandom,
         config: &MultifaceGrowthConfiguration,
@@ -76,7 +76,7 @@ impl FeatureDecorationRunner {
     }
 
     fn place_multiface_growth_if_possible(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         random: &mut WorldgenRandom,
         pos: BlockPos,
         old_state: BlockStateId,
@@ -120,7 +120,7 @@ impl FeatureDecorationRunner {
     }
 
     fn spread_multiface_from_face_toward_random_direction(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
 
         random: &mut WorldgenRandom,
         config: &ResolvedMultifaceGrowth<'_>,
@@ -148,7 +148,7 @@ impl FeatureDecorationRunner {
     }
 
     fn spread_multiface_from_face_toward_direction(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         config: &ResolvedMultifaceGrowth<'_>,
         state: BlockStateId,
         pos: BlockPos,
@@ -202,7 +202,7 @@ impl FeatureDecorationRunner {
     }
 
     fn spread_multiface_to_face(
-        region: &mut WorldGenRegion<'_>,
+        region: &WorldGenRegion<'_>,
         config: &ResolvedMultifaceGrowth<'_>,
         spread_pos: &MultifaceSpreadPos,
         post_process: bool,
