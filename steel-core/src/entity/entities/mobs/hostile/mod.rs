@@ -1,6 +1,7 @@
 //! Hostile mob implementations.
 
 mod blaze;
+mod bogged;
 mod cave_spider;
 mod creeper;
 mod cube_common;
@@ -10,12 +11,14 @@ mod enderman;
 mod endermite;
 mod evoker;
 mod ghast;
+mod giant;
 mod guardian;
 mod guardian_common;
 mod hoglin;
 mod husk;
 mod illusioner;
 mod magma_cube;
+mod parched;
 mod phantom;
 mod piglin;
 pub mod piglin_predicates;
@@ -36,6 +39,7 @@ mod zombie;
 mod zombified_piglin;
 
 pub use blaze::BlazeEntity;
+pub use bogged::BoggedEntity;
 pub use cave_spider::CaveSpiderEntity;
 pub use creeper::CreeperEntity;
 pub use drowned::DrownedEntity;
@@ -44,11 +48,13 @@ pub use enderman::EndermanEntity;
 pub use endermite::EndermiteEntity;
 pub use evoker::EvokerEntity;
 pub use ghast::GhastEntity;
+pub use giant::GiantEntity;
 pub use guardian::GuardianEntity;
 pub use hoglin::HoglinEntity;
 pub use husk::HuskEntity;
 pub use illusioner::IllusionerEntity;
 pub use magma_cube::MagmaCubeEntity;
+pub use parched::ParchedEntity;
 pub use phantom::PhantomEntity;
 pub use piglin::{PiglinBruteEntity, PiglinEntity, anger_nearby_piglins};
 pub use pillager::PillagerEntity;

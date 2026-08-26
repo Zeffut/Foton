@@ -21,9 +21,8 @@ use steel_utils::{
     WorldAabb, axis::Axis,
 };
 
-use crate::entity::entities::ItemFrameEntity;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData, ItemFrame as _,
+    Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData, ItemFrame,
 };
 use crate::physics::{WorldCollisionProvider, has_block_collision};
 use crate::world::World;
@@ -430,15 +429,15 @@ fn is_diode(state: BlockStateId) -> bool {
 /// The facing of `entity` when it is one of Steel's hanging entities.
 ///
 /// Vanilla parity: the `EntityTypeTest.forClass(HangingEntity.class)` of
-/// `HangingEntity.canCoexist`. `GlowItemFrame` shares `ItemFrameEntity` here,
-/// so the two arms cover every hanging entity Steel has.
+/// `HangingEntity.canCoexist`. Steel has no `HangingEntity` supertype, so the
+/// painting is matched by its concrete type and both item frames through the
+/// `ItemFrame` capability trait -- which is what stops a glow frame being hung
+/// inside a plain one.
 fn hanging_entity_direction(entity: &dyn Entity) -> Option<Direction> {
     if let Some(painting) = entity.downcast_ref::<PaintingEntity>() {
         return Some(painting.direction());
     }
-    entity
-        .downcast_ref::<ItemFrameEntity>()
-        .map(ItemFrameEntity::direction)
+    entity.as_item_frame().map(ItemFrame::direction)
 }
 
 /// Vanilla parity: `Direction.get2DDataValue`.

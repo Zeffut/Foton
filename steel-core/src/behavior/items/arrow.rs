@@ -32,11 +32,6 @@ impl ItemBehavior for ArrowItem {
 ///
 /// Vanilla parity: `SpectralArrowItem`, which only swaps the entity its
 /// `createArrow` builds.
-///
-/// Steel gap: Steel has no `SpectralArrow` entity, so [`arrow_entity_type_for`]
-/// substitutes a plain arrow when a weapon fires one and no glowing is applied.
-/// The `minecraft:glowing` effect itself already exists; only the entity that
-/// hands it out is missing.
 #[item_behavior]
 pub struct SpectralArrowItem;
 
@@ -92,13 +87,20 @@ mod tests {
         );
     }
 
+    /// A bow loaded with spectral arrows has to fire the spectral entity, or
+    /// the glowing never happens. This was the fallback arm of
+    /// `arrow_entity_type_for` until `SpectralArrowEntity` existed to be
+    /// registered, so it is also the check that the factory is wired.
     #[test]
-    fn a_spectral_arrow_falls_back_while_steel_has_no_spectral_entity() {
+    fn a_spectral_arrow_fires_the_spectral_entity() {
         init_vanilla_registry();
         init_behaviors();
         init_entities();
 
         let spectral = ItemStack::new(&vanilla_items::SPECTRAL_ARROW);
-        assert_eq!(arrow_entity_type_for(&spectral), &vanilla_entities::ARROW);
+        assert_eq!(
+            arrow_entity_type_for(&spectral),
+            &vanilla_entities::SPECTRAL_ARROW
+        );
     }
 }

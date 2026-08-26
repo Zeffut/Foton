@@ -31,23 +31,18 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 20
-Bogged
+[entities] 15
 Breeze
 BreezeWindCharge
 CamelHusk
 Creaking
 EnderDragon
 EyeOfEnder
-Giant
-GlowItemFrame
 HappyGhast
 Mannequin
 MinecartCommandBlock
 Nautilus
-Parched
 Player
-SpectralArrow
 SulfurCube
 ThrownLingeringPotion
 Warden

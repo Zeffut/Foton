@@ -1,4 +1,9 @@
-//! The item frame.
+//! The glow item frame.
+//!
+//! Vanilla parity: `GlowItemFrame`, which extends `ItemFrame` and overrides
+//! nothing but its five sounds and the item it drops. Everything else -- the
+//! geometry, the rotation, the comparator output, the save format -- is
+//! `ItemFrame`, and the pure geometry here is [`ItemFrameEntity`]'s own.
 
 use std::sync::Weak;
 
@@ -11,12 +16,14 @@ use steel_registry::data_components::vanilla_components::MAP_ID;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::vanilla_entity_data::ItemFrameEntityData;
+use steel_registry::vanilla_entity_data::GlowItemFrameEntityData;
 use steel_registry::{sound_events, vanilla_blocks, vanilla_game_events};
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::InteractionHand;
-use steel_utils::{BlockPos, Direction, DowncastType, DowncastTypeKey, WorldAabb, axis::Axis};
+use steel_utils::{BlockPos, Direction, DowncastType, DowncastTypeKey, WorldAabb};
 
+use super::ItemFrameEntity;
+use super::item_frame::{direction_3d_data_value, direction_from_3d_data_value};
 use crate::behavior::InteractionResult;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData, ItemFrame,
@@ -25,34 +32,29 @@ use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
 
-/// An item frame.
-///
-/// Vanilla parity: `ItemFrame`. A frame holds one item, turns it eight ways,
-/// and reports the rotation to a comparator. Not implemented: drops when the
-/// frame is broken, map tracking, and the support check that makes a frame pop
-/// off when the wall behind it goes -- the frame is placed against a solid
-/// block and then stays there.
-#[entity_behavior(class = "ItemFrame")]
-pub struct ItemFrameEntity {
-    base: EntityBase,
-    entity_type: EntityTypeRef,
-    entity_data: SyncMutex<ItemFrameEntityData>,
-    block_pos: SyncMutex<BlockPos>,
-}
-
-// SAFETY: This key is owned by Steel and uniquely identifies `ItemFrameEntity`.
-unsafe impl DowncastType for ItemFrameEntity {
-    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/item_frame");
-}
-
 /// How many ways round a framed item can sit.
 ///
 /// Vanilla parity: the `% 8` shared by `ItemFrame.setRotation` and its
 /// comparator output.
 const ROTATION_STEPS: i32 = 8;
 
-impl ItemFrameEntity {
-    /// Creates a fresh item frame from the generic entity factory path.
+/// A glow item frame.
+#[entity_behavior(class = "GlowItemFrame")]
+pub struct GlowItemFrameEntity {
+    base: EntityBase,
+    entity_type: EntityTypeRef,
+    entity_data: SyncMutex<GlowItemFrameEntityData>,
+    block_pos: SyncMutex<BlockPos>,
+}
+
+// SAFETY: This key is owned by Steel and uniquely identifies
+// `GlowItemFrameEntity`.
+unsafe impl DowncastType for GlowItemFrameEntity {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/glow_item_frame");
+}
+
+impl GlowItemFrameEntity {
+    /// Creates a fresh glow item frame from the generic entity factory path.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {
         Self::new_attached(
@@ -68,7 +70,7 @@ impl ItemFrameEntity {
         )
     }
 
-    /// Creates a fresh item frame attached to `block_pos`.
+    /// Creates a fresh glow item frame attached to `block_pos`.
     #[must_use]
     pub fn new_attached(
         entity_type: EntityTypeRef,
@@ -81,34 +83,34 @@ impl ItemFrameEntity {
             base: EntityBase::new_with_state(
                 id,
                 EntityBaseState::new_with_bounding_box(
-                    Self::frame_center(block_pos, direction),
+                    ItemFrameEntity::frame_center(block_pos, direction),
                     entity_type.dimensions,
-                    Self::frame_bounding_box(block_pos, direction, false),
+                    ItemFrameEntity::frame_bounding_box(block_pos, direction, false),
                 )
-                .with_rotation(Self::rotation_for_direction(direction)),
+                .with_rotation(ItemFrameEntity::rotation_for_direction(direction)),
                 world,
             ),
             entity_type,
-            entity_data: SyncMutex::new(ItemFrameEntityData::new()),
+            entity_data: SyncMutex::new(GlowItemFrameEntityData::new()),
             block_pos: SyncMutex::new(block_pos),
         };
         entity
             .entity_data
             .lock()
-            .hanging_entity
+            .hanging_entity_mut()
             .direction
             .set(direction);
         entity
     }
 
-    /// Creates an item frame from persistent entity data.
+    /// Creates a glow item frame from persistent entity data.
     #[must_use]
     pub fn from_saved(entity_type: EntityTypeRef, load: EntityBaseLoad) -> Self {
         let position = load.position;
         Self {
             base: EntityBase::from_load(load, entity_type.dimensions),
             entity_type,
-            entity_data: SyncMutex::new(ItemFrameEntityData::new()),
+            entity_data: SyncMutex::new(GlowItemFrameEntityData::new()),
             block_pos: SyncMutex::new(BlockPos::new(
                 position.x.floor() as i32,
                 position.y.floor() as i32,
@@ -127,7 +129,7 @@ impl ItemFrameEntity {
         if !item.is_empty() {
             item.set_count(1);
         }
-        self.entity_data.lock().item.set(item);
+        self.entity_data.lock().item_frame_mut().item.set(item);
         self.recalculate_position();
         if update_comparators && let Some(world) = self.level() {
             world.update_neighbor_for_output_signal(*self.block_pos.lock(), &vanilla_blocks::AIR);
@@ -137,11 +139,11 @@ impl ItemFrameEntity {
     fn set_direction(&self, direction: Direction) {
         self.entity_data
             .lock()
-            .hanging_entity
+            .hanging_entity_mut()
             .direction
             .set(direction);
         self.base
-            .set_rotation(Self::rotation_for_direction(direction));
+            .set_rotation(ItemFrameEntity::rotation_for_direction(direction));
         self.recalculate_position();
     }
 
@@ -156,8 +158,7 @@ impl ItemFrameEntity {
     /// Tells the world the frame changed.
     ///
     /// Vanilla parity: the `gameEvent(BLOCK_CHANGE, player)` of
-    /// `ItemFrame.interact`, plus the comparator update -- a frame's signal is
-    /// its rotation, so turning the item is a redstone change.
+    /// `ItemFrame.interact`, plus the comparator update.
     fn frame_changed(&self, player: &Player) {
         let Some(world) = self.level() else {
             return;
@@ -172,97 +173,54 @@ impl ItemFrameEntity {
 
     fn recalculate_position(&self) {
         let block_pos = *self.block_pos.lock();
-        let direction = *self.entity_data.lock().hanging_entity.direction.get();
-        let position = Self::frame_center(block_pos, direction);
+        let direction = *self.entity_data.lock().hanging_entity().direction.get();
+        let position = ItemFrameEntity::frame_center(block_pos, direction);
         if let Err(error) = self.base.try_set_position(position) {
             panic!(
-                "failed to commit item frame {} position recalculation: {error}",
+                "failed to commit glow item frame {} position recalculation: {error}",
                 self.base.id()
             );
         }
-        self.base.set_bounding_box(Self::frame_bounding_box(
-            block_pos,
-            direction,
-            self.has_framed_map(),
-        ));
+        self.base
+            .set_bounding_box(ItemFrameEntity::frame_bounding_box(
+                block_pos,
+                direction,
+                self.has_framed_map(),
+            ));
     }
 
     fn has_framed_map(&self) -> bool {
-        self.entity_data.lock().item.get().has(MAP_ID)
-    }
-
-    /// Returns where a frame attached to `block_pos` sits.
-    ///
-    /// Shared with [`super::GlowItemFrameEntity`], which is the same geometry.
-    pub(super) fn frame_center(block_pos: BlockPos, direction: Direction) -> DVec3 {
-        let off = direction.offset_vec().as_dvec3() * 0.46875;
-        block_pos.0.as_dvec3() + DVec3::splat(0.5) - off
-    }
-
-    /// Returns the rotation a frame facing `direction` is drawn at.
-    pub(super) fn rotation_for_direction(direction: Direction) -> (f32, f32) {
-        if direction.is_horizontal() {
-            (f32::from(direction_2d_data_value(direction)) * 90.0, 0.0)
-        } else {
-            let pitch = match direction {
-                Direction::Up => -90.0,
-                Direction::Down => 90.0,
-                Direction::North | Direction::South | Direction::West | Direction::East => 0.0,
-            };
-            (0.0, pitch)
-        }
+        self.entity_data.lock().item_frame().item.get().has(MAP_ID)
     }
 
     /// Returns the hitbox of a frame attached to `block_pos`.
-    pub(super) fn frame_bounding_box(
+    #[must_use]
+    pub fn frame_bounding_box(
         block_pos: BlockPos,
         direction: Direction,
         has_framed_map: bool,
     ) -> WorldAabb {
-        let center = Self::frame_center(block_pos, direction);
-        let size = if has_framed_map { 1.0 } else { 0.75 };
-        let x_size = if direction.axis() == Axis::X {
-            0.0625
-        } else {
-            size
-        };
-        let y_size = if direction.axis() == Axis::Y {
-            0.0625
-        } else {
-            size
-        };
-        let z_size = if direction.axis() == Axis::Z {
-            0.0625
-        } else {
-            size
-        };
-        WorldAabb::new(
-            center.x - x_size / 2.0,
-            center.y - y_size / 2.0,
-            center.z - z_size / 2.0,
-            center.x + x_size / 2.0,
-            center.y + y_size / 2.0,
-            center.z + z_size / 2.0,
-        )
+        ItemFrameEntity::frame_bounding_box(block_pos, direction, has_framed_map)
     }
 }
 
-impl ItemFrame for ItemFrameEntity {
+impl ItemFrame for GlowItemFrameEntity {
     fn direction(&self) -> Direction {
-        *self.entity_data.lock().hanging_entity.direction.get()
+        *self.entity_data.lock().hanging_entity().direction.get()
     }
 
     fn analog_output(&self) -> i32 {
         let entity_data = self.entity_data.lock();
-        if entity_data.item.get().is_empty() {
+        let frame = entity_data.item_frame();
+        if frame.item.get().is_empty() {
             0
         } else {
-            *entity_data.rotation.get() % 8 + 1
+            *frame.rotation.get() % ROTATION_STEPS + 1
         }
     }
 }
 
-impl Entity for ItemFrameEntity {
+impl Entity for GlowItemFrameEntity {
     fn base(&self) -> &EntityBase {
         &self.base
     }
@@ -272,7 +230,7 @@ impl Entity for ItemFrameEntity {
     }
 
     fn spawn_data(&self) -> i32 {
-        direction_3d_data_value(*self.entity_data.lock().hanging_entity.direction.get())
+        direction_3d_data_value(*self.entity_data.lock().hanging_entity().direction.get())
     }
 
     fn spawn_position(&self) -> DVec3 {
@@ -290,17 +248,14 @@ impl Entity for ItemFrameEntity {
 
     /// Fills the frame, or turns what is already in it.
     ///
-    /// Vanilla parity: `ItemFrame.interact`. The same click does two different
-    /// things depending on whether the frame is empty, which is what lets a
-    /// player set a rotation without a second gesture -- and what a comparator
-    /// beside the frame is reading.
+    /// Vanilla parity: `ItemFrame.interact` with `GlowItemFrame`'s sounds.
     fn interact(
         &self,
         player: &Player,
         hand: InteractionHand,
         _location: DVec3,
     ) -> InteractionResult {
-        let frame_is_empty = self.entity_data.lock().item.get().is_empty();
+        let frame_is_empty = self.entity_data.lock().item_frame().item.get().is_empty();
 
         if frame_is_empty {
             let held = {
@@ -313,7 +268,7 @@ impl Entity for ItemFrameEntity {
             }
 
             self.set_item(held);
-            self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_ADD_ITEM);
+            self.play_frame_sound(&sound_events::ENTITY_GLOW_ITEM_FRAME_ADD_ITEM);
             self.frame_changed(player);
 
             if !player.has_infinite_materials() {
@@ -325,10 +280,11 @@ impl Entity for ItemFrameEntity {
 
         {
             let mut entity_data = self.entity_data.lock();
-            let next = (*entity_data.rotation.get() + 1).rem_euclid(ROTATION_STEPS);
-            entity_data.rotation.set(next);
+            let frame = entity_data.item_frame_mut();
+            let next = (*frame.rotation.get() + 1).rem_euclid(ROTATION_STEPS);
+            frame.rotation.set(next);
         }
-        self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_ROTATE_ITEM);
+        self.play_frame_sound(&sound_events::ENTITY_GLOW_ITEM_FRAME_ROTATE_ITEM);
         self.frame_changed(player);
         InteractionResult::Success
     }
@@ -345,15 +301,16 @@ impl Entity for ItemFrameEntity {
         );
 
         let entity_data = self.entity_data.lock();
-        let item = entity_data.item.get();
+        let frame = entity_data.item_frame();
+        let item = frame.item.get();
         if !item.is_empty() {
             nbt.insert("Item", item.to_nbt_tag_ref());
         }
-        nbt.insert("ItemRotation", *entity_data.rotation.get() as i8);
+        nbt.insert("ItemRotation", *frame.rotation.get() as i8);
         nbt.insert("ItemDropChance", 1.0_f32);
         nbt.insert(
             "Facing",
-            direction_3d_data_value(*entity_data.hanging_entity.direction.get()) as i8,
+            direction_3d_data_value(*entity_data.hanging_entity().direction.get()) as i8,
         );
         nbt.insert("Invisible", 0_i8);
         nbt.insert("Fixed", 0_i8);
@@ -375,8 +332,9 @@ impl Entity for ItemFrameEntity {
         if let Some(item_rotation) = nbt.byte("ItemRotation") {
             self.entity_data
                 .lock()
+                .item_frame_mut()
                 .rotation
-                .set(i32::from(item_rotation).rem_euclid(8));
+                .set(i32::from(item_rotation).rem_euclid(ROTATION_STEPS));
         }
 
         let facing = nbt
@@ -391,57 +349,47 @@ impl Entity for ItemFrameEntity {
     }
 }
 
-/// Vanilla parity: `Direction.get3DDataValue`.
-pub(super) const fn direction_3d_data_value(direction: Direction) -> i32 {
-    match direction {
-        Direction::Down => 0,
-        Direction::Up => 1,
-        Direction::North => 2,
-        Direction::South => 3,
-        Direction::West => 4,
-        Direction::East => 5,
-    }
-}
-
-/// Vanilla parity: `Direction.from3DDataValue`, with the out-of-range case
-/// rejected rather than wrapped.
-pub(super) const fn direction_from_3d_data_value(value: i32) -> Option<Direction> {
-    match value {
-        0 => Some(Direction::Down),
-        1 => Some(Direction::Up),
-        2 => Some(Direction::North),
-        3 => Some(Direction::South),
-        4 => Some(Direction::West),
-        5 => Some(Direction::East),
-        _ => None,
-    }
-}
-
-/// Vanilla parity: `Direction.get2DDataValue`.
-pub(super) const fn direction_2d_data_value(direction: Direction) -> u8 {
-    match direction {
-        Direction::South | Direction::Down | Direction::Up => 0,
-        Direction::West => 1,
-        Direction::North => 2,
-        Direction::East => 3,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::string::ToString;
-    use steel_registry::{vanilla_entities, vanilla_items};
+    use steel_registry::{init_vanilla_registry, vanilla_entities, vanilla_items};
 
-    #[test]
-    fn item_frame_persists_structure_marker_state() {
-        let frame = ItemFrameEntity::new_attached(
-            &vanilla_entities::ITEM_FRAME,
+    fn glow_frame() -> GlowItemFrameEntity {
+        init_vanilla_registry();
+        GlowItemFrameEntity::new_attached(
+            &vanilla_entities::GLOW_ITEM_FRAME,
             1,
-            BlockPos::new(12, 80, 14),
+            BlockPos::new(8, 64, 8),
             Direction::West,
             Weak::new(),
-        );
+        )
+    }
+
+    /// A comparator beside a glow frame reads the same signal as one beside a
+    /// plain frame. This is the whole reason the glow frame is a separate
+    /// entity type rather than a block state: it has to answer redstone.
+    #[test]
+    fn a_glow_frame_reports_the_same_comparator_signal_as_a_plain_one() {
+        let frame = glow_frame();
+        assert_eq!(frame.analog_output(), 0);
+
+        frame.set_item_with_update(ItemStack::new(&vanilla_items::ELYTRA), false);
+        assert_eq!(frame.analog_output(), 1);
+        frame
+            .entity_data
+            .lock()
+            .item_frame_mut()
+            .rotation
+            .set(ROTATION_STEPS - 1);
+        assert_eq!(frame.analog_output(), ROTATION_STEPS);
+    }
+
+    /// A glow frame writes the same NBT shape as a plain frame -- vanilla's
+    /// `GlowItemFrame` overrides no save method at all -- so a world saved with
+    /// one has to reload it with its item and facing intact.
+    #[test]
+    fn a_glow_frame_saves_the_item_frame_shape() {
+        let frame = glow_frame();
         frame.set_item(ItemStack::new(&vanilla_items::ELYTRA));
 
         let mut nbt = NbtCompound::new();
@@ -449,46 +397,9 @@ mod tests {
 
         assert_eq!(nbt.byte("Facing"), Some(4));
         assert_eq!(nbt.byte("ItemRotation"), Some(0));
-        assert_eq!(nbt.float("ItemDropChance"), Some(1.0));
-        assert_eq!(nbt.byte("Invisible"), Some(0));
-        assert_eq!(nbt.byte("Fixed"), Some(0));
         let Some(item) = nbt.compound("Item") else {
-            panic!("item frame should save framed item");
+            panic!("glow item frame should save its framed item");
         };
-        assert_eq!(
-            item.string("id").map(ToString::to_string),
-            Some("minecraft:elytra".to_owned())
-        );
         assert_eq!(item.int("count"), Some(1));
-    }
-
-    #[test]
-    fn item_frame_is_pickable_like_vanilla() {
-        let frame = ItemFrameEntity::new_attached(
-            &vanilla_entities::ITEM_FRAME,
-            1,
-            BlockPos::new(12, 80, 14),
-            Direction::West,
-            Weak::new(),
-        );
-
-        assert!(frame.is_pickable());
-    }
-
-    #[test]
-    fn analog_output_uses_item_presence_and_rotation() {
-        let frame = ItemFrameEntity::new_attached(
-            &vanilla_entities::ITEM_FRAME,
-            1,
-            BlockPos::new(12, 80, 14),
-            Direction::West,
-            Weak::new(),
-        );
-        assert_eq!(frame.analog_output(), 0);
-
-        frame.set_item_with_update(ItemStack::new(&vanilla_items::ELYTRA), false);
-        assert_eq!(frame.analog_output(), 1);
-        frame.entity_data.lock().rotation.set(7);
-        assert_eq!(frame.analog_output(), 8);
     }
 }

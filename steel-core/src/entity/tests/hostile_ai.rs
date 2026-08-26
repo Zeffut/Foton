@@ -15,10 +15,10 @@
 
 use super::*;
 use crate::entity::entities::{
-    BlazeEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
-    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GuardianEntity, HoglinEntity,
-    HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity, PhantomEntity,
-    PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
+    BlazeEntity, BoggedEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, ElderGuardianEntity,
+    EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity, GuardianEntity,
+    HoglinEntity, HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity, ParchedEntity,
+    PhantomEntity, PiglinBruteEntity, PiglinEntity, PillagerEntity, RavagerEntity, ShulkerEntity,
     SilverfishEntity, SkeletonEntity, SlimeEntity, SnowGolemEntity, SpiderEntity, StrayEntity,
     VexEntity, VindicatorEntity, WitchEntity, WitherBoss, WitherSkeletonEntity, ZoglinEntity,
     ZombieEntity, ZombifiedPiglinEntity,
@@ -61,6 +61,9 @@ assert_ai_runs! {
     a_zombified_piglin_runs_its_goals: ZombifiedPiglinEntity, &vanilla_entities::ZOMBIFIED_PIGLIN;
     a_skeleton_runs_its_goals: SkeletonEntity, &vanilla_entities::SKELETON;
     a_stray_runs_its_goals: StrayEntity, &vanilla_entities::STRAY;
+    a_bogged_runs_its_goals: BoggedEntity, &vanilla_entities::BOGGED;
+    a_parched_runs_its_goals: ParchedEntity, &vanilla_entities::PARCHED;
+    a_giant_runs_its_goals: GiantEntity, &vanilla_entities::GIANT;
     a_wither_skeleton_runs_its_goals: WitherSkeletonEntity, &vanilla_entities::WITHER_SKELETON;
     a_creeper_runs_its_goals: CreeperEntity, &vanilla_entities::CREEPER;
     a_spider_runs_its_goals: SpiderEntity, &vanilla_entities::SPIDER;

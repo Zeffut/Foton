@@ -11,9 +11,10 @@
 
 use super::*;
 use crate::entity::entities::{
-    CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, HoglinEntity, HuskEntity,
-    PiglinBruteEntity, PiglinEntity, SilverfishEntity, SkeletonEntity, SpiderEntity, StrayEntity,
-    WitchEntity, WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombifiedPiglinEntity,
+    BoggedEntity, CaveSpiderEntity, CreeperEntity, DrownedEntity, EndermanEntity, GiantEntity,
+    HoglinEntity, HuskEntity, ParchedEntity, PiglinBruteEntity, PiglinEntity, SilverfishEntity,
+    SkeletonEntity, SpiderEntity, StrayEntity, WitchEntity, WitherSkeletonEntity, ZoglinEntity,
+    ZombieEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{LivingEntity, Mob, next_entity_id};
 use steel_registry::vanilla_entities;
@@ -43,6 +44,9 @@ assert_monster_reward! {
     a_zombified_piglin_is_worth_five: ZombifiedPiglinEntity, &vanilla_entities::ZOMBIFIED_PIGLIN;
     a_skeleton_is_worth_five: SkeletonEntity, &vanilla_entities::SKELETON;
     a_stray_is_worth_five: StrayEntity, &vanilla_entities::STRAY;
+    a_bogged_is_worth_five: BoggedEntity, &vanilla_entities::BOGGED;
+    a_parched_is_worth_five: ParchedEntity, &vanilla_entities::PARCHED;
+    a_giant_is_worth_five: GiantEntity, &vanilla_entities::GIANT;
     a_wither_skeleton_is_worth_five: WitherSkeletonEntity, &vanilla_entities::WITHER_SKELETON;
     a_creeper_is_worth_five: CreeperEntity, &vanilla_entities::CREEPER;
     a_spider_is_worth_five: SpiderEntity, &vanilla_entities::SPIDER;
