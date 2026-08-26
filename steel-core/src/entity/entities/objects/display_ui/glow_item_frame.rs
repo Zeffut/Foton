@@ -15,18 +15,23 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::vanilla_components::MAP_ID;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
+use steel_registry::items::ItemRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_entity_data::GlowItemFrameEntityData;
-use steel_registry::{sound_events, vanilla_blocks, vanilla_game_events};
+use steel_registry::{sound_events, vanilla_blocks, vanilla_game_events, vanilla_items};
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, Direction, DowncastType, DowncastTypeKey, WorldAabb};
 
 use super::ItemFrameEntity;
-use super::item_frame::{direction_3d_data_value, direction_from_3d_data_value};
+use super::item_frame::{
+    FrameLike, FrameState, direction_3d_data_value, direction_from_3d_data_value,
+};
 use crate::behavior::InteractionResult;
+use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData, ItemFrame,
+    BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
+    ItemFrame, SharedEntity,
 };
 use crate::player::Player;
 use crate::world::World;
@@ -45,6 +50,7 @@ pub struct GlowItemFrameEntity {
     entity_type: EntityTypeRef,
     entity_data: SyncMutex<GlowItemFrameEntityData>,
     block_pos: SyncMutex<BlockPos>,
+    state: SyncMutex<FrameState>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies
@@ -93,6 +99,7 @@ impl GlowItemFrameEntity {
             entity_type,
             entity_data: SyncMutex::new(GlowItemFrameEntityData::new()),
             block_pos: SyncMutex::new(block_pos),
+            state: SyncMutex::new(FrameState::default()),
         };
         entity
             .entity_data
@@ -116,6 +123,7 @@ impl GlowItemFrameEntity {
                 position.y.floor() as i32,
                 position.z.floor() as i32,
             )),
+            state: SyncMutex::new(FrameState::default()),
         }
     }
 
@@ -148,7 +156,7 @@ impl GlowItemFrameEntity {
     }
 
     /// Plays one of the frame's own sounds at the frame.
-    fn play_frame_sound(&self, sound: SoundEventRef) {
+    fn play_sound_at_frame(&self, sound: SoundEventRef) {
         let Some(world) = self.level() else {
             return;
         };
@@ -237,6 +245,10 @@ impl Entity for GlowItemFrameEntity {
     /// Lightning passes straight through anything hung on a block.
     fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
 
+    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
+        self.hurt_item_frame(world, source)
+    }
+
     fn spawn_position(&self) -> DVec3 {
         let block_pos = *self.block_pos.lock();
         DVec3::new(
@@ -272,7 +284,7 @@ impl Entity for GlowItemFrameEntity {
             }
 
             self.set_item(held);
-            self.play_frame_sound(&sound_events::ENTITY_GLOW_ITEM_FRAME_ADD_ITEM);
+            self.play_sound_at_frame(&sound_events::ENTITY_GLOW_ITEM_FRAME_ADD_ITEM);
             self.frame_changed(player);
 
             if !player.has_infinite_materials() {
@@ -288,7 +300,7 @@ impl Entity for GlowItemFrameEntity {
             let next = (*frame.rotation.get() + 1).rem_euclid(ROTATION_STEPS);
             frame.rotation.set(next);
         }
-        self.play_frame_sound(&sound_events::ENTITY_GLOW_ITEM_FRAME_ROTATE_ITEM);
+        self.play_sound_at_frame(&sound_events::ENTITY_GLOW_ITEM_FRAME_ROTATE_ITEM);
         self.frame_changed(player);
         InteractionResult::Success
     }
@@ -311,13 +323,13 @@ impl Entity for GlowItemFrameEntity {
             nbt.insert("Item", item.to_nbt_tag_ref());
         }
         nbt.insert("ItemRotation", *frame.rotation.get() as i8);
-        nbt.insert("ItemDropChance", 1.0_f32);
+        nbt.insert("ItemDropChance", self.drop_chance());
         nbt.insert(
             "Facing",
             direction_3d_data_value(*entity_data.hanging_entity().direction.get()) as i8,
         );
         nbt.insert("Invisible", 0_i8);
-        nbt.insert("Fixed", 0_i8);
+        nbt.insert("Fixed", i8::from(self.is_fixed()));
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
@@ -331,6 +343,16 @@ impl Entity for GlowItemFrameEntity {
             && let Some(item) = ItemStack::from_borrowed_compound(&item_tag)
         {
             self.set_item_with_update(item, false);
+        }
+
+        {
+            let mut state = self.state.lock();
+            if let Some(drop_chance) = nbt.float("ItemDropChance") {
+                state.drop_chance = drop_chance;
+            }
+            if let Some(fixed) = nbt.byte("Fixed") {
+                state.fixed = fixed != 0;
+            }
         }
 
         if let Some(item_rotation) = nbt.byte("ItemRotation") {
@@ -350,6 +372,35 @@ impl Entity for GlowItemFrameEntity {
         }
 
         self.recalculate_position();
+    }
+}
+
+impl BlockAttached for GlowItemFrameEntity {
+    fn drop_item(&self, world: &World, caused_by: Option<&SharedEntity>) {
+        self.drop_broken_frame(world, caused_by);
+    }
+}
+
+impl FrameLike for GlowItemFrameEntity {
+    fn frame_state(&self) -> &SyncMutex<FrameState> {
+        &self.state
+    }
+
+    fn framed_item(&self) -> ItemStack {
+        self.entity_data.lock().item_frame().item.get().clone()
+    }
+
+    fn clear_framed_item(&self) {
+        self.set_item_with_update(ItemStack::empty(), true);
+    }
+
+    /// Vanilla parity: `GlowItemFrame.getFrameItemStack`.
+    fn frame_item(&self) -> ItemRef {
+        &vanilla_items::GLOW_ITEM_FRAME
+    }
+
+    fn play_frame_sound(&self, sound: SoundEventRef) {
+        self.play_sound_at_frame(sound);
     }
 }
 
