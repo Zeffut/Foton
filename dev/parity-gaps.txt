@@ -28,8 +28,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 7
-EnderDragon
+[entities] 6
 HappyGhast
 Nautilus
 Player

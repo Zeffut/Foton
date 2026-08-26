@@ -710,15 +710,6 @@ pub trait LivingEntity: Entity {
         false
     }
 
-    /// Returns vanilla base living-entity invulnerability.
-    fn default_is_invulnerable_to(&self, source: &DamageSource) -> bool {
-        self.is_removed()
-            || self.is_invulnerable() && !source.bypasses_invulnerability()
-            || source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FIRE) && self.fire_immune()
-            || source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FALL)
-                && self.is_fall_damage_immune()
-    }
-
     /// Returns whether this living entity ignores a damage source.
     fn is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
         self.living_is_invulnerable_to(world, source)
@@ -730,7 +721,7 @@ pub trait LivingEntity: Entity {
     /// source -- a breeze, which ignores another breeze's gust -- calls this
     /// for the rest rather than re-deriving the enchantment half.
     fn living_is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
-        self.default_is_invulnerable_to(source)
+        self.is_invulnerable_to_base(source)
             || enchantment_helper::is_immune_to_damage(world, self, source)
     }
 

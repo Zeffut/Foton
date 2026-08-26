@@ -1524,6 +1524,18 @@ impl LivingEntityBase {
         self.state.lock().invulnerable_time = invulnerable_time;
     }
 
+    /// Returns vanilla `LivingEntity.invulnerableTime`.
+    ///
+    /// Vanilla also carries `hurtTime`, the ten-tick red-flash timer, which a
+    /// few mobs read to mean "was hurt just now". Steel does not model it and
+    /// does not need to: both are written on the same hit -- twenty ticks here,
+    /// ten there -- and both decrement once a tick, so vanilla's `hurtTime > 0`
+    /// is exactly this value being above ten.
+    #[must_use]
+    pub fn invulnerable_time(&self) -> i32 {
+        self.state.lock().invulnerable_time
+    }
+
     /// Decrements remaining invulnerability ticks by one if any are active.
     pub fn decrement_invulnerable_time(&self) {
         let mut state = self.state.lock();

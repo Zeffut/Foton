@@ -16,6 +16,7 @@ mod dripstone;
 mod end_gateway;
 mod end_island;
 mod end_platform;
+pub mod end_podium;
 mod end_spike;
 mod fossil;
 mod freeze_top_layer;

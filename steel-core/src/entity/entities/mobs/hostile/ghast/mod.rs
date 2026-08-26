@@ -461,7 +461,7 @@ impl LivingEntity for GhastEntity {
             return true;
         }
 
-        !self.is_reflected_fireball(source) && self.default_is_invulnerable_to(source)
+        !self.is_reflected_fireball(source) && self.is_invulnerable_to_base(source)
     }
 
     /// Vanilla parity: `Ghast.hurtServer`, which turns a reflected fireball

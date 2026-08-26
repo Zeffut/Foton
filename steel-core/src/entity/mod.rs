@@ -481,10 +481,33 @@ fn physics_state_for_move(entity: &dyn Entity) -> EntityPhysicsState {
 /// Thread-safe through the shared counter lock.
 #[must_use]
 pub fn next_entity_id() -> i32 {
+    reserve_entity_ids(1)
+}
+
+/// Allocates `count` consecutive entity IDs and returns the first of them.
+///
+/// The returned block is `first ..= first + count - 1`, and no other caller can
+/// be handed an ID inside it.
+///
+/// Vanilla gets this contiguity for free: `Entity`'s constructor pulls from
+/// `ServerLevel.getNextEntityId()`, so an entity that builds sub-entities in
+/// its own constructor -- only [`EnderDragon`](entities::EnderDragon) does --
+/// necessarily receives the IDs right after its own. Steel builds entities off
+/// the tick thread as well, so the same guarantee has to be asked for
+/// explicitly; without it two concurrent spawns can interleave and the dragon's
+/// parts stop being `dragon + 1 ..= dragon + 8`, which is the only thing the
+/// client has to go on when it rebuilds them.
+///
+/// # Panics
+///
+/// Panics if `count` is zero.
+#[must_use]
+pub fn reserve_entity_ids(count: u32) -> i32 {
+    assert!(count > 0, "cannot reserve an empty entity ID block");
     let mut counter = ENTITY_COUNTER.lock();
-    let id = *counter;
-    *counter = counter.wrapping_add(1);
-    id
+    let first = *counter;
+    *counter = counter.wrapping_add(count as i32);
+    first
 }
 
 fn apply_block_effect_segment(

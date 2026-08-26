@@ -88,6 +88,18 @@ const DRAGON_BREATH_FINAL_RADIUS: f32 = 7.0;
 /// `DragonFireball.onHit`.
 const DRAGON_BREATH_AMPLIFIER: i32 = 1;
 
+/// Radius of the breath a sitting dragon lays down.
+///
+/// Vanilla parity: the `this.flame.setRadius(5.0F)` of
+/// `DragonSittingFlamingPhase.doServerTick`.
+pub const DRAGON_SITTING_FLAME_RADIUS: f32 = 5.0;
+
+/// How long the breath a sitting dragon lays down lasts.
+///
+/// Vanilla parity: the `this.flame.setDuration(200)` of the same method, which
+/// is also how long the phase itself runs.
+pub const DRAGON_SITTING_FLAME_DURATION: i32 = 200;
+
 /// State a cloud keeps that is not synced.
 struct CloudState {
     /// Ticks the cloud runs for once it starts, or -1 for forever.
@@ -223,6 +235,30 @@ impl AreaEffectCloudEntity {
             1,
             DRAGON_BREATH_AMPLIFIER,
         )];
+    }
+
+    /// Sets this cloud up the way a sitting dragon's breath does.
+    ///
+    /// Vanilla parity: the cloud built by `DragonSittingFlamingPhase`. It is
+    /// not the fireball's cloud: it starts at its full five blocks and neither
+    /// grows nor shrinks, and it lasts ten seconds rather than thirty.
+    ///
+    /// The same two settings are dropped as for the fireball's cloud, for the
+    /// same reasons: `setOwner` has nowhere to go, and `setPotionDurationScale`
+    /// only matters to effects that last.
+    pub fn configure_as_dragon_sitting_flame(&self) {
+        self.set_radius(DRAGON_SITTING_FLAME_RADIUS);
+        self.entity_data.lock().particle.set(ParticleData::new(
+            &vanilla_particle_types::DRAGON_BREATH,
+            PowerParticleOption::new(1.0),
+        ));
+
+        let mut state = self.state.lock();
+        state.duration = DRAGON_SITTING_FLAME_DURATION;
+        // NOT IMPLEMENTED: the same instant-damage gap `configure_as_dragon_breath`
+        // documents. The effect is carried and saved, but standing in the breath
+        // does no damage yet.
+        state.effects = vec![(vanilla_mob_effects::INSTANT_DAMAGE, 0, 0)];
     }
 
     /// Returns how far the cloud reaches.

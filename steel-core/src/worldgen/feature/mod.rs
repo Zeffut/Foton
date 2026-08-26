@@ -7,7 +7,7 @@
 //! added through the configured-feature runtime registry.
 
 mod configured;
-mod features;
+pub mod features;
 pub(crate) mod instrumentation;
 mod placed;
 mod placement;

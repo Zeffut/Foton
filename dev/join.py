@@ -74,6 +74,7 @@ PLAY_S_CONTAINER_CLICK = 18
 PLAY_S_CONTAINER_CLOSE = 19
 PLAY_S_CONTAINER_SLOT_STATE_CHANGED = 20
 PLAY_S_SET_BEACON = 52
+PLAY_S_ATTACK = 1
 PLAY_S_INTERACT = 26
 PLAY_S_USE_ITEM_ON = 66
 PLAY_S_USE_ITEM = 67
@@ -102,6 +103,10 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # without one, `!useitemx <n> [yaw] [pitch]` does that n times in a row
 # without waiting between them -- which is what makes a one-in-eight chance
 # testable -- `!close` shuts whatever screen is open, and
+# `!attack <type> [offset]` left-clicks the last entity of that type, or the
+# entity `offset` ids after it -- which is the only way to reach an ender
+# dragon's hitboxes, because the client is never told they exist and derives
+# their ids as `dragonId + 1 ..= dragonId + 8` from the dragon's own.
 # `!useentity <type>` / `!sneakuse <type>` right-click the last entity of
 # that type to spawn, with and without sneaking, and `!spawned <type>` reports
 # whether the client has ever been told one appeared -- which answers "did this
@@ -661,6 +666,9 @@ def run_directive(connection, directive):
             print(f"  the client saw a {name} spawn")
         else:
             print(f"  no {name} has spawned")
+    elif parts[0] == "attack":
+        offset = int(parts[2]) if len(parts) > 2 else 0
+        send_attack(connection, parts[1], offset)
     elif parts[0] == "useentity":
         send_interact(connection, parts[1], secondary=False)
     elif parts[0] == "sneakuse":
@@ -743,6 +751,26 @@ def report_passengers(payload):
         print(f"  entity {vehicle} is carrying {riders}")
     else:
         print(f"  entity {vehicle} is carrying nobody")
+
+
+def send_attack(connection, name, offset):
+    """Left-clicks the last entity spawned of type `name`, or one near its id.
+
+    `offset` is what makes this more than a duplicate of `!useentity`: an ender
+    dragon's eight hitboxes are never spawned to the client, so their ids exist
+    only as arithmetic on the dragon's own, and a hit on one is the only way to
+    hurt a dragon at all. Sending the attack at `dragonId + 1` is exactly what a
+    real client does when a player swings at the dragon's head.
+    """
+    entity_id = connection.entities.get(name)
+    if entity_id is None:
+        fail(f"no {name} has spawned, so there is nothing to attack")
+    target = entity_id + offset
+    connection.send(PLAY_S_ATTACK, varint(target))
+    if offset:
+        print(f"  attacked entity {target}, {offset} past the {name} at {entity_id}")
+    else:
+        print(f"  attacked the {name} (entity {entity_id})")
 
 
 def send_interact(connection, name, secondary):

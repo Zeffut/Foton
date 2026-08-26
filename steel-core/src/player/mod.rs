@@ -1606,7 +1606,7 @@ impl LivingEntity for Player {
     }
 
     fn is_invulnerable_to(&self, world: &World, source: &DamageSource) -> bool {
-        if self.default_is_invulnerable_to(source)
+        if self.is_invulnerable_to_base(source)
             || enchantment_helper::is_immune_to_damage(world, self, source)
         {
             return true;

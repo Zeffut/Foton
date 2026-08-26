@@ -293,7 +293,8 @@ impl Player {
         };
 
         let world = self.get_world();
-        let Some(target) = world.get_accessible_entity_by_id(entity_id) else {
+        // Vanilla parity: `level.getEntityOrPart(packet.spectateEntityId()...)`.
+        let Some(target) = world.get_accessible_entity_or_part_by_id(entity_id) else {
             return;
         };
 

@@ -463,7 +463,7 @@ impl LivingEntity for SilverfishEntity {
     /// and before the invulnerability-frame/cooldown gate inside
     /// `LivingEntity.hurtServer`. Steel's `LivingEntity::hurt_server` default
     /// has no equivalent pre-cooldown extension point (unlike
-    /// `is_invulnerable_to`/`default_is_invulnerable_to`), and overriding
+    /// `is_invulnerable_to`/`is_invulnerable_to_base`), and overriding
     /// `hurt_server` here would mean duplicating its entire damage pipeline.
     /// `before_actually_hurt` is the closest available hook; it runs after
     /// the cooldown gate, so a silverfish hit again during its brief
