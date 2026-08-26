@@ -229,6 +229,17 @@ pub fn make_brain() -> Brain {
 /// MISSING FOUNDATION: vanilla also runs `InteractWithDoor`, `ReactToBell` and
 /// `SetRaidStatus` here. Doors need the `DOORS_TO_CLOSE` bookkeeping Steel does
 /// not do, and the other two need the bell event and the raid seam.
+///
+/// MISSING FOUNDATION: `GoToWantedItem` is here, and is inert. It walks to
+/// whatever `NEAREST_VISIBLE_WANTED_ITEM` names, and `NearestItemSensor` only
+/// names something the body `wantsToPickUp` -- which needs `canPickUpLoot`,
+/// which vanilla's `Villager` constructor sets and Steel's does not. Turning
+/// the flag on alone would be worse than leaving it off: Steel's villager holds
+/// a bare `Vec<ItemStack>` rather than the `SimpleContainer` that
+/// `InventoryCarrier::pick_up_item` fills, so the shared `Mob::pick_up_item`
+/// would try to *equip* the bread instead of stowing it. The behavior is placed
+/// where vanilla places it so that wiring the inventory up is the only step
+/// left.
 fn core_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Core,
@@ -317,9 +328,14 @@ fn core_package() -> ActivityData {
 ///
 /// MISSING FOUNDATION: vanilla's `RunOne` also holds `StrollToPoiList` over
 /// `SECONDARY_JOB_SITE`, `HarvestFarmland` and `UseBonemeal`, and the package
-/// ends with `GiveGiftToHero`. The first three need the `SECONDARY_POIS`
-/// sensor, which needs `VillagerProfession.secondaryPoi` from the extractor;
-/// the gift needs the hero-of-the-village effect.
+/// ends with `GiveGiftToHero`. Farming needs three things Steel does not have:
+/// the `SECONDARY_POIS` sensor, which reads `VillagerProfession.secondaryPoi`
+/// -- a hardcoded Java field `SteelExtractor` emits nothing for, and the reason
+/// `HarvestFarmland` could not start even if it were ported, since it is gated
+/// on `SECONDARY_JOB_SITE` being present; a way to ask a block behavior whether
+/// it is a crop at max age, which `BlockBehavior` has no seam for; and the
+/// container the villager would keep seeds in (see the core package). The gift
+/// needs the hero-of-the-village effect.
 fn work_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Work,
