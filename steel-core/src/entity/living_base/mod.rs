@@ -20,7 +20,8 @@ use steel_registry::items::ItemRef;
 use steel_registry::mob_effect::MobEffectRef;
 use steel_registry::vanilla_attributes;
 use steel_registry::vanilla_entity_data::VanillaLivingEntityData;
-use steel_registry::{vanilla_damage_types, vanilla_mob_effects};
+use steel_registry::vanilla_entity_type_tags::EntityTypeTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _, vanilla_damage_types, vanilla_mob_effects};
 use steel_utils::locks::{IntoShared, Shared, SyncMutex};
 use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, Identifier};
@@ -39,6 +40,36 @@ use crate::world::World;
 /// of `BadOmenMobEffect.applyEffectTick`. Thirty seconds of warning before the
 /// horn sounds.
 const RAID_OMEN_DURATION: i32 = 600;
+
+/// Ticks between two points of wither damage at amplifier zero.
+///
+/// Vanilla parity: the `40 >> amplification` of `WitherMobEffect`.
+const WITHER_DAMAGE_INTERVAL: i32 = 40;
+
+/// Ticks between two points of poison damage at amplifier zero.
+///
+/// Vanilla parity: `PoisonMobEffect.DAMAGE_INTERVAL`.
+const POISON_DAMAGE_INTERVAL: i32 = 25;
+
+/// Ticks between two half-hearts of regeneration at amplifier zero.
+///
+/// Vanilla parity: the `50 >> amplification` of `RegenerationMobEffect`.
+const REGENERATION_HEAL_INTERVAL: i32 = 50;
+
+/// Exhaustion Hunger I adds per tick.
+///
+/// Vanilla parity: the `0.005F * (amplification + 1)` of `HungerMobEffect`.
+const HUNGER_EXHAUSTION_PER_TICK: f32 = 0.005;
+
+/// Health Instant Health I restores.
+///
+/// Vanilla parity: the `4 << amplification` of `HealOrHarmMobEffect`.
+const HEAL_BASE: i32 = 4;
+
+/// Damage Instant Damage I deals.
+///
+/// Vanilla parity: the `6 << amplification` of `HealOrHarmMobEffect`.
+const HARM_BASE: i32 = 6;
 
 /// Duration in ticks of the death animation before entity removal.
 pub const DEATH_DURATION: i32 = 20;
@@ -189,6 +220,12 @@ impl MobEffectInstance {
         self.is_infinite_duration() || self.duration > 0
     }
 
+    /// Returns whether this effect does something on this particular tick.
+    ///
+    /// Vanilla parity: `MobEffect.shouldApplyEffectTickThisTick` and the
+    /// overrides on the handful of effects that have one. Everything not named
+    /// here is an attribute modifier or a client-side one, and vanilla's base
+    /// implementation answers false for it.
     #[must_use]
     pub(crate) fn should_apply_effect_tick_this_tick(&self, entity_tick_count: i32) -> bool {
         let tick_count = if self.is_infinite_duration() {
@@ -198,8 +235,26 @@ impl MobEffectInstance {
         };
 
         if self.effect == vanilla_mob_effects::WITHER {
-            let interval = 40_i32.wrapping_shr(self.amplifier as u32);
-            return interval <= 0 || tick_count % interval == 0;
+            return self.is_on_interval(tick_count, WITHER_DAMAGE_INTERVAL);
+        }
+        // Vanilla parity: `PoisonMobEffect.shouldApplyEffectTickThisTick`.
+        if self.effect == vanilla_mob_effects::POISON {
+            return self.is_on_interval(tick_count, POISON_DAMAGE_INTERVAL);
+        }
+        // Vanilla parity: `RegenerationMobEffect.shouldApplyEffectTickThisTick`.
+        if self.effect == vanilla_mob_effects::REGENERATION {
+            return self.is_on_interval(tick_count, REGENERATION_HEAL_INTERVAL);
+        }
+        // Vanilla parity: `HungerMobEffect.shouldApplyEffectTickThisTick` and
+        // `AbsorptionMobEffect`'s, both of which are every tick.
+        if self.effect == vanilla_mob_effects::HUNGER {
+            return true;
+        }
+        // Vanilla parity: `InstantaneousMobEffect.shouldApplyEffectTickThisTick`,
+        // which is what makes a lingering instant effect fire on every tick it
+        // still has left rather than once.
+        if is_instantaneous(self.effect) {
+            return tick_count >= 1;
         }
         // Vanilla parity: `BadOmenMobEffect.shouldApplyEffectTickThisTick`,
         // which is every tick -- the effect is watching for the moment the
@@ -214,10 +269,27 @@ impl MobEffectInstance {
             return !self.is_infinite_duration() && tick_count == 1;
         }
 
-        // TODO: Add the remaining vanilla effect schedules as their gameplay systems land.
+        // MISSING FOUNDATION: `AbsorptionMobEffect` ticks every tick and ends
+        // itself once the absorption is gone, but its `onEffectStarted` is what
+        // grants the absorption in the first place and Steel has no hook for
+        // that. Scheduling the tick without it would make the effect remove
+        // itself the moment it was applied.
         false
     }
 
+    /// Vanilla parity: the `interval > 0 ? tickCount % interval == 0 : true`
+    /// that every intervalled effect shares. The shift is Java's, so an
+    /// amplifier past 31 wraps back onto a long interval rather than reaching
+    /// zero.
+    const fn is_on_interval(&self, tick_count: i32, base_interval: i32) -> bool {
+        let interval = base_interval.wrapping_shr(self.amplifier as u32);
+        interval <= 0 || tick_count % interval == 0
+    }
+
+    /// Runs one tick of this effect, returning whether it stays.
+    ///
+    /// Vanilla parity: `MobEffect.applyEffectTick`. A `false` return is how a
+    /// vanilla effect removes itself from inside its own tick.
     pub(crate) fn apply_effect_tick<E: LivingEntity + ?Sized>(
         &self,
         world: &World,
@@ -230,6 +302,42 @@ impl MobEffectInstance {
                 1.0,
             );
         }
+        // Vanilla parity: `PoisonMobEffect.applyEffectTick`. Poison stops at
+        // half a heart rather than killing, which is the whole reason a
+        // poisoned player survives and a withered one does not.
+        if self.effect == vanilla_mob_effects::POISON && entity.get_health() > 1.0 {
+            entity.hurt(
+                world,
+                &DamageSource::environment(&vanilla_damage_types::MAGIC),
+                1.0,
+            );
+        }
+        // Vanilla parity: `RegenerationMobEffect.applyEffectTick`.
+        if self.effect == vanilla_mob_effects::REGENERATION
+            && entity.get_health() < entity.get_max_health()
+        {
+            entity.heal(1.0);
+        }
+        // Vanilla parity: `HungerMobEffect.applyEffectTick`, which only drains
+        // a player -- nothing else has an exhaustion bar to drain.
+        if self.effect == vanilla_mob_effects::HUNGER
+            && let Some(player) = entity.as_player()
+        {
+            player
+                .cause_food_exhaustion(HUNGER_EXHAUSTION_PER_TICK * (self.amplifier as f32 + 1.0));
+        }
+        // Vanilla parity: `SaturationMobEffect.applyEffectTick`.
+        if self.effect == vanilla_mob_effects::SATURATION
+            && let Some(player) = entity.as_player()
+        {
+            player.food_data.lock().eat(self.amplifier + 1, 1.0);
+        }
+        if self.effect == vanilla_mob_effects::INSTANT_HEALTH {
+            apply_heal_or_harm(world, entity, self.amplifier, false);
+        }
+        if self.effect == vanilla_mob_effects::INSTANT_DAMAGE {
+            apply_heal_or_harm(world, entity, self.amplifier, true);
+        }
         if self.effect == vanilla_mob_effects::BAD_OMEN {
             return tick_bad_omen(world, entity, self.amplifier);
         }
@@ -237,8 +345,8 @@ impl MobEffectInstance {
             return tick_raid_omen(world, entity);
         }
 
-        // Vanilla effect ticks return whether the effect remains active. Wither
-        // always returns true, and unimplemented effect ticks are not scheduled.
+        // Vanilla effect ticks return whether the effect remains active.
+        // Everything above keeps itself; only the two omens consume themselves.
         true
     }
 
@@ -1778,6 +1886,43 @@ fn living_is_dead(entity: &SharedEntity) -> bool {
     entity
         .as_living_entity()
         .is_none_or(|living| !LivingEntity::is_alive(living))
+}
+
+/// Returns whether an effect is one of vanilla's `InstantaneousMobEffect`s.
+///
+/// Vanilla parity: `MobEffect.isInstantaneous`, which only `HealOrHarmMobEffect`
+/// and `SaturationMobEffect` answer true to.
+fn is_instantaneous(effect: MobEffectRef) -> bool {
+    effect == vanilla_mob_effects::INSTANT_HEALTH
+        || effect == vanilla_mob_effects::INSTANT_DAMAGE
+        || effect == vanilla_mob_effects::SATURATION
+}
+
+/// Heals or hurts by the amount `HealOrHarmMobEffect` picks.
+///
+/// Vanilla parity: `HealOrHarmMobEffect.applyEffectTick`. The two swap for
+/// anything tagged `inverted_healing_and_harm`, which is what makes a splash
+/// of healing a weapon against the undead.
+fn apply_heal_or_harm<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    amplifier: i32,
+    is_harm: bool,
+) {
+    let inverted = REGISTRY.entity_types.is_in_tag(
+        entity.entity_type(),
+        &EntityTypeTag::INVERTED_HEALING_AND_HARM,
+    );
+    let shift = amplifier.max(0) as u32;
+    if is_harm == inverted {
+        entity.heal(HEAL_BASE.wrapping_shl(shift).max(0) as f32);
+    } else {
+        entity.hurt(
+            world,
+            &DamageSource::environment(&vanilla_damage_types::MAGIC),
+            HARM_BASE.wrapping_shl(shift) as f32,
+        );
+    }
 }
 
 /// Turns Bad Omen into Raid Omen the moment its bearer walks into a village.
