@@ -31,19 +31,17 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 15
+[entities] 13
 Breeze
 BreezeWindCharge
 CamelHusk
 Creaking
 EnderDragon
-EyeOfEnder
 HappyGhast
 Mannequin
 MinecartCommandBlock
 Nautilus
 Player
 SulfurCube
-ThrownLingeringPotion
 Warden
 ZombieNautilus
