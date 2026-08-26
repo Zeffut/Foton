@@ -66,10 +66,14 @@ fn spawn_villager(world: &Arc<World>) -> Arc<VillagerEntity> {
     villager
 }
 
-/// Ticks the villager long enough for the jittered job-site scan to have run.
+/// How long to tick a villager that is expected to end up at a workstation.
 ///
-/// `AcquirePoi` books its first scan up to twenty ticks out and then re-books
-/// every twenty-plus-jitter, so a hundred ticks is several scans' worth.
+/// `AcquirePoi` books its first scan up to twenty ticks out and re-books every
+/// twenty-plus-jitter, and an idle villager strolls -- so the walk back to the
+/// site it just claimed, at half speed, is the long pole rather than the scan.
+const TICKS_TO_TAKE_A_JOB: i32 = 400;
+
+/// Ticks the villager the way the server would, clock and all.
 fn run_ticks(world: &Arc<World>, villager: &Arc<VillagerEntity>, ticks: i32) {
     for _ in 0..ticks {
         advance_time(world);
@@ -114,7 +118,7 @@ fn claiming_a_workstation_gives_a_villager_its_profession_and_its_trades() {
         UpdateFlags::UPDATE_NONE,
     ));
 
-    run_ticks(&world, &villager, 100);
+    run_ticks(&world, &villager, TICKS_TO_TAKE_A_JOB);
 
     assert_eq!(
         villager.profession().key.path,
@@ -145,7 +149,7 @@ fn two_villagers_cannot_claim_the_same_workstation() {
         UpdateFlags::UPDATE_NONE,
     ));
 
-    for _ in 0..100 {
+    for _ in 0..TICKS_TO_TAKE_A_JOB {
         advance_time(&world);
         first.base_tick();
         first.tick();
@@ -172,7 +176,7 @@ fn a_villager_gives_its_workstation_back_when_it_dies() {
         vanilla_blocks::CARTOGRAPHY_TABLE.default_state(),
         UpdateFlags::UPDATE_NONE,
     ));
-    run_ticks(&world, &villager, 100);
+    run_ticks(&world, &villager, TICKS_TO_TAKE_A_JOB);
     assert_eq!(villager_job_site(&villager), Some(table));
 
     villager.release_all_pois();
@@ -432,7 +436,7 @@ fn a_baby_villager_will_not_take_a_job() {
         UpdateFlags::UPDATE_NONE,
     ));
 
-    run_ticks(&world, &villager, 100);
+    run_ticks(&world, &villager, TICKS_TO_TAKE_A_JOB);
 
     assert_eq!(
         villager_job_site(&villager),
@@ -444,7 +448,7 @@ fn a_baby_villager_will_not_take_a_job() {
     // And the table really was claimable, so the assertion above is about the
     // baby rather than about an unreachable table.
     let adult = spawn_villager(&world);
-    run_ticks(&world, &adult, 100);
+    run_ticks(&world, &adult, TICKS_TO_TAKE_A_JOB);
     assert_eq!(villager_job_site(&adult), Some(table));
 }
 

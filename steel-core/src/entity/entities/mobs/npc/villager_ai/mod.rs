@@ -50,8 +50,9 @@ use crate::behavior::BlockStateBehaviorExt as _;
 use crate::entity::ai::brain::behavior::{
     AcquirePoi, Behavior, BehaviorControl, DoNothing, GoToWantedItem, InteractWith,
     LookAtTargetSink, MoveToTargetSink, OneShot, RunOne, SetEntityLookTarget, SetLookAndInteract,
-    SetWalkTargetAwayFrom, SetWalkTargetFromLookTarget, SleepInBed, StrollAroundPoi, StrollToPoi,
-    Swim, TriggerGate, UpdateActivityFromSchedule, ValidateNearbyPoi, WakeUp,
+    SetWalkTargetAwayFrom, SetWalkTargetFromLookTarget, SleepInBed, SocializeAtBell,
+    StrollAroundPoi, StrollToPoi, Swim, TriggerGate, UpdateActivityFromSchedule, ValidateNearbyPoi,
+    VillageBoundRandomStroll, WakeUp,
 };
 use crate::entity::ai::brain::memory::{EntityMemory, MemoryModuleType, memory_module_types};
 use crate::entity::ai::brain::sensor::SensorType;
@@ -74,10 +75,10 @@ use steel_registry::blocks::properties::BlockStateProperties;
 pub const SPEED_MODIFIER: f64 = 0.5;
 /// Vanilla parity: `VillagerGoalPackages.STROLL_SPEED_MODIFIER`.
 const STROLL_SPEED_MODIFIER: f64 = 0.4;
-/// Vanilla parity: `VillagerGoalPackages.INTERACT_DIST_SQR`, used as a range.
-const INTERACT_DIST: i32 = 5;
 /// Vanilla parity: `VillagerGoalPackages.INTERACT_WALKUP_DIST`.
 const INTERACT_WALKUP_DIST: i32 = 2;
+/// Vanilla parity: the `4` of every `SetLookAndInteract.create(PLAYER, 4)`.
+const PLAYER_INTERACT_RANGE: i32 = 4;
 /// Vanilla parity: the `new LookAtTargetSink(45, 90)` of the core package.
 const LOOK_AT_TARGET_MIN_DURATION: i32 = 45;
 const LOOK_AT_TARGET_MAX_DURATION: i32 = 90;
@@ -88,6 +89,9 @@ const INTERACT_RANGE: i32 = 8;
 /// Vanilla parity: the `new DoNothing(30, 60)` of the look packages.
 const LOOK_DO_NOTHING_MIN: i32 = 30;
 const LOOK_DO_NOTHING_MAX: i32 = 60;
+/// Vanilla parity: the `new DoNothing(20, 40)` of the play package.
+const PLAY_DO_NOTHING_MIN: i32 = 20;
+const PLAY_DO_NOTHING_MAX: i32 = 40;
 /// Vanilla parity: the `GoToWantedItem.create(speedModifier, false, 4)`.
 const WANTED_ITEM_MAX_DIST: i32 = 4;
 /// Vanilla parity: the `speedModifier * 1.5F` a panicking villager runs at.
@@ -100,6 +104,11 @@ const SHOW_TRADES_MAX_DURATION: i32 = 1600;
 /// Vanilla parity: the `new MoveToTargetSink(80, 120)` of the play package.
 const PLAY_MOVE_MIN_TIMEOUT: i32 = 80;
 const PLAY_MOVE_MAX_TIMEOUT: i32 = 120;
+/// Vanilla parity: the `StrollAroundPoi.create(MEETING_POINT, 0.4F, 40)`.
+const MEETING_POINT_STROLL_DISTANCE: i32 = 40;
+/// Vanilla parity: the `VillageBoundRandomStroll.create(runawaySpeed, 2, 2)` of
+/// the panic package, which keeps a frightened villager's hops short.
+const PANIC_STROLL_DIST: i32 = 2;
 
 /// Vanilla parity: the sensor list of `Villager.BRAIN_PROVIDER`.
 ///
@@ -345,7 +354,7 @@ fn work_package() -> ActivityData {
                 10,
                 OneShot::boxed(SetLookAndInteract::new(
                     &vanilla_entities::PLAYER,
-                    INTERACT_DIST - 1,
+                    PLAYER_INTERACT_RANGE,
                 )),
             ),
             (
@@ -400,23 +409,26 @@ fn rest_package() -> ActivityData {
 
 /// Vanilla parity: `VillagerGoalPackages.getMeetPackage`.
 ///
-/// MISSING FOUNDATION: `SocializeAtBell`, `GiveGiftToHero` and the
-/// `TradeWithVillager` gate are not ported yet, so villagers gather at the bell
-/// and look around but do not swap goods there.
+/// MISSING FOUNDATION: `GiveGiftToHero` and the `TradeWithVillager` gate are not
+/// ported yet, so villagers gather at the bell and talk but do not swap goods
+/// there.
 fn meet_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Meet,
         vec![
             (
                 2,
-                OneShot::boxed(TriggerGate::trigger_one_shuffled(vec![(
-                    Box::new(StrollAroundPoi::new(
-                        memory_module_types::MEETING_POINT,
-                        STROLL_SPEED_MODIFIER,
-                        40,
-                    )),
-                    2,
-                )])),
+                OneShot::boxed(TriggerGate::trigger_one_shuffled(vec![
+                    (
+                        Box::new(StrollAroundPoi::new(
+                            memory_module_types::MEETING_POINT,
+                            STROLL_SPEED_MODIFIER,
+                            MEETING_POINT_STROLL_DISTANCE,
+                        )),
+                        2,
+                    ),
+                    (Box::new(SocializeAtBell), 2),
+                ])),
             ),
             (
                 10,
@@ -429,7 +441,7 @@ fn meet_package() -> ActivityData {
                 10,
                 OneShot::boxed(SetLookAndInteract::new(
                     &vanilla_entities::PLAYER,
-                    INTERACT_DIST - 1,
+                    PLAYER_INTERACT_RANGE,
                 )),
             ),
             (
@@ -457,9 +469,9 @@ fn meet_package() -> ActivityData {
 
 /// Vanilla parity: `VillagerGoalPackages.getIdlePackage`.
 ///
-/// MISSING FOUNDATION: `VillageBoundRandomStroll`, `JumpOnBed`,
-/// `GiveGiftToHero`, `TradeWithVillager` and `VillagerMakeLove` are not ported
-/// yet, so an idle villager mingles and shows its wares but does not breed.
+/// MISSING FOUNDATION: `JumpOnBed`, `GiveGiftToHero`, `TradeWithVillager` and
+/// `VillagerMakeLove` are not ported yet, so an idle villager mingles and shows
+/// its wares but does not breed.
 fn idle_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Idle,
@@ -482,6 +494,10 @@ fn idle_package() -> ActivityData {
                         1,
                     ),
                     (
+                        OneShot::boxed(VillageBoundRandomStroll::new(SPEED_MODIFIER)),
+                        1,
+                    ),
+                    (
                         OneShot::boxed(SetWalkTargetFromLookTarget::new(
                             SPEED_MODIFIER,
                             INTERACT_WALKUP_DIST,
@@ -498,7 +514,7 @@ fn idle_package() -> ActivityData {
                 3,
                 OneShot::boxed(SetLookAndInteract::new(
                     &vanilla_entities::PLAYER,
-                    INTERACT_DIST - 1,
+                    PLAYER_INTERACT_RANGE,
                 )),
             ),
             (
@@ -517,8 +533,8 @@ fn idle_package() -> ActivityData {
 /// Vanilla parity: `VillagerGoalPackages.getPlayPackage`.
 ///
 /// MISSING FOUNDATION: `PlayTagWithOtherKids` needs the `VILLAGER_BABIES`
-/// sensor, and `JumpOnBed` and `VillageBoundRandomStroll` are not ported, so a
-/// baby wanders and stares rather than playing tag.
+/// sensor and `JumpOnBed` needs `NEAREST_BED`, so a baby wanders and stares
+/// rather than playing tag.
 fn play_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Play,
@@ -549,13 +565,20 @@ fn play_package() -> ActivityData {
                         1,
                     ),
                     (
+                        OneShot::boxed(VillageBoundRandomStroll::new(SPEED_MODIFIER)),
+                        1,
+                    ),
+                    (
                         OneShot::boxed(SetWalkTargetFromLookTarget::new(
                             SPEED_MODIFIER,
                             INTERACT_WALKUP_DIST,
                         )),
                         1,
                     ),
-                    (Box::new(DoNothing::new(20, 40)), 2),
+                    (
+                        Box::new(DoNothing::new(PLAY_DO_NOTHING_MIN, PLAY_DO_NOTHING_MAX)),
+                        2,
+                    ),
                 ])),
             ),
             (99, OneShot::boxed(UpdateActivityFromSchedule)),
@@ -564,10 +587,6 @@ fn play_package() -> ActivityData {
 }
 
 /// Vanilla parity: `VillagerGoalPackages.getPanicPackage`.
-///
-/// MISSING FOUNDATION: the `VillageBoundRandomStroll` that would have a
-/// panicking villager scatter within the village is not ported, so it only runs
-/// directly away from what frightened it.
 fn panic_package() -> ActivityData {
     let runaway_speed = SPEED_MODIFIER * PANIC_SPEED_MULTIPLIER;
     ActivityData::with_priorities(
@@ -590,6 +609,14 @@ fn panic_package() -> ActivityData {
                     runaway_speed,
                     PANIC_DESIRED_DISTANCE,
                     false,
+                )),
+            ),
+            (
+                3,
+                OneShot::boxed(VillageBoundRandomStroll::with_range(
+                    runaway_speed,
+                    PANIC_STROLL_DIST,
+                    PANIC_STROLL_DIST,
                 )),
             ),
             minimal_look_behavior(),

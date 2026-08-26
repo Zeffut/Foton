@@ -276,7 +276,7 @@ fn a_bitten_villager_gives_its_workstation_back() {
         vanilla_blocks::CARTOGRAPHY_TABLE.default_state(),
         UpdateFlags::UPDATE_NONE,
     ));
-    for _ in 0..100 {
+    for _ in 0..400 {
         let now = world.game_time();
         world.level_data.write().set_game_time(now + 1);
         villager.base_tick();
