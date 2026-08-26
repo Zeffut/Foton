@@ -31,7 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 23
+[entities] 22
 Armadillo
 Bogged
 Breeze
@@ -47,7 +47,6 @@ HappyGhast
 Mannequin
 MinecartCommandBlock
 Nautilus
-Panda
 Parched
 Player
 SpectralArrow

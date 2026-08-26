@@ -17,6 +17,11 @@ enum LookAtTargetType {
     LivingEntity(LookAtEntitySelector),
 }
 
+/// A target the mob wants looked at before anybody is searched for.
+type PresetLookTarget = Box<dyn Fn(&dyn PathfinderMob) -> Option<SharedEntity> + Send + Sync>;
+/// A reason of the mob's own to refuse to look at anything.
+type ExtraLookCondition = Box<dyn Fn(&dyn PathfinderMob) -> bool + Send + Sync>;
+
 pub struct LookAtPlayerGoal {
     look_at: Option<SharedEntity>,
     look_distance: f64,
@@ -26,6 +31,8 @@ pub struct LookAtPlayerGoal {
     controls: GoalControls,
     look_at_type: LookAtTargetType,
     look_at_context: TargetingConditions,
+    preset_target: Option<PresetLookTarget>,
+    extra_condition: Option<ExtraLookCondition>,
 }
 
 impl LookAtPlayerGoal {
@@ -87,6 +94,8 @@ impl LookAtPlayerGoal {
             controls,
             look_at_type: LookAtTargetType::Player,
             look_at_context: TargetingConditions::for_non_combat().range(look_distance),
+            preset_target: None,
+            extra_condition: None,
         }
     }
 
@@ -110,7 +119,38 @@ impl LookAtPlayerGoal {
             controls,
             look_at_type: LookAtTargetType::LivingEntity(Box::new(selector)),
             look_at_context: TargetingConditions::for_non_combat().range(look_distance),
+            preset_target: None,
+            extra_condition: None,
         }
+    }
+
+    /// Looks at whatever the mob names before searching for anybody else.
+    ///
+    /// Vanilla parity: `Panda.PandaLookAtPlayerGoal.setTarget`, which the
+    /// panda's breed goal calls so an unhappy panda stares at the player it is
+    /// complaining to. Vanilla stores that target on the goal and one goal
+    /// reaches into another; Steel's goals live behind the selector's mutex, so
+    /// the mob owns the target and the goal reads it.
+    #[must_use]
+    pub(crate) fn with_preset_target(
+        mut self,
+        target: impl Fn(&dyn PathfinderMob) -> Option<SharedEntity> + Send + Sync + 'static,
+    ) -> Self {
+        self.preset_target = Some(Box::new(target));
+        self
+    }
+
+    /// Adds a reason of the mob's own to refuse to look.
+    ///
+    /// Vanilla parity: the `this.panda.canPerformAction()` the panda's override
+    /// ends `canUse` with.
+    #[must_use]
+    pub(crate) fn with_extra_condition(
+        mut self,
+        condition: impl Fn(&dyn PathfinderMob) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_condition = Some(Box::new(condition));
+        self
     }
 }
 
@@ -127,6 +167,18 @@ impl Goal for LookAtPlayerGoal {
         let Some(world) = mob.level() else {
             return false;
         };
+
+        // Vanilla parity: the panda's `if (this.lookAt == null)` -- a target the
+        // mob asked for is kept rather than searched past.
+        if let Some(preset) = &self.preset_target
+            && let Some(target) = preset(mob)
+        {
+            self.look_at = Some(target);
+            return self
+                .extra_condition
+                .as_ref()
+                .is_none_or(|condition| condition(mob));
+        }
 
         let position = mob.position();
         let origin = DVec3::new(position.x, mob.get_eye_y(), position.z);
@@ -151,6 +203,10 @@ impl Goal for LookAtPlayerGoal {
         };
 
         self.look_at.is_some()
+            && self
+                .extra_condition
+                .as_ref()
+                .is_none_or(|condition| condition(mob))
     }
 
     fn can_continue_to_use(&mut self, mob: &dyn PathfinderMob) -> bool {
