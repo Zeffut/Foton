@@ -13,7 +13,7 @@ use steel_registry::blocks::properties::{BlockStateProperties, SculkSensorPhase}
 use steel_registry::game_events::GameEventRef;
 use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_game_events};
 use steel_utils::types::UpdateFlags;
-use steel_utils::{BlockPos, ChunkPos, Direction, Downcast as _};
+use steel_utils::{BlockPos, ChunkPos, Downcast as _};
 
 use super::*;
 use crate::behavior::blocks::sculk_sensor_phase;
@@ -179,45 +179,50 @@ fn a_distance_tie_is_broken_by_the_louder_event() {
     );
 }
 
-/// Wool between the source and the sensor deafens it, and it has to be wool the vibration
-/// cannot get around: the occlusion test only reports a block when all six rays out of the
-/// source block are stopped.
+/// Wool in the line between a footstep and a sensor swallows the vibration. This is the
+/// occlusion test, and without it a sensor hears through walls.
 #[test]
-fn wool_sealing_the_source_stops_the_vibration_but_one_wool_block_does_not() {
-    let world = sensor_world("vibration_occlusion");
-    let source = BlockPos::new(11, 64, 8);
-
+fn wool_between_a_source_and_a_sensor_stops_the_vibration() {
+    let world = sensor_world("vibration_occlusion_blocked");
     assert!(world.set_block(
-        source.above(),
+        BlockPos::new(10, 64, 8),
         vanilla_blocks::WHITE_WOOL.default_state(),
         UpdateFlags::UPDATE_ALL,
     ));
-    emit(&world, &vanilla_game_events::STEP, source);
-    advance_game_time(&world, 1);
-    for _ in 0..4 {
-        tick_sensor(&world);
-    }
-    assert!(
-        is_active(&world),
-        "a single wool block beside the source leaves five clear rays"
-    );
 
-    let world = sensor_world("vibration_occlusion_sealed");
-    for direction in Direction::ALL {
-        assert!(world.set_block(
-            source.relative(direction),
-            vanilla_blocks::WHITE_WOOL.default_state(),
-            UpdateFlags::UPDATE_ALL,
-        ));
-    }
-    emit(&world, &vanilla_game_events::STEP, source);
+    emit(&world, &vanilla_game_events::STEP, BlockPos::new(11, 64, 8));
     advance_game_time(&world, 1);
     for _ in 0..4 {
         tick_sensor(&world);
     }
+
     assert!(
         !is_active(&world),
-        "wool on all six sides stops every ray, so the sensor never hears it"
+        "the wool is on the straight line to the sensor, so nothing arrives"
+    );
+}
+
+/// Occlusion is a line test, not a proximity test: wool touching the source but behind it
+/// leaves the path to the sensor clear. A sensor that went deaf whenever any wool was nearby
+/// would make the block useless as a stealth tool.
+#[test]
+fn wool_behind_the_source_does_not_stop_the_vibration() {
+    let world = sensor_world("vibration_occlusion_clear");
+    assert!(world.set_block(
+        BlockPos::new(12, 64, 8),
+        vanilla_blocks::WHITE_WOOL.default_state(),
+        UpdateFlags::UPDATE_ALL,
+    ));
+
+    emit(&world, &vanilla_game_events::STEP, BlockPos::new(11, 64, 8));
+    advance_game_time(&world, 1);
+    for _ in 0..4 {
+        tick_sensor(&world);
+    }
+
+    assert!(
+        is_active(&world),
+        "the line to the sensor was never crossed"
     );
 }
 

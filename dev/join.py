@@ -75,6 +75,7 @@ PLAY_S_CONTAINER_CLOSE = 19
 PLAY_S_CONTAINER_SLOT_STATE_CHANGED = 20
 PLAY_S_SET_BEACON = 52
 PLAY_S_INTERACT = 26
+PLAY_S_MOVE_PLAYER_POS = 30
 PLAY_S_USE_ITEM_ON = 66
 PLAY_S_USE_ITEM = 67
 PLAY_S_CHUNK_BATCH_RECEIVED = 11
@@ -98,7 +99,10 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # Optional: commands to run once in the world, separated by `;;`. An entry
 # starting with `!` is a client action rather than a chat command:
 # `!hotbar <slot>` selects a hotbar slot, `!useon <x> <y> <z> [face]`
-# right-clicks a block face, `!useitem [yaw] [pitch]` right-clicks
+# right-clicks a block face, `!walk <x> <y> <z> <dx> <dz> <steps>` walks the
+# player from that spot in `steps` strides of `dx`/`dz` -- the only way to make
+# the server emit the `step` game event, because no command moves a player the
+# way their own legs do -- `!useitem [yaw] [pitch]` right-clicks
 # without one, `!useitemx <n> [yaw] [pitch]` does that n times in a row
 # without waiting between them -- which is what makes a one-in-eight chance
 # testable -- `!close` shuts whatever screen is open, and
@@ -570,6 +574,14 @@ def send_set_carried_item(connection, slot):
     connection.send(PLAY_S_SET_CARRIED_ITEM, struct.pack(">h", slot))
 
 
+def send_move_player_pos(connection, x, y, z, on_ground=True):
+    """Sends one position update, the way a walking client does every tick."""
+    connection.send(
+        PLAY_S_MOVE_PLAYER_POS,
+        struct.pack(">ddd", x, y, z) + bytes([1 if on_ground else 0]),
+    )
+
+
 def send_use_item_on(connection, x, y, z, face):
     """Right-clicks a block face, the way a player does.
 
@@ -624,6 +636,19 @@ def run_directive(connection, directive):
         x, y, z = (int(part) for part in parts[1:4])
         face = parts[4] if len(parts) > 4 else "up"
         send_use_item_on(connection, x, y, z, face)
+    elif parts[0] == "walk":
+        # A player only emits `step` when their own movement carries them past
+        # the next whole block, so this walks in real strides with a tick or two
+        # between them rather than teleporting.
+        x, y, z, dx, dz = (float(part) for part in parts[1:6])
+        steps = int(parts[6])
+        for _ in range(steps):
+            x += dx
+            z += dz
+            send_move_player_pos(connection, x, y, z)
+            if not pump(connection, 0.1, {}):
+                fail("the connection dropped while walking")
+        print(f"  walked {steps} strides to {x:.2f} {y:.2f} {z:.2f}")
     elif parts[0] == "close":
         send_container_close(connection)
     elif parts[0] == "button":
