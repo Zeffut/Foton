@@ -373,10 +373,18 @@ mobs that need it.
 - [x] **The horse family**: horse, donkey, mule, skeleton horse with its
       lightning trap, zombie horse, llama, trader llama and the llama spit.
       Taming by temper, the chest, coat and markings, the caravan, breeding
-      inheritance. The inventory itself is complete -- contents, resizing, slot
-      rules, NBT and drops -- but there is no screen to open it with, because
-      the saddle and armor slots are entity equipment and Steel's menu slots
-      are backed by containers.
+      inheritance, and the mount screen that opens over all of it -- the
+      saddle, the body armor and the cargo grid, from the inventory key while
+      riding or from a sneaking right-click. The nautilus and the camel open
+      the same screen; in 26.2 a nautilus carries no cargo, so only its saddle
+      and armor slots are live.
+
+      What made this the last piece of the family: a Steel menu slot sits on a
+      `Container`, which hands out `&[ItemStack]`, while a mount's saddle and
+      armor are worn equipment -- vanilla's `Mob.createEquipmentSlotContainer`
+      is a view over `getItemBySlot`, not storage. `OwnedEntityEquipment` is
+      the container now, and `LivingEntityBase` keeps a second handle on the
+      same allocation erased to `Container`.
 
 ### 2b. Blocks the world runs on its own
 

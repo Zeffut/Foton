@@ -4,7 +4,7 @@
 # They are run one at a time on purpose: they each start a server on their own
 # port but several share a run directory naming pattern, and two at once tread
 # on each other.
-cd /root/SteelMC || exit 1
+cd "$(dirname "$0")/.." || exit 1
 export PATH="$HOME/.cargo/bin:$PATH"
 
 pass=0
@@ -14,6 +14,7 @@ for test in dev/join-test.sh dev/sapling-test.sh dev/container-test.sh \
             dev/chest-loot-test.sh \
             dev/flowerpot-test.sh dev/enderchest-test.sh dev/spawnegg-test.sh \
             dev/boat-test.sh dev/openers-test.sh dev/ride-test.sh \
+            dev/mount-test.sh \
             dev/minecart-test.sh dev/jukebox-test.sh dev/frame-test.sh \
             dev/throw-test.sh dev/workstation-test.sh dev/beacon-test.sh \
             dev/beehive-test.sh dev/tnt-minecart-test.sh \

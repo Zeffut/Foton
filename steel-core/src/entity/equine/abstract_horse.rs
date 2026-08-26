@@ -45,6 +45,7 @@ use crate::entity::{
 };
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::equipment::EquipmentSlot;
+use crate::inventory::menu::kinds::{horse_inventory, open_mount_screen};
 use crate::player::Player;
 use crate::world::World;
 
@@ -1072,17 +1073,23 @@ pub trait AbstractHorse: Animal {
 
     /// Opens the horse's own inventory screen.
     ///
-    /// Vanilla parity: `AbstractHorse.openCustomInventoryScreen`, which sends
-    /// `ClientboundMountScreenOpenPacket` and installs a `HorseInventoryMenu`.
-    ///
-    /// MISSING FOUNDATION: Steel's menu slots are backed by a slice-shaped
-    /// [`Container`](crate::inventory::container::Container), and the saddle and
-    /// body-armor slots of that screen are entity equipment, which no container
-    /// can expose. The chest inventory itself, its contents, the slot rules, the
-    /// NBT round trip and the drops are all implemented; only the screen is not,
-    /// so the interaction is accepted and nothing opens.
+    /// Vanilla parity: the `player.openHorseInventory(this, this.inventory)` of
+    /// `AbstractHorse.openCustomInventoryScreen`. The tame and rider gates are
+    /// the caller's, as they are in vanilla.
     fn open_horse_inventory_screen(&self, player: &Player) {
-        let _ = player;
+        let Some(world) = self.level() else {
+            return;
+        };
+        let Some(mount) = world.get_entity_by_id(Entity::id(self)) else {
+            return;
+        };
+        open_mount_screen(
+            &mount,
+            self.abstract_horse_base().inventory(),
+            self.inventory_columns(),
+            horse_inventory,
+            player,
+        );
     }
 
     /// Returns whether the mob's own `mobInteract` should defer straight to

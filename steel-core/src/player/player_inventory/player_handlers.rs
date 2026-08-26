@@ -2,9 +2,10 @@ use std::{f32::consts::TAU, mem, sync::Arc};
 
 use glam::DVec3;
 use steel_protocol::packets::game::{
-    CContainerClose, COpenBook, COpenScreen, CSetPlayerInventory, ClickType, SContainerButtonClick,
-    SContainerClick, SContainerClose, SContainerSlotStateChanged, SEditBook, SRenameItem,
-    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCreativeModeSlot,
+    CContainerClose, CMountScreenOpen, COpenBook, COpenScreen, CSetPlayerInventory, ClickType,
+    SContainerButtonClick, SContainerClick, SContainerClose, SContainerSlotStateChanged, SEditBook,
+    SRenameItem, SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem,
+    SSetCreativeModeSlot,
 };
 use steel_registry::data_components::components::{
     Filterable, WritableBookContent, WrittenBookContent,
@@ -28,7 +29,7 @@ use crate::{
         container::{Container, CraftingContainer, clear_or_count_matching_stack},
         lock::{ContainerId, ContainerLockGuard},
         menu::{
-            Menu,
+            Menu, ScreenOpener,
             kinds::{INVENTORY_MENU_CONTAINER_ID, InventoryKind},
         },
         slots::CraftingHandler,
@@ -752,13 +753,25 @@ impl Player {
             break;
         }
 
-        self.send_packet(COpenScreen {
-            container_id: i32::from(menu.container_id()),
-            menu_type: menu
-                .menu_type()
-                .expect("a menu opened via open_menu must declare a menu type"),
-            title,
-        });
+        match menu.screen_opener() {
+            ScreenOpener::Screen => self.send_packet(COpenScreen {
+                container_id: i32::from(menu.container_id()),
+                menu_type: menu
+                    .menu_type()
+                    .expect("a menu opened via open_menu must declare a menu type"),
+                title,
+            }),
+            // Vanilla parity: `ServerPlayer.openHorseInventory`, which sends no
+            // title -- the client names the screen after the mount.
+            ScreenOpener::Mount {
+                inventory_columns,
+                entity_id,
+            } => self.send_packet(CMountScreenOpen {
+                container_id: i32::from(menu.container_id()),
+                inventory_columns: inventory_columns as i32,
+                entity_id,
+            }),
+        }
 
         // Fire on_open before the full sync so anything the menu populates here
         // is included in the first render sent below.

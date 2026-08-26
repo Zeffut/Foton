@@ -183,8 +183,10 @@ impl ScheduledPlayPacket {
                 | PlayerCommandAction::StopSprinting
                 | PlayerCommandAction::StartFallFlying => ScheduledPacketExecution::PlayerLocal,
                 PlayerCommandAction::LeaveBed => ScheduledPacketExecution::Serialized,
-                // These handlers are not implemented, so their eventual vehicle transaction
-                // cannot yet be audited against concurrently player-local work.
+                // Each reaches into the vehicle the player is sitting on: a jump moves
+                // both bodies, and the inventory key opens a menu over the mount's own
+                // equipment. Neither transaction can be audited against concurrently
+                // player-local work.
                 PlayerCommandAction::StartRidingJump
                 | PlayerCommandAction::StopRidingJump
                 | PlayerCommandAction::OpenVehicleInventory => ScheduledPacketExecution::Exclusive,

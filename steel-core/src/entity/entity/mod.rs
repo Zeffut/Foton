@@ -1794,6 +1794,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn Llama>(self)
     }
 
+    /// Returns this entity as a nautilus.
+    ///
+    /// Mirrors vanilla's `instanceof AbstractNautilus` branches, which is how
+    /// `NautilusInventoryMenu` reaches the mount behind the screen.
+    fn as_abstract_nautilus(&self) -> Option<&dyn AbstractNautilus> {
+        try_as_dyn::<Self, dyn AbstractNautilus>(self)
+    }
+
     /// Throws every passenger off.
     ///
     /// Mirrors vanilla `Entity.ejectPassengers`.
