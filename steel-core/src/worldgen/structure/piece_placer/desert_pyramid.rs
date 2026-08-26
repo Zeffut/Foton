@@ -1,3 +1,4 @@
+use crate::world::WorldGenLevel;
 use std::cmp::Ordering;
 
 use glam::IVec3;
@@ -462,7 +463,7 @@ impl DesertPyramidPlacer<'_, '_> {
         self.place_block(stairs, 13, -1, 17);
         self.place_block(stairs, 14, -2, 17);
         self.place_block(stairs, 15, -3, 17);
-        let variant = self.region.with_random(Random::next_bool);
+        let variant = self.region.with_level_random(Random::next_bool);
         self.place_block(sand, 12, 0, 17);
         self.place_block(sand, 13, 0, 17);
         self.place_block(sand, 14, 0, 17);
@@ -662,7 +663,7 @@ impl DesertPyramidPlacer<'_, '_> {
     }
 
     fn place_collapsed_roof_piece(&mut self, x: i32, y: i32, z: i32) {
-        let state = if self.region.with_random(Random::next_f32) < 0.33 {
+        let state = if self.region.with_level_random(Random::next_f32) < 0.33 {
             vanilla_blocks::SANDSTONE.default_state()
         } else {
             vanilla_blocks::SAND.default_state()

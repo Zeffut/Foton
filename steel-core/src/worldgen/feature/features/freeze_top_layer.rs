@@ -18,7 +18,10 @@ impl FeatureDecorationRunner {
                 let y = region.height_at(HeightmapType::MotionBlocking, x, z);
                 let top_pos = BlockPos::new(x, y, z);
                 let below_pos = top_pos.below();
-                let biome = Self::biome_at_block(region, registry, biome_zoom_seed, top_pos);
+                let Some(biome) = Self::biome_at_block(region, registry, biome_zoom_seed, top_pos)
+                else {
+                    continue;
+                };
 
                 if Self::should_freeze_in_biome(region, biome, below_pos, false) {
                     let _ = region.set_block_state(below_pos, ice, UpdateFlags::UPDATE_CLIENTS);

@@ -679,6 +679,19 @@ impl World {
             .unwrap_or(false)
     }
 
+    /// Removes the block entity at a position, if any.
+    pub(crate) fn remove_block_entity(&self, pos: BlockPos) -> bool {
+        if !self.is_in_valid_bounds(pos) {
+            return false;
+        }
+
+        self.chunk_map
+            .with_full_chunk(Self::chunk_pos_for_block(pos), |chunk| {
+                chunk.remove_block_entity(pos)
+            })
+            .unwrap_or(false)
+    }
+
     /// Removes a block entity only while it still owns its position.
     pub(crate) fn remove_block_entity_if_same(&self, expected: &dyn BlockEntity) -> bool {
         let pos = expected.get_block_pos();

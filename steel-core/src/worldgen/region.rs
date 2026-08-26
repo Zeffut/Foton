@@ -37,7 +37,7 @@ use crate::chunk::{
 };
 use crate::entity::SharedEntity;
 use crate::world::tick_scheduler::TickPriority;
-use crate::world::{LevelAccessor, LevelReader, ScheduledTickAccess, World};
+use crate::world::{LevelAccessor, LevelReader, ScheduledTickAccess, World, WorldGenLevel};
 use crate::worldgen::feature::instrumentation::OreFeatureStats;
 use crate::worldgen::generator::context::WorldGenContext;
 
@@ -230,15 +230,6 @@ impl<'a> WorldGenRegion<'a> {
         self.center
     }
 
-    /// Runs `apply` against the random source vanilla exposes as
-    /// `WorldGenRegion.getRandom()`.
-    ///
-    /// The stream is positional and seeded from the center chunk, so draws from it
-    /// stay part of deterministic generation.
-    pub fn with_random<R>(&self, apply: impl FnOnce(&mut RandomSource) -> R) -> R {
-        apply(&mut self.random.borrow_mut())
-    }
-
     /// Returns the minimum build height.
     #[must_use]
     pub const fn min_y(&self) -> i32 {
@@ -249,50 +240,6 @@ impl<'a> WorldGenRegion<'a> {
     #[must_use]
     pub const fn height(&self) -> i32 {
         self.context.height()
-    }
-
-    /// Returns the minimum Y coordinate used by vanilla `WorldGenerationContext`.
-    #[must_use]
-    pub fn generation_min_y(&self) -> i32 {
-        self.context.generation_min_y()
-    }
-
-    /// Returns the vertical generation depth used by vanilla `WorldGenerationContext`.
-    #[must_use]
-    pub fn generation_height(&self) -> i32 {
-        self.context.generation_height()
-    }
-
-    /// Returns this dimension's sea level.
-    #[must_use]
-    pub const fn sea_level(&self) -> i32 {
-        self.context.sea_level()
-    }
-
-    /// Returns the world seed.
-    #[must_use]
-    pub fn seed(&self) -> i64 {
-        self.context.world().seed()
-    }
-
-    /// Returns the weak world reference used by generated chunks and entities.
-    #[must_use]
-    pub fn weak_world(&self) -> Weak<World> {
-        self.context.weak_world()
-    }
-
-    /// Returns block light as seen by feature-stage worldgen.
-    ///
-    /// Vanilla routes this through the level light engine from `WorldGenRegion`, but block light
-    /// is not generated for the feature-stage proto chunks. Treating the region as dark keeps
-    /// snow and freeze checks aligned with vanilla feature placement.
-    #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "keeps light lookup callable through the region instance"
-    )]
-    pub const fn block_light_at(&self, _pos: BlockPos) -> u8 {
-        0
     }
 
     /// Returns the exclusive maximum build height.
@@ -475,8 +422,7 @@ impl<'a> WorldGenRegion<'a> {
     ///
     /// # Panics
     /// Panics if the position's chunk is outside this step's direct dependencies.
-    #[must_use]
-    pub fn noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> u16 {
+    fn region_noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> u16 {
         let chunk_x = quart_x >> 2;
         let chunk_z = quart_z >> 2;
         let local_quart_x = (quart_x & 3) as usize;
@@ -560,8 +506,7 @@ impl<'a> WorldGenRegion<'a> {
     /// This mirrors vanilla's feature paths that place a block first, then configure its block
     /// entity. If Steel does not have concrete behavior for the type yet, the raw fallback keeps
     /// the NBT intact for later save/load.
-    #[must_use]
-    pub fn set_block_entity_data(
+    fn region_set_block_entity_data(
         &self,
         pos: BlockPos,
         block_entity_type: BlockEntityTypeRef,
@@ -598,8 +543,7 @@ impl<'a> WorldGenRegion<'a> {
     }
 
     /// Removes block entity data at a writable worldgen position.
-    #[must_use]
-    pub fn remove_block_entity(&self, pos: BlockPos) -> bool {
+    fn region_remove_block_entity(&self, pos: BlockPos) -> bool {
         let Some((chunk_x, chunk_z, status)) =
             self.writable_chunk_for_pos(pos, "remove block entity")
         else {
@@ -618,8 +562,7 @@ impl<'a> WorldGenRegion<'a> {
     ///
     /// Vanilla `WorldGenRegion.addFreshEntity` does not call `ensureCanWrite`, so entity
     /// insertion is allowed anywhere covered by the generation step's chunk dependencies.
-    #[must_use]
-    pub fn add_fresh_entity(&self, entity: SharedEntity) -> bool {
+    fn region_add_fresh_entity(&self, entity: SharedEntity) -> bool {
         let pos = BlockPos::from(entity.position());
         let (chunk_x, chunk_z, status) = self.dependency_chunk_for_pos(pos, "add entity");
 
@@ -1414,6 +1357,61 @@ const fn abs_diff(left: i32, right: i32) -> i32 {
         left - right
     } else {
         right - left
+    }
+}
+
+impl WorldGenLevel for WorldGenRegion<'_> {
+    fn seed(&self) -> i64 {
+        self.context.world().seed()
+    }
+
+    fn sea_level(&self) -> i32 {
+        self.context.sea_level()
+    }
+
+    fn generation_min_y(&self) -> i32 {
+        self.context.generation_min_y()
+    }
+
+    fn generation_height(&self) -> i32 {
+        self.context.generation_height()
+    }
+
+    fn noise_biome_id(&self, quart_x: i32, quart_y: i32, quart_z: i32) -> Option<u16> {
+        Some(self.region_noise_biome_id(quart_x, quart_y, quart_z))
+    }
+
+    /// Feature-stage proto chunks have no block light yet, so vanilla's light-engine
+    /// query answers dark here. That is what keeps snow and freeze checks aligned
+    /// with vanilla feature placement.
+    fn block_light_at(&self, _pos: BlockPos) -> u8 {
+        0
+    }
+
+    fn with_level_random<R>(&self, apply: impl FnOnce(&mut RandomSource) -> R) -> R {
+        apply(&mut self.random.borrow_mut())
+    }
+
+    fn set_block_entity_data(
+        &self,
+        pos: BlockPos,
+        block_entity_type: BlockEntityTypeRef,
+        state: BlockStateId,
+        nbt: NbtCompound,
+    ) -> bool {
+        self.region_set_block_entity_data(pos, block_entity_type, state, nbt)
+    }
+
+    fn remove_block_entity(&self, pos: BlockPos) -> bool {
+        self.region_remove_block_entity(pos)
+    }
+
+    fn add_fresh_entity(&self, entity: SharedEntity) -> bool {
+        self.region_add_fresh_entity(entity)
+    }
+
+    fn weak_world(&self) -> Weak<World> {
+        self.context.weak_world()
     }
 }
 

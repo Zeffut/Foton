@@ -1,3 +1,4 @@
+use crate::world::WorldGenLevel;
 use std::sync::Arc;
 
 use glam::{DVec3, IVec3};
@@ -552,7 +553,7 @@ impl StructurePiecePlacer {
             "Warrior" => (&vanilla_entities::VINDICATOR, 1),
             "Group of Allays" => (
                 &vanilla_entities::ALLAY,
-                region.with_random(|random| random.next_i32_bounded(3)) + 1,
+                region.with_level_random(|random| random.next_i32_bounded(3)) + 1,
             ),
             _ => return,
         };

@@ -141,6 +141,7 @@ pub mod tick_scheduler;
 mod village;
 mod weather;
 mod world_entities;
+mod worldgen_level;
 
 #[cfg(test)]
 mod tests;
@@ -164,6 +165,7 @@ pub(crate) use signal_getter::{
     get_best_neighbor_signal, get_control_input_signal, get_signal, is_redstone_conductor,
 };
 pub use tick_scheduler::ScheduledTick;
+pub use worldgen_level::WorldGenLevel;
 
 #[cfg(test)]
 use level_effects::sound_is_within_range;
@@ -316,6 +318,12 @@ pub struct World {
     raids: Raids,
     /// World-change requests queued by world-local ticks for server safe-point processing.
     pending_world_changes: SyncMutex<Vec<(SharedEntity, WorldChangeRequest)>>,
+    /// The level's own random source.
+    ///
+    /// Vanilla parity: `Level.random`, which vanilla creates unseeded. Feature code
+    /// that vanilla draws from `LevelAccessor.getRandom()` reaches it through
+    /// [`WorldGenLevel::with_level_random`] when placement runs in a live world.
+    level_random: SyncMutex<RandomSource>,
     /// The server this world belongs to, attached once the server exists.
     ///
     /// Vanilla reaches the server through `Level.getServer()`. Steel builds its
@@ -470,6 +478,9 @@ impl World {
                 poi_storage: SyncMutex::new(PointOfInterestStorage::new()),
                 raids,
                 pending_world_changes: SyncMutex::new(Vec::new()),
+                level_random: SyncMutex::new(RandomSource::Legacy(LegacyRandom::from_seed(
+                    rand::random(),
+                ))),
                 server: OnceLock::new(),
             }
         }))

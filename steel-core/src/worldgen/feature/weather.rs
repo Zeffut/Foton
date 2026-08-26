@@ -26,14 +26,14 @@ impl FeatureDecorationRunner {
         registry: &Registry,
         biome_zoom_seed: i64,
         pos: BlockPos,
-    ) -> BiomeRef {
+    ) -> Option<BiomeRef> {
         let biome_id = fuzzed_biome_at_block(biome_zoom_seed, pos, |quart| {
             region.noise_biome_id(quart.x, quart.y, quart.z)
-        });
+        })?;
         let Some(biome) = registry.biomes.by_id(usize::from(biome_id)) else {
             panic!("biome lookup resolved unknown biome id {biome_id}");
         };
-        biome
+        Some(biome)
     }
 
     pub(super) fn should_freeze(
@@ -43,7 +43,9 @@ impl FeatureDecorationRunner {
         pos: BlockPos,
         check_neighbors: bool,
     ) -> bool {
-        let biome = Self::biome_at_block(region, registry, biome_zoom_seed, pos);
+        let Some(biome) = Self::biome_at_block(region, registry, biome_zoom_seed, pos) else {
+            return false;
+        };
         Self::should_freeze_in_biome(region, biome, pos, check_neighbors)
     }
 

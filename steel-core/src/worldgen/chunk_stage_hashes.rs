@@ -998,14 +998,14 @@ fn generate_features_for_positions(
         let region_random = inputs
             .generator
             .create_worldgen_region_random(inputs.seed as i64, center);
-        let mut region = crate::worldgen::WorldGenRegion::new(
+        let region = crate::worldgen::WorldGenRegion::new(
             inputs.context,
             inputs.feature_step,
             &cache,
             center,
             region_random,
         );
-        inputs.generator.apply_biome_decorations(&mut region);
+        inputs.generator.apply_biome_decorations(&region);
     }
 }
 

@@ -19,6 +19,7 @@ mod swamp_hut;
 mod template_piece;
 mod template_processors;
 
+use crate::world::WorldGenLevel;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;

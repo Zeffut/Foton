@@ -1,3 +1,4 @@
+use crate::world::WorldGenLevel;
 use std::sync::Arc;
 
 use glam::DVec3;
@@ -433,9 +434,11 @@ impl MineshaftPlacer<'_, '_> {
     }
 
     fn is_mineshaft_blocking_biome(&self, pos: BlockPos) -> bool {
-        let biome_id = fuzzed_biome_at_block(self.biome_zoom_seed, pos, |quart| {
+        let Some(biome_id) = fuzzed_biome_at_block(self.biome_zoom_seed, pos, |quart| {
             self.region.noise_biome_id(quart.x, quart.y, quart.z)
-        });
+        }) else {
+            panic!("mineshaft biome check reached a column the region has no chunk for");
+        };
         let Some(biome) = self.registry.biomes.by_id(usize::from(biome_id)) else {
             panic!("noise biome id {biome_id} is not registered");
         };

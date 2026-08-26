@@ -1,3 +1,5 @@
+use steel_utils::random::Random;
+
 use super::super::prelude::*;
 use super::super::runner::FeatureDecorationRunner;
 use crate::behavior::blocks::MossyCarpetBlock;
@@ -135,7 +137,7 @@ impl FeatureDecorationRunner {
             for direction in MossyCarpetBlock::HORIZONTAL_DIRECTIONS {
                 let property = MossyCarpetBlock::wall_property(direction);
                 if above_state.get_value(property) != WallSide::None
-                    && !region.with_random(|random| random.next_bool())
+                    && !region.with_level_random(Random::next_bool)
                 {
                     above_state = above_state.set_value(property, WallSide::None);
                 }

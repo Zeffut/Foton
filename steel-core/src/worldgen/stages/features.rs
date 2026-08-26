@@ -25,6 +25,6 @@ pub(crate) fn generate(
     let region_random = context
         .generator
         .create_worldgen_region_random(world_seed, center);
-    let mut region = WorldGenRegion::new(context.as_ref(), step, cache, center, region_random);
-    context.generator.apply_biome_decorations(&mut region);
+    let region = WorldGenRegion::new(context.as_ref(), step, cache, center, region_random);
+    context.generator.apply_biome_decorations(&region);
 }
