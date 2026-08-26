@@ -269,6 +269,63 @@ fn four_shrieks_summon_a_warden() {
     );
 }
 
+/// A second shriek inside the ten-second cooldown is refused, which is the rule that stops
+/// a player collecting four warnings off one block in half a minute.
+#[test]
+fn a_second_shriek_inside_the_cooldown_earns_nothing() {
+    let world = warden_world("warden_shriek_cooldown");
+    let shrieker_pos = STAND;
+    assert!(
+        world.set_block(
+            shrieker_pos,
+            vanilla_blocks::SCULK_SHRIEKER
+                .default_state()
+                .set_value(&BlockStateProperties::CAN_SUMMON, true),
+            UpdateFlags::UPDATE_ALL,
+        )
+    );
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "impatient", next_entity_id()).build();
+    player
+        .try_set_position(DVec3::new(
+            f64::from(STAND.x()) + 0.5,
+            f64::from(STAND.y()) + 1.0,
+            f64::from(STAND.z()) + 0.5,
+        ))
+        .expect("the test chunk is loaded");
+    assert!(world.add_player(Arc::clone(&player), ResetReason::InitialJoin));
+
+    with_shrieker(&world, shrieker_pos, |shrieker| {
+        shrieker.try_shriek(&world, &player);
+    });
+    assert_eq!(player.warden_spawn_tracker().warning_level(), 1);
+
+    // Quiet the block so the shriek itself is not what refuses the second one, then ask
+    // again immediately.
+    assert!(
+        world.set_block(
+            shrieker_pos,
+            world
+                .get_block_state(shrieker_pos)
+                .set_value(&BlockStateProperties::SHRIEKING, false),
+            UpdateFlags::UPDATE_ALL,
+        )
+    );
+    with_shrieker(&world, shrieker_pos, |shrieker| {
+        shrieker.try_shriek(&world, &player);
+    });
+    assert_eq!(
+        player.warden_spawn_tracker().warning_level(),
+        1,
+        "the cooldown should have refused the second warning"
+    );
+    assert!(
+        !world
+            .get_block_state(shrieker_pos)
+            .get_value(&BlockStateProperties::SHRIEKING),
+        "a summoning shrieker that was refused its warning does not shriek either"
+    );
+}
+
 fn with_shrieker(
     world: &Arc<World>,
     pos: BlockPos,
