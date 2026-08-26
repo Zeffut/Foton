@@ -3,9 +3,10 @@ use super::{
     base_gray, base_light, generate_box_on_fill_only, generate_default_floor, generate_water_box,
     lamp, open, vanilla_blocks,
 };
+use crate::world::WorldGenLevel;
 
 pub(super) fn place_simple_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     room: OceanMonumentRoomData,
     main_design: i32,
@@ -38,7 +39,7 @@ pub(super) fn place_simple_room(
 }
 
 fn place_simple_room_design0(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     room: OceanMonumentRoomData,
 ) {
     for (x0, z0) in [(0, 0), (5, 0), (0, 5), (5, 5)] {
@@ -112,7 +113,7 @@ fn place_simple_room_design0(
 }
 
 fn place_simple_room_design1(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     room: OceanMonumentRoomData,
 ) {
     for (x, z) in [(2, 2), (2, 5), (5, 5), (5, 2)] {
@@ -159,7 +160,7 @@ fn place_simple_room_design1(
 }
 
 fn place_simple_room_design2(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     room: OceanMonumentRoomData,
 ) {
     placer.generate_box(0, 1, 0, 0, 1, 7, base_light(), base_light(), false);
@@ -194,7 +195,7 @@ fn place_simple_room_design2(
 }
 
 pub(super) fn place_simple_top_room(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     random: &mut WorldgenRandom,
     room: OceanMonumentRoomData,
 ) {

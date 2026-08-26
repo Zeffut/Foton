@@ -5,7 +5,7 @@ use steel_utils::random::Random;
 use steel_utils::random::worldgen_random::WorldgenRandom;
 use steel_utils::{BlockStateId, BoundingBox, Direction};
 
-use crate::worldgen::region::WorldGenRegion;
+use crate::world::WorldGenLevel;
 use steel_worldgen::structure::jungle_temple::JungleTemplePieceData;
 
 use super::StructurePiecePlacer;
@@ -16,7 +16,7 @@ const JUNGLE_TEMPLE_DISPENSER_LOOT: &str = "minecraft:chests/jungle_temple_dispe
 
 impl StructurePiecePlacer {
     pub(super) fn place_jungle_temple_piece(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         bounding_box: &mut BoundingBox,
         orientation: Option<Direction>,
@@ -40,7 +40,7 @@ impl StructurePiecePlacer {
     reason = "jungle temple placement is a direct port of vanilla's linear postProcess"
 )]
 fn place_jungle_temple(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     data: &mut JungleTemplePieceData,
     random: &mut WorldgenRandom,
 ) {
@@ -243,7 +243,7 @@ fn place_jungle_temple(
     reason = "mirrors vanilla StructurePiece.generateBox selector overload"
 )]
 fn moss_box(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     x0: i32,
     y0: i32,
     z0: i32,

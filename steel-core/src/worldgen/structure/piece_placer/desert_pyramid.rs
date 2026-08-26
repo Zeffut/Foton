@@ -12,7 +12,6 @@ use steel_utils::{BlockPos, BlockStateId, BoundingBox, Direction, types::UpdateF
 
 use super::StructurePiecePlacer;
 use crate::chunk::heightmap::HeightmapType;
-use crate::worldgen::region::WorldGenRegion;
 use crate::worldgen::template::StructureTemplate;
 use steel_worldgen::structure::desert_pyramid::DesertPyramidPieceData;
 use steel_worldgen::structure::{
@@ -30,7 +29,7 @@ const HORIZONTAL_PLANE: [Direction; 4] = [
 
 impl StructurePiecePlacer {
     pub(super) fn place_desert_pyramid_piece(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         bounding_box: &mut BoundingBox,
         orientation: Option<Direction>,
@@ -56,7 +55,7 @@ impl StructurePiecePlacer {
     }
 
     pub(super) fn after_place_desert_pyramid(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         pieces: &mut [StructurePiece],
         clip: BoundingBox,
     ) {
@@ -109,7 +108,7 @@ impl StructurePiecePlacer {
     }
 
     fn place_desert_pyramid_suspicious_sand(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         clip: BoundingBox,
         pos: BlockPos,
     ) {
@@ -140,8 +139,8 @@ impl StructurePiecePlacer {
     }
 }
 
-struct DesertPyramidPlacer<'a, 'world> {
-    region: &'a WorldGenRegion<'world>,
+struct DesertPyramidPlacer<'a, L: WorldGenLevel> {
+    region: &'a L,
     registry: &'a Registry,
     bounding_box: &'a mut BoundingBox,
     orientation: Option<Direction>,
@@ -149,7 +148,7 @@ struct DesertPyramidPlacer<'a, 'world> {
     data: &'a mut DesertPyramidPieceData,
 }
 
-impl DesertPyramidPlacer<'_, '_> {
+impl<L: WorldGenLevel> DesertPyramidPlacer<'_, L> {
     fn update_height_position_to_lowest_ground_height(&mut self, offset: i32) -> bool {
         if self.data.height_position.is_some() {
             return true;
@@ -159,7 +158,7 @@ impl DesertPyramidPlacer<'_, '_> {
         let mut found_position_within_bounding_box = false;
         for z in self.bounding_box.min_z()..=self.bounding_box.max_z() {
             for x in self.bounding_box.min_x()..=self.bounding_box.max_x() {
-                lowest_ground_height = lowest_ground_height.min(self.region.height_at(
+                lowest_ground_height = lowest_ground_height.min(self.region.heightmap_at(
                     HeightmapType::MotionBlockingNoLeaves,
                     x,
                     z,
@@ -606,7 +605,7 @@ impl DesertPyramidPlacer<'_, '_> {
             return;
         }
 
-        while Self::is_replaceable_by_structures(self.region.block_state(pos))
+        while Self::is_replaceable_by_structures(self.region.get_block_state(pos))
             && pos.y() > self.region.min_y() + 1
         {
             let _ = self
@@ -634,7 +633,7 @@ impl DesertPyramidPlacer<'_, '_> {
     fn get_block(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         let pos = self.world_pos(x, y, z);
         if self.clip.contains_blockpos(pos) {
-            self.region.block_state(pos)
+            self.region.get_block_state(pos)
         } else {
             vanilla_blocks::AIR.default_state()
         }

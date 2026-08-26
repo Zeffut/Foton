@@ -8,7 +8,6 @@ use steel_utils::{BlockPos, BlockStateId, BoundingBox, Direction, types::UpdateF
 
 use super::StructurePiecePlacer;
 use crate::chunk::heightmap::HeightmapType;
-use crate::worldgen::region::WorldGenRegion;
 
 const BURIED_TREASURE_LOOT: &str = "minecraft:chests/buried_treasure";
 const VANILLA_DIRECTION_VALUES: [Direction; 6] = [
@@ -22,19 +21,19 @@ const VANILLA_DIRECTION_VALUES: [Direction; 6] = [
 
 impl StructurePiecePlacer {
     pub(super) fn place_buried_treasure_piece(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         bounding_box: &mut BoundingBox,
         clip: BoundingBox,
         random: &mut WorldgenRandom,
     ) -> bool {
         let x = bounding_box.min_x();
         let z = bounding_box.min_z();
-        let mut y = region.height_at(HeightmapType::OceanFloorWg, x, z);
+        let mut y = region.heightmap_at(HeightmapType::OceanFloorWg, x, z);
 
         while y > region.min_y() {
             let pos = BlockPos::new(x, y, z);
-            let current_state = region.block_state(pos);
-            let below_state = region.block_state(pos.below());
+            let current_state = region.get_block_state(pos);
+            let below_state = region.get_block_state(pos.below());
 
             if Self::is_buried_treasure_base(below_state) {
                 let soft_state =
@@ -46,14 +45,14 @@ impl StructurePiecePlacer {
 
                 for direction in VANILLA_DIRECTION_VALUES {
                     let relative_pos = pos.relative(direction);
-                    let relative_state = region.block_state(relative_pos);
+                    let relative_state = region.get_block_state(relative_pos);
                     if !relative_state.is_air() && !Self::is_buried_treasure_liquid(relative_state)
                     {
                         continue;
                     }
 
                     let below_relative_pos = relative_pos.below();
-                    let below_relative_state = region.block_state(below_relative_pos);
+                    let below_relative_state = region.get_block_state(below_relative_pos);
                     let place_state = if direction != Direction::Up
                         && (below_relative_state.is_air()
                             || Self::is_buried_treasure_liquid(below_relative_state))
@@ -92,13 +91,13 @@ impl StructurePiecePlacer {
     }
 
     fn create_buried_treasure_chest(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         clip: BoundingBox,
         random: &mut WorldgenRandom,
         pos: BlockPos,
     ) -> bool {
         if !clip.contains_blockpos(pos)
-            || region.block_state(pos).get_block() == &vanilla_blocks::CHEST
+            || region.get_block_state(pos).get_block() == &vanilla_blocks::CHEST
         {
             return false;
         }

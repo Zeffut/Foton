@@ -8,7 +8,7 @@ use steel_utils::random::worldgen_random::WorldgenRandom;
 use steel_utils::{BlockStateId, BoundingBox, Direction};
 
 use crate::entity::{entities::RawEntity, next_entity_id};
-use crate::worldgen::region::WorldGenRegion;
+use crate::world::WorldGenLevel;
 use steel_worldgen::structure::ocean_monument::{
     OceanMonumentChildPiece, OceanMonumentChildPieceKind, OceanMonumentPieceData,
     OceanMonumentRoomData,
@@ -19,7 +19,7 @@ use super::scattered_feature::ScatteredFeaturePlacer;
 
 impl StructurePiecePlacer {
     pub(super) fn place_ocean_monument_piece(
-        region: &WorldGenRegion<'_>,
+        region: &impl WorldGenLevel,
         registry: &Registry,
         bounding_box: BoundingBox,
         orientation: Option<Direction>,
@@ -50,7 +50,7 @@ impl StructurePiecePlacer {
 }
 
 fn place_child_piece(
-    placer: &mut ScatteredFeaturePlacer<'_, '_>,
+    placer: &mut ScatteredFeaturePlacer<'_, impl WorldGenLevel>,
     child: &OceanMonumentChildPiece,
     random: &mut WorldgenRandom,
 ) {
