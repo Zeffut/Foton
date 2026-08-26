@@ -262,11 +262,16 @@ fn a_bee_saves_and_reloads_the_two_positions_it_remembers() {
 }
 
 #[test]
-fn a_bee_ticks_in_a_live_world_without_deadlocking() {
-    // The bee reads its own navigation from `tick_path_navigation` and its move
-    // control from the pollinate goal. A previous agent deadlocked every
-    // pathfinding mob by reading a navigation flag while its lock was held, so
-    // this drives a real tick loop rather than asserting on fields.
+fn a_bee_reaches_its_goals_and_survives_forty_ticks_in_a_live_world() {
+    // Two failures at once, because the tick loop alone catches only the second.
+    //
+    // A bee whose `server_ai_step` does not reach `Mob::mob_server_ai_step`
+    // registers thirteen goals and ticks none of them, and nothing downstream
+    // notices -- the `no_action_time` bump is the cheapest witness that the whole
+    // body ran. And the bee reads its own navigation from `tick_path_navigation`
+    // and its move control from the pollinate goal, which is where a previous
+    // agent deadlocked every pathfinding mob by reading a navigation flag while
+    // its lock was held; that one hangs the tick loop rather than failing it.
     init_vanilla_registry();
     init_behaviors();
     let world = fresh_test_world("bee_ticks");
@@ -287,6 +292,14 @@ fn a_bee_ticks_in_a_live_world_without_deadlocking() {
     world
         .try_add_entity(bee.clone())
         .unwrap_or_else(|error| panic!("bee should enter the test world: {error:?}"));
+
+    bee.set_no_action_time(0);
+    LivingEntity::server_ai_step(bee.as_ref());
+    assert!(
+        bee.no_action_time() > 0,
+        "the bee's goals never tick: `server_ai_step` does not reach \
+         `Mob::mob_server_ai_step`"
+    );
 
     for _ in 0..40 {
         bee.tick();
