@@ -25,6 +25,7 @@
 //! each behavior states that list itself, in [`Trigger::required_memories`] or
 //! [`TimedBehavior::entry_condition`].
 
+mod amphibious;
 mod animal_make_love;
 mod animal_panic;
 mod baby_follow_adult;
@@ -35,10 +36,13 @@ mod count_down_cooldown_ticks;
 mod crossbow_attack;
 mod do_nothing;
 mod erase_memory_if;
+mod follow_temptation;
+mod frog_specific;
 mod gate_behavior;
 mod go_to_target_location;
 mod go_to_wanted_item;
 mod interact_with;
+mod long_jump;
 mod look_at_target_sink;
 mod melee_attack;
 mod mount;
@@ -56,6 +60,7 @@ mod stroll_to_poi;
 mod swim;
 pub mod transport_items_between_containers;
 mod trigger_gate;
+mod trigger_if;
 
 pub(crate) mod utils;
 
@@ -94,8 +99,15 @@ pub use transport_items_between_containers::TransportItemsBetweenContainers;
     reason = "framework re-exports waiting for the brain mobs they were ported for"
 )]
 pub use {
+    amphibious::{TryFindLand, TryFindLandNearWater, TryLaySpawnOnFluidNearLand},
     back_up_if_too_close::BackUpIfTooClose,
+    follow_temptation::{DEFAULT_CLOSE_ENOUGH_DIST, FollowTemptation},
+    frog_specific::{Croak, ShootTongue},
     gate_behavior::{GateBehavior, OrderPolicy, RunningPolicy, ShufflingList},
+    long_jump::{
+        LongJumpMidJump, LongJumpToRandomPos, calculate_jump_vector_for_angle,
+        default_acceptable_landing_spot, frog_prefer_jump_to,
+    },
     melee_attack::MeleeAttack,
     mount::{DismountOrSkipMounting, Mount},
     set_entity_look_target::SetEntityLookTarget,
@@ -105,6 +117,7 @@ pub use {
     stop_attacking_if_target_invalid::StopAttackingIfTargetInvalid,
     swim::Swim,
     trigger_gate::TriggerGate,
+    trigger_if::TriggerIf,
 };
 
 pub use super::context::BrainContext;

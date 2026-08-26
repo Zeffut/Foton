@@ -330,6 +330,16 @@ memory_module_types! {
     PACIFIED: bool = "minecraft:pacified", saved = false;
     /// Vanilla `MemoryModuleType.ITEM_PICKUP_COOLDOWN_TICKS`.
     ITEM_PICKUP_COOLDOWN_TICKS: i32 = "minecraft:item_pickup_cooldown_ticks", saved = true;
+    /// Vanilla `MemoryModuleType.IS_PREGNANT`, which is what a bred frog carries
+    /// until it finds water to lay its spawn on.
+    IS_PREGNANT: Unit = "minecraft:is_pregnant", saved = true;
+    /// Vanilla `MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS`, registry key
+    /// `long_jump_cooling_down`.
+    LONG_JUMP_COOLDOWN_TICKS: i32 = "minecraft:long_jump_cooling_down", saved = true;
+    /// Vanilla `MemoryModuleType.LONG_JUMP_MID_JUMP`.
+    LONG_JUMP_MID_JUMP: bool = "minecraft:long_jump_mid_jump", saved = false;
+    /// Vanilla `MemoryModuleType.UNREACHABLE_TONGUE_TARGETS`.
+    UNREACHABLE_TONGUE_TARGETS: Vec<Uuid> = "minecraft:unreachable_tongue_targets", saved = false;
 }
 
 /// Everything a brain remembers.

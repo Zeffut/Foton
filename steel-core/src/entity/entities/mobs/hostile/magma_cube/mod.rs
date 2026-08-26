@@ -82,6 +82,26 @@ unsafe impl DowncastType for MagmaCubeEntity {
 }
 
 impl MagmaCubeEntity {
+    /// Returns vanilla `AbstractCubeMob.getSize`.
+    ///
+    /// Public for the same reason [`super::slime::SlimeEntity::cube_size`] is:
+    /// `Frog.canEat` needs it, and the frog cannot reach the `pub(super)`
+    /// `CubeLike` trait from the passive module.
+    #[must_use]
+    pub fn cube_size(&self) -> i32 {
+        <Self as CubeLike>::size(self)
+    }
+
+    /// Sets vanilla `AbstractCubeMob.setSize`, and with it everything the size
+    /// decides -- health, armor, bite and hitbox.
+    ///
+    /// Public because vanilla's `setSize` is: the `CubeLike` trait that carries
+    /// it is `pub(super)` to the hostile module, so nothing outside can size a
+    /// cube without this.
+    pub fn set_cube_size(&self, size: i32, update_health: bool) {
+        <Self as CubeLike>::set_size(self, size, update_health);
+    }
+
     /// Creates a magma cube at runtime.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {

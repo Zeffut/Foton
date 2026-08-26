@@ -13,6 +13,7 @@ use steel_utils::{BlockPos, BlockStateId, Direction};
 
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::BlockPlaceContext;
+use crate::entity::entities::spawn_tadpoles_from_frogspawn;
 use crate::entity::{Entity, InsideBlockEffectCollector};
 use crate::fluid::get_fluid_state_from_block;
 use crate::world::{LevelReader, ScheduledTickAccess, World};
@@ -62,11 +63,7 @@ impl FrogspawnBlock {
             1.0,
             None,
         );
-        // Vanilla `FrogspawnBlock.spawnTadpoles` releases 2 to 5 persistent
-        // `Tadpole` entities half a block below this position. Steel has no
-        // `Tadpole` entity, so the spawn is left out and the frogspawn simply
-        // disappears; the call belongs on this line once `EntityTypes.TADPOLE`
-        // is implemented.
+        spawn_tadpoles_from_frogspawn(world, pos);
     }
 }
 
@@ -136,6 +133,8 @@ mod tests {
     use steel_registry::{init_vanilla_registry, vanilla_blocks};
 
     use super::*;
+    use crate::entity::Mob;
+    use crate::entity::entities::{MAX_TADPOLES_SPAWN_EXCLUSIVE, MIN_TADPOLES_SPAWN};
     use crate::test_support::TestLevel;
 
     fn frogspawn() -> BlockStateId {
@@ -209,5 +208,66 @@ mod tests {
         let delay = FrogspawnBlock::hatch_delay();
 
         assert!((MIN_HATCH_TICK_DELAY..MAX_HATCH_TICK_DELAY).contains(&delay));
+    }
+
+    #[test]
+    fn hatching_frogspawn_leaves_two_to_five_tadpoles_in_the_water() {
+        // This is the loop: without the spawn the block just disappeared, which
+        // is what the comment on this line used to say.
+        use steel_registry::vanilla_entities;
+        use steel_utils::ChunkPos;
+        use steel_utils::types::UpdateFlags;
+
+        use crate::behavior::init_behaviors;
+        use crate::entity::init_entities;
+        use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+        init_vanilla_registry();
+        init_behaviors();
+        init_entities();
+        let world = fresh_test_world("frogspawn_hatch");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        assert!(world.set_block(
+            pos.below(),
+            vanilla_blocks::WATER.default_state(),
+            UpdateFlags::UPDATE_NONE
+        ));
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::FROGSPAWN.default_state(),
+            UpdateFlags::UPDATE_NONE
+        ));
+
+        let behavior = FrogspawnBlock::new(&vanilla_blocks::FROGSPAWN);
+        behavior.tick(frogspawn(), &world, pos);
+
+        assert!(
+            world.get_block_state(pos).is_air(),
+            "hatching destroys the spawn block"
+        );
+        let search = steel_utils::WorldAabb::new(
+            f64::from(pos.x()) - 4.0,
+            f64::from(pos.y()) - 4.0,
+            f64::from(pos.z()) - 4.0,
+            f64::from(pos.x()) + 5.0,
+            f64::from(pos.y()) + 5.0,
+            f64::from(pos.z()) + 5.0,
+        );
+        let tadpoles = world.get_entities_in_aabb_matching(&search, |entity| {
+            entity.entity_type() == &vanilla_entities::TADPOLE
+        });
+
+        assert!(
+            (MIN_TADPOLES_SPAWN..MAX_TADPOLES_SPAWN_EXCLUSIVE).contains(&(tadpoles.len() as i32)),
+            "vanilla releases two to five tadpoles, this released {}",
+            tadpoles.len()
+        );
+        assert!(
+            tadpoles
+                .iter()
+                .all(|tadpole| tadpole.as_mob().is_some_and(Mob::is_persistence_required)),
+            "a hatched tadpole is persistent, so it does not despawn before growing up"
+        );
     }
 }

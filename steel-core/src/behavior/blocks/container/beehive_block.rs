@@ -67,7 +67,6 @@ impl BeehiveBlock {
     ///
     /// Vanilla parity: `BeehiveBlock.releaseBeesAndResetHoneyLevel`.
     fn release_bees_and_reset_honey_level(
-        &self,
         world: &Arc<World>,
         state: BlockStateId,
         pos: BlockPos,
@@ -206,7 +205,7 @@ impl BlockBehavior for BeehiveBlock {
         if Self::hive_contains_bees(world, pos) {
             Self::anger_nearby_bees(world, pos);
         }
-        self.release_bees_and_reset_honey_level(
+        Self::release_bees_and_reset_honey_level(
             world,
             state,
             pos,

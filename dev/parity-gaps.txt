@@ -31,7 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 28
+[entities] 26
 Allay
 Armadillo
 Axolotl
@@ -43,7 +43,6 @@ CamelHusk
 Creaking
 EnderDragon
 EyeOfEnder
-Frog
 Giant
 GlowItemFrame
 HappyGhast
@@ -56,7 +55,6 @@ Player
 Sniffer
 SpectralArrow
 SulfurCube
-Tadpole
 ThrownLingeringPotion
 Warden
 ZombieNautilus

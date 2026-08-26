@@ -70,19 +70,19 @@ impl BlockBehavior for WitherRoseBlock {
         ) {
             return;
         }
-        living_entity.add_mob_effect(self.bee_interaction_effect_instance());
+        living_entity.add_mob_effect(Self::wither_effect());
     }
 
     /// Vanilla parity: `WitherRoseBlock.getBeeInteractionEffect`.
     fn bee_interaction_effect(&self) -> Option<MobEffectInstance> {
-        Some(self.bee_interaction_effect_instance())
+        Some(Self::wither_effect())
     }
 }
 
 impl WitherRoseBlock {
     /// The wither a rose hands out, both to whatever walks into it and to a bee
     /// a player feeds it to.
-    fn bee_interaction_effect_instance(&self) -> MobEffectInstance {
+    fn wither_effect() -> MobEffectInstance {
         MobEffectInstance::with_duration(vanilla_mob_effects::WITHER, WITHER_DURATION_TICKS, 0)
     }
 }

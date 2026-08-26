@@ -1,6 +1,7 @@
 //! Sensors: what writes the world into a brain's memories.
 
 mod adult;
+mod frog_attackables;
 mod hurt_by;
 mod is_in_water;
 mod nearest_item;
@@ -10,6 +11,7 @@ mod player;
 mod tempting;
 
 pub use adult::AdultSensor;
+pub use frog_attackables::FrogAttackablesSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
 pub use nearest_item::NearestItemSensor;
@@ -21,6 +23,8 @@ pub use player::PlayerSensor;
 pub use tempting::TemptingSensor;
 
 use steel_registry::vanilla_attributes;
+use steel_registry::vanilla_item_tags::ItemTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _};
 
 use super::context::BrainContext;
 use super::memory::{MemoryModuleId, memory_module_types};
@@ -88,6 +92,10 @@ pub enum SensorType {
     IsInWater,
     /// Vanilla `SensorType.FOOD_TEMPTATIONS`.
     FoodTemptations,
+    /// Vanilla `SensorType.FROG_TEMPTATIONS`.
+    FrogTemptations,
+    /// Vanilla `SensorType.FROG_ATTACKABLES`.
+    FrogAttackables,
     /// Vanilla `SensorType.NEAREST_ADULT`.
     NearestAdult,
     /// Vanilla `SensorType.PIGLIN_SPECIFIC_SENSOR`.
@@ -109,6 +117,16 @@ impl SensorType {
             Self::HurtBy => Box::new(HurtBySensor),
             Self::IsInWater => Box::new(IsInWaterSensor),
             Self::FoodTemptations => Box::new(TemptingSensor::for_animal()),
+            // Vanilla parity: `SensorType.FROG_TEMPTATIONS`, which tempts on the
+            // item tag rather than on the mob's own `isFood` -- that is what
+            // lets a tadpole, which is a fish and has no `isFood`, be led along
+            // by the same slime ball a frog follows.
+            Self::FrogTemptations => Box::new(TemptingSensor::new(|_, item_stack| {
+                REGISTRY
+                    .items
+                    .is_in_tag(item_stack.item(), &ItemTag::FROG_FOOD)
+            })),
+            Self::FrogAttackables => Box::new(FrogAttackablesSensor),
             Self::NearestAdult => Box::new(AdultSensor),
             Self::PiglinSpecific => Box::new(PiglinSpecificSensor),
             Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),

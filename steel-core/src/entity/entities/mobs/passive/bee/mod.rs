@@ -632,11 +632,7 @@ impl BeeEntity {
     /// Vanilla parity: the `flower.getBeeInteractionEffect()` branch of
     /// `Bee.mobInteract`, which is live for the wither rose and the eyeblossom
     /// because both are in `#minecraft:bee_food`.
-    fn held_flower_effect(
-        &self,
-        player: &Player,
-        hand: InteractionHand,
-    ) -> Option<MobEffectInstance> {
+    fn held_flower_effect(player: &Player, hand: InteractionHand) -> Option<MobEffectInstance> {
         let item_stack = {
             let inventory = player.inventory.lock();
             let item_stack = inventory.get_item_in_hand(hand);
@@ -997,7 +993,7 @@ impl Mob for BeeEntity {
     /// Vanilla parity: `Bee.mobInteract`, which lets a flower that carries a bee
     /// effect be fed to the bee instead of breeding it.
     fn mob_interact(&self, player: &Player, hand: InteractionHand) -> InteractionResult {
-        if let Some(effect) = self.held_flower_effect(player, hand) {
+        if let Some(effect) = Self::held_flower_effect(player, hand) {
             self.use_player_item(player, hand);
             self.add_mob_effect(effect);
             return InteractionResult::Success;

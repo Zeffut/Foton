@@ -4,14 +4,32 @@ use glam::DVec3;
 
 use super::{BrainContext, Trigger};
 
+use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_utils::BlockPos;
+
+use crate::behavior::BLOCK_BEHAVIORS;
 use crate::entity::PathfinderMob;
 use crate::entity::ai::brain::memory::{MemoryModuleId, WalkTarget, memory_module_types};
-use crate::entity::ai::goal::land_random_pos;
+use crate::entity::ai::goal::{default_random_pos, land_random_pos};
+use crate::entity::ai::path::PathComputationType;
+use crate::fluid::FluidStateExt as _;
+use crate::world::LevelReader as _;
+
+/// How many times `getRandomSwimmablePos` re-rolls before giving up.
+///
+/// Vanilla parity: the `attempts++ < 10` of `BehaviorUtils.getRandomSwimmablePos`.
+const RANDOM_SWIMMABLE_POS_ATTEMPTS: usize = 10;
 
 /// Vanilla parity: `RandomStroll.MAX_XZ_DIST`.
 const MAX_XZ_DIST: i32 = 10;
 /// Vanilla parity: `RandomStroll.MAX_Y_DIST`.
 const MAX_Y_DIST: i32 = 7;
+/// Vanilla parity: `RandomStroll.SWIM_XY_DISTANCE_TIERS`.
+///
+/// A swimming stroll walks outward through these tiers, each one aimed along
+/// the direction the last found, so the mob drifts in a line rather than
+/// picking one point at random and turning for it.
+const SWIM_XY_DISTANCE_TIERS: [(i32, i32); 6] = [(1, 1), (3, 3), (5, 5), (6, 5), (7, 7), (10, 7)];
 
 /// Where a stroll aims for.
 type TargetPicker = Box<dyn Fn(&dyn PathfinderMob) -> Option<DVec3> + Send>;
@@ -62,6 +80,91 @@ impl RandomStroll {
         self.can_run = Box::new(|mob| !mob.is_in_water());
         self
     }
+
+    /// Strolls along the water, and only while in it.
+    ///
+    /// Vanilla parity: `RandomStroll.swim(float)`.
+    #[must_use]
+    pub fn swim(speed_modifier: f64) -> Self {
+        Self {
+            speed_modifier,
+            fetch_target_pos: Box::new(target_swim_pos),
+            can_run: Box::new(<dyn PathfinderMob>::is_in_water),
+        }
+    }
+}
+
+/// Vanilla parity: `RandomStroll.getTargetSwimPos`.
+///
+/// Each tier after the first extends the previous answer outward rather than
+/// rolling again, and the walk stops at the first tier that leaves the water or
+/// the mob's home radius -- so the target is the furthest point along a line
+/// that is still swimmable.
+fn target_swim_pos(mob: &dyn PathfinderMob) -> Option<DVec3> {
+    let world = mob.level()?;
+    let mut fallback: Option<DVec3> = None;
+    let mut target_pos: Option<DVec3> = None;
+
+    for (horizontal, vertical) in SWIM_XY_DISTANCE_TIERS {
+        target_pos = match fallback {
+            None => random_swimmable_pos(mob, horizontal, vertical),
+            Some(previous) => {
+                let step = (previous - mob.position()).normalize_or_zero()
+                    * DVec3::new(
+                        f64::from(horizontal),
+                        f64::from(vertical),
+                        f64::from(horizontal),
+                    );
+                Some(mob.position() + step)
+            }
+        };
+
+        let leaves_water = target_pos.is_none_or(|pos| {
+            !world
+                .get_block_state(BlockPos::containing(pos.x, pos.y, pos.z))
+                .get_fluid_state()
+                .is_water()
+        });
+        let outside_home = target_pos.is_some_and(|pos| {
+            mob.has_home()
+                && block_center_distance_sqr(mob.home_position(), mob.position())
+                    < (f64::from(mob.home_radius()) + f64::from(horizontal) + 1.0).powi(2)
+                && !mob.is_within_home_vec(pos)
+        });
+        if leaves_water || outside_home {
+            return fallback;
+        }
+
+        fallback = target_pos;
+    }
+
+    target_pos
+}
+
+/// Vanilla parity: `BehaviorUtils.getRandomSwimmablePos`, which re-rolls up to
+/// ten times for a point a swimmer can actually path into.
+fn random_swimmable_pos(
+    mob: &dyn PathfinderMob,
+    horizontal_dist: i32,
+    vertical_dist: i32,
+) -> Option<DVec3> {
+    let world = mob.level()?;
+    for _ in 0..=RANDOM_SWIMMABLE_POS_ATTEMPTS {
+        let pos = default_random_pos(mob, horizontal_dist, vertical_dist)?;
+        let state = world.get_block_state(BlockPos::containing(pos.x, pos.y, pos.z));
+        if BLOCK_BEHAVIORS
+            .get_behavior(state.get_block())
+            .is_pathfindable(state, PathComputationType::Water)
+        {
+            return Some(pos);
+        }
+    }
+    None
+}
+
+fn block_center_distance_sqr(pos: BlockPos, target: DVec3) -> f64 {
+    let (x, y, z) = pos.get_center();
+    DVec3::new(x, y, z).distance_squared(target)
 }
 
 impl Trigger for RandomStroll {

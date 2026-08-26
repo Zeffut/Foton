@@ -6,6 +6,7 @@ mod chicken;
 mod cow;
 pub mod equine;
 mod fox;
+mod frog;
 mod goat;
 mod mooshroom;
 mod ocelot;
@@ -26,6 +27,7 @@ pub use equine::{
     SkeletonHorseEntity, TraderLlamaEntity, ZombieHorseEntity,
 };
 pub use fox::{FoxEntity, FoxVariant};
+pub use frog::FrogEntity;
 pub use goat::GoatEntity;
 pub use mooshroom::MushroomCowEntity;
 pub use ocelot::OcelotEntity;

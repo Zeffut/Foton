@@ -84,6 +84,26 @@ unsafe impl DowncastType for SlimeEntity {
 }
 
 impl SlimeEntity {
+    /// Returns vanilla `AbstractCubeMob.getSize`.
+    ///
+    /// Public because `Frog.canEat` asks for it: `#minecraft:frog_food` holds
+    /// only the slime and the magma cube, so those two answering directly covers
+    /// exactly what vanilla's `instanceof AbstractCubeMob` reaches.
+    #[must_use]
+    pub fn cube_size(&self) -> i32 {
+        <Self as CubeLike>::size(self)
+    }
+
+    /// Sets vanilla `AbstractCubeMob.setSize`, and with it everything the size
+    /// decides -- health, armor, bite and hitbox.
+    ///
+    /// Public because vanilla's `setSize` is: the `CubeLike` trait that carries
+    /// it is `pub(super)` to the hostile module, so nothing outside can size a
+    /// cube without this.
+    pub fn set_cube_size(&self, size: i32, update_health: bool) {
+        <Self as CubeLike>::set_size(self, size, update_health);
+    }
+
     /// Creates a slime at runtime.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {

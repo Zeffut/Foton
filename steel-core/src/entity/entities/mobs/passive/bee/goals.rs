@@ -4,14 +4,16 @@
 //! `Bee.BaseBeeGoal`, whose only job is to switch the whole set off while the
 //! bee is angry -- an angry bee stops keeping house and attacks.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_poi_type_tags::PoiTag;
-use steel_registry::{REGISTRY, RegistryExt as _, TaggedRegistryExt as _, sound_events};
+use steel_registry::{
+    REGISTRY, RegistryExt as _, TaggedRegistryExt as _, level_events, sound_events,
+};
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, ChunkPos, Downcast as _};
 
@@ -693,7 +695,7 @@ pub(super) struct BeePollinateGoal {
     last_sound_played_tick: i32,
     hover_pos: Option<DVec3>,
     pollinating_ticks: i32,
-    unreachable_flower_cache: HashMap<BlockPos, i64>,
+    unreachable_flower_cache: FxHashMap<BlockPos, i64>,
 }
 
 impl BeePollinateGoal {
@@ -703,7 +705,7 @@ impl BeePollinateGoal {
             last_sound_played_tick: 0,
             hover_pos: None,
             pollinating_ticks: 0,
-            unreachable_flower_cache: HashMap::new(),
+            unreachable_flower_cache: FxHashMap::default(),
         }
     }
 
@@ -717,7 +719,7 @@ impl BeePollinateGoal {
         let world = bee.level()?;
         let game_time = world.game_time();
         let origin = bee.block_position();
-        let mut next_cache = HashMap::new();
+        let mut next_cache = FxHashMap::default();
 
         // Vanilla parity: `BlockPos.withinManhattan(pos, 5, 5, 5)`, whose order
         // is what decides which of several flowers a bee settles on.
@@ -964,7 +966,7 @@ impl Goal for BeeGrowCropGoal {
             };
 
             world.level_event(
-                steel_registry::level_events::PARTICLES_AND_SOUND_PLANT_GROWTH,
+                level_events::PARTICLES_AND_SOUND_PLANT_GROWTH,
                 below_pos,
                 GROWTH_PARTICLE_COUNT,
                 None,

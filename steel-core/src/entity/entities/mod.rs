@@ -20,14 +20,15 @@ pub use mobs::neutral::{CopperGolemEntity, IronGolemEntity, SnowGolemEntity, Wol
 pub use mobs::npc::{VillagerEntity, WanderingTraderEntity, ZombieVillagerEntity};
 pub use mobs::passive::{
     BeeEntity, CatEntity, ChickenEntity, CowEntity, DonkeyEntity, FoxEntity, FoxVariant,
-    GoatEntity, HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity,
+    FrogEntity, GoatEntity, HorseEntity, HorseMarkings, HorseVariant, LlamaEntity, MuleEntity,
     MushroomCowEntity, OcelotEntity, ParrotEntity, ParrotVariant, PigEntity, PolarBearEntity,
     RabbitEntity, RabbitVariant, SheepEntity, SkeletonHorseEntity, StriderEntity,
     TraderLlamaEntity, TurtleEntity, ZombieHorseEntity,
 };
 pub use mobs::water::{
-    CodEntity, DolphinEntity, GlowSquidEntity, PufferfishEntity, SalmonEntity, SquidEntity,
-    TropicalFishEntity, TropicalFishPattern, TropicalFishVariant,
+    CodEntity, DolphinEntity, GlowSquidEntity, MAX_TADPOLES_SPAWN_EXCLUSIVE, MIN_TADPOLES_SPAWN,
+    PufferfishEntity, SalmonEntity, SquidEntity, TICKS_TO_BE_FROG, TadpoleEntity,
+    TropicalFishEntity, TropicalFishPattern, TropicalFishVariant, spawn_tadpoles_from_frogspawn,
 };
 pub use objects::display_ui::{
     BlockDisplayEntity, InteractionEntity, ItemDisplayEntity, ItemFrameEntity,

@@ -96,6 +96,7 @@ pub enum MemoryValue {
     GlobalPos(GlobalPos),
     GlobalPosSet(FxHashSet<GlobalPos>),
     Uuid(Uuid),
+    Uuids(Vec<Uuid>),
     Vec3(DVec3),
     Entity(EntityMemory),
     Entities(Vec<EntityMemory>),
@@ -117,6 +118,7 @@ impl MemoryValue {
         match self {
             Self::Entities(entities) => entities.is_empty(),
             Self::GlobalPosSet(positions) => positions.is_empty(),
+            Self::Uuids(uuids) => uuids.is_empty(),
             _ => false,
         }
     }
@@ -139,7 +141,8 @@ impl MemoryValue {
                 Some(NbtTag::List(NbtList::Compound(entries)))
             }
             Self::Uuid(uuid) => Some(NbtTag::IntArray(uuid.to_int_array().to_vec())),
-            Self::Vec3(_)
+            Self::Uuids(_)
+            | Self::Vec3(_)
             | Self::Entity(_)
             | Self::Entities(_)
             | Self::NearestVisibleLivingEntities(_)
@@ -290,6 +293,7 @@ impl_memory_value_type!(
     from_nbt = read_global_pos_set
 );
 impl_memory_value_type!(Uuid, Uuid, from_nbt = read_uuid);
+impl_memory_value_type!(Vec<Uuid>, Uuids);
 impl_memory_value_type!(DVec3, Vec3);
 impl_memory_value_type!(EntityMemory, Entity);
 impl_memory_value_type!(Vec<EntityMemory>, Entities);

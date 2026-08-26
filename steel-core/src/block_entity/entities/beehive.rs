@@ -6,6 +6,7 @@
 //! honey level if the bee came home carrying nectar.
 
 use std::io::Cursor;
+use std::mem;
 use std::sync::{Arc, Weak};
 
 use simdnbt::borrow::{
@@ -407,7 +408,7 @@ impl BeehiveBlockEntity {
 
         let (occupants, saved_flower_pos) = {
             let mut state = self.state.lock();
-            (std::mem::take(&mut state.stored), state.saved_flower_pos)
+            (mem::take(&mut state.stored), state.saved_flower_pos)
         };
 
         let mut spawned = Vec::new();
