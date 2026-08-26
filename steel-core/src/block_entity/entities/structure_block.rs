@@ -908,6 +908,87 @@ mod tests {
         assert_eq!(entity.size(), (2, 5, 1));
     }
 
+    /// The load button fills the size in on the first press and places on the second.
+    ///
+    /// Vanilla parity: `placeStructureIfSameSize`, which is what makes the editor
+    /// report `structure_block.load_prepare` once and `structure_block.load_success`
+    /// after.
+    #[test]
+    fn the_load_button_prepares_before_it_places() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+
+        let world = fresh_test_world("structure_block_load_button");
+        let pos = BlockPos::new(4, 64, 4);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+
+        let entity =
+            StructureBlockEntity::new(Arc::downgrade(&world), pos, state_for(StructureMode::Load));
+        entity.set_structure_name("minecraft:nether_fossils/fossil_5");
+
+        // The editor starts with a zero size, so the first press only reports one.
+        assert!(!entity.place_structure_if_same_size(&world));
+        assert_eq!(entity.size(), (2, 5, 1));
+        assert!(
+            world.get_block_state(pos.above()).is_air(),
+            "nothing should be placed while the size is still being reported"
+        );
+
+        assert!(entity.place_structure_if_same_size(&world));
+        assert_eq!(
+            world.get_block_state(pos.above()).get_block(),
+            &vanilla_blocks::BONE_BLOCK
+        );
+    }
+
+    /// Integrity below one drops blocks from a stream seeded by the block's own seed,
+    /// not from the one the placement draws loot seeds out of.
+    ///
+    /// `igloo/middle` is three by three by three, so a repeat matching by chance is
+    /// out of the question.
+    #[test]
+    fn integrity_rots_the_structure_from_the_blocks_own_seed() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+
+        let world = fresh_test_world("structure_block_integrity");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let whole = place_igloo_middle(&world, BlockPos::new(1, 64, 1), 1.0, 4242);
+        let rotted = place_igloo_middle(&world, BlockPos::new(6, 64, 1), 0.5, 4242);
+        let again = place_igloo_middle(&world, BlockPos::new(11, 64, 1), 0.5, 4242);
+
+        assert_eq!(whole.len(), 15, "the whole template is fifteen blocks");
+        assert!(
+            rotted.len() < whole.len(),
+            "half integrity should drop some of the fifteen"
+        );
+        assert_eq!(rotted, again, "the same seed should rot the same blocks");
+    }
+
+    /// Places `igloo/middle` from a load block and returns the offsets it filled.
+    fn place_igloo_middle(
+        world: &Arc<World>,
+        pos: BlockPos,
+        integrity: f32,
+        seed: i64,
+    ) -> Vec<(i32, i32, i32)> {
+        let entity =
+            StructureBlockEntity::new(Arc::downgrade(world), pos, state_for(StructureMode::Load));
+        entity.set_structure_name("minecraft:igloo/middle");
+        entity.set_integrity(integrity);
+        entity.set_seed(seed);
+        assert!(entity.place_structure(world));
+
+        let origin = pos.above();
+        (0..3)
+            .flat_map(|x| (0..3).flat_map(move |y| (0..3).map(move |z| (x, y, z))))
+            .filter(|&(x, y, z)| !world.get_block_state(origin.offset(x, y, z)).is_air())
+            .collect()
+    }
+
     /// A name nothing has saved is not loadable, which is what makes the editor say
     /// "not found" instead of placing nothing and claiming success.
     #[test]

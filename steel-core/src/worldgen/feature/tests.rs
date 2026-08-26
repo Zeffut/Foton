@@ -14,6 +14,54 @@ use steel_worldgen::structure::{
     StructurePiece, StructureReferenceMap, StructureReferenceSet, StructureStart,
 };
 
+use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::feature::ConfiguredFeatureKind;
+use steel_registry::{REGISTRY, init_vanilla_registry, vanilla_configured_features};
+use steel_utils::types::UpdateFlags;
+
+use crate::behavior::init_behaviors;
+use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+/// An ore vein placed into a live world writes through the level rather than
+/// through a region's section cache.
+///
+/// The two surfaces run the same vein algorithm behind `OreLevelAccess`, and only
+/// the region has sections to batch into. Nothing in worldgen reaches the live
+/// side, so without this the per-block path would only ever be compiled.
+#[test]
+fn an_ore_vein_places_into_a_live_world() {
+    init_vanilla_registry();
+    init_behaviors();
+
+    let world = fresh_test_world("live_ore_vein");
+    let center = BlockPos::new(8, 64, 8);
+    insert_ready_full_chunk(&world, ChunkPos::from_block_pos(center));
+
+    // `stone_ore_replaceables` is what a coal vein looks for, and the vein is
+    // discarded where it touches air, so bury the whole search volume in stone.
+    let stone = vanilla_blocks::STONE.default_state();
+    for pos in BlockPos::between_closed(center.offset(-7, -7, -7), center.offset(7, 7, 7)) {
+        assert!(world.set_block(pos, stone, UpdateFlags::UPDATE_NONE));
+    }
+
+    let ConfiguredFeatureKind::Ore(config) = &vanilla_configured_features::ORE_COAL.kind else {
+        panic!("ore_coal should be an ore feature");
+    };
+    let mut random = WorldgenRandom::from_seed(1234);
+    assert!(FeatureDecorationRunner::place_ore_feature(
+        &world,
+        &REGISTRY,
+        &mut random,
+        config,
+        center,
+    ));
+
+    let coal = BlockPos::between_closed(center.offset(-7, -7, -7), center.offset(7, 7, 7))
+        .filter(|pos| world.get_block_state(*pos).get_block() == &vanilla_blocks::COAL_ORE)
+        .count();
+    assert!(coal > 0, "the vein should have replaced some of the stone");
+}
+
 #[test]
 fn feature_direction_order_matches_java_direction_values() {
     assert_eq!(

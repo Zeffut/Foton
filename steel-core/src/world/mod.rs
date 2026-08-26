@@ -870,6 +870,15 @@ impl LevelAccessor for Arc<World> {
     }
 
     fn heightmap_at(&self, heightmap_type: HeightmapType, x: i32, z: i32) -> i32 {
+        // A finished chunk keeps only the final heightmaps. Vanilla primes a missing
+        // one on demand from the blocks that are there, which for the worldgen pair
+        // is the same answer their final counterparts already hold, so ask those.
+        // `WorldGenRegion` resolves an already-full dependency the same way.
+        let heightmap_type = match heightmap_type {
+            HeightmapType::WorldSurfaceWg => HeightmapType::WorldSurface,
+            HeightmapType::OceanFloorWg => HeightmapType::OceanFloor,
+            other => other,
+        };
         World::height_at(self, heightmap_type, x, z).unwrap_or_else(|| self.get_min_y())
     }
 }
