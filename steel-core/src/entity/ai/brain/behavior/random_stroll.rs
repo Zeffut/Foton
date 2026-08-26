@@ -1,5 +1,7 @@
 //! Vanilla `RandomStroll`.
 
+use std::f64::consts::FRAC_PI_2;
+
 use glam::DVec3;
 
 use super::{BrainContext, Trigger};
@@ -10,7 +12,7 @@ use steel_utils::BlockPos;
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::entity::PathfinderMob;
 use crate::entity::ai::brain::memory::{MemoryModuleId, WalkTarget, memory_module_types};
-use crate::entity::ai::goal::{default_random_pos, land_random_pos};
+use crate::entity::ai::goal::{air_and_water_random_pos, default_random_pos, land_random_pos};
 use crate::entity::ai::path::PathComputationType;
 use crate::fluid::FluidStateExt as _;
 use crate::world::LevelReader as _;
@@ -30,6 +32,12 @@ const MAX_Y_DIST: i32 = 7;
 /// the direction the last found, so the mob drifts in a line rather than
 /// picking one point at random and turning for it.
 const SWIM_XY_DISTANCE_TIERS: [(i32, i32); 6] = [(1, 1), (3, 3), (5, 5), (6, 5), (7, 7), (10, 7)];
+
+/// Vanilla parity: the `-2` flying height of `RandomStroll.getTargetFlyPos`,
+/// which is what keeps a wandering flier drifting gently downward.
+const FLY_TARGET_HEIGHT: i32 = -2;
+/// Vanilla parity: the `(float) (Math.PI / 2)` of `getTargetFlyPos`.
+const FLY_MAX_XZ_RADIANS_FROM_DIR: f64 = FRAC_PI_2;
 
 /// Where a stroll aims for.
 type TargetPicker = Box<dyn Fn(&dyn PathfinderMob) -> Option<DVec3> + Send>;
@@ -79,6 +87,34 @@ impl RandomStroll {
     pub fn not_from_water(mut self) -> Self {
         self.can_run = Box::new(|mob| !mob.is_in_water());
         self
+    }
+
+    /// Drifts to a spot in the air ahead of where the mob is looking.
+    ///
+    /// Vanilla parity: `RandomStroll.fly(float)`, whose `getTargetFlyPos` aims
+    /// the search along the view vector inside a quarter turn either way, so a
+    /// flier wanders forward rather than doubling back on itself.
+    #[must_use]
+    pub fn fly(speed_modifier: f64) -> Self {
+        Self {
+            speed_modifier,
+            fetch_target_pos: Box::new(|mob| {
+                // Vanilla parity: `body.getViewVector(0.0F)`, whose zero
+                // partial tick reads the *previous* tick's rotation.
+                let (old_yaw, old_pitch) = mob.base().old_rotation();
+                let view = mob.calculate_view_vector(old_pitch, old_yaw);
+                air_and_water_random_pos(
+                    mob,
+                    MAX_XZ_DIST,
+                    MAX_Y_DIST,
+                    FLY_TARGET_HEIGHT,
+                    view.x,
+                    view.z,
+                    FLY_MAX_XZ_RADIANS_FROM_DIR,
+                )
+            }),
+            can_run: Box::new(|_| true),
+        }
     }
 
     /// Strolls along the water, and only while in it.

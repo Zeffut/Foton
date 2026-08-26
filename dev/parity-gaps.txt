@@ -31,8 +31,7 @@ TransparentBlock
 [items] 1
 Item
 
-[entities] 24
-Allay
+[entities] 23
 Armadillo
 Bogged
 Breeze

@@ -72,7 +72,7 @@ use crate::physics::{
     COLLISION_EPSILON, CollisionWorld, EntityPhysicsState, MoveResult, MoverType,
     WorldCollisionProvider, move_entity as resolve_entity_movement,
 };
-use crate::world::game_event::GameEventContext;
+use crate::world::game_event::{DynamicListenerAction, GameEventContext};
 use crate::world::{ClipBlockShape, ClipFluid, LevelReader, World};
 use crate::{enchantment_helper, entity::damage::DamageSource, player::Player};
 
@@ -761,6 +761,7 @@ mod fluid_contact;
 mod generated_entities;
 pub mod hoglin_base;
 mod inside_block_effects;
+pub mod inventory_carrier;
 mod item_based_steering;
 mod item_frame;
 mod living_base;
@@ -816,6 +817,7 @@ pub use fluid_contact::EntityFluidContact;
 pub use inside_block_effects::{
     InsideBlockEffectCallback, InsideBlockEffectCollector, InsideBlockEffectType,
 };
+pub use inventory_carrier::InventoryCarrier;
 pub(crate) use item_based_steering::{ItemBasedSteering, ItemSteerable};
 pub use item_frame::ItemFrame;
 pub use living_base::{

@@ -1611,6 +1611,31 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn AgeableMob>(self)
     }
 
+    /// Registers, moves or unregisters whatever game-event listeners this
+    /// entity carries.
+    ///
+    /// Vanilla parity: `Entity.updateDynamicGameEventListener`, which is empty
+    /// on `Entity` itself and overridden by the two mobs that listen -- the
+    /// allay and the warden. `ServerLevel` calls it with `add` when the entity
+    /// joins, `remove` when it leaves and `move` when it changes section, and
+    /// Steel calls it from the same three places.
+    fn update_dynamic_game_event_listener(
+        &self,
+        action: DynamicListenerAction,
+        world: &Arc<World>,
+    ) {
+        let _ = (action, world);
+    }
+
+    /// Returns this entity as an inventory carrier when it carries a container.
+    ///
+    /// Mirrors vanilla's `instanceof InventoryCarrier` branches, and the
+    /// `E extends LivingEntity & InventoryCarrier` bound its two brain
+    /// behaviors are written against.
+    fn as_inventory_carrier(&self) -> Option<&dyn InventoryCarrier> {
+        try_as_dyn::<Self, dyn InventoryCarrier>(self)
+    }
+
     /// Returns this entity as a bucketable mob when a bucket can pick it up.
     ///
     /// Mirrors vanilla's `instanceof Bucketable` branches, which is how

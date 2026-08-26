@@ -20,8 +20,8 @@ use crate::chunk::status::ChunkStatus;
 use crate::poi::OccupationStatus;
 use crate::portal::WorldChangeRequest;
 use crate::world::game_event::{
-    GameEventContext, GameEventDispatcher, GameEventListenerCount, GameEventListenerStorage,
-    SharedGameEventListener,
+    DynamicListenerAction, GameEventContext, GameEventDispatcher, GameEventListenerCount,
+    GameEventListenerStorage, SharedGameEventListener,
 };
 use crate::{chunk::chunk_map::ChunkMapGameTickTimings, world::weather::Weather};
 use steel_utils::saved_data::{SavedDataManager, names as saved_data_names};

@@ -40,6 +40,7 @@ mod erase_memory_if;
 mod follow_temptation;
 mod frog_specific;
 mod gate_behavior;
+mod give_items;
 mod go_to_target_location;
 mod go_to_wanted_item;
 mod interact_with;
@@ -107,6 +108,7 @@ pub use {
     follow_temptation::{DEFAULT_CLOSE_ENOUGH_DIST, FollowTemptation},
     frog_specific::{Croak, ShootTongue},
     gate_behavior::{GateBehavior, OrderPolicy, RunningPolicy, ShufflingList},
+    give_items::{GoAndGiveItemsToTarget, StayCloseToTarget},
     long_jump::{
         LongJumpMidJump, LongJumpToRandomPos, calculate_jump_vector_for_angle,
         default_acceptable_landing_spot, frog_prefer_jump_to,

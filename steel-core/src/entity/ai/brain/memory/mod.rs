@@ -344,6 +344,13 @@ memory_module_types! {
     PLAY_DEAD_TICKS: i32 = "minecraft:play_dead_ticks", saved = true;
     /// Vanilla `MemoryModuleType.HAS_HUNTING_COOLDOWN`.
     HAS_HUNTING_COOLDOWN: bool = "minecraft:has_hunting_cooldown", saved = true;
+    /// Vanilla `MemoryModuleType.LIKED_PLAYER`, the player an allay fetches for.
+    LIKED_PLAYER: Uuid = "minecraft:liked_player", saved = true;
+    /// Vanilla `MemoryModuleType.LIKED_NOTEBLOCK_POSITION`, registry key
+    /// `liked_noteblock`.
+    LIKED_NOTEBLOCK_POSITION: GlobalPos = "minecraft:liked_noteblock", saved = true;
+    /// Vanilla `MemoryModuleType.LIKED_NOTEBLOCK_COOLDOWN_TICKS`.
+    LIKED_NOTEBLOCK_COOLDOWN_TICKS: i32 = "minecraft:liked_noteblock_cooldown_ticks", saved = true;
     /// Vanilla `MemoryModuleType.SNIFF_COOLDOWN`.
     SNIFF_COOLDOWN: Unit = "minecraft:sniff_cooldown", saved = true;
     /// Vanilla `MemoryModuleType.SNIFFER_EXPLORED_POSITIONS`, newest first.

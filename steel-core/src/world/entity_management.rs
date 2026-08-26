@@ -1,10 +1,11 @@
 use super::{
-    AddEntityError, Arc, BLOCK_DROPS, BlockPos, ChunkPos, ChunkStatus, DVec3, Direction, Entity,
-    EntityChunkCallback, EntityLifecycleChanges, EntityOwnership, EntityTracker, EntityVisibility,
-    ExperienceOrbEntity, FxHashSet, GameEventContext, GameEventDispatcher, GameEventListenerCount,
-    GameEventListenerStorage, GameEventRef, InactiveEntityCallback, ItemEntity, ItemStack, Player,
-    RemovalReason, SectionPos, SharedEntity, SharedGameEventListener, SyncMutex, World, WorldAabb,
-    WorldChangeRequest, block_entity_ticker, mem, vanilla_entities,
+    AddEntityError, Arc, BLOCK_DROPS, BlockPos, ChunkPos, ChunkStatus, DVec3, Direction,
+    DynamicListenerAction, Entity, EntityChunkCallback, EntityLifecycleChanges, EntityOwnership,
+    EntityTracker, EntityVisibility, ExperienceOrbEntity, FxHashSet, GameEventContext,
+    GameEventDispatcher, GameEventListenerCount, GameEventListenerStorage, GameEventRef,
+    InactiveEntityCallback, ItemEntity, ItemStack, Player, RemovalReason, SectionPos, SharedEntity,
+    SharedGameEventListener, SyncMutex, World, WorldAabb, WorldChangeRequest, block_entity_ticker,
+    mem, vanilla_entities,
 };
 
 pub(super) struct NavigatingMobTracker {
@@ -112,6 +113,9 @@ impl World {
             .entity_manager
             .add_live_entity(entity.clone(), EntityOwnership::ManagerOwned)?;
         self.attach_managed_entity_callback(&entity);
+        // Vanilla parity: the `entity.updateDynamicGameEventListener(DynamicGameEventListener::add)`
+        // of `ServerLevel.addEntity`.
+        entity.update_dynamic_game_event_listener(DynamicListenerAction::Add, self);
         self.apply_entity_lifecycle_changes(lifecycle);
         Ok(())
     }
@@ -125,6 +129,7 @@ impl World {
             .add_live_entity_tree(entities, EntityOwnership::ManagerOwned)?;
         for entity in entities {
             self.attach_managed_entity_callback(entity);
+            entity.update_dynamic_game_event_listener(DynamicListenerAction::Add, self);
         }
         self.apply_entity_lifecycle_changes(lifecycle);
         Ok(())
