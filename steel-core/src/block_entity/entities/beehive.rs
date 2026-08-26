@@ -727,3 +727,129 @@ impl BlockEntity for BeehiveBlockEntity {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use steel_registry::{init_vanilla_registry, vanilla_blocks};
+    use steel_utils::ChunkPos;
+
+    use super::*;
+    use crate::behavior::init_behaviors;
+    use crate::block_entity::init_block_entities;
+    use crate::entity::init_entities;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    /// Places a beehive and hands back its block entity.
+    fn hive_at(world: &Arc<World>, pos: BlockPos) -> Arc<World> {
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::BEEHIVE.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        Arc::clone(world)
+    }
+
+    #[test]
+    fn a_bee_goes_into_a_hive_and_comes_back_out_with_the_honey_it_carried() {
+        // The whole point of the bee: Steel has had beehives since the start and
+        // nothing has ever lived in one. This is a bee entering, the hive keeping
+        // it, and the hive letting it back out with the honey level raised.
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        init_entities();
+        let world = fresh_test_world("beehive_round_trip");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        let world = hive_at(&world, pos);
+
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("placing a beehive should create its block entity"));
+        let hive = block_entity
+            .downcast_ref::<BeehiveBlockEntity>()
+            .unwrap_or_else(|| panic!("the beehive's block entity should be a beehive"));
+
+        let bee = Arc::new(BeeEntity::new(
+            &vanilla_entities::BEE,
+            next_entity_id(),
+            glam::DVec3::new(8.5, 65.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&bee) as SharedEntity)
+            .unwrap_or_else(|error| panic!("bee should enter the test world: {error:?}"));
+        bee.set_has_nectar(true);
+
+        hive.add_occupant(bee.as_ref());
+
+        assert_eq!(hive.occupant_count(), 1, "the hive swallowed the bee");
+        assert!(bee.is_removed(), "the bee stopped being an entity");
+
+        // A bee carrying nectar owes the hive two full minutes, four times what a
+        // bee that came home empty owes it. Ticking a little past the shorter
+        // deadline is what tells the two apart.
+        for _ in 0..(BEEHIVE_MIN_OCCUPATION_TICKS_NECTARLESS + 5) {
+            hive.tick(&world);
+        }
+        assert_eq!(
+            hive.occupant_count(),
+            1,
+            "a bee with nectar stays in far longer than one without"
+        );
+
+        for _ in 0..BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR {
+            hive.tick(&world);
+        }
+
+        assert!(hive.is_empty(), "the hive let the bee back out");
+        let released = world.get_entities_in_aabb_matching(
+            &steel_utils::WorldAabb::new(4.0, 60.0, 4.0, 13.0, 69.0, 13.0),
+            |entity| entity.entity_type() == &vanilla_entities::BEE,
+        );
+        assert_eq!(released.len(), 1, "exactly one bee came back out");
+        assert!(
+            world.get_block_state(pos).get_value(LEVEL_HONEY) > 0,
+            "a bee that came home with nectar leaves honey behind"
+        );
+        let released_bee = released[0]
+            .downcast_ref::<BeeEntity>()
+            .unwrap_or_else(|| panic!("the released entity should be a bee"));
+        assert!(
+            !released_bee.has_nectar(),
+            "the bee handed its nectar over on the way out"
+        );
+        assert_eq!(
+            released_bee.hive_pos(),
+            Some(pos),
+            "a released bee remembers the hive it came out of"
+        );
+    }
+
+    #[test]
+    fn a_full_hive_takes_no_more_bees() {
+        // Vanilla's `MAX_OCCUPANTS` is what stops a hive being an infinite bee
+        // store, and it is also what makes `BeeLocateHiveGoal` look elsewhere.
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world("beehive_capacity");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        let world = hive_at(&world, pos);
+
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("placing a beehive should create its block entity"));
+        let hive = block_entity
+            .downcast_ref::<BeehiveBlockEntity>()
+            .unwrap_or_else(|| panic!("the beehive's block entity should be a beehive"));
+
+        for _ in 0..(BEEHIVE_MAX_OCCUPANTS + 2) {
+            hive.store_worldgen_bee(0);
+        }
+
+        assert_eq!(hive.occupant_count(), BEEHIVE_MAX_OCCUPANTS);
+        assert!(hive.is_full());
+    }
+}

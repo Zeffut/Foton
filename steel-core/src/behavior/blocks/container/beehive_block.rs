@@ -265,3 +265,29 @@ impl BlockBehavior for BeehiveBlock {
         state.get_value(LEVEL_HONEY).into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use steel_registry::{init_vanilla_registry, vanilla_blocks};
+
+    use super::*;
+    use crate::test_support::fresh_test_world;
+
+    #[test]
+    fn a_beehive_asks_for_a_ticker_so_its_occupants_can_come_back_out() {
+        // Without this the block entity never ticks, so a bee that went in stays
+        // in forever and the hive never gains honey. Nothing else notices: the
+        // hive still stores, saves and loads its occupants perfectly well.
+        init_vanilla_registry();
+        let world = fresh_test_world("beehive_ticker");
+        let behavior = BeehiveBlock::new(&vanilla_blocks::BEEHIVE);
+
+        let ticker = behavior.get_block_entity_ticker(
+            &world,
+            vanilla_blocks::BEEHIVE.default_state(),
+            &vanilla_block_entity_types::BEEHIVE,
+        );
+
+        assert!(ticker.is_some());
+    }
+}
