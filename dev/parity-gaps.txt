@@ -12,15 +12,13 @@
 #
 # Sections are `blocks`, `items`, `entities`. Sorted, one class per line.
 
-[blocks] 13
+[blocks] 11
 AirBlock
 Block
 BonemealableFeaturePlacerBlock
 CryingObsidianBlock
 HalfTransparentBlock
-JigsawBlock
 StainedGlassBlock
-StructureBlock
 StructureVoidBlock
 TestBlock
 TestInstanceBlock

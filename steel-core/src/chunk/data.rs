@@ -1578,7 +1578,7 @@ mod tests {
                 .set_block_state_for_generation(
                     ChunkStatus::Empty,
                     deferred_pos,
-                    vanilla_blocks::JIGSAW.default_state(),
+                    vanilla_blocks::TEST_BLOCK.default_state(),
                     UpdateFlags::UPDATE_NONE,
                 )
                 .is_some()

@@ -476,7 +476,7 @@ fn unimplemented_block_entities_preserve_nbt_through_proto_save_load() {
     // concrete structure-block entity ever lands.
     let structure_block = REGISTRY
         .blocks
-        .get_default_state_id(&vanilla_blocks::STRUCTURE_BLOCK);
+        .get_default_state_id(&vanilla_blocks::TEST_BLOCK);
     proto.set_block_state_for_generation(
         ChunkStatus::Features,
         block_pos,
@@ -488,7 +488,7 @@ fn unimplemented_block_entities_preserve_nbt_through_proto_save_load() {
     nbt.insert("LootTable", "minecraft:chests/simple_dungeon");
     nbt.insert("LootTableSeed", 42_i64);
     let entity = BLOCK_ENTITIES.create_and_load_owned_or_raw(
-        &vanilla_block_entity_types::STRUCTURE_BLOCK,
+        &vanilla_block_entity_types::TEST_BLOCK,
         proto.level_weak(),
         block_pos,
         structure_block,
@@ -520,7 +520,7 @@ fn unimplemented_block_entities_preserve_nbt_through_proto_save_load() {
     let mut saved = NbtCompound::new();
     assert_eq!(
         loaded_entity.get_type().id(),
-        vanilla_block_entity_types::STRUCTURE_BLOCK.id()
+        vanilla_block_entity_types::TEST_BLOCK.id()
     );
     loaded_entity.save_additional(&mut saved);
 

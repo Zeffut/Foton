@@ -19,8 +19,8 @@ use steel_protocol::packets::game::{
     SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
     SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem,
     SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCommandBlock,
-    SSetCommandMinecart, SSetCreativeModeSlot, SSignUpdate, SSpectatorAction, SSwing, SUseItem,
-    SUseItemOn,
+    SSetCommandMinecart, SSetCreativeModeSlot, SSetJigsawBlock, SSetStructureBlock, SSignUpdate,
+    SSpectatorAction, SSwing, SUseItem, SUseItemOn,
 };
 
 use steel_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
@@ -96,6 +96,8 @@ enum ScheduledPlayPacketKind {
     SetBeacon(SSetBeacon),
     SetCommandBlock(SSetCommandBlock),
     SetCommandMinecart(SSetCommandMinecart),
+    SetJigsawBlock(SSetJigsawBlock),
+    SetStructureBlock(Box<SSetStructureBlock>),
     SetCreativeModeSlot(SSetCreativeModeSlot),
     PlayerInput(SPlayerInput),
     PlayerCommand(SPlayerCommand),
@@ -213,6 +215,8 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::SetBeacon(_)
             | ScheduledPlayPacketKind::SetCommandBlock(_)
             | ScheduledPlayPacketKind::SetCommandMinecart(_)
+            | ScheduledPlayPacketKind::SetJigsawBlock(_)
+            | ScheduledPlayPacketKind::SetStructureBlock(_)
             | ScheduledPlayPacketKind::RenameItem(_)
             | ScheduledPlayPacketKind::UseItemOn(_)
             | ScheduledPlayPacketKind::UseItem(_)
@@ -340,6 +344,12 @@ impl ScheduledPlayPacket {
             }
             ScheduledPlayPacketKind::SetCommandMinecart(packet) => {
                 player.handle_set_command_minecart(packet);
+            }
+            ScheduledPlayPacketKind::SetJigsawBlock(packet) => {
+                player.handle_set_jigsaw_block(packet);
+            }
+            ScheduledPlayPacketKind::SetStructureBlock(packet) => {
+                player.handle_set_structure_block(*packet);
             }
             ScheduledPlayPacketKind::SetCreativeModeSlot(packet) => {
                 player.handle_set_creative_mode_slot(packet);
@@ -784,6 +794,12 @@ impl JavaConnection {
             )),
             play::S_SET_COMMAND_MINECART => scheduled(ScheduledPlayPacketKind::SetCommandMinecart(
                 SSetCommandMinecart::read_packet(data)?,
+            )),
+            play::S_SET_JIGSAW_BLOCK => scheduled(ScheduledPlayPacketKind::SetJigsawBlock(
+                SSetJigsawBlock::read_packet(data)?,
+            )),
+            play::S_SET_STRUCTURE_BLOCK => scheduled(ScheduledPlayPacketKind::SetStructureBlock(
+                Box::new(SSetStructureBlock::read_packet(data)?),
             )),
             play::S_SET_CREATIVE_MODE_SLOT => {
                 scheduled(ScheduledPlayPacketKind::SetCreativeModeSlot(

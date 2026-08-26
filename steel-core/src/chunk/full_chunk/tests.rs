@@ -542,14 +542,14 @@ fn insertion_rejects_an_entity_owned_by_another_chunk() {
     let foreign_pos = BlockPos::new(16, 2, 0);
     // Jigsaw has a vanilla block entity type but no Steel factory yet, so the
     // chunk keeps a pending marker instead of materializing an entity.
-    let deferred = vanilla_blocks::JIGSAW.default_state();
+    let deferred = vanilla_blocks::TEST_BLOCK.default_state();
     assert!(
         chunk
             .set_block_state(local_pos, deferred, UpdateFlags::UPDATE_NONE)
             .is_some()
     );
     let foreign: SharedBlockEntity = Arc::new(RawBlockEntity::new(
-        &vanilla_block_entity_types::JIGSAW,
+        &vanilla_block_entity_types::TEST_BLOCK,
         Weak::new(),
         foreign_pos,
         deferred,
@@ -602,7 +602,7 @@ fn stale_no_entity_promotion_cannot_consume_a_replacement_marker() {
 
     // Jigsaw has no Steel block entity factory yet, so the replacement keeps the
     // pending marker rather than resolving to a concrete entity.
-    let deferred = vanilla_blocks::JIGSAW.default_state();
+    let deferred = vanilla_blocks::TEST_BLOCK.default_state();
     assert_eq!(
         chunk.set_block_state(pos, deferred, UpdateFlags::UPDATE_NONE),
         Some(moving_piston)

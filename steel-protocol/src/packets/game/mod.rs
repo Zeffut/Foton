@@ -94,6 +94,8 @@ pub(crate) mod s_set_command_block;
 mod s_set_command_minecart;
 mod s_set_creative_mode_slot;
 mod s_set_held_item;
+mod s_set_jigsaw_block;
+mod s_set_structure_block;
 mod s_sign_update;
 mod s_spectator_action;
 mod s_swing;
@@ -220,6 +222,10 @@ pub use s_set_command_block::{MAX_COMMAND_LENGTH, SSetCommandBlock};
 pub use s_set_command_minecart::SSetCommandMinecart;
 pub use s_set_creative_mode_slot::SSetCreativeModeSlot;
 pub use s_set_held_item::SSetHeldItem;
+pub use s_set_jigsaw_block::SSetJigsawBlock;
+pub use s_set_structure_block::{
+    MAX_STRUCTURE_METADATA_LENGTH, SSetStructureBlock, StructureUpdateType,
+};
 pub use s_sign_update::SSignUpdate;
 pub use s_spectator_action::SSpectatorAction;
 pub use s_swing::SSwing;

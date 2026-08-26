@@ -20,6 +20,7 @@ mod heavy_core;
 mod honey_block;
 mod ice_block;
 mod infested_block;
+mod jigsaw_block;
 mod ladder_block;
 mod lava_cauldron_block;
 mod light_block;
@@ -35,6 +36,7 @@ mod snow_layer_block;
 mod soul_sand_block;
 mod sponge_block;
 mod stair_block;
+mod structure_block;
 mod trapdoor_block;
 mod wall_block;
 mod waterlogged_transparent_block;
@@ -67,6 +69,7 @@ pub use infested_block::{
     Infested, InfestedBlock, InfestedRotatedPillarBlock, host_state_by_infested,
     infested_state_by_host, is_compatible_host_block, spawn_infestation,
 };
+pub use jigsaw_block::JigsawBlock;
 pub use ladder_block::LadderBlock;
 pub use lava_cauldron_block::LavaCauldronBlock;
 pub use light_block::LightBlock;
@@ -82,6 +85,7 @@ pub use snow_layer_block::SnowLayerBlock;
 pub use soul_sand_block::SoulSandBlock;
 pub use sponge_block::SpongeBlock;
 pub use stair_block::{StairBlock, WeatheringCopperStairBlock};
+pub use structure_block::StructureBlock;
 pub use trapdoor_block::{TrapDoorBlock, WeatheringCopperTrapDoorBlock};
 pub use wall_block::WallBlock;
 pub use waterlogged_transparent_block::{WaterloggedTransparentBlock, WeatheringCopperGrateBlock};

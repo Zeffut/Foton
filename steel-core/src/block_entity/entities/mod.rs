@@ -20,6 +20,7 @@ mod end_gateway;
 mod end_portal;
 mod furnace;
 mod hopper;
+mod jigsaw;
 mod jukebox;
 mod lectern;
 mod piston_moving;
@@ -33,6 +34,7 @@ mod shulker_box;
 mod sign;
 mod skull;
 mod spawner;
+mod structure_block;
 mod trial_spawner;
 
 pub use banner::BannerBlockEntity;
@@ -76,6 +78,7 @@ pub use hopper::{
     HOPPER_SLOTS, HopperBlockEntity, HopperContainer, MOVE_ITEM_SPEED, insert_into_containers_at,
 };
 pub(crate) use hopper::{attached_containers_at, suck_into_at};
+pub use jigsaw::{JigsawBlockEntity, JigsawJointType, default_joint_type};
 pub use jukebox::JukeboxBlockEntity;
 pub use lectern::LecternBlockEntity;
 pub use piston_moving::PistonMovingBlockEntity;
@@ -89,4 +92,8 @@ pub use shulker_box::{SHULKER_BOX_SLOTS, ShulkerBoxBlockEntity};
 pub use sign::{SIGN_LINES, SignBlockEntity, SignText};
 pub use skull::SkullBlockEntity;
 pub use spawner::SpawnerBlockEntity;
+pub use structure_block::{
+    StructureBlockEntity, StructureMirror, StructureRotation,
+    mode_from_ordinal as structure_mode_from_ordinal,
+};
 pub use trial_spawner::TrialSpawnerBlockEntity;
