@@ -20,6 +20,9 @@ const DEFAULT_CREAKING_ACTIVE: bool = false;
 /// type overrides it, so a bee only shelters where the overworld `day` timeline or
 /// the weather layer says so.
 const DEFAULT_BEES_STAY_IN_HIVE: bool = false;
+/// The declared default of `EnvironmentAttributes.CLOUD_HEIGHT`. Only the
+/// overworld sets it, and it sets it to this.
+const DEFAULT_CLOUD_HEIGHT: f32 = 192.33;
 const DEFAULT_SKY_LIGHT_LEVEL: f32 = 15.0;
 const DEFAULT_SUN_ANGLE: f32 = 0.0;
 /// Vanilla `DimensionDefaults.TURTLE_EGG_HATCH_CHANCE`, which is also the
@@ -162,6 +165,22 @@ pub(super) fn bees_stay_in_hive(
         clock_manager,
         BEES_STAY_IN_HIVE_ATTRIBUTE,
     )
+}
+
+/// Returns the height the cloud layer starts at, or `None` where a dimension
+/// has none.
+///
+/// Vanilla parity: the `visual/cloud_height` environment attribute, gated on
+/// `visual/cloud_color`'s alpha the way `Entity.isInClouds` gates on it. Steel
+/// keeps the color as the ARGB string the registry hands the client, so the
+/// gate reads its alpha byte. The timeline layer that tints the clouds through
+/// the day is not consulted: no vanilla timeline makes them transparent, and it
+/// is the dimension that decides whether there are any.
+#[must_use]
+pub(super) fn cloud_bottom(dimension_type: DimensionTypeRef) -> Option<f32> {
+    let color = dimension_type.cloud_color?;
+    let alpha = u8::from_str_radix(color.strip_prefix('#')?.get(..2)?, 16).ok()?;
+    (alpha != 0).then(|| dimension_type.cloud_height.unwrap_or(DEFAULT_CLOUD_HEIGHT))
 }
 
 #[must_use]

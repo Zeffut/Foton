@@ -1,16 +1,20 @@
 //! Mob control state.
 
 use std::f32::consts::{FRAC_PI_2, PI};
+use std::sync::Arc;
 
 use glam::{DVec3, Quat, Vec3};
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
-use steel_registry::vanilla_attributes;
-use steel_utils::Direction;
+use steel_registry::vanilla_block_tags::BlockTag;
+use steel_registry::vanilla_fluid_tags::FluidTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _, vanilla_attributes};
+use steel_utils::{BlockPos, Direction};
 
 use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext};
 use crate::entity::block_effects;
 use crate::entity::mob::rotlerp;
-use crate::entity::{LivingTravelInput, Mob};
+use crate::entity::{LivingTravelInput, Mob, collided_with_fluid};
+use crate::world::World;
 
 pub(crate) const DEFAULT_LOOK_Y_MAX_ROT_SPEED: f32 = 10.0;
 pub(crate) const DEFAULT_LOOK_X_MAX_ROT_ANGLE: f32 = 40.0;
@@ -1029,6 +1033,12 @@ const GHAST_FLOAT_PAUSE_SPAN: i32 = 5;
 /// Vanilla parity: the `getAttributeValue(FLYING_SPEED) * 5.0 / 3.0` scale.
 const GHAST_THRUST_SCALE: f64 = 5.0 / 3.0;
 
+/// How much clearance a careful ghast keeps around where it is heading.
+///
+/// Vanilla parity: the `aabbAtDestination.inflate(1.0)` of the careful
+/// branch of `GhastMoveControl.canReach`.
+const CAREFUL_CLEARANCE: f64 = 1.0;
+
 /// How a ghast steers.
 ///
 /// Vanilla parity: `Ghast.GhastMoveControl`. A ghast does not path and does not
@@ -1036,10 +1046,6 @@ const GHAST_THRUST_SCALE: f64 = 5.0 / 3.0;
 /// its destination is clear and, if it is, gives itself one shove along it.
 /// That intermittent shove is the whole of a ghast's drift.
 ///
-/// Vanilla's control also carries a `careful` flag and a `shouldBeStopped`
-/// supplier. Both exist for the happy ghast -- a ghast constructs it with
-/// `(this, false, () -> false)` -- so neither is modeled here; add them with
-/// that mob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GhastMoveControl {
     /// Ticks left before the next shove.
@@ -1048,12 +1054,51 @@ pub struct GhastMoveControl {
     /// the control object; Steel's controls are recreated each tick, so the
     /// ghast holds it and hands it in.
     float_duration: i32,
+    /// Vanilla parity: `GhastMoveControl.careful`, which a happy ghast sets and
+    /// a ghast does not. It is what keeps a mob carrying four players out of
+    /// lava, out of walls, and a block clear of both.
+    careful: bool,
+    /// Vanilla parity: one read of the `shouldBeStopped` supplier. Vanilla asks
+    /// a `BooleanSupplier` once at the top of the tick, so the answer is what
+    /// the control needs rather than the closure.
+    stopped: bool,
+}
+
+/// Which fluids a drifting ghast will path through.
+///
+/// Vanilla parity: the `canPathThroughWater` / `canPathThroughLava` pair of
+/// `GhastMoveControl.blockTraversalPossible`, which is only ever the mob's own
+/// answer to "am I already in this".
+#[derive(Debug, Clone, Copy)]
+struct GhastFluidTolerance {
+    water: bool,
+    lava: bool,
 }
 
 impl GhastMoveControl {
+    /// Vanilla parity: the `new GhastMoveControl<>(this, false, () -> false)` a
+    /// ghast builds for itself.
     #[must_use]
     pub const fn new(float_duration: i32) -> Self {
-        Self { float_duration }
+        Self {
+            float_duration,
+            careful: false,
+            stopped: false,
+        }
+    }
+
+    /// Vanilla parity: the `careful` constructor argument.
+    #[must_use]
+    pub const fn careful(mut self) -> Self {
+        self.careful = true;
+        self
+    }
+
+    /// Vanilla parity: what the `shouldBeStopped` supplier answered this tick.
+    #[must_use]
+    pub const fn stopped(mut self, stopped: bool) -> Self {
+        self.stopped = stopped;
+        self
     }
 
     /// Ticks the control and returns the new float duration for the mob to keep.
@@ -1061,6 +1106,11 @@ impl GhastMoveControl {
     /// Vanilla parity: `GhastMoveControl.tick`.
     #[must_use]
     pub fn tick(self, mob: &dyn Mob) -> i32 {
+        if self.stopped {
+            mob.mob_base().controls().lock().move_control.set_wait();
+            mob.stop_in_place();
+        }
+
         let (operation, wanted_position) = {
             let controls = mob.mob_base().controls().lock();
             (
@@ -1072,13 +1122,16 @@ impl GhastMoveControl {
             return self.float_duration;
         }
 
+        // Vanilla parity: `this.floatDuration-- <= 0` tests the old value and
+        // keeps the decremented one either way, so a control that arrives on
+        // one still waits a tick.
         let remaining = self.float_duration - 1;
-        if remaining > 0 {
+        if self.float_duration > 0 {
             return remaining;
         }
 
         let travel = wanted_position - mob.position();
-        if !Self::can_reach(mob, travel) {
+        if !self.can_reach(mob, travel) {
             mob.mob_base().controls().lock().move_control.set_wait();
             return remaining;
         }
@@ -1097,9 +1150,8 @@ impl GhastMoveControl {
     /// Returns whether the ghast could slide along `travel` without hitting
     /// anything.
     ///
-    /// Vanilla parity: `GhastMoveControl.canReach` with `careful` false, which
-    /// reduces `blockTraversalPossible` to the collision test alone.
-    fn can_reach(mob: &dyn Mob, travel: DVec3) -> bool {
+    /// Vanilla parity: `GhastMoveControl.canReach`.
+    fn can_reach(self, mob: &dyn Mob, travel: DVec3) -> bool {
         let Some(world) = mob.level() else {
             return false;
         };
@@ -1108,6 +1160,35 @@ impl GhastMoveControl {
         let start = mob.position();
         let end = start + travel;
 
+        if self.careful {
+            // Vanilla parity: the `BlockPos.betweenClosed(aabbAtDestination.inflate(1.0))`
+            // pre-scan. It runs with no segment and no fluid tolerance, so an
+            // occupied block anywhere in the block of clearance around the
+            // destination is enough to refuse the whole move.
+            let refused = !block_effects::for_each_block_in_aabb(
+                aabb_at_destination.inflate(CAREFUL_CLEARANCE),
+                |pos| {
+                    self.block_traversal_possible(
+                        mob,
+                        &world,
+                        None,
+                        pos,
+                        GhastFluidTolerance {
+                            water: false,
+                            lava: false,
+                        },
+                    )
+                },
+            );
+            if refused {
+                return false;
+            }
+        }
+
+        let tolerance = GhastFluidTolerance {
+            water: mob.is_in_water(),
+            lava: mob.is_in_lava(),
+        };
         block_effects::for_each_block_intersected_between(
             start,
             end,
@@ -1117,23 +1198,76 @@ impl GhastMoveControl {
                     return true;
                 }
 
-                let state = world.get_block_state(pos);
-                if state.is_air() {
-                    return true;
-                }
-
-                let shape = BLOCK_BEHAVIORS
-                    .get_behavior(state.get_block())
-                    .get_collision_shape(
-                        state,
-                        world.as_ref(),
-                        pos,
-                        BlockCollisionContext::empty(),
-                    );
-                !block_effects::collided_with_shape_moving_from(aabb, start, end, pos, shape)
+                self.block_traversal_possible(mob, &world, Some((start, end)), pos, tolerance)
             },
         )
         .is_some()
+    }
+
+    /// Returns whether one block on the way is something the ghast may cross.
+    ///
+    /// Vanilla parity: `GhastMoveControl.blockTraversalPossible`. Without
+    /// `careful` it is the collision test alone; with it, the block tag and the
+    /// fluid it holds decide before the collision does.
+    fn block_traversal_possible(
+        self,
+        mob: &dyn Mob,
+        world: &Arc<World>,
+        segment: Option<(DVec3, DVec3)>,
+        pos: BlockPos,
+        fluids: GhastFluidTolerance,
+    ) -> bool {
+        let state = world.get_block_state(pos);
+        if state.is_air() {
+            return true;
+        }
+
+        let shape = BLOCK_BEHAVIORS
+            .get_behavior(state.get_block())
+            .get_collision_shape(state, world.as_ref(), pos, BlockCollisionContext::empty());
+        let path_no_collisions = match segment {
+            Some((start, end)) => !block_effects::collided_with_shape_moving_from(
+                mob.bounding_box(),
+                start,
+                end,
+                pos,
+                shape,
+            ),
+            None => shape.is_empty(),
+        };
+        if !self.careful {
+            return path_no_collisions;
+        }
+
+        if REGISTRY
+            .blocks
+            .is_in_tag(state.get_block(), &BlockTag::HAPPY_GHAST_AVOIDS)
+        {
+            return false;
+        }
+
+        let fluid_state = state.get_fluid_state();
+        if !fluid_state.is_empty()
+            && segment.is_none_or(|(start, end)| {
+                collided_with_fluid(
+                    world,
+                    fluid_state,
+                    pos,
+                    start,
+                    end,
+                    mob.as_entity_event_source(),
+                )
+            })
+        {
+            if fluid_state.fluid_id.has_tag(&FluidTag::WATER) {
+                return fluids.water;
+            }
+            if fluid_state.fluid_id.has_tag(&FluidTag::LAVA) {
+                return fluids.lava;
+            }
+        }
+
+        path_no_collisions
     }
 }
 

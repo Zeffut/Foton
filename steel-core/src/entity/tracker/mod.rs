@@ -395,6 +395,7 @@ impl EntityTracker {
                         needs_velocity_sync: entity.needs_velocity_sync(),
                         has_dirty_entity_data,
                         force_velocity_sync: entity.forces_fall_flying_velocity_sync(),
+                        requires_precise_position: entity.requires_precise_position(),
                     });
             if result.should_clear_velocity_sync() {
                 entity.clear_velocity_sync();

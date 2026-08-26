@@ -427,10 +427,21 @@ pub trait LivingEntity: Entity {
 
     /// Returns vanilla `LivingEntity.getScale()`.
     fn get_scale(&self) -> f32 {
-        self.attributes()
-            .lock()
-            .get_value(vanilla_attributes::SCALE)
-            .unwrap_or(1.0) as f32
+        self.sanitize_scale(
+            self.attributes()
+                .lock()
+                .get_value(vanilla_attributes::SCALE)
+                .unwrap_or(1.0) as f32,
+        )
+    }
+
+    /// Clamps the scale attribute to what this entity can be drawn at.
+    ///
+    /// Vanilla parity: `LivingEntity.sanitizeScale`, which is the identity for
+    /// every mob but the happy ghast -- a mob four players ride cannot be
+    /// scaled past the harness they sit on.
+    fn sanitize_scale(&self, scale: f32) -> f32 {
+        scale
     }
 
     /// Returns true if the entity is alive (health > 0).
