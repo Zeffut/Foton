@@ -1196,6 +1196,7 @@ mod nether_ocean_end_hostiles;
 mod pets;
 mod portals;
 mod riding_and_leashes;
+mod skeleton_archery;
 mod travel;
 mod villagers;
 mod wandering_traders;

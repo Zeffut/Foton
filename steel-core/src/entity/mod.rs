@@ -873,7 +873,7 @@ pub use projectile::{
     EntityHitResult, HurtingProjectile, HurtingProjectileBase, INITIAL_ACCELERATION_POWER,
     Projectile, ProjectileBase, ProjectileDeflection, ProjectileEventSource, ProjectileHit,
     ThrowableItemProjectile, ThrowableProjectile, ViewVectorHitResult, compute_margin,
-    get_hit_result_on_view_vector, rotate_towards_movement,
+    get_hit_result_on_view_vector, rotate_towards_movement, weapon_holding_hand,
 };
 pub use raider::{RaidStatus, Raider, RaiderState};
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
