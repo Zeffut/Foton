@@ -453,27 +453,21 @@ impl LootEntry {
                 // Empty entry produces nothing
             }
             LootEntry::Dynamic { name, .. } => {
-                // Dynamic entries are used for block entity contents (like shulker boxes)
-                // The name identifies what content to retrieve:
-                // - "contents" = block entity inventory contents
-                // - Other names may exist for specific use cases
-                //
-                // TODO: Implement when block entity system supports inventory retrieval
-                // This requires:
-                // 1. Block entity reference in LootContext
-                // 2. Method to get inventory contents from block entity
-                // 3. Adding those items to the result
+                // Vanilla's `DynamicLoot` asks the block being broken for a
+                // named pile of items. `blocks/decorated_pot` is the only
+                // vanilla table that uses one, and `DecoratedPotBlock` answers
+                // with its own `get_drops` before the table is ever consulted,
+                // so a cracked pot does hand back its four sherds. This arm
+                // waits for a second user, which would need a block entity that
+                // can be asked for a named pile.
                 let _ = name;
             }
             LootEntry::Slots {
                 slots, functions, ..
             } => {
-                // Slots entries select items from specific block entity slots
-                // TODO: Implement when block entity system supports slot access
-                // This requires:
-                // 1. Block entity reference in LootContext
-                // 2. Method to get items from specific slots
-                // 3. Apply functions to each retrieved item
+                // Vanilla's `NestedLootTable`-adjacent `slots` entry, which no
+                // vanilla loot table uses. Implementing it would need the
+                // container behind the loot context to expose indexed slots.
                 let _ = slots;
                 let _ = functions;
             }

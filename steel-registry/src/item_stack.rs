@@ -822,15 +822,23 @@ impl ItemStack {
     }
 
     /// Copies components from a source (block entity, attacker, etc.) to this item.
+    ///
+    /// MISSING FOUNDATION: `CopyComponentsFunction.run` reads the source's
+    /// `collectComponents()`, and Steel's block entities have no such thing --
+    /// nothing turns one into a component patch a caller can pick keys out of.
+    /// Only the four blocks that answer with their own `get_drops` keep what
+    /// this function was supposed to carry: the decorated pot its sherds, a
+    /// head its profile, a banner its patterns and a shulker box its contents.
+    ///
+    /// The rest is what is still lost: a named chest, barrel, furnace, hopper
+    /// or beacon comes back nameless, a hive comes back without its bees, and
+    /// a shulker box loses its lock and any loot table it had not yet spent.
     pub const fn copy_components<R: rand::Rng>(
         &mut self,
         _source: crate::loot_table::CopySource,
         _include: &[Identifier],
         _ctx: &crate::loot_table::LootContext<'_, R>,
     ) {
-        // TODO: Implement when block entity system is ready
-        // 1. Get the source entity/block entity from context
-        // 2. For each component in `include`, copy it to this item's patch
     }
 
     /// Copies the named properties of the broken block state onto this item.
