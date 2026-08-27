@@ -12,7 +12,7 @@ fail=0
 failed=""
 for test in dev/join-test.sh dev/selector-test.sh dev/rcon-test.sh \
             dev/summon-test.sh \
-            dev/sapling-test.sh dev/container-test.sh \
+            dev/sapling-test.sh dev/bonemeal-test.sh dev/container-test.sh \
             dev/chest-loot-test.sh \
             dev/block-components-test.sh \
             dev/flowerpot-test.sh dev/enderchest-test.sh dev/spawnegg-test.sh \

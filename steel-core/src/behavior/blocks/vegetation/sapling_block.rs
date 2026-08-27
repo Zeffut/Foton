@@ -108,6 +108,14 @@ impl BlockBehavior for SaplingBlock {
 
         self.advance_tree(state, world, pos, &mut rng);
     }
+
+    /// Vanilla parity: the `instanceof BonemealableBlock` test every caller of
+    /// bone meal opens with. `SaplingBlock` implements it below, but nothing
+    /// said so here, so bone meal on a sapling did nothing at all -- neither in
+    /// a hand nor out of a dispenser.
+    fn as_bonemealable(&self) -> Option<&dyn Bonemealable> {
+        Some(self)
+    }
 }
 
 impl Bonemealable for SaplingBlock {
@@ -281,6 +289,30 @@ mod tests {
         }
 
         panic!("two hundred random ticks never advanced the sapling");
+    }
+
+    /// Bone meal has to reach the sapling at all.
+    ///
+    /// `SaplingBlock` implemented `Bonemealable` in full and its behavior
+    /// answered `None` to `as_bonemealable`, which is the one question every
+    /// caller of bone meal asks first. Nothing else in the tree would have
+    /// noticed: the trait was written, tested, and unreachable.
+    #[test]
+    fn a_sapling_answers_that_it_takes_bone_meal() {
+        let (world, pos) = planted("sapling_takes_bonemeal");
+        let state = world.get_block_state(pos);
+
+        let bonemealable = sapling_behavior()
+            .as_bonemealable()
+            .expect("a sapling is a bone meal target");
+
+        assert!(bonemealable.is_valid_bonemeal_target(state, world.as_ref(), pos));
+
+        // And it does something once it is reached: bone meal advances the
+        // sapling exactly as a random tick would.
+        let mut rng = rand::rng();
+        bonemealable.perform_bonemeal(state, &world, &mut rng, pos);
+        assert_eq!(world.get_block_state(pos).get_value(STAGE), 1);
     }
 
     /// A grower name Steel does not know leaves the sapling alone.
