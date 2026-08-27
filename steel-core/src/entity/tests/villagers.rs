@@ -1207,7 +1207,15 @@ fn villager_home(villager: &Arc<VillagerEntity>) -> Option<BlockPos> {
 
 /// The courtship is 275 to 325 ticks once it starts, and the pair have to pick
 /// each other out of the idle gate before that.
-const TICKS_TO_RAISE_A_CHILD: i32 = 800;
+// Four thousand rather than eight hundred. Two dice stand between these two
+// villagers and a child: the IDLE package's `RunOne` picks one of its entries
+// each round, so courtship only starts on the rounds it is chosen, and the
+// child timer is then seeded with vanilla's `60 + random.nextInt(50)`. Eight
+// hundred ticks left so little headroom that the test failed roughly one run
+// in twenty-five -- it passed twenty times alone here and still fell over in a
+// full suite. Raising the budget does not weaken the assertion: a child is
+// either born or it is not.
+const TICKS_TO_RAISE_A_CHILD: i32 = 4_000;
 
 /// Fills a villager's inventory with enough bread to be willing to breed.
 ///
