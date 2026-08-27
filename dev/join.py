@@ -68,6 +68,7 @@ CLICK_QUICK_MOVE = 1
 PLAY_C_SET_PASSENGERS = 107
 PLAY_C_SYSTEM_CHAT = 121
 PLAY_C_ANIMATE = 2
+PLAY_C_LEVEL_PARTICLES = 47
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
@@ -113,7 +114,9 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # way their own legs do -- `!useitem [yaw] [pitch]` right-clicks
 # without one, `!useitemx <n> [yaw] [pitch]` does that n times in a row
 # without waiting between them -- which is what makes a one-in-eight chance
-# testable -- `!close` shuts whatever screen is open, and
+# testable -- `!close` shuts whatever screen is open, `!wear <slot>`
+# shift-clicks a slot of the player's own inventory -- the screen nothing
+# announces, and the only way a script puts armor on -- and
 # `!attack <type> [offset]` left-clicks the last entity of that type, or the
 # entity `offset` ids after it -- which is the only way to reach an ender
 # dragon's hitboxes, because the client is never told they exist and derives
@@ -125,9 +128,15 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # asked. `!releaseuse` lets go of a drawn item, which is the only thing that
 # fires a bow; `!hop <x> <y> <z>` sends the arc of one jump without ever
 # claiming to be on the ground, which is the only way a script builds up the
-# fall distance a critical hit needs; and `!sawanimation <name>` /
+# fall distance a critical hit needs; `!fall <x> <y> <z> <groundY>` drops the
+# player from `y` to `groundY` along a real gravity arc and lands them, which
+# is the only way a script takes fall damage -- a teleport arrives as one
+# jump the server refuses to read as a fall; and `!sawanimation <name>` /
 # `!forgetanimations` read and reset the `ClientboundAnimatePacket` actions the
-# client has been told about -- a critical hit leaves the server no other way. Those are the only way to reach an item's `use_on` and
+# client has been told about -- a critical hit leaves the server no other way;
+# and `!sawparticle <name>` / `!forgetparticles` do the same for the particles
+# the server has asked for, which is how the puff a hard landing kicks up is
+# read back. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
@@ -177,6 +186,9 @@ class Connection:
         # Every `ClientboundAnimatePacket` action the client has been told
         # about, by name. A critical hit reaches a player no other way.
         self.animations = set()
+        # Every particle the server has asked the client to draw, by name.
+        # A hard landing puffs the block underfoot and reports it nowhere else.
+        self.particles = set()
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -398,6 +410,44 @@ MOB_EFFECT_NAMES = mob_effect_names()
 MOB_EFFECT_IDS = {name: index for index, name in MOB_EFFECT_NAMES.items()}
 
 
+def particle_names():
+    """Maps particle type ids to names by reading the generated registry.
+
+    Unlike the entity and effect tables, the ids here are not declaration
+    order: the file declares every particle and then registers them in a
+    separate list at the end, and that list is the order the protocol counts
+    in.
+    """
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "steel-registry",
+        "src",
+        "generated",
+        "vanilla_particle_types.rs",
+    )
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            source = handle.read()
+    except OSError:
+        return {}
+    paths = dict(
+        re.findall(
+            r'pub static (\w+) : ParticleType[^;]*?path : Cow :: Borrowed \("([a-z_]+)"\)',
+            source,
+        )
+    )
+    return {
+        index: paths.get(constant, constant.lower())
+        for index, constant in enumerate(
+            re.findall(r"registry \. register \(& (\w+)\)", source)
+        )
+    }
+
+
+PARTICLE_NAMES = particle_names()
+
+
 def describe_spawns(spawned):
     if not spawned:
         return "nothing"
@@ -487,6 +537,8 @@ def run_play(connection, watch_seconds=0):
             report_passengers(payload)
         elif packet_id == PLAY_C_ANIMATE:
             note_animation(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_PARTICLES:
+            note_particles(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -533,6 +585,20 @@ def note_system_chat(payload):
     words = [word for word in text.split() if len(word) >= 4]
     if words:
         print(f"  server says: {' '.join(words)}")
+
+
+def note_particles(connection, payload):
+    """Records which particle the server just asked the client to draw.
+
+    The packet's header is fixed width -- two flags, three doubles, four
+    floats and a count -- and the particle id follows it as a varint. Whatever
+    the id carries after that is per-particle and not needed to name it.
+    """
+    header = 2 + 3 * 8 + 4 * 4 + 4
+    if len(payload) <= header:
+        return
+    particle_id, _rest = read_varint(payload[header:])
+    connection.particles.add(PARTICLE_NAMES.get(particle_id, str(particle_id)))
 
 
 def note_animation(connection, payload):
@@ -590,6 +656,8 @@ def pump(connection, seconds, spawned):
             report_passengers(payload)
         elif packet_id == PLAY_C_ANIMATE:
             note_animation(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_PARTICLES:
+            note_particles(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -614,6 +682,13 @@ PLAYER_ACTION_RELEASE_USE_ITEM = 5
 # ends well above where it started -- a player who has landed is on the ground
 # again, and a player on the ground never crits.
 HOP_ARC = [0.42, 0.33, 0.25, 0.16, -0.08, -0.16, -0.24]
+
+# Vanilla free fall, per tick: gravity takes 0.08 blocks off the vertical speed
+# and drag keeps 98% of what is left. `!fall` has to send a real arc -- the
+# server re-runs the movement itself and teleports back anything that does not
+# match its own collision.
+FALL_GRAVITY = 0.08
+FALL_DRAG = 0.98
 
 # The `ClientboundAnimatePacket` actions worth naming. A critical hit and an
 # enchanted hit are only ever announced this way -- no command reports one, and
@@ -686,6 +761,31 @@ def send_release_use_item(connection):
     print("  let go of the drawn item")
 
 
+def send_fall(connection, x, y, z, ground_y):
+    """Falls from `y` down to `ground_y`, one position packet per tick.
+
+    Every packet but the last says the player is in the air, which is what
+    makes the server add the drop to their fall distance; the last one lands.
+    A player who never lands is never hurt, so the landing packet carries the
+    whole point of the directive.
+    """
+    vertical_speed = 0.0
+    ticks = 0
+    while y > ground_y and ticks < 400:
+        vertical_speed = (vertical_speed - FALL_GRAVITY) * FALL_DRAG
+        y += vertical_speed
+        ticks += 1
+        if y <= ground_y:
+            break
+        send_move_player_pos(connection, x, y, z, on_ground=False)
+        if not pump(connection, 0.05, {}):
+            fail("the connection dropped mid-fall")
+    send_move_player_pos(connection, x, ground_y, z, on_ground=True)
+    if not pump(connection, 0.05, {}):
+        fail("the connection dropped on landing")
+    print(f"  fell for {ticks} ticks and landed on {ground_y:.2f}")
+
+
 def run_directive(connection, directive):
     """Runs one `!`-prefixed instruction. Returns False if it is not one."""
     if not directive.startswith("!"):
@@ -733,6 +833,8 @@ def run_directive(connection, directive):
     elif parts[0] == "click":
         send_container_click(connection, int(parts[1]), CLICK_PICKUP)
         print(f"  clicked slot {parts[1]}")
+    elif parts[0] == "wear":
+        send_wear(connection, int(parts[1]))
     elif parts[0] == "shiftclick":
         # Repeats so a whole stack can be spread out slot by slot, which is how
         # a crafter grid gets filled: the crafter only takes one item per slot
@@ -776,12 +878,24 @@ def run_directive(connection, directive):
         print(f"  jumped, and is falling through {y:.2f}")
         if len(parts) > 4:
             send_attack(connection, parts[4], 0)
+    elif parts[0] == "fall":
+        x, y, z, ground_y = (float(part) for part in parts[1:5])
+        send_fall(connection, x, y, z, ground_y)
     elif parts[0] == "sawanimation":
         name = parts[1]
         if name in connection.animations:
             print(f"  the client saw a {name}")
         else:
             print(f"  no {name} reached the client")
+    elif parts[0] == "sawparticle":
+        name = parts[1]
+        if name in connection.particles:
+            print(f"  the client saw {name} particles")
+        else:
+            print(f"  no {name} particles reached the client")
+    elif parts[0] == "forgetparticles":
+        connection.particles.clear()
+        print("  forgot the particles seen so far")
     elif parts[0] == "forgetanimations":
         connection.animations.clear()
         print("  forgot the animations seen so far")
@@ -934,6 +1048,27 @@ def send_interact(connection, name, secondary):
     connection.send(PLAY_S_INTERACT, payload)
     verb = "sneak-right-clicked" if secondary else "right-clicked"
     print(f"  {verb} the {name} (entity {entity_id})")
+
+
+def send_wear(connection, slot):
+    """Shift-clicks a slot of the player's own inventory, which is how armor
+    goes on.
+
+    That screen is the one a player never opens: it is container zero and no
+    `ClientboundOpenScreenPacket` announces it, so `!click` and `!shiftclick`,
+    which click whatever the server last opened, cannot reach it. No command
+    equips armor either, so this is the only way a script puts boots on feet.
+    """
+    payload = (
+        varint(0)  # the inventory every player already has open
+        + varint(0)  # state id; the server recomputes the outcome either way
+        + struct.pack(">hb", slot, 0)
+        + varint(CLICK_QUICK_MOVE)
+        + varint(0)
+        + b"\x00"
+    )
+    connection.send(PLAY_S_CONTAINER_CLICK, payload)
+    print(f"  shift-clicked slot {slot} of the player's own inventory")
 
 
 def send_container_button_click(connection, button):
@@ -1098,6 +1233,8 @@ def watch_for_spawns(connection, seconds, spawned):
             report_passengers(payload)
         elif packet_id == PLAY_C_ANIMATE:
             note_animation(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_PARTICLES:
+            note_particles(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:

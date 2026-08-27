@@ -501,7 +501,7 @@ impl Entity for StriderEntity {
         if self.is_in_lava() {
             self.reset_fall_distance();
         } else {
-            self.entity_check_fall_damage(vertical_movement, on_ground, on_state, pos, world);
+            self.living_check_fall_damage(vertical_movement, on_ground, on_state, pos, world);
         }
     }
 

@@ -4,6 +4,8 @@ use steel_registry::DyeColor;
 use steel_registry::attribute::AttributeRef;
 use steel_registry::data_components::components::ItemDamageFunction;
 use steel_registry::data_components::vanilla_components::{self, BLOCKS_ATTACKS};
+use steel_registry::particle_type::{BlockParticleOption, ParticleData};
+use steel_registry::vanilla_particle_types;
 
 use super::*;
 use crate::behavior::ITEM_BEHAVIORS;
@@ -51,6 +53,16 @@ const FLYING_TRAVEL_LAVA_DRAG: f64 = 0.5;
 
 /// How much of a flier's speed survives a tick in the air.
 const FLYING_TRAVEL_AIR_DRAG: f32 = 0.91;
+
+/// The numbers behind the puff a hard landing kicks up.
+///
+/// Vanilla parity: the `0.2F`, `15.0`, `2.5`, `150.0` and `0.15F` of
+/// `LivingEntity.checkFallDamage`.
+const FALL_PARTICLE_BASE_SCALE: f32 = 0.2;
+const FALL_PARTICLE_POWER_DIVISOR: f64 = 15.0;
+const FALL_PARTICLE_MAX_SCALE: f64 = 2.5;
+const FALL_PARTICLE_COUNT_PER_SCALE: f64 = 150.0;
+const FALL_PARTICLE_SPEED: f32 = 0.15;
 
 /// A trait for living entities that can take damage, heal, and die.
 ///
@@ -1394,6 +1406,79 @@ pub trait LivingEntity: Entity {
             sound_type.volume * 0.5,
             sound_type.pitch * 0.75,
         );
+    }
+
+    /// Mirrors vanilla `LivingEntity.checkFallDamage`.
+    ///
+    /// Rust has no `super`, so a living entity that only wants to intercept
+    /// some landings -- the strider, which treats lava as a floor -- calls
+    /// this for the rest. It calls [`Entity::entity_check_fall_damage`] for
+    /// the layer below; calling `check_fall_damage` would come straight back
+    /// here.
+    fn living_check_fall_damage(
+        &self,
+        vertical_movement: f64,
+        on_ground: bool,
+        on_state: BlockStateId,
+        pos: BlockPos,
+        world: &Arc<World>,
+    ) {
+        if on_ground && self.fall_distance() > 0.0 {
+            self.spawn_fall_particles(on_state, pos, world);
+        }
+
+        self.entity_check_fall_damage(vertical_movement, on_ground, on_state, pos, world);
+    }
+
+    /// Puffs the block a hard landing kicked up.
+    ///
+    /// Mirrors the particle half of vanilla `LivingEntity.checkFallDamage`.
+    /// When the block landed on is not the one the entity's own column names,
+    /// the burst is pulled back to that block's edge, which is what stops a
+    /// landing on the lip of a block from spraying out of the air beside it.
+    fn spawn_fall_particles(&self, on_state: BlockStateId, pos: BlockPos, world: &Arc<World>) {
+        let power = self
+            .calculate_fall_power(self.fall_distance())
+            .floor()
+            .max(0.0);
+        if power <= 0.0 || on_state.is_air() {
+            return;
+        }
+
+        let position = self.position();
+        let mut x = position.x;
+        let mut z = position.z;
+        let block_position = self.block_position();
+        if pos.x() != block_position.x() || pos.z() != block_position.z() {
+            let x_offset = x - f64::from(pos.x()) - 0.5;
+            let z_offset = z - f64::from(pos.z()) - 0.5;
+            let largest_offset = x_offset.abs().max(z_offset.abs());
+            x = f64::from(pos.x()) + 0.5 + x_offset / largest_offset * 0.5;
+            z = f64::from(pos.z()) + 0.5 + z_offset / largest_offset * 0.5;
+        }
+
+        let scale = (f64::from(FALL_PARTICLE_BASE_SCALE) + power / FALL_PARTICLE_POWER_DIVISOR)
+            .min(FALL_PARTICLE_MAX_SCALE);
+        world.send_particles(
+            ParticleData::new(
+                &vanilla_particle_types::BLOCK,
+                BlockParticleOption::new(on_state),
+            ),
+            DVec3::new(x, position.y, z),
+            (FALL_PARTICLE_COUNT_PER_SCALE * scale) as i32,
+            DVec3::ZERO,
+            f64::from(FALL_PARTICLE_SPEED),
+        );
+    }
+
+    /// Returns vanilla `LivingEntity.calculateFallPower` for this entity.
+    fn calculate_fall_power(&self, fall_distance: f64) -> f64 {
+        let safe_fall_distance = self
+            .attributes()
+            .lock()
+            .get_value(vanilla_attributes::SAFE_FALL_DISTANCE)
+            .unwrap_or(vanilla_attributes::SAFE_FALL_DISTANCE.default_value);
+        LivingEntityBase::calculate_fall_power(fall_distance, safe_fall_distance)
     }
 
     /// Mirrors vanilla `LivingEntity.causeFallDamage`.

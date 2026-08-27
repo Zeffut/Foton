@@ -1683,6 +1683,14 @@ impl LivingEntityBase {
         }
     }
 
+    /// Calculates the vanilla `LivingEntity.calculateFallPower` of a fall.
+    ///
+    /// Both the damage and the size of the puff a landing kicks up read this.
+    #[must_use]
+    pub fn calculate_fall_power(fall_distance: f64, safe_fall_distance: f64) -> f64 {
+        fall_distance + 1.0e-6 - safe_fall_distance
+    }
+
     /// Calculates vanilla living-entity fall damage.
     #[must_use]
     pub fn calculate_fall_damage(
@@ -1691,7 +1699,7 @@ impl LivingEntityBase {
         safe_fall_distance: f64,
         fall_damage_multiplier: f64,
     ) -> i32 {
-        ((fall_distance + 1.0e-6 - safe_fall_distance)
+        (Self::calculate_fall_power(fall_distance, safe_fall_distance)
             * f64::from(damage_modifier)
             * fall_damage_multiplier)
             .floor() as i32
