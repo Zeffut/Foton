@@ -11,8 +11,8 @@
 # Midnight, because daylight makes an enderman teleport away from its ring, and
 # clear weather, because rain hurts it into teleporting too.
 #
-# The ring is at the enderman's own feet level rather than under them: the take
-# box is `y .. y+3`, so a floor is out of reach by construction.
+# The grass is at the enderman's own feet level and above rather than under it:
+# the take box is `y .. y+3`, so a floor is out of reach by construction.
 #
 # Usage: bash dev/enderman-block-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -68,13 +68,26 @@ CMDS="$CMDS;;teleport @s 0 108 0"
 CMDS="$CMDS;;gamerule spawn_mobs false"
 CMDS="$CMDS;;kill @e[type=minecraft:enderman]"
 
-# Stone floor to stand on, then a ring of grass at standing height so the take
-# box has something holdable in it. The middle stays empty for the enderman.
+# A slab floor, then grass filling every cell around the middle for the
+# enderman's whole height. The middle stays empty for it to stand in.
+#
+# Two details in that are load-bearing, both learned from watching this test
+# fail. An enderman has a step height of one, so a single ring at foot level is
+# a kerb it walks over: the first rig watched it stroll off the platform and
+# spend two thousand ticks in a field with nothing holdable in reach. And the
+# floor is a slab rather than stone because `canPlaceBlock` demands a full
+# collision block underneath -- with a slab no cell in the leave goal's reach is
+# ever legal, so a block this enderman picks up is a block it keeps. Otherwise
+# the leave goal is free to set the block down in the enderman's own cell, which
+# vanilla allows (it passes itself as the exclusion), and the suffocation that
+# follows teleports it out of the rig.
 for x in -1 0 1; do
   for z in -1 0 1; do
-    CMDS="$CMDS;;setblock $x 99 $z minecraft:stone"
+    CMDS="$CMDS;;setblock $x 99 $z minecraft:smooth_stone_slab"
     if [ "$x" != 0 ] || [ "$z" != 0 ]; then
-      CMDS="$CMDS;;setblock $x 100 $z minecraft:grass_block"
+      for y in 100 101 102; do
+        CMDS="$CMDS;;setblock $x $y $z minecraft:grass_block"
+      done
     fi
   done
 done
@@ -88,15 +101,18 @@ CMDS="$CMDS;;execute if block 1 100 0 minecraft:grass_block run tellraw @s \"RIN
 # block itself uses.
 CMDS="$CMDS;;execute if entity @e[type=minecraft:enderman,tag=carrier,nbt={PersistenceRequired:1b}] run tellraw @s \"ENDERMANPINNED\""
 
-# A take attempt is one tick in ten and lands on a reachable grass cell about
-# one time in twelve, so this asks several times rather than once: an enderman
-# that has already put its block back down would read as a failure at a single
-# checkpoint.
+# A take attempt is one tick in ten and lands on a reachable cell one time in
+# four, so two hundred ticks is already a near-certainty and nothing in this rig
+# can take the block away again. The checkpoints repeat only so a failure says
+# how long it held out.
 CARRYING='nbt={carriedBlockState:{Name:"minecraft:grass_block"}}'
-for _ in 1 2 3 4 5 6; do
-  CMDS="$CMDS;;tick sprint 400"
+for _ in 1 2 3; do
+  CMDS="$CMDS;;tick sprint 200"
   CMDS="$CMDS;;execute if entity @e[type=minecraft:enderman,tag=carrier,$CARRYING] run tellraw @s \"ENDERMANCARRIES\""
 done
+# It is still there and still holding what it took: nothing quietly killed the
+# subject between the checkpoints above.
+CMDS="$CMDS;;execute if entity @e[type=minecraft:enderman,tag=carrier] run tellraw @s \"ENDERMANSURVIVED\""
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
@@ -105,7 +121,7 @@ STATUS=$?
 cleanup
 
 echo "=== what the server said ==="
-grep "server says" join.log | grep -oE "ENDERMANUP|RINGDOWN|ENDERMANPINNED|ENDERMANCARRIES"
+grep "server says" join.log | grep -oE "ENDERMANUP|RINGDOWN|ENDERMANPINNED|ENDERMANCARRIES|ENDERMANSURVIVED"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "\[Error\]|panic|Unknown|Incorrect" | tail -8
 
@@ -119,5 +135,6 @@ said ENDERMANUP     || fail "the enderman never spawned"
 said RINGDOWN       || fail "the ring of grass never got placed"
 said ENDERMANPINNED || fail "the summon NBT never reached the mob"
 
-said ENDERMANCARRIES || fail "the enderman never picked a block up"
+said ENDERMANSURVIVED || fail "the enderman did not live through the run"
+said ENDERMANCARRIES  || fail "the enderman never picked a block up"
 echo "########## ENDERMAN BLOCK TEST PASSED ##########"
