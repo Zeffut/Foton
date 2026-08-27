@@ -515,10 +515,7 @@ impl CopperGolemEntity {
                 None,
             );
             self.state.lock().next_weathering_tick = UNSET_WEATHERING_TICK;
-            player
-                .inventory
-                .lock()
-                .hurt_item_in_hand(hand, 1, player.has_infinite_materials());
+            player.hurt_item_in_hand(hand, 1);
             return InteractionResult::SuccessServer;
         }
 
@@ -543,10 +540,7 @@ impl CopperGolemEntity {
         );
         self.state.lock().next_weathering_tick = UNSET_WEATHERING_TICK;
         self.set_weather_state(weather_state.previous());
-        player
-            .inventory
-            .lock()
-            .hurt_item_in_hand(hand, 1, player.has_infinite_materials());
+        player.hurt_item_in_hand(hand, 1);
         InteractionResult::SuccessServer
     }
 }
@@ -765,10 +759,7 @@ impl Mob for CopperGolemEntity {
                 self.position(),
                 &GameEventContext::new(Some(player as &dyn Entity), None),
             );
-            player
-                .inventory
-                .lock()
-                .hurt_item_in_hand(hand, 1, player.has_infinite_materials());
+            player.hurt_item_in_hand(hand, 1);
             return InteractionResult::Success;
         }
 

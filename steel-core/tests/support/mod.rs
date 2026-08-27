@@ -35,7 +35,7 @@ mod connection;
 mod player;
 
 pub(crate) use boss_bar::{BossBarViewer, OP_ADD, OP_REMOVE, OP_UPDATE_PROGRESS, OP_UPDATE_STYLE};
-pub(crate) use connection::TestConnection;
+pub(crate) use connection::{RecordingConnection, TestConnection};
 pub(crate) use player::{TestPlayerBuilder, test_runtime_config};
 
 pub(crate) fn test_world() -> &'static Arc<World> {

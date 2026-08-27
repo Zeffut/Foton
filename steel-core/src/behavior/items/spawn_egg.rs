@@ -10,7 +10,7 @@ use std::sync::Arc;
 use steel_macros::item_behavior;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::data_components::components::EntityData;
-use steel_registry::data_components::vanilla_components::ENTITY_DATA;
+use steel_registry::data_components::vanilla_components::{CUSTOM_NAME, ENTITY_DATA};
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_game_events;
@@ -18,7 +18,8 @@ use steel_utils::BlockPos;
 use steel_utils::types::Difficulty;
 
 use crate::behavior::{InteractionResult, ItemBehavior, UseOnContext};
-use crate::entity::{ENTITIES, EntitySpawnReason, next_entity_id};
+use crate::entity::{ENTITIES, EntitySpawnReason, Mob, SharedEntity, next_entity_id};
+use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader as _, World};
 
@@ -34,9 +35,85 @@ impl SpawnEggItem {
     pub fn entity_type(stack: &ItemStack) -> Option<EntityTypeRef> {
         stack.get(ENTITY_DATA).map(EntityData::entity_type)
     }
+
+    /// Puts one mob of `entity_type` at `pos`.
+    ///
+    /// Vanilla parity: the `EntityType.spawn` both `SpawnEggItem.spawnMob` and
+    /// `SpawnEggItemBehavior` go through, so a dispenser and a right click make
+    /// the same mob under the same rules.
+    pub fn spawn_at(world: &Arc<World>, entity_type: EntityTypeRef, pos: BlockPos) -> Option<()> {
+        spawn_mob(world, entity_type, pos)
+    }
+
+    /// Breeds a baby out of `parent` when `stack` is that mob's own spawn egg.
+    ///
+    /// Vanilla parity: `SpawnEggItem.spawnOffspringFromSpawnEgg`. The egg has to
+    /// match the mob it is used on -- a chicken egg on a cow does nothing -- and
+    /// the baby comes from the parent's own breeding path when it has one, so a
+    /// mooshroom egg on a brown mooshroom gives a brown calf rather than a
+    /// default-variant one.
+    ///
+    /// Returns the baby, or `None` when nothing was spawned (and the egg is
+    /// then left alone, as vanilla's empty `Optional` is).
+    pub fn spawn_offspring_from_spawn_egg(
+        player: &Player,
+        parent: &dyn Mob,
+        world: &Arc<World>,
+        stack: &mut ItemStack,
+    ) -> Option<SharedEntity> {
+        // Vanilla parity: `SpawnEggItem.spawnsEntity`.
+        if Self::entity_type(stack)?.key != parent.entity_type().key {
+            return None;
+        }
+
+        // Vanilla asks an `AgeableMob` for its `getBreedOffspring`; Steel hangs
+        // that on `Animal`, which is where every ageable mob that has one lives.
+        let offspring = match parent.as_animal() {
+            Some(animal) => animal.get_breed_offspring(world, animal)?,
+            None => ENTITIES.create(
+                parent.entity_type(),
+                next_entity_id(),
+                parent.position(),
+                Arc::downgrade(world),
+            )?,
+        };
+
+        {
+            let baby = offspring.as_mob()?;
+            baby.set_baby(true);
+            // Vanilla bails when the mob refused to be a baby, which is how an
+            // egg for something that has no baby form spawns nothing at all.
+            if !baby.is_baby() {
+                return None;
+            }
+            baby.try_set_position(parent.position()).ok()?;
+            baby.set_rotation((0.0, 0.0));
+            baby.set_old_position_to_current();
+
+            // Vanilla parity: `Entity.applyComponentsFromItemStack`, which for an
+            // entity means `CUSTOM_NAME` and `CUSTOM_DATA`. Steel entities have no
+            // `CUSTOM_DATA`, so a named egg naming its baby is the whole of it.
+            if let Some(name) = stack.get(CUSTOM_NAME) {
+                baby.set_custom_name(Some(name.clone()));
+            }
+        }
+
+        world.try_add_entity(Arc::clone(&offspring)).ok()?;
+
+        // Vanilla parity: `ItemStack.consume`, which spares a creative player.
+        if !player.has_infinite_materials() {
+            stack.shrink(1);
+        }
+
+        Some(offspring)
+    }
 }
 
 impl ItemBehavior for SpawnEggItem {
+    fn is_spawn_egg(&self) -> bool {
+        true
+    }
+
     /// Vanilla parity: `SpawnEggItem.useOn`.
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
         let Some(entity_type) = context.inv.with_item(|item| Self::entity_type(item)) else {

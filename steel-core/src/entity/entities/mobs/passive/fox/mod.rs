@@ -1007,6 +1007,16 @@ impl Mob for FoxEntity {
         &self.mob_base
     }
 
+    /// Vanilla parity: `Fox.onOffspringSpawnedFromEgg`. A cub bred out of a fox
+    /// spawn egg trusts whoever held the egg, so it does not flee them the way
+    /// a wild fox does.
+    fn on_offspring_spawned_from_egg(&self, spawner: &Player, offspring: &dyn Mob) {
+        let Some(cub) = offspring.downcast_ref::<FoxEntity>() else {
+            return;
+        };
+        cub.add_trusted_entity(spawner.uuid());
+    }
+
     fn mob_flags(&self) -> i8 {
         *self.entity_data.lock().mob().mob_flags.get()
     }

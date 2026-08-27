@@ -450,12 +450,12 @@ fn find_gateway(world: &Arc<World>) -> Option<BlockPos> {
 
 /// Sums the experience lying on the ground.
 ///
-/// An orb is worth `value * count`, not `value`: `tryMergeToExisting` folds a
-/// new orb into a neighbour by raising that neighbour's count and leaving its
-/// value alone, and which orbs merge is decided by an unseeded random group
-/// id. Summing only the values undercounts by however many merges the run
-/// happened to make, which is what made this a test that failed about one run
-/// in five.
+/// An orb's `count` is how many pickups it is worth, not decoration:
+/// `ExperienceOrb.award` merges a new orb into a matching one nearby by
+/// bumping that instead of spawning anything, and `playerTouch` pays out
+/// `value` once per count. Summing `value` alone loses one orb's worth every
+/// time a merge happens -- which is a one-in-forty roll per orb, and is why
+/// this read used to fail about one run in six.
 fn experience_in(world: &Arc<World>) -> i32 {
     world
         .entity_manager()

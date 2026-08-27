@@ -14,6 +14,7 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty};
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
+use steel_registry::vanilla_game_events;
 use steel_registry::vanilla_game_rules::TNT_EXPLODES;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::{REGISTRY, TaggedRegistryExt as _};
@@ -23,9 +24,12 @@ use steel_utils::{BlockPos, BlockStateId, Direction, Downcast as _, Identifier, 
 
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::behavior::blocks::FireBlock;
+use crate::behavior::blocks::container::dispenser_block::spawn_dispensed_item;
+use crate::behavior::items::SpawnEggItem;
 use crate::entity::entities::{ArrowEntity, PrimedTntEntity, SheepEntity, SulfurCubeEntity};
 use crate::entity::{Entity, Projectile as _, next_entity_id};
 use crate::world::World;
+use crate::world::game_event::GameEventContext;
 
 /// Where the dispensing happens.
 ///
@@ -337,6 +341,123 @@ impl DispenseItemBehavior for ShearsDispenseBehavior {
     }
 }
 
+/// Puts a piece of equipment on whatever is standing in front.
+///
+/// Vanilla parity: `EquipmentDispenseItemBehavior`. This is how an armour
+/// dispenser works, and how a saddle goes onto a pig without a player -- it is
+/// not in the registry at all, it is `getDefaultDispenseMethod`'s answer for
+/// anything carrying an `equippable` component.
+struct EquipmentDispenseBehavior;
+
+impl DispenseItemBehavior for EquipmentDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        if dispense_equipment(source, &mut stack) {
+            return DispenseOutcome::acted(stack);
+        }
+        DefaultDispenseBehavior.execute(source, stack)
+    }
+}
+
+/// Equips the first thing in front of the dispenser that will take `stack`.
+///
+/// Vanilla parity: `EquipmentDispenseItemBehavior.dispenseEquipment`, which
+/// several registered behaviors fall back to as well. Returns whether anything
+/// took it.
+pub(super) fn dispense_equipment(source: &DispenseSource<'_>, stack: &mut ItemStack) -> bool {
+    let target = source.pos.relative(source.facing);
+    let Some(equippable) = stack.get_equippable() else {
+        return false;
+    };
+    let slot = equippable.slot;
+
+    let candidates = source.world.get_entities_in_aabb(&block_aabb(target));
+    let Some(wearer) = candidates.iter().find_map(|entity| {
+        let living = entity.as_living_entity()?;
+        living.can_equip_with_dispenser(stack).then_some(living)
+    }) else {
+        return false;
+    };
+
+    let equipped = stack.split(1);
+    wearer.set_item_slot(slot, equipped);
+    if let Some(mob) = wearer.as_mob() {
+        mob.set_guaranteed_drop(slot);
+        mob.set_persistence_required();
+    }
+    true
+}
+
+/// Puts the mob a spawn egg makes in front of the dispenser.
+///
+/// Vanilla parity: `SpawnEggItemBehavior`, reached through
+/// `DispenserBlock.getDefaultDispenseMethod` rather than the registry.
+struct SpawnEggDispenseBehavior;
+
+impl DispenseItemBehavior for SpawnEggDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        let Some(entity_type) = SpawnEggItem::entity_type(&stack) else {
+            return DispenseOutcome::Failed(stack);
+        };
+        let target = source.pos.relative(source.facing);
+
+        // Vanilla's `type.spawn(..., tryMoveDown = direction != Direction.UP,
+        // movedUp = false)`; Steel's spawn helper has no downward search yet, so
+        // an egg fired at a ceiling lands in the block it was aimed at.
+        if SpawnEggItem::spawn_at(source.world, entity_type, target).is_none() {
+            return DispenseOutcome::Failed(stack);
+        }
+
+        source.world.game_event(
+            &vanilla_game_events::ENTITY_PLACE,
+            source.pos,
+            &GameEventContext::new(None, None),
+        );
+        stack.shrink(1);
+        DispenseOutcome::acted(stack)
+    }
+}
+
+/// Offers a block to a sulfur cube standing in front, and throws it otherwise.
+///
+/// Vanilla parity: `SulfurCubeBlockDispenseItemBehavior`, the second arm of
+/// `DispenserBlock.getDefaultDispenseMethod`.
+struct SulfurCubeDispenseBehavior;
+
+impl DispenseItemBehavior for SulfurCubeDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        if feed_sulfur_cube(source.world, source.pos.relative(source.facing), &mut stack) {
+            return DispenseOutcome::acted(stack);
+        }
+        DefaultDispenseBehavior.execute(source, stack)
+    }
+}
+
+/// Throws one item out of the dispenser.
+///
+/// Vanilla parity: `DefaultDispenseItemBehavior`, which is what an item with
+/// nothing else to say gets.
+pub(super) struct DefaultDispenseBehavior;
+
+impl DispenseItemBehavior for DefaultDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        let thrown = stack.split(1);
+        spawn_dispensed_item(source.world, source.pos, source.facing, thrown);
+        DispenseOutcome::acted(stack)
+    }
+}
+
+/// The one-block box in front of the dispenser that its behaviors act in.
+fn block_aabb(pos: BlockPos) -> WorldAabb {
+    WorldAabb::new(
+        f64::from(pos.x()),
+        f64::from(pos.y()),
+        f64::from(pos.z()),
+        f64::from(pos.x()) + 1.0,
+        f64::from(pos.y()) + 1.0,
+        f64::from(pos.z()) + 1.0,
+    )
+}
+
 /// Every item the dispenser treats specially.
 ///
 /// Vanilla parity: `DispenserBlock.DISPENSER_REGISTRY`, filled by
@@ -408,13 +529,36 @@ pub(super) fn is_sulfur_cube_swallowable(item: ItemRef) -> bool {
         .is_in_tag(item, &ItemTag::SULFUR_CUBE_SWALLOWABLE)
 }
 
-/// Returns the behavior registered for `item`, if any.
+/// Returns what the dispenser should do with `stack`.
 ///
-/// Vanilla parity: the `DISPENSER_REGISTRY.get` of
-/// `DispenserBlock.getDispenseMethod`.
+/// Vanilla parity: `DispenserBlock.getDispenseMethod` -- the registry first,
+/// then `getDefaultDispenseMethod` for the three things a dispenser knows how
+/// to do without an entry of their own.
 #[must_use]
-pub fn dispense_behavior_for(item: ItemRef) -> Option<&'static dyn DispenseItemBehavior> {
-    DISPENSE_BEHAVIORS.get(&item.key).map(AsRef::as_ref)
+pub fn dispense_behavior_for(stack: &ItemStack) -> &'static dyn DispenseItemBehavior {
+    if let Some(registered) = DISPENSE_BEHAVIORS.get(&stack.item().key) {
+        return registered.as_ref();
+    }
+    default_dispense_behavior_for(stack)
+}
+
+/// Returns the behavior an item with no registry entry gets.
+///
+/// Vanilla parity: `DispenserBlock.getDefaultDispenseMethod`, in its order:
+/// equippable first, then a block a sulfur cube would swallow, then a spawn
+/// egg, and a plain throw for everything else.
+#[must_use]
+fn default_dispense_behavior_for(stack: &ItemStack) -> &'static dyn DispenseItemBehavior {
+    if stack.get_equippable().is_some() {
+        return &EquipmentDispenseBehavior;
+    }
+    if is_sulfur_cube_swallowable(stack.item()) {
+        return &SulfurCubeDispenseBehavior;
+    }
+    if SpawnEggItem::entity_type(stack).is_some() {
+        return &SpawnEggDispenseBehavior;
+    }
+    &DefaultDispenseBehavior
 }
 
 #[cfg(test)]
@@ -436,7 +580,7 @@ mod tests {
             &vanilla_items::SHEARS,
         ] {
             assert!(
-                dispense_behavior_for(item).is_some(),
+                DISPENSE_BEHAVIORS.contains_key(&item.key),
                 "{} should have a dispense behavior",
                 item.key
             );
@@ -515,7 +659,109 @@ mod tests {
     #[test]
     fn an_unregistered_item_has_no_behavior() {
         init_vanilla_registry();
-        assert!(dispense_behavior_for(&vanilla_items::STONE).is_none());
+        assert!(!DISPENSE_BEHAVIORS.contains_key(&vanilla_items::STONE.key));
+    }
+
+    /// A saddle fired at a pig lands on the pig.
+    ///
+    /// `LivingEntity::can_equip_with_dispenser` had been written and tested,
+    /// but nothing in the server ever called it: the dispenser had no
+    /// `getDefaultDispenseMethod`, so every piece of armour and every saddle
+    /// was simply thrown on the floor.
+    #[test]
+    fn a_dispenser_aimed_at_a_pig_saddles_it() {
+        use std::sync::Arc;
+
+        use glam::DVec3;
+        use steel_registry::vanilla_entities;
+
+        use crate::entity::entities::PigEntity;
+        use crate::entity::{LivingEntity as _, Mob as _, next_entity_id};
+        use crate::inventory::equipment::EquipmentSlot;
+
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("dispenser_saddles_a_pig");
+        insert_ready_full_chunk(&world, steel_utils::ChunkPos::new(0, 0));
+
+        let pig = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&pig) as Arc<dyn Entity>)
+            .expect("the test world accepts a pig");
+
+        let source = DispenseSource {
+            world: &world,
+            pos: BlockPos::new(8, 64, 7),
+            facing: Direction::South,
+        };
+        let mut stack = ItemStack::new(&vanilla_items::SADDLE);
+        stack.set_count(2);
+
+        // Through `dispense_behavior_for`, so the routing is under test too --
+        // a saddle has no registry entry and only reaches the equipment
+        // behavior through `getDefaultDispenseMethod`.
+        let DispenseOutcome::Acted { remainder, .. } =
+            dispense_behavior_for(&stack).execute(&source, stack)
+        else {
+            panic!("a saddle aimed at a bare pig should go on the pig");
+        };
+        assert_eq!(
+            remainder.count(),
+            1,
+            "the dispenser gave up exactly one saddle"
+        );
+        assert!(
+            pig.get_item_by_slot(EquipmentSlot::Saddle)
+                .is(&vanilla_items::SADDLE)
+        );
+        assert!(
+            pig.is_persistence_required(),
+            "a mob a dispenser dressed stops despawning, saddle and all"
+        );
+
+        let mut second = remainder;
+        assert!(
+            !dispense_equipment(&source, &mut second),
+            "a pig that already has its saddle takes no second one"
+        );
+    }
+
+    /// A spawn egg fired out of a dispenser makes its mob rather than landing
+    /// on the floor as an item.
+    #[test]
+    fn a_dispensed_spawn_egg_makes_its_mob() {
+        use crate::entity::init_entities;
+
+        init_vanilla_registry();
+        init_behaviors();
+        init_entities();
+        let world = fresh_test_world("dispenser_spawn_egg");
+        insert_ready_full_chunk(&world, steel_utils::ChunkPos::new(0, 0));
+
+        let source = DispenseSource {
+            world: &world,
+            pos: BlockPos::new(8, 64, 7),
+            facing: Direction::South,
+        };
+        let mut stack = ItemStack::new(&vanilla_items::COW_SPAWN_EGG);
+        stack.set_count(2);
+
+        let DispenseOutcome::Acted { remainder, .. } =
+            dispense_behavior_for(&stack).execute(&source, stack)
+        else {
+            panic!("a cow egg aimed at open air should make a cow");
+        };
+        assert_eq!(remainder.count(), 1, "one egg is spent");
+
+        let cows = world.get_entities_in_aabb_matching(&block_aabb(BlockPos::new(8, 64, 8)), |e| {
+            e.entity_type() == &vanilla_entities::COW
+        });
+        assert_eq!(cows.len(), 1, "exactly one cow, in front of the dispenser");
     }
 
     /// Vanilla parity: `getDispensePosition`, which places things in front of the
