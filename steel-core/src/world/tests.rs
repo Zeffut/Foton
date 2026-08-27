@@ -12,6 +12,7 @@ use steel_registry::{
 use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
+use crate::block_entity::init_block_entities;
 use crate::chunk::chunk_ticket_manager::{ChunkTicket, ChunkTicketLevel};
 use crate::entity::{EntityBase, entities::ItemEntity, entities::PigEntity};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
@@ -573,7 +574,7 @@ fn fluid_clip_height_treats_source_and_flowing_variants_as_same_fluid_above() {
 fn breaking_a_chest_scatters_what_it_held() {
     init_vanilla_registry();
     init_behaviors();
-    crate::block_entity::init_block_entities();
+    init_block_entities();
 
     let world = fresh_test_world("chest_break_drops_contents");
     let pos = BlockPos::new(8, 64, 8);

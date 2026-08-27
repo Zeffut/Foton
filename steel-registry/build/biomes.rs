@@ -73,6 +73,10 @@ pub struct BiomeJson {
     #[serde(skip)]
     snow_golem_melts: Option<bool>,
 
+    /// Extracted from the `minecraft:gameplay/increased_fire_burnout` attribute.
+    #[serde(skip)]
+    increased_fire_burnout: Option<bool>,
+
     effects: BiomeEffects,
 
     #[serde(default)]
@@ -269,6 +273,10 @@ struct AmbientParticle {
 /// Vanilla `EnvironmentAttributes.SNOW_GOLEM_MELTS`, which biomes such as the
 /// desert override to `true`.
 const SNOW_GOLEM_MELTS_ATTRIBUTE: &str = "minecraft:gameplay/snow_golem_melts";
+
+/// Vanilla `EnvironmentAttributes.INCREASED_FIRE_BURNOUT`, which the humid
+/// biomes such as the jungle override to `true`.
+const INCREASED_FIRE_BURNOUT_ATTRIBUTE: &str = "minecraft:gameplay/increased_fire_burnout";
 
 fn extract_attributes_to_effects(
     effects: &mut BiomeEffects,
@@ -533,6 +541,11 @@ pub(crate) fn build() -> TokenStream {
                 Some(Value::Bool(melts)) => Some(*melts),
                 _ => None,
             };
+            biome.increased_fire_burnout =
+                match biome.attributes.get(INCREASED_FIRE_BURNOUT_ATTRIBUTE) {
+                    Some(Value::Bool(burnout)) => Some(*burnout),
+                    _ => None,
+                };
 
             biomes.push((biome_name, biome));
         }
@@ -564,6 +577,8 @@ pub(crate) fn build() -> TokenStream {
         let downfall = biome.downfall;
         let temperature_modifier = generate_temperature_modifier(&biome.temperature_modifier);
         let snow_golem_melts = generate_option(&biome.snow_golem_melts, |melts| quote! { #melts });
+        let increased_fire_burnout =
+            generate_option(&biome.increased_fire_burnout, |burnout| quote! { #burnout });
         let effects = generate_biome_effects(&biome.effects);
         let creature_spawn_probability = biome.creature_spawn_probability;
         let spawners =
@@ -582,6 +597,7 @@ pub(crate) fn build() -> TokenStream {
                 downfall: #downfall,
                 temperature_modifier: #temperature_modifier,
                 snow_golem_melts: #snow_golem_melts,
+                increased_fire_burnout: #increased_fire_burnout,
                 effects: #effects,
                 creature_spawn_probability: #creature_spawn_probability,
                 spawners: #spawners,

@@ -30,7 +30,6 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::entity_type::EntityTypeRef;
-use steel_registry::vanilla_game_rules::FIRE_SPREAD_RADIUS_AROUND_PLAYER;
 use steel_registry::{REGISTRY, level_events, vanilla_damage_types, vanilla_game_events};
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::{Difficulty, UpdateFlags};
@@ -198,7 +197,7 @@ impl LightningBoltEntity {
             return;
         }
         let pos = self.block_position();
-        if !can_spread_fire_around(world, pos) {
+        if !world.can_spread_fire_around(pos) {
             return;
         }
 
@@ -340,33 +339,6 @@ pub fn default_thunder_hit(entity: &dyn Entity, world: &World) {
     );
 }
 
-/// Returns whether fire may spread near `pos`.
-///
-/// Vanilla parity: `ServerLevel.canSpreadFireAround` plus
-/// `ChunkMap.anyPlayerCloseEnoughTo`. A radius of -1 turns the check off; with
-/// the default 128 a strike in an empty corner of the world lights nothing,
-/// which is what keeps unattended chunks from burning.
-fn can_spread_fire_around(world: &Arc<World>, pos: BlockPos) -> bool {
-    let radius = world.get_game_rule(&FIRE_SPREAD_RADIUS_AROUND_PLAYER);
-    if radius == -1 {
-        return true;
-    }
-
-    let target = DVec3::new(f64::from(pos.x()), f64::from(pos.y()), f64::from(pos.z()));
-    let mut close_enough = false;
-    world.players.iter_players(|_, player| {
-        if player.is_spectator() {
-            return true;
-        }
-        if player.position().distance(target) < f64::from(radius) {
-            close_enough = true;
-            return false;
-        }
-        true
-    });
-    close_enough
-}
-
 /// Tries to put a fire block at `pos`, returning whether one appeared.
 ///
 /// Vanilla parity: the inner body of `LightningBolt.spawnFire`, which is
@@ -466,6 +438,7 @@ fn random_step_cleaning_copper(world: &Arc<World>, pos: BlockPos) -> Option<Bloc
 mod tests {
     use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty};
     use steel_registry::item_stack::ItemStack;
+    use steel_registry::vanilla_game_rules::FIRE_SPREAD_RADIUS_AROUND_PLAYER;
     use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_items};
     use steel_utils::types::InteractionHand;
     use steel_utils::{ChunkPos, Downcast as _};

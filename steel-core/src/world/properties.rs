@@ -1,4 +1,7 @@
-use steel_registry::vanilla_game_rules::SPAWNER_BLOCKS_WORK;
+use glam::DVec3;
+
+use crate::entity::Entity as _;
+use steel_registry::vanilla_game_rules::{FIRE_SPREAD_RADIUS_AROUND_PLAYER, SPAWNER_BLOCKS_WORK};
 
 use super::{
     ADVANCE_TIME, BlockPos, CChangeDifficulty, ChunkPos, Difficulty, Digest, ErasedGameRuleRef,
@@ -222,6 +225,34 @@ impl World {
 
     pub(super) fn advance_time_with_guard(&self, guard: &LevelDataManager) -> bool {
         self.get_game_rule_with_guard(&ADVANCE_TIME, guard)
+    }
+
+    /// Returns whether fire may spread near `pos`.
+    ///
+    /// Vanilla parity: `ServerLevel.canSpreadFireAround` plus
+    /// `ChunkMap.anyPlayerCloseEnoughTo`. A radius of -1 turns the check off;
+    /// with the default 128 a fire in an empty corner of the world burns
+    /// nothing, which is what keeps unattended chunks from going up.
+    #[must_use]
+    pub fn can_spread_fire_around(&self, pos: BlockPos) -> bool {
+        let radius = self.get_game_rule(&FIRE_SPREAD_RADIUS_AROUND_PLAYER);
+        if radius == -1 {
+            return true;
+        }
+
+        let target = DVec3::new(f64::from(pos.x()), f64::from(pos.y()), f64::from(pos.z()));
+        let mut close_enough = false;
+        self.players.iter_players(|_, player| {
+            if player.is_spectator() {
+                return true;
+            }
+            if player.position().distance(target) < f64::from(radius) {
+                close_enough = true;
+                return false;
+            }
+            true
+        });
+        close_enough
     }
 
     /// Gets the world seed.
