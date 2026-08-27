@@ -309,7 +309,6 @@ impl World {
 
         if drop_items {
             self.drop_resources_with_entity(state, pos, entity, explosion_radius);
-            // TODO: block entity drops
         }
 
         // Vanilla parity: fluidState.createLegacyBlock() — breaking a waterlogged
@@ -332,7 +331,17 @@ impl World {
     /// This is the no-tool/no-entity overload. Player block breaking uses
     /// `block_breaking::drop_block_loot` which includes tool context for
     /// fortune/silk touch.
-    // TODO: block entity and entity drops
+    ///
+    /// Container *contents* do not come out here: like vanilla they leave
+    /// through [`BlockEntity::pre_remove_side_effects`] when the chunk replaces
+    /// the block.
+    ///
+    /// [`BlockEntity::pre_remove_side_effects`]:
+    ///     crate::block_entity::BlockEntity::pre_remove_side_effects
+    // TODO: vanilla's `Block.dropResources` also puts the block entity in the
+    // loot context (`LootContextParams.BLOCK_ENTITY`). Without it `copy_name`
+    // and `copy_components` resolve to nothing, so a broken banner loses its
+    // patterns and a silk-touched beehive loses its bees.
     pub fn drop_resources(self: &Arc<Self>, state: BlockStateId, pos: BlockPos) {
         self.drop_resources_with_entity(state, pos, None, None);
     }

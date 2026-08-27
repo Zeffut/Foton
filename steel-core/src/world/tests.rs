@@ -13,7 +13,8 @@ use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
 use crate::chunk::chunk_ticket_manager::{ChunkTicket, ChunkTicketLevel};
-use crate::entity::{EntityBase, entities::PigEntity};
+use crate::entity::{EntityBase, entities::ItemEntity, entities::PigEntity};
+use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::test_support::{fresh_test_world, insert_ready_full_chunk, test_world};
 
 const FIRST_HALF: BlockLocalAabb = BlockLocalAabb::new(0.0, 0.0, 0.0, 0.5, 1.0, 1.0);
@@ -566,4 +567,50 @@ fn fluid_clip_height_treats_source_and_flowing_variants_as_same_fluid_above() {
     );
 
     assert_eq!(height.to_bits(), 1.0_f64.to_bits());
+}
+
+#[test]
+fn breaking_a_chest_scatters_what_it_held() {
+    init_vanilla_registry();
+    init_behaviors();
+    crate::block_entity::init_block_entities();
+
+    let world = fresh_test_world("chest_break_drops_contents");
+    let pos = BlockPos::new(8, 64, 8);
+    insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+    world.set_block(
+        pos,
+        vanilla_blocks::CHEST.default_state(),
+        UpdateFlags::UPDATE_ALL,
+    );
+    let block_entity = world
+        .get_block_entity(pos)
+        .expect("the chest should have a block entity");
+    let container_ref =
+        ContainerRef::from_block_entity(block_entity).expect("a chest is a container");
+    let mut guard = ContainerLockGuard::lock_all(&[&container_ref]);
+    guard
+        .get_mut(container_ref.container_id())
+        .expect("the container is locked")
+        .set_item(0, ItemStack::new(&vanilla_items::DIAMOND));
+    drop(guard);
+
+    assert!(world.destroy_block(pos, true));
+
+    let dropped: Vec<String> = world
+        .entity_manager
+        .get_accessible_entities()
+        .into_iter()
+        .filter_map(|entity| {
+            entity
+                .as_ref()
+                .downcast_ref::<ItemEntity>()
+                .map(|item| item.get_item().item.key.to_string())
+        })
+        .collect();
+
+    assert!(
+        dropped.iter().any(|key| key == "minecraft:diamond"),
+        "breaking a chest must scatter its contents, dropped: {dropped:?}"
+    );
 }
