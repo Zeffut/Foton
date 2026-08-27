@@ -316,6 +316,12 @@ struct EntityPredicateJson {
     /// `minecraft:type_specific/cube_mob`, shared by slime and magma cube.
     #[serde(rename = "minecraft:type_specific/cube_mob", default)]
     cube_mob_type_specific: Option<CubeMobTypeSpecificJson>,
+    /// `minecraft:type_specific/raider`, which gates the ominous bottle.
+    #[serde(rename = "minecraft:type_specific/raider", default)]
+    raider_type_specific: Option<RaiderTypeSpecificJson>,
+    /// `minecraft:vehicle`, the predicate the ridden entity has to pass.
+    #[serde(rename = "minecraft:vehicle", default)]
+    vehicle: Option<VehiclePredicateJson>,
     /// `minecraft:type_specific/fishing_hook`, which gates fishing treasure.
     #[serde(rename = "minecraft:type_specific/fishing_hook", default)]
     fishing_hook_type_specific: Option<FishingHookTypeSpecificJson>,
@@ -343,8 +349,36 @@ struct EntityComponentsJson {
     sheep_color: Option<String>,
     #[serde(rename = "minecraft:chicken/variant", default)]
     chicken_variant: Option<String>,
+    #[serde(rename = "minecraft:frog/variant", default)]
+    frog_variant: Option<String>,
     #[serde(rename = "minecraft:mooshroom/variant", default)]
     mooshroom_variant: Option<String>,
+    #[serde(flatten)]
+    unmodeled: FxHashMap<String, serde_json::Value>,
+}
+
+/// `minecraft:type_specific/raider`: vanilla `RaiderPredicate`.
+///
+/// Both fields are optional in the codec and default to `false`, so a
+/// predicate that only names `is_captain` still demands `has_raid == false`.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct RaiderTypeSpecificJson {
+    #[serde(default)]
+    has_raid: bool,
+    #[serde(default)]
+    is_captain: bool,
+}
+
+/// The `minecraft:vehicle` predicate, narrowed to the entity type.
+///
+/// Vanilla tests the vehicle against a full `EntityPredicate`. Nothing in the
+/// loot data asks for more than its type, and anything that did would land in
+/// `unmodeled` and fail rather than match.
+#[derive(Deserialize, Debug, Clone)]
+struct VehiclePredicateJson {
+    #[serde(rename = "type", alias = "minecraft:entity_type", default)]
+    entity_type: Option<String>,
     #[serde(flatten)]
     unmodeled: FxHashMap<String, serde_json::Value>,
 }
@@ -681,7 +715,7 @@ pub(crate) fn build() -> TokenStream {
             ItemComponentPredicate, ItemFilter, ItemFilterItems, LocationPredicate, LootCondition,
             LootContextEntity, LootEntry, LootFunction, LootPool, LootTable, LootTableRef,
             LootTableRegistry, LootType, NameTarget, NumberProvider, NumberProviderRange,
-            PotionOptions, PropertyCheck, StewEffect, ToolPredicate,
+            PotionOptions, PropertyCheck, RaiderStatus, StewEffect, ToolPredicate,
         };
         use steel_utils::Identifier;
     });

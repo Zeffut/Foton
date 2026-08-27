@@ -31,6 +31,7 @@ use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::loot_table::{
     DamageSourceInfo, EntityEquipmentRef, EntityRef, EntityRefFlags, LootContext, LootTableRef,
+    RaiderStatus,
 };
 use steel_registry::mob_effect::MobEffectRef;
 use steel_registry::sound_event::SoundEventRef;
@@ -1464,11 +1465,33 @@ pub(crate) fn entity_loot_ref_with_equipment<'a>(
         sheep_color: sheep.map(|(color, _)| color),
         sheep_sheared: sheep.map(|(_, sheared)| sheared),
         chicken_variant: living_entity.and_then(LivingEntity::chicken_loot_variant),
+        frog_variant: living_entity.and_then(LivingEntity::frog_loot_variant),
+        raider: raider_loot_status(entity),
+        vehicle_type: vehicle_loot_type(entity),
         mooshroom_variant: living_entity.and_then(LivingEntity::mooshroom_loot_variant),
         cube_size: living_entity.and_then(LivingEntity::cube_loot_size),
         villager_variant: living_entity.and_then(LivingEntity::villager_loot_variant),
         in_open_water: entity.fishing_hook_loot_open_water(),
     }
+}
+
+/// Reads `minecraft:type_specific/raider` off an entity.
+///
+/// Vanilla parity: `RaiderPredicate.matches`, which rejects anything that is
+/// not a `Raider` -- so a non-raider has no status to compare at all.
+pub(crate) fn raider_loot_status<E: Entity + ?Sized>(entity: &E) -> Option<RaiderStatus> {
+    entity.as_raider().map(|raider| RaiderStatus {
+        has_raid: raider.has_raid(),
+        is_captain: raider.is_captain(),
+    })
+}
+
+/// The entity type of whatever `entity` is riding.
+///
+/// Vanilla parity: the subject `EntityPredicate.vehicle` tests, which is
+/// `entity.getVehicle()` and fails when there is none.
+pub(crate) fn vehicle_loot_type<E: Entity + ?Sized>(entity: &E) -> Option<&'static Identifier> {
+    entity.vehicle().map(|vehicle| &vehicle.entity_type().key)
 }
 
 #[cfg(test)]

@@ -415,6 +415,38 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             },
         );
 
+    let frog_variant = predicate
+        .components
+        .as_ref()
+        .and_then(|components| components.frog_variant.as_deref())
+        .map_or_else(
+            || quote! { None },
+            |variant| {
+                let variant = strip_vanilla(variant);
+                quote! { Some(Identifier::vanilla_static(#variant)) }
+            },
+        );
+
+    let raider = predicate.raider_type_specific.as_ref().map_or_else(
+        || quote! { None },
+        |raider| {
+            let (has_raid, is_captain) = (raider.has_raid, raider.is_captain);
+            quote! { Some(RaiderStatus { has_raid: #has_raid, is_captain: #is_captain }) }
+        },
+    );
+
+    let vehicle_type = predicate
+        .vehicle
+        .as_ref()
+        .and_then(|vehicle| vehicle.entity_type.as_deref())
+        .map_or_else(
+            || quote! { None },
+            |entity_type| {
+                let entity_type = strip_vanilla(entity_type);
+                quote! { Some(Identifier::vanilla_static(#entity_type)) }
+            },
+        );
+
     let mooshroom_variant = predicate
         .components
         .as_ref()
@@ -489,6 +521,14 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
                 .map(|key| format!("minecraft:predicates -> {key}")),
         );
     }
+    if let Some(vehicle) = &predicate.vehicle {
+        unsupported.extend(
+            vehicle
+                .unmodeled
+                .keys()
+                .map(|key| format!("minecraft:vehicle -> {key}")),
+        );
+    }
     unsupported.sort();
     warn_unsupported_predicate_keys(&unsupported);
 
@@ -500,6 +540,9 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             sheep_color: #sheep_color,
             sheep_sheared: #sheep_sheared,
             chicken_variant: #chicken_variant,
+            frog_variant: #frog_variant,
+            raider: #raider,
+            vehicle_type: #vehicle_type,
             mooshroom_variant: #mooshroom_variant,
             cube_size: #cube_size,
             in_open_water: #in_open_water,

@@ -1,7 +1,7 @@
 use super::{
     BlockStateExt, BlockStateId, DamageSourceInfo, DyeColor, EntityEquipmentRef, EntityRef,
     EntityRefFlags, Identifier, ItemStack, LootContext, LootContextEntity, NumberProvider,
-    NumberProviderRange, REGISTRY, RegistryExt, RngExt, TaggedRegistryExt,
+    NumberProviderRange, REGISTRY, RaiderStatus, RegistryExt, RngExt, TaggedRegistryExt,
 };
 use crate::biome::BiomeRef;
 
@@ -235,6 +235,13 @@ pub struct EntityPredicate {
     pub sheep_sheared: Option<bool>,
     /// Vanilla `minecraft:components.chicken/variant` check.
     pub chicken_variant: Option<Identifier>,
+    /// Vanilla `minecraft:components.frog/variant` check.
+    pub frog_variant: Option<Identifier>,
+    /// Vanilla `minecraft:type_specific/raider` check. Both of its fields
+    /// default to `false` when the key is present, so this compares the pair.
+    pub raider: Option<RaiderStatus>,
+    /// The type `minecraft:vehicle` asks the ridden entity for.
+    pub vehicle_type: Option<Identifier>,
     /// Vanilla `minecraft:components.mooshroom/variant` check, by serialized
     /// name (`red` / `brown`) since the variant is an enum, not a registry.
     pub mooshroom_variant: Option<&'static str>,
@@ -506,6 +513,9 @@ impl EntityPredicate {
         sheep_color: None,
         sheep_sheared: None,
         chicken_variant: None,
+        frog_variant: None,
+        raider: None,
+        vehicle_type: None,
         mooshroom_variant: None,
         cube_size: None,
         in_open_water: None,
@@ -550,6 +560,24 @@ impl EntityPredicate {
 
         if let Some(expected_variant) = &self.chicken_variant
             && entity.chicken_variant != Some(expected_variant)
+        {
+            return false;
+        }
+
+        if let Some(expected_variant) = &self.frog_variant
+            && entity.frog_variant != Some(expected_variant)
+        {
+            return false;
+        }
+
+        // Vanilla `RaiderPredicate.matches` rejects anything that is not a
+        // raider, then compares both flags.
+        if self.raider.is_some() && entity.raider != self.raider {
+            return false;
+        }
+
+        if let Some(expected_type) = &self.vehicle_type
+            && entity.vehicle_type != Some(expected_type)
         {
             return false;
         }

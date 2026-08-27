@@ -884,3 +884,151 @@ fn a_large_fern_half_drops_only_while_its_other_half_stands() {
         "a lone lower half must drop nothing"
     );
 }
+
+/// Rolls `table` once against a subject and its killer and reports the items.
+fn roll_entity_table(
+    table: &LootTable,
+    this: EntityRef<'_>,
+    killer: Option<EntityRef<'_>>,
+) -> Vec<ItemStack> {
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng).with_this_entity(this);
+    if let Some(killer) = killer {
+        ctx = ctx
+            .with_killer_entity(killer)
+            .with_damage_source(DamageSourceInfo {
+                damage_type: Some(&MOB_ATTACK),
+                tags: &[],
+                is_direct: true,
+            });
+    }
+    table.get_random_items(&mut ctx)
+}
+
+fn drops_item(items: &[ItemStack], key: &'static str) -> bool {
+    let key = Identifier::vanilla_static(key);
+    items.iter().any(|item| item.item.key == key)
+}
+
+fn pillager(raider: Option<RaiderStatus>) -> EntityRef<'static> {
+    EntityRef {
+        entity_type: Some(&PILLAGER),
+        raider,
+        ..EntityRef::default()
+    }
+}
+
+static MOB_ATTACK: Identifier = Identifier::vanilla_static("mob_attack");
+static PILLAGER: Identifier = Identifier::vanilla_static("pillager");
+static FROG: Identifier = Identifier::vanilla_static("frog");
+static ZOMBIE: Identifier = Identifier::vanilla_static("zombie");
+static PLAYER: Identifier = Identifier::vanilla_static("player");
+static CHICKEN: Identifier = Identifier::vanilla_static("chicken");
+static WARM: Identifier = Identifier::vanilla_static("warm");
+static COLD: Identifier = Identifier::vanilla_static("cold");
+
+#[test]
+fn only_a_patrol_captain_outside_a_raid_drops_the_ominous_bottle() {
+    init_test_registries();
+    let table = &vanilla_loot_tables::ENTITIES_PILLAGER;
+
+    let captain = RaiderStatus {
+        has_raid: false,
+        is_captain: true,
+    };
+    assert!(drops_item(
+        &roll_entity_table(table, pillager(Some(captain)), None),
+        "ominous_bottle"
+    ));
+
+    // A captain leading a raid wave is a different subject: vanilla's
+    // predicate wants `has_raid` false as well.
+    let raid_captain = RaiderStatus {
+        has_raid: true,
+        is_captain: true,
+    };
+    assert!(
+        roll_entity_table(table, pillager(Some(raid_captain)), None).is_empty(),
+        "a raid captain is not a patrol captain"
+    );
+
+    let rank_and_file = RaiderStatus {
+        has_raid: false,
+        is_captain: false,
+    };
+    assert!(roll_entity_table(table, pillager(Some(rank_and_file)), None).is_empty());
+
+    // Anything that is not a raider at all fails the predicate outright.
+    assert!(roll_entity_table(table, pillager(None), None).is_empty());
+}
+
+#[test]
+fn a_magma_cube_leaves_the_froglight_of_the_frog_that_ate_it() {
+    init_test_registries();
+    let table = &vanilla_loot_tables::ENTITIES_MAGMA_CUBE;
+    let cube = EntityRef {
+        entity_type: Some(&Identifier::vanilla_static("magma_cube")),
+        cube_size: Some(1),
+        ..EntityRef::default()
+    };
+    let frog = |variant: &'static Identifier| EntityRef {
+        entity_type: Some(&FROG),
+        frog_variant: Some(variant),
+        ..EntityRef::default()
+    };
+
+    assert!(drops_item(
+        &roll_entity_table(table, cube, Some(frog(&WARM))),
+        "pearlescent_froglight"
+    ));
+    assert!(drops_item(
+        &roll_entity_table(table, cube, Some(frog(&COLD))),
+        "verdant_froglight"
+    ));
+
+    let player = EntityRef {
+        entity_type: Some(&PLAYER),
+        ..EntityRef::default()
+    };
+    let by_player = roll_entity_table(table, cube, Some(player));
+    assert!(
+        !drops_item(&by_player, "pearlescent_froglight")
+            && !drops_item(&by_player, "verdant_froglight"),
+        "only a frog turns a magma cube into a froglight"
+    );
+}
+
+#[test]
+fn only_a_chicken_jockey_drops_the_lava_chicken_disc() {
+    init_test_registries();
+    let table = &vanilla_loot_tables::ENTITIES_ZOMBIE;
+    let jockey = EntityRef {
+        entity_type: Some(&ZOMBIE),
+        flags: EntityRefFlags {
+            is_baby: true,
+            ..EntityRefFlags::default()
+        },
+        vehicle_type: Some(&CHICKEN),
+        ..EntityRef::default()
+    };
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng)
+        .with_this_entity(jockey)
+        .with_killed_by_player(true);
+    assert!(drops_item(
+        &table.get_random_items(&mut ctx),
+        "music_disc_lava_chicken"
+    ));
+
+    let on_foot = EntityRef {
+        vehicle_type: None,
+        ..jockey
+    };
+    let mut ctx = LootContext::new(&mut rng)
+        .with_this_entity(on_foot)
+        .with_killed_by_player(true);
+    assert!(!drops_item(
+        &table.get_random_items(&mut ctx),
+        "music_disc_lava_chicken"
+    ));
+}

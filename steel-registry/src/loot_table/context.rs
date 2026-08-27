@@ -390,6 +390,9 @@ pub struct EntityRef<'a> {
     pub sheep_sheared: Option<bool>,
     /// Vanilla `minecraft:components.chicken/variant`, `None` for non-chickens.
     pub chicken_variant: Option<&'a Identifier>,
+    /// Vanilla `minecraft:components.frog/variant`, `None` for non-frogs. This
+    /// is what decides which froglight a magma cube leaves behind.
+    pub frog_variant: Option<&'a Identifier>,
     /// Vanilla `minecraft:components.mooshroom/variant` by serialized name,
     /// `None` for non-mooshrooms.
     pub mooshroom_variant: Option<&'static str>,
@@ -399,11 +402,32 @@ pub struct EntityRef<'a> {
     /// Vanilla `FishingHook.isOpenWaterFishing`, `None` for anything that is not
     /// a fishing hook.
     pub in_open_water: Option<bool>,
+    /// Vanilla `minecraft:type_specific/raider`, `None` for anything that is
+    /// not a raider. A patrol captain outside a raid is what drops the ominous
+    /// bottle.
+    pub raider: Option<RaiderStatus>,
+    /// The type of whatever this entity is riding, `None` when it rides
+    /// nothing.
+    ///
+    /// Vanilla's `EntityPredicate.vehicle` is a whole nested predicate; the
+    /// loot data only ever asks the vehicle's type, and the build script
+    /// refuses a vehicle predicate that asks for more.
+    pub vehicle_type: Option<&'a Identifier>,
     /// Vanilla `minecraft:predicates.villager/variant`, the villager type a
     /// villager or zombie villager answers `DataComponents.VILLAGER_VARIANT`
     /// with. `None` for anything that is not one. This is what decides which
     /// boats a fisherman sells and which maps a cartographer draws.
     pub villager_variant: Option<&'a Identifier>,
+}
+
+/// What vanilla's `RaiderPredicate` reads off a `Raider`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RaiderStatus {
+    /// Vanilla `Raider.hasRaid`.
+    pub has_raid: bool,
+    /// Vanilla `Raider.isCaptain`: wearing the ominous banner as a patrol
+    /// leader or a raid captain.
+    pub is_captain: bool,
 }
 
 /// Entity flags for predicate checking.
