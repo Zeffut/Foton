@@ -6,15 +6,11 @@
 # only thing that leaves the server is a `ClientboundAnimatePacket`, which is
 # what `!sawanimation crit` reads.
 #
-# Only the negative half of that is asserted here, and deliberately. A crit
-# needs `fallDistance > 0` at the moment of the swing, and a player's fall
-# distance does not survive a server tick in Steel: `!hop` sends the arc of a
-# real jump and swings on the way down in the same directive, and the server
-# still reports no crit. The unit tests in `entity_interaction.rs` cover the
-# positive case by setting the fall distance directly; making it reachable
-# in-world is a movement problem, not a combat one. Until it is fixed, this
-# checks that the animation channel is wired and does not fire on a swing that
-# should not crit -- and that a left click kills what it lands on.
+# Both halves are asserted. A crit needs `fallDistance > 0` at the moment of
+# the swing, so `!hop` sends the arc of a real jump and swings on the way down
+# inside one directive -- the two-second settle between two commands is long
+# enough for the server to put the player back on their feet, and a player on
+# their feet never crits. A swing taken standing still must not report one.
 #
 # Usage: bash dev/melee-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -38,6 +34,7 @@ if [ ! -d "$ROOT/run-offline/config" ]; then
 fi
 cp -r "$ROOT/run-offline/config" "$RUN_DIR/config"
 sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
+sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 0/' "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
@@ -71,7 +68,7 @@ done
 CMDS="$CMDS;;teleport @s 0 100 0"
 # A pig that wandered in on its own would be hit instead of the one summoned,
 # and one that wandered off would be out of reach.
-CMDS="$CMDS;;gamerule doMobSpawning false"
+CMDS="$CMDS;;gamerule spawn_mobs false"
 CMDS="$CMDS;;kill @e[type=minecraft:pig]"
 
 CMDS="$CMDS;;clear @s"
@@ -94,6 +91,15 @@ for _ in $(seq 1 4); do
 done
 CMDS="$CMDS;;execute unless entity @e[type=minecraft:pig] run tellraw @s \"THEPIGDIED\""
 
+# A swing taken on the way down is. The pig is a fresh one: the first died,
+# and `!attack` swings at the last of its kind the client was told about.
+CMDS="$CMDS;;summon minecraft:pig 0 100 2"
+CMDS="$CMDS;;execute if entity @e[type=minecraft:pig] run tellraw @s \"ASECONDPIGSTANDSTHERE\""
+CMDS="$CMDS;;teleport @e[type=minecraft:pig] 0 100 2"
+CMDS="$CMDS;;!forgetanimations"
+CMDS="$CMDS;;!hop 0 100 0 pig"
+CMDS="$CMDS;;!sawanimation crit"
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -102,7 +108,7 @@ cleanup
 
 echo "=== what happened ==="
 grep -E "server says|crit" join.log \
-  | grep -oE "APIGSTANDSTHERE|THEPIGDIED|the client saw a crit|no crit reached the client"
+  | grep -oE "APIGSTANDSTHERE|THEPIGDIED|ASECONDPIGSTANDSTHERE|the client saw a crit|no crit reached the client"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 
@@ -114,4 +120,7 @@ said APIGSTANDSTHERE || fail "nothing was summoned to hit"
 grep -q "no crit reached the client" join.log \
   || fail "a swing taken standing still was reported as a critical hit"
 said THEPIGDIED || fail "four sword swings did not kill a pig"
+said ASECONDPIGSTANDSTHERE || fail "nothing was summoned for the falling swing"
+grep -q "the client saw a crit" join.log \
+  || fail "a swing taken on the way down was not critical"
 echo "########## MELEE TEST PASSED ##########"

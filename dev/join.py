@@ -113,7 +113,9 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # way their own legs do -- `!useitem [yaw] [pitch]` right-clicks
 # without one, `!useitemx <n> [yaw] [pitch]` does that n times in a row
 # without waiting between them -- which is what makes a one-in-eight chance
-# testable -- `!close` shuts whatever screen is open, and
+# testable -- `!close` shuts whatever screen is open, `!wear <slot>`
+# shift-clicks a slot of the player's own inventory -- the screen nothing
+# announces, and the only way a script puts armor on -- and
 # `!attack <type> [offset]` left-clicks the last entity of that type, or the
 # entity `offset` ids after it -- which is the only way to reach an ender
 # dragon's hitboxes, because the client is never told they exist and derives
@@ -125,7 +127,10 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # asked. `!releaseuse` lets go of a drawn item, which is the only thing that
 # fires a bow; `!hop <x> <y> <z>` sends the arc of one jump without ever
 # claiming to be on the ground, which is the only way a script builds up the
-# fall distance a critical hit needs; and `!sawanimation <name>` /
+# fall distance a critical hit needs; `!fall <x> <y> <z> <groundY>` drops the
+# player from `y` to `groundY` along a real gravity arc and lands them, which
+# is the only way a script takes fall damage -- a teleport arrives as one
+# jump the server refuses to read as a fall; and `!sawanimation <name>` /
 # `!forgetanimations` read and reset the `ClientboundAnimatePacket` actions the
 # client has been told about -- a critical hit leaves the server no other way. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do. The server
@@ -615,6 +620,13 @@ PLAYER_ACTION_RELEASE_USE_ITEM = 5
 # again, and a player on the ground never crits.
 HOP_ARC = [0.42, 0.33, 0.25, 0.16, -0.08, -0.16, -0.24]
 
+# Vanilla free fall, per tick: gravity takes 0.08 blocks off the vertical speed
+# and drag keeps 98% of what is left. `!fall` has to send a real arc -- the
+# server re-runs the movement itself and teleports back anything that does not
+# match its own collision.
+FALL_GRAVITY = 0.08
+FALL_DRAG = 0.98
+
 # The `ClientboundAnimatePacket` actions worth naming. A critical hit and an
 # enchanted hit are only ever announced this way -- no command reports one, and
 # the damage they add is invisible from outside.
@@ -686,6 +698,31 @@ def send_release_use_item(connection):
     print("  let go of the drawn item")
 
 
+def send_fall(connection, x, y, z, ground_y):
+    """Falls from `y` down to `ground_y`, one position packet per tick.
+
+    Every packet but the last says the player is in the air, which is what
+    makes the server add the drop to their fall distance; the last one lands.
+    A player who never lands is never hurt, so the landing packet carries the
+    whole point of the directive.
+    """
+    vertical_speed = 0.0
+    ticks = 0
+    while y > ground_y and ticks < 400:
+        vertical_speed = (vertical_speed - FALL_GRAVITY) * FALL_DRAG
+        y += vertical_speed
+        ticks += 1
+        if y <= ground_y:
+            break
+        send_move_player_pos(connection, x, y, z, on_ground=False)
+        if not pump(connection, 0.05, {}):
+            fail("the connection dropped mid-fall")
+    send_move_player_pos(connection, x, ground_y, z, on_ground=True)
+    if not pump(connection, 0.05, {}):
+        fail("the connection dropped on landing")
+    print(f"  fell for {ticks} ticks and landed on {ground_y:.2f}")
+
+
 def run_directive(connection, directive):
     """Runs one `!`-prefixed instruction. Returns False if it is not one."""
     if not directive.startswith("!"):
@@ -733,6 +770,8 @@ def run_directive(connection, directive):
     elif parts[0] == "click":
         send_container_click(connection, int(parts[1]), CLICK_PICKUP)
         print(f"  clicked slot {parts[1]}")
+    elif parts[0] == "wear":
+        send_wear(connection, int(parts[1]))
     elif parts[0] == "shiftclick":
         # Repeats so a whole stack can be spread out slot by slot, which is how
         # a crafter grid gets filled: the crafter only takes one item per slot
@@ -776,6 +815,9 @@ def run_directive(connection, directive):
         print(f"  jumped, and is falling through {y:.2f}")
         if len(parts) > 4:
             send_attack(connection, parts[4], 0)
+    elif parts[0] == "fall":
+        x, y, z, ground_y = (float(part) for part in parts[1:5])
+        send_fall(connection, x, y, z, ground_y)
     elif parts[0] == "sawanimation":
         name = parts[1]
         if name in connection.animations:
@@ -934,6 +976,27 @@ def send_interact(connection, name, secondary):
     connection.send(PLAY_S_INTERACT, payload)
     verb = "sneak-right-clicked" if secondary else "right-clicked"
     print(f"  {verb} the {name} (entity {entity_id})")
+
+
+def send_wear(connection, slot):
+    """Shift-clicks a slot of the player's own inventory, which is how armor
+    goes on.
+
+    That screen is the one a player never opens: it is container zero and no
+    `ClientboundOpenScreenPacket` announces it, so `!click` and `!shiftclick`,
+    which click whatever the server last opened, cannot reach it. No command
+    equips armor either, so this is the only way a script puts boots on feet.
+    """
+    payload = (
+        varint(0)  # the inventory every player already has open
+        + varint(0)  # state id; the server recomputes the outcome either way
+        + struct.pack(">hb", slot, 0)
+        + varint(CLICK_QUICK_MOVE)
+        + varint(0)
+        + b"\x00"
+    )
+    connection.send(PLAY_S_CONTAINER_CLICK, payload)
+    print(f"  shift-clicked slot {slot} of the player's own inventory")
 
 
 def send_container_button_click(connection, button):
