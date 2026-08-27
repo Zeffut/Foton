@@ -37,6 +37,7 @@ use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, DowncastType, DowncastTypeKey, Identifier, UuidExt as _};
 use uuid::Uuid;
 
+use super::super::hostile::zombie_common;
 use crate::behavior::InteractionResult;
 use crate::entity::ai::gossip::{GossipContainer, ReputationEventType};
 use crate::entity::conversion::{ConversionParams, convert_to};
@@ -462,8 +463,10 @@ impl Entity for ZombieVillagerEntity {
         SoundSource::Hostile
     }
 
+    /// Vanilla parity: `ZombieVillager.addAdditionalSaveData`, on top of the
+    /// zombie half it inherits.
     fn save_additional(&self, nbt: &mut NbtCompound) {
-        self.save_mob(nbt);
+        zombie_common::save_zombie(self, self.is_baby(), nbt);
 
         let mut villager_data = NbtCompound::new();
         villager_data.insert("type", self.villager_type().key.to_string());
@@ -497,7 +500,7 @@ impl Entity for ZombieVillagerEntity {
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
-        self.load_mob(nbt);
+        zombie_common::load_zombie(self, nbt);
 
         if let Some(villager_data) = nbt.compound("VillagerData") {
             if let Some(key) = villager_data
@@ -594,6 +597,15 @@ impl LivingEntity for ZombieVillagerEntity {
 }
 
 impl Mob for ZombieVillagerEntity {
+    /// Sets whether this is a baby zombie villager.
+    ///
+    /// Vanilla parity: the `Zombie.setBaby` a zombie villager inherits. The
+    /// hitbox follows because [`Self::dimensions_for_pose`] reads the flag.
+    fn set_baby(&self, baby: bool) {
+        self.entity_data.lock().zombie.baby.set(baby);
+        self.refresh_dimensions();
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

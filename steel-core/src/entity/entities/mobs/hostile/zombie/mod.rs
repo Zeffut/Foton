@@ -6,6 +6,8 @@
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
@@ -229,6 +231,15 @@ impl Entity for ZombieEntity {
 
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
+    }
+
+    /// Vanilla parity: `Zombie.addAdditionalSaveData`.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        zombie_common::save_zombie(self, self.is_baby(), nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        zombie_common::load_zombie(self, nbt);
     }
 }
 

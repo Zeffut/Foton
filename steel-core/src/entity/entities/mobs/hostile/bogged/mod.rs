@@ -284,11 +284,15 @@ impl Entity for BoggedEntity {
         SoundSource::Hostile
     }
 
+    /// Vanilla parity: `Bogged.addAdditionalSaveData`, whose own contribution
+    /// is the shear flag on top of the shared mob half.
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_mob(nbt);
         nbt.insert(SHEARED_NBT_KEY, self.is_sheared());
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_mob(nbt);
         // Vanilla parity: `getBooleanOr("sheared", false)`.
         self.set_sheared(nbt.byte(SHEARED_NBT_KEY).is_some_and(|value| value != 0));
     }

@@ -902,7 +902,12 @@ impl Entity for SulfurCubeEntity {
         self.player_push(player);
     }
 
+    /// Vanilla parity: `SulfurCube.addAdditionalSaveData`, which is its own
+    /// three keys on top of the cube and ageable halves.
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        cube_common::save_cube(self, nbt);
+        self.save_ageable_mob(nbt);
+
         let (pickup_timer, fuse) = {
             let state = self.state.lock();
             (state.pickup_timer, state.fuse)
@@ -912,6 +917,9 @@ impl Entity for SulfurCubeEntity {
         nbt.insert("fuse", fuse);
     }
 
+    /// Vanilla parity: `SulfurCube.readAdditionalSaveData`, in its order -- the
+    /// three own keys first, then the cube half, whose `setSize` the age read
+    /// after it may override when a saved baby grows up.
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
         let fuse = nbt.int("fuse").unwrap_or(-1);
         {
@@ -921,6 +929,9 @@ impl Entity for SulfurCubeEntity {
         }
         self.set_from_bucket(nbt.byte("from_bucket").is_some_and(|flag| flag != 0));
         self.entity_data.lock().sulfur_cube_mut().max_fuse.set(fuse);
+
+        cube_common::load_cube(self, nbt);
+        self.load_ageable_mob(nbt);
     }
 }
 

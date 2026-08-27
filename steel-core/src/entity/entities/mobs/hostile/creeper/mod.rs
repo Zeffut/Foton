@@ -6,6 +6,8 @@
 use std::sync::Weak;
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
@@ -43,15 +45,19 @@ use steel_utils::BlockPos;
 /// every monster inherits and this one does not override.
 const XP_REWARD: i32 = 5;
 
-/// Ticks the fuse takes to fill.
+/// Ticks the fuse takes to fill, unless the compound says otherwise.
 ///
-/// Vanilla parity: `Creeper.maxSwell`.
-const MAX_SWELL: i32 = 30;
+/// Vanilla parity: the `maxSwell = 30` initialiser, and the default of the
+/// `Fuse` read. Vanilla's field is an `int`, but it is only ever written from a
+/// short, so the narrower type is the actual range.
+const DEFAULT_MAX_SWELL: i16 = 30;
 
 /// Blast radius of an ordinary creeper.
 ///
-/// Vanilla parity: `Creeper.explosionRadius`.
-const EXPLOSION_RADIUS: f32 = 3.0;
+/// Vanilla parity: the `explosionRadius = 3` initialiser, and the default of
+/// the `ExplosionRadius` read. Vanilla's field is an `int`, but it is only ever
+/// written from a byte, so the narrower type is the actual range.
+const DEFAULT_EXPLOSION_RADIUS: i8 = 3;
 
 /// Squared distance within which a creeper starts swelling.
 ///
@@ -75,8 +81,17 @@ pub struct CreeperEntity {
     living_base: LivingEntityBase,
     mob_base: MobBase,
     entity_data: SyncMutex<CreeperEntityData>,
-    /// How full the fuse is, from 0 to [`MAX_SWELL`].
+    /// How full the fuse is, from 0 to [`Self::max_swell`].
     swell: SyncMutex<i32>,
+    /// How full the fuse has to get before this one detonates.
+    ///
+    /// Vanilla parity: `Creeper.maxSwell`, which the `Fuse` key sets.
+    max_swell: SyncMutex<i16>,
+    /// How large a hole this one leaves.
+    ///
+    /// Vanilla parity: `Creeper.explosionRadius`, which the `ExplosionRadius`
+    /// key sets.
+    explosion_radius: SyncMutex<i8>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `CreeperEntity`.
@@ -139,6 +154,8 @@ impl CreeperEntity {
             mob_base,
             entity_data: SyncMutex::new(entity_data),
             swell: SyncMutex::new(0),
+            max_swell: SyncMutex::new(DEFAULT_MAX_SWELL),
+            explosion_radius: SyncMutex::new(DEFAULT_EXPLOSION_RADIUS),
         }
     }
 
@@ -165,6 +182,14 @@ impl CreeperEntity {
         *self.entity_data.lock().is_ignited.get()
     }
 
+    /// Lights the fuse for good.
+    ///
+    /// Vanilla parity: `Creeper.ignite`. There is no way back from it: the
+    /// swell goal stops mattering and the fuse fills on its own.
+    pub fn ignite(&self) {
+        self.entity_data.lock().is_ignited.set(true);
+    }
+
     /// Advances the fuse and detonates when it fills.
     ///
     /// Vanilla parity: the swell block of `Creeper.tick`.
@@ -177,6 +202,7 @@ impl CreeperEntity {
         }
 
         let dir = self.swell_dir();
+        let max_swell = i32::from(*self.max_swell.lock());
         let reached_max = {
             let mut swell = self.swell.lock();
             if dir > 0
@@ -194,8 +220,8 @@ impl CreeperEntity {
             }
 
             *swell = (*swell + dir).max(0);
-            if *swell >= MAX_SWELL {
-                *swell = MAX_SWELL;
+            if *swell >= max_swell {
+                *swell = max_swell;
                 true
             } else {
                 false
@@ -216,6 +242,7 @@ impl CreeperEntity {
             return;
         };
         let multiplier = if self.is_powered() { 2.0 } else { 1.0 };
+        let radius = f32::from(*self.explosion_radius.lock());
         // A creeper is its own cause: vanilla's `getIndirectSourceEntity`
         // returns the source unchanged when it is a living entity.
         world.explode(
@@ -223,7 +250,7 @@ impl CreeperEntity {
                 Some(self.id()),
                 Some(self.id()),
                 None,
-                EXPLOSION_RADIUS * multiplier,
+                radius * multiplier,
                 false,
                 // Vanilla `ExplosionInteraction.MOB`: mob griefing decides whether
                 // blocks break at all, and the decay rule whether their drops thin.
@@ -335,6 +362,34 @@ impl Entity for CreeperEntity {
 
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
+    }
+
+    /// Vanilla parity: `Creeper.addAdditionalSaveData`, whose own contribution
+    /// is the charge, the fuse length, the blast radius and the hand-lit flag.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_mob(nbt);
+        nbt.insert("powered", i8::from(self.is_powered()));
+        nbt.insert("Fuse", *self.max_swell.lock());
+        nbt.insert("ExplosionRadius", *self.explosion_radius.lock());
+        nbt.insert("ignited", i8::from(self.is_ignited()));
+    }
+
+    /// Vanilla parity: `Creeper.readAdditionalSaveData`. A missing `ignited`
+    /// leaves the creeper unlit rather than putting an already lit fuse out,
+    /// which is why this only ever calls [`CreeperEntity::ignite`].
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_mob(nbt);
+        self.entity_data
+            .lock()
+            .is_powered
+            .set(nbt.byte("powered").is_some_and(|value| value != 0));
+        *self.max_swell.lock() = nbt.short("Fuse").unwrap_or(DEFAULT_MAX_SWELL);
+        *self.explosion_radius.lock() = nbt
+            .byte("ExplosionRadius")
+            .unwrap_or(DEFAULT_EXPLOSION_RADIUS);
+        if nbt.byte("ignited").is_some_and(|value| value != 0) {
+            self.ignite();
+        }
     }
 
     /// Vanilla parity: `Creeper.thunderHit`, which takes the damage and the

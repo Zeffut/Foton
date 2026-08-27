@@ -14,6 +14,8 @@
 use std::sync::Arc;
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_registry::entity_type::EntityDimensions;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::{sound_events, vanilla_attributes};
@@ -231,6 +233,32 @@ pub(super) fn apply_size<C: CubeLike + ?Sized>(cube: &C, size: i32, update_healt
     if update_health {
         cube.set_health(cube.get_max_health());
     }
+}
+
+/// Saves what `AbstractCubeMob` owns.
+///
+/// Vanilla parity: `AbstractCubeMob.addAdditionalSaveData`. The size is stored
+/// one lower than it is used, so a saved `Size:0` is vanilla's smallest cube.
+pub(super) fn save_cube<C: CubeLike + ?Sized>(cube: &C, nbt: &mut NbtCompound) {
+    cube.save_mob(nbt);
+    nbt.insert("Size", cube.size() - 1);
+    nbt.insert(
+        "wasOnGround",
+        i8::from(cube.cube_state().lock().was_on_ground),
+    );
+}
+
+/// Loads what `AbstractCubeMob` owns.
+///
+/// Vanilla parity: `AbstractCubeMob.readAdditionalSaveData`, in its order. The
+/// size goes on before the shared mob data because `setSize` rewrites the
+/// health and speed attributes, and anything the compound says about them has
+/// to land after that rather than be overwritten by it.
+pub(super) fn load_cube<C: CubeLike + ?Sized>(cube: &C, nbt: BorrowedNbtCompoundView<'_, '_>) {
+    cube.set_size(nbt.int("Size").unwrap_or(0) + 1, false);
+    cube.load_mob(nbt);
+    cube.cube_state().lock().was_on_ground =
+        nbt.byte("wasOnGround").is_some_and(|value| value != 0);
 }
 
 /// Returns this cube's hitbox.

@@ -10,6 +10,8 @@
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
@@ -224,6 +226,12 @@ impl DrownedEntity {
             entity_data: SyncMutex::new(entity_data),
             searching_for_land: SyncMutex::new(false),
         }
+    }
+
+    /// Returns whether this drowned is a baby.
+    #[must_use]
+    pub fn is_baby(&self) -> bool {
+        *self.entity_data.lock().zombie().baby.get()
     }
 
     /// Returns whether the drowned wants to swim rather than walk.
@@ -581,6 +589,15 @@ impl Entity for DrownedEntity {
     fn update_swimming(&self) {
         self.set_shared_swimming(self.is_under_water() && self.wants_to_swim());
     }
+
+    /// Vanilla parity: `Drowned` adds nothing to `Zombie.addAdditionalSaveData`.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        zombie_common::save_zombie(self, self.is_baby(), nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        zombie_common::load_zombie(self, nbt);
+    }
 }
 
 impl LivingEntity for DrownedEntity {
@@ -658,6 +675,15 @@ impl LivingEntity for DrownedEntity {
 }
 
 impl Mob for DrownedEntity {
+    /// Sets whether this drowned is a baby.
+    ///
+    /// Vanilla parity: the `Zombie.setBaby` a drowned inherits. Like its zombie
+    /// and husk siblings Steel only syncs the flag so far, without vanilla's
+    /// movement-speed modifier.
+    fn set_baby(&self, baby: bool) {
+        self.entity_data.lock().zombie_mut().baby.set(baby);
+    }
+
     /// Vanilla parity: `Drowned` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true
@@ -665,8 +691,7 @@ impl Mob for DrownedEntity {
 
     /// Vanilla parity: `Zombie.canHoldItem`.
     fn can_hold_item(&self, item_stack: &ItemStack) -> bool {
-        let is_baby = *self.entity_data.lock().zombie().baby.get();
-        zombie_common::can_hold_item(self, is_baby, item_stack)
+        zombie_common::can_hold_item(self, self.is_baby(), item_stack)
     }
 
     /// Vanilla parity: `Drowned.wantsToPickUp`, which leaves spears where they

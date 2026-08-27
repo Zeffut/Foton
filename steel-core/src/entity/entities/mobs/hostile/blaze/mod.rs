@@ -13,6 +13,8 @@
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
@@ -540,6 +542,16 @@ impl Entity for BlazeEntity {
     /// than the entity's own burning state.
     fn is_on_fire(&self) -> bool {
         self.is_charged()
+    }
+
+    /// Vanilla parity: `Blaze` inherits `Mob.addAdditionalSaveData` unchanged,
+    /// so the shared half is the whole of it.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_mob(nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_mob(nbt);
     }
 }
 
