@@ -10,6 +10,7 @@ use steel_registry::data_components::vanilla_components::{
 use glam::DVec3;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::BlockRef;
+use steel_registry::blocks::properties::Direction;
 use steel_registry::consume_effect::{
     ApplyStatusEffectsConsumeEffect, ClearAllStatusEffectsConsumeEffect, ConsumeEffectData,
     PlaySoundConsumeEffect, RemoveStatusEffectsConsumeEffect, TeleportRandomlyConsumeEffect,
@@ -295,6 +296,55 @@ pub trait SignApplicator {
     }
 }
 
+/// The block a player aimed a container item at.
+///
+/// Vanilla parity: the two fields of `BlockHitResult` that
+/// `DispensibleContainerItem.emptyContents` reads. A `None` hit is vanilla's
+/// null `hitResult`: it is what a dispenser passes, and what switches off both
+/// the sneak check and the one-step retry at the neighboring block.
+#[derive(Clone, Copy)]
+pub struct BucketHit {
+    /// The block that was clicked.
+    pub block_pos: BlockPos,
+    /// The face of it that was clicked.
+    pub direction: Direction,
+}
+
+/// An item a dispenser can empty with nobody holding it.
+///
+/// Vanilla parity: the `DispensibleContainerItem` interface, implemented by
+/// `BucketItem` -- and so by `MobBucketItem` -- and by `SolidBucketItem`. Its
+/// whole point is the nullable user: the behavior registered for every filled
+/// bucket calls `emptyContents(null, ..)`, so nothing reached from here may ask
+/// for a player.
+pub trait DispensibleContainerItem {
+    /// Empties this container at `pos`, returning whether anything happened.
+    ///
+    /// Vanilla parity: `DispensibleContainerItem.emptyContents`.
+    fn empty_contents(
+        &self,
+        user: Option<&Player>,
+        world: &Arc<World>,
+        pos: BlockPos,
+        hit: Option<BucketHit>,
+    ) -> bool;
+
+    /// Releases whatever the container carries beyond its fluid.
+    ///
+    /// Vanilla parity: `DispensibleContainerItem.checkExtraContent`, whose only
+    /// override is the one that lets the fish out of a mob bucket. Vanilla runs
+    /// it at the position `emptyContents` was asked for, not the one the fluid
+    /// may have retried into.
+    fn check_extra_content(
+        &self,
+        _user: Option<&Player>,
+        _world: &Arc<World>,
+        _stack: &ItemStack,
+        _pos: BlockPos,
+    ) {
+    }
+}
+
 /// Trait defining the behavior of an item.
 ///
 /// This trait handles dynamic/functional aspects of items:
@@ -435,6 +485,16 @@ pub trait ItemBehavior: Send + Sync {
     /// in `SignBlock.useItemOn`. Steel has no class hierarchy to ask, so a
     /// behavior that applies to signs says so here.
     fn as_sign_applicator(&self) -> Option<&dyn SignApplicator> {
+        None
+    }
+
+    /// Returns this behavior as a dispensible container, when it is one.
+    ///
+    /// Vanilla parity: the `(DispensibleContainerItem)dispensed.getItem()` cast
+    /// the filled-bucket dispense behavior opens with. Vanilla's cast cannot
+    /// fail because only container items are registered there; Steel asks
+    /// instead of assuming, and a `None` falls back to throwing the item.
+    fn as_dispensible_container(&self) -> Option<&dyn DispensibleContainerItem> {
         None
     }
 

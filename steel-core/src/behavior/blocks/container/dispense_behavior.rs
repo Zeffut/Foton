@@ -22,10 +22,13 @@ use steel_registry::{level_events, sound_events, vanilla_blocks, vanilla_entitie
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, Direction, Downcast as _, Identifier, WorldAabb};
 
-use crate::behavior::BLOCK_BEHAVIORS;
 use crate::behavior::blocks::FireBlock;
-use crate::behavior::blocks::container::dispenser_block::spawn_dispensed_item;
+use crate::behavior::blocks::container::dispenser_block::{
+    play_dispense_effects, spawn_dispensed_item,
+};
 use crate::behavior::items::SpawnEggItem;
+use crate::behavior::{BLOCK_BEHAVIORS, ITEM_BEHAVIORS, pickup_waterlogged_block};
+use crate::block_entity::entities::DispenserBlockEntity;
 use crate::entity::entities::{ArrowEntity, PrimedTntEntity, SheepEntity, SulfurCubeEntity};
 use crate::entity::{Entity, Projectile as _, next_entity_id};
 use crate::world::World;
@@ -33,8 +36,8 @@ use crate::world::game_event::GameEventContext;
 
 /// Where the dispensing happens.
 ///
-/// Vanilla parity: `BlockSource`, minus the block entity, which Steel's
-/// behaviors do not need yet.
+/// Vanilla parity: `BlockSource`. The facing is unpacked from the state, which
+/// vanilla's behaviors read out of it themselves.
 pub struct DispenseSource<'a> {
     /// The world the dispenser lives in.
     pub world: &'a Arc<World>,
@@ -42,6 +45,12 @@ pub struct DispenseSource<'a> {
     pub pos: BlockPos,
     /// The face it points at.
     pub facing: Direction,
+    /// The nine slots behind the face.
+    ///
+    /// Vanilla parity: `BlockSource.blockEntity`, which only
+    /// `consumeWithRemainder` reads -- it is how the empty bucket a water
+    /// bucket leaves gets back inside the dispenser instead of on the floor.
+    pub block_entity: &'a DispenserBlockEntity,
 }
 
 impl DispenseSource<'_> {
@@ -432,6 +441,94 @@ impl DispenseItemBehavior for SulfurCubeDispenseBehavior {
     }
 }
 
+/// Empties a bucket that carries something in front of the dispenser.
+///
+/// Vanilla parity: the anonymous `filledBucketBehavior` of
+/// `DispenseItemBehavior.bootStrap`, shared by every bucket with contents --
+/// water, lava, powder snow and all six mob buckets. This is the half of a
+/// redstone farm a dispenser could not do at all: `emptyContents` takes a
+/// nullable user precisely so that this call site can pass nothing.
+struct FilledBucketDispenseBehavior;
+
+impl DispenseItemBehavior for FilledBucketDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, stack: ItemStack) -> DispenseOutcome {
+        let behavior = ITEM_BEHAVIORS.get_behavior(stack.item());
+        let Some(container) = behavior.as_dispensible_container() else {
+            return DefaultDispenseBehavior.execute(source, stack);
+        };
+
+        let target = source.pos.relative(source.facing);
+        if !container.empty_contents(None, source.world, target, None) {
+            return DefaultDispenseBehavior.execute(source, stack);
+        }
+
+        // Vanilla reads the stack here, before `consumeWithRemainder` shrinks
+        // it, which is how the fish keeps the name the bucket was carrying.
+        container.check_extra_content(None, source.world, &stack, target);
+        DispenseOutcome::acted(consume_with_remainder(
+            source,
+            stack,
+            ItemStack::new(&vanilla_items::BUCKET),
+        ))
+    }
+}
+
+/// Fills an empty bucket from whatever is in front of the dispenser.
+///
+/// Vanilla parity: the `Items.BUCKET` entry of
+/// `DispenseItemBehavior.bootStrap`. Nothing here plays the pickup sound: the
+/// hand-held path does, but the dispenser fires only the game event.
+struct EmptyBucketDispenseBehavior;
+
+impl DispenseItemBehavior for EmptyBucketDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, stack: ItemStack) -> DispenseOutcome {
+        let target = source.pos.relative(source.facing);
+        let state = source.world.get_block_state(target);
+        let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
+
+        // The waterlogging fallback is the same one the hand-held empty bucket
+        // uses; without it a dispenser could not drain a block a player can.
+        let picked = behavior
+            .pickup_block(source.world, target, state, None)
+            .or_else(|| pickup_waterlogged_block(behavior, source.world, target, state, None));
+        let Some(result) = picked.filter(|result| !result.filled_bucket.is_empty()) else {
+            return DefaultDispenseBehavior.execute(source, stack);
+        };
+
+        source.world.game_event(
+            &vanilla_game_events::FLUID_PICKUP,
+            target,
+            &GameEventContext::new(None, None),
+        );
+        DispenseOutcome::acted(consume_with_remainder(source, stack, result.filled_bucket))
+    }
+}
+
+/// Spends one item and finds a home for what it leaves behind.
+///
+/// Vanilla parity: `DefaultDispenseItemBehavior.consumeWithRemainder`. The
+/// remainder only takes the dispensed slot when that slot is now empty;
+/// otherwise it goes into the block's own inventory, and out onto the floor
+/// when there is no room, with a second clack and puff of smoke.
+fn consume_with_remainder(
+    source: &DispenseSource<'_>,
+    mut dispensed: ItemStack,
+    remainder: ItemStack,
+) -> ItemStack {
+    dispensed.shrink(1);
+    if dispensed.is_empty() {
+        return remainder;
+    }
+
+    // Vanilla parity: `addToInventoryOrDispense`.
+    let leftover = source.block_entity.insert_item(remainder);
+    if !leftover.is_empty() {
+        spawn_dispensed_item(source.world, source.pos, source.facing, leftover);
+        play_dispense_effects(source.world, source.pos, source.facing);
+    }
+    dispensed
+}
+
 /// Throws one item out of the dispenser.
 ///
 /// Vanilla parity: `DefaultDispenseItemBehavior`, which is what an item with
@@ -488,8 +585,35 @@ static DISPENSE_BEHAVIORS: LazyLock<FxHashMap<Identifier, Box<dyn DispenseItemBe
             vanilla_items::SHEARS.key.clone(),
             Box::new(ShearsDispenseBehavior),
         );
+        for bucket in filled_buckets() {
+            behaviors.insert(bucket.key.clone(), Box::new(FilledBucketDispenseBehavior));
+        }
+        behaviors.insert(
+            vanilla_items::BUCKET.key.clone(),
+            Box::new(EmptyBucketDispenseBehavior),
+        );
         behaviors
     });
+
+/// Every bucket that carries something.
+///
+/// Vanilla parity: the ten `registerBehavior(.., filledBucketBehavior)` lines of
+/// `DispenseItemBehavior.bootStrap`, which is also the full list of vanilla
+/// items implementing `DispensibleContainerItem`.
+fn filled_buckets() -> [ItemRef; 10] {
+    [
+        &vanilla_items::LAVA_BUCKET,
+        &vanilla_items::WATER_BUCKET,
+        &vanilla_items::POWDER_SNOW_BUCKET,
+        &vanilla_items::SALMON_BUCKET,
+        &vanilla_items::COD_BUCKET,
+        &vanilla_items::PUFFERFISH_BUCKET,
+        &vanilla_items::TROPICAL_FISH_BUCKET,
+        &vanilla_items::AXOLOTL_BUCKET,
+        &vanilla_items::SULFUR_CUBE_BUCKET,
+        &vanilla_items::TADPOLE_BUCKET,
+    ]
+}
 
 /// Feeds a block to a sulfur cube standing in front of the dispenser.
 ///
@@ -563,11 +687,21 @@ fn default_dispense_behavior_for(stack: &ItemStack) -> &'static dyn DispenseItem
 
 #[cfg(test)]
 mod tests {
+    use steel_registry::blocks::BlockRef;
     use steel_registry::init_vanilla_registry;
 
     use super::*;
     use crate::behavior::init_behaviors;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    /// The nine slots a `DispenseSource` needs behind it.
+    fn dispenser_at(world: &Arc<World>, pos: BlockPos) -> DispenserBlockEntity {
+        DispenserBlockEntity::new(
+            Arc::downgrade(world),
+            pos,
+            vanilla_blocks::DISPENSER.default_state(),
+        )
+    }
 
     #[test]
     fn every_item_steel_handles_specially_is_registered() {
@@ -694,10 +828,12 @@ mod tests {
             .try_add_entity(Arc::clone(&pig) as Arc<dyn Entity>)
             .expect("the test world accepts a pig");
 
+        let block_entity = dispenser_at(&world, BlockPos::new(8, 64, 7));
         let source = DispenseSource {
             world: &world,
             pos: BlockPos::new(8, 64, 7),
             facing: Direction::South,
+            block_entity: &block_entity,
         };
         let mut stack = ItemStack::new(&vanilla_items::SADDLE);
         stack.set_count(2);
@@ -743,10 +879,12 @@ mod tests {
         let world = fresh_test_world("dispenser_spawn_egg");
         insert_ready_full_chunk(&world, steel_utils::ChunkPos::new(0, 0));
 
+        let block_entity = dispenser_at(&world, BlockPos::new(8, 64, 7));
         let source = DispenseSource {
             world: &world,
             pos: BlockPos::new(8, 64, 7),
             facing: Direction::South,
+            block_entity: &block_entity,
         };
         let mut stack = ItemStack::new(&vanilla_items::COW_SPAWN_EGG);
         stack.set_count(2);
@@ -769,10 +907,12 @@ mod tests {
     #[test]
     fn the_dispense_position_sits_in_front_of_the_face() {
         let world = fresh_test_world("dispense_position");
+        let block_entity = dispenser_at(&world, BlockPos::new(10, 64, 10));
         let source = DispenseSource {
             world: &world,
             pos: BlockPos::new(10, 64, 10),
             facing: Direction::East,
+            block_entity: &block_entity,
         };
 
         let position = source.dispense_position(DISPENSE_OFFSET, DVec3::ZERO);
@@ -780,5 +920,198 @@ mod tests {
         assert!((position.x - 11.2).abs() < 1e-9, "x was {}", position.x);
         assert!((position.y - 64.5).abs() < 1e-9);
         assert!((position.z - 10.5).abs() < 1e-9);
+    }
+
+    /// The dispenser and the block in front of it, in a chunk that is loaded.
+    struct BucketBench {
+        world: Arc<World>,
+        block_entity: DispenserBlockEntity,
+        pos: BlockPos,
+        target: BlockPos,
+    }
+
+    impl BucketBench {
+        fn new(key: &'static str) -> Self {
+            init_vanilla_registry();
+            init_behaviors();
+            let world = fresh_test_world(key);
+            insert_ready_full_chunk(&world, steel_utils::ChunkPos::new(0, 0));
+            let pos = BlockPos::new(8, 64, 7);
+            let block_entity = dispenser_at(&world, pos);
+            Self {
+                world,
+                block_entity,
+                pos,
+                target: BlockPos::new(8, 64, 8),
+            }
+        }
+
+        fn source(&self) -> DispenseSource<'_> {
+            DispenseSource {
+                world: &self.world,
+                pos: self.pos,
+                facing: Direction::South,
+                block_entity: &self.block_entity,
+            }
+        }
+
+        /// Runs the whole routing, not just the behavior, so a bucket that
+        /// stopped being registered fails here too.
+        fn dispense(&self, stack: ItemStack) -> ItemStack {
+            let source = self.source();
+            match dispense_behavior_for(&stack).execute(&source, stack) {
+                DispenseOutcome::Acted { remainder, .. } => remainder,
+                DispenseOutcome::Failed(_) => panic!("the dispenser refused the bucket"),
+            }
+        }
+
+        fn block_in_front(&self) -> BlockRef {
+            self.world.get_block_state(self.target).get_block()
+        }
+    }
+
+    /// Vanilla parity: the `filledBucketBehavior` of
+    /// `DispenseItemBehavior.bootStrap`. A dispenser that cannot place water is
+    /// half the redstone farms in the game; Steel threw the bucket on the floor.
+    #[test]
+    fn a_dispensed_water_bucket_places_water_and_keeps_the_empty_bucket() {
+        let bench = BucketBench::new("dispenser_water_bucket");
+        assert!(
+            bench.block_in_front() == &vanilla_blocks::AIR,
+            "the bench starts with nothing in front of the dispenser"
+        );
+
+        let remainder = bench.dispense(ItemStack::new(&vanilla_items::WATER_BUCKET));
+
+        assert_eq!(bench.block_in_front(), &vanilla_blocks::WATER);
+        assert!(
+            remainder.is(&vanilla_items::BUCKET),
+            "the slot keeps what the bucket became"
+        );
+        assert_eq!(remainder.count(), 1);
+    }
+
+    /// Vanilla parity: `DefaultDispenseItemBehavior.consumeWithRemainder`, which
+    /// only hands the remainder back through the dispensed slot once that slot
+    /// has emptied; anything left over goes into the block's own inventory.
+    ///
+    /// No bucket ever reaches the second arm -- every filled bucket stacks to
+    /// one, so shrinking it always empties the slot -- but the next behavior
+    /// that hands back a remainder will, and this is the only thing that calls
+    /// `DispenserBlockEntity::insert_item` at all.
+    #[test]
+    fn a_remainder_goes_into_the_block_when_the_slot_is_still_full() {
+        init_vanilla_registry();
+        let world = fresh_test_world("dispenser_consume_with_remainder");
+        let pos = BlockPos::new(8, 64, 7);
+        let block_entity = dispenser_at(&world, pos);
+        block_entity.set_item(0, ItemStack::with_count(&vanilla_items::STONE, 3));
+        let source = DispenseSource {
+            world: &world,
+            pos,
+            facing: Direction::South,
+            block_entity: &block_entity,
+        };
+
+        let kept = consume_with_remainder(
+            &source,
+            block_entity.get_item(0),
+            ItemStack::new(&vanilla_items::DIRT),
+        );
+
+        assert!(kept.is(&vanilla_items::STONE) && kept.count() == 2);
+        assert!(
+            block_entity.get_item(1).is(&vanilla_items::DIRT),
+            "the remainder went back into the block, not onto the floor"
+        );
+    }
+
+    /// Vanilla parity: the `Items.BUCKET` entry of
+    /// `DispenseItemBehavior.bootStrap`, the other half of a water farm.
+    #[test]
+    fn a_dispenser_aimed_at_water_fills_its_empty_bucket() {
+        let bench = BucketBench::new("dispenser_empty_bucket");
+        assert!(
+            bench.world.set_block(
+                bench.target,
+                vanilla_blocks::WATER.default_state(),
+                UpdateFlags::UPDATE_ALL,
+            ),
+            "the water the dispenser is meant to drink has to be there"
+        );
+
+        let remainder = bench.dispense(ItemStack::new(&vanilla_items::BUCKET));
+
+        assert!(
+            bench.block_in_front() == &vanilla_blocks::AIR,
+            "the source block is gone"
+        );
+        assert!(remainder.is(&vanilla_items::WATER_BUCKET));
+    }
+
+    /// Vanilla parity: `SolidBucketItem.emptyContents`. Powder snow is a block,
+    /// not a fluid, and reaches the same registered behavior.
+    #[test]
+    fn a_dispensed_powder_snow_bucket_lays_powder_snow() {
+        let bench = BucketBench::new("dispenser_powder_snow_bucket");
+
+        let remainder = bench.dispense(ItemStack::new(&vanilla_items::POWDER_SNOW_BUCKET));
+
+        assert_eq!(bench.block_in_front(), &vanilla_blocks::POWDER_SNOW);
+        assert!(remainder.is(&vanilla_items::BUCKET));
+    }
+
+    /// Vanilla parity: `MobBucketItem.checkExtraContent`, which the dispense
+    /// behavior calls right after `emptyContents`. Without it the water lands
+    /// and the fish stays in a bucket that no longer exists.
+    #[test]
+    fn a_dispensed_axolotl_bucket_lets_the_axolotl_out() {
+        use crate::entity::init_entities;
+
+        let bench = BucketBench::new("dispenser_axolotl_bucket");
+        init_entities();
+
+        let remainder = bench.dispense(ItemStack::new(&vanilla_items::AXOLOTL_BUCKET));
+
+        assert_eq!(bench.block_in_front(), &vanilla_blocks::WATER);
+        assert!(remainder.is(&vanilla_items::BUCKET));
+        let axolotls = bench
+            .world
+            .get_entities_in_aabb_matching(&block_aabb(bench.target), |entity| {
+                entity.entity_type() == &vanilla_entities::AXOLOTL
+            });
+        assert_eq!(
+            axolotls.len(),
+            1,
+            "exactly one axolotl, where the water went"
+        );
+    }
+
+    /// Vanilla parity: the `defaultDispenseItemBehavior.dispense` arm of the
+    /// filled-bucket behavior. A bucket with nowhere to empty is thrown, and the
+    /// dispenser does not quietly swallow it.
+    #[test]
+    fn a_water_bucket_with_nowhere_to_go_is_thrown_instead() {
+        let bench = BucketBench::new("dispenser_blocked_water_bucket");
+        assert!(bench.world.set_block(
+            bench.target,
+            vanilla_blocks::STONE.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        ));
+
+        let remainder = bench.dispense(ItemStack::new(&vanilla_items::WATER_BUCKET));
+
+        assert!(
+            bench.block_in_front() == &vanilla_blocks::STONE,
+            "the stone is untouched"
+        );
+        assert!(remainder.is_empty(), "the only bucket left the block");
+        let around_the_face = WorldAabb::new(6.0, 62.0, 6.0, 11.0, 67.0, 11.0);
+        let thrown = bench
+            .world
+            .get_entities_in_aabb_matching(&around_the_face, |entity| {
+                entity.entity_type() == &vanilla_entities::ITEM
+            });
+        assert_eq!(thrown.len(), 1, "the bucket is on the floor, not destroyed");
     }
 }

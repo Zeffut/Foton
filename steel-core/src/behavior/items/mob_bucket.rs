@@ -10,16 +10,17 @@ use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_game_events;
 use steel_utils::BlockPos;
 
-use crate::behavior::item_utils::create_filled_result;
-use crate::behavior::{InteractionResult, ItemBehavior, UseItemContext};
-use crate::entity::bucketable::read_bucket_entity_data;
-use crate::entity::{ENTITIES, EntitySpawnReason, next_entity_id};
-use crate::world::game_event::GameEventContext;
-
-use super::bucket::{
-    EmptySound, filled_bucket_success_stack, filled_bucket_target, play_empty_sound_and_event,
-    use_filled_bucket,
+use crate::behavior::{
+    BucketHit, DispensibleContainerItem, InteractionResult, ItemBehavior, UseItemContext,
 };
+use crate::entity::bucketable::read_bucket_entity_data;
+use crate::entity::{ENTITIES, Entity, EntitySpawnReason, next_entity_id};
+use crate::player::Player;
+use crate::world::World;
+use crate::world::game_event::GameEventContext;
+use steel_registry::item_stack::ItemStack;
+
+use super::bucket::{EmptySound, empty_contents, play_empty_sound_and_event, use_filled_bucket};
 
 /// A bucket that carries one mob.
 ///
@@ -59,10 +60,8 @@ impl MobBucketItem {
         }
     }
 
-    /// Vanilla parity: `MobBucketItem.spawn` plus the `ENTITY_PLACE` game event
-    /// its `checkExtraContent` fires alongside.
-    fn spawn(&self, context: &UseItemContext<'_>, pos: BlockPos) {
-        let world = context.world;
+    /// Vanilla parity: `MobBucketItem.spawn`.
+    fn spawn(&self, world: &Arc<World>, stack: &ItemStack, pos: BlockPos) {
         let (x, y, z) = pos.get_bottom_center();
         let Some(entity) = ENTITIES.create(
             self.mob_type,
@@ -81,56 +80,58 @@ impl MobBucketItem {
         // `MobBucketItem.spawn`, which replays what the bucket saved before the
         // mob joins the world.
         if let Some(bucketable) = entity.as_bucketable() {
-            context.inv.with_item(|item| {
-                read_bucket_entity_data(item, |tag| bucketable.load_from_bucket_tag(tag));
-            });
+            read_bucket_entity_data(stack, |tag| bucketable.load_from_bucket_tag(tag));
             bucketable.set_from_bucket(true);
         }
 
         if let Err(error) = world.try_add_entity(entity) {
             log::warn!("Failed to spawn bucketed mob: {error}");
-            return;
         }
-
-        world.game_event(
-            &vanilla_game_events::ENTITY_PLACE,
-            pos,
-            &GameEventContext::new(Some(context.player), None),
-        );
-    }
-
-    /// Vanilla parity: the `content == Fluids.EMPTY` short-circuit of
-    /// `MobBucketItem.emptyContents`, which succeeds on the sound alone.
-    fn empty_without_fluid(
-        &self,
-        context: &mut UseItemContext,
-        empty_sound: EmptySound,
-    ) -> InteractionResult {
-        let target = match filled_bucket_target(context) {
-            Ok(target) => target,
-            Err(result) => return result,
-        };
-        // Vanilla's `placePos` is the offset block unless the content is water,
-        // which this branch never is.
-        let pos = target.direction.relative(target.clicked_pos);
-
-        play_empty_sound_and_event(context, pos, false, empty_sound);
-        self.spawn(context, pos);
-        let result_stack = filled_bucket_success_stack(context);
-        create_filled_result(context, result_stack, true);
-        InteractionResult::Success
     }
 }
 
 impl ItemBehavior for MobBucketItem {
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
+        use_filled_bucket(self, self.content, context)
+    }
+
+    fn as_dispensible_container(&self) -> Option<&dyn DispensibleContainerItem> {
+        Some(self)
+    }
+}
+
+impl DispensibleContainerItem for MobBucketItem {
+    /// Vanilla parity: `MobBucketItem.emptyContents`, whose `content ==
+    /// Fluids.EMPTY` arm succeeds on the sound alone.
+    fn empty_contents(
+        &self,
+        user: Option<&Player>,
+        world: &Arc<World>,
+        pos: BlockPos,
+        hit: Option<BucketHit>,
+    ) -> bool {
         let empty_sound = EmptySound::Mob(self.empty_sound);
         let Some(fluid_block) = self.content else {
-            return self.empty_without_fluid(context, empty_sound);
+            play_empty_sound_and_event(world, user, pos, false, empty_sound);
+            return true;
         };
+        empty_contents(fluid_block, user, world, pos, hit, empty_sound)
+    }
 
-        use_filled_bucket(fluid_block, context, empty_sound, |used_on, pos| {
-            self.spawn(used_on, pos);
-        })
+    /// Vanilla parity: `MobBucketItem.checkExtraContent`, the reason a fish
+    /// bucket is worth anything at all.
+    fn check_extra_content(
+        &self,
+        user: Option<&Player>,
+        world: &Arc<World>,
+        stack: &ItemStack,
+        pos: BlockPos,
+    ) {
+        self.spawn(world, stack, pos);
+        world.game_event(
+            &vanilla_game_events::ENTITY_PLACE,
+            pos,
+            &GameEventContext::new(user.map(|player| player as &dyn Entity), None),
+        );
     }
 }

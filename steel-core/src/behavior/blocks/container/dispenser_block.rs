@@ -190,7 +190,7 @@ pub(super) fn spawn_dispensed_item(
 ///
 /// Vanilla parity: the two `levelEvent` calls of
 /// `DefaultDispenseItemBehavior.dispense`.
-fn play_dispense_effects(world: &Arc<World>, pos: BlockPos, facing: Direction) {
+pub(super) fn play_dispense_effects(world: &Arc<World>, pos: BlockPos, facing: Direction) {
     world.level_event(level_events::SOUND_DISPENSER_DISPENSE, pos, 0, None);
     world.level_event(
         level_events::PARTICLES_SHOOT_SMOKE,
@@ -246,11 +246,10 @@ impl DropperBlock {
 /// say is thrown, which is also what vanilla does.
 ///
 /// TODO: Steel covers arrows, TNT, bone meal, flint and steel, shears,
-/// equipment, spawn eggs and sulfur cubes. Vanilla also places a filled
-/// bucket's contents and picks a fluid up with an empty one, launches boats and
-/// minecarts, plants a wither skull or a carved pumpkin, opens a shulker box,
-/// fills a bottle, charges a respawn anchor, waxes with a honeycomb, brushes an
-/// armadillo, and makes mud with a water bottle.
+/// equipment, spawn eggs, sulfur cubes and buckets. Vanilla also launches boats
+/// and minecarts, plants a wither skull or a carved pumpkin, opens a shulker
+/// box, fills a bottle, charges a respawn anchor, waxes with a honeycomb,
+/// brushes an armadillo, and makes mud with a water bottle.
 fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
     let Some(block_entity) = world.get_block_entity(pos) else {
         return;
@@ -270,7 +269,12 @@ fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
     }
 
     let facing = state.get_value(FACING);
-    let source = DispenseSource { world, pos, facing };
+    let source = DispenseSource {
+        world,
+        pos,
+        facing,
+        block_entity: dispenser,
+    };
     let behavior = dispense_behavior_for(&stack);
 
     match behavior.execute(&source, stack) {

@@ -82,7 +82,8 @@ pub use context::{
 };
 pub use fluid::{FLUID_BEHAVIORS, FluidBehaviorRegistry};
 pub use item::{
-    ItemBehavior, ItemBehaviorRegistry, ItemUseAnimation, SignApplicator, potion_effects,
+    BucketHit, DispensibleContainerItem, ItemBehavior, ItemBehaviorRegistry, ItemUseAnimation,
+    SignApplicator, potion_effects,
 };
 use item_behaviors::register_item_behaviors;
 pub use items::{
