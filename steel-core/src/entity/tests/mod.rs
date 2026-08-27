@@ -1182,6 +1182,7 @@ fn villager_job_site(villager: &VillagerEntity) -> Option<BlockPos> {
 
 mod brains;
 mod damage;
+mod daylight_burning;
 mod entity_ids;
 mod equine;
 mod equipment_and_freezing;
