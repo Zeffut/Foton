@@ -32,7 +32,8 @@ use steel_registry::villager_profession::VillagerProfessionRef;
 use steel_registry::villager_type::VillagerTypeRef;
 use steel_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, sound_events,
-    vanilla_mob_effects, vanilla_poi_types, vanilla_villager_professions, vanilla_villager_types,
+    vanilla_items, vanilla_mob_effects, vanilla_poi_types, vanilla_villager_professions,
+    vanilla_villager_types,
 };
 use steel_utils::entity_events::EntityStatus;
 use steel_utils::locks::SyncMutex;
@@ -86,6 +87,14 @@ const HALF_DAY_TICKS: i64 = 12_000;
 const RESTOCK_COOLDOWN_TICKS: i64 = 2_400;
 /// Vanilla parity: the `2` restocks a villager is allowed each day.
 const MAX_RESTOCKS_PER_DAY: i32 = 2;
+/// Vanilla parity: the `countItem(Items.BREAD) <= 36` of `makeBread`.
+const MAX_BREAD_BEFORE_BAKING: i32 = 36;
+/// Vanilla parity: `makeBread`'s `maxAmountOfBreadToMake`.
+const MAX_BREAD_PER_BAKE: i32 = 3;
+/// Vanilla parity: `makeBread`'s `amountOfWheatNeededToCraftOneBread`.
+const WHEAT_PER_BREAD: i32 = 3;
+/// Vanilla parity: the `0.5F` offset the bread it cannot carry is dropped at.
+const BREAD_DROP_OFFSET: f64 = 0.5;
 
 /// Vanilla parity: `Villager.FOOD_POINTS`.
 fn food_points(stack: &ItemStack) -> i32 {
@@ -618,6 +627,32 @@ impl VillagerEntity {
     #[must_use]
     pub fn wants_more_food(&self) -> bool {
         self.food_points_in_inventory() < BREEDING_FOOD_THRESHOLD
+    }
+
+    /// Bakes bread out of the wheat this villager is carrying.
+    ///
+    /// Vanilla parity: `WorkAtComposter.makeBread`, which is the only thing that
+    /// turns a farmer's harvest into food a village can eat and breed on. Bread
+    /// it cannot carry is dropped rather than lost.
+    pub fn make_bread(&self) {
+        let leftover = {
+            let mut inventory = self.inventory.lock();
+            if inventory.count_item(&vanilla_items::BREAD) > MAX_BREAD_BEFORE_BAKING {
+                return;
+            }
+            let wheat = inventory.count_item(&vanilla_items::WHEAT);
+            let loaves = MAX_BREAD_PER_BAKE.min(wheat / WHEAT_PER_BREAD);
+            if loaves == 0 {
+                return;
+            }
+            inventory.remove_item_type(&vanilla_items::WHEAT, loaves * WHEAT_PER_BREAD);
+            let mut bread = ItemStack::with_count(&vanilla_items::BREAD, loaves);
+            inventory.add(&mut bread);
+            bread
+        };
+        if !leftover.is_empty() {
+            self.spawn_at_location(leftover, BREAD_DROP_OFFSET);
+        }
     }
 
     /// Vanilla parity: `Villager.hasFarmSeeds`.

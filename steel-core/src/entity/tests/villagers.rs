@@ -781,6 +781,59 @@ fn a_farmer_pulls_ripe_wheat_and_puts_a_seed_back_in_the_ground() {
     );
 }
 
+/// What the harvest is for: a farmer standing at its composter turns the wheat
+/// it is carrying into bread, which is the only food a village breeds on.
+///
+/// Vanilla parity: `WorkAtComposter.makeBread`, reached through
+/// `WorkAtPoi.useWorkstation`. This enters only through `villager.tick()`, so
+/// it fails if the hook is never called as well as if the baking is wrong.
+#[test]
+fn a_farmer_at_its_composter_bakes_its_wheat_into_bread() {
+    let world = villager_world("villager_makes_bread");
+    let villager = spawn_villager(&world);
+    assert!(world.set_block(
+        BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()),
+        vanilla_blocks::COMPOSTER.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+
+    set_time_of_day(&world, 3_000);
+    assert!(
+        run_ticks_until(&world, &villager, TICKS_TO_TAKE_A_JOB, || {
+            villager.profession().key.path == "farmer"
+        }),
+        "the composter should have made this villager a farmer"
+    );
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::WHEAT, 9));
+
+    // `WorkAtPoi` only looks every three hundred ticks, and then on a coin flip.
+    assert!(
+        run_ticks_until(&world, &villager, 4_000, || {
+            villager
+                .carried_inventory()
+                .lock()
+                .count_item(&vanilla_items::BREAD)
+                > 0
+        }),
+        "nine wheat at a composter is three loaves"
+    );
+
+    let inventory = villager.carried_inventory().lock();
+    assert_eq!(
+        inventory.count_item(&vanilla_items::BREAD),
+        3,
+        "vanilla bakes at most three loaves a visit, out of three wheat each"
+    );
+    assert_eq!(
+        inventory.count_item(&vanilla_items::WHEAT),
+        0,
+        "and takes the nine wheat back out of the container"
+    );
+}
+
 /// The activity the villager's own brain is currently in.
 fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
     Mob::brain(villager.as_ref())?.active_non_core_activity()

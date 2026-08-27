@@ -14,6 +14,7 @@ pub use simple::SimpleContainer;
 use std::mem;
 
 use steel_registry::item_stack::ItemStack;
+use steel_registry::items::ItemRef;
 use steel_utils::{Direction, ErasedType};
 
 /// Default distance buffer for container interaction range checks.
@@ -126,6 +127,49 @@ pub trait Container: ErasedType + Send + Sync {
     /// Returns a reference to the item in the specified slot.
     fn get_item(&self, slot: usize) -> &ItemStack {
         &self.items()[slot]
+    }
+
+    /// Returns how many of `item` this container holds across every slot.
+    ///
+    /// Vanilla parity: `Container.countItem`.
+    fn count_item(&self, item: ItemRef) -> i32 {
+        self.items()
+            .iter()
+            .filter(|stack| stack.item().key == item.key)
+            .map(ItemStack::count)
+            .sum()
+    }
+
+    /// Returns whether any slot holds one of `items`.
+    ///
+    /// Vanilla parity: `Container.hasAnyOf`.
+    fn has_any_of(&self, items: &[ItemRef]) -> bool {
+        self.items()
+            .iter()
+            .any(|stack| !stack.is_empty() && items.iter().any(|item| item.key == stack.item().key))
+    }
+
+    /// Takes up to `count` of `item` out, from the last slot backwards.
+    ///
+    /// Vanilla parity: `SimpleContainer.removeItemType`, which walks the slots
+    /// in reverse -- the order matters because it is what decides which of two
+    /// part-stacks a villager spends first.
+    fn remove_item_type(&mut self, item: ItemRef, count: i32) -> ItemStack {
+        let mut removed = 0;
+        for slot in (0..self.get_container_size()).rev() {
+            if self.get_item(slot).item().key != item.key {
+                continue;
+            }
+            let still_needed = count - removed;
+            removed += self.get_item_mut(slot).split(still_needed).count();
+            if removed == count {
+                break;
+            }
+        }
+        if removed > 0 {
+            self.set_changed();
+        }
+        ItemStack::with_count(item, removed)
     }
 
     /// Returns true if this container has a non-empty stack with the same item and components.

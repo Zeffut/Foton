@@ -8,8 +8,9 @@
 use std::f64::consts::FRAC_PI_2;
 
 use glam::DVec3;
+use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::poi::PoiTypeRef;
-use steel_registry::{REGISTRY, RegistryExt as _, vanilla_villager_professions};
+use steel_registry::{REGISTRY, RegistryExt as _, vanilla_blocks, vanilla_villager_professions};
 use steel_utils::entity_events::EntityStatus;
 use steel_utils::{BlockPos, Downcast as _, GlobalPos};
 
@@ -597,17 +598,30 @@ const WORK_CHECK_COOLDOWN: i64 = 300;
 /// Vanilla parity: `WorkAtPoi.DISTANCE`.
 const WORK_DISTANCE: f64 = 1.73;
 
+/// Vanilla parity: `WorkAtPoi.useWorkstation`, which is empty on the base class
+/// and is `WorkAtComposter`'s whole reason to exist.
+fn use_workstation(ctx: &BrainContext<'_>, villager: &VillagerEntity, job_site: BlockPos) {
+    if ctx.world().get_block_state(job_site).get_block().key == vanilla_blocks::COMPOSTER.key {
+        villager.make_bread();
+    }
+}
+
 /// Stands at the workstation and does the day's work.
 ///
 /// Vanilla parity: `net.minecraft.world.entity.ai.behavior.WorkAtPoi`. The
 /// villager turns to face its workstation, makes its trade's work sound, and
 /// restocks if it is due.
 ///
-/// MISSING FOUNDATION: `WorkAtComposter`, the subclass vanilla builds a farmer's
-/// brain with, is not here. Its `useWorkstation` both bakes bread out of the
-/// wheat in the villager's inventory and feeds seeds through the composter; the
-/// composting needs `ComposterBlock.insertItem`/`extractProduce`, which Steel's
-/// composter block behavior does not implement.
+/// Vanilla builds a farmer's brain with `WorkAtComposter` instead, whose only
+/// difference is a `useWorkstation` that acts on the composter it is standing
+/// at. Steel registers one `WorkAtPoi` on every villager and has it look at the
+/// block instead -- see the module docs on [`super`] for why there is no
+/// `refreshBrain` to swap the two.
+///
+/// MISSING FOUNDATION: `WorkAtComposter.compostItems`, the other half of that
+/// `useWorkstation`, needs `ComposterBlock.insertItem`/`extractProduce`, which
+/// Steel's composter block behavior does not implement. A farmer therefore
+/// bakes its wheat but never fills its composter.
 pub struct WorkAtPoi {
     last_check: i64,
 }
@@ -677,6 +691,7 @@ impl TimedBehavior for WorkAtPoi {
             return;
         };
         villager.play_work_sound();
+        use_workstation(ctx, villager, target.pos);
         let game_time = ctx.world().game_time();
         if villager.should_restock(game_time) {
             villager.restock(game_time);
