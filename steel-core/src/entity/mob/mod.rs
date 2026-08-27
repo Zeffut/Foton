@@ -42,7 +42,10 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, Downcast as _, Identifier, WorldAabb, axis::Axis};
 
-use crate::behavior::{BLOCK_BEHAVIORS, BlockCollisionContext, ITEM_BEHAVIORS, InteractionResult};
+use crate::behavior::items::SpawnEggItem;
+use crate::behavior::{
+    BLOCK_BEHAVIORS, BlockCollisionContext, ITEM_BEHAVIORS, InteractionResult, InventoryAccess,
+};
 use crate::enchantment_helper::{self, EnchantmentDamageContext, EnchantmentPostAttackContext};
 use crate::entity::ai::brain::Brain;
 use crate::entity::ai::brain::memory::memory_module_types;
@@ -383,7 +386,22 @@ impl Default for MobBase {
 /// Vanilla parity: the `igniteForSeconds(8.0F)` of `Mob.burnUndead`.
 const DAYLIGHT_BURN_TICKS: i32 = 160;
 
-pub trait Mob: LivingEntity {
+/// Object-safe access to a mob trait object from default `Mob` methods.
+///
+/// Same shape, and same reason, as [`crate::entity::EntityEventSource`]: `Self`
+/// is `?Sized` inside a default method, so it cannot coerce itself.
+pub trait MobSource {
+    /// Returns this mob as a trait object.
+    fn as_mob_source(&self) -> &dyn Mob;
+}
+
+impl<T: Mob> MobSource for T {
+    fn as_mob_source(&self) -> &dyn Mob {
+        self
+    }
+}
+
+pub trait Mob: LivingEntity + MobSource {
     fn mob_base(&self) -> &MobBase;
 
     fn mob_flags(&self) -> i8;
@@ -710,24 +728,93 @@ pub trait Mob: LivingEntity {
             return InteractionResult::Pass;
         }
 
-        // TODO: Handle name tags and spawn eggs once item-on-entity behavior exists.
+        let interaction_result = self.check_and_handle_important_interactions(player, hand);
+        if interaction_result.consumes_action() {
+            self.emit_entity_interact_game_event(player);
+            return interaction_result;
+        }
+
         let interaction_result = self.interact_entity(player, hand, location);
         if interaction_result != InteractionResult::Pass {
             return interaction_result;
         }
 
         let interaction_result = self.mob_interact(player, hand);
-        if interaction_result.consumes_action()
-            && let Some(world) = self.level()
-        {
-            world.game_event(
-                &vanilla_game_events::ENTITY_INTERACT,
-                self.block_position(),
-                &GameEventContext::new(Some(player), None),
-            );
+        if interaction_result.consumes_action() {
+            self.emit_entity_interact_game_event(player);
         }
 
         interaction_result
+    }
+
+    /// Handles the two items that mean the same thing on every mob, whatever
+    /// its own `mob_interact` would rather do with a right click.
+    ///
+    /// Vanilla parity: `Mob.checkAndHandleImportantInteractions`. Running first
+    /// is the whole point of it: a villager's `mob_interact` opens its trades
+    /// and a horse's puts you in the saddle, so a name tag held out to either
+    /// would never be read if this came second.
+    fn check_and_handle_important_interactions(
+        &self,
+        player: &Player,
+        hand: InteractionHand,
+    ) -> InteractionResult {
+        let this = self.as_mob_source();
+        let held = InventoryAccess::new(player.inventory.clone(), hand);
+        let (is_name_tag, item) =
+            held.with_item(|stack| (stack.is(&vanilla_items::NAME_TAG), stack.item()));
+        let behavior = ITEM_BEHAVIORS.get_behavior(item);
+
+        if is_name_tag {
+            let result =
+                held.with_item(|stack| behavior.interact_living_entity(stack, player, this, hand));
+            if result.consumes_action() {
+                return result;
+            }
+        }
+
+        if !behavior.is_spawn_egg() {
+            return InteractionResult::Pass;
+        }
+
+        // Vanilla's `level() instanceof ServerLevel` guard. Steel only ever runs
+        // the server side, so the only way past it is a mob with no world at
+        // all, which vanilla's client branch answers the same way.
+        let Some(world) = self.level() else {
+            return InteractionResult::SuccessServer;
+        };
+
+        let offspring = held.with_item(|stack| {
+            SpawnEggItem::spawn_offspring_from_spawn_egg(player, this, &world, stack)
+        });
+        let Some(offspring) = offspring else {
+            // A wrong egg for this mob falls through to the ordinary
+            // interaction rather than eating the click.
+            return InteractionResult::Pass;
+        };
+        if let Some(baby) = offspring.as_mob() {
+            self.on_offspring_spawned_from_egg(player, baby);
+        }
+
+        InteractionResult::SuccessServer
+    }
+
+    /// Applies whatever the parent wants said about a baby a spawn egg made.
+    ///
+    /// Vanilla parity: `Mob.onOffspringSpawnedFromEgg`, a no-op that `Fox` and
+    /// `Zombie` override.
+    fn on_offspring_spawned_from_egg(&self, _spawner: &Player, _offspring: &dyn Mob) {}
+
+    /// Emits vanilla's `GameEvent.ENTITY_INTERACT` for a consumed interaction.
+    fn emit_entity_interact_game_event(&self, player: &Player) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        world.game_event(
+            &vanilla_game_events::ENTITY_INTERACT,
+            self.block_position(),
+            &GameEventContext::new(Some(player), None),
+        );
     }
 
     /// Handles vanilla `Mob.mobInteract`.

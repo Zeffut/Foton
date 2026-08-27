@@ -1188,6 +1188,7 @@ mod equine;
 mod equipment_and_freezing;
 mod fall_and_fluids;
 mod hostile_ai;
+mod important_interactions;
 mod item_use;
 mod living_state;
 mod monster_experience;

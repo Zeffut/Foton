@@ -448,6 +448,16 @@ pub trait ItemBehavior: Send + Sync {
         None
     }
 
+    /// Returns whether this item is a spawn egg.
+    ///
+    /// Vanilla parity: the `itemStack.getItem() instanceof SpawnEggItem` test in
+    /// `Mob.checkAndHandleImportantInteractions`. Which mob a given egg makes is
+    /// in its `ENTITY_DATA` component and callers read it there; this only
+    /// answers the class question Steel has no hierarchy to ask.
+    fn is_spawn_egg(&self) -> bool {
+        false
+    }
+
     /// Called when this item is used (e.g. right click in air).
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
         // Vanilla parity: `Consumable.startConsuming`.
