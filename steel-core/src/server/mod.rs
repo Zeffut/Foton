@@ -24,6 +24,7 @@ use crate::command::execution::{
     CommandExecutionContext, CommandResultCallback, CommandSource, ExecutionCommandSource,
     ExecutionStop,
 };
+use crate::command::rcon::RconOutput;
 use crate::command::sender::{CommandExecutionOwner, CommandSender};
 use crate::command::storage::DomainCommandStorage;
 use crate::command::{
@@ -109,7 +110,7 @@ use text_components::{Modifier, TextComponent, format::Color};
 use tick_rate_manager::{SprintReport, TickRateManager};
 use tokio::{
     runtime::Runtime,
-    sync::Notify,
+    sync::{Notify, oneshot},
     task::{JoinSet, spawn_blocking},
     time::sleep,
 };
@@ -842,6 +843,29 @@ impl Server {
             owner: CommandExecutionOwner::capture(sender, self),
             command,
         })
+    }
+
+    /// Queues one Rcon command and hands back the reply its client waits on.
+    ///
+    /// Vanilla parity: `DedicatedServer.runCommand`, which clears the shared
+    /// Rcon buffer, blocks the Rcon thread on the server thread with
+    /// `executeBlocking`, and reads the buffer back. A Steel tick may not be
+    /// blocked on, so the wait moves to the caller: the reply arrives when the
+    /// last handle to the command's output sink is dropped, which happens
+    /// whether the command completed, failed to parse, hit the command limit,
+    /// overflowed the execution queue, or was cancelled at shutdown.
+    ///
+    /// # Errors
+    /// Returns [`CommandQueueFull`] when the command request queue is full,
+    /// in which case no reply will ever be sent.
+    pub fn submit_rcon_command(
+        &self,
+        connection: u64,
+        command: String,
+    ) -> Result<oneshot::Receiver<String>, CommandQueueFull> {
+        let (output, reply) = RconOutput::new(connection);
+        self.submit_command(CommandSender::Rcon(Arc::new(output)), command)?;
+        Ok(reply)
     }
 
     pub(crate) fn submit_command_suggestions(

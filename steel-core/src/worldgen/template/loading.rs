@@ -43,7 +43,7 @@ impl StructureTemplate {
             });
         }
 
-        let entities = Self::read_entities(registry, &compound, context)?;
+        let entities = Self::read_entities(&compound, context)?;
         let author = compound
             .string("author")
             .map(|author| author.to_str().into_owned())
@@ -211,7 +211,6 @@ impl StructureTemplate {
     }
 
     pub(super) fn read_entities(
-        registry: &Registry,
         compound: &BorrowedNbtCompound<'_, '_>,
         context: &str,
     ) -> Result<Vec<StructureEntityInfo>, String> {
@@ -226,136 +225,33 @@ impl StructureTemplate {
             let entity_nbt = entity.compound("nbt").ok_or_else(|| {
                 format!("structure template {context} has entity entry without nbt")
             })?;
-            let id = entity_nbt
-                .string("id")
-                .ok_or_else(|| format!("structure template {context} has entity nbt without id"))?;
-            let id = Identifier::from_str(id.to_str().as_ref()).map_err(|err| {
-                format!("structure template {context} has invalid entity identifier: {err}")
-            })?;
-            let entity_type = registry.entity_types.by_key(&id).ok_or_else(|| {
+            // A template's entities are ordinary vanilla save compounds, so the
+            // same reader `/summon` uses decodes them. `Pos` and `UUID` are the
+            // two fields a template does not take from the compound: the
+            // position is the template-relative `pos` above, and each placement
+            // mints a fresh UUID so two copies of one structure are two
+            // entities.
+            let loaded = read_entity_nbt(&entity_nbt).ok_or_else(|| {
+                let id = entity_nbt
+                    .string("id")
+                    .map_or_else(|| "<missing>".to_owned(), |id| id.to_str().into_owned());
                 format!("structure template {context} references unknown entity type {id}")
             })?;
-            let rotation = Self::read_entity_rotation(&entity_nbt);
-            let velocity = Self::read_optional_vec3d(&entity_nbt, "Motion");
-            let fall_distance = entity_nbt.double("fall_distance").unwrap_or(0.0);
-            let fire_freeze = EntityFireFreezeState::from_parts(
-                Self::read_optional_int(&entity_nbt, "Fire").unwrap_or(0),
-                Self::read_optional_int(&entity_nbt, "TicksFrozen").unwrap_or(0),
-                false,
-                false,
-                entity_nbt
-                    .byte("HasVisualFire")
-                    .is_some_and(|value| value != 0),
-            );
-            let on_ground = entity_nbt.byte("OnGround").is_some_and(|value| value != 0);
-            let save_data = EntityBaseSaveData {
-                air_supply: Self::read_optional_int(&entity_nbt, "Air")
-                    .unwrap_or(DEFAULT_MAX_AIR_SUPPLY),
-                portal_cooldown: Self::read_optional_int(&entity_nbt, "PortalCooldown")
-                    .unwrap_or(0),
-                no_gravity: entity_nbt.byte("NoGravity").is_some_and(|value| value != 0),
-                invulnerable: entity_nbt
-                    .byte("Invulnerable")
-                    .is_some_and(|value| value != 0),
-                custom_name: Self::read_custom_name(&entity_nbt),
-                custom_name_visible: entity_nbt
-                    .byte("CustomNameVisible")
-                    .is_some_and(|value| value != 0),
-                silent: entity_nbt.byte("Silent").is_some_and(|value| value != 0),
-                glowing: entity_nbt.byte("Glowing").is_some_and(|value| value != 0),
-                tags: Self::read_entity_tags(&entity_nbt),
-                custom_data: entity_nbt
-                    .compound("data")
-                    .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
-            };
-            let mut nbt = entity_nbt.to_owned();
-            Self::strip_entity_base_fields(&mut nbt);
-
             result.push(StructureEntityInfo {
                 pos,
                 block_pos: BlockPos::new(block_pos[0], block_pos[1], block_pos[2]),
-                entity_type,
-                rotation,
-                velocity,
-                fall_distance,
-                fire_freeze,
-                on_ground,
-                save_data,
-                nbt,
+                entity_type: loaded.entity_type,
+                rotation: loaded.rotation,
+                velocity: loaded.velocity,
+                fall_distance: loaded.fall_distance,
+                fire_freeze: loaded.fire_freeze,
+                on_ground: loaded.on_ground,
+                save_data: loaded.save_data,
+                nbt: loaded.remainder,
             });
         }
 
         Ok(result)
-    }
-
-    pub(super) fn read_entity_rotation(nbt: &BorrowedNbtCompound<'_, '_>) -> (f32, f32) {
-        let Some(rotation) = nbt.list("Rotation").and_then(|list| list.floats()) else {
-            return (0.0, 0.0);
-        };
-        if rotation.len() < 2 {
-            return (0.0, 0.0);
-        }
-        (rotation[0], rotation[1])
-    }
-
-    pub(super) fn read_optional_vec3d(nbt: &BorrowedNbtCompound<'_, '_>, field: &str) -> DVec3 {
-        let Some(values) = nbt.list(field).and_then(|list| list.doubles()) else {
-            return DVec3::ZERO;
-        };
-        if values.len() < 3 {
-            return DVec3::ZERO;
-        }
-        DVec3::new(values[0], values[1], values[2])
-    }
-
-    pub(super) fn read_optional_int(nbt: &BorrowedNbtCompound<'_, '_>, field: &str) -> Option<i32> {
-        nbt.int(field)
-            .or_else(|| nbt.short(field).map(i32::from))
-            .or_else(|| nbt.byte(field).map(i32::from))
-    }
-
-    pub(super) fn read_custom_name(nbt: &BorrowedNbtCompound<'_, '_>) -> Option<TextComponent> {
-        let tag = nbt.get("CustomName")?;
-        TextComponent::from_nbt(&tag.to_owned())
-    }
-
-    pub(super) fn read_entity_tags(nbt: &BorrowedNbtCompound<'_, '_>) -> BTreeSet<String> {
-        nbt.list("Tags")
-            .and_then(|list| list.strings())
-            .map(|tags| {
-                tags.iter()
-                    .take(MAX_ENTITY_TAGS)
-                    .map(|tag| tag.to_str().into_owned())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    pub(super) fn strip_entity_base_fields(nbt: &mut NbtCompound) {
-        for field in [
-            "id",
-            "Pos",
-            "Motion",
-            "Rotation",
-            "UUID",
-            "fall_distance",
-            "Fire",
-            "Air",
-            "OnGround",
-            "NoGravity",
-            "Invulnerable",
-            "PortalCooldown",
-            "CustomName",
-            "CustomNameVisible",
-            "Silent",
-            "Glowing",
-            "TicksFrozen",
-            "HasVisualFire",
-            "Tags",
-            "data",
-        ] {
-            let _ = nbt.remove(field);
-        }
     }
 
     pub(super) fn is_static_full_block(registry: &Registry, state: BlockStateId) -> bool {

@@ -253,6 +253,34 @@ impl World {
         Ok(())
     }
 
+    /// Adds a runtime entity and everything riding it, all or nothing.
+    ///
+    /// Vanilla parity: `ServerLevel.tryAddFreshEntityWithPassengers`, which
+    /// checks the whole tree for a UUID clash before adding any of it. A
+    /// partial add would leave a rider seated on a vehicle the world does not
+    /// know about.
+    ///
+    /// `entities` is the tree in depth-first order with the vehicle first,
+    /// which is what [`Self::register_loaded_entity_tree`] expects.
+    pub fn try_add_entity_with_passengers(
+        self: &Arc<Self>,
+        entities: &[SharedEntity],
+    ) -> Result<(), AddEntityError> {
+        let Some(root) = entities.first() else {
+            return Ok(());
+        };
+        let chunk_pos = ChunkPos::from_entity_pos(root.position());
+        if !self.has_full_chunk(chunk_pos) {
+            return Err(AddEntityError::ChunkNotLoaded {
+                entity_id: root.id(),
+                chunk: chunk_pos,
+            });
+        }
+        self.register_loaded_entity_tree(entities)?;
+        self.mark_chunk_dirty(chunk_pos);
+        Ok(())
+    }
+
     pub(crate) fn on_entity_chunk_loaded(self: &Arc<Self>, pos: ChunkPos) {
         // Runtime entity membership follows retained chunk holders, so it
         // starts at Empty rather than waiting for full LevelChunk readiness.

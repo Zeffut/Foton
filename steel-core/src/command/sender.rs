@@ -4,7 +4,7 @@ use text_components::TextComponent;
 use uuid::Uuid;
 
 use crate::{
-    command::base_command_block::BaseCommandBlock,
+    command::{base_command_block::BaseCommandBlock, rcon::RconOutput},
     player::{DomainResidenceToken, Player},
     server::Server,
 };
@@ -16,8 +16,12 @@ pub enum CommandSender {
     Player(Arc<Player>),
     /// The command was sent via the server's console.
     Console,
-    /// The command was sent via Rcon.
-    Rcon,
+    /// The command was sent by an Rcon client.
+    ///
+    /// Vanilla parity: `RconConsoleSource`, whose output is buffered for the
+    /// reply instead of being printed anywhere. The sink is per request; the
+    /// connection it belongs to is what orders one client's commands.
+    Rcon(Arc<RconOutput>),
     /// The command came from a command block or a command block minecart.
     ///
     /// Vanilla parity: the `CommandSource` a `BaseCommandBlock` builds. Its
@@ -31,7 +35,9 @@ pub enum CommandSender {
 pub(crate) enum CommandSenderKey {
     Player(Uuid),
     Console,
-    Rcon,
+    /// Rcon clients are ordered per connection, so one client's suspended
+    /// command cannot stall another client's.
+    Rcon(u64),
     /// Command blocks are ordered by identity, so two blocks never share a lane.
     CommandBlock(usize),
 }
@@ -102,7 +108,7 @@ impl CommandExecutionOwner {
             CommandSender::Console | CommandSender::CommandBlock(_) => {
                 CommandSuggestionKey::Console
             }
-            CommandSender::Rcon => CommandSuggestionKey::Rcon,
+            CommandSender::Rcon(_) => CommandSuggestionKey::Rcon,
         }
     }
 
@@ -127,7 +133,7 @@ impl CommandSender {
         match self {
             Self::Player(player) => CommandSenderKey::Player(player.gameprofile.id),
             Self::Console => CommandSenderKey::Console,
-            Self::Rcon => CommandSenderKey::Rcon,
+            Self::Rcon(output) => CommandSenderKey::Rcon(output.connection()),
             Self::CommandBlock(block) => {
                 CommandSenderKey::CommandBlock(Arc::as_ptr(block).cast::<()>() as usize)
             }
@@ -148,8 +154,10 @@ impl CommandSender {
         match self {
             Self::Player(player) => player.send_message(text),
             Self::Console => log::info!("{text}"),
-            // TODO: Implement Rcon message sending
-            Self::Rcon => log::warn!("Dropping Rcon command message until Rcon output is wired"),
+            // Vanilla parity: `RconConsoleSource.sendSystemMessage`, which
+            // appends to the reply the client is waiting on rather than
+            // printing it anywhere.
+            Self::Rcon(output) => output.record(text),
             // Vanilla parity: `CloseableCommandBlockSource.sendSystemMessage`,
             // which stores the line on the block instead of printing it.
             Self::CommandBlock(block) => block.record_output(text),
@@ -165,7 +173,7 @@ impl fmt::Display for CommandSender {
             match self {
                 Self::Player(p) => &p.gameprofile.name,
                 Self::Console => "Server",
-                Self::Rcon => "Rcon",
+                Self::Rcon(_) => "Rcon",
                 Self::CommandBlock(_) => "@",
             }
         )

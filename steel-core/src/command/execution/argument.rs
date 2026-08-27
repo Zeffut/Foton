@@ -1,5 +1,7 @@
 use std::{fmt, sync::Arc};
 
+use simdnbt::owned::NbtCompound;
+
 use super::{
     BiomeOrTag, BlockPredicate, CommandArgumentSource, Coordinates, IntRange, ItemPredicate,
     ScoreHolderArgument, StructureOrTagKey, WorldArgument,
@@ -8,7 +10,7 @@ use super::{
     coordinates::{parse_block_pos, parse_rotation, parse_vec3, suggest_coordinates},
     item::{parse_item_stack, suggest_item_stack},
     item_predicate::{parse_item_predicate, suggest_item_predicate},
-    nbt::parse_nbt_path,
+    nbt::{parse_nbt_compound, parse_nbt_path},
     permission::{PermissionGroupParser, PermissionMetadataParser, PermissionRuleParser},
     profile::{GameProfileParser, GameProfileSuggestionMode},
     score::{parse_int_range, parse_score_holder, suggest_score_holders},
@@ -332,6 +334,10 @@ impl SteelArgumentType {
         Self::new(NbtPathParser)
     }
 
+    pub(crate) fn nbt_compound_tag() -> Self {
+        Self::new(NbtCompoundParser)
+    }
+
     pub(crate) fn storage_key() -> Self {
         Self::new(StorageKeyParser)
     }
@@ -522,6 +528,10 @@ argument_value_wrapper!(
     "steel:command/value/component"
 );
 argument_value_wrapper!(NbtPathValue(NbtPath), "steel:command/value/nbt_path");
+argument_value_wrapper!(
+    NbtCompoundValue(NbtCompound),
+    "steel:command/value/nbt_compound"
+);
 argument_value_wrapper!(
     IdentifierValue(Identifier),
     "steel:command/value/identifier"
@@ -1062,6 +1072,16 @@ unit_argument_parser!(
     suggest | _context,
     _builder | {},
     protocol(ProtocolArgumentType::NbtPath, None)
+);
+unit_argument_parser!(
+    NbtCompoundParser,
+    "steel:command/parser/nbt_compound",
+    NbtCompoundValue,
+    parse | reader,
+    _source | { parse_nbt_compound(reader).map(NbtCompoundValue) },
+    suggest | _context,
+    _builder | {},
+    protocol(ProtocolArgumentType::Nbt, None)
 );
 unit_argument_parser!(
     StorageKeyParser,

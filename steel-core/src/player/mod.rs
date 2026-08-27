@@ -265,8 +265,8 @@ pub struct Player {
     /// once something is actually enchanted. That is what makes a bad set of
     /// offers worth burning a cheap item on.
     ///
-    /// TODO: vanilla persists this as `XpSeed`; Steel re-rolls it at login, so
-    /// the offers on a table survive a session but not a relog.
+    /// Saved as `XpSeed`, so the offers a player walked away from are the ones
+    /// waiting when they come back.
     enchantment_seed: SyncMutex<i32>,
 
     /// Assigned groups, direct overrides, and the effective permission set.
@@ -1097,6 +1097,7 @@ impl Player {
             nbt.insert("XpLevel", experience.level());
             nbt.insert("XpTotal", experience.total_points());
         }
+        nbt.insert("XpSeed", self.enchantment_seed());
         nbt.insert("Score", self.score());
 
         {

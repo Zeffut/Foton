@@ -18,6 +18,8 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 pub mod config;
 /// A module for logging utilities.
 pub mod logger;
+/// Remote administration over the Source Rcon protocol.
+pub mod rcon;
 
 /// Static access to the server
 pub static SERVER: OnceLock<Arc<Server>> = OnceLock::new();
@@ -34,6 +36,8 @@ pub struct SteelServer {
     pub server: Arc<Server>,
     /// Session id UUID state
     pub connection_session: Arc<ServerConnectionSession>,
+    /// The bound Rcon port, when remote administration is enabled.
+    pub rcon_listener: Option<rcon::RconListener>,
 }
 
 /// Startup error for expected operational failures.
@@ -48,6 +52,13 @@ pub enum SteelServerError {
         /// Underlying IO error.
         source: io::Error,
     },
+    /// The Rcon listener could not bind.
+    RconBind {
+        /// Rcon port that failed to bind.
+        port: u16,
+        /// Underlying IO error.
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for SteelServerError {
@@ -56,6 +67,9 @@ impl fmt::Display for SteelServerError {
             Self::Core(error) => f.write_str(error),
             Self::Bind { port, source } => {
                 write!(f, "failed to bind to server port {port}: {source}")
+            }
+            Self::RconBind { port, source } => {
+                write!(f, "failed to bind to rcon port {port}: {source}")
             }
         }
     }
@@ -91,6 +105,7 @@ impl SteelServer {
 
         let permission_group_store = steel_config.permission_group_store();
         let server_port = steel_config.server.server_port;
+        let rcon_config = steel_config.server.rcon.clone();
         let worlds_config = steel_config.worlds;
         let permission_groups =
             PermissionGroupManager::new(steel_config.groups, permission_group_store).map_err(
@@ -118,12 +133,26 @@ impl SteelServer {
                 source,
             })?;
 
+        let rcon_listener = if rcon_config.enable {
+            Some(
+                rcon::RconListener::bind(rcon_config.port, rcon_config.password.into())
+                    .await
+                    .map_err(|source| SteelServerError::RconBind {
+                        port: rcon_config.port,
+                        source,
+                    })?,
+            )
+        } else {
+            None
+        };
+
         Ok(Self {
             tcp_listener,
             cancel_token,
             client_id: 0,
             server: Arc::new(server),
             connection_session: Arc::new(ServerConnectionSession::default()),
+            rcon_listener,
         })
     }
 
@@ -136,6 +165,14 @@ impl SteelServer {
         let server_handle = tokio::spawn(async move {
             server.run(token).await;
         });
+
+        if let Some(rcon_listener) = self.rcon_listener.take() {
+            task_tracker.spawn(rcon_listener.run(
+                self.server.clone(),
+                self.cancel_token.clone(),
+                task_tracker.clone(),
+            ));
+        }
 
         loop {
             select! {

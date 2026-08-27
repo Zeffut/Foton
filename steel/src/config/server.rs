@@ -68,6 +68,9 @@ pub struct ServerConfig {
     /// Thread counts for server thread pools.
     #[serde(default)]
     pub threads: ThreadConfig,
+    /// Remote administration over the Source Rcon protocol.
+    #[serde(default)]
+    pub rcon: RconConfig,
 }
 
 impl ServerConfig {
@@ -96,6 +99,34 @@ impl ServerConfig {
             packet_workers: self.threads.packet_workers,
             chunk_generation_threads: self.threads.chunk_generation,
             chunk_encoding_threads: self.threads.chunk_encoding,
+        }
+    }
+}
+
+/// Remote administration over the Source Rcon protocol.
+///
+/// Vanilla parity: `enable-rcon`, `rcon.port` and `rcon.password`. Vanilla
+/// warns and quietly disables Rcon when the password is blank; Steel refuses
+/// to start instead, because an administrator who asked for remote access and
+/// silently did not get it is worse off than one who is told why.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RconConfig {
+    /// Whether the Rcon port is opened at all.
+    pub enable: bool,
+    /// The port Rcon listens on.
+    pub port: u16,
+    /// The password every client must send before it may run a command.
+    pub password: String,
+}
+
+impl Default for RconConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            // Vanilla's default `rcon.port`.
+            port: 25575,
+            password: String::new(),
         }
     }
 }
@@ -165,6 +196,17 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         }
         if !(1..=9).contains(&compression.level) {
             return Err("Compression level must be between 1 and 9");
+        }
+    }
+    if config.rcon.enable {
+        if config.rcon.password.is_empty() {
+            return Err("rcon.password must be set when rcon is enabled");
+        }
+        if config.rcon.port == 0 {
+            return Err("rcon.port must be a real port when rcon is enabled");
+        }
+        if config.rcon.port == config.server_port {
+            return Err("rcon.port must differ from server_port");
         }
     }
     if config.enforce_secure_chat {

@@ -12,6 +12,7 @@ use crate::command::brigadier::{
     CommandContext, CommandNodeBuilder, CommandRedirectTarget, CommandRuntime, CommandSyntaxError,
     ContextChain,
 };
+use simdnbt::owned::NbtCompound;
 use steel_registry::damage_type::DamageTypeRef;
 use steel_registry::{
     enchantment::EnchantmentRef, entity_type::EntityTypeRef, item_stack::ItemStack,
@@ -27,8 +28,8 @@ use super::{
     SteelArgumentType, StructureOrTagKey, WorldArgument,
     argument::{
         ComponentValue, CoordinateAxes, DomainValue, EnchantmentValue, EntityTypeValue,
-        GameModeValue, IdentifierValue, ItemStackValue, NbtPathValue, ObjectiveValue,
-        SteelArgumentValue, TimeValue, TimelineValue, WorldClockValue,
+        GameModeValue, IdentifierValue, ItemStackValue, NbtCompoundValue, NbtPathValue,
+        ObjectiveValue, SteelArgumentValue, TimeValue, TimelineValue, WorldClockValue,
     },
     selector::EntitySelector,
 };
@@ -337,6 +338,11 @@ where
 
     pub(crate) fn nbt_path(&self, name: &str) -> Result<&NbtPath, CommandSyntaxError> {
         self.typed_argument::<NbtPathValue>(name)
+            .map(|value| &value.0)
+    }
+
+    pub(crate) fn nbt_compound(&self, name: &str) -> Result<&NbtCompound, CommandSyntaxError> {
+        self.typed_argument::<NbtCompoundValue>(name)
             .map(|value| &value.0)
     }
 

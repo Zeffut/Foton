@@ -448,12 +448,20 @@ fn find_gateway(world: &Arc<World>) -> Option<BlockPos> {
         .find(|pos| world.get_block_state(*pos).get_block() == &vanilla_blocks::END_GATEWAY)
 }
 
+/// Sums the experience lying on the ground.
+///
+/// An orb is worth `value * count`, not `value`: `tryMergeToExisting` folds a
+/// new orb into a neighbour by raising that neighbour's count and leaving its
+/// value alone, and which orbs merge is decided by an unseeded random group
+/// id. Summing only the values undercounts by however many merges the run
+/// happened to make, which is what made this a test that failed about one run
+/// in five.
 fn experience_in(world: &Arc<World>) -> i32 {
     world
         .entity_manager()
         .get_accessible_entities()
         .iter()
         .filter_map(|entity| entity.downcast_ref::<ExperienceOrbEntity>())
-        .map(ExperienceOrbEntity::value)
+        .map(|orb| orb.value() * orb.count())
         .sum()
 }

@@ -1,5 +1,6 @@
 //! `/execute` operations that transform or fork the command source.
 
+use simdnbt::owned::NbtCompound;
 use steel_utils::translations;
 use text_components::TextComponent;
 
@@ -203,8 +204,13 @@ pub(super) fn summon_operation() -> Builder {
             EXECUTE_ROOT,
             |context| {
                 let entity_type = context.entity_type("entity")?;
-                let entity =
-                    summon::create_entity(context, entity_type, context.source().position())?;
+                let entity = summon::create_entity(
+                    context,
+                    entity_type,
+                    context.source().position(),
+                    &NbtCompound::new(),
+                    true,
+                )?;
                 Ok(context.source().with_entity(entity))
             },
         ),

@@ -40,6 +40,16 @@ chat_spam_threshold_seconds = 10
 # Vanilla command spam threshold window in seconds
 command_spam_threshold_seconds = 10
 
+# Remote administration over the Source Rcon protocol.
+[server.rcon]
+# Whether the rcon port is opened at all
+enable = false
+# Port rcon listens on
+port = 25575
+# Password every rcon client must send before it may run a command.
+# The server refuses to start with rcon enabled and this left blank.
+password = ""
+
 # Optional worker counts for server thread pools. 0 or omitted uses each pool's automatic default.
 [server.threads]
 # Worker threads for the primary Tokio runtime.
