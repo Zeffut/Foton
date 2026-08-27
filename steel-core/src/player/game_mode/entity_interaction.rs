@@ -7,6 +7,17 @@ use super::{
     World, WorldAabb, enchantment_helper, piercing_ray_hit_t, vanilla_attributes,
     vanilla_damage_types, vanilla_entities,
 };
+use steel_protocol::packets::game::{AnimateAction, CAnimate};
+use steel_registry::entity_data::ParticleData;
+use steel_registry::vanilla_item_tags::ItemTag;
+use steel_registry::{sound_events, vanilla_mob_effects, vanilla_particle_types};
+
+/// Returns a height `progress` of the way up an entity's hitbox.
+///
+/// Vanilla parity: `Entity.getY(double)`.
+fn entity_y_at(entity: &dyn Entity, progress: f64) -> f64 {
+    entity.position().y + entity.bounding_box().height() * progress
+}
 
 const fn sound_holder_ref(holder: &SoundEventHolder) -> Option<SoundEventRef> {
     match holder {
@@ -411,23 +422,38 @@ impl Player {
         base_damage += ITEM_BEHAVIORS
             .get_behavior(attacking_item.item())
             .get_attack_damage_bonus(self, entity, base_damage, &damage_source);
-        let total_damage = base_damage + magic_boost;
-        let full_strength_attack = attack_strength_scale > 0.9;
-        let knockback_attack = self.is_sprinting() && full_strength_attack;
         self.reset_attack_strength_ticker();
 
-        if total_damage <= 0.0 {
+        let world = self.get_world();
+        if base_damage <= 0.0 && magic_boost <= 0.0 {
+            enchantment_helper::do_post_piercing_attack_effects(&world, self);
             return false;
         }
 
-        // TODO: Apply crits, sweep attacks, damage stats, and sounds.
+        let full_strength_attack = attack_strength_scale > 0.9;
+        let knockback_attack = self.is_sprinting() && full_strength_attack;
+        if knockback_attack {
+            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_KNOCKBACK);
+        }
+
+        let critical_attack = full_strength_attack && self.can_critical_attack(entity);
+        if critical_attack {
+            base_damage *= 1.5;
+        }
+        let total_damage = base_damage + magic_boost;
+        let sweep_attack =
+            self.is_sweep_attack(full_strength_attack, critical_attack, knockback_attack);
+
+        let old_health = entity
+            .as_living_entity()
+            .map_or(0.0, LivingEntity::get_health);
         let old_movement = entity.velocity();
         let Some(target_world) = entity.level() else {
+            enchantment_helper::do_post_piercing_attack_effects(&world, self);
             return false;
         };
         let was_hurt = entity.hurt(&target_world, &damage_source, total_damage);
         if was_hurt {
-            self.set_last_hurt_mob(Some(target));
             let sprint_knockback = if knockback_attack { 0.5 } else { 0.0 };
             self.cause_extra_knockback(
                 entity,
@@ -435,13 +461,222 @@ impl Player {
                     + sprint_knockback,
                 old_movement,
             );
+            if sweep_attack {
+                self.do_sweep_attack(
+                    entity,
+                    &attacking_item,
+                    base_damage,
+                    &damage_source,
+                    attack_strength_scale,
+                );
+            }
+            self.attack_visual_effects(
+                entity,
+                critical_attack,
+                sweep_attack,
+                full_strength_attack,
+                magic_boost,
+            );
+            self.set_last_hurt_mob(Some(target));
             self.item_attack_interaction(entity, &damage_source, true);
+            self.show_damage_indicators(entity, old_health);
             self.cause_food_exhaustion(0.1);
+        } else {
+            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_NODAMAGE);
         }
 
-        let world = self.get_world();
         enchantment_helper::do_post_piercing_attack_effects(&world, self);
         was_hurt
+    }
+
+    /// Plays a sound at the player's feet for every nearby client, the attacker
+    /// included.
+    ///
+    /// Vanilla parity: `Player.playServerSideSound`, which passes a null
+    /// exclusion so the attacker hears it from the server too.
+    fn play_server_side_sound(&self, sound: SoundEventRef) {
+        self.get_world()
+            .play_sound_at(sound, self.sound_source(), self.position(), 1.0, 1.0, None);
+    }
+
+    /// Vanilla parity: `Player.isMobilityRestricted`, which in 26.2 is
+    /// blindness alone -- slowness has not gated crits since the combat rework.
+    fn is_mobility_restricted(&self) -> bool {
+        self.mob_effect(vanilla_mob_effects::BLINDNESS).is_some()
+    }
+
+    /// Vanilla parity: `Player.canCriticalAttack`.
+    fn can_critical_attack(&self, entity: &dyn Entity) -> bool {
+        self.fall_distance() > 0.0
+            && !self.on_ground()
+            && !self.on_climbable()
+            && !self.is_in_water()
+            && !self.is_mobility_restricted()
+            && !self.is_passenger()
+            && entity.as_living_entity().is_some()
+            && !self.is_sprinting()
+    }
+
+    /// Vanilla parity: `Player.isSweepAttack`.
+    ///
+    /// 26.2 no longer asks for Sweeping Edge: anything in `#minecraft:swords`
+    /// sweeps, and the enchantment only feeds `SWEEPING_DAMAGE_RATIO`.
+    fn is_sweep_attack(
+        &self,
+        full_strength_attack: bool,
+        critical_attack: bool,
+        knockback_attack: bool,
+    ) -> bool {
+        if !full_strength_attack || critical_attack || knockback_attack || !self.on_ground() {
+            return false;
+        }
+
+        let movement = self.known_movement();
+        let approximate_speed_sq = movement.x.mul_add(movement.x, movement.z * movement.z);
+        let max_speed_for_sweep_attack = f64::from(self.get_speed()) * 2.5;
+        if approximate_speed_sq >= max_speed_for_sweep_attack * max_speed_for_sweep_attack {
+            return false;
+        }
+
+        let inventory = self.inventory.lock();
+        inventory
+            .get_item_in_hand(InteractionHand::MainHand)
+            .item()
+            .has_tag(&ItemTag::SWORDS)
+    }
+
+    /// Vanilla parity: `Player.attackVisualEffects`, minus the stab flag that
+    /// only a piercing weapon sets.
+    fn attack_visual_effects(
+        &self,
+        entity: &dyn Entity,
+        critical_attack: bool,
+        sweep_attack: bool,
+        full_strength_attack: bool,
+        magic_boost: f32,
+    ) {
+        if critical_attack {
+            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_CRIT);
+            self.send_attack_animation(entity, AnimateAction::CriticalHit);
+        }
+
+        if !critical_attack && !sweep_attack {
+            self.play_server_side_sound(if full_strength_attack {
+                &sound_events::ENTITY_PLAYER_ATTACK_STRONG
+            } else {
+                &sound_events::ENTITY_PLAYER_ATTACK_WEAK
+            });
+        }
+
+        if magic_boost > 0.0 {
+            self.send_attack_animation(entity, AnimateAction::MagicCriticalHit);
+        }
+    }
+
+    /// Vanilla parity: `ServerPlayer.crit` and `ServerPlayer.magicCrit`, which
+    /// both go to the attacker's trackers and to the attacker itself.
+    fn send_attack_animation(&self, entity: &dyn Entity, action: AnimateAction) {
+        let packet = CAnimate::new(entity.id(), action);
+        self.get_world()
+            .broadcast_to_entity_trackers(self.id(), packet.clone(), None);
+        self.send_packet(packet);
+    }
+
+    /// Vanilla parity: `Player.doSweepAttack`.
+    fn do_sweep_attack(
+        &self,
+        entity: &dyn Entity,
+        attacking_item: &ItemStack,
+        base_damage: f32,
+        damage_source: &DamageSource,
+        attack_strength_scale: f32,
+    ) {
+        self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_SWEEP);
+
+        let world = self.get_world();
+        let sweeping_damage_ratio = self
+            .attributes()
+            .lock()
+            .get_value(vanilla_attributes::SWEEPING_DAMAGE_RATIO)
+            .unwrap_or(0.0) as f32;
+        let sweep_damage = sweeping_damage_ratio.mul_add(base_damage, 1.0);
+
+        let yaw_radians = self.rotation().0.to_radians();
+        let yaw_sin = f64::from(yaw_radians.sin());
+        let yaw_cos = f64::from(yaw_radians.cos());
+        let position = self.position();
+
+        let area = entity.bounding_box().inflate_xyz(1.0, 0.25, 1.0);
+        for shared in world.get_entities_in_aabb(&area) {
+            let nearby = shared.as_ref();
+            if nearby.id() == self.id()
+                || nearby.id() == entity.id()
+                || self.is_allied_to(nearby)
+                || nearby.is_marker_armor_stand()
+                || position.distance_squared(nearby.position()) >= 9.0
+            {
+                continue;
+            }
+            let Some(living) = nearby.as_living_entity() else {
+                continue;
+            };
+
+            let context = EnchantmentDamageContext::new(
+                nearby.entity_type(),
+                Some(self.entity_type()),
+                Some(self.entity_type()),
+                damage_source,
+            );
+            let enchanted_damage =
+                enchantment_helper::modify_damage(attacking_item, &context, sweep_damage)
+                    * attack_strength_scale;
+            if !living.hurt(&world, damage_source, enchanted_damage) {
+                continue;
+            }
+            living.knockback(0.4, yaw_sin, -yaw_cos);
+            let post_attack_context =
+                EnchantmentPostAttackContext::new(nearby, Some(self), Some(self), damage_source);
+            enchantment_helper::do_post_attack_effects_from_item(
+                &world,
+                attacking_item,
+                &post_attack_context,
+            );
+        }
+
+        world.send_particles(
+            ParticleData::simple(&vanilla_particle_types::SWEEP_ATTACK),
+            DVec3::new(
+                position.x - yaw_sin,
+                entity_y_at(self, 0.5),
+                position.z + yaw_cos,
+            ),
+            0,
+            DVec3::new(-yaw_sin, 0.0, yaw_cos),
+            0.0,
+        );
+    }
+
+    /// Vanilla parity: the particle half of `Player.damageStatsAndHearts`.
+    ///
+    /// Steel has no statistics registry yet, so the `DAMAGE_DEALT` award is
+    /// left out; the damage indicators are what a player actually sees.
+    fn show_damage_indicators(&self, entity: &dyn Entity, old_health: f32) {
+        let Some(living) = entity.as_living_entity() else {
+            return;
+        };
+        let actual_damage = old_health - living.get_health();
+        if actual_damage <= 2.0 {
+            return;
+        }
+
+        let position = entity.position();
+        self.get_world().send_particles(
+            ParticleData::simple(&vanilla_particle_types::DAMAGE_INDICATOR),
+            DVec3::new(position.x, entity_y_at(entity, 0.5), position.z),
+            (actual_damage * 0.5) as i32,
+            DVec3::new(0.1, 0.0, 0.1),
+            0.2,
+        );
     }
 
     fn item_attack_interaction(
@@ -673,5 +908,300 @@ impl Player {
             self.swing(packet.hand, true);
         }
         self.broadcast_inventory_changes();
+    }
+}
+
+/// The melee attack a player performs every few seconds, entered where the
+/// client enters it: `Player::handle_attack` with a `SAttack` packet.
+///
+/// Going in through the packet is the point. Steel already had crit-shaped
+/// helpers that nothing called; a test that pokes `Player::attack` directly
+/// would pass for either version of the code.
+#[cfg(test)]
+mod melee_tests {
+    use std::io::Cursor;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use glam::DVec3;
+    use steel_protocol::packet_traits::{CompressionInfo, EncodedPacket};
+    use steel_protocol::packets::game::SAttack;
+    use steel_registry::packets::play::C_ANIMATE;
+    use steel_registry::{init_vanilla_registry, vanilla_entities, vanilla_items};
+    use steel_utils::codec::VarInt;
+    use steel_utils::locks::SyncMutex;
+    use steel_utils::serial::ReadFrom as _;
+    use steel_utils::types::InteractionHand;
+    use text_components::TextComponent;
+
+    use crate::behavior::init_behaviors;
+    use crate::entity::entities::PigEntity;
+    use crate::entity::{Entity, LivingEntity, SharedEntity, next_entity_id};
+    use crate::player::connection::NetworkConnection;
+    use crate::player::{Player, PlayerConnection};
+    use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
+    use crate::world::World;
+    use steel_registry::item_stack::ItemStack;
+    use steel_utils::ChunkPos;
+
+    /// Ticks of charge that fill the attack strength meter for any vanilla
+    /// weapon: the slowest is the mace at 0.5 attacks per second, i.e. 40.
+    const FULL_CHARGE_TICKS: i32 = 40;
+
+    /// Vanilla `Player.aiStep` puts the movement speed attribute here.
+    const WALKING_SPEED: f32 = 0.1;
+
+    #[derive(Default)]
+    struct RecordingConnection {
+        sent: Arc<SyncMutex<Vec<EncodedPacket>>>,
+        closed: AtomicBool,
+    }
+
+    impl NetworkConnection for RecordingConnection {
+        fn compression(&self) -> Option<CompressionInfo> {
+            None
+        }
+
+        fn send_encoded(&self, packet: EncodedPacket) {
+            self.sent.lock().push(packet);
+        }
+
+        fn send_encoded_bundle(&self, packets: Vec<EncodedPacket>) {
+            self.sent.lock().extend(packets);
+        }
+
+        fn disconnect_with_reason(&self, _reason: TextComponent) {}
+
+        fn tick(&self) {}
+
+        fn latency(&self) -> i32 {
+            0
+        }
+
+        fn close(&self) {
+            self.closed.store(true, Ordering::Release);
+        }
+
+        fn closed(&self) -> bool {
+            self.closed.load(Ordering::Acquire)
+        }
+    }
+
+    /// Reads back the `(entity_id, action)` of a clientbound animate packet.
+    fn animate_payload(packet: &EncodedPacket) -> Option<(i32, u8)> {
+        let mut cursor = Cursor::new(packet.encoded_data.as_slice());
+        VarInt::read(&mut cursor).ok()?;
+        let packet_id = VarInt::read(&mut cursor).ok()?;
+        if packet_id.0 != C_ANIMATE {
+            return None;
+        }
+        let entity_id = VarInt::read(&mut cursor).ok()?;
+        let action = u8::read(&mut cursor).ok()?;
+        Some((entity_id.0, action))
+    }
+
+    fn combat_world(key: &'static str) -> Arc<World> {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        world
+    }
+
+    fn spawn_pig(world: &Arc<World>, position: DVec3) -> Arc<PigEntity> {
+        let pig = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            position,
+            Arc::downgrade(world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&pig) as SharedEntity)
+            .expect("the test chunk is loaded, so the pig should attach");
+        pig
+    }
+
+    struct Attacker {
+        player: Arc<Player>,
+        sent: Arc<SyncMutex<Vec<EncodedPacket>>>,
+    }
+
+    fn attacker(world: &Arc<World>) -> Attacker {
+        let sent = Arc::new(SyncMutex::new(Vec::new()));
+        let connection = Arc::new(PlayerConnection::Other(Box::new(RecordingConnection {
+            sent: Arc::clone(&sent),
+            closed: AtomicBool::new(false),
+        })));
+        let player = TestPlayerBuilder::new(Arc::clone(world), "Attacker", next_entity_id())
+            .connection(connection)
+            .build();
+        player.set_on_ground(true);
+        player.set_speed(WALKING_SPEED);
+        Attacker { player, sent }
+    }
+
+    impl Attacker {
+        /// Fills the attack strength meter and clears the recorded packets, so
+        /// each swing is judged on its own.
+        fn ready(&self) {
+            for _ in 0..FULL_CHARGE_TICKS {
+                self.player.tick_attack_strength();
+            }
+            self.sent.lock().clear();
+        }
+
+        fn swing_at(&self, target: &dyn Entity) {
+            self.ready();
+            self.player.handle_attack(SAttack {
+                entity_id: target.id(),
+            });
+        }
+
+        fn animations(&self) -> Vec<(i32, u8)> {
+            self.sent
+                .lock()
+                .iter()
+                .filter_map(animate_payload)
+                .collect()
+        }
+    }
+
+    /// Puts the attacker in the air, mid-fall, which is the whole of vanilla's
+    /// `canCriticalAttack` a test can arrange.
+    fn start_falling(player: &Player) {
+        player.set_on_ground(false);
+        player.set_fall_distance(1.0);
+    }
+
+    fn damage_taken(pig: &PigEntity, before: f32) -> f32 {
+        before - pig.get_health()
+    }
+
+    #[test]
+    fn a_falling_hit_deals_half_as_much_damage_again() {
+        let world = combat_world("melee_crit_damage");
+        let attacker = attacker(&world);
+        let position = attacker.player.position();
+
+        let grounded_target = spawn_pig(&world, position + DVec3::new(1.0, 0.0, 0.0));
+        let falling_target = spawn_pig(&world, position + DVec3::new(2.2, 0.0, 0.0));
+
+        let grounded_before = grounded_target.get_health();
+        attacker.swing_at(grounded_target.as_ref());
+        let plain = damage_taken(&grounded_target, grounded_before);
+        assert!(plain > 0.0, "the plain hit landed no damage at all");
+
+        start_falling(&attacker.player);
+        let falling_before = falling_target.get_health();
+        attacker.swing_at(falling_target.as_ref());
+        let critical = damage_taken(&falling_target, falling_before);
+
+        assert!(
+            (critical - plain * 1.5).abs() < 1.0e-4,
+            "a critical hit should be 1.5x a plain one, got {critical} against {plain}"
+        );
+    }
+
+    #[test]
+    fn a_critical_hit_animates_the_target_for_the_attacker() {
+        let world = combat_world("melee_crit_animation");
+        let attacker = attacker(&world);
+        let position = attacker.player.position();
+        let target = spawn_pig(&world, position + DVec3::new(1.0, 0.0, 0.0));
+
+        attacker.swing_at(target.as_ref());
+        assert!(
+            !attacker.animations().contains(&(target.id(), 4)),
+            "a hit taken with both feet on the ground is not a critical hit"
+        );
+
+        start_falling(&attacker.player);
+        attacker.swing_at(target.as_ref());
+        assert!(
+            attacker.animations().contains(&(target.id(), 4)),
+            "a falling hit should send the critical-hit animation, got {:?}",
+            attacker.animations()
+        );
+    }
+
+    #[test]
+    fn a_sword_sweep_reaches_the_neighbour() {
+        let world = combat_world("melee_sweep_reaches");
+        let attacker = attacker(&world);
+        let position = attacker.player.position();
+        attacker.player.inventory.lock().set_item_in_hand(
+            InteractionHand::MainHand,
+            ItemStack::new(&vanilla_items::IRON_SWORD),
+        );
+
+        let target = spawn_pig(&world, position + DVec3::new(1.0, 0.0, 0.0));
+        let bystander = spawn_pig(&world, position + DVec3::new(1.6, 0.0, 0.0));
+        let bystander_before = bystander.get_health();
+
+        attacker.swing_at(target.as_ref());
+
+        assert!(
+            damage_taken(&bystander, bystander_before) > 0.0,
+            "a full-strength sword swing on the ground should sweep the neighbour"
+        );
+    }
+
+    #[test]
+    fn a_sprinting_sword_hit_does_not_sweep() {
+        let world = combat_world("melee_sweep_sprint");
+        let attacker = attacker(&world);
+        let position = attacker.player.position();
+        attacker.player.inventory.lock().set_item_in_hand(
+            InteractionHand::MainHand,
+            ItemStack::new(&vanilla_items::IRON_SWORD),
+        );
+        attacker.player.set_sprinting(true);
+
+        let target = spawn_pig(&world, position + DVec3::new(1.0, 0.0, 0.0));
+        let bystander = spawn_pig(&world, position + DVec3::new(1.6, 0.0, 0.0));
+        let bystander_before = bystander.get_health();
+
+        attacker.swing_at(target.as_ref());
+
+        assert!(
+            (damage_taken(&bystander, bystander_before)).abs() < f32::EPSILON,
+            "a sprint hit is a knockback hit, and vanilla never sweeps on one"
+        );
+    }
+
+    #[test]
+    fn a_bare_handed_hit_does_not_sweep() {
+        let world = combat_world("melee_sweep_needs_a_sword");
+        let attacker = attacker(&world);
+        let position = attacker.player.position();
+
+        let target = spawn_pig(&world, position + DVec3::new(1.0, 0.0, 0.0));
+        let bystander = spawn_pig(&world, position + DVec3::new(1.6, 0.0, 0.0));
+        let bystander_before = bystander.get_health();
+
+        attacker.swing_at(target.as_ref());
+
+        assert!(
+            (damage_taken(&bystander, bystander_before)).abs() < f32::EPSILON,
+            "only an item in `#minecraft:swords` sweeps in 26.2"
+        );
+    }
+
+    /// `Player.isSweepAttack` compares the known movement against
+    /// `getSpeed() * 2.5`, and a player whose speed was never set fails that
+    /// test at zero -- every sweep dies silently. Vanilla writes the movement
+    /// speed attribute there once per `aiStep`.
+    #[test]
+    fn the_player_tick_publishes_the_movement_speed() {
+        let world = combat_world("melee_ai_step_speed");
+        let player = TestPlayerBuilder::new(world, "Walker", next_entity_id()).build();
+        player.set_speed(0.0);
+
+        let _ = LivingEntity::ai_step(player.as_ref());
+
+        assert!(
+            player.get_speed() > 0.0,
+            "without this the sweep check compares against a zero speed and never fires"
+        );
     }
 }

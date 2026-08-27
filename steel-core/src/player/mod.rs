@@ -1810,6 +1810,16 @@ impl LivingEntity for Player {
 
         let result = self.default_ai_step();
         self.set_y_head_rot(self.rotation().0);
+        // Vanilla parity: the `setSpeed(getAttributeValue(MOVEMENT_SPEED))` of
+        // `Player.aiStep`. `Player.isSweepAttack` compares the player's known
+        // movement against this, so leaving it at zero silently kills every
+        // sweep attack.
+        let movement_speed = self
+            .attributes()
+            .lock()
+            .get_value(vanilla_attributes::MOVEMENT_SPEED)
+            .unwrap_or(0.0) as f32;
+        self.set_speed(movement_speed);
         // Vanilla parity: the `handleShoulderEntities` at the end of
         // `Player.aiStep`.
         self.handle_shoulder_entities();
