@@ -35,6 +35,12 @@ pub struct RecipeRegistry {
     blasting_recipes: Vec<&'static SmeltingRecipe>,
     /// All smoker recipes.
     smoking_recipes: Vec<&'static SmeltingRecipe>,
+    /// All campfire recipes.
+    ///
+    /// Kept apart from the three furnace families rather than folded into
+    /// [`CookingKind`]: a campfire burns no fuel and awards no experience on
+    /// collection, so it shares only the recipe shape, not the block.
+    campfire_recipes: Vec<&'static SmeltingRecipe>,
     /// Whether registration is still allowed.
     allows_registering: bool,
 }
@@ -59,6 +65,7 @@ impl RecipeRegistry {
             smelting_recipes: Vec::new(),
             blasting_recipes: Vec::new(),
             smoking_recipes: Vec::new(),
+            campfire_recipes: Vec::new(),
             allows_registering: true,
         }
     }
@@ -158,6 +165,34 @@ impl RecipeRegistry {
         self.smoking_recipes.push(recipe);
     }
 
+    /// Registers a campfire cooking recipe.
+    pub fn register_campfire(&mut self, recipe: &'static SmeltingRecipe) {
+        assert!(
+            self.allows_registering,
+            "Cannot register recipes after the registry has been frozen"
+        );
+        self.campfire_recipes.push(recipe);
+    }
+
+    /// Returns the campfire recipe that accepts `input`.
+    ///
+    /// Vanilla parity: `RecipeManager.getRecipeFor(RecipeType.CAMPFIRE_COOKING, ...)`.
+    /// Doubles as `RecipePropertySet.CAMPFIRE_INPUT.test`, which vanilla builds
+    /// from exactly these recipes' ingredients.
+    #[must_use]
+    pub fn find_campfire_recipe(&self, input: &ItemStack) -> Option<&'static SmeltingRecipe> {
+        self.campfire_recipes
+            .iter()
+            .find(|recipe| recipe.matches(input))
+            .copied()
+    }
+
+    /// Returns how many campfire recipes are registered.
+    #[must_use]
+    pub const fn campfire_count(&self) -> usize {
+        self.campfire_recipes.len()
+    }
+
     /// Returns the recipes of one cooking family.
     const fn cooking_recipes(&self, kind: CookingKind) -> &Vec<&'static SmeltingRecipe> {
         match kind {
@@ -214,6 +249,7 @@ impl RecipeRegistry {
             .iter()
             .chain(&self.blasting_recipes)
             .chain(&self.smoking_recipes)
+            .chain(&self.campfire_recipes)
             .find(|recipe| &recipe.id == id)
             .copied()
     }
@@ -416,6 +452,38 @@ mod tests {
                 .find_cooking_recipe(CookingKind::Smoking, &raw_iron)
                 .is_none(),
             "a smoker must refuse ore"
+        );
+    }
+
+    /// The campfire family is loaded from the same datapack directory as the
+    /// furnace ones, but through its own build-script arm. A typo there would
+    /// leave the list silently empty and every campfire inert, so this asserts
+    /// on the count as well as on one lookup.
+    #[test]
+    fn a_campfire_cooks_food_slowly_and_never_ore() {
+        init_vanilla_registry();
+        let recipes = &REGISTRY.recipes;
+
+        assert_eq!(
+            recipes.campfire_count(),
+            9,
+            "vanilla ships nine campfire recipes"
+        );
+
+        let porkchop = ItemStack::new(&vanilla_items::PORKCHOP);
+        let cooked = recipes
+            .find_campfire_recipe(&porkchop)
+            .expect("a campfire cooks porkchop");
+        assert_eq!(cooked.result.item.key, vanilla_items::COOKED_PORKCHOP.key);
+        assert_eq!(
+            cooked.cooking_time, 600,
+            "a campfire is six times slower than a furnace"
+        );
+
+        let raw_iron = ItemStack::new(&vanilla_items::RAW_IRON);
+        assert!(
+            recipes.find_campfire_recipe(&raw_iron).is_none(),
+            "a campfire must refuse ore"
         );
     }
 }
