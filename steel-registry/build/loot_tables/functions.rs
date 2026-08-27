@@ -1,3 +1,6 @@
+use crate::generator_functions::generate_text_component;
+use crate::shared_structs::TextComponentJson;
+
 use super::{
     ItemFilterJson, LimitJson, LootFunctionJson, TokenStream, generate_condition,
     generate_instrument_options, generate_number_provider, generate_optional_enchantment_options,
@@ -341,20 +344,27 @@ pub(crate) fn generate_function(function: &LootFunctionJson) -> TokenStream {
             }
         }
         "minecraft:set_name" => {
-            let name_str = function
-                .name
-                .as_ref()
-                .map_or_else(|| "\"\"".to_string(), std::string::ToString::to_string);
-
+            // Vanilla's `target` is optional and defaults to `custom_name`.
             let target = match function.target.as_deref() {
-                Some("custom_name") => quote! { NameTarget::CustomName },
                 Some("item_name") => quote! { NameTarget::ItemName },
-                _ => quote! { NameTarget::CustomName },
+                Some("custom_name") | None => quote! { NameTarget::CustomName },
+                Some(other) => panic!("unknown `set_name` target `{other}`"),
             };
+
+            let Some(name) = &function.name else {
+                // Vanilla parity: `SetNameFunction.run` writes nothing when the
+                // optional `name` is absent, so neither does an empty sequence.
+                return quote! { LootFunction::Sequence { functions: &[] } };
+            };
+            let name: TextComponentJson = match serde_json::from_value(name.clone()) {
+                Ok(name) => name,
+                Err(error) => panic!("`set_name` name {name} is not modeled: {error}"),
+            };
+            let name = generate_text_component(&name);
 
             quote! {
                 LootFunction::SetName {
-                    name: #name_str,
+                    name: || #name,
                     target: #target,
                 }
             }

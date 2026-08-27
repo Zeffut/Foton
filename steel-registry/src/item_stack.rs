@@ -880,11 +880,14 @@ impl ItemStack {
     /// origin but no world, and Steel has no structure locator reachable from
     /// `steel-registry` at all, so there is nothing here to search with.
     ///
-    /// The stack is deliberately left as the plain `map` the trade started
-    /// from. Every vanilla use of this function is followed by a
+    /// The stack is deliberately left as the plain `map` the roll started
+    /// from. Every villager trade that uses this function follows it with a
     /// `minecraft:filtered` on `filled_map`/`map_id` whose `on_fail` discards,
-    /// so the effect is that a cartographer withholds the trade rather than
-    /// selling a blank map -- one offer instead of two at levels 2, 3 and 5.
+    /// so a cartographer withholds the trade rather than selling a blank map
+    /// -- one offer instead of two at levels 2, 3 and 5. The three chest
+    /// tables that use it (`chests/shipwreck_map` and the two underwater
+    /// ruins) have no such guard, so those chests hold an empty map carrying
+    /// the buried-treasure name instead of the filled map vanilla draws.
     pub const fn create_exploration_map(
         &mut self,
         _destination: &Identifier,
@@ -895,9 +898,16 @@ impl ItemStack {
     }
 
     /// Sets the custom name or item name of this item.
-    pub const fn set_name(&mut self, _name: &str, _target: crate::loot_table::NameTarget) {
-        // TODO: Implement name setting
-        // Parse the name as a text component and set CUSTOM_NAME or ITEM_NAME
+    ///
+    /// Vanilla parity: `SetNameFunction.run`, which writes the component into
+    /// whichever of the two name slots the `target` names. Vanilla also
+    /// resolves selectors against a context entity first; no vanilla loot
+    /// table or trade names one, so there is nothing to resolve against.
+    pub fn set_name(&mut self, name: TextComponent, target: crate::loot_table::NameTarget) {
+        match target {
+            crate::loot_table::NameTarget::CustomName => self.set(CUSTOM_NAME, name),
+            crate::loot_table::NameTarget::ItemName => self.set(ITEM_NAME, name),
+        }
     }
 
     /// Sets the ominous bottle amplifier component.

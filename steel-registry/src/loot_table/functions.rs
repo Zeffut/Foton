@@ -1,3 +1,5 @@
+use text_components::TextComponent;
+
 use super::{
     DyeColor, EquipmentSlotGroup, Identifier, InstrumentRef, ItemStack, LootCondition, LootContext,
     LootContextEntity, LootEntry, NumberProvider, REGISTRY, RngExt, TaggedRegistryExt, math_round,
@@ -120,9 +122,9 @@ pub enum LootFunction {
         zoom: i32,
         skip_existing_chunks: bool,
     },
-    /// Set the custom name of the item.
+    /// Set the custom name or item name of the item.
     SetName {
-        name: &'static str,
+        name: fn() -> TextComponent,
         target: NameTarget,
     },
     /// Set the ominous bottle amplifier.
@@ -406,7 +408,10 @@ pub enum CopySource {
 }
 
 /// Target for `set_name` function.
-#[derive(Debug, Clone, Copy)]
+///
+/// Vanilla parity: `SetNameFunction.Target`, whose `component()` picks between
+/// the two name components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameTarget {
     CustomName,
     ItemName,
@@ -561,8 +566,7 @@ impl LootFunction {
                 item.create_exploration_map(destination, decoration, *zoom, *skip_existing_chunks);
             }
             LootFunction::SetName { name, target } => {
-                // TODO: Implement name setting
-                item.set_name(name, *target);
+                item.set_name(name(), *target);
             }
             LootFunction::SetOminousBottleAmplifier { amplifier } => {
                 let amp = amplifier.get_int(ctx.rng).clamp(

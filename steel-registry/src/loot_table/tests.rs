@@ -1032,3 +1032,31 @@ fn only_a_chicken_jockey_drops_the_lava_chicken_disc() {
         "music_disc_lava_chicken"
     ));
 }
+
+#[test]
+fn a_shipwreck_treasure_map_comes_out_named() {
+    init_test_registries();
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng);
+    let items = vanilla_loot_tables::CHESTS_SHIPWRECK_MAP.get_random_items(&mut ctx);
+
+    let map = items
+        .iter()
+        .find(|item| item.item.key == Identifier::vanilla_static("map"))
+        .expect("the first pool of chests/shipwreck_map always rolls a map");
+    let name = map
+        .get(crate::data_components::vanilla_components::ITEM_NAME)
+        .expect("a map always carries an item name; set_name replaces it");
+    assert_eq!(
+        name,
+        &steel_utils::translations::FILLED_MAP_BURIED_TREASURE
+            .msg()
+            .into()
+    );
+    // `set_name` targets `item_name`, not `custom_name`: an anvil rename shows
+    // in italics and this one must not.
+    assert!(
+        map.get(crate::data_components::vanilla_components::CUSTOM_NAME)
+            .is_none()
+    );
+}

@@ -718,6 +718,7 @@ pub(crate) fn build() -> TokenStream {
             PotionOptions, PropertyCheck, RaiderStatus, StewEffect, ToolPredicate,
         };
         use steel_utils::Identifier;
+        use text_components::{TextComponent, translation::TranslatedMessage};
     });
 
     // Generate static constants for each loot table
