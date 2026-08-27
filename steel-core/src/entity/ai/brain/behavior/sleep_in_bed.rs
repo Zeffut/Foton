@@ -34,9 +34,11 @@ const MIN_HEIGHT_ABOVE_BED: f64 = 0.4;
 ///
 /// MISSING FOUNDATION: vanilla's `start` also closes the doors it opened on the
 /// way home, through `InteractWithDoor.closeDoorsThatIHaveOpenedOrPassedThrough`.
-/// Steel has the `DOORS_TO_CLOSE` memory but no `InteractWithDoor`, so nothing
-/// ever fills it and there is nothing to close; the door pass is a no-op rather
-/// than a skipped step.
+/// Getting into bed is also when a villager shuts the doors it left open on
+/// the way home -- the same `DOORS_TO_CLOSE` pass [`InteractWithDoor`] runs as
+/// it walks, which is why that one is public.
+///
+/// [`InteractWithDoor`]: super::InteractWithDoor
 pub struct SleepInBed {
     next_ok_start_time: i64,
 }
@@ -138,6 +140,10 @@ impl TimedBehavior for SleepInBed {
         let Some(home) = brain.get_memory(memory_module_types::HOME) else {
             return;
         };
+        // Vanilla parity: the `closeDoorsThatIHaveOpenedOrPassedThrough(level,
+        // body, null, null, ..)` of `SleepInBed.start` -- with no path nodes to
+        // excuse, so every door still tracked is a candidate.
+        super::close_doors_behind(ctx.world(), ctx.mob(), brain, None, None);
         if let Err(error) = ctx.mob().start_sleeping(home.pos) {
             log::debug!(
                 "villager {} could not lie down in its bed: {error}",

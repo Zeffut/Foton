@@ -46,6 +46,7 @@ mod give_items;
 mod go_to_target_location;
 mod go_to_wanted_item;
 mod interact_with;
+mod interact_with_door;
 mod long_jump;
 mod look_at_target_sink;
 mod melee_attack;
@@ -92,6 +93,7 @@ pub use gate_behavior::RunOne;
 pub use go_to_target_location::GoToTargetLocation;
 pub use go_to_wanted_item::GoToWantedItem;
 pub use interact_with::{InteractWith, SetLookAndInteract};
+pub use interact_with_door::{InteractWithDoor, close_doors_behind};
 pub use look_at_target_sink::LookAtTargetSink;
 pub use move_to_target_sink::MoveToTargetSink;
 pub use raid::{

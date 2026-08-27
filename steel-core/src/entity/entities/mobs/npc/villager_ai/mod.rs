@@ -55,8 +55,8 @@ use std::sync::Arc;
 use crate::behavior::BlockStateBehaviorExt as _;
 use crate::entity::ai::brain::behavior::{
     AcquirePoi, Behavior, BehaviorControl, DoNothing, GateBehavior, GoToWantedItem, InteractWith,
-    LocateHidingPlace, LookAtTargetSink, MoveToSkySeeingSpot, MoveToTargetSink, OneShot,
-    OrderPolicy, ReactToBell, ResetRaidStatus, RingBell, RunOne, RunningPolicy, Sequence,
+    InteractWithDoor, LocateHidingPlace, LookAtTargetSink, MoveToSkySeeingSpot, MoveToTargetSink,
+    OneShot, OrderPolicy, ReactToBell, ResetRaidStatus, RingBell, RunOne, RunningPolicy, Sequence,
     SetEntityLookTarget, SetHiddenState, SetLookAndInteract, SetRaidStatus, SetWalkTargetAwayFrom,
     SetWalkTargetFromLookTarget, SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi,
     StrollToPoiList, Swim, TriggerGate, TriggerIf, UpdateActivityFromSchedule, ValidateNearbyPoi,
@@ -273,14 +273,12 @@ pub fn make_brain() -> Brain {
 }
 
 /// Vanilla parity: `VillagerGoalPackages.getCorePackage`.
-///
-/// MISSING FOUNDATION: vanilla also runs `InteractWithDoor` here, which needs
-/// the `DOORS_TO_CLOSE` bookkeeping Steel does not do.
 fn core_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Core,
         vec![
             (0, Behavior::boxed(Swim::new(0.8))),
+            (0, OneShot::boxed(InteractWithDoor::new())),
             (
                 0,
                 Behavior::boxed(LookAtTargetSink::new(

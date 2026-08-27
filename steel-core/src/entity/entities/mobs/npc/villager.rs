@@ -100,6 +100,13 @@ const WHEAT_PER_BREAD: i32 = 3;
 /// Vanilla parity: the `0.5F` offset the bread it cannot carry is dropped at.
 const BREAD_DROP_OFFSET: f64 = 0.5;
 
+/// How long a path a villager will follow.
+///
+/// Vanilla parity: the `getNavigation().setRequiredPathLength(48.0F)` of the
+/// `Villager` constructor, which is what lets one walk across a village rather
+/// than the sixteen blocks a mob's follow range would otherwise allow.
+const REQUIRED_PATH_LENGTH: f32 = 48.0;
+
 /// How far a villager looks for neighbours who also want a golem.
 ///
 /// Vanilla parity: the `getBoundingBox().inflate(10.0, 10.0, 10.0)` of
@@ -209,6 +216,19 @@ impl VillagerEntity {
         let ageable_base = AgeableMobBase::new();
         let mut entity_data = VillagerEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
+
+        {
+            // Vanilla parity: the three navigation lines of the `Villager`
+            // constructor. `setCanOpenDoors` is the one with teeth: without it
+            // a closed door is not pathfindable, so a villager would never plan
+            // a route through one and `InteractWithDoor` would have nothing to
+            // open.
+            let mut navigation = mob_base.navigation().lock();
+            navigation.set_can_open_doors(true);
+            navigation.set_can_float(true);
+            navigation
+                .set_required_path_length(REQUIRED_PATH_LENGTH, f64::from(REQUIRED_PATH_LENGTH));
+        }
 
         let villager = Self {
             base,
