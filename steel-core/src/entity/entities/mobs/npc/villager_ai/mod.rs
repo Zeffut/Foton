@@ -72,7 +72,7 @@ pub use job_site::{
     SetWalkTargetFromBlockMemory, WorkAtPoi, YieldJobSite,
 };
 pub use panic::{VillagerCalmDown, VillagerPanicTrigger};
-pub use trade::{LookAndFollowTradingPlayerSink, ShowTradesToPlayer};
+pub use trade::{LookAndFollowTradingPlayerSink, ShowTradesToPlayer, TradeWithVillager};
 
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::BlockStateProperties;
@@ -439,9 +439,8 @@ fn rest_package() -> ActivityData {
 
 /// Vanilla parity: `VillagerGoalPackages.getMeetPackage`.
 ///
-/// MISSING FOUNDATION: `GiveGiftToHero` and the `TradeWithVillager` gate are not
-/// ported yet, so villagers gather at the bell and talk but do not swap goods
-/// there.
+/// MISSING FOUNDATION: `GiveGiftToHero` is not ported yet -- it needs the
+/// hero-of-the-village effect.
 fn meet_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Meet,
@@ -491,6 +490,19 @@ fn meet_package() -> ActivityData {
                     memory_module_types::MEETING_POINT,
                 )),
             ),
+            // Vanilla parity: the `GateBehavior` that erases `INTERACTION_TARGET`
+            // when it stops, so a swap that is interrupted does not leave the
+            // pair bound to each other.
+            (
+                3,
+                Box::new(GateBehavior::new(
+                    Vec::new(),
+                    vec![memory_module_types::INTERACTION_TARGET.id()],
+                    OrderPolicy::Ordered,
+                    RunningPolicy::RunOne,
+                    vec![(Behavior::boxed(TradeWithVillager::new()), 1)],
+                )),
+            ),
             full_look_behavior(),
             (99, OneShot::boxed(UpdateActivityFromSchedule)),
         ],
@@ -506,9 +518,8 @@ fn meet_package() -> ActivityData {
 
 /// Vanilla parity: `VillagerGoalPackages.getIdlePackage`.
 ///
-/// MISSING FOUNDATION: `JumpOnBed`, `GiveGiftToHero`, `TradeWithVillager` and
-/// `VillagerMakeLove` are not ported yet, so an idle villager mingles and shows
-/// its wares but does not breed.
+/// MISSING FOUNDATION: `JumpOnBed` needs the `NEAREST_BED` sensor and
+/// `GiveGiftToHero` needs the hero-of-the-village effect.
 fn idle_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Idle,
@@ -571,6 +582,19 @@ fn idle_package() -> ActivityData {
                 Behavior::boxed(ShowTradesToPlayer::new(
                     SHOW_TRADES_MIN_DURATION,
                     SHOW_TRADES_MAX_DURATION,
+                )),
+            ),
+            // Vanilla parity: the `GateBehavior` that erases `INTERACTION_TARGET`
+            // when it stops, so a swap that is interrupted does not leave the
+            // pair bound to each other.
+            (
+                3,
+                Box::new(GateBehavior::new(
+                    Vec::new(),
+                    vec![memory_module_types::INTERACTION_TARGET.id()],
+                    OrderPolicy::Ordered,
+                    RunningPolicy::RunOne,
+                    vec![(Behavior::boxed(TradeWithVillager::new()), 1)],
                 )),
             ),
             // Vanilla parity: the `GateBehavior` that erases `BREED_TARGET` when

@@ -834,6 +834,62 @@ fn a_farmer_at_its_composter_bakes_its_wheat_into_bread() {
     );
 }
 
+/// The bread a villager is carrying reaches the villager who is short of it.
+///
+/// Vanilla parity: `TradeWithVillager`, which is what stops a farmer hoarding a
+/// harvest the rest of the village cannot eat. It rides on the container and on
+/// the idle gate that picks an `INTERACTION_TARGET`, so this fails if either is
+/// missing -- and it enters only through the two villagers' own ticks.
+#[test]
+fn a_villager_with_food_to_spare_throws_half_of_it_to_a_neighbour() {
+    const CARRIED: i32 = 40;
+
+    let world = villager_world("villager_shares_food");
+    let giver = spawn_villager(&world);
+    let taker = spawn_villager(&world);
+    giver
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::BREAD, CARRIED));
+    assert!(
+        giver.has_excess_food() && taker.wants_more_food(),
+        "the giver has more than it needs and the taker has nothing"
+    );
+
+    // 10..2000 is the IDLE stretch, the package the swap gate is in.
+    set_time_of_day(&world, 1_000);
+    let mut shared = false;
+    for _ in 0..6_000 {
+        advance_time(&world);
+        giver.base_tick();
+        giver.tick();
+        taker.base_tick();
+        taker.tick();
+        if giver
+            .carried_inventory()
+            .lock()
+            .count_item(&vanilla_items::BREAD)
+            < CARRIED
+        {
+            shared = true;
+            break;
+        }
+    }
+
+    assert!(
+        shared,
+        "a villager with bread to spare should have shared it"
+    );
+    assert_eq!(
+        giver
+            .carried_inventory()
+            .lock()
+            .count_item(&vanilla_items::BREAD),
+        CARRIED / 2,
+        "vanilla throws half a stack that is more than half full"
+    );
+}
+
 /// The activity the villager's own brain is currently in.
 fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
     Mob::brain(villager.as_ref())?.active_non_core_activity()

@@ -1,18 +1,24 @@
-//! Showing trades off, and following the player who is buying.
+//! Trading: showing wares to a player, and handing goods to another villager.
 //!
-//! Vanilla parity: `ShowTradesToPlayer` and `LookAndFollowTradingPlayerSink`.
+//! Vanilla parity: `ShowTradesToPlayer`, `LookAndFollowTradingPlayerSink` and
+//! `TradeWithVillager`.
 
 use steel_registry::equipment::EquipmentSlot;
 use steel_registry::item_stack::ItemStack;
+use steel_registry::items::ItemRef;
+use steel_registry::{vanilla_entities, vanilla_items, vanilla_villager_professions};
+use steel_utils::Downcast as _;
 use steel_utils::types::InteractionHand;
 
 use super::villager;
 use crate::entity::ai::brain::behavior::{
-    BrainContext, MemoryModuleId, MemoryStatus, TimedBehavior,
+    BrainContext, MemoryModuleId, MemoryStatus, TimedBehavior, utils,
 };
 use crate::entity::ai::brain::memory::{WalkTarget, memory_module_types};
 use crate::entity::ai::brain::position_tracker::PositionTracker;
-use crate::entity::{Entity as _, LivingEntity, SharedEntity};
+use crate::entity::entities::mobs::npc::VillagerEntity;
+use crate::entity::{Entity as _, InventoryCarrier as _, LivingEntity, SharedEntity};
+use crate::inventory::container::Container as _;
 use crate::trading::Merchant as _;
 
 /// Vanilla parity: `ShowTradesToPlayer.MAX_LOOK_TIME`.
@@ -316,5 +322,204 @@ impl TimedBehavior for LookAndFollowTradingPlayerSink {
 
     fn debug_name(&self) -> &'static str {
         "LookAndFollowTradingPlayerSink"
+    }
+}
+
+/// Vanilla parity: the `0.5F` and `2` of the `lockGazeAndWalkToEachOther` calls.
+const SWAP_SPEED_MODIFIER: f64 = 0.5;
+const SWAP_CLOSE_ENOUGH_DIST: i32 = 2;
+/// Vanilla parity: the `distanceToSqr(target) > 5.0` that holds the exchange
+/// until the pair have actually reached each other.
+const SWAP_DISTANCE_SQR: f64 = 5.0;
+/// Vanilla parity: the `24` of `throwHalfStack`, the count above which a
+/// villager gives away everything past two dozen rather than half.
+const KEEP_AT_MOST: i32 = 24;
+
+/// Vanilla parity: the `ImmutableMap` handed to `TradeWithVillager`'s `super(...)`.
+const SWAP_ENTRY_CONDITION: &[(MemoryModuleId, MemoryStatus)] = &[
+    (
+        memory_module_types::INTERACTION_TARGET.id(),
+        MemoryStatus::ValuePresent,
+    ),
+    (
+        memory_module_types::NEAREST_VISIBLE_LIVING_ENTITIES.id(),
+        MemoryStatus::ValuePresent,
+    ),
+];
+
+/// Two villagers meet and hand each other what the other one needs.
+///
+/// Vanilla parity: `net.minecraft.world.entity.ai.behavior.TradeWithVillager`.
+/// Despite the name nothing is bought: each villager throws the other half a
+/// stack of food, of a farmer's wheat, or of whatever the other's profession
+/// asks for and its own does not.
+pub struct TradeWithVillager {
+    /// Vanilla parity: the `Set<Item> trades` the behavior works out on start.
+    trades: Vec<ItemRef>,
+}
+
+impl TradeWithVillager {
+    /// Vanilla parity: `new TradeWithVillager()`.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { trades: Vec::new() }
+    }
+
+    /// Vanilla parity: `TradeWithVillager.figureOutWhatIAmWillingToTrade` --
+    /// what the other one collects and this one does not.
+    fn figure_out_what_i_am_willing_to_trade(
+        body: &VillagerEntity,
+        target: &VillagerEntity,
+    ) -> Vec<ItemRef> {
+        let mine = body.profession().requested_items();
+        target
+            .profession()
+            .requested_items()
+            .iter()
+            .filter(|wanted| !mine.iter().any(|own| own.key == wanted.key))
+            .copied()
+            .collect()
+    }
+
+    /// Vanilla parity: the private static `TradeWithVillager.throwHalfStack`.
+    fn throw_half_stack(body: &VillagerEntity, items: &[ItemRef], target: &SharedEntity) {
+        let to_throw = {
+            let mut inventory = body.carried_inventory().lock();
+            let mut to_throw = ItemStack::empty();
+            for slot in 0..inventory.get_container_size() {
+                let stack = inventory.get_item(slot);
+                if stack.is_empty() || !items.iter().any(|item| item.key == stack.item().key) {
+                    continue;
+                }
+                let count = if stack.count() > stack.max_stack_size() / 2 {
+                    stack.count() / 2
+                } else if stack.count() > KEEP_AT_MOST {
+                    stack.count() - KEEP_AT_MOST
+                } else {
+                    continue;
+                };
+                to_throw = ItemStack::with_count(stack.item(), count);
+                inventory.get_item_mut(slot).shrink(count);
+                break;
+            }
+            to_throw
+        };
+        if !to_throw.is_empty() {
+            utils::throw_item(body, to_throw, target.position());
+        }
+    }
+}
+
+impl Default for TradeWithVillager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The villager this one is facing, if the memory still names a live one.
+fn interaction_target(ctx: &BrainContext<'_>) -> Option<SharedEntity> {
+    ctx.brain()
+        .get_memory(memory_module_types::INTERACTION_TARGET)?
+        .get()
+}
+
+impl TimedBehavior for TradeWithVillager {
+    fn entry_condition(&self) -> &[(MemoryModuleId, MemoryStatus)] {
+        SWAP_ENTRY_CONDITION
+    }
+
+    /// Vanilla parity: `TradeWithVillager.checkExtraStartConditions`.
+    fn check_extra_start_conditions(&mut self, ctx: &BrainContext<'_>) -> bool {
+        utils::target_is_valid(
+            ctx.brain(),
+            memory_module_types::INTERACTION_TARGET,
+            &vanilla_entities::VILLAGER,
+        )
+    }
+
+    fn can_still_use(&mut self, ctx: &BrainContext<'_>) -> bool {
+        self.check_extra_start_conditions(ctx)
+    }
+
+    /// Vanilla parity: `TradeWithVillager.start`.
+    fn start(&mut self, ctx: &BrainContext<'_>) {
+        let (Some(body_entity), Some(target_entity)) = (
+            ctx.world().get_entity_by_id(ctx.mob().id()),
+            interaction_target(ctx),
+        ) else {
+            return;
+        };
+        utils::lock_gaze_and_walk_to_each_other(
+            &body_entity,
+            &target_entity,
+            SWAP_SPEED_MODIFIER,
+            SWAP_CLOSE_ENOUGH_DIST,
+        );
+        let (Some(body), Some(target)) = (
+            villager(ctx),
+            target_entity.downcast_ref::<VillagerEntity>(),
+        ) else {
+            return;
+        };
+        self.trades = Self::figure_out_what_i_am_willing_to_trade(body, target);
+    }
+
+    /// Vanilla parity: `TradeWithVillager.tick`.
+    fn tick(&mut self, ctx: &BrainContext<'_>) {
+        let (Some(body_entity), Some(target_entity)) = (
+            ctx.world().get_entity_by_id(ctx.mob().id()),
+            interaction_target(ctx),
+        ) else {
+            return;
+        };
+        if body_entity
+            .position()
+            .distance_squared(target_entity.position())
+            > SWAP_DISTANCE_SQR
+        {
+            return;
+        }
+        utils::lock_gaze_and_walk_to_each_other(
+            &body_entity,
+            &target_entity,
+            SWAP_SPEED_MODIFIER,
+            SWAP_CLOSE_ENOUGH_DIST,
+        );
+
+        let (Some(body), Some(target)) = (
+            villager(ctx),
+            target_entity.downcast_ref::<VillagerEntity>(),
+        ) else {
+            return;
+        };
+        body.gossip_with(target, ctx.game_time());
+
+        let is_farmer = body.profession().key == vanilla_villager_professions::FARMER.key;
+        if body.has_excess_food() && (is_farmer || target.wants_more_food()) {
+            Self::throw_half_stack(body, &VillagerEntity::food_items(), &target_entity);
+        }
+
+        let spare_wheat = body
+            .carried_inventory()
+            .lock()
+            .count_item(&vanilla_items::WHEAT)
+            > ItemStack::new(&vanilla_items::WHEAT).max_stack_size() / 2;
+        if is_farmer && spare_wheat {
+            Self::throw_half_stack(body, &[&vanilla_items::WHEAT], &target_entity);
+        }
+
+        if !self.trades.is_empty() && body.carried_inventory().lock().has_any_of(&self.trades) {
+            Self::throw_half_stack(body, &self.trades.clone(), &target_entity);
+        }
+    }
+
+    /// Vanilla parity: `TradeWithVillager.stop`.
+    fn stop(&mut self, ctx: &BrainContext<'_>) {
+        ctx.brain()
+            .erase_memory(memory_module_types::INTERACTION_TARGET.id());
+    }
+
+    fn debug_name(&self) -> &'static str {
+        "TradeWithVillager"
     }
 }

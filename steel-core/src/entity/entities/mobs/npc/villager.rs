@@ -21,6 +21,7 @@ use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::item_stack::ItemStack;
+use steel_registry::items::ItemRef;
 use steel_registry::loot_table::{EntityRef, LootContext};
 use steel_registry::poi::PoiTypeRef;
 use steel_registry::sound_event::SoundEventRef;
@@ -97,16 +98,21 @@ const WHEAT_PER_BREAD: i32 = 3;
 const BREAD_DROP_OFFSET: f64 = 0.5;
 
 /// Vanilla parity: `Villager.FOOD_POINTS`.
+fn food_points_table() -> [(ItemRef, i32); 4] {
+    [
+        (&vanilla_items::BREAD, 4),
+        (&vanilla_items::POTATO, 1),
+        (&vanilla_items::CARROT, 1),
+        (&vanilla_items::BEETROOT, 1),
+    ]
+}
+
+/// Vanilla parity: the `FOOD_POINTS.get(item)` every food count goes through.
 fn food_points(stack: &ItemStack) -> i32 {
-    let key = &stack.item().key;
-    if key.namespace != "minecraft" {
-        return 0;
-    }
-    match key.path.as_ref() {
-        "bread" => 4,
-        "potato" | "carrot" | "beetroot" => 1,
-        _ => 0,
-    }
+    food_points_table()
+        .into_iter()
+        .find(|&(item, _)| stack.is(item))
+        .map_or(0, |(_, points)| points)
 }
 
 /// A villager: a mob that trades, restocks and remembers.
@@ -653,6 +659,14 @@ impl VillagerEntity {
         if !leftover.is_empty() {
             self.spawn_at_location(leftover, BREAD_DROP_OFFSET);
         }
+    }
+
+    /// The food a villager counts, eats and hands to another villager.
+    ///
+    /// Vanilla parity: `Villager.FOOD_POINTS.keySet()`.
+    #[must_use]
+    pub fn food_items() -> [ItemRef; 4] {
+        food_points_table().map(|(item, _)| item)
     }
 
     /// Vanilla parity: `Villager.hasFarmSeeds`.
