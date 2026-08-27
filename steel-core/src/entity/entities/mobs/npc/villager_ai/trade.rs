@@ -492,7 +492,7 @@ impl TimedBehavior for TradeWithVillager {
         ) else {
             return;
         };
-        body.gossip_with(target, ctx.game_time());
+        body.gossip_with(ctx.world(), target, ctx.game_time());
 
         let is_farmer = body.profession().key == vanilla_villager_professions::FARMER.key;
         if body.has_excess_food() && (is_farmer || target.wants_more_food()) {

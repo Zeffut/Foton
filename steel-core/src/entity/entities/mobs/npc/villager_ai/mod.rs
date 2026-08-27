@@ -159,10 +159,9 @@ const HIDE_CLOSE_ENOUGH_DIST: i32 = 3;
 
 /// Vanilla parity: the sensor list of `Villager.BRAIN_PROVIDER`.
 ///
-/// MISSING FOUNDATION: vanilla also asks for `NEAREST_BED`, `VILLAGER_BABIES`
-/// and `GOLEM_DETECTED`. The first two feed behaviors Steel has not ported
-/// (`JumpOnBed`, `PlayTagWithOtherKids`) and the last feeds iron-golem
-/// spawning, which Steel does not have.
+/// MISSING FOUNDATION: vanilla also asks for `NEAREST_BED` and
+/// `VILLAGER_BABIES`, which feed behaviors Steel has not ported (`JumpOnBed`,
+/// `PlayTagWithOtherKids`).
 ///
 /// The raid packages need no sensor of their own: what they read is the raid
 /// manager, at the villager's own block, and the `HEARD_BELL_TIME` a rung bell
@@ -174,6 +173,7 @@ const SENSORS: &[SensorType] = &[
     SensorType::HurtBy,
     SensorType::VillagerHostiles,
     SensorType::SecondaryPois,
+    SensorType::GolemDetected,
 ];
 
 /// Reaches for the villager behind a brain context.

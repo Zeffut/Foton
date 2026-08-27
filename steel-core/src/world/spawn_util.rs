@@ -14,7 +14,8 @@ use crate::entity::{ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
 /// Which blocks a triggered mob is allowed to stand on.
 ///
 /// Vanilla parity: `SpawnUtil.Strategy`. Only the one the shrieker's warden uses is
-/// ported; the iron golem's legacy strategy arrives with the villager that needs it.
+/// ported here; the creaking's and the iron golem's live on the second copy of
+/// this helper in [`crate::entity::spawn_util`], which is the fuller port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnStrategy {
     /// Vanilla `SpawnUtil.Strategy.ON_TOP_OF_COLLIDER`: a full upward face with nothing

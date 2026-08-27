@@ -15,6 +15,7 @@ use steel_registry::blocks::properties::Direction;
 use steel_registry::blocks::shapes::is_face_full;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::vanilla_block_tags::BlockTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _, vanilla_blocks};
 use steel_utils::{BlockPos, BlockStateId, WorldAabb};
 
 use crate::entity::{ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
@@ -25,14 +26,21 @@ use crate::world::World;
 /// What counts as a surface a mob may be dropped onto.
 ///
 /// Vanilla parity: `SpawnUtil.Strategy`. Only the strategies a Steel caller
-/// needs are here; `LEGACY_IRON_GOLEM` is deprecated upstream and
-/// `ON_TOP_OF_COLLIDER` arrives with the first caller that wants it.
+/// needs are here; `ON_TOP_OF_COLLIDER` arrives with the first caller that
+/// wants it -- Steel's sculk shrieker reaches its own copy in
+/// [`crate::world::spawn_util`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnStrategy {
     /// Vanilla parity: `Strategy.ON_TOP_OF_COLLIDER_NO_LEAVES`, a full upward
     /// collision face with nothing solid above it and no leaves underfoot --
     /// which is what stops a creaking from being dropped into a treetop.
     OnTopOfColliderNoLeaves,
+    /// Vanilla parity: `Strategy.LEGACY_IRON_GOLEM`, deprecated upstream and
+    /// kept because a village raising a golem is the one caller that still
+    /// uses it. It is a hand-written list of blocks a golem may not be put on
+    /// rather than a rule -- glass and leaves it would fall through, and a
+    /// handful of blocks a heavy mob landing on them would make a nuisance of.
+    LegacyIronGolem,
 }
 
 impl SpawnStrategy {
@@ -44,8 +52,56 @@ impl SpawnStrategy {
                     && !state.get_block().has_tag(&BlockTag::LEAVES)
                     && is_face_full(state.get_static_collision_shape(), Direction::Up)
             }
+            Self::LegacyIronGolem => {
+                !is_refused_underfoot(state)
+                    && (above_state.is_air() || !above_state.get_fluid_state().is_empty())
+                    && (state.is_solid() || state.get_block() == &vanilla_blocks::POWDER_SNOW)
+            }
         }
     }
+}
+
+/// Whether `Strategy.LEGACY_IRON_GOLEM` refuses to stand a golem on this block.
+///
+/// Vanilla parity: the fourteen-term rejection list of
+/// `SpawnUtil.Strategy.LEGACY_IRON_GOLEM`. Three of its terms are `instanceof`
+/// checks on block classes Steel does not model one-for-one, so each is read
+/// off the tag that holds exactly that class:
+///
+/// * `LeavesBlock` is `#minecraft:leaves`, the same reading the ravager's
+///   leaf-trampling already takes.
+/// * `StainedGlassBlock` is `#minecraft:impermeable` less its three other
+///   members -- `glass` and `tinted_glass` are refused by name in the same
+///   predicate anyway, so only `barrier` has to be excused to leave exactly the
+///   sixteen dyed glass blocks.
+/// * `StainedGlassPaneBlock` is `#c:glass_panes` less `glass_pane`, which is
+///   likewise refused by name.
+fn is_refused_underfoot(state: BlockStateId) -> bool {
+    let block = state.get_block();
+    let named = [
+        &vanilla_blocks::COBWEB,
+        &vanilla_blocks::CACTUS,
+        &vanilla_blocks::GLASS_PANE,
+        &vanilla_blocks::CONDUIT,
+        &vanilla_blocks::ICE,
+        &vanilla_blocks::TNT,
+        &vanilla_blocks::GLOWSTONE,
+        &vanilla_blocks::BEACON,
+        &vanilla_blocks::SEA_LANTERN,
+        &vanilla_blocks::FROSTED_ICE,
+        &vanilla_blocks::TINTED_GLASS,
+        &vanilla_blocks::GLASS,
+    ];
+    if named.into_iter().any(|refused| block == refused) {
+        return true;
+    }
+    if block == &vanilla_blocks::BARRIER {
+        // In `#minecraft:impermeable` but not on vanilla's list.
+        return false;
+    }
+    REGISTRY.blocks.is_in_tag(block, &BlockTag::LEAVES)
+        || REGISTRY.blocks.is_in_tag(block, &BlockTag::IMPERMEABLE)
+        || REGISTRY.blocks.is_in_tag(block, &BlockTag::C_GLASS_PANES)
 }
 
 /// Tries to put one mob of `entity_type` on the ground near `start`.
