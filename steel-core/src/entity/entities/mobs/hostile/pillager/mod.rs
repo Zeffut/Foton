@@ -32,7 +32,7 @@ use crate::entity::ai::goal::{
     RangedCrossbowAttackGoal,
 };
 use crate::entity::damage::DamageSource;
-use crate::entity::entities::ArrowEntity;
+use crate::entity::entities::{ArrowEntity, ItemEntity};
 use crate::entity::patrolling_monster::{
     PatrolState, PatrollingMonster, read_patrol_state, write_patrol_state,
 };
@@ -46,6 +46,7 @@ use crate::entity::{
 };
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::equipment::EquipmentSlot;
+use crate::inventory::slots::is_banner;
 use crate::world::World;
 
 /// Slots in a pillager's bag.
@@ -450,6 +451,23 @@ impl LivingEntity for PillagerEntity {
 }
 
 impl Mob for PillagerEntity {
+    /// Vanilla parity: `Pillager.pickUpItem`. A pillager reaches for a banner
+    /// and for nothing else, which is why one never turns up carrying the sword
+    /// you dropped. Vanilla's second branch asks for a white banner, which the
+    /// first branch has already caught, so it can never run.
+    fn pick_up_item(&self, world: &Arc<World>, item_entity: &SharedEntity) {
+        let Some(item) = item_entity.downcast_ref::<ItemEntity>() else {
+            return;
+        };
+        if !is_banner(&item.get_item()) {
+            return;
+        }
+        // Vanilla parity: `super.pickUpItem`, which is `Raider.pickUpItem` --
+        // the ominous banner promotes the pillager to captain, any other one
+        // just ends up in its hand.
+        self.default_pick_up_item(world, item_entity);
+    }
+
     /// Vanilla parity: `Pillager.canUseNonMeleeWeapon`.
     fn can_use_non_melee_weapon(&self, item_stack: &ItemStack) -> bool {
         item_stack.is(&vanilla_items::CROSSBOW)

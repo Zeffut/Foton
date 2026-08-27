@@ -16,10 +16,12 @@ use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_entity_data::DrownedEntityData;
-use steel_registry::{sound_events, vanilla_items};
+use steel_registry::vanilla_item_tags::ItemTag;
+use steel_registry::{REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_items};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, Downcast as _, DowncastType, DowncastTypeKey};
 
+use super::zombie_common;
 use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
@@ -661,6 +663,21 @@ impl Mob for DrownedEntity {
         true
     }
 
+    /// Vanilla parity: `Zombie.canHoldItem`.
+    fn can_hold_item(&self, item_stack: &ItemStack) -> bool {
+        let is_baby = *self.entity_data.lock().zombie().baby.get();
+        zombie_common::can_hold_item(self, is_baby, item_stack)
+    }
+
+    /// Vanilla parity: `Drowned.wantsToPickUp`, which leaves spears where they
+    /// fell so a drowned never swaps the trident it spawned holding.
+    fn wants_to_pick_up(&self, world: &World, item_stack: &ItemStack) -> bool {
+        !REGISTRY
+            .items
+            .is_in_tag(item_stack.item(), &ItemTag::SPEARS)
+            && zombie_common::wants_to_pick_up(self, world, item_stack)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }
@@ -702,10 +719,11 @@ impl Mob for DrownedEntity {
         if rand::random::<f32>() < AgeableMobGroupData::DEFAULT_BABY_SPAWN_CHANCE {
             self.entity_data.lock().zombie_mut().baby.set(true);
         }
-        // Vanilla parity: `Zombie.finalizeSpawn` rolls the weapon, and only for
-        // a spawn that is not a conversion -- a drowning zombie keeps what it
-        // was already holding.
+        // Vanilla parity: `Zombie.finalizeSpawn` rolls the loot flag and the
+        // weapon, and only for a spawn that is not a conversion -- a drowning
+        // zombie keeps what it was already holding, and the flag it had.
         if spawn_reason != EntitySpawnReason::Conversion {
+            self.roll_spawn_can_pick_up_loot(world);
             self.populate_default_equipment_slots();
         }
         // Vanilla parity: the nautilus shell of `Drowned.finalizeSpawn`, which

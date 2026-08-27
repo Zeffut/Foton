@@ -20,6 +20,7 @@ for test in dev/join-test.sh dev/selector-test.sh dev/rcon-test.sh \
             dev/mount-test.sh \
             dev/minecart-test.sh dev/jukebox-test.sh dev/frame-test.sh \
             dev/throw-test.sh dev/melee-test.sh dev/fall-test.sh \
+            dev/loot-pickup-test.sh \
             dev/workstation-test.sh dev/beacon-test.sh \
             dev/beehive-test.sh dev/tnt-minecart-test.sh \
             dev/furnace-minecart-test.sh dev/hopper-minecart-test.sh \

@@ -301,6 +301,10 @@ impl Mob for WitherSkeletonEntity {
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
         let group_data = self.finalize_spawn_mob_base(world, spawn_reason, group_data);
+        // Vanilla parity: the `setCanPickUpLoot` of
+        // `AbstractSkeleton.finalizeSpawn`, which is what lets a skeleton pick
+        // your bow up off the ground.
+        self.roll_spawn_can_pick_up_loot(world);
         self.attributes().lock().set_base_value(
             vanilla_attributes::ATTACK_DAMAGE,
             WITHER_SKELETON_ATTACK_DAMAGE,

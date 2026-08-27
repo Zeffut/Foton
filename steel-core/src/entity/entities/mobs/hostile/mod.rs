@@ -40,6 +40,7 @@ mod witch;
 mod wither_skeleton;
 mod zoglin;
 mod zombie;
+mod zombie_common;
 mod zombified_piglin;
 
 pub use blaze::BlazeEntity;
