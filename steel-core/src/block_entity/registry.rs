@@ -18,7 +18,7 @@ use super::SharedBlockEntity;
 use super::entities::{
     BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity,
     BrewingStandBlockEntity, BrushableBlockEntity, CampfireBlockEntity, ChestBlockEntity,
-    ChiseledBookShelfBlockEntity, CommandBlockEntity, ComparatorBlockEntity,
+    ChiseledBookShelfBlockEntity, CommandBlockEntity, ComparatorBlockEntity, ConduitBlockEntity,
     CopperGolemStatueBlockEntity, CrafterBlockEntity, CreakingHeartBlockEntity,
     DaylightDetectorBlockEntity, DecoratedPotBlockEntity, DispenserBlockEntity,
     EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
@@ -226,6 +226,10 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
         &vanilla_block_entity_types::CAMPFIRE,
         |level, pos, state| Arc::new(CampfireBlockEntity::new(level, pos, state)),
     );
+
+    registry.register(&vanilla_block_entity_types::CONDUIT, |level, pos, state| {
+        Arc::new(ConduitBlockEntity::new(level, pos, state))
+    });
 
     registry.register(
         &vanilla_block_entity_types::COMMAND_BLOCK,

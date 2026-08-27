@@ -401,6 +401,22 @@ mobs that need it.
       to write into a mid-generation `WorldGenRegion`. It now writes into anything
       that implements `WorldGenLevel`, which a live world does.
 
+      The campfire cooks. It has the four-slot block entity, food goes on by
+      hand, cooked food drops on the ground, and breaking it gives back whatever
+      was still on it. The lit and unlit tickers are chosen from the block state
+      the way vanilla does it, so dousing one stops it and lighting it starts it
+      again. The nine `campfire_cooking` recipes had been sitting unread in the
+      builtin datapack -- the build script's match dropped them with the recipe
+      types Steel does not model, and an empty family answers every lookup with
+      nothing, so this looked like a missing block rather than a missing recipe.
+
+      The conduit works, which means the prismarine people build around it now
+      buys something: sixteen frame blocks switch it on and hand Conduit Power
+      to anyone swimming in range, forty-two make it hunt, and it beats a
+      hostile mob in the water for four every two seconds. Only the attack
+      target crosses the wire -- everything else a conduit shows is derived
+      client-side, so the server has nothing else to send.
+
 ### 3. The end of the game
 
 - [x] **The boss bar**: `BossEvent`, `ServerBossEvent` and the boss-event packet
