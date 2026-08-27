@@ -18,14 +18,16 @@ use steel_macros::entity_behavior;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_entity_data::SpectralArrowEntityData;
-use steel_registry::{vanilla_damage_types, vanilla_entities, vanilla_items, vanilla_mob_effects};
+use steel_registry::{
+    sound_events, vanilla_damage_types, vanilla_entities, vanilla_items, vanilla_mob_effects,
+};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, Projectile,
-    ProjectileBase, RemovalReason, SharedEntity, next_entity_id,
+    ProjectileBase, ProjectileDeflection, RemovalReason, SharedEntity, next_entity_id,
 };
 use crate::inventory::container::Container as _;
 use crate::physics::MoverType;
@@ -51,6 +53,34 @@ const AIR_DRAG: f64 = 0.99;
 /// Vanilla parity: the 1200-tick limit in `AbstractArrow.tickDespawn`.
 const DESPAWN_TICKS: i32 = 1200;
 
+/// Ticks a freshly landed arrow wobbles for.
+///
+/// Vanilla parity: `AbstractArrow.SHAKE_TIME`.
+const SHAKE_TIME: i32 = 7;
+
+/// Vanilla parity: `AbstractArrow.FLAG_CRIT`.
+const FLAG_CRIT: i8 = 1;
+
+/// Seconds a burning arrow sets its target alight for.
+///
+/// Vanilla parity: the `igniteForSeconds(5.0F)` of `AbstractArrow.onHitEntity`.
+const IGNITE_TICKS: i32 = 100;
+
+/// How far back along its own travel an arrow is pulled when it lands.
+///
+/// Vanilla parity: the `offsetDirection.scale(0.05F)` of
+/// `AbstractArrow.onHitBlock`.
+const BLOCK_HIT_STEP_BACK: f64 = 0.05;
+
+/// Speed kept by an arrow a target refused.
+///
+/// Vanilla parity: the `getDeltaMovement().scale(0.2)` of the failed-hit branch
+/// of `AbstractArrow.onHitEntity`.
+const DEFLECTED_SPEED_SCALE: f64 = 0.2;
+
+/// Below this squared speed a deflected arrow is treated as stopped.
+const STOPPED_SPEED_SQUARED: f64 = 1.0e-7;
+
 /// Ticks of glowing a spectral arrow hands out.
 ///
 /// Vanilla parity: `SpectralArrow.DEFAULT_DURATION`.
@@ -67,6 +97,10 @@ struct SpectralArrowState {
     base_damage: f64,
     /// Ticks spent stuck in a block.
     life: i32,
+    /// Ticks left of the landing wobble.
+    ///
+    /// Vanilla parity: `AbstractArrow.shakeTime`.
+    shake_time: i32,
     /// Ticks of glowing this arrow grants.
     duration: i32,
 }
@@ -76,6 +110,7 @@ impl SpectralArrowState {
         Self {
             base_damage: DEFAULT_BASE_DAMAGE,
             life: 0,
+            shake_time: 0,
             duration: DEFAULT_GLOWING_TICKS,
         }
     }
@@ -188,6 +223,43 @@ impl SpectralArrowEntity {
             .set(in_ground);
     }
 
+    /// Returns whether this arrow was loosed from a fully drawn bow.
+    ///
+    /// Vanilla parity: `AbstractArrow.isCritArrow`.
+    #[must_use]
+    pub fn is_crit_arrow(&self) -> bool {
+        *self.entity_data.lock().abstract_arrow.id_flags.get() & FLAG_CRIT != 0
+    }
+
+    /// Marks the arrow as critical.
+    ///
+    /// Vanilla parity: `AbstractArrow.setCritArrow`.
+    pub fn set_crit_arrow(&self, crit_arrow: bool) {
+        let mut data = self.entity_data.lock();
+        let flags = *data.abstract_arrow.id_flags.get();
+        data.abstract_arrow.id_flags.set(if crit_arrow {
+            flags | FLAG_CRIT
+        } else {
+            flags & !FLAG_CRIT
+        });
+    }
+
+    /// Returns how many entities this arrow punches through.
+    ///
+    /// Vanilla parity: `AbstractArrow.getPierceLevel`.
+    #[must_use]
+    pub fn pierce_level(&self) -> i8 {
+        *self.entity_data.lock().abstract_arrow.pierce_level.get()
+    }
+
+    fn set_pierce_level(&self, pierce_level: i8) {
+        self.entity_data
+            .lock()
+            .abstract_arrow
+            .pierce_level
+            .set(pierce_level);
+    }
+
     /// Returns the damage this arrow deals before the speed multiplier.
     #[must_use]
     pub fn base_damage(&self) -> f64 {
@@ -243,6 +315,13 @@ impl Entity for SpectralArrowEntity {
     }
 
     fn tick(&self) {
+        // Vanilla parity: the `if (this.shakeTime > 0) this.shakeTime--;` of
+        // `AbstractArrow.tick`, which runs whether or not the arrow has landed.
+        {
+            let mut state = self.state.lock();
+            state.shake_time = (state.shake_time - 1).max(0);
+        }
+
         if self.is_in_ground() {
             self.tick_despawn();
             return;
@@ -294,7 +373,9 @@ impl Entity for SpectralArrowEntity {
     /// `SpectralArrow.getDefaultPickupItem`. A spectral arrow gives back a
     /// spectral arrow, not a plain one.
     fn player_touch(self: Arc<Self>, player: &Arc<Player>) {
-        if !self.is_in_ground() {
+        // Vanilla parity: `AbstractArrow.playerTouch` also waits out `shakeTime`,
+        // so an arrow cannot be collected the tick it lands.
+        if !self.is_in_ground() || self.state.lock().shake_time > 0 {
             return;
         }
 
@@ -322,41 +403,118 @@ impl Projectile for SpectralArrowEntity {
     /// Vanilla parity: `AbstractArrow.onHitEntity` plus
     /// `SpectralArrow.doPostHurtEffects`.
     fn on_hit_entity(&self, entity: &SharedEntity, _location: DVec3) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        let target = entity.as_ref();
         let speed = self.velocity().length();
-        let damage = (speed * self.base_damage()).ceil().max(0.0);
 
+        let owner = self.get_owner();
         let mut source = DamageSource::environment(&vanilla_damage_types::ARROW)
             .with_direct_entity(self.id())
             .with_source_position(self.position());
-        if let Some(owner) = self.get_owner() {
+        if let Some(owner) = owner.as_ref() {
             source = source.with_causing_entity(owner.id());
         }
 
-        if let Some(world) = self.level() {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "vanilla passes arrow damage as an f32"
-            )]
-            entity.hurt(&world, &source, damage as f32);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "vanilla ceils arrow damage into an int"
+        )]
+        let mut damage = (speed * self.base_damage())
+            .clamp(0.0, f64::from(i32::MAX))
+            .ceil() as i32;
+        // Vanilla parity: a critical arrow rolls a bonus in `[0, damage/2 + 2)`.
+        if self.is_crit_arrow() {
+            damage = damage.saturating_add(rand::random_range(0..damage / 2 + 2));
         }
 
-        self.do_post_hurt_effects(entity);
+        if let Some(owner_living) = owner.as_ref().and_then(|owner| owner.as_living_entity()) {
+            owner_living.set_last_hurt_mob(Some(entity));
+        }
 
-        // TODO: vanilla also sets the target's arrow count, applies piercing,
-        // ignites the target when the arrow burns, and runs the weapon's
-        // enchantment effects.
-        self.set_removed(RemovalReason::Discarded);
+        let is_enderman = target.entity_type() == &vanilla_entities::ENDERMAN;
+        let fire_ticks_before = target.remaining_fire_ticks();
+        if self.is_on_fire() && !is_enderman {
+            target.ignite_for_ticks(IGNITE_TICKS);
+        }
+
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "vanilla passes the same int through as an f32"
+        )]
+        let dealt = target.hurt(&world, &source, damage as f32);
+        if !dealt {
+            target.set_remaining_fire_ticks(fire_ticks_before);
+            self.deflect(
+                ProjectileDeflection::Reverse,
+                Some(target),
+                self.owner_uuid(),
+                owner.as_ref(),
+                false,
+            );
+            self.set_velocity(self.velocity() * DEFLECTED_SPEED_SCALE);
+            if self.velocity().length_squared() < STOPPED_SPEED_SQUARED {
+                self.set_removed(RemovalReason::Discarded);
+            }
+            return;
+        }
+
+        if is_enderman {
+            return;
+        }
+
+        if let Some(living) = target.as_living_entity() {
+            if self.pierce_level() <= 0 {
+                living.set_arrow_count(living.arrow_count() + 1);
+            }
+            self.do_post_hurt_effects(entity);
+        }
+
+        self.play_sound(
+            &sound_events::ENTITY_ARROW_HIT,
+            1.0,
+            1.2 / 0.2f32.mul_add(rand::random::<f32>(), 0.9),
+        );
+
+        if self.pierce_level() <= 0 {
+            self.set_removed(RemovalReason::Discarded);
+        }
     }
 
     /// Sticks the arrow into the block it hit.
     ///
     /// Vanilla parity: `AbstractArrow.onHitBlock`.
-    fn on_hit_block(&self, _hit: &ClipHitResult) {
-        // TODO: vanilla snaps the arrow onto the face it struck; Steel has no
-        // direct position setter on the entity trait, so it stops where it is.
+    fn on_hit_block(&self, hit: &ClipHitResult) {
+        self.projectile_on_hit_block(hit);
+
+        // Vanilla parity: `AbstractArrow.stepMoveAndHit` puts the arrow on the
+        // hit point and `onHitBlock` steps it back along the axis signs of its
+        // movement, burying the head in the face it struck. Steel's projectile
+        // engine does not advance a projectile to its hit point, so both halves
+        // are done here off the hit result.
+        let movement = self.velocity();
+        let offset_direction = DVec3::new(
+            movement.x.signum(),
+            movement.y.signum(),
+            movement.z.signum(),
+        );
+        let _ = self.try_set_position(hit.location - offset_direction * BLOCK_HIT_STEP_BACK);
+
         self.set_velocity(DVec3::ZERO);
+        self.play_sound(
+            &sound_events::ENTITY_ARROW_HIT,
+            1.0,
+            1.2 / 0.2f32.mul_add(rand::random::<f32>(), 0.9),
+        );
         self.set_in_ground(true);
-        self.state.lock().life = 0;
+        self.set_crit_arrow(false);
+        self.set_pierce_level(0);
+        {
+            let mut state = self.state.lock();
+            state.life = 0;
+            state.shake_time = SHAKE_TIME;
+        }
     }
 }
 

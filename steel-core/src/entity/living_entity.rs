@@ -1871,6 +1871,36 @@ pub trait LivingEntity: Entity {
             .take(EquipmentSlot::for_hand(hand))
     }
 
+    /// Returns how many arrows are stuck in this entity.
+    ///
+    /// Vanilla parity: `LivingEntity.getArrowCount`.
+    fn arrow_count(&self) -> i32 {
+        self.living_synced_data()
+            .map_or(0, LivingEntitySyncedData::arrow_count)
+    }
+
+    /// Sets how many arrows are stuck in this entity.
+    ///
+    /// Vanilla parity: `LivingEntity.setArrowCount`.
+    fn set_arrow_count(&self, count: i32) {
+        if let Some(entity_data) = self.living_synced_data() {
+            entity_data.set_arrow_count(count);
+        }
+    }
+
+    /// Lets the arrows stuck in this entity fall out over time.
+    ///
+    /// Vanilla parity: the `removeArrowTime` countdown of `LivingEntity.tick`.
+    fn tick_arrow_count(&self) {
+        let arrow_count = self.arrow_count();
+        if arrow_count <= 0 {
+            return;
+        }
+        if self.living_base().tick_remove_arrow_time(arrow_count) {
+            self.set_arrow_count(arrow_count - 1);
+        }
+    }
+
     /// Sets one bit of the synchronized living-entity flags.
     ///
     /// Vanilla parity: `LivingEntity.setLivingEntityFlag`. An entity that does
@@ -2642,6 +2672,7 @@ pub trait LivingEntity: Entity {
         self.updating_using_item();
         self.living_base().decrement_invulnerable_time();
         self.tick_mob_effects();
+        self.tick_arrow_count();
         self.detect_equipment_updates();
 
         if self.is_dead_or_dying() {

@@ -778,6 +778,7 @@ struct LivingEntityState {
     absorption_amount: f32,
     skip_drop_experience: bool,
     death_time: i32,
+    remove_arrow_time: i32,
     speed: f32,
     current_impulse_impact_pos: Option<DVec3>,
     current_impulse_context_reset_grace_time: i32,
@@ -814,6 +815,7 @@ impl LivingEntityState {
             absorption_amount: 0.0,
             skip_drop_experience: false,
             death_time: 0,
+            remove_arrow_time: 0,
             speed,
             current_impulse_impact_pos: None,
             current_impulse_context_reset_grace_time: 0,
@@ -1425,6 +1427,19 @@ impl LivingEntityBase {
     /// Marks synchronized effect visibility data for recomputation.
     pub(crate) fn mark_effects_dirty(&self) {
         self.state.lock().effects_dirty = true;
+    }
+
+    /// Counts down vanilla `LivingEntity.removeArrowTime` and reports whether
+    /// one of the arrows stuck in this entity should now fall out.
+    ///
+    /// Vanilla parity: the `removeArrowTime` block of `LivingEntity.tick`.
+    pub fn tick_remove_arrow_time(&self, arrow_count: i32) -> bool {
+        let mut state = self.state.lock();
+        if state.remove_arrow_time <= 0 {
+            state.remove_arrow_time = 20 * (30 - arrow_count);
+        }
+        state.remove_arrow_time -= 1;
+        state.remove_arrow_time <= 0
     }
 
     /// Gets the cached movement speed used by living movement code.
