@@ -91,32 +91,43 @@ impl PlayerInventory {
     }
 
     /// Damages the held item and records inventory/equipment changes.
+    ///
+    /// Returns whether the item broke. Vanilla's `ItemStack.hurtAndBreak` takes
+    /// the holder and calls `onEquippedItemBroken` itself; Steel's item stacks
+    /// cannot reach an entity, so the answer comes back to the caller instead --
+    /// and [`crate::player::Player::hurt_item_in_hand`] is the wrapper that
+    /// spends it, so that the snap and the splinters are not left to each call
+    /// site to remember.
     pub fn hurt_item_in_hand(
         &mut self,
         hand: InteractionHand,
         amount: i32,
         has_infinite_materials: bool,
-    ) {
+    ) -> bool {
         if amount <= 0 || self.get_item_in_hand(hand).is_empty() {
-            return;
+            return false;
         }
 
-        let changed = {
+        let (broke, changed) = {
             let item = self.get_item_in_hand_mut(hand);
             let previous_item = item.item();
             let previous_count = item.count();
             let previous_damage = item.get_damage_value();
 
-            let _ = item.hurt_and_break(amount, has_infinite_materials);
+            let broke = item.hurt_and_break(amount, has_infinite_materials);
 
-            item.item() != previous_item
-                || item.count() != previous_count
-                || item.get_damage_value() != previous_damage
+            (
+                broke,
+                item.item() != previous_item
+                    || item.count() != previous_count
+                    || item.get_damage_value() != previous_damage,
+            )
         };
 
         if changed {
             self.set_changed();
         }
+        broke
     }
 
     /// Mutates the held item and records inventory/equipment changes if its stack state changed.

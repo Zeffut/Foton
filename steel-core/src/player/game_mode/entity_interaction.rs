@@ -9,6 +9,7 @@ use super::{
 };
 use steel_protocol::packets::game::{AnimateAction, CAnimate};
 use steel_registry::entity_data::ParticleData;
+use steel_registry::equipment::EquipmentSlot;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::{sound_events, vanilla_mob_effects, vanilla_particle_types};
 
@@ -720,17 +721,25 @@ impl Player {
             return;
         };
         let has_infinite_materials = self.has_infinite_materials();
-        let mut inventory = self.inventory.lock();
-        inventory.mutate_item_in_hand(InteractionHand::MainHand, |stack| {
-            if stack.is_empty() {
-                return;
-            }
-            let behavior = ITEM_BEHAVIORS.get_behavior(stack.item());
-            behavior.post_hurt_enemy(stack, living_target, self);
-            if let Some(damage) = behavior.item_damage_per_attack(stack) {
-                stack.hurt_and_break(damage, has_infinite_materials);
-            }
-        });
+        let weapon_broke = {
+            let mut inventory = self.inventory.lock();
+            inventory.mutate_item_in_hand(InteractionHand::MainHand, |stack| {
+                if stack.is_empty() {
+                    return false;
+                }
+                let behavior = ITEM_BEHAVIORS.get_behavior(stack.item());
+                behavior.post_hurt_enemy(stack, living_target, self);
+                behavior
+                    .item_damage_per_attack(stack)
+                    .is_some_and(|damage| stack.hurt_and_break(damage, has_infinite_materials))
+            })
+        };
+        // Vanilla's `hurtAndBreak` takes the attacker and announces the break
+        // itself; Steel's item stacks cannot reach one, so the sword's last
+        // swing is announced here instead.
+        if weapon_broke {
+            LivingEntity::on_equipped_item_broken(self, EquipmentSlot::MainHand);
+        }
     }
 
     /// Interacts with an entity using the held item.
@@ -926,19 +935,21 @@ mod melee_tests {
     use glam::DVec3;
     use steel_protocol::packet_traits::{CompressionInfo, EncodedPacket};
     use steel_protocol::packets::game::SAttack;
-    use steel_registry::packets::play::C_ANIMATE;
+    use steel_registry::packets::play::{C_ANIMATE, C_ENTITY_EVENT};
     use steel_registry::{init_vanilla_registry, vanilla_entities, vanilla_items};
     use steel_utils::codec::VarInt;
+    use steel_utils::entity_events::EntityStatus;
     use steel_utils::locks::SyncMutex;
     use steel_utils::serial::ReadFrom as _;
     use steel_utils::types::InteractionHand;
     use text_components::TextComponent;
 
     use crate::behavior::init_behaviors;
+    use crate::chunk::player_chunk_view::PlayerChunkView;
     use crate::entity::entities::PigEntity;
     use crate::entity::{Entity, LivingEntity, SharedEntity, next_entity_id};
     use crate::player::connection::NetworkConnection;
-    use crate::player::{Player, PlayerConnection};
+    use crate::player::{Player, PlayerConnection, ResetReason};
     use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
     use crate::world::World;
     use steel_registry::item_stack::ItemStack;
@@ -998,6 +1009,19 @@ mod melee_tests {
         let entity_id = VarInt::read(&mut cursor).ok()?;
         let action = u8::read(&mut cursor).ok()?;
         Some((entity_id.0, action))
+    }
+
+    /// Reads back the `(entity_id, status)` of a clientbound entity-event packet.
+    fn entity_event_payload(packet: &EncodedPacket) -> Option<(i32, i32)> {
+        let mut cursor = Cursor::new(packet.encoded_data.as_slice());
+        VarInt::read(&mut cursor).ok()?;
+        let packet_id = VarInt::read(&mut cursor).ok()?;
+        if packet_id.0 != C_ENTITY_EVENT {
+            return None;
+        }
+        let entity_id = i32::read(&mut cursor).ok()?;
+        let status = VarInt::read(&mut cursor).ok()?;
+        Some((entity_id, status.0))
     }
 
     fn combat_world(key: &'static str) -> Arc<World> {
@@ -1062,6 +1086,14 @@ mod melee_tests {
                 .lock()
                 .iter()
                 .filter_map(animate_payload)
+                .collect()
+        }
+
+        fn entity_events(&self) -> Vec<(i32, i32)> {
+            self.sent
+                .lock()
+                .iter()
+                .filter_map(entity_event_payload)
                 .collect()
         }
     }
@@ -1202,6 +1234,61 @@ mod melee_tests {
         assert!(
             player.get_speed() > 0.0,
             "without this the sweep check compares against a zero speed and never fires"
+        );
+    }
+
+    /// A weapon that dies on the swing has to say so.
+    ///
+    /// Vanilla's `hurtAndBreak` takes the holder and calls
+    /// `onEquippedItemBroken` itself -- the snap and the splinters. Steel's
+    /// item stacks cannot reach a holder, and the attack path threw the "it
+    /// broke" answer away, so a sword simply vanished from the hand in silence.
+    #[test]
+    fn a_weapon_that_breaks_on_the_swing_announces_it() {
+        let world = combat_world("melee_weapon_breaks");
+        let attacker = attacker(&world);
+        // The break is a broadcast, not a self-send, so the attacker only hears
+        // it as one of the players tracking its own chunk.
+        assert!(world.add_player(Arc::clone(&attacker.player), ResetReason::InitialJoin));
+        let _ = attacker.player.mark_joined_world();
+        attacker.player.set_client_loaded(true);
+        attacker
+            .player
+            .chunk_sender
+            .lock()
+            .mark_chunk_sent_for_test(ChunkPos::new(0, 0));
+        world.player_area_map.on_player_join(
+            &attacker.player,
+            &PlayerChunkView::new(ChunkPos::new(0, 0), 2),
+        );
+        let position = attacker.player.position();
+
+        let mut sword = ItemStack::new(&vanilla_items::IRON_SWORD);
+        sword.set_damage_value(sword.get_max_damage() - 1);
+        attacker
+            .player
+            .inventory
+            .lock()
+            .set_item_in_hand(InteractionHand::MainHand, sword);
+
+        let target = spawn_pig(&world, position + DVec3::new(1.0, 0.0, 0.0));
+        attacker.swing_at(target.as_ref());
+
+        assert!(
+            attacker
+                .player
+                .inventory
+                .lock()
+                .get_item_in_hand(InteractionHand::MainHand)
+                .is_empty(),
+            "the sword was one point from the end, so the swing should have finished it"
+        );
+        assert!(
+            attacker
+                .entity_events()
+                .contains(&(attacker.player.id(), EntityStatus::MainhandBreak as i32)),
+            "the break should be broadcast, got {:?}",
+            attacker.entity_events()
         );
     }
 }

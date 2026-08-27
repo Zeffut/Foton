@@ -405,10 +405,7 @@ impl Mob for BoggedEntity {
             self.position(),
             &GameEventContext::new(Some(player as &dyn Entity), None),
         );
-        player
-            .inventory
-            .lock()
-            .hurt_item_in_hand(hand, 1, player.has_infinite_materials());
+        player.hurt_item_in_hand(hand, 1);
 
         InteractionResult::Success
     }

@@ -53,10 +53,7 @@ impl ItemBehavior for FishingRodItem {
                 .as_ref()
                 .downcast_ref::<FishingHookEntity>()
                 .map_or(0, |hook| hook.retrieve(&rod));
-            let has_infinite_materials = player.has_infinite_materials();
-            context.inv.with_inventory(|inventory| {
-                inventory.hurt_item_in_hand(context.hand, damage, has_infinite_materials);
-            });
+            player.hurt_item_in_hand(context.hand, damage);
 
             world.play_sound_at(
                 &sound_events::ENTITY_FISHING_BOBBER_RETRIEVE,

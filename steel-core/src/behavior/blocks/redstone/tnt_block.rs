@@ -141,9 +141,7 @@ impl BlockBehavior for TntBlock {
         match igniter {
             // Flint and steel wears out; a fire charge is spent.
             Igniter::FlintAndSteel => {
-                inv.with_inventory(|inventory| {
-                    inventory.hurt_item_in_hand(hand, 1, infinite);
-                });
+                player.hurt_item_in_hand(hand, 1);
             }
             Igniter::FireCharge => {
                 if !infinite {

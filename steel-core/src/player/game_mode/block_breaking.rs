@@ -9,6 +9,7 @@ use steel_protocol::packets::game::CBlockUpdate;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::data_components::AdventureModePredicate;
 use steel_registry::data_components::vanilla_components::CAN_BREAK;
+use steel_registry::equipment::EquipmentSlot;
 use steel_registry::vanilla_attributes;
 use steel_registry::{
     REGISTRY, blocks::properties::Direction, item_stack::ItemStack, vanilla_blocks,
@@ -416,14 +417,23 @@ impl BlockBreakingManager {
             // ones with their own durability rule get it -- shears pay for a
             // zero-hardness plant and never pay for fire. Runs before
             // `playerDestroy`, as vanilla does.
-            // TODO: Play item break sound/particles when the tool breaks here.
-            {
+            //
+            // The tool can die here, and vanilla's `hurtAndBreak` announces
+            // that itself. Steel's `ItemStack` cannot reach the miner, so the
+            // break is read off the slot: the pickaxe was there before the
+            // durability hit and is gone after.
+            let tool_broke = {
                 let mut inv = player.inventory.lock();
                 let item_behavior = ITEM_BEHAVIORS.get_behavior(inv.get_selected_item().item());
                 // with_selected_item_mut so the slot is marked changed.
                 inv.with_selected_item_mut(|main_hand| {
-                    item_behavior.mine_block(main_hand, adjusted_state, player)
-                });
+                    let had_a_tool = !main_hand.is_empty();
+                    item_behavior.mine_block(main_hand, adjusted_state, player);
+                    had_a_tool && main_hand.is_empty()
+                })
+            };
+            if tool_broke {
+                LivingEntity::on_equipped_item_broken(player, EquipmentSlot::MainHand);
             }
 
             player.cause_food_exhaustion(food_constants::EXHAUSTION_MINE);
@@ -868,6 +878,91 @@ mod tests {
     #[test]
     fn shearing_the_upper_half_of_a_large_fern_pays_out_once() {
         assert_sheared_fern(DoubleBlockHalf::Upper, "large_fern_upper_break");
+    }
+
+    /// The pickaxe that dies on its last block says so.
+    ///
+    /// Vanilla's `ItemStack.hurtAndBreak` carries the miner and announces the
+    /// break itself. Steel's item stacks cannot reach one, and `mine_block`
+    /// returns vanilla's "the item handled it" boolean rather than "it broke",
+    /// so the tool used to vanish from the hand with no snap and no splinters.
+    #[test]
+    fn a_pickaxe_that_breaks_on_its_last_block_announces_it() {
+        use std::io::Cursor;
+
+        use steel_protocol::packet_traits::EncodedPacket;
+        use steel_registry::packets::play::C_ENTITY_EVENT;
+        use steel_utils::codec::VarInt;
+        use steel_utils::entity_events::EntityStatus;
+        use steel_utils::locks::SyncMutex;
+        use steel_utils::serial::ReadFrom as _;
+
+        use crate::chunk::player_chunk_view::PlayerChunkView;
+        use crate::entity::next_entity_id;
+        use crate::player::{PlayerConnection, ResetReason};
+        use crate::test_support::RecordingConnection;
+
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("pickaxe_breaks_while_mining");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let pos = BlockPos::new(8, 64, 8);
+        world.set_block(
+            pos,
+            vanilla_blocks::STONE.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        );
+
+        let sent = Arc::new(SyncMutex::new(Vec::new()));
+        let connection = Arc::new(PlayerConnection::Other(Box::new(RecordingConnection::new(
+            Arc::clone(&sent),
+        ))));
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "Miner", next_entity_id())
+            .connection(connection)
+            .build();
+        // The break is broadcast to whoever is tracking the chunk, so the miner
+        // only hears it once they are one of them.
+        assert!(world.add_player(Arc::clone(&player), ResetReason::InitialJoin));
+        let _ = player.mark_joined_world();
+        player.set_client_loaded(true);
+        player
+            .chunk_sender
+            .lock()
+            .mark_chunk_sent_for_test(ChunkPos::new(0, 0));
+        world
+            .player_area_map
+            .on_player_join(&player, &PlayerChunkView::new(ChunkPos::new(0, 0), 2));
+
+        let mut pickaxe = ItemStack::new(&vanilla_items::IRON_PICKAXE);
+        pickaxe.set_damage_value(pickaxe.get_max_damage() - 1);
+        player.inventory.lock().set_selected_item(pickaxe);
+        sent.lock().clear();
+
+        assert!(BlockBreakingManager::new().destroy_block(&player, &world, pos));
+
+        assert!(
+            player.inventory.lock().get_selected_item().is_empty(),
+            "the pickaxe was one point from the end, so this block should have finished it"
+        );
+
+        let breaks: Vec<i32> = sent
+            .lock()
+            .iter()
+            .filter_map(|packet: &EncodedPacket| {
+                let mut cursor = Cursor::new(packet.encoded_data.as_slice());
+                VarInt::read(&mut cursor).ok()?;
+                if VarInt::read(&mut cursor).ok()?.0 != C_ENTITY_EVENT {
+                    return None;
+                }
+                let entity_id = i32::read(&mut cursor).ok()?;
+                let status = VarInt::read(&mut cursor).ok()?;
+                (entity_id == player.id()).then_some(status.0)
+            })
+            .collect();
+        assert!(
+            breaks.contains(&(EntityStatus::MainhandBreak as i32)),
+            "the break should be broadcast, got {breaks:?}"
+        );
     }
 
     /// A pitcher plant's table has no `location_check` to stop a second

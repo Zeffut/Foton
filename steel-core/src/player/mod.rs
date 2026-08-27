@@ -355,6 +355,25 @@ impl Player {
         self.client_information.lock().main_hand
     }
 
+    /// Damages the item in `hand`, and announces it if the item breaks.
+    ///
+    /// Vanilla parity: `ItemStack.hurtAndBreak(int, LivingEntity,
+    /// EquipmentSlot)`, whose break callback is
+    /// `entity.onEquippedItemBroken(item, slot)` -- the snap, the splinters and
+    /// the attribute modifiers coming back off. Steel's `ItemStack` cannot
+    /// reach the holder, so this is where the two halves meet; going through
+    /// `player.inventory` directly damages the item silently.
+    pub fn hurt_item_in_hand(&self, hand: InteractionHand, amount: i32) {
+        let has_infinite_materials = self.has_infinite_materials();
+        let broke = self
+            .inventory
+            .lock()
+            .hurt_item_in_hand(hand, amount, has_infinite_materials);
+        if broke {
+            LivingEntity::on_equipped_item_broken(self, EquipmentSlot::for_hand(hand));
+        }
+    }
+
     /// Computes the start (eye position) and end positions for a raytrace.
     pub fn get_ray_endpoints(&self) -> (DVec3, DVec3) {
         let pos = self.position();

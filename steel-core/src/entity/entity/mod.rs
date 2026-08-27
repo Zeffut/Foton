@@ -1439,10 +1439,7 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
                 continue;
             }
 
-            player
-                .inventory
-                .lock()
-                .hurt_item_in_hand(hand, 1, has_infinite_materials);
+            player.hurt_item_in_hand(hand, 1);
             mob.set_guaranteed_drop(slot);
             mob.set_persistence_required();
 
@@ -1520,11 +1517,7 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
             inventory.get_item_in_hand(hand).is(&vanilla_items::SHEARS)
         };
         if holding_shears && self.shear_off_all_leash_connections(Some(player)) {
-            let has_infinite_materials = player.has_infinite_materials();
-            player
-                .inventory
-                .lock()
-                .hurt_item_in_hand(hand, 1, has_infinite_materials);
+            player.hurt_item_in_hand(hand, 1);
             return InteractionResult::Success;
         }
         if holding_shears && self.attempt_to_shear_equipment(player, hand) {

@@ -61,13 +61,24 @@ impl Slot for ArmorSlot {
         self.base.set_item(guard, stack);
     }
 
+    /// MISSING FOUNDATION: vanilla's `ArmorSlot.setByPlayer` opens with
+    /// `this.owner.onEquipItem(slot, oldStack, newStack)`, which is where the
+    /// clunk of putting a helmet on comes from. Steel's `on_equip_item` exists
+    /// and the mount's own equipment slots already call it -- see
+    /// `MountEquipmentSlot::set_by_player`, which holds a `Weak` to its mount.
+    ///
+    /// This slot has no such handle. `Slot::set_by_player` takes no player (as
+    /// vanilla's does not), the menu is built inside `Player::new` before any
+    /// `Arc<Player>` exists to weaken, and `Slot::safe_insert` reaches this
+    /// with no player at all. Wiring it needs an owner reachable at
+    /// menu-construction time; until then armour equipped from the inventory
+    /// screen goes on in silence, and emits neither `EQUIP` nor `UNEQUIP`.
     fn set_by_player(
         &self,
         guard: &mut ContainerLockGuard,
         stack: ItemStack,
         previous: &ItemStack,
     ) {
-        // TODO: Call player.onEquipItem(equipmentSlot, previous, stack) here
         let _ = previous;
         self.set_item(guard, stack);
     }

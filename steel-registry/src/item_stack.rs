@@ -255,9 +255,11 @@ impl ItemStack {
         self.set_damage_value(new_damage);
 
         if self.is_broken() {
-            // TODO: Call onEquippedItemBroken callback which:
-            // - Broadcasts entity event (byte 47 for mainhand) for break sound/particles
-            // - Stops location-based effects (removes attribute modifiers)
+            // Vanilla's `hurtAndBreak` calls `onEquippedItemBroken` here, which
+            // wants the holder for the break event and the attribute modifiers.
+            // An `ItemStack` in `steel-registry` has no way to reach one, so the
+            // break comes back to the caller as `true` instead --
+            // `LivingEntity::on_equipped_item_broken` is what they spend it on.
             self.shrink(1);
             return true;
         }

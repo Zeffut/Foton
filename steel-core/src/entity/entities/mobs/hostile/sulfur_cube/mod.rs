@@ -783,10 +783,7 @@ impl SulfurCubeEntity {
 
         self.prime_time(false);
         if item_stack.is(&vanilla_items::FLINT_AND_STEEL) {
-            player
-                .inventory
-                .lock()
-                .hurt_item_in_hand(hand, 1, player.has_infinite_materials());
+            player.hurt_item_in_hand(hand, 1);
         } else {
             Mob::use_player_item(self, player, hand);
         }
@@ -1294,10 +1291,7 @@ impl Mob for SulfurCubeEntity {
                     self.position(),
                     &GameEventContext::new(Some(player as &dyn Entity), None),
                 );
-                player
-                    .inventory
-                    .lock()
-                    .hurt_item_in_hand(hand, 1, player.has_infinite_materials());
+                player.hurt_item_in_hand(hand, 1);
             }
             return InteractionResult::Success;
         }
