@@ -4,7 +4,12 @@ use crate::vanilla_items;
 use crate::{init_vanilla_registry, vanilla_loot_tables};
 
 use super::*;
+use crate::biome::BiomeRef;
+use crate::blocks::block_state_ext::BlockStateExt;
+use crate::blocks::properties::{BlockStateProperties, DoubleBlockHalf};
+use crate::vanilla_blocks;
 use rand::SeedableRng;
+use steel_utils::BlockStateId;
 
 fn test_rng() -> rand::rngs::StdRng {
     rand::rngs::StdRng::seed_from_u64(12345)
@@ -743,4 +748,139 @@ mod functions_that_used_to_do_nothing {
             .map(|potion| potion.value().key.clone());
         assert_eq!(before, after, "an unknown id changed the bottle");
     }
+}
+
+/// A world that answers exactly what a test put in it.
+///
+/// Everything else reads as unloaded, which is what makes the "no world knows
+/// about this position" branch of `LocationPredicate` testable.
+struct TestWorld {
+    biome: Option<BiomeRef>,
+    blocks: Vec<((i32, i32, i32), BlockStateId)>,
+}
+
+impl TestWorld {
+    const fn in_biome(biome: BiomeRef) -> Self {
+        Self {
+            biome: Some(biome),
+            blocks: Vec::new(),
+        }
+    }
+
+    const fn holding(blocks: Vec<((i32, i32, i32), BlockStateId)>) -> Self {
+        Self {
+            biome: None,
+            blocks,
+        }
+    }
+}
+
+impl LootWorldView for TestWorld {
+    fn loaded_block_state(&self, x: i32, y: i32, z: i32) -> Option<BlockStateId> {
+        self.blocks
+            .iter()
+            .find(|(pos, _)| *pos == (x, y, z))
+            .map(|(_, state)| *state)
+    }
+
+    fn loaded_biome(&self, x: i32, y: i32, z: i32) -> Option<BiomeRef> {
+        let _ = (x, y, z);
+        self.biome
+    }
+}
+
+fn biome(key: &'static str) -> BiomeRef {
+    REGISTRY
+        .biomes
+        .by_key(&Identifier::vanilla_static(key))
+        .expect("vanilla biome")
+}
+
+/// Rolls `gameplay/fishing/junk` a fixed number of times in `world` and reports
+/// whether bamboo ever came out.
+fn junk_yields_bamboo(world: &TestWorld) -> bool {
+    let bamboo = Identifier::vanilla_static("bamboo");
+    let mut rng = test_rng();
+    (0..400).any(|_| {
+        let mut ctx = LootContext::new(&mut rng)
+            .with_world(world)
+            .with_origin(8.0, 62.0, 8.0);
+        vanilla_loot_tables::GAMEPLAY_FISHING_JUNK
+            .get_random_items(&mut ctx)
+            .iter()
+            .any(|item| item.item.key == bamboo)
+    })
+}
+
+#[test]
+fn fishing_junk_yields_bamboo_only_in_the_jungle() {
+    init_test_registries();
+
+    assert!(
+        junk_yields_bamboo(&TestWorld::in_biome(biome("bamboo_jungle"))),
+        "bamboo is a jungle-only junk catch and 400 rolls should have found it"
+    );
+    assert!(
+        !junk_yields_bamboo(&TestWorld::in_biome(biome("plains"))),
+        "bamboo must not be fishable out of a plains pond"
+    );
+}
+
+#[test]
+fn fishing_junk_withholds_bamboo_from_a_world_it_cannot_read() {
+    init_test_registries();
+
+    // Vanilla's `LocationPredicate.matches` fails a position it cannot load
+    // rather than assuming the biome matches.
+    let unreadable = TestWorld {
+        biome: None,
+        blocks: Vec::new(),
+    };
+    assert!(!junk_yields_bamboo(&unreadable));
+}
+
+/// The two states of a large fern, which is the block whose loot table asks
+/// about its other half.
+fn large_fern_halves() -> (BlockStateId, BlockStateId) {
+    let lower = vanilla_blocks::LARGE_FERN.default_state().set_value(
+        &BlockStateProperties::DOUBLE_BLOCK_HALF,
+        DoubleBlockHalf::Lower,
+    );
+    let upper = vanilla_blocks::LARGE_FERN.default_state().set_value(
+        &BlockStateProperties::DOUBLE_BLOCK_HALF,
+        DoubleBlockHalf::Upper,
+    );
+    (lower, upper)
+}
+
+fn shear_large_fern_lower_half(world: &TestWorld) -> Vec<ItemStack> {
+    let (lower, _) = large_fern_halves();
+    let shears = ItemStack::new(&vanilla_items::SHEARS);
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng)
+        .with_world(world)
+        .with_origin(0.0, 64.0, 0.0)
+        .with_block_state(lower)
+        .with_tool(&shears);
+    vanilla_loot_tables::BLOCKS_LARGE_FERN.get_random_items(&mut ctx)
+}
+
+#[test]
+fn a_large_fern_half_drops_only_while_its_other_half_stands() {
+    init_test_registries();
+    let (lower, upper) = large_fern_halves();
+
+    let whole = TestWorld::holding(vec![((0, 64, 0), lower), ((0, 65, 0), upper)]);
+    let dropped = shear_large_fern_lower_half(&whole);
+    assert_eq!(dropped.len(), 1, "shearing a whole fern drops fern");
+    assert_eq!(dropped[0].item.key, Identifier::vanilla_static("fern"));
+    assert_eq!(dropped[0].count, 2);
+
+    // With the upper half already gone the pool's `location_check` fails, which
+    // is what stops a double plant from paying out once per half.
+    let beheaded = TestWorld::holding(vec![((0, 64, 0), lower)]);
+    assert!(
+        shear_large_fern_lower_half(&beheaded).is_empty(),
+        "a lone lower half must drop nothing"
+    );
 }

@@ -1,8 +1,19 @@
 use super::{
-    BlockStateExt, DamageSourceInfo, DyeColor, EntityEquipmentRef, EntityRef, EntityRefFlags,
-    Identifier, ItemStack, LootContext, LootContextEntity, NumberProvider, NumberProviderRange,
-    REGISTRY, RegistryExt, RngExt, TaggedRegistryExt,
+    BlockStateExt, BlockStateId, DamageSourceInfo, DyeColor, EntityEquipmentRef, EntityRef,
+    EntityRefFlags, Identifier, ItemStack, LootContext, LootContextEntity, NumberProvider,
+    NumberProviderRange, REGISTRY, RegistryExt, RngExt, TaggedRegistryExt,
 };
+use crate::biome::BiomeRef;
+
+/// Vanilla parity: `Mth.floor(double)`, which is how `BlockPos.containing`
+/// turns a loot origin into the block that contains it.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "vanilla's Mth.floor(double) truncates to int the same way"
+)]
+const fn block_coord(value: f64) -> i32 {
+    value.floor() as i32
+}
 
 /// A property check for block state conditions.
 #[derive(Debug, Clone)]
@@ -121,9 +132,73 @@ pub enum ToolPredicate {
 }
 
 /// Predicate for checking location/block properties.
+///
+/// Vanilla parity: `LocationPredicate`. Only the keys the vanilla loot data
+/// uses are modeled; the build script fails on the rest rather than emitting a
+/// predicate that asks nothing.
 #[derive(Debug, Clone)]
 pub struct LocationPredicate {
     pub block: Option<BlockPredicate>,
+    /// The biomes the position has to be in.
+    pub biomes: Option<BiomeOptions>,
+}
+
+/// The biomes a [`LocationPredicate`] accepts.
+///
+/// Vanilla parity: the `HolderSet<Biome>` of `LocationPredicate.biomes`.
+#[derive(Debug, Clone)]
+pub enum BiomeOptions {
+    /// Reference to a biome tag.
+    Tag(Identifier),
+    /// Explicit list of biome IDs.
+    List(&'static [Identifier]),
+}
+
+impl BiomeOptions {
+    fn contains(&self, biome: BiomeRef) -> bool {
+        match self {
+            Self::Tag(tag) => biome.has_tag(tag),
+            Self::List(keys) => keys.contains(&biome.key),
+        }
+    }
+}
+
+impl LocationPredicate {
+    /// Vanilla parity: `LocationPredicate.matches`, narrowed to the modeled keys.
+    ///
+    /// The coordinates are already offset block coordinates, the way vanilla's
+    /// `BlockPos.containing(x + offsetX, ...)` produces them.
+    fn test<R: rand::Rng>(&self, ctx: &LootContext<'_, R>, x: i32, y: i32, z: i32) -> bool {
+        if self.block.is_none() && self.biomes.is_none() {
+            return true;
+        }
+
+        // Every modeled key reads the world; vanilla answers `false` for a
+        // position it cannot load, and an absent world is that same "cannot".
+        let Some(world) = ctx.world else {
+            return false;
+        };
+
+        if let Some(biomes) = &self.biomes {
+            let Some(biome) = world.loaded_biome(x, y, z) else {
+                return false;
+            };
+            if !biomes.contains(biome) {
+                return false;
+            }
+        }
+
+        if let Some(block) = &self.block {
+            let Some(state) = world.loaded_block_state(x, y, z) else {
+                return false;
+            };
+            if !block.test(state) {
+                return false;
+            }
+        }
+
+        true
+    }
 }
 
 /// Predicate for checking block properties.
@@ -131,6 +206,21 @@ pub struct LocationPredicate {
 pub struct BlockPredicate {
     pub blocks: Option<Identifier>,
     pub state: &'static [(&'static str, &'static str)],
+}
+
+impl BlockPredicate {
+    /// Vanilla parity: `BlockPredicate.matchesState`.
+    fn test(&self, state: BlockStateId) -> bool {
+        if let Some(blocks) = &self.blocks
+            && state.get_block().key != *blocks
+        {
+            return false;
+        }
+
+        self.state
+            .iter()
+            .all(|(name, value)| state.get_property_str(name).as_deref() == Some(*value))
+    }
 }
 
 /// Predicate for checking entity properties.
@@ -293,9 +383,23 @@ impl LootCondition {
                 predicate.test(entity, ctx)
             }
             LootCondition::DamageSourceProperties { predicate } => predicate.test(ctx),
-            LootCondition::LocationCheck { .. } => {
-                // TODO: Implement when world position data is available in context
-                true
+            LootCondition::LocationCheck {
+                offset_x,
+                offset_y,
+                offset_z,
+                predicate,
+            } => {
+                // Vanilla parity: `LocationCheck.test`, which fails outright
+                // without ORIGIN and otherwise tests the offset position.
+                let Some((x, y, z)) = ctx.origin else {
+                    return false;
+                };
+                predicate.test(
+                    ctx,
+                    block_coord(x) + offset_x,
+                    block_coord(y) + offset_y,
+                    block_coord(z) + offset_z,
+                )
             }
             LootCondition::WeatherCheck {
                 raining,

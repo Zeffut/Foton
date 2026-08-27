@@ -24,6 +24,21 @@ use values::{
     generate_optional_enchantment_options, generate_potion_options, generate_tool_predicate,
 };
 
+/// Reads a condition's raw predicate as the shape that condition accepts.
+///
+/// A predicate the generator cannot read is a build failure: the alternative
+/// is emitting a predicate that asks nothing and hands out drops vanilla gates.
+fn read_predicate<T: serde::de::DeserializeOwned>(
+    condition: &str,
+    predicate: &Option<serde_json::Value>,
+) -> Option<T> {
+    let predicate = predicate.as_ref()?;
+    match serde_json::from_value(predicate.clone()) {
+        Ok(parsed) => Some(parsed),
+        Err(error) => panic!("`{condition}` predicate {predicate} is not modeled: {error}"),
+    }
+}
+
 /// A number provider can be a constant number or an object with type.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
@@ -54,10 +69,12 @@ impl Default for NumberProviderJson {
     }
 }
 
-/// Enchantment options can be a tag string or list of enchantment IDs.
+/// Vanilla parity: a serialized  -- one id, a , or a list of
+/// ids. Enchantments, potions, instruments, villager types and biomes all
+/// arrive in this shape.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
-enum EnchantmentOptionsJson {
+enum HolderSetJson {
     Tag(String),
     List(Vec<String>),
 }
@@ -192,9 +209,12 @@ pub(crate) struct LootConditionJson {
     block: Option<String>,
     #[serde(default)]
     properties: Option<FxHashMap<String, PropertyValueJson>>,
-    // match_tool / entity_properties predicate
+    /// The condition's predicate, kept raw so each condition can read the one
+    /// shape it actually accepts. Guessing the shape from the fields present
+    /// silently turned an unmodeled `location_check` into an entity predicate
+    /// and then back into a predicate that asks nothing.
     #[serde(default)]
-    predicate: Option<PredicateJson>,
+    predicate: Option<serde_json::Value>,
     // table_bonus / random_chance_with_enchanted_bonus
     #[serde(default)]
     enchantment: Option<String>,
@@ -226,18 +246,6 @@ pub(crate) struct LootConditionJson {
     offset_z: Option<i32>,
 }
 
-/// Predicate can be a tool predicate (`match_tool`), location predicate (`location_check`),
-/// entity predicate (`entity_properties`), or damage source predicate. We parse these specifically.
-#[derive(Deserialize, Debug, Clone)]
-#[serde(untagged)]
-#[expect(clippy::large_enum_variant)]
-enum PredicateJson {
-    Tool(ToolPredicateJson),
-    Location(LocationPredicateJson),
-    DamageSource(DamageSourcePredicateJson),
-    Entity(EntityPredicateJson),
-}
-
 /// Damage source predicate for `damage_source_properties` condition.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
@@ -264,11 +272,16 @@ const fn default_true() -> bool {
     true
 }
 
+/// Vanilla parity: `LocationPredicate`. Only the two keys the vanilla loot
+/// data uses are modeled; `deny_unknown_fields` fails the build on the other
+/// seven rather than dropping a condition nobody would notice was gone.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 struct LocationPredicateJson {
     #[serde(default)]
     block: Option<BlockPredicateJson>,
+    #[serde(default)]
+    biomes: Option<HolderSetJson>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -318,7 +331,7 @@ struct EntityComponentPredicatesJson {
     /// Vanilla `VillagerTypePredicate`: a `HolderSet<VillagerType>`, so either
     /// one id or a list of them.
     #[serde(rename = "minecraft:villager/variant", default)]
-    villager_variant: Option<EnchantmentOptionsJson>,
+    villager_variant: Option<HolderSetJson>,
     #[serde(flatten)]
     unmodeled: FxHashMap<String, serde_json::Value>,
 }
@@ -484,7 +497,7 @@ pub(crate) struct LootFunctionJson {
     damage: Option<NumberProviderJson>,
     // enchant_randomly / enchant_with_levels / set_instrument
     #[serde(default)]
-    options: Option<EnchantmentOptionsJson>,
+    options: Option<HolderSetJson>,
     // enchant_with_levels
     #[serde(default)]
     levels: Option<NumberProviderJson>,
@@ -661,7 +674,8 @@ pub(crate) fn build() -> TokenStream {
     // Imports
     stream.extend(quote! {
         use crate::loot_table::{
-            BlockPredicate, BonusFormula, ConditionalLootFunction, CopySource, DamageSourcePredicate,
+            BiomeOptions, BlockPredicate, BonusFormula, ConditionalLootFunction, CopySource,
+            DamageSourcePredicate,
             DamageTagPredicate, DyeColor, EnchantedChance, EnchantmentOptions, EntityEquipment,
             EntityFlags, EntityPredicate, EquipmentSlotGroup, InstrumentOptions,
             ItemComponentPredicate, ItemFilter, ItemFilterItems, LocationPredicate, LootCondition,

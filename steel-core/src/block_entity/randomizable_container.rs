@@ -238,6 +238,7 @@ impl ContainerLoot {
         player: Option<&Player>,
     ) {
         let mut ctx = LootContext::new(rng)
+            .with_world(&**world)
             .with_origin(origin.x, origin.y, origin.z)
             .with_game_time(world.game_time());
         if let Some(player) = player {

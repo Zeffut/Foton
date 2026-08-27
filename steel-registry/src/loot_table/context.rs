@@ -1,5 +1,24 @@
 use super::{BlockStateId, DyeColor, Identifier, ItemStack, REGISTRY, RegistryExt, RngExt};
+use crate::biome::BiomeRef;
 use crate::equipment::EquipmentSlot;
+
+/// The live world a loot roll is allowed to ask about.
+///
+/// Vanilla parity: the `ServerLevel` every `LootContext` carries.
+/// `steel-registry` cannot see `steel-core`'s world, so the two facts loot
+/// actually reads -- the block and the biome at a position -- come in through
+/// this trait instead.
+///
+/// Both answers are `None` for a position vanilla's `Level.isLoaded` would
+/// reject. `LocationPredicate.matches` fails there rather than guessing, so
+/// the distinction has to survive the trait boundary.
+pub trait LootWorldView {
+    /// The block state at a block position, `None` when it is not loaded.
+    fn loaded_block_state(&self, x: i32, y: i32, z: i32) -> Option<BlockStateId>;
+
+    /// The biome at a block position, `None` when it is not loaded.
+    fn loaded_biome(&self, x: i32, y: i32, z: i32) -> Option<BiomeRef>;
+}
 
 /// Entity target for loot context lookups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,6 +348,11 @@ pub struct LootContext<'a, R: rand::Rng> {
     pub block_entity: Option<BlockEntityRef<'a>>,
     /// The entity interacting with a block/entity (e.g., player opening a chest).
     pub interacting_entity: Option<EntityRef<'a>>,
+    /// The world the loot is being rolled in.
+    ///
+    /// Vanilla parity: `LootContext.getLevel`. Absent means no world could be
+    /// reached, which fails every predicate that needs one.
+    pub world: Option<&'a dyn LootWorldView>,
     /// Whether an enchanting function may bank its cost in `ADDITIONAL_TRADE_COST`.
     ///
     /// Vanilla parity: the presence of `LootContextParams.ADDITIONAL_COST_COMPONENT_ALLOWED`,
@@ -464,8 +488,16 @@ impl<'a, R: rand::Rng> LootContext<'a, R> {
             damage_source: None,
             block_entity: None,
             interacting_entity: None,
+            world: None,
             additional_cost_component_allowed: false,
         }
+    }
+
+    /// Set the world the loot is rolled in.
+    #[must_use]
+    pub const fn with_world(mut self, world: &'a dyn LootWorldView) -> Self {
+        self.world = Some(world);
+        self
     }
 
     /// Allow enchanting functions to bank their cost in `ADDITIONAL_TRADE_COST`.
