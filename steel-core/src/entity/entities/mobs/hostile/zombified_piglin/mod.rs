@@ -19,6 +19,7 @@ use steel_registry::{sound_events, vanilla_attributes, vanilla_blocks, vanilla_i
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, Downcast, DowncastType, DowncastTypeKey, WorldAabb};
 
+use super::zombie_common;
 use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
@@ -351,6 +352,16 @@ impl Mob for ZombifiedPiglinEntity {
         true
     }
 
+    /// Vanilla parity: `Zombie.canHoldItem`.
+    ///
+    /// `ZombifiedPiglin.wantsToPickUp` deliberately drops the glow ink sac rule
+    /// its zombie parent adds and answers `canHoldItem` alone -- which is what
+    /// `Mob.wantsToPickUp` already does, so there is nothing to override here.
+    fn can_hold_item(&self, item_stack: &ItemStack) -> bool {
+        let is_baby = *self.entity_data.lock().zombie().baby.get();
+        zombie_common::can_hold_item(self, is_baby, item_stack)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }
@@ -436,6 +447,12 @@ impl Mob for ZombifiedPiglinEntity {
     ) -> Option<SpawnGroupData> {
         if rand::random::<f32>() < AgeableMobGroupData::DEFAULT_BABY_SPAWN_CHANCE {
             self.entity_data.lock().zombie_mut().baby.set(true);
+        }
+        // Vanilla parity: the `spawnReason != CONVERSION` guard of
+        // `Zombie.finalizeSpawn`. A zombie that drowned into a drowned keeps
+        // the flag it already had rather than rerolling it.
+        if spawn_reason != EntitySpawnReason::Conversion {
+            self.roll_spawn_can_pick_up_loot(world);
         }
         self.finalize_spawn_mob_base(world, spawn_reason, group_data)
     }

@@ -4,35 +4,55 @@
 //! the only one whose whole character comes from a single rule: it ignores you
 //! until you look it in the eye, and then it will not let go. The grudge is
 //! [`NeutralMob`]'s; what is here is the stare that starts it, the teleport
-//! that carries it, and the water that ends it.
+//! that carries it, the water that ends it, and the block it walks off with.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
+use steel_registry::vanilla_block_tags::BlockTag;
+use steel_registry::vanilla_enchantments::SILK_TOUCH;
 use steel_registry::vanilla_entity_data::EndermanEntityData;
-use steel_registry::{sound_events, vanilla_attributes, vanilla_damage_types};
+use steel_registry::vanilla_game_rules::MOB_GRIEFING;
+use steel_registry::{
+    REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_attributes, vanilla_blocks,
+    vanilla_damage_types, vanilla_entities, vanilla_game_events, vanilla_items,
+};
 use steel_utils::locks::SyncMutex;
-use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
+use steel_utils::types::UpdateFlags;
+use steel_utils::{
+    BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey, WorldAabb,
+};
+use uuid::Uuid;
 
+use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, update_from_neighbour_shapes};
+use crate::block_entity::block_state_nbt;
 use crate::entity::Enemy;
 use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
-    RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
+    NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
+    reduced_tick_delay,
 };
 use crate::entity::damage::DamageSource;
 use crate::entity::living_entity::is_looking_at;
-use crate::entity::neutral_mob::{NeutralMob, PersistentAnger};
+use crate::entity::neutral_mob::{
+    NeutralMob, PersistentAnger, read_persistent_anger, resolve_anger_target,
+    write_persistent_anger,
+};
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
     MobBase, PathfinderMob,
 };
-use crate::world::{LevelReader as _, World};
+use crate::world::game_event::GameEventContext;
+use crate::world::{ClipBlockShape, ClipFluid, LevelReader as _, World};
 use steel_registry::fluid::is_water_fluid;
 
 /// Experience this mob drops.
@@ -70,6 +90,23 @@ const DAYLIGHT_BRIGHTNESS: f32 = 0.5;
 /// mobs. Rain and water both hurt, which is why an enderman caught in a shower
 /// teleports repeatedly.
 const WATER_DAMAGE: f32 = 1.0;
+
+/// How often an empty-handed enderman looks for a block to take.
+///
+/// Vanilla parity: the `reducedTickDelay(20)` of `EndermanTakeBlockGoal.canUse`.
+const TAKE_BLOCK_INTERVAL_TICKS: i32 = 20;
+
+/// How often a carrying enderman looks for somewhere to put its block.
+///
+/// Vanilla parity: the `reducedTickDelay(2000)` of
+/// `EndermanLeaveBlockGoal.canUse`. It is why a block an enderman took can end
+/// up a hundred blocks from where it started.
+const LEAVE_BLOCK_INTERVAL_TICKS: i32 = 2000;
+
+/// NBT key the carried block is stored under.
+///
+/// Vanilla parity: the `carriedBlockState` of `EnderMan.addAdditionalSaveData`.
+const TAG_CARRIED_BLOCK_STATE: &str = "carriedBlockState";
 
 /// Shortest grudge, in ticks.
 ///
@@ -131,17 +168,20 @@ impl EndermanEntity {
             goals.add_goal(7, WaterAvoidingRandomStrollGoal::new(1.0));
             goals.add_goal(8, LookAtPlayerGoal::new(8.0));
             goals.add_goal(8, RandomLookAroundGoal::new());
-            // TODO: vanilla also carries blocks, at priorities 10 and 11. That
-            // needs a synced optional block state and the block's own drops;
-            // neither is wired yet.
+            goals.add_goal(10, EndermanLeaveBlockGoal);
+            goals.add_goal(11, EndermanTakeBlockGoal);
         }
 
         {
             let mut targets = mob_base.target_selector().lock();
             targets.add_goal(1, EndermanLookForPlayerGoal);
             targets.add_goal(2, HurtByTargetGoal::new());
-            // TODO: vanilla also hunts endermites at priority 3; the endermite
-            // is not implemented.
+            targets.add_goal(
+                3,
+                NearestAttackableTargetGoal::new(true, |_, target, _| {
+                    target.entity_type() == &vanilla_entities::ENDERMITE
+                }),
+            );
         }
 
         Self {
@@ -153,6 +193,25 @@ impl EndermanEntity {
             anger: PersistentAnger::new(),
             target_change_time: SyncMutex::new(0),
         }
+    }
+
+    /// Returns the block the enderman is walking around with, if any.
+    ///
+    /// Vanilla parity: `getCarriedBlock`.
+    #[must_use]
+    pub fn carried_block(&self) -> Option<BlockStateId> {
+        *self.entity_data.lock().ender_man().carry_state.get()
+    }
+
+    /// Puts a block in the enderman's hands, or takes the one it has away.
+    ///
+    /// Vanilla parity: `setCarriedBlock`.
+    pub fn set_carried_block(&self, state: Option<BlockStateId>) {
+        self.entity_data
+            .lock()
+            .ender_man_mut()
+            .carry_state
+            .set(state);
     }
 
     /// Returns whether the enderman has its arms up and its mouth open.
@@ -374,6 +433,46 @@ impl Entity for EndermanEntity {
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
     }
+
+    /// Vanilla parity: `EnderMan.addAdditionalSaveData`, whose own contribution
+    /// is the carried block and the grudge.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_mob(nbt);
+        if let Some(state) = self.carried_block() {
+            nbt.insert(
+                TAG_CARRIED_BLOCK_STATE,
+                NbtTag::Compound(block_state_nbt::save(state)),
+            );
+        }
+        write_persistent_anger(self, nbt);
+    }
+
+    /// Vanilla parity: `EnderMan.readAdditionalSaveData`. The air filter is
+    /// vanilla's: a saved air state means "carrying nothing", not "carrying a
+    /// pocket of air".
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_mob(nbt);
+        let carried = nbt
+            .compound(TAG_CARRIED_BLOCK_STATE)
+            .and_then(block_state_nbt::load)
+            .filter(|state| !state.is_air());
+        self.set_carried_block(carried);
+
+        let angry_at = nbt
+            .int_array("angry_at")
+            .and_then(|values| <Uuid as steel_utils::UuidExt>::from_int_array(&values));
+        read_persistent_anger(
+            self,
+            nbt.long("anger_end_time"),
+            nbt.int("AngerTime"),
+            angry_at,
+        );
+        if let Some(world) = self.level()
+            && let Some(target) = resolve_anger_target(&world, angry_at)
+        {
+            self.set_target(Some(&target));
+        }
+    }
 }
 
 impl LivingEntity for EndermanEntity {
@@ -415,6 +514,37 @@ impl LivingEntity for EndermanEntity {
         Some(&sound_events::ENTITY_ENDERMAN_DEATH)
     }
 
+    /// Drops whatever the block it was carrying would have dropped.
+    ///
+    /// Vanilla parity: `EnderMan.dropCustomDeathLoot`, which runs the block's
+    /// own loot table against a fake diamond axe enchanted from the
+    /// `minecraft:enderman_loot_drop` provider. Steel has no
+    /// `EnchantmentProvider` registry, so the one enchantment that provider
+    /// grants is applied here instead; the provider is shipped at
+    /// `steel-utils/build_assets/builtin_datapacks/minecraft/enchantment_provider/enderman_loot_drop.json`
+    /// and this should read it once a build step for that registry exists.
+    /// Without the enchantment an enderman holding a grass block would drop
+    /// dirt, which is not what happens in game.
+    fn drop_custom_death_loot(&self, _source: &DamageSource, _killed_by_player: bool) {
+        let (Some(world), Some(carried)) = (self.level(), self.carried_block()) else {
+            return;
+        };
+
+        let mut fake_tool = ItemStack::new(&vanilla_items::DIAMOND_AXE);
+        fake_tool.set_enchantments(&[(SILK_TOUCH.key.clone(), 1)], false);
+
+        let position = self.position();
+        let drops = BlockLootContext::new(&world, self.block_position())
+            .with_entity(Some(self))
+            .with_tool(&fake_tool)
+            .get_drops(carried);
+        for drop in drops {
+            if !drop.is_empty() {
+                world.spawn_item(position, drop);
+            }
+        }
+    }
+
     /// Blinks away from whatever hit it.
     ///
     /// Vanilla parity: the `hurtServer` override, which is why an enderman
@@ -438,6 +568,14 @@ impl Mob for EndermanEntity {
     /// Vanilla parity: `EnderMan` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true
+    }
+
+    /// Vanilla parity: `EnderMan.requiresCustomPersistence`. An enderman with a
+    /// block in its hands never despawns, which is what lets the block travel.
+    /// The two disjuncts in front are the shared `Mob` body, which Rust has no
+    /// `super` to reach.
+    fn requires_custom_persistence(&self) -> bool {
+        self.is_passenger() || self.is_leashed() || self.carried_block().is_some()
     }
 
     fn mob_base(&self) -> &MobBase {
@@ -533,6 +671,173 @@ impl Mob for EndermanEntity {
     }
 }
 
+/// Puts the carried block down somewhere it will stand.
+///
+/// Vanilla parity: `EnderMan.EndermanLeaveBlockGoal`. Together with the take
+/// goal this is what quietly rearranges a landscape overnight.
+struct EndermanLeaveBlockGoal;
+
+impl Goal for EndermanLeaveBlockGoal {
+    fn controls(&self) -> GoalControls {
+        GoalControls::EMPTY
+    }
+
+    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        let Some(enderman) = mob.downcast_ref::<EndermanEntity>() else {
+            return false;
+        };
+        if enderman.carried_block().is_none() {
+            return false;
+        }
+        mob.level().is_some_and(|world| {
+            world.get_game_rule(&MOB_GRIEFING)
+                && rand::random_range(0..reduced_tick_delay(LEAVE_BLOCK_INTERVAL_TICKS)) == 0
+        })
+    }
+
+    fn tick(&mut self, mob: &dyn PathfinderMob) {
+        let (Some(enderman), Some(world)) = (mob.downcast_ref::<EndermanEntity>(), mob.level())
+        else {
+            return;
+        };
+        let Some(carried) = enderman.carried_block() else {
+            return;
+        };
+
+        let position = mob.position();
+        let target = BlockPos::new(
+            (position.x - 1.0 + rand::random::<f64>() * 2.0).floor() as i32,
+            (position.y + rand::random::<f64>() * 2.0).floor() as i32,
+            (position.z - 1.0 + rand::random::<f64>() * 2.0).floor() as i32,
+        );
+        let below = target.below();
+        let carried = update_from_neighbour_shapes(&world, carried, target);
+        if !can_place_block(&world, mob, target, carried, below) {
+            return;
+        }
+
+        world.set_block(target, carried, UpdateFlags::UPDATE_ALL);
+        world.game_event_at(
+            &vanilla_game_events::BLOCK_PLACE,
+            block_center(target),
+            &GameEventContext::new(Some(mob), Some(carried)),
+        );
+        enderman.set_carried_block(None);
+    }
+}
+
+/// Returns the middle of a block, the point vanilla's `Vec3.atCenterOf` gives.
+fn block_center(pos: BlockPos) -> DVec3 {
+    let (x, y, z) = pos.get_center();
+    DVec3::new(x, y, z)
+}
+
+/// Vanilla parity: `EndermanLeaveBlockGoal.canPlaceBlock`.
+fn can_place_block(
+    world: &Arc<World>,
+    enderman: &dyn PathfinderMob,
+    pos: BlockPos,
+    carried: BlockStateId,
+    below: BlockPos,
+) -> bool {
+    let target_state = world.get_block_state(pos);
+    let below_state = world.get_block_state(below);
+    if !target_state.is_air()
+        || below_state.is_air()
+        || below_state.get_block() == &vanilla_blocks::BEDROCK
+        || !world.is_collision_shape_full_block_at(below, below_state)
+    {
+        return false;
+    }
+    if !BLOCK_BEHAVIORS
+        .get_behavior(carried.get_block())
+        .can_survive(carried, world.as_ref(), pos)
+    {
+        return false;
+    }
+
+    // Vanilla parity: `level.getEntities(this.enderman, unitCube)`, which is
+    // what stops an enderman entombing you in the block it is holding.
+    let cube = WorldAabb::new(
+        f64::from(pos.x()),
+        f64::from(pos.y()),
+        f64::from(pos.z()),
+        f64::from(pos.x()) + 1.0,
+        f64::from(pos.y()) + 1.0,
+        f64::from(pos.z()) + 1.0,
+    );
+    world
+        .get_entities_in_aabb_matching(&cube, |entity| entity.id() != enderman.id())
+        .is_empty()
+}
+
+/// Takes a block out of the ground and walks off with it.
+///
+/// Vanilla parity: `EnderMan.EndermanTakeBlockGoal`.
+struct EndermanTakeBlockGoal;
+
+impl Goal for EndermanTakeBlockGoal {
+    fn controls(&self) -> GoalControls {
+        GoalControls::EMPTY
+    }
+
+    fn can_use(&mut self, mob: &dyn PathfinderMob) -> bool {
+        let Some(enderman) = mob.downcast_ref::<EndermanEntity>() else {
+            return false;
+        };
+        if enderman.carried_block().is_some() {
+            return false;
+        }
+        mob.level().is_some_and(|world| {
+            world.get_game_rule(&MOB_GRIEFING)
+                && rand::random_range(0..reduced_tick_delay(TAKE_BLOCK_INTERVAL_TICKS)) == 0
+        })
+    }
+
+    fn tick(&mut self, mob: &dyn PathfinderMob) {
+        let (Some(enderman), Some(world)) = (mob.downcast_ref::<EndermanEntity>(), mob.level())
+        else {
+            return;
+        };
+
+        let position = mob.position();
+        let target = BlockPos::new(
+            (position.x - 2.0 + rand::random::<f64>() * 4.0).floor() as i32,
+            (position.y + rand::random::<f64>() * 3.0).floor() as i32,
+            (position.z - 2.0 + rand::random::<f64>() * 4.0).floor() as i32,
+        );
+        let state = world.get_block_state(target);
+        if !REGISTRY
+            .blocks
+            .is_in_tag(state.get_block(), &BlockTag::ENDERMAN_HOLDABLE)
+        {
+            return;
+        }
+
+        // Vanilla parity: the clip that stops an enderman reaching through a
+        // wall for the block behind it.
+        let block_pos = mob.block_position();
+        let from = DVec3::new(
+            f64::from(block_pos.x()) + 0.5,
+            f64::from(target.y()) + 0.5,
+            f64::from(block_pos.z()) + 0.5,
+        );
+        let to = block_center(target);
+        let hit = world.clip(from, to, ClipBlockShape::Outline, ClipFluid::None);
+        if hit.block_pos != target {
+            return;
+        }
+
+        world.remove_block(target, false);
+        world.game_event_at(
+            &vanilla_game_events::BLOCK_DESTROY,
+            to,
+            &GameEventContext::new(Some(mob), Some(state)),
+        );
+        enderman.set_carried_block(Some(state.get_block().default_state()));
+    }
+}
+
 impl PathfinderMob for EndermanEntity {}
 
 impl NeutralMob for EndermanEntity {
@@ -548,3 +853,6 @@ impl NeutralMob for EndermanEntity {
 }
 
 impl Enemy for EndermanEntity {}
+
+#[cfg(test)]
+mod tests;

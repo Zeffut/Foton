@@ -9,12 +9,14 @@ use glam::DVec3;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
 use steel_registry::vanilla_entity_data::ZombieEntityData;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
+use super::zombie_common;
 use crate::entity::Enemy;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
@@ -308,6 +310,16 @@ impl Mob for ZombieEntity {
         check_monster_spawn_rules(world, spawn_reason, pos)
     }
 
+    /// Vanilla parity: `Zombie.canHoldItem`.
+    fn can_hold_item(&self, item_stack: &ItemStack) -> bool {
+        zombie_common::can_hold_item(self, self.is_baby(), item_stack)
+    }
+
+    /// Vanilla parity: `Zombie.wantsToPickUp`.
+    fn wants_to_pick_up(&self, world: &World, item_stack: &ItemStack) -> bool {
+        zombie_common::wants_to_pick_up(self, world, item_stack)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }
@@ -337,6 +349,12 @@ impl Mob for ZombieEntity {
     ) -> Option<SpawnGroupData> {
         if rand::random::<f32>() < AgeableMobGroupData::DEFAULT_BABY_SPAWN_CHANCE {
             self.set_baby(true);
+        }
+        // Vanilla parity: the `spawnReason != CONVERSION` guard of
+        // `Zombie.finalizeSpawn`. A zombie that drowned into a drowned keeps
+        // the flag it already had rather than rerolling it.
+        if spawn_reason != EntitySpawnReason::Conversion {
+            self.roll_spawn_can_pick_up_loot(world);
         }
         self.finalize_spawn_mob_base(world, spawn_reason, group_data)
     }

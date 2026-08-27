@@ -23,7 +23,7 @@ use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_math::fast_floor;
-use steel_protocol::packets::game::SoundSource;
+use steel_protocol::packets::game::{CTakeItemEntity, SoundSource};
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::enchantment_effect::EnchantmentEffectComponent;
 use steel_registry::item_stack::ItemStack;
@@ -40,7 +40,7 @@ use steel_registry::{
 use steel_utils::entity_events::EntityStatus;
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::{Difficulty, InteractionHand};
-use steel_utils::{BlockPos, Downcast as _, Identifier, WorldAabb, axis::Axis};
+use steel_utils::{BlockPos, ChunkPos, Downcast as _, Identifier, WorldAabb, axis::Axis};
 
 use crate::behavior::items::SpawnEggItem;
 use crate::behavior::{
@@ -71,6 +71,13 @@ use crate::inventory::equipment::EquipmentSlot;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader, World};
+
+/// Odds a mob of the zombie or skeleton family spawns able to pick loot up.
+///
+/// Vanilla parity: the `0.55F` of `Zombie.finalizeSpawn` and
+/// `AbstractSkeleton.finalizeSpawn`, scaled by the local difficulty's special
+/// multiplier.
+const SPAWN_CAN_PICK_UP_LOOT_CHANCE: f32 = 0.55;
 
 const MOB_FLAG_NO_AI: i8 = 1;
 const MOB_FLAG_LEFT_HANDED: i8 = 2;
@@ -715,6 +722,20 @@ pub trait Mob: LivingEntity + MobSource {
         }
         self.set_left_handed(left_handed);
         group_data
+    }
+
+    /// Rolls whether this mob spawned able to take loot off the ground.
+    ///
+    /// Vanilla parity: the `setCanPickUpLoot(random.nextFloat() < 0.55F *
+    /// difficulty.getSpecialMultiplier())` that `Zombie.finalizeSpawn` and
+    /// `AbstractSkeleton.finalizeSpawn` both run. Steel has no class hierarchy
+    /// to inherit it from, so every mob in those two families calls this. The
+    /// multiplier is zero below local difficulty 2, which is why an easy-mode
+    /// zombie never turns up wearing your armor.
+    fn roll_spawn_can_pick_up_loot(&self, world: &World) {
+        let difficulty = world.get_current_difficulty_at(Entity::block_position(self));
+        let chance = SPAWN_CAN_PICK_UP_LOOT_CHANCE * difficulty.special_multiplier();
+        Mob::set_can_pick_up_loot(self, rand::random::<f32>() < chance);
     }
 
     /// Handles vanilla `Mob.interact`.
@@ -2104,11 +2125,6 @@ pub trait Mob: LivingEntity + MobSource {
     /// Takes one dropped item off the ground.
     ///
     /// Vanilla parity: `Mob.pickUpItem`.
-    ///
-    /// TODO: The vanilla body equips the stack through `equipItemIfPossible`.
-    /// Steel has no `getEquipmentSlotForItem` yet, so only mobs that override
-    /// this -- the fox -- pick anything up. Nothing regresses: before this loop
-    /// existed no Steel mob picked up items at all.
     fn pick_up_item(&self, world: &Arc<World>, item_entity: &SharedEntity) {
         self.default_pick_up_item(world, item_entity);
     }
@@ -2116,12 +2132,48 @@ pub trait Mob: LivingEntity + MobSource {
     /// The body of [`Self::pick_up_item`], callable from an override.
     ///
     /// Vanilla parity: `Raider.pickUpItem`, which is what promotes whichever
-    /// raider reaches the fallen captain's banner first. It sits on the shared
-    /// body because Steel's raiders would otherwise repeat the same override
-    /// six times.
+    /// raider reaches the fallen captain's banner first, and otherwise falls
+    /// through to `Mob.pickUpItem`. It sits on the shared body because Steel's
+    /// raiders would otherwise repeat the same override six times.
     fn default_pick_up_item(&self, world: &Arc<World>, item_entity: &SharedEntity) {
-        if let Some(raider) = self.as_raider() {
-            raider::pick_up_banner(raider, world, item_entity);
+        if let Some(raider) = self.as_raider()
+            && raider::pick_up_banner(raider, world, item_entity)
+        {
+            return;
+        }
+        self.mob_pick_up_item(world, item_entity);
+    }
+
+    /// Equips a dropped stack, or as much of it as fits.
+    ///
+    /// Vanilla parity: the body of `Mob.pickUpItem`. This is what makes a
+    /// zombie wear the helmet you dropped and swing the sword that came with
+    /// it. Overrides that want the shared behavior call this rather than
+    /// [`Self::pick_up_item`], which would come straight back to them.
+    fn mob_pick_up_item(&self, world: &Arc<World>, item_entity: &SharedEntity) {
+        let Some(item) = item_entity.downcast_ref::<ItemEntity>() else {
+            return;
+        };
+        let mut stack = item.get_item();
+        let equipped = self.equip_item_if_possible(&stack);
+        if equipped.is_empty() {
+            return;
+        }
+
+        // Vanilla parity: `this.take(entity, equippedWithStack.getCount())`,
+        // the pickup animation every client draws.
+        let taken = equipped.count();
+        world.broadcast_to_nearby(
+            ChunkPos::from_entity_pos(item_entity.position()),
+            CTakeItemEntity::new(item_entity.id(), self.id(), taken),
+            None,
+        );
+
+        stack.shrink(taken);
+        if stack.is_empty() {
+            item_entity.set_removed(RemovalReason::Discarded);
+        } else {
+            item.set_item(stack);
         }
     }
 

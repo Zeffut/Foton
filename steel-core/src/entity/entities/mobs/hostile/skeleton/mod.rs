@@ -259,6 +259,10 @@ impl Mob for SkeletonEntity {
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
         let group_data = self.finalize_spawn_mob_base(world, spawn_reason, group_data);
+        // Vanilla parity: the `setCanPickUpLoot` of
+        // `AbstractSkeleton.finalizeSpawn`, which is what lets a skeleton pick
+        // your bow up off the ground.
+        self.roll_spawn_can_pick_up_loot(world);
         self.set_item_in_hand(
             InteractionHand::MainHand,
             ItemStack::new(&vanilla_items::BOW),
