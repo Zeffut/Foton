@@ -441,9 +441,14 @@ mobs that need it.
       does. Raids can use it as-is -- vanilla's raid bar is a plain
       `ServerBossEvent`.
 
-      Not done: `CustomBossEvent` / `CustomBossEvents`, the *named* bars behind
-      `/bossbar` and `execute store ... bossbar`. Their persistence format is
-      best settled with the command that drives it, and nothing else needs them.
+      `CustomBossEvent` and `CustomBossEvents` are here too, which is the
+      *named* half: `/bossbar` builds a bar no boss is behind, `execute store
+      ... bossbar` counts into it, and the domain's save file remembers it.
+      Two player sets rather than one is what the type is for -- the clients a
+      bar is drawn on, and the players it is assigned to, which is the set that
+      survives a logout. They hang off the domain the way the scoreboards and
+      the command storage do, not off one server-wide collection, because
+      `execute store` reaches all three the same way.
 
 - [x] **The wither**: the soul-sand summon, the eleven-second arrival and the
       blast that ends it, three independently aiming heads, the block-chewing
@@ -542,5 +547,17 @@ a furnace has no behavior. These scripts can:
 - `dev/openers-test.sh` -- an open trapped chest powers redstone and a
   closed one stops, a plain chest powers nothing, a chest under a solid
   block refuses to open, and a barrel looks open while somebody is in it.
+- `dev/store-entity-test.sh` -- `execute store ... entity` writes one field of
+  a live mob and leaves the rest of it alone. Every probe asks for the stored
+  value *and* a tag the mob had first, because a store built on a fresh
+  compound sets the field and wipes the name, the tags and the health with it.
+- `dev/items-test.sh` -- `execute if items` counts items and not slots, over a
+  player's hotbar, a mob's armor, a chest minecart and a chest block. The count
+  is read back through a marker rather than looked at, and an `unless` at a
+  stone block is what separates "not a container is an error" from a silent
+  zero.
+- `dev/bossbar-test.sh` -- a named bar is built, driven and counted into, and
+  then a second boot asks the save file for it back without ever being told
+  what was in it.
 
 Every entry above gets one before it is called done.
