@@ -21,17 +21,20 @@ use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::item_stack::ItemStack;
+use steel_registry::items::ItemRef;
 use steel_registry::loot_table::{EntityRef, LootContext};
 use steel_registry::poi::PoiTypeRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::trading::{MerchantOffers, TradeSet, offer_nbt};
 use steel_registry::vanilla_entity_data::VillagerEntityData;
+use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::vanilla_poi_type_tags::PoiTag;
 use steel_registry::villager_profession::VillagerProfessionRef;
 use steel_registry::villager_type::VillagerTypeRef;
 use steel_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, sound_events,
-    vanilla_mob_effects, vanilla_poi_types, vanilla_villager_professions, vanilla_villager_types,
+    vanilla_items, vanilla_mob_effects, vanilla_poi_types, vanilla_villager_professions,
+    vanilla_villager_types,
 };
 use steel_utils::entity_events::EntityStatus;
 use steel_utils::locks::SyncMutex;
@@ -48,10 +51,12 @@ use crate::entity::ai::gossip::{GossipContainer, GossipType, ReputationEventType
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::mobs::npc::merchant_state::{MerchantState, villager_data};
 use crate::entity::entities::mobs::npc::villager_ai;
+use crate::entity::inventory_carrier::{self, InventoryCarrier, load_inventory, save_inventory};
 use crate::entity::{
     AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntityPose, EntitySyncedData,
-    LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob,
+    LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob, SharedEntity,
 };
+use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::physics::MoveResult;
 use crate::player::Player;
 use crate::trading::{Merchant, open_trading_screen};
@@ -83,18 +88,31 @@ const HALF_DAY_TICKS: i64 = 12_000;
 const RESTOCK_COOLDOWN_TICKS: i64 = 2_400;
 /// Vanilla parity: the `2` restocks a villager is allowed each day.
 const MAX_RESTOCKS_PER_DAY: i32 = 2;
+/// Vanilla parity: the `countItem(Items.BREAD) <= 36` of `makeBread`.
+const MAX_BREAD_BEFORE_BAKING: i32 = 36;
+/// Vanilla parity: `makeBread`'s `maxAmountOfBreadToMake`.
+const MAX_BREAD_PER_BAKE: i32 = 3;
+/// Vanilla parity: `makeBread`'s `amountOfWheatNeededToCraftOneBread`.
+const WHEAT_PER_BREAD: i32 = 3;
+/// Vanilla parity: the `0.5F` offset the bread it cannot carry is dropped at.
+const BREAD_DROP_OFFSET: f64 = 0.5;
 
 /// Vanilla parity: `Villager.FOOD_POINTS`.
+fn food_points_table() -> [(ItemRef, i32); 4] {
+    [
+        (&vanilla_items::BREAD, 4),
+        (&vanilla_items::POTATO, 1),
+        (&vanilla_items::CARROT, 1),
+        (&vanilla_items::BEETROOT, 1),
+    ]
+}
+
+/// Vanilla parity: the `FOOD_POINTS.get(item)` every food count goes through.
 fn food_points(stack: &ItemStack) -> i32 {
-    let key = &stack.item().key;
-    if key.namespace != "minecraft" {
-        return 0;
-    }
-    match key.path.as_ref() {
-        "bread" => 4,
-        "potato" | "carrot" | "beetroot" => 1,
-        _ => 0,
-    }
+    food_points_table()
+        .into_iter()
+        .find(|&(item, _)| stack.is(item))
+        .map_or(0, |(_, points)| points)
 }
 
 /// A villager: a mob that trades, restocks and remembers.
@@ -109,7 +127,7 @@ pub struct VillagerEntity {
     /// The trading state, in an `Arc` so the screen can hold it.
     merchant: Arc<MerchantState>,
     /// Vanilla parity: `AbstractVillager.inventory`, a `SimpleContainer(8)`.
-    inventory: SyncMutex<Vec<ItemStack>>,
+    inventory: SyncMutex<SimpleContainer>,
     gossips: SyncMutex<GossipContainer>,
     /// Vanilla parity: `LivingEntity.brain`, built by `Villager.BRAIN_PROVIDER`.
     brain: Brain,
@@ -173,7 +191,7 @@ impl VillagerEntity {
             ageable_base,
             entity_data: SyncMutex::new(entity_data),
             merchant: Arc::new(MerchantState::villager(id, world)),
-            inventory: SyncMutex::new(vec![ItemStack::empty(); Self::INVENTORY_SIZE]),
+            inventory: SyncMutex::new(SimpleContainer::new(Self::INVENTORY_SIZE)),
             gossips: SyncMutex::new(GossipContainer::new()),
             brain: villager_ai::make_brain(),
             food_level: SyncMutex::new(0),
@@ -183,6 +201,10 @@ impl VillagerEntity {
             number_of_restocks_today: SyncMutex::new(0),
         };
         villager.update_schedule();
+        // Vanilla parity: the `setCanPickUpLoot(true)` of the `Villager`
+        // constructor, which is what makes `Mob.aiStep` offer the ground to
+        // `wantsToPickUp` at all.
+        Mob::set_can_pick_up_loot(&villager, true);
         villager
     }
 
@@ -561,6 +583,7 @@ impl VillagerEntity {
     pub fn food_points_in_inventory(&self) -> i32 {
         self.inventory
             .lock()
+            .items()
             .iter()
             .map(|stack| food_points(stack) * stack.count())
             .sum()
@@ -585,14 +608,14 @@ impl VillagerEntity {
             return;
         }
         let mut inventory = self.inventory.lock();
-        for slot in 0..inventory.len() {
-            let value = food_points(&inventory[slot]);
+        for slot in 0..inventory.get_container_size() {
+            let value = food_points(inventory.get_item(slot));
             if value == 0 {
                 continue;
             }
-            while inventory[slot].count() > 0 {
+            while inventory.get_item(slot).count() > 0 {
                 *self.food_level.lock() += value;
-                inventory[slot].shrink(1);
+                inventory.remove_item(slot, 1);
                 if *self.food_level.lock() >= BREEDING_FOOD_THRESHOLD {
                     return;
                 }
@@ -612,12 +635,48 @@ impl VillagerEntity {
         self.food_points_in_inventory() < BREEDING_FOOD_THRESHOLD
     }
 
-    /// The villager's eight-slot inventory.
+    /// Bakes bread out of the wheat this villager is carrying.
     ///
-    /// Vanilla parity: `InventoryCarrier.getInventory`.
+    /// Vanilla parity: `WorkAtComposter.makeBread`, which is the only thing that
+    /// turns a farmer's harvest into food a village can eat and breed on. Bread
+    /// it cannot carry is dropped rather than lost.
+    pub fn make_bread(&self) {
+        let leftover = {
+            let mut inventory = self.inventory.lock();
+            if inventory.count_item(&vanilla_items::BREAD) > MAX_BREAD_BEFORE_BAKING {
+                return;
+            }
+            let wheat = inventory.count_item(&vanilla_items::WHEAT);
+            let loaves = MAX_BREAD_PER_BAKE.min(wheat / WHEAT_PER_BREAD);
+            if loaves == 0 {
+                return;
+            }
+            inventory.remove_item_type(&vanilla_items::WHEAT, loaves * WHEAT_PER_BREAD);
+            let mut bread = ItemStack::with_count(&vanilla_items::BREAD, loaves);
+            inventory.add(&mut bread);
+            bread
+        };
+        if !leftover.is_empty() {
+            self.spawn_at_location(leftover, BREAD_DROP_OFFSET);
+        }
+    }
+
+    /// The food a villager counts, eats and hands to another villager.
+    ///
+    /// Vanilla parity: `Villager.FOOD_POINTS.keySet()`.
     #[must_use]
-    pub const fn inventory(&self) -> &SyncMutex<Vec<ItemStack>> {
-        &self.inventory
+    pub fn food_items() -> [ItemRef; 4] {
+        food_points_table().map(|(item, _)| item)
+    }
+
+    /// Vanilla parity: `Villager.hasFarmSeeds`.
+    #[must_use]
+    pub fn has_farm_seeds(&self) -> bool {
+        self.inventory
+            .lock()
+            .items()
+            .iter()
+            .any(|stack| stack.item().has_tag(&ItemTag::VILLAGER_PLANTABLE_SEEDS))
     }
 
     /// The experience this villager has banked toward its next level.
@@ -782,6 +841,7 @@ impl Entity for VillagerEntity {
         if self.merchant.offers_built() {
             nbt.insert("Offers", offer_nbt::save(&self.merchant.offers().lock()));
         }
+        save_inventory(&self.inventory.lock(), nbt);
         self.brain.save(nbt);
     }
 
@@ -837,6 +897,7 @@ impl Entity for VillagerEntity {
         if let Some(list) = nbt.list("Offers") {
             self.merchant.set_offers(offer_nbt::load(&list));
         }
+        load_inventory(&mut self.inventory.lock(), nbt);
         self.brain.load(nbt);
         // The age came out of the same NBT, so which schedule track this
         // villager reads may have changed with it.
@@ -1020,6 +1081,26 @@ impl Mob for VillagerEntity {
         })
     }
 
+    /// Vanilla parity: `Villager.wantsToPickUp`.
+    ///
+    /// This deliberately does not defer to [`Mob::mob_wants_to_pick_up`]: the
+    /// vanilla override replaces the shared body rather than narrowing it, so a
+    /// villager never asks `canHoldItem` -- the question is whether the stack is
+    /// one it collects and whether its own container has room.
+    /// [`Mob::pick_up_nearby_items`] has already checked `canPickUpLoot` and
+    /// `mobGriefing`, exactly where `Mob.aiStep` checks them.
+    fn wants_to_pick_up(&self, _world: &World, item_stack: &ItemStack) -> bool {
+        (item_stack.item().has_tag(&ItemTag::VILLAGER_PICKS_UP)
+            || self.profession().requests_item(item_stack.item()))
+            && inventory_carrier::can_add_item(&self.inventory.lock(), item_stack)
+    }
+
+    /// Vanilla parity: `Villager.pickUpItem`, which stows the stack in the
+    /// villager's own container instead of equipping it.
+    fn pick_up_item(&self, world: &Arc<World>, item_entity: &SharedEntity) {
+        inventory_carrier::pick_up_item(world, self, item_entity);
+    }
+
     /// Vanilla parity: `Villager.mobInteract`.
     fn mob_interact(&self, player: &Player, hand: InteractionHand) -> InteractionResult {
         let stack = player.inventory.lock().get_item_in_hand(hand).clone();
@@ -1051,3 +1132,9 @@ impl Mob for VillagerEntity {
 }
 
 impl PathfinderMob for VillagerEntity {}
+
+impl InventoryCarrier for VillagerEntity {
+    fn carried_inventory(&self) -> &SyncMutex<SimpleContainer> {
+        &self.inventory
+    }
+}

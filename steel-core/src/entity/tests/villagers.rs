@@ -15,15 +15,19 @@ use steel_registry::{vanilla_villager_professions, vanilla_world_clocks};
 use steel_utils::types::UpdateFlags;
 
 use super::*;
-use crate::behavior::init_behaviors;
+use crate::behavior::{BlockStateBehaviorExt as _, init_behaviors};
 use crate::block_entity::init_block_entities;
 use crate::entity::ai::brain::Activity;
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::gossip::{GossipType, ReputationEventType};
-use crate::entity::entities::{VillagerEntity, ZombieEntity};
-use crate::entity::{AgeableMob, LivingEntity, Mob, SharedEntity, next_entity_id};
+use crate::entity::entities::{ItemEntity, VillagerEntity, ZombieEntity};
+use crate::entity::{
+    AgeableMob, InventoryCarrier as _, LivingEntity, Mob, MobEffectInstance, SharedEntity,
+    next_entity_id,
+};
+use crate::inventory::container::Container as _;
 use crate::poi::poi_storage::OccupationStatus;
-use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 use crate::trading::Merchant as _;
 use crate::world::World;
 
@@ -513,6 +517,450 @@ fn set_time_of_day(world: &Arc<World>, ticks: i64) {
     );
 }
 
+/// The container the rest of the villager's day hangs off.
+///
+/// `GoToWantedItem` walks a villager to a dropped stack, `makeBread` turns the
+/// wheat in that stack into loaves and `TradeWithVillager` hands them on -- and
+/// every one of them is inert unless the tick can actually put something in the
+/// container. Three pieces have to agree for that: `canPickUpLoot`, the
+/// `wantsToPickUp` override, and the `InventoryCarrier` seam that stows the
+/// stack instead of equipping it.
+///
+/// This enters only through `villager.tick()`, the door the server tick uses.
+#[test]
+fn a_villager_stows_the_bread_it_walks_over() {
+    let world = villager_world("villager_picks_up_bread");
+    let villager = spawn_villager(&world);
+    let dropped = world
+        .spawn_item(SPAWN, ItemStack::with_count(&vanilla_items::BREAD, 3))
+        .expect("the test chunk accepts an item entity");
+
+    let taken = run_ticks_until(&world, &villager, 20, || dropped.is_removed());
+
+    assert!(
+        taken,
+        "a villager standing on bread should have picked it up"
+    );
+    assert_eq!(
+        villager.carried_inventory().lock().get_item(0).count(),
+        3,
+        "the bread has to land in the villager's own container, not its hands"
+    );
+    assert!(
+        LivingEntity::get_item_by_slot(villager.as_ref(), EquipmentSlot::MainHand).is_empty(),
+        "equipping the bread is exactly the failure the InventoryCarrier seam avoids"
+    );
+}
+
+/// Vanilla parity: the `itemStack.is(ItemTags.VILLAGER_PICKS_UP)` half of
+/// `Villager.wantsToPickUp`. Without it a villager with `canPickUpLoot` set
+/// would hoover up whatever fell near it.
+#[test]
+fn a_villager_leaves_alone_what_it_does_not_collect() {
+    let world = villager_world("villager_ignores_diamond");
+    let villager = spawn_villager(&world);
+    let dropped = world
+        .spawn_item(SPAWN, ItemStack::new(&vanilla_items::DIAMOND))
+        .expect("the test chunk accepts an item entity");
+
+    run_ticks(&world, &villager, 20);
+
+    assert!(
+        !dropped.is_removed(),
+        "a diamond is not a villager's business"
+    );
+    assert!(
+        villager.carried_inventory().lock().is_empty(),
+        "nothing outside VILLAGER_PICKS_UP should reach the container"
+    );
+}
+
+/// Vanilla parity: the `profession().requestedItems().contains(item)` half of
+/// `Villager.wantsToPickUp`. Bone meal is the one item that half decides on its
+/// own -- it is not in `VILLAGER_PICKS_UP`, and only the farmer requests it.
+#[test]
+fn only_a_farmer_picks_up_bone_meal() {
+    let world = villager_world("villager_bone_meal_is_the_farmers");
+    let villager = spawn_villager(&world);
+    let dropped = world
+        .spawn_item(SPAWN, ItemStack::new(&vanilla_items::BONE_MEAL))
+        .expect("the test chunk accepts an item entity");
+
+    run_ticks(&world, &villager, 20);
+    assert!(
+        !dropped.is_removed(),
+        "a villager with no profession requests nothing"
+    );
+
+    villager.set_profession(&vanilla_villager_professions::FARMER);
+    let taken = run_ticks_until(&world, &villager, 20, || dropped.is_removed());
+
+    assert!(taken, "a farmer requests bone meal and should take it");
+}
+
+/// The eight slots have to survive a save and load, or a villager that spent an
+/// afternoon gathering wheat arrives at tomorrow empty-handed.
+///
+/// Vanilla parity: `AbstractVillager.addAdditionalSaveData`, which writes the
+/// carried inventory under the shared `Inventory` tag.
+#[test]
+fn a_villager_carries_its_inventory_through_a_save_and_load() {
+    let world = villager_world("villager_inventory_round_trip");
+    let villager = spawn_villager(&world);
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(2, ItemStack::with_count(&vanilla_items::WHEAT, 7));
+
+    let mut nbt = NbtCompound::new();
+    villager.save_additional(&mut nbt);
+
+    let mut bytes = Vec::new();
+    nbt.write(&mut bytes);
+    let borrowed = read_borrowed_compound(&mut Cursor::new(bytes.as_slice()))
+        .unwrap_or_else(|error| panic!("villager nbt should reborrow: {error}"));
+
+    let restored = Arc::new(VillagerEntity::new(
+        &vanilla_entities::VILLAGER,
+        next_entity_id(),
+        SPAWN,
+        Arc::downgrade(&world),
+    ));
+    restored.load_additional((&borrowed).into());
+
+    let inventory = restored.carried_inventory().lock();
+    let stack = inventory.get_item(0);
+    assert!(
+        stack.is(&vanilla_items::WHEAT) && stack.count() == 7,
+        "the wheat should come back -- vanilla's `fromItemList` re-adds it, so it compacts to the first free slot"
+    );
+}
+
+/// Vanilla parity: `SecondaryPoiSensor`, the only writer of
+/// `SECONDARY_JOB_SITE`.
+///
+/// `HarvestFarmland` and the work package's `StrollToPoiList` both refuse to
+/// start without that memory, so a farmer whose sensor never runs never works
+/// its field -- and the memory is only ever written for the one profession that
+/// registers a secondary POI at all.
+///
+/// This enters only through `villager.tick()`, which is what makes it fail if
+/// the sensor is never added to the brain rather than merely written.
+#[test]
+fn only_a_farmer_notices_the_farmland_it_is_standing_on() {
+    let world = villager_world("villager_secondary_job_site");
+    let villager = spawn_villager(&world);
+    for x in (STAND.x() - 4)..=(STAND.x() + 4) {
+        for z in (STAND.z() - 4)..=(STAND.z() + 4) {
+            assert!(world.set_block(
+                BlockPos::new(x, STAND.y() - 1, z),
+                vanilla_blocks::FARMLAND.default_state(),
+                UpdateFlags::UPDATE_NONE,
+            ));
+        }
+    }
+
+    let brain = Mob::brain(villager.as_ref()).expect("a villager has a brain");
+    // Two full scan rates, so the staggered first tick cannot be the reason.
+    run_ticks(&world, &villager, 90);
+    assert!(
+        !brain.has_memory_value(memory_module_types::SECONDARY_JOB_SITE.id()),
+        "farmland is the farmer's secondary POI, nobody else's"
+    );
+
+    // A profession only sticks while the villager holds the workstation that
+    // grants it -- `ResetProfession` takes back a job with no job site.
+    assert!(world.set_block(
+        BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()),
+        vanilla_blocks::COMPOSTER.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    assert!(
+        run_ticks_until(&world, &villager, TICKS_TO_TAKE_A_JOB, || {
+            villager.profession().key.path == "farmer"
+        }),
+        "the composter should have made this villager a farmer"
+    );
+
+    let noticed = run_ticks_until(&world, &villager, 90, || {
+        brain.has_memory_value(memory_module_types::SECONDARY_JOB_SITE.id())
+    });
+
+    assert!(noticed, "a farmer standing in a field should have seen it");
+    let field = brain
+        .get_memory(memory_module_types::SECONDARY_JOB_SITE)
+        .expect("the memory was just asserted present");
+    assert!(
+        field
+            .iter()
+            .all(|pos| pos.dimension == world.key && pos.pos.y() == STAND.y() - 1),
+        "the sensor should report the farmland it scanned, in this dimension"
+    );
+}
+
+/// The five-by-five field the farming test plants and then watches.
+const FIELD_RADIUS: i32 = 2;
+
+/// Where the farming test puts the composter that makes the villager a farmer.
+///
+/// It has to be next to the villager: `AcquirePoi` only claims a workstation it
+/// can path to, and the composter's own POI reach is one block.
+const COMPOSTER: BlockPos = BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z());
+
+/// Every square of that field, at crop height.
+///
+/// The composter stands in the middle of it and is not farmland, so it is not
+/// one of the squares the assertions watch -- leaving it in would make "some
+/// square is no longer ripe wheat" true before the villager had done anything.
+fn field() -> Vec<BlockPos> {
+    let mut positions = Vec::new();
+    for x in (STAND.x() - FIELD_RADIUS)..=(STAND.x() + FIELD_RADIUS) {
+        for z in (STAND.z() - FIELD_RADIUS)..=(STAND.z() + FIELD_RADIUS) {
+            let pos = BlockPos::new(x, STAND.y(), z);
+            if pos != COMPOSTER {
+                positions.push(pos);
+            }
+        }
+    }
+    positions
+}
+
+/// Lays farmland under the field and ripe wheat on top of it.
+fn sow_a_ripe_field(world: &Arc<World>) {
+    let ripe = vanilla_blocks::WHEAT
+        .default_state()
+        .set_value(&BlockStateProperties::AGE_7, 7);
+    for pos in field() {
+        assert!(world.set_block(
+            pos.below(),
+            vanilla_blocks::FARMLAND.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        assert!(world.set_block(pos, ripe, UpdateFlags::UPDATE_NONE));
+    }
+}
+
+/// The farming loop, end to end: a farmer walks into a ripe field, pulls the
+/// wheat and puts a seed back in the ground.
+///
+/// Three separate pieces have to be right for this at once -- the
+/// `SECONDARY_POIS` sensor `HarvestFarmland` is gated on, the `crop_is_max_age`
+/// block seam that tells a ripe crop from a growing one, and the container the
+/// seeds come out of. It enters only through `villager.tick()`.
+#[test]
+fn a_farmer_pulls_ripe_wheat_and_puts_a_seed_back_in_the_ground() {
+    let world = villager_world("villager_harvests_farmland");
+    let villager = spawn_villager(&world);
+    sow_a_ripe_field(&world);
+    assert!(world.set_block(
+        COMPOSTER,
+        vanilla_blocks::COMPOSTER.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::WHEAT_SEEDS, 8));
+
+    // 2000..9000 is the WORK stretch of the schedule, and nothing here ticks
+    // the day clock, so the villager stays in working hours for the whole run.
+    set_time_of_day(&world, 3_000);
+    assert!(
+        run_ticks_until(&world, &villager, TICKS_TO_TAKE_A_JOB, || {
+            villager.profession().key.path == "farmer"
+        }),
+        "the composter should have made this villager a farmer"
+    );
+
+    assert!(
+        field()
+            .iter()
+            .all(|&pos| world.get_block_state(pos).crop_is_max_age() == Some(true)),
+        "every square of the field starts as ripe wheat"
+    );
+    let harvested = || {
+        field()
+            .iter()
+            .any(|&pos| world.get_block_state(pos).crop_is_max_age() != Some(true))
+    };
+    assert!(
+        run_ticks_until(&world, &villager, 8_000, harvested),
+        "a farmer standing in ripe wheat should have pulled some of it"
+    );
+
+    let replanted = || {
+        field().iter().any(|&pos| {
+            let state = world.get_block_state(pos);
+            state.get_block().key == vanilla_blocks::WHEAT.key
+                && state.get_value(&BlockStateProperties::AGE_7) == 0
+        })
+    };
+    assert!(
+        run_ticks_until(&world, &villager, 8_000, replanted),
+        "the square it pulled should have been sown again from its own seeds"
+    );
+}
+
+/// What the harvest is for: a farmer standing at its composter turns the wheat
+/// it is carrying into bread, which is the only food a village breeds on.
+///
+/// Vanilla parity: `WorkAtComposter.makeBread`, reached through
+/// `WorkAtPoi.useWorkstation`. This enters only through `villager.tick()`, so
+/// it fails if the hook is never called as well as if the baking is wrong.
+#[test]
+fn a_farmer_at_its_composter_bakes_its_wheat_into_bread() {
+    let world = villager_world("villager_makes_bread");
+    let villager = spawn_villager(&world);
+    assert!(world.set_block(
+        BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()),
+        vanilla_blocks::COMPOSTER.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+
+    set_time_of_day(&world, 3_000);
+    assert!(
+        run_ticks_until(&world, &villager, TICKS_TO_TAKE_A_JOB, || {
+            villager.profession().key.path == "farmer"
+        }),
+        "the composter should have made this villager a farmer"
+    );
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::WHEAT, 9));
+
+    // `WorkAtPoi` only looks every three hundred ticks, and then on a coin flip.
+    assert!(
+        run_ticks_until(&world, &villager, 4_000, || {
+            villager
+                .carried_inventory()
+                .lock()
+                .count_item(&vanilla_items::BREAD)
+                > 0
+        }),
+        "nine wheat at a composter is three loaves"
+    );
+
+    let inventory = villager.carried_inventory().lock();
+    assert_eq!(
+        inventory.count_item(&vanilla_items::BREAD),
+        3,
+        "vanilla bakes at most three loaves a visit, out of three wheat each"
+    );
+    assert_eq!(
+        inventory.count_item(&vanilla_items::WHEAT),
+        0,
+        "and takes the nine wheat back out of the container"
+    );
+}
+
+/// The bread a villager is carrying reaches the villager who is short of it.
+///
+/// Vanilla parity: `TradeWithVillager`, which is what stops a farmer hoarding a
+/// harvest the rest of the village cannot eat. It rides on the container and on
+/// the idle gate that picks an `INTERACTION_TARGET`, so this fails if either is
+/// missing -- and it enters only through the two villagers' own ticks.
+#[test]
+fn a_villager_with_food_to_spare_throws_half_of_it_to_a_neighbour() {
+    const CARRIED: i32 = 40;
+
+    let world = villager_world("villager_shares_food");
+    let giver = spawn_villager(&world);
+    let taker = spawn_villager(&world);
+    giver
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::BREAD, CARRIED));
+    assert!(
+        giver.has_excess_food() && taker.wants_more_food(),
+        "the giver has more than it needs and the taker has nothing"
+    );
+
+    // 10..2000 is the IDLE stretch, the package the swap gate is in.
+    set_time_of_day(&world, 1_000);
+    let mut shared = false;
+    for _ in 0..6_000 {
+        advance_time(&world);
+        giver.base_tick();
+        giver.tick();
+        taker.base_tick();
+        taker.tick();
+        if giver
+            .carried_inventory()
+            .lock()
+            .count_item(&vanilla_items::BREAD)
+            < CARRIED
+        {
+            shared = true;
+            break;
+        }
+    }
+
+    assert!(
+        shared,
+        "a villager with bread to spare should have shared it"
+    );
+    assert_eq!(
+        giver
+            .carried_inventory()
+            .lock()
+            .count_item(&vanilla_items::BREAD),
+        CARRIED / 2,
+        "vanilla throws half a stack that is more than half full"
+    );
+}
+
+/// A villager gives a present back to the player who saved its village.
+///
+/// Vanilla parity: `GiveGiftToHero`. It rides on `NEAREST_VISIBLE_PLAYER`, on
+/// the hero effect, and on the gift loot table its profession names -- and it
+/// enters only through `villager.tick()`.
+#[test]
+fn a_villager_throws_a_gift_at_the_hero_of_the_village() {
+    let world = villager_world("villager_gift");
+    let villager = spawn_villager(&world);
+
+    let hero = TestPlayerBuilder::new(Arc::clone(&world), "Hero", next_entity_id()).build();
+    hero.try_set_position(SPAWN)
+        .expect("the test chunk is loaded, so the hero can stand in it");
+    assert!(world.players.insert(Arc::clone(&hero)));
+    world
+        .try_add_entity(Arc::clone(&hero) as SharedEntity)
+        .expect("the test chunk is loaded, so the hero should attach");
+    assert!(
+        LivingEntity::add_mob_effect(
+            hero.as_ref(),
+            MobEffectInstance::with_duration(vanilla_mob_effects::HERO_OF_THE_VILLAGE, 20_000, 0),
+        ),
+        "the hero has to actually carry the effect the behavior looks for"
+    );
+
+    // 10..2000 is the IDLE stretch, one of the three packages the gift is in.
+    set_time_of_day(&world, 1_000);
+    let gift_near_the_villager = || {
+        let around = WorldAabb::new(
+            SPAWN.x - 8.0,
+            SPAWN.y - 4.0,
+            SPAWN.z - 8.0,
+            SPAWN.x + 8.0,
+            SPAWN.y + 4.0,
+            SPAWN.z + 8.0,
+        );
+        !world
+            .get_entities_in_aabb_matching(&around, |entity| {
+                entity.downcast_ref::<ItemEntity>().is_some()
+            })
+            .is_empty()
+    };
+
+    // The countdown before a villager will offer a gift is six hundred ticks,
+    // and it only runs down while a hero is in sight.
+    assert!(
+        run_ticks_until(&world, &villager, 4_000, gift_near_the_villager),
+        "a villager that can see a hero of the village should have thrown it something"
+    );
+}
+
 /// The activity the villager's own brain is currently in.
 fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
     Mob::brain(villager.as_ref())?.active_non_core_activity()
@@ -664,7 +1112,10 @@ const TICKS_TO_RAISE_A_CHILD: i32 = 800;
 /// Vanilla parity: `Villager.canBreed` adds the food level to the food points
 /// in the inventory and wants twelve; bread is four points each.
 fn feed_for_breeding(villager: &Arc<VillagerEntity>) {
-    villager.inventory().lock()[0] = ItemStack::with_count(&vanilla_items::BREAD, 3);
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::BREAD, 3));
     assert!(
         villager.can_breed(),
         "three bread is the breeding threshold"

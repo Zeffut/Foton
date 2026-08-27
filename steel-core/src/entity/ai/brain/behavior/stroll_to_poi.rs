@@ -146,3 +146,89 @@ impl Trigger for StrollAroundPoi {
         "StrollAroundPoi"
     }
 }
+
+/// Vanilla parity: the `nextOkStartTime + 100L` of `StrollToPoiList`.
+const MIN_TIME_BETWEEN_LIST_WALKS: i64 = 100;
+
+/// Wanders between the remembered blocks around a point of interest.
+///
+/// Vanilla parity: `net.minecraft.world.entity.ai.behavior.StrollToPoiList`,
+/// which is how a farmer paces its field: `SECONDARY_JOB_SITE` holds the
+/// farmland the sensor found, and the walk only happens while the villager is
+/// still near the workstation `must_be_close_to` names.
+pub struct StrollToPoiList {
+    stroll_to: MemoryModuleType<Vec<GlobalPos>>,
+    must_be_close_to: MemoryModuleType<GlobalPos>,
+    speed_modifier: f64,
+    close_enough_dist: i32,
+    max_distance_from_poi: f64,
+    next_ok_start_time: i64,
+}
+
+impl StrollToPoiList {
+    /// Vanilla parity: `StrollToPoiList.create`.
+    #[must_use]
+    pub const fn new(
+        stroll_to: MemoryModuleType<Vec<GlobalPos>>,
+        speed_modifier: f64,
+        close_enough_dist: i32,
+        max_distance_from_poi: i32,
+        must_be_close_to: MemoryModuleType<GlobalPos>,
+    ) -> Self {
+        Self {
+            stroll_to,
+            must_be_close_to,
+            speed_modifier,
+            close_enough_dist,
+            max_distance_from_poi: max_distance_from_poi as f64,
+            next_ok_start_time: 0,
+        }
+    }
+}
+
+impl Trigger for StrollToPoiList {
+    fn required_memories(&self) -> Vec<MemoryModuleId> {
+        vec![
+            memory_module_types::WALK_TARGET.id(),
+            self.stroll_to.id(),
+            self.must_be_close_to.id(),
+        ]
+    }
+
+    fn trigger(&mut self, ctx: &BrainContext<'_>) -> bool {
+        let brain = ctx.brain();
+        let (Some(stroll_to), Some(stay_close_to)) = (
+            brain.get_memory(self.stroll_to),
+            brain.get_memory(self.must_be_close_to),
+        ) else {
+            return false;
+        };
+        let Some(target) = stroll_to
+            .get(rand::random_range(0..stroll_to.len().max(1)))
+            .cloned()
+        else {
+            return false;
+        };
+        if target.dimension != ctx.world().key
+            || !utils::block_closer_to_center_than(
+                stay_close_to.pos,
+                ctx.mob().position(),
+                self.max_distance_from_poi,
+            )
+        {
+            return false;
+        }
+        if ctx.game_time() > self.next_ok_start_time {
+            brain.set_memory(
+                memory_module_types::WALK_TARGET,
+                WalkTarget::of_block(target.pos, self.speed_modifier, self.close_enough_dist),
+            );
+            self.next_ok_start_time = ctx.game_time() + MIN_TIME_BETWEEN_LIST_WALKS;
+        }
+        true
+    }
+
+    fn debug_name(&self) -> &'static str {
+        "StrollToPoiList"
+    }
+}

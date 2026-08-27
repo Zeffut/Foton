@@ -139,6 +139,9 @@ pub trait BlockStateBehaviorExt {
     /// Returns whether this block state extends `BedBlock`
     fn is_bed(&self) -> bool;
 
+    /// Returns whether this block state is a crop, and if so whether it is ripe.
+    fn crop_is_max_age(&self) -> Option<bool>;
+
     /// Returns whether this block state can be occupied by a forced respawn position
     fn is_possible_to_respawn_in_this(&self) -> bool;
 }
@@ -171,6 +174,11 @@ impl BlockStateBehaviorExt for BlockStateId {
     fn is_bed(&self) -> bool {
         let block = self.get_block();
         BLOCK_BEHAVIORS.get_behavior(block).is_bed()
+    }
+
+    fn crop_is_max_age(&self) -> Option<bool> {
+        let block = self.get_block();
+        BLOCK_BEHAVIORS.get_behavior(block).crop_is_max_age(*self)
     }
 
     fn is_possible_to_respawn_in_this(&self) -> bool {

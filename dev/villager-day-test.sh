@@ -1,5 +1,6 @@
 #!/bin/bash
-# Watch a villager keep its working day, end to end.
+# Watch a villager keep its working day, end to end: it sleeps at night, and it
+# works a field in the morning.
 #
 # A villager's day crosses more systems than any unit test can stand up at
 # once: the `villager_schedule` timeline has to be loaded and sampled as a
@@ -9,13 +10,21 @@
 # `SleepInBed`, and `WakeUp` has to get the villager out again when the clock
 # turns. This drives all of it through a real client.
 #
-# The bed's own `occupied` block state is the assertion. It is the one part of
-# sleeping a command can read back, and it can only be true if a body is in the
-# bed -- nothing else in the game sets it.
+# The bed's own `occupied` block state is the assertion for the night half. It
+# is the one part of sleeping a command can read back, and it can only be true
+# if a body is in the bed -- nothing else in the game sets it.
 #
 # The bed is deliberately five blocks from where the villager is summoned, so
 # the villager has to walk there: a test with the bed underfoot would pass even
 # if `SetWalkTargetFromBlockMemory` and `MoveToTargetSink` never ran.
+#
+# The morning half is the field. A composter turns the villager into a farmer,
+# the `SECONDARY_POIS` sensor has to see the farmland, `HarvestFarmland` has to
+# tell a ripe crop from a growing one through the block behavior, and the seeds
+# the harvest drops have to reach the villager's own container before it can
+# sow the square again. The field starts as `wheat[age=7]` on every square, so
+# `wheat[age=0]` on any of them is the whole loop having run -- and a square
+# that has gone to `air` is at least the harvest half.
 #
 # Usage: bash dev/villager-day-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -83,6 +92,22 @@ CMDS="$CMDS;;summon minecraft:villager 5 100 0"
 CMDS="$CMDS;;execute if entity @e[type=minecraft:villager] run tellraw @s \"VILLAGERSTANDING\""
 CMDS="$CMDS;;execute if block 0 100 0 minecraft:red_bed[occupied=false] run tellraw @s \"BEDSTARTSEMPTY\""
 
+# --- the field -----------------------------------------------------------
+# Ripe wheat on farmland, right where the villager is summoned, with the
+# composter that gives it the farmer trade next to it. `AcquirePoi` only takes
+# a workstation it can path to and a composter's own reach is one block, so the
+# composter is adjacent rather than across the room.
+FIELD_X="3 4 5"
+FIELD_Z="-1 0 1"
+for x in $FIELD_X; do
+  for z in $FIELD_Z; do
+    CMDS="$CMDS;;setblock $x 99 $z minecraft:farmland"
+    CMDS="$CMDS;;setblock $x 100 $z minecraft:wheat[age=7]"
+  done
+done
+CMDS="$CMDS;;setblock 6 100 0 minecraft:composter"
+CMDS="$CMDS;;execute if block 5 100 0 minecraft:wheat[age=7] run tellraw @s \"FIELDISRIPE\""
+
 # --- night ---------------------------------------------------------------
 # 12000 onward is the REST stretch of `Timelines.VILLAGER_SCHEDULE`.
 CMDS="$CMDS;;time set 13000"
@@ -97,6 +122,25 @@ CMDS="$CMDS;;time set 3000"
 CMDS="$CMDS;;!wait 8"
 CMDS="$CMDS;;execute if block 0 100 0 minecraft:red_bed[occupied=false] run tellraw @s \"VILLAGERUPANDABOUT\""
 
+# --- the working day -----------------------------------------------------
+# The villager has to walk back from the bed, claim the composter and take the
+# farmer trade before the WORK package starts offering `HarvestFarmland` at
+# all -- and that package picks one of six behaviors at random each round, so
+# the wait for the farming one is measured in thousands of ticks rather than
+# hundreds. Sprinting is what keeps this test to a sane wall-clock length;
+# freezing the day first is what stops the sprint running the clock out of the
+# WORK stretch and putting the villager back to bed.
+CMDS="$CMDS;;gamerule doDaylightCycle false"
+CMDS="$CMDS;;time set 3000"
+CMDS="$CMDS;;tick sprint 12000t"
+CMDS="$CMDS;;!wait 90"
+for x in $FIELD_X; do
+  for z in $FIELD_Z; do
+    CMDS="$CMDS;;execute if block $x 100 $z minecraft:air run tellraw @s \"SQUAREPULLED\""
+    CMDS="$CMDS;;execute if block $x 100 $z minecraft:wheat[age=0] run tellraw @s \"SQUARESOWN\""
+  done
+done
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=4 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -105,7 +149,8 @@ cleanup
 
 echo "=== what happened ==="
 grep "server says" join.log \
-  | grep -oE "VILLAGERSTANDING|BEDSTARTSEMPTY|VILLAGERINBED|VILLAGERUPANDABOUT"
+  | grep -oE "VILLAGERSTANDING|BEDSTARTSEMPTY|FIELDISRIPE|VILLAGERINBED|VILLAGERUPANDABOUT|SQUAREPULLED|SQUARESOWN" \
+  | sort | uniq -c
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic" | tail -5
 
@@ -126,5 +171,11 @@ said VILLAGERINBED \
   || fail "the villager never walked to its bed and got in once the clock said REST"
 said VILLAGERUPANDABOUT \
   || fail "the villager stayed in bed after the clock moved on to WORK"
+said FIELDISRIPE \
+  || fail "the field was never planted, so nothing below is about farming"
+said SQUAREPULLED || said SQUARESOWN \
+  || fail "the farmer never pulled a ripe crop out of its own field"
+said SQUARESOWN \
+  || fail "the farmer pulled the wheat but never sowed a square again"
 
 echo "########## VILLAGER DAY TEST PASSED ##########"
