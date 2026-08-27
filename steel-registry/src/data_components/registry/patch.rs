@@ -104,6 +104,11 @@ impl DataComponentPatch {
         self.entries.remove(&component.key);
     }
 
+    /// Clears any patch entry for a dynamically resolved component.
+    pub fn clear_key(&mut self, key: &Identifier) {
+        self.entries.remove(key);
+    }
+
     /// Gets the patch entry for a key.
     #[must_use]
     pub fn get_entry(&self, key: &Identifier) -> Option<&ComponentPatchEntry> {
@@ -137,6 +142,21 @@ impl DataComponentPatch {
     /// Iterates over all entries.
     pub fn iter(&self) -> impl Iterator<Item = (&Identifier, &ComponentPatchEntry)> {
         self.entries.iter()
+    }
+
+    /// The added half of this patch as a plain map.
+    ///
+    /// Vanilla parity: `DataComponentPatch.split().added()`, which drops the
+    /// removals and keeps every set value.
+    #[must_use]
+    pub fn added(&self) -> DataComponentMap {
+        let mut map = DataComponentMap::new();
+        for (key, entry) in &self.entries {
+            if let ComponentPatchEntry::Set(data) = entry {
+                map.set_raw(key.clone(), data.clone());
+            }
+        }
+        map
     }
 
     pub(crate) fn sanitize_against(&mut self, prototype: &DataComponentMap) {

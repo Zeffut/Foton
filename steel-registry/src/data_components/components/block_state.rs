@@ -5,9 +5,12 @@ use std::io::{Cursor, Error, Result, Write};
 
 use simdnbt::owned::{NbtCompound, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
+use steel_utils::BlockStateId;
 use steel_utils::codec::VarInt;
 use steel_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
 use steel_utils::serial::{PrefixedRead, PrefixedWrite, ReadFrom, WriteTo};
+
+use crate::REGISTRY;
 
 /// String-valued block properties applied when a block item is placed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -50,6 +53,22 @@ impl BlockItemStateProperties {
     pub fn with(mut self, name: &str, value: String) -> Self {
         self.properties.insert(name.to_owned(), value);
         self
+    }
+
+    /// Stamps these properties onto a placed block state.
+    ///
+    /// Vanilla parity: `BlockItemStateProperties.apply`, which silently skips a
+    /// property the block does not have and a value it does not accept rather
+    /// than rejecting the whole placement.
+    #[must_use]
+    pub fn apply(&self, state: BlockStateId) -> BlockStateId {
+        let mut result = state;
+        for (name, value) in &self.properties {
+            if let Some(updated) = REGISTRY.blocks.set_property_by_name(result, name, value) {
+                result = updated;
+            }
+        }
+        result
     }
 }
 

@@ -786,9 +786,11 @@ impl ChunkStorage {
             .map(|entity| {
                 let pos = entity.get_block_pos();
 
-                // Serialize NBT data
-                let mut nbt = NbtCompound::new();
-                entity.save_additional(&mut nbt);
+                // Serialize NBT data. Vanilla's `saveWithoutMetadata`: the
+                // entity's own fields plus the components an item left on it.
+                // Type and position are stored beside the payload here, which
+                // is what vanilla's metadata half carries.
+                let nbt = entity.save_without_metadata();
                 let mut nbt_bytes = Vec::new();
                 nbt.write(&mut nbt_bytes);
 

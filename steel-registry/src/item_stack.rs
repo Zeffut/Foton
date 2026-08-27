@@ -825,22 +825,49 @@ impl ItemStack {
 
     /// Copies components from a source (block entity, attacker, etc.) to this item.
     ///
-    /// MISSING FOUNDATION: `CopyComponentsFunction.run` reads the source's
-    /// `collectComponents()`, and Steel's block entities have no such thing --
-    /// nothing turns one into a component patch a caller can pick keys out of.
-    /// Only the four blocks that answer with their own `get_drops` keep what
-    /// this function was supposed to carry: the decorated pot its sherds, a
-    /// head its profile, a banner its patterns and a shulker box its contents.
+    /// Vanilla parity: `CopyComponentsFunction.run`. A block entity answers
+    /// with a `DataComponentMap`, so vanilla takes the first branch and
+    /// `applyComponents` each filtered entry onto the stack.
     ///
-    /// The rest is what is still lost: a named chest, barrel, furnace, hopper
-    /// or beacon comes back nameless, a hive comes back without its bees, and
-    /// a shulker box loses its lock and any loot table it had not yet spent.
-    pub const fn copy_components<R: rand::Rng>(
+    /// An empty `include` stands for vanilla's *absent* `include`, which copies
+    /// every component the source has. The generated data cannot tell an absent
+    /// list from an empty one, and no vanilla loot table writes an empty one.
+    pub fn copy_components<R: rand::Rng>(
         &mut self,
-        _source: crate::loot_table::CopySource,
-        _include: &[Identifier],
-        _ctx: &crate::loot_table::LootContext<'_, R>,
+        source: crate::loot_table::CopySource,
+        include: &[Identifier],
+        ctx: &crate::loot_table::LootContext<'_, R>,
     ) {
+        let Some(components) = ctx.copy_source_components(source) else {
+            return;
+        };
+
+        if include.is_empty() {
+            for key in components.keys() {
+                let Some(value) = components.get_raw(key) else {
+                    continue;
+                };
+                self.set_component_data(key.clone(), value.clone());
+            }
+            return;
+        }
+
+        for key in include {
+            let Some(value) = components.get_raw(key) else {
+                continue;
+            };
+            self.set_component_data(key.clone(), value.clone());
+        }
+    }
+
+    /// Sets one type-erased component value, collapsing it into the prototype
+    /// default the way [`Self::set`] does.
+    fn set_component_data(&mut self, key: Identifier, value: ComponentData) {
+        if self.prototype().get_raw(&key) == Some(&value) {
+            self.patch.clear_key(&key);
+        } else {
+            self.patch.set_component_data(key, value);
+        }
     }
 
     /// Copies the named properties of the broken block state onto this item.
@@ -1058,14 +1085,27 @@ impl ItemStack {
     }
 
     /// Copies the name from a source entity/block to this item.
-    pub const fn copy_name<R: rand::Rng>(
+    ///
+    /// Vanilla parity: `CopyNameFunction.run`, which sets `CUSTOM_NAME` to
+    /// `Nameable.getCustomName()` -- including when that is null, which removes
+    /// the component. A source that is not in the context leaves the stack
+    /// alone.
+    ///
+    /// No vanilla loot table uses `minecraft:copy_name` in 26.2; the block
+    /// tables that used to now say `copy_components` with `custom_name`. This
+    /// stays for datapacks.
+    pub fn copy_name<R: rand::Rng>(
         &mut self,
-        _source: crate::loot_table::CopySource,
-        _ctx: &crate::loot_table::LootContext<'_, R>,
+        source: crate::loot_table::CopySource,
+        ctx: &crate::loot_table::LootContext<'_, R>,
     ) {
-        // TODO: Implement when entity/block entity name access is available
-        // Get name from source (block_entity.custom_name or entity.custom_name)
-        // Set as CUSTOM_NAME component
+        let Some(components) = ctx.copy_source_components(source) else {
+            return;
+        };
+        match components.get_ref(CUSTOM_NAME) {
+            Some(name) => self.set(CUSTOM_NAME, name.clone()),
+            None => self.remove(CUSTOM_NAME),
+        }
     }
 
     /// Sets lore lines on this item.

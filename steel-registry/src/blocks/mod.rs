@@ -718,6 +718,30 @@ impl BlockRegistry {
         property_indices
     }
 
+    /// Returns `state` with one named property set.
+    ///
+    /// Vanilla parity: `BlockItemStateProperties.updateState`. `None` means the
+    /// block has no such property or the value is not one it accepts, which is
+    /// where vanilla keeps the state it was handed.
+    #[must_use]
+    pub fn set_property_by_name(
+        &self,
+        state: BlockStateId,
+        name: &str,
+        value: &str,
+    ) -> Option<BlockStateId> {
+        let block = self.by_state_id(state)?;
+        let block_id = self.try_block_index(block)?;
+        let base_state_id = self.block_to_base_state[block_id];
+
+        let mut property_indices = Self::decode_property_indices(block, state.0 - base_state_id);
+        Self::apply_property_overrides(block, &mut property_indices, [(name, value)])?;
+
+        Some(BlockStateId(
+            base_state_id + Self::encode_property_indices(block, &property_indices),
+        ))
+    }
+
     fn apply_property_overrides<'a>(
         block: BlockRef,
         property_indices: &mut [usize],

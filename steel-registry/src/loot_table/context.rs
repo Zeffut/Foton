@@ -1,6 +1,8 @@
 use super::{BlockStateId, DyeColor, Identifier, ItemStack, REGISTRY, RegistryExt, RngExt};
 use crate::biome::BiomeRef;
+use crate::data_components::DataComponentMap;
 use crate::equipment::EquipmentSlot;
+use crate::loot_table::functions::CopySource;
 
 /// The live world a loot roll is allowed to ask about.
 ///
@@ -481,15 +483,15 @@ pub struct DamageSourceInfo<'a> {
     pub is_direct: bool,
 }
 
-/// A reference to a block entity for loot context.
+/// The block entity behind `LootContextParams.BLOCK_ENTITY`.
+///
+/// Vanilla hands the live `BlockEntity` to the roll, but every loot function
+/// that names it only ever asks for `collectComponents()`. `steel-registry`
+/// cannot see a block entity, so that map is what crosses the crate boundary.
 #[derive(Debug, Clone, Copy)]
 pub struct BlockEntityRef<'a> {
-    /// The block entity type identifier.
-    pub block_entity_type: Option<&'a Identifier>,
-    /// Custom name of the block entity (for `copy_name`).
-    pub custom_name: Option<&'a str>,
-    /// Inventory contents (for dynamic/slots entries).
-    pub inventory: Option<&'a [ItemStack]>,
+    /// Vanilla parity: `BlockEntity.collectComponents()`.
+    pub components: &'a DataComponentMap,
 }
 
 impl<'a, R: rand::Rng> LootContext<'a, R> {
@@ -675,6 +677,26 @@ impl<'a, R: rand::Rng> LootContext<'a, R> {
             .map(|(_, stack)| stack.get_enchantment_level(enchantment))
             .max()
             .unwrap_or(0)
+    }
+
+    /// The components a `copy_components`/`copy_name` source hands out.
+    ///
+    /// Vanilla resolves the source through `LootContextArg`: a block entity
+    /// answers with `collectComponents()`, while an entity or an item stack is
+    /// itself a `DataComponentGetter`.
+    ///
+    /// MISSING FOUNDATION: Steel's `EntityRef` carries no component map, so the
+    /// three entity sources answer nothing. No vanilla loot table names one --
+    /// all 71 `copy_components` uses in 26.2 read `block_entity`.
+    #[must_use]
+    pub const fn copy_source_components(&self, source: CopySource) -> Option<&'a DataComponentMap> {
+        match source {
+            CopySource::BlockEntity => match self.block_entity {
+                Some(block_entity) => Some(block_entity.components),
+                None => None,
+            },
+            CopySource::This | CopySource::Attacker | CopySource::DirectAttacker => None,
+        }
     }
 
     /// Get an entity reference by target.

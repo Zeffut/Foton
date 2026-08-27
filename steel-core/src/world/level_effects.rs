@@ -1,10 +1,10 @@
 use super::{
-    Arc, BLOCK_BEHAVIORS, BlockLootContext, BlockPos, BlockStateExt, BlockStateId, CLevelEvent,
-    CLevelParticles, CSound, ChunkPos, ConnectionProtocol, DVec3, EncodedPacket, Entity,
-    GLOBAL_SOUND_EVENTS, GameEventContext, ItemStack, LevelReader, LootContext, NetworkConnection,
-    ParticleData, Player, REGISTRY, RegistryExt, SectionPos, SoundEventRef, SoundSource,
-    UpdateFlags, World, WorldEntityManager, entity_loot_ref, fluid_state_to_block, level_events,
-    vanilla_blocks, vanilla_game_events,
+    Arc, BLOCK_BEHAVIORS, BlockEntityRef, BlockLootContext, BlockPos, BlockStateExt, BlockStateId,
+    CLevelEvent, CLevelParticles, CSound, ChunkPos, ConnectionProtocol, DVec3, EncodedPacket,
+    Entity, GLOBAL_SOUND_EVENTS, GameEventContext, ItemStack, LevelReader, LootContext,
+    NetworkConnection, ParticleData, Player, REGISTRY, RegistryExt, SectionPos, SoundEventRef,
+    SoundSource, UpdateFlags, World, WorldEntityManager, entity_loot_ref, fluid_state_to_block,
+    level_events, vanilla_blocks, vanilla_game_events,
 };
 
 pub(super) fn sound_is_within_range(
@@ -356,10 +356,6 @@ impl World {
     ///
     /// [`BlockEntity::pre_remove_side_effects`]:
     ///     crate::block_entity::BlockEntity::pre_remove_side_effects
-    // TODO: vanilla's `Block.dropResources` also puts the block entity in the
-    // loot context (`LootContextParams.BLOCK_ENTITY`). Without it `copy_name`
-    // and `copy_components` resolve to nothing, so a broken banner loses its
-    // patterns and a silk-touched beehive loses its bees.
     pub fn drop_resources(self: &Arc<Self>, state: BlockStateId, pos: BlockPos) {
         self.drop_resources_with_entity(state, pos, None, None);
     }
@@ -371,8 +367,13 @@ impl World {
         entity: Option<&dyn Entity>,
         explosion_radius: Option<f32>,
     ) {
+        // Vanilla's `Block.dropResources(state, level, pos, blockEntity)` takes
+        // the block entity from its caller because the block may already be
+        // gone. Here the block is still standing, so the live one is it.
+        let block_entity = self.get_block_entity(pos);
         let context = BlockLootContext::new(self, pos)
             .with_entity(entity)
+            .with_block_entity(block_entity.as_ref())
             .with_explosion_radius(explosion_radius);
         for item in context.get_drops(state) {
             if !item.is_empty() {
@@ -426,6 +427,15 @@ impl World {
         }
         if let Some(entity) = context.entity() {
             ctx = ctx.with_this_entity(entity_loot_ref(entity));
+        }
+        // Vanilla parity: `LootContextParams.BLOCK_ENTITY`. The roll only ever
+        // reads `collectComponents()` off it, so that map is what crosses into
+        // `steel-registry`.
+        let collected = context
+            .block_entity()
+            .map(|block_entity| block_entity.collect_components());
+        if let Some(components) = collected.as_ref() {
+            ctx = ctx.with_block_entity(BlockEntityRef { components });
         }
 
         loot_table.get_random_items(&mut ctx)

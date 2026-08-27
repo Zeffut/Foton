@@ -108,6 +108,7 @@ pub struct BlockLootContext<'a> {
     tool: Option<&'a ItemStack>,
     luck: f32,
     explosion_radius: Option<f32>,
+    block_entity: Option<&'a SharedBlockEntity>,
 }
 
 impl<'a> BlockLootContext<'a> {
@@ -121,6 +122,7 @@ impl<'a> BlockLootContext<'a> {
             tool: None,
             luck: 0.0,
             explosion_radius: None,
+            block_entity: None,
         }
     }
 
@@ -128,6 +130,18 @@ impl<'a> BlockLootContext<'a> {
     #[must_use]
     pub const fn with_entity(mut self, entity: Option<&'a dyn Entity>) -> Self {
         self.entity = entity;
+        self
+    }
+
+    /// Adds the block entity the broken block was carrying.
+    ///
+    /// Vanilla parity: `LootContextParams.BLOCK_ENTITY`. It has to be captured
+    /// before the block leaves the world: `minecraft:copy_components` reads it,
+    /// and that is what keeps a named chest named and a hive's bees inside the
+    /// hive.
+    #[must_use]
+    pub const fn with_block_entity(mut self, block_entity: Option<&'a SharedBlockEntity>) -> Self {
+        self.block_entity = block_entity;
         self
     }
 
@@ -188,6 +202,12 @@ impl<'a> BlockLootContext<'a> {
 
     pub(crate) const fn explosion_radius(&self) -> Option<f32> {
         self.explosion_radius
+    }
+
+    /// Returns the block entity the broken block was carrying.
+    #[must_use]
+    pub const fn block_entity(&self) -> Option<&'a SharedBlockEntity> {
+        self.block_entity
     }
 }
 
