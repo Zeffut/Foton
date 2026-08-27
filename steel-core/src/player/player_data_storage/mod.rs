@@ -97,6 +97,7 @@ struct PlayerDataFile {
     experience_level: i32,
     experience_progress: f32,
     experience_total: i32,
+    enchantment_seed: i32,
     score: i32,
     seen_credits: bool,
     warden_spawn_tracker: [i32; 3],
@@ -642,6 +643,7 @@ impl PlayerDataFile {
             experience_level: data.experience_level,
             experience_progress: data.experience_progress,
             experience_total: data.experience_total,
+            enchantment_seed: data.enchantment_seed,
             score: data.score,
             seen_credits: data.seen_credits,
             warden_spawn_tracker: data.warden_spawn_tracker,
@@ -729,6 +731,7 @@ impl PlayerDataFile {
             experience_level: self.experience_level,
             experience_progress: self.experience_progress,
             experience_total: self.experience_total,
+            enchantment_seed: self.enchantment_seed,
             score: self.score,
             seen_credits: self.seen_credits,
             warden_spawn_tracker: self.warden_spawn_tracker,
@@ -960,6 +963,7 @@ mod tests {
             experience_level: 7,
             experience_progress: 0.5,
             experience_total: 32,
+            enchantment_seed: 4242,
             score: 9,
             seen_credits: true,
             warden_spawn_tracker: [0, 0, 0],
@@ -1334,6 +1338,7 @@ mod tests {
         assert_eq!(decoded.experience_level, 7);
         assert_eq!(decoded.experience_progress.to_bits(), 0.5_f32.to_bits());
         assert_eq!(decoded.experience_total, 32);
+        assert_eq!(decoded.enchantment_seed, 4242);
         assert_eq!(decoded.score, 9);
         assert!(decoded.seen_credits);
     }

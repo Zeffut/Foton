@@ -20,7 +20,7 @@ use super::{
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 8;
+pub const PLAYER_DATA_VERSION: i32 = 9;
 
 /// Persistent player data saved by Steel's storage backend.
 ///
@@ -108,6 +108,10 @@ pub struct PersistentPlayerData {
 
     /// Vanilla `Player.totalExperience`, updated by point grants but independent of level/progress.
     pub experience_total: i32,
+
+    /// Vanilla `XpSeed`, the seed an enchanting table draws its three offers
+    /// from. Without it a relog silently reshuffles what the table shows.
+    pub enchantment_seed: i32,
 
     /// Vanilla death-screen score. Point grants change it with Java `int` wrapping.
     pub score: i32,
@@ -271,6 +275,7 @@ impl PersistentPlayerData {
             experience_level,
             experience_progress,
             experience_total,
+            enchantment_seed: player.enchantment_seed(),
             score,
             seen_credits: player.has_seen_credits(),
             warden_spawn_tracker: warden_spawn_tracker_fields(player.warden_spawn_tracker()),
@@ -509,6 +514,7 @@ impl PersistentPlayerData {
                 self.experience_total,
             );
         }
+        player.set_enchantment_seed(self.enchantment_seed);
         player.set_score(self.score);
         player.set_seen_credits(self.seen_credits);
         let [ticks_since_last_warning, warning_level, cooldown_ticks] = self.warden_spawn_tracker;

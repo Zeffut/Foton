@@ -264,6 +264,15 @@ impl Player {
         *self.enchantment_seed.lock()
     }
 
+    /// Restores a saved enchantment seed.
+    ///
+    /// Vanilla parity: the `XpSeed` branch of `Player.readAdditionalSaveData`,
+    /// including its zero sentinel -- a save that never held a seed draws a
+    /// fresh one rather than pinning every such player to the same offers.
+    pub(crate) fn set_enchantment_seed(&self, seed: i32) {
+        *self.enchantment_seed.lock() = if seed == 0 { rand::random() } else { seed };
+    }
+
     /// Spends levels on an enchantment and rerolls the offers.
     ///
     /// Vanilla parity: `Player.onEnchantmentPerformed`. Rerolling here rather

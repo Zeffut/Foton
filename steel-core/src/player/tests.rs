@@ -1144,6 +1144,32 @@ fn persistent_player_data_restores_independent_experience_fields_and_score() {
 }
 
 #[test]
+fn persistent_player_data_restores_the_enchantment_seed() {
+    init_vanilla_registry();
+    let player = test_player(Arc::clone(test_world()));
+    player.set_enchantment_seed(0x5EED);
+    let persistent = PersistentPlayerData::from_player(&player);
+    assert_eq!(
+        persistent.enchantment_seed, 0x5EED,
+        "the save has to carry the live seed, not a fresh one"
+    );
+
+    // Standing in for the reconnect: the returning player starts with the
+    // random seed every new Player is built with.
+    player.set_enchantment_seed(1);
+    persistent.apply_to_player_without_location(&player);
+    assert_eq!(player.enchantment_seed(), 0x5EED);
+
+    // Vanilla parity: `XpSeed` of zero means the save never held one, and the
+    // player draws a fresh seed rather than sharing offers with everyone else
+    // whose save is equally old.
+    let mut seedless = persistent;
+    seedless.enchantment_seed = 0;
+    seedless.apply_to_player_without_location(&player);
+    assert_ne!(player.enchantment_seed(), 0);
+}
+
+#[test]
 fn persistent_player_data_restores_equipment_inventory_slots() {
     init_vanilla_registry();
     let player = test_player(Arc::clone(test_world()));
