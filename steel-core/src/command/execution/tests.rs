@@ -10,6 +10,7 @@ use crate::command::PendingCommandExecutionQueue;
 use crate::command::brigadier::{
     ArgumentType, CommandDispatcher, CommandNodeBuilder, CommandSyntaxError, NodeId,
 };
+use crate::command::rcon::RconOutput;
 use crate::command::sender::{CommandExecutionOwner, CommandSender, CommandSenderKey};
 use crate::permission::{PermissionExpr, PermissionState};
 
@@ -1304,11 +1305,11 @@ fn pending_execution_queue_polls_once_per_tick_in_fifo_order() {
         first
     ));
     assert!(queue.push_suspended(
-        CommandExecutionOwner::non_player_for_test(CommandSender::Rcon),
+        CommandExecutionOwner::non_player_for_test(CommandSender::Rcon(RconOutput::for_test(0))),
         second
     ));
     assert!(queue.blocks(CommandSenderKey::Console));
-    assert!(queue.blocks(CommandSenderKey::Rcon));
+    assert!(queue.blocks(CommandSenderKey::Rcon(0)));
 
     let first_tick = queue.tick(2, |_| true);
     assert_eq!(first_tick.polled, 2);
@@ -1316,7 +1317,7 @@ fn pending_execution_queue_polls_once_per_tick_in_fifo_order() {
     assert_eq!(first_tick.pending, 1);
     assert_eq!(*observed.invocations.lock(), ["first"]);
     assert!(!queue.blocks(CommandSenderKey::Console));
-    assert!(queue.blocks(CommandSenderKey::Rcon));
+    assert!(queue.blocks(CommandSenderKey::Rcon(0)));
 
     let second_tick = queue.tick(2, |_| true);
     assert_eq!(second_tick.polled, 1);
@@ -1324,7 +1325,7 @@ fn pending_execution_queue_polls_once_per_tick_in_fifo_order() {
     assert_eq!(second_tick.pending, 0);
     assert_eq!(*observed.invocations.lock(), ["first", "second"]);
     assert_eq!(*cancellations.lock(), 0);
-    assert!(!queue.blocks(CommandSenderKey::Rcon));
+    assert!(!queue.blocks(CommandSenderKey::Rcon(0)));
 }
 
 #[test]
@@ -1357,13 +1358,13 @@ fn global_suspension_blocks_every_command_source_until_completion() {
         execution
     ));
     assert!(queue.blocks(CommandSenderKey::Console));
-    assert!(queue.blocks(CommandSenderKey::Rcon));
+    assert!(queue.blocks(CommandSenderKey::Rcon(0)));
 
     assert_eq!(queue.tick(1, |_| true).pending, 1);
-    assert!(queue.blocks(CommandSenderKey::Rcon));
+    assert!(queue.blocks(CommandSenderKey::Rcon(0)));
     assert_eq!(queue.tick(1, |_| true).pending, 0);
     assert!(!queue.blocks(CommandSenderKey::Console));
-    assert!(!queue.blocks(CommandSenderKey::Rcon));
+    assert!(!queue.blocks(CommandSenderKey::Rcon(0)));
     assert_eq!(*cancellations.lock(), 0);
 }
 

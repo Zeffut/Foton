@@ -7,6 +7,7 @@ mod builtins;
 pub(crate) mod execution;
 mod protocol;
 mod queue;
+pub mod rcon;
 mod registration;
 pub mod sender;
 pub(crate) mod storage;

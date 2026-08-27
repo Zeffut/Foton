@@ -221,6 +221,30 @@
           },
           "additionalProperties": false
         },
+        "rcon": {
+          "type": "object",
+          "description": "Remote administration over the Source Rcon protocol",
+          "properties": {
+            "enable": {
+              "type": "boolean",
+              "description": "Whether the rcon port is opened at all",
+              "default": false
+            },
+            "port": {
+              "type": "integer",
+              "description": "Port rcon listens on",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 25575
+            },
+            "password": {
+              "type": "string",
+              "description": "Password every rcon client must send before it may run a command",
+              "default": ""
+            }
+          },
+          "additionalProperties": false
+        },
         "threads": {
           "type": "object",
           "description": "Optional worker counts for server thread pools. 0 or omitted uses each pool's automatic default.",
