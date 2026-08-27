@@ -16,6 +16,7 @@ use steel_registry::entity_type::{
     EntityAttachmentPoint, EntityAttachments, EntityDimensions, EntityTypeRef,
 };
 use steel_registry::item_stack::ItemStack;
+use steel_registry::particle_type::ParticleData;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_entity_data::MushroomCowEntityData;
@@ -23,7 +24,8 @@ use steel_registry::vanilla_game_events;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::vanilla_loot_tables;
 use steel_registry::{
-    REGISTRY, TaggedRegistryExt, sound_events, vanilla_attributes, vanilla_blocks, vanilla_items,
+    REGISTRY, TaggedRegistryExt, sound_events, vanilla_attributes, vanilla_blocks,
+    vanilla_entities, vanilla_items, vanilla_particle_types,
 };
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::InteractionHand;
@@ -35,7 +37,9 @@ use crate::entity::ai::goal::{
     BreedGoal, FloatGoal, FollowParentGoal, LookAtPlayerGoal, PanicGoal, RandomLookAroundGoal,
     TemptGoal, WaterAvoidingRandomStrollGoal,
 };
+use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::CowEntity;
 use crate::entity::living_entity::shearing_loot_items_with_rng;
 use crate::entity::{
     AgeableMob, AgeableMobBase, Animal, AnimalBase, Entity, EntityBase, EntityBaseLoad, EntityPose,
@@ -346,14 +350,16 @@ impl MushroomCowEntity {
         true
     }
 
-    /// Runs the loot half of vanilla `MushroomCow.shear`: plays the shear sound and
-    /// drops the vanilla shearing loot for the current variant.
+    /// Vanilla `MushroomCow.shear`: the shear sound, then this mooshroom is
+    /// replaced by a plain cow that leaves its mushrooms behind.
     ///
-    /// TODO: vanilla `MushroomCow.shear` also converts this entity into a `Cow` via
-    /// `Entity.convertTo` (spawning an `EXPLOSION` particle burst as part of that
-    /// conversion callback). Steel has no runtime entity-type conversion yet, so the
-    /// mooshroom stays a mooshroom — and remains re-shearable — instead of becoming a
-    /// cow.
+    /// The conversion is the whole point. A mooshroom that stayed a mooshroom
+    /// would still be `ready_for_shearing` on the next tick, so one pair of
+    /// shears would be an unlimited mushroom supply.
+    ///
+    /// The particle burst and the drops run inside the conversion callback, as
+    /// vanilla does, so they are placed while this mooshroom is still in the
+    /// world and before the cow joins it.
     pub fn shear(&self, world: &World, tool: &ItemStack) {
         world.play_sound_at(
             &sound_events::ENTITY_MOOSHROOM_SHEAR,
@@ -364,11 +370,37 @@ impl MushroomCowEntity {
             None,
         );
 
-        // The generic `SHEARING_MOOSHROOM` loot table dispatches on a
-        // `mooshroom/variant` entity-property predicate that Steel's loot `EntityRef`
-        // doesn't carry yet (only sheep color/sheared state are wired up there).
-        // Picking the per-variant sub-table directly reproduces the same drops
-        // without needing that predicate.
+        // Vanilla's `ConversionParams.single(this, false, false)`.
+        convert_to(
+            self,
+            ConversionParams::single(false, false),
+            |id, position, level| CowEntity::new(&vanilla_entities::COW, id, position, level),
+            |_cow| {
+                let position = self.position();
+                world.send_particles(
+                    ParticleData::simple(&vanilla_particle_types::EXPLOSION),
+                    DVec3::new(
+                        position.x,
+                        position.y + self.bounding_box().height() * 0.5,
+                        position.z,
+                    ),
+                    1,
+                    DVec3::ZERO,
+                    0.0,
+                );
+                self.drop_shearing_loot(tool);
+            },
+        );
+    }
+
+    /// Rolls and spawns the shearing drops for the current variant.
+    ///
+    /// The generic `SHEARING_MOOSHROOM` loot table dispatches on a
+    /// `mooshroom/variant` entity-property predicate that Steel's loot `EntityRef`
+    /// doesn't carry yet (only sheep color/sheared state are wired up there).
+    /// Picking the per-variant sub-table directly reproduces the same drops
+    /// without needing that predicate.
+    fn drop_shearing_loot(&self, tool: &ItemStack) {
         let loot_table = match self.variant() {
             MushroomCowVariant::Red => &vanilla_loot_tables::SHEARING_MOOSHROOM_RED,
             MushroomCowVariant::Brown => &vanilla_loot_tables::SHEARING_MOOSHROOM_BROWN,
@@ -743,13 +775,36 @@ mod tests {
     use simdnbt::borrow::read_compound as read_borrowed_compound;
     use steel_registry::data_components::components::SuspiciousStewEffect;
     use steel_registry::{RegistryExt, init_vanilla_registry, vanilla_entities};
-    use steel_utils::Identifier;
+    use steel_utils::{ChunkPos, Identifier};
 
     use super::*;
+    use crate::behavior::init_behaviors;
     use crate::entity::entities::PigEntity;
+    use crate::entity::{SharedEntity, next_entity_id};
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     fn new_mooshroom(id: i32) -> MushroomCowEntity {
         MushroomCowEntity::new(&vanilla_entities::MOOSHROOM, id, DVec3::ZERO, Weak::new())
+    }
+
+    /// Puts a mooshroom in a live test world and hands back the shared handle
+    /// plus the world it joined.
+    fn mooshroom_in_world(name: &'static str) -> (Arc<World>, SharedEntity) {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world(name);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let mooshroom: SharedEntity = Arc::new(MushroomCowEntity::new(
+            &vanilla_entities::MOOSHROOM,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&mooshroom))
+            .unwrap_or_else(|error| panic!("mooshroom should join the test world: {error:?}"));
+        (world, mooshroom)
     }
 
     #[test]
@@ -776,6 +831,67 @@ mod tests {
         assert_eq!(MushroomCowVariant::from_id(1), MushroomCowVariant::Brown);
         assert_eq!(MushroomCowVariant::from_id(-5), MushroomCowVariant::Red);
         assert_eq!(MushroomCowVariant::from_id(99), MushroomCowVariant::Brown);
+    }
+
+    /// Shearing has to leave a cow behind.
+    ///
+    /// A mooshroom that stayed a mooshroom is `ready_for_shearing` again on the
+    /// next tick, so a single pair of shears would be an unlimited supply of
+    /// mushrooms. The cow and the drops are asserted together because the drops
+    /// are rolled inside the conversion callback: moving them out, or dropping
+    /// the conversion, breaks exactly one of the two.
+    #[test]
+    fn shearing_a_mooshroom_leaves_a_cow_and_its_mushrooms() {
+        let (world, mooshroom) = mooshroom_in_world("mooshroom_shearing");
+        let mooshroom = mooshroom
+            .downcast_ref::<MushroomCowEntity>()
+            .expect("the shared entity is the mooshroom");
+
+        mooshroom.shear(world.as_ref(), &ItemStack::new(&vanilla_items::SHEARS));
+
+        assert!(
+            mooshroom.is_removed(),
+            "the sheared mooshroom should have been replaced"
+        );
+
+        let nearby = mooshroom.bounding_box().inflate(4.0);
+        let cows = world.get_entities_in_aabb_matching(&nearby, |entity| {
+            entity.entity_type() == &vanilla_entities::COW
+        });
+        assert_eq!(cows.len(), 1, "shearing leaves exactly one cow behind");
+
+        let dropped = world.get_entities_in_aabb_matching(&nearby, |entity| {
+            entity.entity_type() == &vanilla_entities::ITEM
+        });
+        assert_eq!(
+            dropped.len(),
+            5,
+            "`shearing/mooshroom/red` rolls five separate red mushrooms"
+        );
+    }
+
+    /// The same mooshroom cannot be sheared twice: it is gone after the first
+    /// pass, so the second finds nothing to convert and drops nothing.
+    #[test]
+    fn a_sheared_mooshroom_cannot_be_sheared_again() {
+        let (world, mooshroom) = mooshroom_in_world("mooshroom_reshearing");
+        let mooshroom = mooshroom
+            .downcast_ref::<MushroomCowEntity>()
+            .expect("the shared entity is the mooshroom");
+        let shears = ItemStack::new(&vanilla_items::SHEARS);
+
+        mooshroom.shear(world.as_ref(), &shears);
+        mooshroom.shear(world.as_ref(), &shears);
+
+        let nearby = mooshroom.bounding_box().inflate(4.0);
+        let dropped = world.get_entities_in_aabb_matching(&nearby, |entity| {
+            entity.entity_type() == &vanilla_entities::ITEM
+        });
+        assert_eq!(
+            dropped.len(),
+            5,
+            "a second shear must not pay out a second time"
+        );
     }
 
     #[test]
