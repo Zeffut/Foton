@@ -1,7 +1,7 @@
 use super::{
-    EnchantedChanceJson, LootConditionJson, PredicateJson, PropertyValueJson, TokenStream,
+    EnchantedChanceJson, LootConditionJson, PropertyValueJson, TokenStream,
     generate_damage_source_predicate, generate_entity_predicate, generate_location_predicate,
-    generate_loot_context_entity, generate_tool_predicate, quote,
+    generate_loot_context_entity, generate_tool_predicate, quote, read_predicate,
 };
 
 pub(crate) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
@@ -45,7 +45,8 @@ pub(crate) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
             }
         }
         "minecraft:match_tool" => {
-            let predicate = generate_tool_predicate(&condition.predicate);
+            let predicate =
+                generate_tool_predicate(&read_predicate("match_tool", &condition.predicate));
             quote! { LootCondition::MatchTool(#predicate) }
         }
         "minecraft:table_bonus" => {
@@ -148,12 +149,12 @@ pub(crate) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
             let entity = condition.entity.as_deref().unwrap_or("this");
             let entity_variant = generate_loot_context_entity(entity);
 
-            let predicate =
-                if let Some(PredicateJson::Entity(entity_predicate)) = &condition.predicate {
-                    generate_entity_predicate(entity_predicate)
-                } else {
-                    quote! { EntityPredicate::ANY }
-                };
+            let predicate = read_predicate("entity_properties", &condition.predicate)
+                .as_ref()
+                .map_or_else(
+                    || quote! { EntityPredicate::ANY },
+                    generate_entity_predicate,
+                );
 
             quote! {
                 LootCondition::EntityProperties {
@@ -163,29 +164,21 @@ pub(crate) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
             }
         }
         "minecraft:damage_source_properties" => {
-            let predicate = if let Some(pred) = &condition.predicate {
-                if let PredicateJson::DamageSource(ds) = pred {
-                    generate_damage_source_predicate(ds)
-                } else {
-                    quote! {
-                        DamageSourcePredicate {
-                            tags: &[],
-                            source_entity: None,
-                            direct_entity: None,
-                            is_direct: None,
+            let predicate = read_predicate("damage_source_properties", &condition.predicate)
+                .as_ref()
+                .map_or_else(
+                    || {
+                        quote! {
+                            DamageSourcePredicate {
+                                tags: &[],
+                                source_entity: None,
+                                direct_entity: None,
+                                is_direct: None,
+                            }
                         }
-                    }
-                }
-            } else {
-                quote! {
-                    DamageSourcePredicate {
-                        tags: &[],
-                        source_entity: None,
-                        direct_entity: None,
-                        is_direct: None,
-                    }
-                }
-            };
+                    },
+                    generate_damage_source_predicate,
+                );
 
             quote! {
                 LootCondition::DamageSourceProperties {
@@ -198,23 +191,21 @@ pub(crate) fn generate_condition(condition: &LootConditionJson) -> TokenStream {
             let offset_y = condition.offset_y.unwrap_or(0);
             let offset_z = condition.offset_z.unwrap_or(0);
 
-            let predicate = if let Some(pred) = &condition.predicate {
-                if let PredicateJson::Location(l) = pred {
-                    generate_location_predicate(l)
-                } else {
-                    quote! {
-                        LocationPredicate {
-                            block: None,
+            let predicate = read_predicate("location_check", &condition.predicate)
+                .as_ref()
+                .map_or_else(
+                    || {
+                        // Vanilla parity: `LocationCheck` with no predicate,
+                        // which asks only that ORIGIN is set.
+                        quote! {
+                            LocationPredicate {
+                                block: None,
+                                biomes: None,
+                            }
                         }
-                    }
-                }
-            } else {
-                quote! {
-                    LocationPredicate {
-                        block: None,
-                    }
-                }
-            };
+                    },
+                    generate_location_predicate,
+                );
 
             quote! {
                 LootCondition::LocationCheck {

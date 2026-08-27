@@ -6,8 +6,9 @@ use glam::DVec3;
 use steel_registry::{init_vanilla_registry, vanilla_entities, vanilla_items};
 
 use super::*;
-use crate::entity::next_entity_id;
 use crate::entity::raider::{is_ominous_banner, ominous_banner};
+use crate::entity::{entity_loot_ref, next_entity_id};
+use steel_registry::loot_table::RaiderStatus;
 
 const TEST_POSITION: DVec3 = DVec3::new(8.5, 64.0, 8.5);
 
@@ -89,4 +90,35 @@ fn a_pillager_counts_its_idle_time_twice_per_tick() {
     LivingEntity::server_ai_step(&pillager);
 
     assert_eq!(pillager.no_action_time(), 2);
+}
+
+/// The loot context has to see the captain, not just the mob: `entities/pillager`
+/// hangs the ominous bottle off `minecraft:type_specific/raider`, and nothing
+/// else on a pillager tells those two apart.
+#[test]
+fn a_captains_loot_reference_reports_the_raider_status() {
+    let pillager = pillager();
+
+    assert_eq!(
+        entity_loot_ref(&pillager).raider,
+        Some(RaiderStatus {
+            has_raid: false,
+            is_captain: false,
+        })
+    );
+
+    pillager.set_patrol_leader(true);
+    pillager
+        .living_base()
+        .equipment()
+        .lock()
+        .set(EquipmentSlot::Head, ominous_banner());
+
+    assert_eq!(
+        entity_loot_ref(&pillager).raider,
+        Some(RaiderStatus {
+            has_raid: false,
+            is_captain: true,
+        })
+    );
 }

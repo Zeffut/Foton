@@ -125,6 +125,7 @@ pub mod explosion;
 pub mod game_event;
 mod level_effects;
 mod level_reader;
+mod loot_view;
 mod mob_effects;
 mod natural_spawn;
 mod player_index;

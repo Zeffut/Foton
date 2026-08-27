@@ -394,6 +394,7 @@ impl World {
         let no_tool = ItemStack::empty();
         let mut rng = rand::rng();
         let mut ctx = LootContext::new(&mut rng)
+            .with_world(&**context.world())
             .with_luck(context.luck())
             .with_block_state(state)
             .with_tool(context.tool().unwrap_or(&no_tool))

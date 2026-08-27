@@ -1,3 +1,5 @@
+use text_components::TextComponent;
+
 use super::{
     DyeColor, EquipmentSlotGroup, Identifier, InstrumentRef, ItemStack, LootCondition, LootContext,
     LootContextEntity, LootEntry, NumberProvider, REGISTRY, RngExt, TaggedRegistryExt, math_round,
@@ -105,8 +107,12 @@ pub enum LootFunction {
         block: Identifier,
         properties: &'static [&'static str],
     },
-    /// Set components on the item.
-    SetComponents { components: &'static str },
+    /// Put a fixed set of components on the item.
+    ///
+    /// Vanilla parity: `SetComponentsFunction`, which applies a whole
+    /// `DataComponentPatch`. The patch is built at generation time, so this
+    /// carries the writer rather than the data.
+    SetComponents { apply: fn(&mut ItemStack) },
     /// Set custom NBT data on the item (merges with existing `custom_data`).
     SetCustomData {
         tag: fn() -> crate::data_components::CustomData,
@@ -120,9 +126,9 @@ pub enum LootFunction {
         zoom: i32,
         skip_existing_chunks: bool,
     },
-    /// Set the custom name of the item.
+    /// Set the custom name or item name of the item.
     SetName {
-        name: &'static str,
+        name: fn() -> TextComponent,
         target: NameTarget,
     },
     /// Set the ominous bottle amplifier.
@@ -406,7 +412,10 @@ pub enum CopySource {
 }
 
 /// Target for `set_name` function.
-#[derive(Debug, Clone, Copy)]
+///
+/// Vanilla parity: `SetNameFunction.Target`, whose `component()` picks between
+/// the two name components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameTarget {
     CustomName,
     ItemName,
@@ -538,13 +547,12 @@ impl LootFunction {
                 item.copy_components(*source, include, ctx);
             }
             LootFunction::CopyState { block, properties } => {
-                // TODO: Implement block state copying
-                item.copy_block_state(block, properties, ctx);
+                // Vanilla's `block` only validates the property names when the
+                // function is built; `CopyBlockState.run` never reads it.
+                let _ = block;
+                item.copy_block_state(properties, ctx);
             }
-            LootFunction::SetComponents { components } => {
-                // TODO: Implement component setting from JSON
-                item.set_components_from_json(components);
-            }
+            LootFunction::SetComponents { apply } => apply(item),
             LootFunction::SetCustomData { tag } => {
                 item.set_custom_data(&tag());
             }
@@ -561,8 +569,7 @@ impl LootFunction {
                 item.create_exploration_map(destination, decoration, *zoom, *skip_existing_chunks);
             }
             LootFunction::SetName { name, target } => {
-                // TODO: Implement name setting
-                item.set_name(name, *target);
+                item.set_name(name(), *target);
             }
             LootFunction::SetOminousBottleAmplifier { amplifier } => {
                 let amp = amplifier.get_int(ctx.rng).clamp(

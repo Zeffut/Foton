@@ -1,5 +1,24 @@
 use super::{BlockStateId, DyeColor, Identifier, ItemStack, REGISTRY, RegistryExt, RngExt};
+use crate::biome::BiomeRef;
 use crate::equipment::EquipmentSlot;
+
+/// The live world a loot roll is allowed to ask about.
+///
+/// Vanilla parity: the `ServerLevel` every `LootContext` carries.
+/// `steel-registry` cannot see `steel-core`'s world, so the two facts loot
+/// actually reads -- the block and the biome at a position -- come in through
+/// this trait instead.
+///
+/// Both answers are `None` for a position vanilla's `Level.isLoaded` would
+/// reject. `LocationPredicate.matches` fails there rather than guessing, so
+/// the distinction has to survive the trait boundary.
+pub trait LootWorldView {
+    /// The block state at a block position, `None` when it is not loaded.
+    fn loaded_block_state(&self, x: i32, y: i32, z: i32) -> Option<BlockStateId>;
+
+    /// The biome at a block position, `None` when it is not loaded.
+    fn loaded_biome(&self, x: i32, y: i32, z: i32) -> Option<BiomeRef>;
+}
 
 /// Entity target for loot context lookups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,6 +348,11 @@ pub struct LootContext<'a, R: rand::Rng> {
     pub block_entity: Option<BlockEntityRef<'a>>,
     /// The entity interacting with a block/entity (e.g., player opening a chest).
     pub interacting_entity: Option<EntityRef<'a>>,
+    /// The world the loot is being rolled in.
+    ///
+    /// Vanilla parity: `LootContext.getLevel`. Absent means no world could be
+    /// reached, which fails every predicate that needs one.
+    pub world: Option<&'a dyn LootWorldView>,
     /// Whether an enchanting function may bank its cost in `ADDITIONAL_TRADE_COST`.
     ///
     /// Vanilla parity: the presence of `LootContextParams.ADDITIONAL_COST_COMPONENT_ALLOWED`,
@@ -366,6 +390,9 @@ pub struct EntityRef<'a> {
     pub sheep_sheared: Option<bool>,
     /// Vanilla `minecraft:components.chicken/variant`, `None` for non-chickens.
     pub chicken_variant: Option<&'a Identifier>,
+    /// Vanilla `minecraft:components.frog/variant`, `None` for non-frogs. This
+    /// is what decides which froglight a magma cube leaves behind.
+    pub frog_variant: Option<&'a Identifier>,
     /// Vanilla `minecraft:components.mooshroom/variant` by serialized name,
     /// `None` for non-mooshrooms.
     pub mooshroom_variant: Option<&'static str>,
@@ -375,11 +402,32 @@ pub struct EntityRef<'a> {
     /// Vanilla `FishingHook.isOpenWaterFishing`, `None` for anything that is not
     /// a fishing hook.
     pub in_open_water: Option<bool>,
+    /// Vanilla `minecraft:type_specific/raider`, `None` for anything that is
+    /// not a raider. A patrol captain outside a raid is what drops the ominous
+    /// bottle.
+    pub raider: Option<RaiderStatus>,
+    /// The type of whatever this entity is riding, `None` when it rides
+    /// nothing.
+    ///
+    /// Vanilla's `EntityPredicate.vehicle` is a whole nested predicate; the
+    /// loot data only ever asks the vehicle's type, and the build script
+    /// refuses a vehicle predicate that asks for more.
+    pub vehicle_type: Option<&'a Identifier>,
     /// Vanilla `minecraft:predicates.villager/variant`, the villager type a
     /// villager or zombie villager answers `DataComponents.VILLAGER_VARIANT`
     /// with. `None` for anything that is not one. This is what decides which
     /// boats a fisherman sells and which maps a cartographer draws.
     pub villager_variant: Option<&'a Identifier>,
+}
+
+/// What vanilla's `RaiderPredicate` reads off a `Raider`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RaiderStatus {
+    /// Vanilla `Raider.hasRaid`.
+    pub has_raid: bool,
+    /// Vanilla `Raider.isCaptain`: wearing the ominous banner as a patrol
+    /// leader or a raid captain.
+    pub is_captain: bool,
 }
 
 /// Entity flags for predicate checking.
@@ -464,8 +512,16 @@ impl<'a, R: rand::Rng> LootContext<'a, R> {
             damage_source: None,
             block_entity: None,
             interacting_entity: None,
+            world: None,
             additional_cost_component_allowed: false,
         }
+    }
+
+    /// Set the world the loot is rolled in.
+    #[must_use]
+    pub const fn with_world(mut self, world: &'a dyn LootWorldView) -> Self {
+        self.world = Some(world);
+        self
     }
 
     /// Allow enchanting functions to bank their cost in `ADDITIONAL_TRADE_COST`.

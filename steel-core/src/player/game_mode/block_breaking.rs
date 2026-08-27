@@ -769,3 +769,124 @@ mod mining_speed_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use steel_registry::blocks::properties::DoubleBlockHalf;
+    use steel_registry::init_vanilla_registry;
+    use steel_utils::ChunkPos;
+
+    use steel_registry::blocks::BlockRef;
+    use steel_registry::blocks::properties::BlockStateProperties;
+    use steel_registry::items::ItemRef;
+    use steel_registry::vanilla_items;
+    use steel_utils::{Downcast as _, WorldAabb};
+
+    use crate::behavior::init_behaviors;
+    use crate::entity::entities::ItemEntity;
+    use crate::inventory::container::Container as _;
+    use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
+
+    /// Every item stack lying in the block at `pos`.
+    fn items_dropped_at(world: &Arc<World>, pos: BlockPos) -> Vec<ItemStack> {
+        let aabb = WorldAabb::new(
+            f64::from(pos.x()) - 1.0,
+            f64::from(pos.y()) - 1.0,
+            f64::from(pos.z()) - 1.0,
+            f64::from(pos.x()) + 2.0,
+            f64::from(pos.y()) + 2.0,
+            f64::from(pos.z()) + 2.0,
+        );
+        world
+            .get_entities_in_aabb(&aabb)
+            .iter()
+            .filter_map(|entity| {
+                entity
+                    .downcast_ref::<ItemEntity>()
+                    .map(ItemEntity::get_item)
+            })
+            .collect()
+    }
+
+    /// Breaks one half of a two-block plant and reports what fell.
+    ///
+    /// A double plant must pay out once whichever half is struck: its loot is
+    /// rolled while both halves still stand, and the half that falls with it
+    /// must not be paid for again.
+    fn break_half_of(
+        plant: BlockRef,
+        held: ItemRef,
+        broken: DoubleBlockHalf,
+        key: &'static str,
+    ) -> Vec<ItemStack> {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let lower_pos = BlockPos::new(8, 64, 8);
+        let half = &BlockStateProperties::DOUBLE_BLOCK_HALF;
+        let lower = plant
+            .default_state()
+            .set_value(half, DoubleBlockHalf::Lower);
+        let upper = plant
+            .default_state()
+            .set_value(half, DoubleBlockHalf::Upper);
+        world.set_block(lower_pos, lower, UpdateFlags::UPDATE_ALL);
+        world.set_block(lower_pos.above(), upper, UpdateFlags::UPDATE_ALL);
+
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "Mower", 4_242).build();
+        player.inventory.lock().set_item(0, ItemStack::new(held));
+
+        let broken_pos = match broken {
+            DoubleBlockHalf::Lower => lower_pos,
+            DoubleBlockHalf::Upper => lower_pos.above(),
+        };
+        assert!(BlockBreakingManager::new().destroy_block(&player, &world, broken_pos));
+
+        items_dropped_at(&world, lower_pos)
+    }
+
+    fn assert_sheared_fern(broken: DoubleBlockHalf, key: &'static str) {
+        let dropped = break_half_of(
+            &vanilla_blocks::LARGE_FERN,
+            &vanilla_items::SHEARS,
+            broken,
+            key,
+        );
+        assert_eq!(dropped.len(), 1, "expected one fern stack, got {dropped:?}");
+        assert!(dropped[0].is(&vanilla_items::FERN));
+        assert_eq!(dropped[0].count(), 2);
+    }
+
+    #[test]
+    fn shearing_the_lower_half_of_a_large_fern_pays_out_once() {
+        assert_sheared_fern(DoubleBlockHalf::Lower, "large_fern_lower_break");
+    }
+
+    #[test]
+    fn shearing_the_upper_half_of_a_large_fern_pays_out_once() {
+        assert_sheared_fern(DoubleBlockHalf::Upper, "large_fern_upper_break");
+    }
+
+    /// A pitcher plant's table has no `location_check` to stop a second
+    /// payout, so it is the one that notices if the plant is rolled both
+    /// before and after the block is taken away.
+    #[test]
+    fn breaking_a_pitcher_plant_pays_out_once() {
+        let dropped = break_half_of(
+            &vanilla_blocks::PITCHER_PLANT,
+            &vanilla_items::STICK,
+            DoubleBlockHalf::Lower,
+            "pitcher_plant_break",
+        );
+        assert_eq!(
+            dropped.len(),
+            1,
+            "expected one pitcher plant, got {dropped:?}"
+        );
+        assert!(dropped[0].is(&vanilla_items::PITCHER_PLANT));
+        assert_eq!(dropped[0].count(), 1);
+    }
+}

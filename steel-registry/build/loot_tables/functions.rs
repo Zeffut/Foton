@@ -1,3 +1,15 @@
+use heck::ToShoutySnakeCase;
+use proc_macro2::{Ident, Span};
+
+use crate::generator_functions::generate_text_component;
+use crate::shared_structs::TextComponentJson;
+
+/// The generated constant name for a vanilla registry id.
+fn const_ident(id: &str) -> Ident {
+    let id = id.strip_prefix("minecraft:").unwrap_or(id);
+    Ident::new(&id.to_shouty_snake_case(), Span::call_site())
+}
+
 use super::{
     ItemFilterJson, LimitJson, LootFunctionJson, TokenStream, generate_condition,
     generate_instrument_options, generate_number_provider, generate_optional_enchantment_options,
@@ -306,11 +318,25 @@ pub(crate) fn generate_function(function: &LootFunctionJson) -> TokenStream {
             }
         }
         "minecraft:set_components" => {
-            let components_str = function
+            let components = function
                 .components
                 .as_ref()
-                .map_or_else(|| "{}".to_string(), std::string::ToString::to_string);
-            quote! { LootFunction::SetComponents { components: #components_str } }
+                .expect("`set_components` without `components`");
+            let material = const_ident(&components.trim.material);
+            let pattern = const_ident(&components.trim.pattern);
+            quote! {
+                LootFunction::SetComponents {
+                    apply: |item| {
+                        item.set(
+                            TRIM,
+                            ArmorTrim::new(
+                                RegistryHolder::reference(&vanilla_trim_materials::#material),
+                                RegistryHolder::reference(&vanilla_trim_patterns::#pattern),
+                            ),
+                        );
+                    },
+                }
+            }
         }
         "minecraft:furnace_smelt" => {
             let use_input_count = function.use_input_count.unwrap_or(true);
@@ -341,20 +367,27 @@ pub(crate) fn generate_function(function: &LootFunctionJson) -> TokenStream {
             }
         }
         "minecraft:set_name" => {
-            let name_str = function
-                .name
-                .as_ref()
-                .map_or_else(|| "\"\"".to_string(), std::string::ToString::to_string);
-
+            // Vanilla's `target` is optional and defaults to `custom_name`.
             let target = match function.target.as_deref() {
-                Some("custom_name") => quote! { NameTarget::CustomName },
                 Some("item_name") => quote! { NameTarget::ItemName },
-                _ => quote! { NameTarget::CustomName },
+                Some("custom_name") | None => quote! { NameTarget::CustomName },
+                Some(other) => panic!("unknown `set_name` target `{other}`"),
             };
+
+            let Some(name) = &function.name else {
+                // Vanilla parity: `SetNameFunction.run` writes nothing when the
+                // optional `name` is absent, so neither does an empty sequence.
+                return quote! { LootFunction::Sequence { functions: &[] } };
+            };
+            let name: TextComponentJson = match serde_json::from_value(name.clone()) {
+                Ok(name) => name,
+                Err(error) => panic!("`set_name` name {name} is not modeled: {error}"),
+            };
+            let name = generate_text_component(&name);
 
             quote! {
                 LootFunction::SetName {
-                    name: #name_str,
+                    name: || #name,
                     target: #target,
                 }
             }

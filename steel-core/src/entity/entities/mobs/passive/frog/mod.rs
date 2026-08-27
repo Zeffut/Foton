@@ -284,6 +284,10 @@ impl Entity for FrogEntity {
 }
 
 impl LivingEntity for FrogEntity {
+    fn frog_loot_variant(&self) -> Option<&'static Identifier> {
+        Some(&self.variant().key)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

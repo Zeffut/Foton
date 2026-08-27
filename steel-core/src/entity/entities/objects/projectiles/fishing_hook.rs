@@ -675,6 +675,7 @@ impl FishingHookEntity {
         let mut rng = rand::rng();
         let luck = self.state.lock().luck as f32 + player.get_luck();
         let mut context = LootContext::new(&mut rng)
+            .with_world(&**world)
             .with_origin(position.x, position.y, position.z)
             .with_game_time(world.game_time())
             .with_tool(rod)

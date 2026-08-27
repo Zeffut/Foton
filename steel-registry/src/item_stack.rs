@@ -822,33 +822,53 @@ impl ItemStack {
     }
 
     /// Copies components from a source (block entity, attacker, etc.) to this item.
+    ///
+    /// MISSING FOUNDATION: `CopyComponentsFunction.run` reads the source's
+    /// `collectComponents()`, and Steel's block entities have no such thing --
+    /// nothing turns one into a component patch a caller can pick keys out of.
+    /// Only the four blocks that answer with their own `get_drops` keep what
+    /// this function was supposed to carry: the decorated pot its sherds, a
+    /// head its profile, a banner its patterns and a shulker box its contents.
+    ///
+    /// The rest is what is still lost: a named chest, barrel, furnace, hopper
+    /// or beacon comes back nameless, a hive comes back without its bees, and
+    /// a shulker box loses its lock and any loot table it had not yet spent.
     pub const fn copy_components<R: rand::Rng>(
         &mut self,
         _source: crate::loot_table::CopySource,
         _include: &[Identifier],
         _ctx: &crate::loot_table::LootContext<'_, R>,
     ) {
-        // TODO: Implement when block entity system is ready
-        // 1. Get the source entity/block entity from context
-        // 2. For each component in `include`, copy it to this item's patch
     }
 
-    /// Copies block state properties to this item (for blocks like `note_block`).
-    pub const fn copy_block_state<R: rand::Rng>(
+    /// Copies the named properties of the broken block state onto this item.
+    ///
+    /// Vanilla parity: `CopyBlockState.run`, which merges into whatever
+    /// `minecraft:block_state` the stack already carries and skips a property
+    /// the state does not have.
+    pub fn copy_block_state<R: rand::Rng>(
         &mut self,
-        _block: &Identifier,
-        _properties: &[&str],
-        _ctx: &crate::loot_table::LootContext<'_, R>,
+        properties: &[&str],
+        ctx: &crate::loot_table::LootContext<'_, R>,
     ) {
-        // TODO: Implement block state copying
-        // 1. Get block state from context
-        // 2. For each property, store it in the item's BLOCK_STATE component
-    }
+        use crate::blocks::block_state_ext::BlockStateExt as _;
+        use crate::data_components::components::BlockItemStateProperties;
+        use crate::data_components::vanilla_components::BLOCK_STATE;
 
-    /// Sets components from a JSON string representation.
-    pub const fn set_components_from_json(&mut self, _components: &str) {
-        // TODO: Implement component parsing from JSON
-        // Parse the JSON and set each component in the patch
+        let Some(state) = ctx.block_state else {
+            return;
+        };
+
+        let mut copied = self
+            .get(BLOCK_STATE)
+            .cloned()
+            .unwrap_or_else(BlockItemStateProperties::empty);
+        for name in properties {
+            if let Some(value) = state.get_property_str(name) {
+                copied = copied.with(name, value);
+            }
+        }
+        self.set(BLOCK_STATE, copied);
     }
 
     /// Merges custom NBT data into this item's `custom_data` component.
@@ -880,11 +900,14 @@ impl ItemStack {
     /// origin but no world, and Steel has no structure locator reachable from
     /// `steel-registry` at all, so there is nothing here to search with.
     ///
-    /// The stack is deliberately left as the plain `map` the trade started
-    /// from. Every vanilla use of this function is followed by a
+    /// The stack is deliberately left as the plain `map` the roll started
+    /// from. Every villager trade that uses this function follows it with a
     /// `minecraft:filtered` on `filled_map`/`map_id` whose `on_fail` discards,
-    /// so the effect is that a cartographer withholds the trade rather than
-    /// selling a blank map -- one offer instead of two at levels 2, 3 and 5.
+    /// so a cartographer withholds the trade rather than selling a blank map
+    /// -- one offer instead of two at levels 2, 3 and 5. The three chest
+    /// tables that use it (`chests/shipwreck_map` and the two underwater
+    /// ruins) have no such guard, so those chests hold an empty map carrying
+    /// the buried-treasure name instead of the filled map vanilla draws.
     pub const fn create_exploration_map(
         &mut self,
         _destination: &Identifier,
@@ -895,9 +918,16 @@ impl ItemStack {
     }
 
     /// Sets the custom name or item name of this item.
-    pub const fn set_name(&mut self, _name: &str, _target: crate::loot_table::NameTarget) {
-        // TODO: Implement name setting
-        // Parse the name as a text component and set CUSTOM_NAME or ITEM_NAME
+    ///
+    /// Vanilla parity: `SetNameFunction.run`, which writes the component into
+    /// whichever of the two name slots the `target` names. Vanilla also
+    /// resolves selectors against a context entity first; no vanilla loot
+    /// table or trade names one, so there is nothing to resolve against.
+    pub fn set_name(&mut self, name: TextComponent, target: crate::loot_table::NameTarget) {
+        match target {
+            crate::loot_table::NameTarget::CustomName => self.set(CUSTOM_NAME, name),
+            crate::loot_table::NameTarget::ItemName => self.set(ITEM_NAME, name),
+        }
     }
 
     /// Sets the ominous bottle amplifier component.

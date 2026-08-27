@@ -243,6 +243,7 @@ pub(crate) fn build() -> TokenStream {
         };
         use crate::vanilla_items;
         use steel_utils::Identifier;
+        use text_components::{TextComponent, translation::TranslatedMessage};
     });
 
     for (key, trade) in &trades {

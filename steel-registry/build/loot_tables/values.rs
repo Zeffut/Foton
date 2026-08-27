@@ -2,10 +2,10 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use super::{
-    BlockPredicateJson, DamageSourcePredicateJson, EnchantmentOptionsJson, EntityEquipmentJson,
-    EntityFlagsJson, EntityPredicateJson, EquipmentSlotJson, FromStr, Ident, Identifier,
-    IntBoundJson, LocationPredicateJson, NumberProviderJson, PredicateJson, Span,
-    ToShoutySnakeCase, TokenStream, quote,
+    BlockPredicateJson, DamageSourcePredicateJson, EntityEquipmentJson, EntityFlagsJson,
+    EntityPredicateJson, EquipmentSlotJson, FromStr, HolderSetJson, Ident, Identifier,
+    IntBoundJson, LocationPredicateJson, NumberProviderJson, Span, ToShoutySnakeCase, TokenStream,
+    ToolPredicateJson, quote,
 };
 
 pub(crate) fn generate_number_provider(value: &NumberProviderJson) -> TokenStream {
@@ -128,17 +128,9 @@ pub(super) fn generate_loot_type(loot_type: &str) -> TokenStream {
     }
 }
 
-pub(super) fn generate_tool_predicate(predicate: &Option<PredicateJson>) -> TokenStream {
+pub(super) fn generate_tool_predicate(predicate: &Option<ToolPredicateJson>) -> TokenStream {
     let Some(pred) = predicate else {
         return quote! { ToolPredicate::Any };
-    };
-
-    // Only handle tool predicates; location/entity/damage_source predicates return Any
-    let pred = match pred {
-        PredicateJson::Tool(p) => p,
-        PredicateJson::Location(_) => return quote! { ToolPredicate::Any },
-        PredicateJson::DamageSource(_) => return quote! { ToolPredicate::Any },
-        PredicateJson::Entity(_) => return quote! { ToolPredicate::Any },
     };
 
     // Check for items field (can be a string or tag reference)
@@ -186,12 +178,12 @@ pub(super) fn generate_tool_predicate(predicate: &Option<PredicateJson>) -> Toke
 /// treating a bare id as one was the old behavior and silently produced an
 /// empty set, so `piglin_bartering`'s soul speed boots came out unenchanted.
 fn generate_homogeneous_list(
-    options: &EnchantmentOptionsJson,
+    options: &HolderSetJson,
     tag_variant: &TokenStream,
     list_variant: &TokenStream,
 ) -> TokenStream {
     match options {
-        EnchantmentOptionsJson::Tag(s) => {
+        HolderSetJson::Tag(s) => {
             if let Some(tag) = s.strip_prefix('#') {
                 let tag = tag.strip_prefix("minecraft:").unwrap_or(tag);
                 quote! { #tag_variant(Identifier::vanilla_static(#tag)) }
@@ -200,7 +192,7 @@ fn generate_homogeneous_list(
                 quote! { #list_variant(&[Identifier::vanilla_static(#id)]) }
             }
         }
-        EnchantmentOptionsJson::List(arr) => {
+        HolderSetJson::List(arr) => {
             let ids: Vec<TokenStream> = arr
                 .iter()
                 .map(|s| {
@@ -219,7 +211,7 @@ fn generate_homogeneous_list(
 
 /// The `Optional<HolderSet<Enchantment>>` shape: absent means the whole registry.
 pub(super) fn generate_optional_enchantment_options(
-    options: &Option<EnchantmentOptionsJson>,
+    options: &Option<HolderSetJson>,
 ) -> TokenStream {
     let tag = quote! { EnchantmentOptions::Tag };
     let list = quote! { EnchantmentOptions::List };
@@ -232,7 +224,7 @@ pub(super) fn generate_optional_enchantment_options(
 }
 
 /// The `Optional<HolderSet<Potion>>` of `minecraft:set_random_potion`.
-pub(super) fn generate_potion_options(options: &Option<EnchantmentOptionsJson>) -> TokenStream {
+pub(super) fn generate_potion_options(options: &Option<HolderSetJson>) -> TokenStream {
     let tag = quote! { PotionOptions::Tag };
     let list = quote! { PotionOptions::List };
     if let Some(options) = options {
@@ -255,9 +247,9 @@ pub(super) fn generate_instrument_ref(value: &str) -> TokenStream {
     quote! { &crate::vanilla_instruments::#ident }
 }
 
-pub(super) fn generate_instrument_options(options: &Option<EnchantmentOptionsJson>) -> TokenStream {
+pub(super) fn generate_instrument_options(options: &Option<HolderSetJson>) -> TokenStream {
     match options {
-        Some(EnchantmentOptionsJson::Tag(value)) if value.starts_with('#') => {
+        Some(HolderSetJson::Tag(value)) if value.starts_with('#') => {
             let tag = value.trim_start_matches('#');
             let id = Identifier::from_str(tag)
                 .unwrap_or_else(|error| panic!("invalid instrument tag {value:?}: {error}"));
@@ -267,11 +259,11 @@ pub(super) fn generate_instrument_options(options: &Option<EnchantmentOptionsJso
                 InstrumentOptions::Tag(Identifier::new_static(#namespace, #path))
             }
         }
-        Some(EnchantmentOptionsJson::Tag(value)) => {
+        Some(HolderSetJson::Tag(value)) => {
             let instrument = generate_instrument_ref(value);
             quote! { InstrumentOptions::Direct(&[#instrument]) }
         }
-        Some(EnchantmentOptionsJson::List(values)) => {
+        Some(HolderSetJson::List(values)) => {
             let instruments = values.iter().map(|value| generate_instrument_ref(value));
             quote! { InstrumentOptions::Direct(&[#(#instruments),*]) }
         }
@@ -423,6 +415,38 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             },
         );
 
+    let frog_variant = predicate
+        .components
+        .as_ref()
+        .and_then(|components| components.frog_variant.as_deref())
+        .map_or_else(
+            || quote! { None },
+            |variant| {
+                let variant = strip_vanilla(variant);
+                quote! { Some(Identifier::vanilla_static(#variant)) }
+            },
+        );
+
+    let raider = predicate.raider_type_specific.as_ref().map_or_else(
+        || quote! { None },
+        |raider| {
+            let (has_raid, is_captain) = (raider.has_raid, raider.is_captain);
+            quote! { Some(RaiderStatus { has_raid: #has_raid, is_captain: #is_captain }) }
+        },
+    );
+
+    let vehicle_type = predicate
+        .vehicle
+        .as_ref()
+        .and_then(|vehicle| vehicle.entity_type.as_deref())
+        .map_or_else(
+            || quote! { None },
+            |entity_type| {
+                let entity_type = strip_vanilla(entity_type);
+                quote! { Some(Identifier::vanilla_static(#entity_type)) }
+            },
+        );
+
     let mooshroom_variant = predicate
         .components
         .as_ref()
@@ -461,14 +485,14 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             // Vanilla's `HolderSet` shape: one id, or a list of them. No trade
             // uses a `#tag` here, and a tag would need a runtime lookup the
             // predicate has no registry for, so it fails the build.
-            EnchantmentOptionsJson::Tag(id) => {
+            HolderSetJson::Tag(id) => {
                 assert!(
                     !id.starts_with('#'),
                     "a villager/variant predicate given as the tag {id} is not modeled"
                 );
                 vec![id.clone()]
             }
-            EnchantmentOptionsJson::List(ids) => ids.clone(),
+            HolderSetJson::List(ids) => ids.clone(),
         })
         .unwrap_or_default()
         .iter()
@@ -497,6 +521,14 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
                 .map(|key| format!("minecraft:predicates -> {key}")),
         );
     }
+    if let Some(vehicle) = &predicate.vehicle {
+        unsupported.extend(
+            vehicle
+                .unmodeled
+                .keys()
+                .map(|key| format!("minecraft:vehicle -> {key}")),
+        );
+    }
     unsupported.sort();
     warn_unsupported_predicate_keys(&unsupported);
 
@@ -508,6 +540,9 @@ pub(super) fn generate_entity_predicate(predicate: &EntityPredicateJson) -> Toke
             sheep_color: #sheep_color,
             sheep_sheared: #sheep_sheared,
             chicken_variant: #chicken_variant,
+            frog_variant: #frog_variant,
+            raider: #raider,
+            vehicle_type: #vehicle_type,
             mooshroom_variant: #mooshroom_variant,
             cube_size: #cube_size,
             in_open_water: #in_open_water,
@@ -651,9 +686,37 @@ pub(super) fn generate_location_predicate(predicate: &LocationPredicateJson) -> 
         quote! { None }
     };
 
+    let biomes = match &predicate.biomes {
+        None => quote! { None },
+        Some(HolderSetJson::Tag(id)) if id.starts_with('#') => {
+            let tag = strip_vanilla(id.strip_prefix('#').unwrap_or(id));
+            quote! { Some(BiomeOptions::Tag(Identifier::vanilla_static(#tag))) }
+        }
+        Some(HolderSetJson::Tag(id)) => {
+            let id = strip_vanilla(id);
+            quote! { Some(BiomeOptions::List(&[Identifier::vanilla_static(#id)])) }
+        }
+        Some(HolderSetJson::List(ids)) => {
+            let ids: Vec<TokenStream> = ids
+                .iter()
+                .map(|id| {
+                    let id = strip_vanilla(id);
+                    quote! { Identifier::vanilla_static(#id) }
+                })
+                .collect();
+            quote! { Some(BiomeOptions::List(&[#(#ids),*])) }
+        }
+    };
+
     quote! {
         LocationPredicate {
             block: #block,
+            biomes: #biomes,
         }
     }
+}
+
+/// Drops the `minecraft:` prefix `Identifier::vanilla_static` puts back.
+fn strip_vanilla(id: &str) -> &str {
+    id.strip_prefix("minecraft:").unwrap_or(id)
 }

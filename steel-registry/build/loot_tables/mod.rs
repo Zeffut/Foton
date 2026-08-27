@@ -24,6 +24,21 @@ use values::{
     generate_optional_enchantment_options, generate_potion_options, generate_tool_predicate,
 };
 
+/// Reads a condition's raw predicate as the shape that condition accepts.
+///
+/// A predicate the generator cannot read is a build failure: the alternative
+/// is emitting a predicate that asks nothing and hands out drops vanilla gates.
+fn read_predicate<T: serde::de::DeserializeOwned>(
+    condition: &str,
+    predicate: &Option<serde_json::Value>,
+) -> Option<T> {
+    let predicate = predicate.as_ref()?;
+    match serde_json::from_value(predicate.clone()) {
+        Ok(parsed) => Some(parsed),
+        Err(error) => panic!("`{condition}` predicate {predicate} is not modeled: {error}"),
+    }
+}
+
 /// A number provider can be a constant number or an object with type.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
@@ -54,10 +69,12 @@ impl Default for NumberProviderJson {
     }
 }
 
-/// Enchantment options can be a tag string or list of enchantment IDs.
+/// Vanilla parity: a serialized  -- one id, a , or a list of
+/// ids. Enchantments, potions, instruments, villager types and biomes all
+/// arrive in this shape.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
-enum EnchantmentOptionsJson {
+enum HolderSetJson {
     Tag(String),
     List(Vec<String>),
 }
@@ -192,9 +209,12 @@ pub(crate) struct LootConditionJson {
     block: Option<String>,
     #[serde(default)]
     properties: Option<FxHashMap<String, PropertyValueJson>>,
-    // match_tool / entity_properties predicate
+    /// The condition's predicate, kept raw so each condition can read the one
+    /// shape it actually accepts. Guessing the shape from the fields present
+    /// silently turned an unmodeled `location_check` into an entity predicate
+    /// and then back into a predicate that asks nothing.
     #[serde(default)]
-    predicate: Option<PredicateJson>,
+    predicate: Option<serde_json::Value>,
     // table_bonus / random_chance_with_enchanted_bonus
     #[serde(default)]
     enchantment: Option<String>,
@@ -226,18 +246,6 @@ pub(crate) struct LootConditionJson {
     offset_z: Option<i32>,
 }
 
-/// Predicate can be a tool predicate (`match_tool`), location predicate (`location_check`),
-/// entity predicate (`entity_properties`), or damage source predicate. We parse these specifically.
-#[derive(Deserialize, Debug, Clone)]
-#[serde(untagged)]
-#[expect(clippy::large_enum_variant)]
-enum PredicateJson {
-    Tool(ToolPredicateJson),
-    Location(LocationPredicateJson),
-    DamageSource(DamageSourcePredicateJson),
-    Entity(EntityPredicateJson),
-}
-
 /// Damage source predicate for `damage_source_properties` condition.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
@@ -264,11 +272,16 @@ const fn default_true() -> bool {
     true
 }
 
+/// Vanilla parity: `LocationPredicate`. Only the two keys the vanilla loot
+/// data uses are modeled; `deny_unknown_fields` fails the build on the other
+/// seven rather than dropping a condition nobody would notice was gone.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 struct LocationPredicateJson {
     #[serde(default)]
     block: Option<BlockPredicateJson>,
+    #[serde(default)]
+    biomes: Option<HolderSetJson>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -303,6 +316,12 @@ struct EntityPredicateJson {
     /// `minecraft:type_specific/cube_mob`, shared by slime and magma cube.
     #[serde(rename = "minecraft:type_specific/cube_mob", default)]
     cube_mob_type_specific: Option<CubeMobTypeSpecificJson>,
+    /// `minecraft:type_specific/raider`, which gates the ominous bottle.
+    #[serde(rename = "minecraft:type_specific/raider", default)]
+    raider_type_specific: Option<RaiderTypeSpecificJson>,
+    /// `minecraft:vehicle`, the predicate the ridden entity has to pass.
+    #[serde(rename = "minecraft:vehicle", default)]
+    vehicle: Option<VehiclePredicateJson>,
     /// `minecraft:type_specific/fishing_hook`, which gates fishing treasure.
     #[serde(rename = "minecraft:type_specific/fishing_hook", default)]
     fishing_hook_type_specific: Option<FishingHookTypeSpecificJson>,
@@ -318,7 +337,7 @@ struct EntityComponentPredicatesJson {
     /// Vanilla `VillagerTypePredicate`: a `HolderSet<VillagerType>`, so either
     /// one id or a list of them.
     #[serde(rename = "minecraft:villager/variant", default)]
-    villager_variant: Option<EnchantmentOptionsJson>,
+    villager_variant: Option<HolderSetJson>,
     #[serde(flatten)]
     unmodeled: FxHashMap<String, serde_json::Value>,
 }
@@ -330,8 +349,56 @@ struct EntityComponentsJson {
     sheep_color: Option<String>,
     #[serde(rename = "minecraft:chicken/variant", default)]
     chicken_variant: Option<String>,
+    #[serde(rename = "minecraft:frog/variant", default)]
+    frog_variant: Option<String>,
     #[serde(rename = "minecraft:mooshroom/variant", default)]
     mooshroom_variant: Option<String>,
+    #[serde(flatten)]
+    unmodeled: FxHashMap<String, serde_json::Value>,
+}
+
+/// The component set a `minecraft:set_components` function writes.
+///
+/// Vanilla applies a whole `DataComponentPatch`; the only component the vanilla
+/// loot data ever puts there is an armor trim, and `deny_unknown_fields` makes
+/// a second one a build failure rather than a component silently dropped.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct SetComponentsJson {
+    #[serde(rename = "minecraft:trim")]
+    trim: ArmorTrimJson,
+}
+
+/// Vanilla parity: `ArmorTrim`, a trim material and a trim pattern.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct ArmorTrimJson {
+    material: String,
+    pattern: String,
+}
+
+/// `minecraft:type_specific/raider`: vanilla `RaiderPredicate`.
+///
+/// Both fields are optional in the codec and default to `false`, so a
+/// predicate that only names `is_captain` still demands `has_raid == false`.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct RaiderTypeSpecificJson {
+    #[serde(default)]
+    has_raid: bool,
+    #[serde(default)]
+    is_captain: bool,
+}
+
+/// The `minecraft:vehicle` predicate, narrowed to the entity type.
+///
+/// Vanilla tests the vehicle against a full `EntityPredicate`. Nothing in the
+/// loot data asks for more than its type, and anything that did would land in
+/// `unmodeled` and fail rather than match.
+#[derive(Deserialize, Debug, Clone)]
+struct VehiclePredicateJson {
+    #[serde(rename = "type", alias = "minecraft:entity_type", default)]
+    entity_type: Option<String>,
     #[serde(flatten)]
     unmodeled: FxHashMap<String, serde_json::Value>,
 }
@@ -484,7 +551,7 @@ pub(crate) struct LootFunctionJson {
     damage: Option<NumberProviderJson>,
     // enchant_randomly / enchant_with_levels / set_instrument
     #[serde(default)]
-    options: Option<EnchantmentOptionsJson>,
+    options: Option<HolderSetJson>,
     // enchant_with_levels
     #[serde(default)]
     levels: Option<NumberProviderJson>,
@@ -515,9 +582,9 @@ pub(crate) struct LootFunctionJson {
     // copy_state properties
     #[serde(default)]
     properties: Option<Vec<String>>,
-    // set_components (keep as raw value since it's complex NBT)
+    // set_components
     #[serde(default)]
-    components: Option<serde_json::Value>,
+    components: Option<SetComponentsJson>,
     // furnace_smelt
     #[serde(default)]
     use_input_count: Option<bool>,
@@ -661,15 +728,21 @@ pub(crate) fn build() -> TokenStream {
     // Imports
     stream.extend(quote! {
         use crate::loot_table::{
-            BlockPredicate, BonusFormula, ConditionalLootFunction, CopySource, DamageSourcePredicate,
+            BiomeOptions, BlockPredicate, BonusFormula, ConditionalLootFunction, CopySource,
+            DamageSourcePredicate,
             DamageTagPredicate, DyeColor, EnchantedChance, EnchantmentOptions, EntityEquipment,
             EntityFlags, EntityPredicate, EquipmentSlotGroup, InstrumentOptions,
             ItemComponentPredicate, ItemFilter, ItemFilterItems, LocationPredicate, LootCondition,
             LootContextEntity, LootEntry, LootFunction, LootPool, LootTable, LootTableRef,
             LootTableRegistry, LootType, NameTarget, NumberProvider, NumberProviderRange,
-            PotionOptions, PropertyCheck, StewEffect, ToolPredicate,
+            PotionOptions, PropertyCheck, RaiderStatus, StewEffect, ToolPredicate,
         };
+        use crate::data_components::components::ArmorTrim;
+        use crate::data_components::vanilla_components::TRIM;
+        use crate::RegistryHolder;
+        use crate::{vanilla_trim_materials, vanilla_trim_patterns};
         use steel_utils::Identifier;
+        use text_components::{TextComponent, translation::TranslatedMessage};
     });
 
     // Generate static constants for each loot table

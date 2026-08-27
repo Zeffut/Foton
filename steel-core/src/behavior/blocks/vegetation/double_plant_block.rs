@@ -9,12 +9,16 @@ use steel_registry::vanilla_blocks;
 use steel_utils::{BlockPos, BlockStateId, axis::Axis, types::UpdateFlags};
 
 use crate::behavior::BlockStateBehaviorExt;
-use crate::behavior::block::BlockBehavior;
+use crate::behavior::block::{BlockBehavior, BlockLootContext};
 use crate::behavior::blocks::vegetation::Vegetation;
 use crate::behavior::blocks::vegetation::vegetation_block::vegetation_can_survive;
 use crate::behavior::context::{BlockPlaceContext, PlacementSource};
+use crate::entity::Entity;
 use crate::fluid::{FluidStateExt as _, get_fluid_state};
+use crate::player::Player;
 use crate::world::{LevelReader, ScheduledTickAccess, World};
+use steel_registry::item_stack::ItemStack;
+use steel_utils::types::InteractionHand;
 
 use super::BlockRef;
 
@@ -77,6 +81,43 @@ impl DoublePlantBlock {
 
         state
     }
+    /// Takes the lower half away without letting it drop.
+    ///
+    /// Vanilla parity: `DoublePlantBlock.preventDropFromBottomPart`, which is
+    /// what stops a creative player who breaks the top of a plant from being
+    /// handed the bottom of it.
+    fn prevent_drop_from_bottom_part(
+        &self,
+        world: &Arc<World>,
+        pos: BlockPos,
+        state: BlockStateId,
+        player: &Player,
+    ) {
+        if state.get_value(HALF) != DoubleBlockHalf::Upper {
+            return;
+        }
+
+        let bottom_pos = pos.below();
+        let bottom_state = world.get_block_state(bottom_pos);
+        if bottom_state.get_block() != self.block
+            || bottom_state.get_value(HALF) != DoubleBlockHalf::Lower
+        {
+            return;
+        }
+
+        let replacement = if get_fluid_state(world, bottom_pos).is_water() {
+            vanilla_blocks::WATER.default_state()
+        } else {
+            vanilla_blocks::AIR.default_state()
+        };
+        world.set_block(
+            bottom_pos,
+            replacement,
+            UpdateFlags::UPDATE_ALL | UpdateFlags::UPDATE_SUPPRESS_DROPS,
+        );
+        world.destroy_block_effect(bottom_pos, u32::from(bottom_state.0), Some(player.id()));
+    }
+
     pub(super) fn place_at(
         world: &Arc<World>,
         state: BlockStateId,
@@ -146,6 +187,56 @@ impl BlockBehavior for DoublePlantBlock {
                 .set_value(HALF, DoubleBlockHalf::Upper),
         );
         world.set_block(upper_pos, upper_state, UpdateFlags::UPDATE_ALL);
+    }
+
+    fn player_will_destroy(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+    ) -> BlockStateId {
+        // Vanilla parity: `DoublePlantBlock.playerWillDestroy`. The plant pays
+        // out here, while both halves are still standing, because
+        // `blocks/large_fern` and `blocks/tall_grass` ask whether the other
+        // half is there -- and removing one half takes the other with it, so a
+        // roll made afterwards finds nothing and pays nothing.
+        if player.has_infinite_materials() {
+            self.prevent_drop_from_bottom_part(world, pos, state, player);
+            return state;
+        }
+
+        let tool = {
+            let inventory = player.inventory.lock();
+            let held = inventory.get_item_in_hand(InteractionHand::MainHand);
+            held.copy_with_count(held.count())
+        };
+        let drops = BlockLootContext::new(world, pos)
+            .with_entity(Some(player))
+            .with_tool(&tool)
+            .get_drops(state);
+        for item in drops {
+            if !item.is_empty() {
+                world.pop_resource(pos, item);
+            }
+        }
+        state
+    }
+
+    fn get_drops(
+        &self,
+        _state: BlockStateId,
+        context: &BlockLootContext<'_>,
+    ) -> Option<Vec<ItemStack>> {
+        // Vanilla parity: `DoublePlantBlock.playerDestroy`, which rolls
+        // `Blocks.AIR` so the plant cannot be paid for twice --
+        // `playerWillDestroy` already paid. Steel rolls a player's break after
+        // the block is gone rather than before, so "already gone" is the same
+        // test, made here.
+        if context.world().get_block_state(context.pos()).get_block() == self.block {
+            return None;
+        }
+        Some(Vec::new())
     }
 
     fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {

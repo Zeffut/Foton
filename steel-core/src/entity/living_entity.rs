@@ -349,6 +349,13 @@ pub trait LivingEntity: Entity {
         None
     }
 
+    /// Returns `minecraft:components.frog/variant` for the loot context, when
+    /// this entity is a frog. It is what picks the froglight a magma cube
+    /// leaves when a frog eats it.
+    fn frog_loot_variant(&self) -> Option<&'static Identifier> {
+        None
+    }
+
     /// Returns `minecraft:components.mooshroom/variant` for the loot context by
     /// its serialized name, when this entity is a mooshroom.
     fn mooshroom_loot_variant(&self) -> Option<&'static str> {
@@ -4021,6 +4028,9 @@ fn living_entity_loot_ref_with_equipment<'a, E: LivingEntity + ?Sized>(
         sheep_color: sheep.map(|(color, _)| color),
         sheep_sheared: sheep.map(|(_, sheared)| sheared),
         chicken_variant: entity.chicken_loot_variant(),
+        frog_variant: entity.frog_loot_variant(),
+        raider: raider_loot_status(entity),
+        vehicle_type: vehicle_loot_type(entity),
         mooshroom_variant: entity.mooshroom_loot_variant(),
         cube_size: entity.cube_loot_size(),
         villager_variant: entity.villager_loot_variant(),
