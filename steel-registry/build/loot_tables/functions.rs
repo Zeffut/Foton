@@ -1,5 +1,14 @@
+use heck::ToShoutySnakeCase;
+use proc_macro2::{Ident, Span};
+
 use crate::generator_functions::generate_text_component;
 use crate::shared_structs::TextComponentJson;
+
+/// The generated constant name for a vanilla registry id.
+fn const_ident(id: &str) -> Ident {
+    let id = id.strip_prefix("minecraft:").unwrap_or(id);
+    Ident::new(&id.to_shouty_snake_case(), Span::call_site())
+}
 
 use super::{
     ItemFilterJson, LimitJson, LootFunctionJson, TokenStream, generate_condition,
@@ -309,11 +318,25 @@ pub(crate) fn generate_function(function: &LootFunctionJson) -> TokenStream {
             }
         }
         "minecraft:set_components" => {
-            let components_str = function
+            let components = function
                 .components
                 .as_ref()
-                .map_or_else(|| "{}".to_string(), std::string::ToString::to_string);
-            quote! { LootFunction::SetComponents { components: #components_str } }
+                .expect("`set_components` without `components`");
+            let material = const_ident(&components.trim.material);
+            let pattern = const_ident(&components.trim.pattern);
+            quote! {
+                LootFunction::SetComponents {
+                    apply: |item| {
+                        item.set(
+                            TRIM,
+                            ArmorTrim::new(
+                                RegistryHolder::reference(&vanilla_trim_materials::#material),
+                                RegistryHolder::reference(&vanilla_trim_patterns::#pattern),
+                            ),
+                        );
+                    },
+                }
+            }
         }
         "minecraft:furnace_smelt" => {
             let use_input_count = function.use_input_count.unwrap_or(true);

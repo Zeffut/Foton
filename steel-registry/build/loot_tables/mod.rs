@@ -357,6 +357,26 @@ struct EntityComponentsJson {
     unmodeled: FxHashMap<String, serde_json::Value>,
 }
 
+/// The component set a `minecraft:set_components` function writes.
+///
+/// Vanilla applies a whole `DataComponentPatch`; the only component the vanilla
+/// loot data ever puts there is an armor trim, and `deny_unknown_fields` makes
+/// a second one a build failure rather than a component silently dropped.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct SetComponentsJson {
+    #[serde(rename = "minecraft:trim")]
+    trim: ArmorTrimJson,
+}
+
+/// Vanilla parity: `ArmorTrim`, a trim material and a trim pattern.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct ArmorTrimJson {
+    material: String,
+    pattern: String,
+}
+
 /// `minecraft:type_specific/raider`: vanilla `RaiderPredicate`.
 ///
 /// Both fields are optional in the codec and default to `false`, so a
@@ -562,9 +582,9 @@ pub(crate) struct LootFunctionJson {
     // copy_state properties
     #[serde(default)]
     properties: Option<Vec<String>>,
-    // set_components (keep as raw value since it's complex NBT)
+    // set_components
     #[serde(default)]
-    components: Option<serde_json::Value>,
+    components: Option<SetComponentsJson>,
     // furnace_smelt
     #[serde(default)]
     use_input_count: Option<bool>,
@@ -717,6 +737,10 @@ pub(crate) fn build() -> TokenStream {
             LootTableRegistry, LootType, NameTarget, NumberProvider, NumberProviderRange,
             PotionOptions, PropertyCheck, RaiderStatus, StewEffect, ToolPredicate,
         };
+        use crate::data_components::components::ArmorTrim;
+        use crate::data_components::vanilla_components::TRIM;
+        use crate::RegistryHolder;
+        use crate::{vanilla_trim_materials, vanilla_trim_patterns};
         use steel_utils::Identifier;
         use text_components::{TextComponent, translation::TranslatedMessage};
     });

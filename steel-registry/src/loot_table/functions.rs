@@ -107,8 +107,12 @@ pub enum LootFunction {
         block: Identifier,
         properties: &'static [&'static str],
     },
-    /// Set components on the item.
-    SetComponents { components: &'static str },
+    /// Put a fixed set of components on the item.
+    ///
+    /// Vanilla parity: `SetComponentsFunction`, which applies a whole
+    /// `DataComponentPatch`. The patch is built at generation time, so this
+    /// carries the writer rather than the data.
+    SetComponents { apply: fn(&mut ItemStack) },
     /// Set custom NBT data on the item (merges with existing `custom_data`).
     SetCustomData {
         tag: fn() -> crate::data_components::CustomData,
@@ -548,10 +552,7 @@ impl LootFunction {
                 let _ = block;
                 item.copy_block_state(properties, ctx);
             }
-            LootFunction::SetComponents { components } => {
-                // TODO: Implement component setting from JSON
-                item.set_components_from_json(components);
-            }
+            LootFunction::SetComponents { apply } => apply(item),
             LootFunction::SetCustomData { tag } => {
                 item.set_custom_data(&tag());
             }

@@ -863,12 +863,6 @@ impl ItemStack {
         self.set(BLOCK_STATE, copied);
     }
 
-    /// Sets components from a JSON string representation.
-    pub const fn set_components_from_json(&mut self, _components: &str) {
-        // TODO: Implement component parsing from JSON
-        // Parse the JSON and set each component in the patch
-    }
-
     /// Merges custom NBT data into this item's `custom_data` component.
     pub fn set_custom_data(&mut self, value: &CustomData) {
         let merged = self

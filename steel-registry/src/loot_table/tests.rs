@@ -1108,3 +1108,43 @@ fn a_silk_touched_beehive_carries_its_honey_level() {
         "the beehive item ships an empty honey level and nothing raised it"
     );
 }
+
+#[test]
+fn trial_chamber_equipment_comes_out_trimmed() {
+    use crate::data_components::vanilla_components::TRIM;
+
+    init_test_registries();
+    let mut rng = test_rng();
+    let copper = Identifier::vanilla_static("copper");
+    let bolt = Identifier::vanilla_static("bolt");
+    let flow = Identifier::vanilla_static("flow");
+
+    let mut trimmed = 0;
+    for _ in 0..64 {
+        let mut ctx = LootContext::new(&mut rng);
+        for item in vanilla_loot_tables::EQUIPMENT_TRIAL_CHAMBER.get_random_items(&mut ctx) {
+            let Some(trim) = item.get(TRIM) else {
+                continue;
+            };
+            assert_eq!(
+                trim.material().as_reference().map(|material| &material.key),
+                Some(&copper)
+            );
+            let pattern = trim
+                .pattern()
+                .as_reference()
+                .map(|pattern| &pattern.key)
+                .expect("a generated trim names its pattern");
+            assert!(
+                *pattern == bolt || *pattern == flow,
+                "the trial chamber only trims in bolt and flow, not {pattern}"
+            );
+            trimmed += 1;
+        }
+    }
+
+    assert!(
+        trimmed > 0,
+        "sixty-four outfits should have carried at least one trimmed piece"
+    );
+}
