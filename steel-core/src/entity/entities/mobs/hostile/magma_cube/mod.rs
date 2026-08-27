@@ -9,6 +9,8 @@
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_data::EntityPose;
@@ -212,6 +214,16 @@ impl Entity for MagmaCubeEntity {
     fn player_touch(self: Arc<Self>, player: &Arc<Player>) {
         let target: SharedEntity = player.clone();
         cube_common::player_touch(self.as_ref(), &target);
+    }
+
+    /// Vanilla parity: `MagmaCube` adds nothing to
+    /// `AbstractCubeMob.addAdditionalSaveData`, so the shared half is all of it.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        cube_common::save_cube(self, nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        cube_common::load_cube(self, nbt);
     }
 }
 

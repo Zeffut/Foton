@@ -8,6 +8,8 @@
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::{CGameEvent, GameEventType, SoundSource};
 use steel_registry::entity_type::EntityTypeRef;
@@ -250,6 +252,16 @@ impl Entity for ElderGuardianEntity {
     /// Vanilla parity: `Guardian.getMovementEmission`.
     fn movement_emission(&self) -> EntityMovementEmission {
         EntityMovementEmission::Events
+    }
+
+    /// Vanilla parity: neither `ElderGuardian` nor `Guardian` overrides
+    /// `addAdditionalSaveData`, so the shared half is the whole of it.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_mob(nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_mob(nbt);
     }
 }
 

@@ -9,6 +9,8 @@
 use std::sync::{Arc, Weak};
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
@@ -26,7 +28,10 @@ use crate::entity::ai::goal::{
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
-use crate::entity::neutral_mob::{NeutralMob, PersistentAnger};
+use crate::entity::neutral_mob::{
+    NeutralMob, PersistentAnger, read_persistent_anger, resolve_anger_target,
+    write_persistent_anger,
+};
 use crate::entity::{
     AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, SharedEntity, SpawnGroupData,
@@ -35,6 +40,7 @@ use crate::inventory::equipment::EquipmentSlot;
 use crate::world::{LevelReader as _, World};
 use std::ptr;
 use steel_utils::types::Difficulty;
+use uuid::Uuid;
 
 /// Experience this mob drops.
 ///
@@ -197,6 +203,12 @@ impl ZombifiedPiglinEntity {
         self.set_item_slot(EquipmentSlot::MainHand, ItemStack::new(weapon));
     }
 
+    /// Returns whether this zombified piglin is a baby.
+    #[must_use]
+    pub fn is_baby(&self) -> bool {
+        *self.entity_data.lock().zombie().baby.get()
+    }
+
     /// Grunts once, shortly after being roused.
     ///
     /// Vanilla parity: `maybePlayFirstAngerSound`. The delay is what makes a
@@ -303,6 +315,32 @@ impl Entity for ZombifiedPiglinEntity {
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
     }
+
+    /// Vanilla parity: `ZombifiedPiglin.addAdditionalSaveData`, which is the
+    /// zombie half plus the grudge.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        zombie_common::save_zombie(self, self.is_baby(), nbt);
+        write_persistent_anger(self, nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        zombie_common::load_zombie(self, nbt);
+
+        let angry_at = nbt
+            .int_array("angry_at")
+            .and_then(|values| <Uuid as steel_utils::UuidExt>::from_int_array(&values));
+        read_persistent_anger(
+            self,
+            nbt.long("anger_end_time"),
+            nbt.int("AngerTime"),
+            angry_at,
+        );
+        if let Some(world) = self.level()
+            && let Some(target) = resolve_anger_target(&world, angry_at)
+        {
+            self.set_target(Some(&target));
+        }
+    }
 }
 
 impl LivingEntity for ZombifiedPiglinEntity {
@@ -358,8 +396,7 @@ impl Mob for ZombifiedPiglinEntity {
     /// its zombie parent adds and answers `canHoldItem` alone -- which is what
     /// `Mob.wantsToPickUp` already does, so there is nothing to override here.
     fn can_hold_item(&self, item_stack: &ItemStack) -> bool {
-        let is_baby = *self.entity_data.lock().zombie().baby.get();
-        zombie_common::can_hold_item(self, is_baby, item_stack)
+        zombie_common::can_hold_item(self, self.is_baby(), item_stack)
     }
 
     fn mob_base(&self) -> &MobBase {

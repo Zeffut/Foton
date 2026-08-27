@@ -4,6 +4,8 @@
 //! Java gets them by inheritance; Steel's zombie, husk, drowned and zombified
 //! piglin are separate types, so they call these instead.
 
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_registry::REGISTRY;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_item_tags::ItemTag;
@@ -30,4 +32,24 @@ pub(super) fn can_hold_item(zombie: &dyn Mob, is_baby: bool, item_stack: &ItemSt
 #[must_use]
 pub(super) fn wants_to_pick_up(zombie: &dyn Mob, world: &World, item_stack: &ItemStack) -> bool {
     !item_stack.is(&vanilla_items::GLOW_INK_SAC) && zombie.mob_wants_to_pick_up(world, item_stack)
+}
+
+/// Saves the state every zombie shares.
+///
+/// Vanilla parity: `Zombie.addAdditionalSaveData`. Vanilla also writes
+/// `CanBreakDoors`, `InWaterTime` and `DrownedConversionTime`; Steel has
+/// neither the door-breaking goal nor the drowning conversion, so there is no
+/// state behind those keys to write.
+pub(super) fn save_zombie(zombie: &dyn Mob, is_baby: bool, nbt: &mut NbtCompound) {
+    zombie.save_mob(nbt);
+    nbt.insert("IsBaby", i8::from(is_baby));
+}
+
+/// Loads the state every zombie shares.
+///
+/// Vanilla parity: `Zombie.readAdditionalSaveData`, whose `getBooleanOr("IsBaby",
+/// false)` is why a zombie saved before the key existed comes back an adult.
+pub(super) fn load_zombie(zombie: &dyn Mob, nbt: BorrowedNbtCompoundView<'_, '_>) {
+    zombie.load_mob(nbt);
+    zombie.set_baby(nbt.byte("IsBaby").is_some_and(|value| value != 0));
 }

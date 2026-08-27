@@ -40,7 +40,8 @@ for test in dev/join-test.sh dev/selector-test.sh dev/rcon-test.sh \
             dev/nautilus-test.sh \
             dev/villager-day-test.sh \
             dev/raid-test.sh \
-            dev/nether-test.sh dev/reload-test.sh; do
+            dev/nether-test.sh dev/reload-test.sh \
+            dev/mob-persist-test.sh; do
   name=$(basename "$test")
   if bash "$test" > "/tmp/$name.out" 2>&1; then
     printf '%-24s PASS\n' "$name"

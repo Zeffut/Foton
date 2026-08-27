@@ -1191,6 +1191,7 @@ mod hostile_ai;
 mod important_interactions;
 mod item_use;
 mod living_state;
+mod mob_persistence;
 mod mob_pickup;
 mod monster_experience;
 mod movement;

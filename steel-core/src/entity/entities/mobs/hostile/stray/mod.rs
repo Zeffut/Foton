@@ -6,6 +6,8 @@
 use std::sync::Weak;
 
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
@@ -219,6 +221,16 @@ impl Entity for StrayEntity {
 
     fn sound_source(&self) -> SoundSource {
         SoundSource::Hostile
+    }
+
+    /// Vanilla parity: `Stray` adds nothing to `AbstractSkeleton`, which adds
+    /// nothing to `Mob`, so the shared half is the whole of it.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_mob(nbt);
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_mob(nbt);
     }
 }
 
