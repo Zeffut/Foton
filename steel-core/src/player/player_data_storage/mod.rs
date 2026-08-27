@@ -43,7 +43,7 @@ use steel_utils::{BlockPos, Identifier};
 
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
-const PLAYER_STORAGE_VERSION: u16 = 8;
+const PLAYER_STORAGE_VERSION: u16 = 9;
 const GLOBAL_STORAGE_VERSION: u16 = 1;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 1;
 
@@ -104,6 +104,8 @@ struct PlayerDataFile {
     root_vehicle: Option<RootVehicleFile>,
     respawn_config: Option<RespawnConfigFile>,
     ender_pearls: Vec<EnderPearlFile>,
+    /// Written `LivingEntity.addAdditionalSaveData` compound.
+    living_nbt: Vec<u8>,
 }
 
 #[derive(SchemaWrite, SchemaRead)]
@@ -666,6 +668,7 @@ impl PlayerDataFile {
                     entity: pearl.entity.clone(),
                 })
                 .collect(),
+            living_nbt: data.living_nbt.clone(),
         })
     }
 
@@ -751,6 +754,7 @@ impl PlayerDataFile {
                     entity: pearl.entity,
                 })
                 .collect(),
+            living_nbt: self.living_nbt,
         })
     }
 }
@@ -885,6 +889,7 @@ mod tests {
     use crate::entity::DEFAULT_MAX_AIR_SUPPLY;
     use crate::permission::PermissionSet;
     use crate::player::KnownPlayer;
+    use simdnbt::owned::NbtCompound;
     use std::{
         env,
         time::{SystemTime, UNIX_EPOCH},
@@ -925,6 +930,30 @@ mod tests {
         assert_eq!(slot.slot, 5, "the slot index moved");
         assert!(slot.item.is(&vanilla_items::DIAMOND), "the item changed");
         assert_eq!(slot.item.count(), 7, "the stack changed size");
+    }
+
+    /// The living half of a player's save survives the file format.
+    ///
+    /// Absorption, potion effects and attribute modifiers live in this one
+    /// field and nowhere else in the file, so a field quietly dropped from the
+    /// format costs a player all three and nothing else notices.
+    #[test]
+    fn the_living_half_survives_the_player_file() {
+        let mut living = NbtCompound::new();
+        living.insert("AbsorptionAmount", 6.0_f32);
+        let mut living_bytes = Vec::new();
+        living.write(&mut living_bytes);
+
+        let mut data = sample_player_file(PLAYER_DATA_VERSION);
+        data.living_nbt = living_bytes.clone();
+
+        let encoded = encode_player_file(&data).expect("player file should encode");
+        let decoded = decode_player_file(&encoded).expect("player file should decode");
+        let restored = decoded
+            .into_persistent()
+            .expect("the file reads back at the current version");
+
+        assert_eq!(restored.living_nbt, living_bytes);
     }
 
     fn sample_player_file(data_version: i32) -> PlayerDataFile {
@@ -970,6 +999,7 @@ mod tests {
             root_vehicle: None,
             respawn_config: None,
             ender_pearls: Vec::new(),
+            living_nbt: Vec::new(),
         }
     }
 

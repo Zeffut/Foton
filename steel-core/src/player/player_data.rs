@@ -2,7 +2,11 @@
 //!
 //! This module defines the data format for saving and loading player state.
 
+use std::io::Cursor;
+
 use rustc_hash::FxHashSet;
+use simdnbt::borrow::read_compound as read_borrowed_compound;
+use simdnbt::owned::NbtCompound;
 use steel_registry::item_stack::ItemStack;
 use steel_utils::types::GameType;
 
@@ -133,6 +137,17 @@ pub struct PersistentPlayerData {
 
     /// Vanilla in-flight ender pearls stored with the player (`ServerPlayer.enderPearls`).
     pub ender_pearls: Vec<PersistentEnderPearl>,
+
+    /// The half of the save every living entity has, as a written NBT compound.
+    ///
+    /// Vanilla parity: the `LivingEntity.addAdditionalSaveData` a player's own
+    /// `addAdditionalSaveData` sits on top of. Absorption, potion effects and
+    /// attribute modifiers live nowhere else in this file, so without it a
+    /// player logged back in with the shield, the effects and the modifiers
+    /// gone. The keys it shares with a field above -- health, equipment -- are
+    /// applied first and then overwritten by that field, which is the order
+    /// vanilla's `super`-first read runs in.
+    pub living_nbt: Vec<u8>,
 }
 
 /// A vanilla `RootVehicle` tree persisted with player data.
@@ -188,6 +203,14 @@ impl PersistentPlayerData {
     /// Extracts persistent data from a live player.
     #[must_use]
     pub fn from_player(player: &Player) -> Self {
+        // Before the inventory lock below, not after: a player's equipment is a
+        // view onto its own inventory, so `save_living` takes that same lock to
+        // read the worn items and would hang waiting on this function.
+        let mut living = NbtCompound::new();
+        player.save_living(&mut living);
+        let mut living_nbt = Vec::new();
+        living.write(&mut living_nbt);
+
         let pos = player.position();
         let (yaw, pitch) = player.rotation();
         let delta = player.velocity();
@@ -283,7 +306,28 @@ impl PersistentPlayerData {
             respawn_config: player.respawn_config(),
 
             ender_pearls,
+            living_nbt,
         }
+    }
+
+    /// Restores the shared living half before the player's own fields.
+    ///
+    /// The compound is empty for a player who has never been saved, and
+    /// [`LivingEntity::load_living`] reads an absent key as a *default* rather
+    /// than as "leave it alone" -- so handing it nothing would clear the
+    /// effects a domain switch is carrying over instead of preserving them.
+    fn apply_living_nbt(&self, player: &Player) {
+        if self.living_nbt.is_empty() {
+            return;
+        }
+        let Ok(living) = read_borrowed_compound(&mut Cursor::new(&self.living_nbt)) else {
+            tracing::warn!(
+                uuid = ?player.uuid(),
+                "Failed to parse saved player living state, leaving it at its defaults"
+            );
+            return;
+        };
+        player.load_living((&living).into());
     }
 
     /// Snapshots the player's live in-flight ender pearls for persistence.
@@ -422,6 +466,8 @@ impl PersistentPlayerData {
 
     fn apply_to_player_inner(&self, player: &Player, restore_location: bool) {
         use glam::DVec3;
+
+        self.apply_living_nbt(player);
 
         if restore_location {
             // Position
