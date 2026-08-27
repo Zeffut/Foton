@@ -31,6 +31,7 @@ use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, 
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::inventory::menu::kinds::chest;
+use crate::inventory::slot_ranges::container_slot_item;
 use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -120,6 +121,16 @@ macro_rules! chest_boat_body {
 
             fn entity_type(&self) -> EntityTypeRef {
                 self.entity_type
+            }
+
+            /// Vanilla parity: `ContainerEntity.getChestVehicleSlot`, which reads
+            /// through `getChestVehicleItem` and so rolls a still-packed loot table
+            /// before answering. A chest vehicle that came out of a structure
+            /// has to report what a player opening it would find, not the
+            /// empty container it is until then.
+            fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+                self.unpack_loot_table(None);
+                container_slot_item(&*self.container.lock(), slot)
             }
 
             fn synced_data(&self) -> Option<&dyn EntitySyncedData> {

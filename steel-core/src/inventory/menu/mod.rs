@@ -27,6 +27,7 @@ use steel_utils::{Downcast as _, types::GameType};
 
 use crate::inventory::container::CraftingContainer;
 use crate::inventory::menu::kinds::InventoryKind;
+use crate::inventory::slot_ranges::container_slot_item;
 use crate::{
     inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef},
     player::Player,
@@ -199,6 +200,18 @@ impl Menu {
         };
 
         crafting.clear_or_count_matching_items(predicate, amount_to_remove, counting_only)
+    }
+
+    /// Reads one slot of the base inventory menu's 2x2 crafting grid.
+    ///
+    /// `None` for any other menu, and for a slot the grid does not have --
+    /// which is vanilla's null `SlotAccess` for `player.crafting.*`.
+    pub(crate) fn crafting_slot_item(&self, slot: i32) -> Option<ItemStack> {
+        let kind = self.kind.downcast_ref::<InventoryKind>()?;
+        let crafting_id = kind.crafting_id();
+        let guard = self.behavior.lock_all_containers();
+        let crafting = guard.get(crafting_id)?;
+        container_slot_item(crafting, slot)
     }
 
     /// A shared handle to the base inventory menu's 2x2 crafting grid, or `None`

@@ -30,6 +30,7 @@ use crate::entity::{
     ProjectileBase, ProjectileDeflection, RemovalReason, SharedEntity, next_entity_id,
 };
 use crate::inventory::container::Container as _;
+use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::{ClipHitResult, World};
@@ -209,6 +210,22 @@ impl SpectralArrowEntity {
         ));
     }
 
+    /// The stack a player picking this arrow up receives.
+    ///
+    /// Vanilla parity: `SpectralArrow.getDefaultPickupItem`, which is what
+    /// `AbstractArrow.getPickupItemStackOrigin` answers with until something
+    /// overrides it. Vanilla keeps that stack per arrow so the one that was
+    /// shot is the one that comes back; Steel builds it fresh, which is the
+    /// same answer for an arrow that carries no components.
+    #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "vanilla reads the per-arrow origin stack through this receiver"
+    )]
+    pub fn pickup_item(&self) -> ItemStack {
+        ItemStack::new(&vanilla_items::SPECTRAL_ARROW)
+    }
+
     /// Returns whether the arrow is stuck in a block.
     #[must_use]
     pub fn is_in_ground(&self) -> bool {
@@ -314,6 +331,14 @@ impl Entity for SpectralArrowEntity {
         self.entity_type
     }
 
+    /// Vanilla parity: `AbstractArrow.getSlot`, whose one slot is what a player picking it up receives.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CONTENTS_SLOT {
+            return Some(self.pickup_item());
+        }
+        self.entity_slot_item(slot)
+    }
+
     fn tick(&self) {
         // Vanilla parity: the `if (this.shakeTime > 0) this.shakeTime--;` of
         // `AbstractArrow.tick`, which runs whether or not the arrow has landed.
@@ -381,7 +406,7 @@ impl Entity for SpectralArrowEntity {
 
         // TODO: honor the arrow's pickup mode, so creative-only and
         // non-collectable arrows behave as in vanilla.
-        let mut stack = ItemStack::new(&vanilla_items::SPECTRAL_ARROW);
+        let mut stack = self.pickup_item();
         let before = stack.count();
         player.inventory.lock().add(&mut stack);
         if stack.count() == before {

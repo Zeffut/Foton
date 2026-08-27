@@ -1304,3 +1304,56 @@ fn a_falling_anvil_is_taken_out_of_the_helmet() {
         "a helmeted anvil hit lands lighter than a bare one, got {taken}"
     );
 }
+
+/// A player is the only entity with four numeric slot ranges of its own, and
+/// each of them has to answer for itself.
+///
+/// The cursor and the crafting grid are the two nothing else can reach: a
+/// player's storage overlaps a chest's `container.*` numbering and its
+/// equipment overlaps every mob's, but 499 and 500..503 are the player's
+/// alone. The bounds matter as much as the hits -- Steel keeps the worn
+/// equipment inline behind the thirty-six storage slots, and vanilla stops the
+/// storage range before them.
+#[test]
+fn a_player_answers_for_each_of_its_own_slot_ranges() {
+    init_vanilla_registry();
+    let world = fresh_test_world("player_command_slots");
+    let player = test_player(Arc::clone(&world));
+
+    let stone = ItemStack::new(&vanilla_items::STONE);
+    let pearl = ItemStack::new(&vanilla_items::ENDER_PEARL);
+    let stick = ItemStack::new(&vanilla_items::STICK);
+    let plank = ItemStack::new(&vanilla_items::OAK_PLANKS);
+    let helmet = ItemStack::new(&vanilla_items::DIAMOND_HELMET);
+
+    player.inventory.lock().set_item(0, stone.clone());
+    player.ender_chest.lock().set_item(0, pearl.clone());
+    *player.inventory_menu.lock().behavior_mut().carried_mut() = stick.clone();
+    let Some(crafting) = player.inventory_menu.lock().crafting_container() else {
+        panic!("the player's own menu should have a crafting grid");
+    };
+    crafting.lock().set_item(0, plank.clone());
+    player.set_item_slot(EquipmentSlot::Head, helmet.clone());
+
+    // Storage, and the slot just past it: Steel's player container runs on
+    // into the worn equipment, and the storage range must not.
+    assert_eq!(player.slot_item(0), Some(stone));
+    assert_eq!(player.slot_item(35), Some(ItemStack::empty()));
+    assert_eq!(player.slot_item(36), None);
+
+    // The ender chest, and the slot just past it.
+    assert_eq!(player.slot_item(200), Some(pearl));
+    assert_eq!(player.slot_item(226), Some(ItemStack::empty()));
+    assert_eq!(player.slot_item(227), None);
+
+    // The cursor and the two-by-two grid, neither of which any other entity
+    // has.
+    assert_eq!(player.slot_item(499), Some(stick));
+    assert_eq!(player.slot_item(500), Some(plank));
+    assert_eq!(player.slot_item(503), Some(ItemStack::empty()));
+    assert_eq!(player.slot_item(504), None);
+
+    // And the equipment every living entity shares, reached by falling
+    // through everything above.
+    assert_eq!(player.slot_item(103), Some(helmet));
+}

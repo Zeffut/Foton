@@ -1396,6 +1396,16 @@ impl EntityBase {
         self.save_data.lock().tags.remove(tag)
     }
 
+    /// Replaces every vanilla scoreboard tag at once.
+    ///
+    /// Vanilla parity: the `tags.clear()` / `addAll` pair in `Entity.load`.
+    /// The cap belongs to the reader there -- `TAG_LIST_CODEC` is a
+    /// size-limited list -- so it is applied here rather than left to
+    /// [`Self::add_tag`], which a wholesale replacement never goes through.
+    pub fn set_tags(&self, tags: impl IntoIterator<Item = String>) {
+        self.save_data.lock().tags = tags.into_iter().take(MAX_ENTITY_TAGS).collect();
+    }
+
     /// Replaces vanilla custom data.
     pub fn set_custom_data(&self, custom_data: NbtCompound) {
         self.save_data.lock().custom_data = custom_data;

@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use super::entities::RawEntity;
 use super::generated_entities::register_entity_factories;
+use super::nbt_load::load_entity_save_data;
 use super::{
     EntityBaseLoad, EntityBaseSaveData, EntityFireFreezeState, SharedEntity, next_entity_id,
 };
@@ -92,24 +93,6 @@ pub struct EntityRegistry {
 }
 
 impl EntityRegistry {
-    /// Completes the registered-entity portion of vanilla `Entity.load` after
-    /// the load factory has reconstructed the entity's base state.
-    fn finish_registered_load(entity: &SharedEntity, nbt: &BorrowedNbtCompound<'_>) {
-        let yaw = entity.rotation().0;
-        let nbt: BorrowedNbtCompoundView<'_, '_> = nbt.into();
-        if let Some(living) = entity.as_living_entity() {
-            living.set_y_head_rot(yaw);
-            living.set_y_body_rot(yaw);
-            // Before the type's own load, the way vanilla's
-            // `readAdditionalSaveData` chain runs `super` first: a slime reads
-            // its size on top of the health the shared half just restored.
-            living.load_living(nbt);
-        }
-
-        entity.load_additional(nbt);
-        entity.sync_base_entity_data();
-    }
-
     /// Creates a new empty registry with entries for all entity types.
     #[must_use]
     pub fn new() -> Self {
@@ -185,7 +168,9 @@ impl EntityRegistry {
         let id = entity_type.id();
         if let Some(load_factory) = self.entries.get(id).and_then(|entry| entry.load_factory) {
             let entity = load_factory(entity_type, load);
-            Self::finish_registered_load(&entity, nbt);
+            // The base fields are already in place from the constructor, so
+            // only the `readAdditionalSaveData` half of `Entity.load` is left.
+            load_entity_save_data(entity.as_ref(), nbt.into());
             return entity;
         }
 

@@ -37,6 +37,9 @@ pub mod names {
     pub const SCOREBOARD: SavedDataName = SavedDataName::trusted("scoreboard");
     /// Domain command storage, persisted through the domain default world.
     pub const COMMAND_STORAGE: SavedDataName = SavedDataName::trusted("command_storage");
+    /// Domain boss bars a command owns, persisted through the domain default
+    /// world.
+    pub const CUSTOM_BOSS_EVENTS: SavedDataName = SavedDataName::trusted("custom_boss_events");
     /// Every filled map of a domain plus its id counter, persisted through the
     /// domain default world as `data/maps.bin`.
     ///

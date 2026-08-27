@@ -37,6 +37,7 @@ use crate::inventory::container::{
 };
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::inventory::menu::kinds::chest;
+use crate::inventory::slot_ranges::container_slot_item;
 use crate::player::Player;
 use crate::portal::portal_shape::PortalShape;
 use crate::world::World;
@@ -205,6 +206,16 @@ impl Entity for ChestMinecartEntity {
 
     fn entity_type(&self) -> EntityTypeRef {
         self.entity_type
+    }
+
+    /// Vanilla parity: `ContainerEntity.getChestVehicleSlot`, which reads
+    /// through `getChestVehicleItem` and so rolls a still-packed loot table
+    /// before answering. A chest vehicle that came out of a structure has to
+    /// report what a player opening it would find, not the empty container it
+    /// is until then.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        self.unpack_loot_table(None);
+        container_slot_item(&*self.container.lock(), slot)
     }
 
     fn is_pickable(&self) -> bool {

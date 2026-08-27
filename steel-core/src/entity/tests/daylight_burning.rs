@@ -17,6 +17,16 @@ use steel_utils::types::UpdateFlags;
 /// roughly once in ten million.
 const SUNLIT_TICKS: i32 = 400;
 
+/// Ticks to give the sun when a hat has to be worn through.
+///
+/// The budget above counts one die. Wearing a helmet out rolls a second:
+/// `Mob.burnUndead` spends `random.nextInt(2)` points on it, which is nothing
+/// half the time. That halves the chance per tick to about one in fifty, and
+/// four hundred tries at one in fifty miss once in three thousand -- often
+/// enough to fall over in a suite that runs every day. Sixteen hundred tries
+/// miss about once in a hundred million million.
+const HELMET_SUNLIT_TICKS: i32 = 1600;
+
 fn open_sky_world(key: &'static str) -> Arc<World> {
     init_vanilla_registry();
     init_behaviors();
@@ -102,7 +112,7 @@ fn the_sun_eventually_eats_the_helmet() {
     helmet.set_damage_value(last_point);
     zombie.set_item_slot(EquipmentSlot::Head, helmet);
 
-    for _ in 0..SUNLIT_TICKS {
+    for _ in 0..HELMET_SUNLIT_TICKS {
         Entity::tick(&zombie);
         let mut gone = false;
         zombie.with_equipment_slot(EquipmentSlot::Head, &mut |helmet| {
@@ -113,5 +123,5 @@ fn the_sun_eventually_eats_the_helmet() {
         }
     }
 
-    panic!("a helmet down to its last point should not survive four hundred ticks of sun");
+    panic!("a helmet down to its last point should not survive {HELMET_SUNLIT_TICKS} ticks of sun");
 }

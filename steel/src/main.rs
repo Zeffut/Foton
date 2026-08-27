@@ -426,6 +426,10 @@ async fn shutdown_worlds(server: &Arc<Server>) {
         Ok(saved) => log::info!("Saved {saved} domain map stores"),
         Err(error) => log::error!("Failed to save domain map data: {error}"),
     }
+    match command_data.boss_bars {
+        Ok(saved) => log::info!("Saved {saved} domain boss-bar sets"),
+        Err(error) => log::error!("Failed to save domain boss bars: {error}"),
+    }
     let mut total_saved = 0;
     for world in server.worlds.values() {
         world.cleanup(&mut total_saved).await;

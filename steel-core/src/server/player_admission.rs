@@ -182,6 +182,13 @@ impl Server {
         }
         let previous_name = self.record_known_player(&player.gameprofile);
         self.broadcast_player_join_message(&player, previous_name.as_deref());
+        // Vanilla parity: the `customBossEvents.onPlayerConnect` of
+        // `PlayerList.placeNewPlayer`. A named bar remembers who it was
+        // assigned to across a logout, and this is where it is handed back.
+        // Every domain is asked, not just the one the player landed in:
+        // a bar names players, and Steel's domains are where it is *stored*.
+        self.boss_bars
+            .for_each(|events| events.on_player_connect(&player));
         if player.mark_joined_world() {
             player.send_inventory_to_remote();
         }
@@ -278,6 +285,11 @@ impl Server {
     }
 
     fn remove_online_player_sync(&self, player: &Arc<Player>) {
+        // Vanilla parity: the `customBossEvents.onPlayerDisconnect` of
+        // `PlayerList.remove`. It takes the bar off the screen without
+        // unassigning the player, so it is waiting for them next time.
+        self.boss_bars
+            .for_each(|events| events.on_player_disconnect(player));
         let _ = self.online_players.remove_player_sync(player);
     }
 

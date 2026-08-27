@@ -15,6 +15,8 @@
 //! [`Entity::start_seen_by_player`](crate::entity::Entity::start_seen_by_player)
 //! and [`Entity::stop_seen_by_player`](crate::entity::Entity::stop_seen_by_player).
 
+pub mod custom;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 

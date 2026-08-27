@@ -28,13 +28,15 @@ use super::{
     SteelArgumentType, StructureOrTagKey, WorldArgument,
     argument::{
         ComponentValue, CoordinateAxes, DomainValue, EnchantmentValue, EntityTypeValue,
-        GameModeValue, IdentifierValue, ItemStackValue, NbtCompoundValue, NbtPathValue,
-        ObjectiveValue, SteelArgumentValue, TimeValue, TimelineValue, WorldClockValue,
+        GameModeValue, IdentifierValue, ItemSlotsValue, ItemStackValue, NbtCompoundValue,
+        NbtPathValue, ObjectiveValue, SteelArgumentValue, TimeValue, TimelineValue,
+        WorldClockValue,
     },
     selector::EntitySelector,
 };
 use crate::command::execution::argument::DamageTypeValue;
 use crate::command::incorrectly_typed_argument;
+use crate::inventory::slot_ranges::SlotRange;
 use crate::{
     chunk::heightmap::HeightmapType,
     entity::{EntityAnchor, SharedEntity},
@@ -329,6 +331,16 @@ where
 
     pub(crate) fn item_predicate(&self, name: &str) -> Result<&ItemPredicate, CommandSyntaxError> {
         self.typed_argument(name)
+    }
+
+    pub(crate) fn boss_bar_id(&self, name: &str) -> Result<&Identifier, CommandSyntaxError> {
+        self.typed_argument::<IdentifierValue>(name)
+            .map(|value| &value.0)
+    }
+
+    pub(crate) fn item_slots(&self, name: &str) -> Result<&'static SlotRange, CommandSyntaxError> {
+        self.typed_argument::<ItemSlotsValue>(name)
+            .map(|value| value.0)
     }
 
     pub(crate) fn text_component(&self, name: &str) -> Result<&TextComponent, CommandSyntaxError> {

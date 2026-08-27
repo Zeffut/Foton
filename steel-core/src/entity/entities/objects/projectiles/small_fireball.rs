@@ -29,6 +29,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, HurtingProjectile, HurtingProjectileBase,
     Projectile, ProjectileBase, ProjectileHit, RemovalReason, SharedEntity,
 };
+use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::world::{ClipHitResult, World};
 
 /// Damage a small fireball does on a direct hit.
@@ -109,6 +110,14 @@ impl Entity for SmallFireballEntity {
 
     fn entity_type(&self) -> EntityTypeRef {
         self.entity_type
+    }
+
+    /// Vanilla parity: `Fireball.getSlot`, whose one slot is the item the fireball displays.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CONTENTS_SLOT {
+            return Some(self.item());
+        }
+        self.entity_slot_item(slot)
     }
 
     fn tick(&self) {

@@ -28,6 +28,7 @@ use crate::command::brigadier::{
 use crate::command::incorrectly_typed_argument;
 use crate::command::protocol::protocol_argument_type;
 use crate::entity::{ENTITIES, EntityAnchor};
+use crate::inventory::slot_ranges::{SLOT_RANGES, SlotRange};
 use glam::DVec3;
 use steel_protocol::packets::game::{
     ArgumentType as ProtocolArgumentType, SuggestionType as ProtocolSuggestionType,
@@ -326,6 +327,10 @@ impl SteelArgumentType {
         Self::new(ItemPredicateParser)
     }
 
+    pub(crate) fn item_slots() -> Self {
+        Self::new(ItemSlotsParser)
+    }
+
     pub(crate) fn component() -> Self {
         Self::new(ComponentParser)
     }
@@ -340,6 +345,10 @@ impl SteelArgumentType {
 
     pub(crate) fn storage_key() -> Self {
         Self::new(StorageKeyParser)
+    }
+
+    pub(crate) fn boss_bar_id() -> Self {
+        Self::new(BossBarIdParser)
     }
 
     pub(crate) fn world_clock() -> Self {
@@ -523,6 +532,10 @@ argument_value_wrapper!(
     "steel:command/value/damage_type"
 );
 argument_value_wrapper!(ItemStackValue(ItemStack), "steel:command/value/item_stack");
+argument_value_wrapper!(
+    ItemSlotsValue(&'static SlotRange),
+    "steel:command/value/item_slots"
+);
 argument_value_wrapper!(
     ComponentValue(TextComponent),
     "steel:command/value/component"
@@ -1054,6 +1067,35 @@ unit_argument_parser!(
     )
 );
 unit_argument_parser!(
+    BossBarIdParser,
+    "steel:command/parser/boss_bar_id",
+    IdentifierValue,
+    parse | reader,
+    _source | { parse_identifier(reader).map(IdentifierValue) },
+    suggest | context,
+    builder | {
+        suggest_boss_bar_ids(context.source(), builder);
+    },
+    protocol(
+        ProtocolArgumentType::ResourceLocation,
+        Some(ProtocolSuggestionType::AskServer),
+    )
+);
+unit_argument_parser!(
+    ItemSlotsParser,
+    "steel:command/parser/item_slots",
+    ItemSlotsValue,
+    parse | reader,
+    _source | { parse_item_slots(reader) },
+    suggest | _context,
+    builder | {
+        suggest_item_slots(builder);
+    },
+    // Vanilla registers this argument as context-free, so the client parses
+    // the name itself and needs no suggestion round trip.
+    protocol(ProtocolArgumentType::ItemSlots, None)
+);
+unit_argument_parser!(
     ComponentParser,
     "steel:command/parser/component",
     ComponentValue,
@@ -1493,6 +1535,18 @@ fn suggest_resources<'a>(
     }
 }
 
+fn suggest_boss_bar_ids<S>(source: &S, builder: &mut SuggestionsBuilder<'_>)
+where
+    S: CommandArgumentSource + ?Sized,
+{
+    let ids = source
+        .boss_bar_ids()
+        .into_iter()
+        .filter_map(|id| id.parse::<Identifier>().ok())
+        .collect::<Vec<_>>();
+    suggest_resources(ids.iter(), builder);
+}
+
 fn suggest_storage_keys<S>(source: &S, builder: &mut SuggestionsBuilder<'_>)
 where
     S: CommandArgumentSource + ?Sized,
@@ -1503,6 +1557,35 @@ where
         .filter_map(|key| key.parse::<Identifier>().ok())
         .collect::<Vec<_>>();
     suggest_resources(keys.iter(), builder);
+}
+
+/// Reads one of vanilla's named slot ranges.
+///
+/// Vanilla parity: `SlotsArgument.parse`, which takes everything up to the
+/// argument separator and looks the whole thing up. An unknown name is an
+/// error rather than an empty range, so a typo cannot become a condition that
+/// silently matches nothing.
+fn parse_item_slots(reader: &mut StringReader<'_>) -> Result<ItemSlotsValue, CommandSyntaxError> {
+    let name = reader.read_unquoted_token();
+    let Some(range) = SLOT_RANGES.name_to_ids(name) else {
+        let message = translations::SLOT_UNKNOWN
+            .message([name.to_owned()])
+            .component();
+        return Err(reader.error(CommandSyntaxErrorKind::Dynamic(Box::new(message))));
+    };
+    Ok(ItemSlotsValue(range))
+}
+
+fn suggest_item_slots(builder: &mut SuggestionsBuilder<'_>) {
+    let contents = builder.remaining_lowercase();
+    let names = SLOT_RANGES
+        .all_names()
+        .filter(|name| matches_substring(contents, name))
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    for name in names {
+        builder.suggest(name);
+    }
 }
 
 pub(super) fn matches_substring(pattern: &str, input: &str) -> bool {

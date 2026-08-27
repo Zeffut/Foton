@@ -8,7 +8,7 @@ use steel_macros::ClientPacket;
 use steel_registry::packets::play::C_BOSS_EVENT;
 use steel_utils::codec::VarInt;
 use steel_utils::serial::WriteTo;
-use text_components::TextComponent;
+use text_components::{TextComponent, format::Color};
 use uuid::Uuid;
 
 /// The color a boss bar is drawn in.
@@ -61,6 +61,24 @@ impl BossBarColor {
         Self::VALUES
             .into_iter()
             .find(|color| color.serialized_name() == name)
+    }
+
+    /// Returns the chat color a bar's name is written in.
+    ///
+    /// Vanilla parity: `BossBarColor.getFormatting`, which `/bossbar` uses to
+    /// tint the bracketed display name. It is not the bar's own color: pink
+    /// writes in red and purple writes in dark blue.
+    #[must_use]
+    pub const fn chat_color(self) -> Color {
+        match self {
+            Self::Pink => Color::Red,
+            Self::Blue => Color::Blue,
+            Self::Red => Color::DarkRed,
+            Self::Green => Color::Green,
+            Self::Yellow => Color::Yellow,
+            Self::Purple => Color::DarkBlue,
+            Self::White => Color::White,
+        }
     }
 }
 

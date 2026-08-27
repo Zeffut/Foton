@@ -30,6 +30,7 @@ use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::World;
 
+use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use simdnbt::ToNbtTag;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
@@ -528,6 +529,14 @@ impl Entity for ItemEntity {
 
     fn entity_type(&self) -> EntityTypeRef {
         self.entity_type
+    }
+
+    /// Vanilla parity: `ItemEntity.getSlot`, whose one slot is the stack lying on the ground.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CONTENTS_SLOT {
+            return Some(self.get_item());
+        }
+        self.entity_slot_item(slot)
     }
 
     /// Vanilla `ItemEntity.dampensVibrations`: wool lying on a sculk sensor silences the

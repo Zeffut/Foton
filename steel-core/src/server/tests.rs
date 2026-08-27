@@ -68,6 +68,7 @@ use super::{
     create_registered_dispatcher, is_allowed_to_enter_portal_target, is_end_return_transition,
     offline_uuid, portal_entity_still_valid, validate_player_permission_group_update,
 };
+use crate::boss_event::custom::DomainCustomBossEvents;
 
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,
@@ -209,6 +210,9 @@ async fn test_server_with_worlds(
         .map_err(|error| format!("test command storage should load: {error}"))?;
     let map_data = DomainMapData::load(&worlds)
         .map_err(|error| format!("test map data should load: {error}"))?;
+    let boss_bars = DomainCustomBossEvents::load(&worlds)
+        .await
+        .map_err(|error| format!("test boss bars should load: {error}"))?;
     let player_data_storage = PlayerDataStorage::new(
         storage_root.to_owned(),
         StorageSelection::default_player_file(),
@@ -240,6 +244,7 @@ async fn test_server_with_worlds(
         scoreboards,
         command_storage,
         map_data,
+        boss_bars,
         command_dispatcher: SyncRwLock::new(registered_commands.dispatcher),
         command_permission_keys,
         command_requests: CommandRequestQueue::new(),
