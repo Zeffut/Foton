@@ -692,6 +692,12 @@ impl VillagerEntity {
         self.make_sound(self.profession().work_sound);
     }
 
+    /// Vanilla parity: `AbstractVillager.playCelebrateSound`, the cheer a
+    /// village lets out over a raid it survived.
+    pub fn play_celebrate_sound(&self) {
+        self.make_sound(Some(&sound_events::ENTITY_VILLAGER_CELEBRATE));
+    }
+
     /// Gives back the POI ticket a memory holds.
     ///
     /// Vanilla parity: `Villager.releasePoi`, which only releases when the block

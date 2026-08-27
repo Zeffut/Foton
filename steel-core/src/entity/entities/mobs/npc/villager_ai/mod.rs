@@ -40,6 +40,7 @@ mod farm;
 mod gift;
 mod job_site;
 mod panic;
+mod raid;
 mod trade;
 
 use steel_registry::entity_type::{EntityTypeRef, MobCategory};
@@ -49,14 +50,17 @@ use steel_registry::{REGISTRY, TaggedRegistryExt as _, vanilla_entities, vanilla
 use steel_utils::entity_events::EntityStatus;
 use steel_utils::{BlockPos, Downcast as _};
 
+use std::sync::Arc;
+
 use crate::behavior::BlockStateBehaviorExt as _;
-use crate::entity::LivingEntity;
 use crate::entity::ai::brain::behavior::{
     AcquirePoi, Behavior, BehaviorControl, DoNothing, GateBehavior, GoToWantedItem, InteractWith,
-    LookAtTargetSink, MoveToTargetSink, OneShot, OrderPolicy, RunOne, RunningPolicy,
-    SetEntityLookTarget, SetLookAndInteract, SetWalkTargetAwayFrom, SetWalkTargetFromLookTarget,
-    SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi, StrollToPoiList, Swim, TriggerGate,
-    UpdateActivityFromSchedule, ValidateNearbyPoi, VillageBoundRandomStroll, WakeUp,
+    LocateHidingPlace, LookAtTargetSink, MoveToSkySeeingSpot, MoveToTargetSink, OneShot,
+    OrderPolicy, ReactToBell, ResetRaidStatus, RingBell, RunOne, RunningPolicy, Sequence,
+    SetEntityLookTarget, SetHiddenState, SetLookAndInteract, SetRaidStatus, SetWalkTargetAwayFrom,
+    SetWalkTargetFromLookTarget, SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi,
+    StrollToPoiList, Swim, TriggerGate, TriggerIf, UpdateActivityFromSchedule, ValidateNearbyPoi,
+    VillageBoundRandomStroll, WakeUp,
 };
 use crate::entity::ai::brain::memory::{
     EntityMemory, MemoryModuleType, MemoryStatus, memory_module_types,
@@ -64,6 +68,7 @@ use crate::entity::ai::brain::memory::{
 use crate::entity::ai::brain::sensor::SensorType;
 use crate::entity::ai::brain::{Activity, ActivityData, Brain, BrainContext};
 use crate::entity::entities::mobs::npc::VillagerEntity;
+use crate::entity::{LivingEntity, PathfinderMob};
 use crate::world::World;
 
 pub use breed::VillagerMakeLove;
@@ -74,6 +79,7 @@ pub use job_site::{
     SetWalkTargetFromBlockMemory, WorkAtPoi, YieldJobSite,
 };
 pub use panic::{VillagerCalmDown, VillagerPanicTrigger};
+pub use raid::{CELEBRATION_DURATION, CelebrateVillagersSurvivedRaid};
 pub use trade::{LookAndFollowTradingPlayerSink, ShowTradesToPlayer, TradeWithVillager};
 
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
@@ -126,12 +132,41 @@ const FARMING_WEIGHT: i32 = 2;
 /// the panic package, which keeps a frightened villager's hops short.
 const PANIC_STROLL_DIST: i32 = 2;
 
+/// Vanilla parity: the `speedModifier * 1.5F` a villager runs to the bell at
+/// while a raid counts down.
+const PRE_RAID_SPEED_MULTIPLIER: f64 = 1.5;
+/// Vanilla parity: the `speedModifier * 1.1F` of the celebration stroll.
+const CELEBRATION_STROLL_MULTIPLIER: f64 = 1.1;
+/// Vanilla parity: the `speedModifier * 1.4F` of the raid package's dash for
+/// cover, and the `speedModifier * 1.25F` of the HIDE package's -- a villager
+/// still out in the open runs harder than one already tucked away.
+const RAID_HIDE_SPEED_MULTIPLIER: f64 = 1.4;
+const HIDE_SPEED_MULTIPLIER: f64 = 1.25;
+/// Vanilla parity: the `SetWalkTargetFromBlockMemory.create(MEETING_POINT, .., 2, 150, 200)`
+/// of the pre-raid package.
+const PRE_RAID_MEETING_POINT_CLOSE_ENOUGH: i32 = 2;
+const PRE_RAID_MEETING_POINT_START_COOLDOWN: i32 = 150;
+const PRE_RAID_MEETING_POINT_MAX_COOLDOWN: i64 = 200;
+/// Vanilla parity: the `LocateHidingPlace.create(24, .., 1)` of the raid
+/// package and the `create(32, .., 2)` of the hide package.
+const RAID_HIDING_PLACE_RADIUS: i32 = 24;
+const RAID_HIDING_PLACE_CLOSE_ENOUGH: i32 = 1;
+const HIDE_HIDING_PLACE_RADIUS: i32 = 32;
+const HIDE_HIDING_PLACE_CLOSE_ENOUGH: i32 = 2;
+/// Vanilla parity: the `SetHiddenState.create(15, 3)` of the hide package.
+const HIDE_SECONDS: i32 = 15;
+const HIDE_CLOSE_ENOUGH_DIST: i32 = 3;
+
 /// Vanilla parity: the sensor list of `Villager.BRAIN_PROVIDER`.
 ///
 /// MISSING FOUNDATION: vanilla also asks for `NEAREST_BED`, `VILLAGER_BABIES`
 /// and `GOLEM_DETECTED`. The first two feed behaviors Steel has not ported
 /// (`JumpOnBed`, `PlayTagWithOtherKids`) and the last feeds iron-golem
 /// spawning, which Steel does not have.
+///
+/// The raid packages need no sensor of their own: what they read is the raid
+/// manager, at the villager's own block, and the `HEARD_BELL_TIME` a rung bell
+/// writes on them directly.
 const SENSORS: &[SensorType] = &[
     SensorType::NearestLivingEntities,
     SensorType::NearestPlayers,
@@ -230,15 +265,17 @@ pub fn make_brain() -> Brain {
             idle_package(),
             play_package(),
             panic_package(),
+            pre_raid_package(),
+            raid_package(),
+            hide_package(),
         ],
     )
 }
 
 /// Vanilla parity: `VillagerGoalPackages.getCorePackage`.
 ///
-/// MISSING FOUNDATION: vanilla also runs `InteractWithDoor`, `ReactToBell` and
-/// `SetRaidStatus` here. Doors need the `DOORS_TO_CLOSE` bookkeeping Steel does
-/// not do, and the other two need the bell event and the raid seam.
+/// MISSING FOUNDATION: vanilla also runs `InteractWithDoor` here, which needs
+/// the `DOORS_TO_CLOSE` bookkeeping Steel does not do.
 fn core_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Core,
@@ -253,6 +290,8 @@ fn core_package() -> ActivityData {
             ),
             (0, Behavior::boxed(VillagerPanicTrigger)),
             (0, OneShot::boxed(WakeUp)),
+            (0, OneShot::boxed(ReactToBell)),
+            (0, OneShot::boxed(SetRaidStatus)),
             (
                 0,
                 OneShot::boxed(ValidateNearbyPoi::new(
@@ -717,6 +756,139 @@ fn panic_package() -> ActivityData {
             minimal_look_behavior(),
         ],
     )
+}
+
+/// Vanilla parity: `VillagerGoalPackages.getPreRaidPackage`.
+///
+/// This is the village's alarm, and the whole of it is: ring the bell, and get
+/// to where the bell is. Everything else the village does about a raid is
+/// downstream of the bell being rung -- which is why the walk to the meeting
+/// point outweighs the stroll six to two.
+fn pre_raid_package() -> ActivityData {
+    let alarm_speed = SPEED_MODIFIER * PRE_RAID_SPEED_MULTIPLIER;
+    ActivityData::with_priorities(
+        Activity::PreRaid,
+        vec![
+            (0, OneShot::boxed(RingBell)),
+            (
+                0,
+                OneShot::boxed(TriggerGate::trigger_one_shuffled(vec![
+                    (
+                        Box::new(SetWalkTargetFromBlockMemory::new(
+                            memory_module_types::MEETING_POINT,
+                            alarm_speed,
+                            PRE_RAID_MEETING_POINT_CLOSE_ENOUGH,
+                            PRE_RAID_MEETING_POINT_START_COOLDOWN,
+                            PRE_RAID_MEETING_POINT_MAX_COOLDOWN,
+                        )),
+                        6,
+                    ),
+                    (Box::new(VillageBoundRandomStroll::new(alarm_speed)), 2),
+                ])),
+            ),
+            minimal_look_behavior(),
+            // Vanilla parity: `ResetRaidStatus` takes the priority-99 slot
+            // `UpdateActivityFromSchedule` holds everywhere else -- a villager
+            // in a raid reads the clock only through the raid ending.
+            (99, OneShot::boxed(ResetRaidStatus)),
+        ],
+    )
+}
+
+/// Vanilla parity: `VillagerGoalPackages.getRaidPackage`.
+///
+/// Two behaviors that never run at the same time: while the raid is live the
+/// villager runs for a bed, and once the village has won it comes out from
+/// under its roof to cheer. The gates that pick between them are the raid's own
+/// phase, read fresh every tick.
+fn raid_package() -> ActivityData {
+    ActivityData::with_priorities(
+        Activity::Raid,
+        vec![
+            (
+                0,
+                OneShot::boxed(Sequence::new(
+                    Box::new(TriggerIf::with_level("RaidWon", raid_is_won)),
+                    Box::new(TriggerGate::trigger_one_shuffled(vec![
+                        (Box::new(MoveToSkySeeingSpot::new(SPEED_MODIFIER)), 5),
+                        (
+                            Box::new(VillageBoundRandomStroll::new(
+                                SPEED_MODIFIER * CELEBRATION_STROLL_MULTIPLIER,
+                            )),
+                            2,
+                        ),
+                    ])),
+                )),
+            ),
+            (
+                0,
+                Behavior::boxed(CelebrateVillagersSurvivedRaid::new(
+                    CELEBRATION_DURATION,
+                    CELEBRATION_DURATION,
+                )),
+            ),
+            (
+                2,
+                OneShot::boxed(Sequence::new(
+                    Box::new(TriggerIf::with_level("RaidRunning", raid_is_running)),
+                    Box::new(LocateHidingPlace::new(
+                        RAID_HIDING_PLACE_RADIUS,
+                        SPEED_MODIFIER * RAID_HIDE_SPEED_MULTIPLIER,
+                        RAID_HIDING_PLACE_CLOSE_ENOUGH,
+                    )),
+                )),
+            ),
+            minimal_look_behavior(),
+            (99, OneShot::boxed(ResetRaidStatus)),
+        ],
+    )
+}
+
+/// Vanilla parity: `VillagerGoalPackages.getHidePackage`.
+///
+/// The one package with neither `UpdateActivityFromSchedule` nor
+/// `ResetRaidStatus`: the only way out of HIDE is [`SetHiddenState`] running
+/// out of one of its two clocks, which is what then reads the schedule.
+fn hide_package() -> ActivityData {
+    ActivityData::with_priorities(
+        Activity::Hide,
+        vec![
+            (
+                0,
+                OneShot::boxed(SetHiddenState::new(HIDE_SECONDS, HIDE_CLOSE_ENOUGH_DIST)),
+            ),
+            (
+                1,
+                OneShot::boxed(LocateHidingPlace::new(
+                    HIDE_HIDING_PLACE_RADIUS,
+                    SPEED_MODIFIER * HIDE_SPEED_MULTIPLIER,
+                    HIDE_HIDING_PLACE_CLOSE_ENOUGH,
+                )),
+            ),
+            minimal_look_behavior(),
+        ],
+    )
+}
+
+/// Whether the raid over this villager has been won.
+///
+/// Vanilla parity: `VillagerGoalPackages.raidExistsAndNotVictory`, whose name
+/// says the opposite of what it does -- the body is `currentRaid != null &&
+/// currentRaid.isVictory()`, and the branch it gates is the celebration. The
+/// name is the misleading one AGENTS.md allows renaming.
+fn raid_is_won(world: &Arc<World>, mob: &dyn PathfinderMob) -> bool {
+    world
+        .get_raid_at(mob.block_position())
+        .is_some_and(|raid| raid.is_victory())
+}
+
+/// Whether the raid over this villager is still being fought.
+///
+/// Vanilla parity: `VillagerGoalPackages.raidExistsAndActive`.
+fn raid_is_running(world: &Arc<World>, mob: &dyn PathfinderMob) -> bool {
+    world
+        .get_raid_at(mob.block_position())
+        .is_some_and(|raid| raid.is_active() && !raid.is_victory() && !raid.is_loss())
 }
 
 /// Vanilla parity: `InteractWith.of(type, 8, memory, speedModifier, 2)`.
