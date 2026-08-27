@@ -1060,3 +1060,51 @@ fn a_shipwreck_treasure_map_comes_out_named() {
             .is_none()
     );
 }
+
+#[test]
+fn a_silk_touched_beehive_carries_its_honey_level() {
+    use crate::blocks::properties::BlockStateProperties;
+    use crate::data_components::vanilla_components::BLOCK_STATE;
+
+    init_test_registries();
+    let tool = enchanted_tool(
+        &vanilla_items::DIAMOND_AXE,
+        &crate::vanilla_enchantments::SILK_TOUCH.key,
+        1,
+    );
+    let half_full = vanilla_blocks::BEEHIVE
+        .default_state()
+        .set_value(&BlockStateProperties::LEVEL_HONEY, 5);
+    let mut rng = test_rng();
+    let mut ctx = LootContext::new(&mut rng)
+        .with_tool(&tool)
+        .with_block_state(half_full);
+
+    let items = vanilla_loot_tables::BLOCKS_BEEHIVE.get_random_items(&mut ctx);
+
+    assert_eq!(items.len(), 1);
+    assert!(items[0].is(&vanilla_items::BEEHIVE));
+    assert_eq!(
+        items[0]
+            .get(BLOCK_STATE)
+            .and_then(|state| state.get("honey_level")),
+        Some("5"),
+        "a hive broken half full has to come up half full"
+    );
+
+    // Without silk touch the table takes its other alternative, which has no
+    // `copy_state`, so the hive keeps the empty level the item ships with.
+    let bare = ItemStack::new(&vanilla_items::DIAMOND_AXE);
+    let mut ctx = LootContext::new(&mut rng)
+        .with_tool(&bare)
+        .with_block_state(half_full);
+    let items = vanilla_loot_tables::BLOCKS_BEEHIVE.get_random_items(&mut ctx);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0]
+            .get(BLOCK_STATE)
+            .and_then(|state| state.get("honey_level")),
+        Some("0"),
+        "the beehive item ships an empty honey level and nothing raised it"
+    );
+}

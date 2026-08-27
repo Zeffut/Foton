@@ -42,6 +42,15 @@ impl BlockItemStateProperties {
     pub fn is_empty(&self) -> bool {
         self.properties.is_empty()
     }
+
+    /// Returns these properties with `name` set to `value`.
+    ///
+    /// Vanilla parity: `BlockItemStateProperties.with`.
+    #[must_use]
+    pub fn with(mut self, name: &str, value: String) -> Self {
+        self.properties.insert(name.to_owned(), value);
+        self
+    }
 }
 
 impl WriteTo for BlockItemStateProperties {

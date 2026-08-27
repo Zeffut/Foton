@@ -833,16 +833,34 @@ impl ItemStack {
         // 2. For each component in `include`, copy it to this item's patch
     }
 
-    /// Copies block state properties to this item (for blocks like `note_block`).
-    pub const fn copy_block_state<R: rand::Rng>(
+    /// Copies the named properties of the broken block state onto this item.
+    ///
+    /// Vanilla parity: `CopyBlockState.run`, which merges into whatever
+    /// `minecraft:block_state` the stack already carries and skips a property
+    /// the state does not have.
+    pub fn copy_block_state<R: rand::Rng>(
         &mut self,
-        _block: &Identifier,
-        _properties: &[&str],
-        _ctx: &crate::loot_table::LootContext<'_, R>,
+        properties: &[&str],
+        ctx: &crate::loot_table::LootContext<'_, R>,
     ) {
-        // TODO: Implement block state copying
-        // 1. Get block state from context
-        // 2. For each property, store it in the item's BLOCK_STATE component
+        use crate::blocks::block_state_ext::BlockStateExt as _;
+        use crate::data_components::components::BlockItemStateProperties;
+        use crate::data_components::vanilla_components::BLOCK_STATE;
+
+        let Some(state) = ctx.block_state else {
+            return;
+        };
+
+        let mut copied = self
+            .get(BLOCK_STATE)
+            .cloned()
+            .unwrap_or_else(BlockItemStateProperties::empty);
+        for name in properties {
+            if let Some(value) = state.get_property_str(name) {
+                copied = copied.with(name, value);
+            }
+        }
+        self.set(BLOCK_STATE, copied);
     }
 
     /// Sets components from a JSON string representation.

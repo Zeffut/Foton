@@ -543,8 +543,10 @@ impl LootFunction {
                 item.copy_components(*source, include, ctx);
             }
             LootFunction::CopyState { block, properties } => {
-                // TODO: Implement block state copying
-                item.copy_block_state(block, properties, ctx);
+                // Vanilla's `block` only validates the property names when the
+                // function is built; `CopyBlockState.run` never reads it.
+                let _ = block;
+                item.copy_block_state(properties, ctx);
             }
             LootFunction::SetComponents { components } => {
                 // TODO: Implement component setting from JSON
