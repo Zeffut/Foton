@@ -53,7 +53,7 @@ use crate::entity::ai::brain::behavior::{
     AcquirePoi, Behavior, BehaviorControl, DoNothing, GateBehavior, GoToWantedItem, InteractWith,
     LookAtTargetSink, MoveToTargetSink, OneShot, OrderPolicy, RunOne, RunningPolicy,
     SetEntityLookTarget, SetLookAndInteract, SetWalkTargetAwayFrom, SetWalkTargetFromLookTarget,
-    SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi, Swim, TriggerGate,
+    SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi, StrollToPoiList, Swim, TriggerGate,
     UpdateActivityFromSchedule, ValidateNearbyPoi, VillageBoundRandomStroll, WakeUp,
 };
 use crate::entity::ai::brain::memory::{
@@ -111,24 +111,26 @@ const PLAY_MOVE_MIN_TIMEOUT: i32 = 80;
 const PLAY_MOVE_MAX_TIMEOUT: i32 = 120;
 /// Vanilla parity: the `StrollAroundPoi.create(MEETING_POINT, 0.4F, 40)`.
 const MEETING_POINT_STROLL_DISTANCE: i32 = 40;
+/// Vanilla parity: the `maxDistanceFromPoi` of the work package's
+/// `StrollToPoiList.create(SECONDARY_JOB_SITE, speedModifier, 1, 6, JOB_SITE)`.
+const SECONDARY_JOB_SITE_MAX_DIST: i32 = 6;
 /// Vanilla parity: the `VillageBoundRandomStroll.create(runawaySpeed, 2, 2)` of
 /// the panic package, which keeps a frightened villager's hops short.
 const PANIC_STROLL_DIST: i32 = 2;
 
 /// Vanilla parity: the sensor list of `Villager.BRAIN_PROVIDER`.
 ///
-/// MISSING FOUNDATION: vanilla also asks for `NEAREST_BED`, `VILLAGER_BABIES`,
-/// `SECONDARY_POIS` and `GOLEM_DETECTED`. The first three feed behaviors Steel
-/// has not ported (`JumpOnBed`, `PlayTagWithOtherKids`, `HarvestFarmland`) and
-/// `SECONDARY_POIS` additionally needs `VillagerProfession.secondaryPoi`, which
-/// `SteelExtractor` does not emit; the last feeds iron-golem spawning, which
-/// Steel does not have.
+/// MISSING FOUNDATION: vanilla also asks for `NEAREST_BED`, `VILLAGER_BABIES`
+/// and `GOLEM_DETECTED`. The first two feed behaviors Steel has not ported
+/// (`JumpOnBed`, `PlayTagWithOtherKids`) and the last feeds iron-golem
+/// spawning, which Steel does not have.
 const SENSORS: &[SensorType] = &[
     SensorType::NearestLivingEntities,
     SensorType::NearestPlayers,
     SensorType::NearestItems,
     SensorType::HurtBy,
     SensorType::VillagerHostiles,
+    SensorType::SecondaryPois,
 ];
 
 /// Reaches for the villager behind a brain context.
@@ -359,6 +361,16 @@ fn work_package() -> ActivityData {
                             STROLL_SPEED_MODIFIER,
                             1,
                             10,
+                        )),
+                        5,
+                    ),
+                    (
+                        OneShot::boxed(StrollToPoiList::new(
+                            memory_module_types::SECONDARY_JOB_SITE,
+                            SPEED_MODIFIER,
+                            1,
+                            SECONDARY_JOB_SITE_MAX_DIST,
+                            memory_module_types::JOB_SITE,
                         )),
                         5,
                     ),

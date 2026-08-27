@@ -1,9 +1,10 @@
 use rustc_hash::FxHashMap;
 use steel_utils::Identifier;
 
+use crate::blocks::BlockRef;
 use crate::items::ItemRef;
 use crate::sound_event::SoundEventRef;
-use crate::{vanilla_items, vanilla_villager_professions};
+use crate::{vanilla_blocks, vanilla_items, vanilla_villager_professions};
 
 #[derive(Debug)]
 pub struct VillagerProfession {
@@ -38,6 +39,19 @@ impl VillagerProfession {
             && farmer_requested_items()
                 .iter()
                 .any(|requested| requested.key == item.key)
+    }
+
+    /// Whether `block` is one this profession works on beside its workstation.
+    ///
+    /// Vanilla parity: `VillagerProfession.secondaryPoi().contains(block)`,
+    /// which `SecondaryPoiSensor` asks of every block around the villager. It is
+    /// the same kind of hardcoded `ImmutableSet` as [`Self::requests_item`] and
+    /// is mirrored for the same reason; only the farmer registers one, and its
+    /// content is farmland.
+    #[must_use]
+    pub fn is_secondary_poi(&self, block: BlockRef) -> bool {
+        self.key == vanilla_villager_professions::FARMER.key
+            && block.key == vanilla_blocks::FARMLAND.key
     }
 }
 

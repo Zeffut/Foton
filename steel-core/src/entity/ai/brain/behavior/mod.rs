@@ -100,7 +100,7 @@ pub use sleep_in_bed::{SleepInBed, WakeUp};
 pub use socialize_at_bell::SocializeAtBell;
 pub use start_celebrating_if_target_dead::StartCelebratingIfTargetDead;
 pub use stop_being_angry_if_target_dead::StopBeingAngryIfTargetDead;
-pub use stroll_to_poi::{StrollAroundPoi, StrollToPoi};
+pub use stroll_to_poi::{StrollAroundPoi, StrollToPoi, StrollToPoiList};
 pub use transport_items_between_containers::TransportItemsBetweenContainers;
 pub use update_activity_from_schedule::UpdateActivityFromSchedule;
 pub use validate_nearby_poi::ValidateNearbyPoi;

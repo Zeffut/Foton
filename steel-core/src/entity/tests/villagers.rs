@@ -636,6 +636,68 @@ fn a_villager_carries_its_inventory_through_a_save_and_load() {
     );
 }
 
+/// Vanilla parity: `SecondaryPoiSensor`, the only writer of
+/// `SECONDARY_JOB_SITE`.
+///
+/// `HarvestFarmland` and the work package's `StrollToPoiList` both refuse to
+/// start without that memory, so a farmer whose sensor never runs never works
+/// its field -- and the memory is only ever written for the one profession that
+/// registers a secondary POI at all.
+///
+/// This enters only through `villager.tick()`, which is what makes it fail if
+/// the sensor is never added to the brain rather than merely written.
+#[test]
+fn only_a_farmer_notices_the_farmland_it_is_standing_on() {
+    let world = villager_world("villager_secondary_job_site");
+    let villager = spawn_villager(&world);
+    for x in (STAND.x() - 4)..=(STAND.x() + 4) {
+        for z in (STAND.z() - 4)..=(STAND.z() + 4) {
+            assert!(world.set_block(
+                BlockPos::new(x, STAND.y() - 1, z),
+                vanilla_blocks::FARMLAND.default_state(),
+                UpdateFlags::UPDATE_NONE,
+            ));
+        }
+    }
+
+    let brain = Mob::brain(villager.as_ref()).expect("a villager has a brain");
+    // Two full scan rates, so the staggered first tick cannot be the reason.
+    run_ticks(&world, &villager, 90);
+    assert!(
+        !brain.has_memory_value(memory_module_types::SECONDARY_JOB_SITE.id()),
+        "farmland is the farmer's secondary POI, nobody else's"
+    );
+
+    // A profession only sticks while the villager holds the workstation that
+    // grants it -- `ResetProfession` takes back a job with no job site.
+    assert!(world.set_block(
+        BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()),
+        vanilla_blocks::COMPOSTER.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    assert!(
+        run_ticks_until(&world, &villager, TICKS_TO_TAKE_A_JOB, || {
+            villager.profession().key.path == "farmer"
+        }),
+        "the composter should have made this villager a farmer"
+    );
+
+    let noticed = run_ticks_until(&world, &villager, 90, || {
+        brain.has_memory_value(memory_module_types::SECONDARY_JOB_SITE.id())
+    });
+
+    assert!(noticed, "a farmer standing in a field should have seen it");
+    let field = brain
+        .get_memory(memory_module_types::SECONDARY_JOB_SITE)
+        .expect("the memory was just asserted present");
+    assert!(
+        field
+            .iter()
+            .all(|pos| pos.dimension == world.key && pos.pos.y() == STAND.y() - 1),
+        "the sensor should report the farmland it scanned, in this dimension"
+    );
+}
+
 /// The activity the villager's own brain is currently in.
 fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
     Mob::brain(villager.as_ref())?.active_non_core_activity()

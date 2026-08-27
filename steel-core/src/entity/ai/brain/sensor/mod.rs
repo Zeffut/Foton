@@ -11,6 +11,7 @@ mod nearest_item;
 mod nearest_living_entity;
 mod piglin_specific;
 mod player;
+mod secondary_poi;
 mod tempting;
 mod villager_hostiles;
 mod warden_specific;
@@ -28,6 +29,7 @@ pub use piglin_specific::{
     HoglinSpecificSensor, PiglinBruteSpecificSensor, PiglinSpecificSensor, is_zombified,
 };
 pub use player::PlayerSensor;
+pub use secondary_poi::SecondaryPoiSensor;
 pub use tempting::TemptingSensor;
 pub use villager_hostiles::VillagerHostilesSensor;
 pub use warden_specific::WardenEntitySensor;
@@ -135,6 +137,8 @@ pub enum SensorType {
     WardenEntity,
     /// Vanilla `SensorType.VILLAGER_HOSTILES`.
     VillagerHostiles,
+    /// Vanilla `SensorType.SECONDARY_POIS`.
+    SecondaryPois,
 }
 
 impl SensorType {
@@ -196,6 +200,7 @@ impl SensorType {
             Self::BreezeAttackEntity => Box::new(BreezeAttackEntitySensor::new()),
             Self::WardenEntity => Box::new(WardenEntitySensor),
             Self::VillagerHostiles => Box::new(VillagerHostilesSensor),
+            Self::SecondaryPois => Box::new(SecondaryPoiSensor),
         }
     }
 }
