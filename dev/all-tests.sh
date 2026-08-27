@@ -30,7 +30,7 @@ for test in dev/join-test.sh dev/selector-test.sh dev/rcon-test.sh \
             dev/dragon-test.sh \
             dev/leash-test.sh dev/happy-ghast-test.sh \
             dev/shelf-test.sh dev/campfire-test.sh dev/conduit-test.sh \
-            dev/dripstone-test.sh \
+            dev/dripstone-test.sh dev/tnt-test.sh \
             dev/spawner-test.sh dev/catalyst-test.sh \
             dev/sculk-vibration-test.sh dev/warden-test.sh \
             dev/fishing-test.sh \

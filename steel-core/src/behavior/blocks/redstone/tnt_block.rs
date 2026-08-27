@@ -1,11 +1,8 @@
 //! TNT block behavior.
 //!
-//! Vanilla parity: `TntBlock`. A redstone signal, flint and steel or a fire
-//! charge turns the block into a [`PrimedTntEntity`] that detonates once its
-//! fuse burns out.
-//!
-//! TODO: also light TNT from a projectile on fire and a neighboring explosion,
-//! matching `TntBlock.onCaughtFire`, `onProjectileHit` and `wasExploded`.
+//! Vanilla parity: `TntBlock`. A redstone signal, flint and steel, a fire
+//! charge, a burning projectile or a blast next door turns the block into a
+//! [`PrimedTntEntity`] that detonates once its fuse burns out.
 
 use std::sync::Arc;
 
@@ -25,8 +22,9 @@ use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::entity::Entity as _;
 use crate::entity::entities::PrimedTntEntity;
+use crate::entity::projectile::Projectile;
 use crate::player::Player;
-use crate::world::{SignalGetter as _, World};
+use crate::world::{ClipHitResult, SignalGetter as _, World};
 
 /// What the player used to light the TNT.
 enum Igniter {
@@ -167,5 +165,58 @@ impl BlockBehavior for TntBlock {
         _moved_by_piston: bool,
     ) {
         Self::prime_if_powered(world, pos);
+    }
+
+    /// Lights the TNT when something on fire hits it.
+    ///
+    /// Vanilla parity: `TntBlock.onProjectileHit`. The blame goes to the
+    /// shooter, and only when the shooter is a living thing: a flaming arrow
+    /// fired by a dispenser answers for itself.
+    fn on_projectile_hit(
+        &self,
+        _state: BlockStateId,
+        world: &Arc<World>,
+        hit: &ClipHitResult,
+        projectile: &dyn Projectile,
+    ) {
+        let pos = hit.block_pos;
+        if !projectile.is_on_fire() || !projectile.projectile_may_interact(world, pos) {
+            return;
+        }
+
+        let shooter = projectile
+            .get_owner()
+            .filter(|owner| owner.is_living_entity())
+            .map(|owner| owner.id());
+        if !Self::prime(world, pos, shooter) {
+            return;
+        }
+        world.set_block(
+            pos,
+            vanilla_blocks::AIR.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        );
+    }
+
+    /// Lights the TNT a neighboring blast just cleared away.
+    ///
+    /// Vanilla parity: `TntBlock.wasExploded`, which is the whole of TNT chain
+    /// reactions. The short fuse is what spreads a chain out into a rolling
+    /// burst instead of one simultaneous crack, and unlike every other way of
+    /// lighting TNT this one is silent: vanilla builds the entity directly
+    /// rather than going through `prime`.
+    fn was_exploded(&self, world: &Arc<World>, pos: BlockPos, causing_entity_id: Option<i32>) {
+        if !world.get_game_rule(&TNT_EXPLODES) {
+            return;
+        }
+        let primed = PrimedTntEntity::prime(world, pos, causing_entity_id);
+        primed.set_fuse(PrimedTntEntity::random_short_fuse(primed.fuse()));
+    }
+
+    /// Vanilla parity: `TntBlock.dropFromExplosion`. Blown-up TNT lights rather
+    /// than drops; leaving the drop in would hand the player a free block for
+    /// every stick of the chain.
+    fn drop_from_explosion(&self) -> bool {
+        false
     }
 }

@@ -423,6 +423,13 @@ mobs that need it.
       `SpeleothemBlock` waiting on a falling-block entity, which has existed for
       a while -- the TODO outlived what it was waiting for.
 
+      TNT chains. A blast now tells every block it cleared that it was exploded,
+      through a new `BlockBehavior::was_exploded` on the explosion path, and TNT
+      answers by lighting itself on a short random fuse -- which is what turns a
+      row of it into a rolling burst rather than one crack. It also stops
+      dropping itself when blown up, through `drop_from_explosion`, so a chain no
+      longer hands out a free block per stick. A burning arrow lights it too.
+
 ### 3. The end of the game
 
 - [x] **The boss bar**: `BossEvent`, `ServerBossEvent` and the boss-event packet

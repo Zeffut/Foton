@@ -268,14 +268,32 @@ impl World {
     /// blast decays them.
     ///
     /// Vanilla parity: `BlockBehaviour.onExplosionHit`. `explosion_radius` is
-    /// `Some` only for `DESTROY_WITH_DECAY`.
+    /// `Some` only for `DESTROY_WITH_DECAY`, and `causing_entity_id` is the
+    /// blast's indirect source, which is what a block lit by the blast blames.
+    ///
+    /// The air guard is vanilla's `!state.isAir()`: a blast that reaches an
+    /// empty position neither drops nor tells anything it was exploded.
     pub(super) fn destroy_block_from_explosion(
         self: &Arc<Self>,
         pos: BlockPos,
         entity: Option<&dyn Entity>,
         explosion_radius: Option<f32>,
+        causing_entity_id: Option<i32>,
     ) -> bool {
-        self.destroy_block_inner(pos, true, 512, entity, explosion_radius)
+        let state = self.get_block_state(pos);
+        if state.is_air() {
+            return false;
+        }
+        let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
+        let destroyed = self.destroy_block_inner(
+            pos,
+            behavior.drop_from_explosion(),
+            512,
+            entity,
+            explosion_radius,
+        );
+        behavior.was_exploded(self, pos, causing_entity_id);
+        destroyed
     }
 
     pub(super) fn destroy_block_with_limit_and_entity(
