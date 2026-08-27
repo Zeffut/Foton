@@ -1,14 +1,17 @@
-"""Retire toute section [server.rcon] d'un config.toml.
+"""Strips any [server.rcon] section from a config.toml.
 
-Le serveur en genere une depuis que RCON existe ; le script de test en ajoute
-une seconde, et deux sections identiques sont un `duplicate key` sur lequel le
-serveur refuse de demarrer.
+The server generates one itself now that it speaks RCON. A test rig that
+appends its own on top leaves two, and a duplicate key is something the server
+refuses to start on.
+
+Usage: strip-rcon-section.py <config.toml>
 """
+
 import io
 import re
 import sys
 
 path = sys.argv[1]
-s = io.open(path, encoding="utf-8").read()
-s = re.sub(r"^\[server\.rcon\]\n(?:(?!^\[).*\n)*", "", s, flags=re.M)
-io.open(path, "w", encoding="utf-8", newline="\n").write(s)
+text = io.open(path, encoding="utf-8").read()
+text = re.sub(r"^\[server\.rcon\]\n(?:(?!^\[).*\n)*", "", text, flags=re.M)
+io.open(path, "w", encoding="utf-8", newline="\n").write(text)
