@@ -801,6 +801,108 @@ fn a_farmer_pulls_ripe_wheat_and_puts_a_seed_back_in_the_ground() {
     );
 }
 
+/// The box the farming tests look in for what a pulled crop left behind.
+fn around_the_field() -> WorldAabb {
+    WorldAabb::new(
+        f64::from(STAND.x() - 8),
+        f64::from(STAND.y() - 4),
+        f64::from(STAND.z() - 8),
+        f64::from(STAND.x() + 8),
+        f64::from(STAND.y() + 4),
+        f64::from(STAND.z() + 8),
+    )
+}
+
+/// Ticks the villager and everything a pulled crop dropped, the way a server
+/// tick does.
+///
+/// [`run_ticks_until`] drives the villager alone, which is enough for a test
+/// that hands it its seeds. A dropped stack is an entity of its own, and an
+/// item nobody ticks keeps the half-second pickup delay `popResource` gives it
+/// forever -- so a farmer that has to gather its own seeds needs the items
+/// ticked too.
+fn run_field_ticks_until(
+    world: &Arc<World>,
+    villager: &Arc<VillagerEntity>,
+    ticks: i32,
+    reached: impl Fn() -> bool,
+) -> bool {
+    for _ in 0..ticks {
+        advance_time(world);
+        villager.base_tick();
+        villager.tick();
+        let dropped = world.get_entities_in_aabb_matching(&around_the_field(), |entity| {
+            !entity.is_removed() && entity.downcast_ref::<ItemEntity>().is_some()
+        });
+        for item in dropped {
+            item.tick();
+        }
+        if reached() {
+            return true;
+        }
+    }
+    false
+}
+
+/// The link the field test cannot see: the seeds a pulled crop leaves have to
+/// reach the villager's own container.
+///
+/// `a_farmer_pulls_ripe_wheat_and_puts_a_seed_back_in_the_ground` puts a stack
+/// of seeds in that container by hand, so it passes whether or not a ripe crop
+/// ever drops one and whether or not a villager can gather it -- and gathering
+/// them is the only way a farmer in a real world ever gets any. This pulls the
+/// crop the way `HarvestFarmland` does, with the villager as the breaker, and
+/// then leaves the villager standing in the drop.
+///
+/// The count matters as much as the pickup: `wheat`'s second loot pool is an
+/// `apply_bonus` on top of a count of one, so a ripe crop always leaves at
+/// least one seed. A pool that stopped adding to an existing count would leave
+/// none, and a farmer with no seeds never sows.
+#[test]
+fn the_wheat_a_farmer_pulls_leaves_seeds_it_can_gather() {
+    let world = villager_world("villager_gathers_its_own_seeds");
+    let villager = spawn_villager(&world);
+    assert!(world.set_block(
+        STAND.below(),
+        vanilla_blocks::FARMLAND.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    assert!(
+        world.set_block(
+            STAND,
+            vanilla_blocks::WHEAT
+                .default_state()
+                .set_value(&BlockStateProperties::AGE_7, 7),
+            UpdateFlags::UPDATE_NONE,
+        )
+    );
+    assert!(
+        !villager.has_farm_seeds(),
+        "a villager starts its day with nothing to sow"
+    );
+
+    assert!(world.destroy_block_by_entity(STAND, true, villager.as_ref()));
+    let seeds_on_the_ground: i32 = world
+        .get_entities_in_aabb_matching(&around_the_field(), |entity| {
+            entity.downcast_ref::<ItemEntity>().is_some()
+        })
+        .iter()
+        .filter_map(|entity| entity.downcast_ref::<ItemEntity>())
+        .map(ItemEntity::get_item)
+        .filter(|stack| stack.is(&vanilla_items::WHEAT_SEEDS))
+        .map(|stack| stack.count())
+        .sum();
+    assert!(
+        seeds_on_the_ground > 0,
+        "a ripe crop always leaves at least one seed for the farmer to sow"
+    );
+
+    assert!(
+        run_field_ticks_until(&world, &villager, 40, || villager.has_farm_seeds()),
+        "a villager standing in the drop should have stowed the seeds"
+    );
+}
+
 /// What the harvest is for: a farmer standing at its composter turns the wheat
 /// it is carrying into bread, which is the only food a village breeds on.
 ///

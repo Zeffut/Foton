@@ -19,12 +19,29 @@
 # if `SetWalkTargetFromBlockMemory` and `MoveToTargetSink` never ran.
 #
 # The morning half is the field. A composter turns the villager into a farmer,
-# the `SECONDARY_POIS` sensor has to see the farmland, `HarvestFarmland` has to
-# tell a ripe crop from a growing one through the block behavior, and the seeds
-# the harvest drops have to reach the villager's own container before it can
-# sow the square again. The field starts as `wheat[age=7]` on every square, so
-# `wheat[age=0]` on any of them is the whole loop having run -- and a square
-# that has gone to `air` is at least the harvest half.
+# the `SECONDARY_POIS` sensor has to see the farmland, and `HarvestFarmland` has
+# to tell a ripe crop from a growing one through the block behavior, pull it,
+# and put a seed back in the square. The field starts as `wheat[age=7]` on every
+# square and random ticking is off, so `wheat[age=0]` on any of them can only be
+# a seed this villager planted -- and a square that has gone to `air` is at
+# least the harvest half.
+#
+# The villager is summoned holding its seeds on purpose. Where a farmer's seeds
+# really come from is the drop of the crop it just pulled, but whether it ever
+# gets them is a dice roll this test cannot make: `getPickupReach` is
+# `(1, 0, 1)` with no vertical slack, so the villager only gathers the drop if
+# it happens to be standing at field level when the crop falls, and the work
+# package only offers `HarvestFarmland` one round in six. Waiting for both is
+# how `SQUARESOWN` came and went between runs. The gathering link has a
+# deterministic test of its own instead:
+# `the_wheat_a_farmer_pulls_leaves_seeds_it_can_gather`.
+#
+# `CanPickUpLoot` is set for the same reason it belongs on any summoned mob
+# meant to behave like a spawned one. `Mob.readAdditionalSaveData` reads the
+# flag with a default of false and `/summon` runs that reader whether or not a
+# compound was typed, so a summoned villager cannot pick anything up at all --
+# vanilla's behaviour, and the one that silently switched this test's sowing
+# off when `/summon` started loading entity NBT.
 #
 # Usage: bash dev/villager-day-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -88,7 +105,7 @@ done
 # there so the bed looks like one to a player watching.
 CMDS="$CMDS;;setblock 0 100 1 minecraft:red_bed[facing=north,part=foot]"
 CMDS="$CMDS;;setblock 0 100 0 minecraft:red_bed[facing=north,part=head]"
-CMDS="$CMDS;;summon minecraft:villager 5 100 0"
+CMDS="$CMDS;;summon minecraft:villager 5 100 0 {CanPickUpLoot:1b,Inventory:[{id:\"minecraft:wheat_seeds\",count:8}]}"
 CMDS="$CMDS;;execute if entity @e[type=minecraft:villager] run tellraw @s \"VILLAGERSTANDING\""
 CMDS="$CMDS;;execute if block 0 100 0 minecraft:red_bed[occupied=false] run tellraw @s \"BEDSTARTSEMPTY\""
 
