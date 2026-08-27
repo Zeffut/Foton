@@ -60,7 +60,7 @@ impl SaplingBlock {
     /// Advances the sapling one step, growing a tree from the last one.
     ///
     /// Vanilla parity: `SaplingBlock.advanceTree`.
-    fn advance_tree(
+    pub(super) fn advance_tree(
         &self,
         state: BlockStateId,
         world: &Arc<World>,

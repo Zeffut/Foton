@@ -13,6 +13,10 @@
 # moment on the same dirt and never touched, and it has to still be a sapling
 # at the end.
 #
+# The mangrove propagule at the end is the same item against the other half of
+# a block that leads two lives: hanging under a leaf it is fruit, and bone meal
+# ripens it rather than growing anything.
+#
 # Everything is built within a chunk or two of the player: only the nine chunks
 # around them are loaded, and `setblock` outside that fails without stopping the
 # script.
@@ -105,6 +109,19 @@ add "!wait 2"
 add "execute if block 2 102 0 #minecraft:logs run tellraw @s \"BONEMEALGREWATREE\""
 add "execute if block 6 100 0 minecraft:oak_sapling run tellraw @s \"CONTROLSTAYEDASAPLING\""
 
+# --- The other half of a propagule ---
+# Hanging under a mangrove leaf a propagule is fruit rather than a sapling, and
+# bone meal ripens it one age at a time with no roll at all. It is on the far
+# side of the player so the oak that just went up cannot reach it, and the
+# leaf above it does not decay because nothing is random-ticking.
+add "setblock -3 102 0 minecraft:mangrove_leaves"
+add "setblock -3 101 0 minecraft:mangrove_propagule[hanging=true,age=0]"
+add "execute if block -3 101 0 minecraft:mangrove_propagule[age=0] run tellraw @s \"PROPAGULEHUNGGREEN\""
+for _ in $(seq 1 6); do
+  add "!useon -3 101 0 up"
+done
+add "execute if block -3 101 0 minecraft:mangrove_propagule[age=4] run tellraw @s \"PROPAGULERIPENED\""
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_COMMAND_SETTLE_SECONDS=0.2 JOIN_WATCH_SECONDS=2 \
   python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
@@ -123,7 +140,7 @@ if [ $STATUS -ne 0 ]; then
   exit 1
 fi
 for marker in FEDSAPLINGPLANTED CONTROLSAPLINGPLANTED BONEMEALGREWATREE \
-              CONTROLSTAYEDASAPLING; do
+              CONTROLSTAYEDASAPLING PROPAGULEHUNGGREEN PROPAGULERIPENED; do
   # Only the server's own reply counts: join.py echoes the commands it sends.
   if ! grep "server says" join.log | grep -q "$marker"; then
     echo "########## BONE MEAL TEST FAILED ($marker missing) ##########"

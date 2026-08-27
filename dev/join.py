@@ -700,8 +700,15 @@ ANIMATIONS = {0: "swing", 2: "wake up", 3: "swing off hand", 4: "crit", 5: "magi
 
 
 def packed_block_pos(x, y, z):
-    """Packs a position the way the protocol carries one."""
-    return ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF)
+    """Packs a position the way the protocol carries one.
+
+    The masks already write the two's complement of a negative coordinate, but
+    the result is then an unsigned 64-bit number and the field on the wire is
+    signed -- so a negative x or z overflowed `struct.pack(">q", ..)` and no
+    test could click a block west or north of the origin.
+    """
+    packed = ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF)
+    return packed - (1 << 64) if packed >= (1 << 63) else packed
 
 
 def send_set_carried_item(connection, slot):
