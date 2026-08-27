@@ -421,34 +421,24 @@ mobs that need it.
       on every hit, the powered second half that arrows and wind charges cannot
       touch, and the nether star.
 
-- [ ] Ender dragon, elder guardian, end crystal, eye of ender.
+- [x] **The ender dragon, and the fight around it**: eleven phases, the
+      twenty-four-node ring A*, the eight `EnderDragonPart` hitboxes and the id
+      block they need, and `EnderDragonFight` -- which is what makes the End an
+      ending rather than a dimension with a dragon in it. Standing in the End is
+      the whole input: the fight holds the arena loaded, builds the exit podium,
+      puts a dragon over it, counts the pillar crystals it heals from, and on
+      its death lights the portal, drops the egg, pays out the first kill's
+      twelve thousand and opens one of the twenty gateways. Four crystals on the
+      spent portal run the respawn ritual back. `dev/dragon-test.sh` proves the
+      whole chain in a live server.
+
+      Not done: `applyEffectsFromBlocks` on the dragon and the crystals, and the
+      advancement triggers the fight fires (`SUMMONED_ENTITY` on a respawn),
+      which wait on advancements below.
+
+- [ ] Elder guardian, eye of ender.
 
 ### Blocked, and honestly so
-
-- **The ender dragon.** Two of its parts do not exist in any form, and neither
-  is a dragon-shaped job:
-
-  - *Multi-part entities.* The dragon is eight `EnderDragonPart` hitboxes; the
-    client builds them itself from `dragonId + 1 ..= dragonId + 8`, and every
-    hit arrives on one of those ids. Steel has no part concept anywhere, and
-    `Player::handle_attack` resolves an id through one flat `live_by_id` map and
-    silently returns on a miss -- so a hit on the dragon's head would evaporate.
-    Routing parts back to their owner means touching `EntityManager`, the
-    interact handler and the tracker. `next_entity_id` also hands out one id at
-    a time, so the contiguous block the protocol requires is not even reservable
-    today.
-  - *The end podium.* `EnderDragonFight` places the exit portal, the egg and the
-    return gateway through `EndPodiumFeature`, and finds them again through
-    `EndPodiumFeature.getLocation`. Steel has the end spikes, the end island,
-    the end platform and the end gateway, but nothing for the podium.
-
-  What is *not* blocking it, checked rather than assumed: the End dimension is
-  real and served, the 24-node ring A* needs only `Node`/`NodeHeap`/`Path`,
-  which are all public and complete, the dragon's synced phase data is already
-  generated, and the boss bar above is ready for it. `EndCrystal` also has no
-  `hurt` override, so a crystal is currently indestructible -- small, and worth
-  doing with the fight rather than before it.
-
 
 - **Statistics and advancements.** Both need `stat_type` and `custom_stat`
   registries that come from SteelExtractor, an external tool not in this
