@@ -67,6 +67,7 @@ CLICK_PICKUP = 0
 CLICK_QUICK_MOVE = 1
 PLAY_C_SET_PASSENGERS = 107
 PLAY_C_SYSTEM_CHAT = 121
+PLAY_C_ANIMATE = 2
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
@@ -84,6 +85,7 @@ PLAY_S_CHUNK_BATCH_RECEIVED = 11
 PLAY_S_KEEP_ALIVE = 28
 PLAY_S_PLAYER_LOADED = 44
 PLAY_S_PLAYER_COMMAND = 42
+PLAY_S_PLAYER_ACTION = 41
 
 # Vanilla parity: `ServerboundPlayerCommandPacket.Action`.
 PLAYER_COMMAND_OPEN_VEHICLE_INVENTORY = 5
@@ -120,7 +122,12 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # that type to spawn, with and without sneaking, and `!spawned <type>` reports
 # whether the client has ever been told one appeared -- which answers "did this
 # exist at all" without depending on it still existing when the question is
-# asked. Those are the only way to reach an item's `use_on` and
+# asked. `!releaseuse` lets go of a drawn item, which is the only thing that
+# fires a bow; `!hop <x> <y> <z>` sends the arc of one jump without ever
+# claiming to be on the ground, which is the only way a script builds up the
+# fall distance a critical hit needs; and `!sawanimation <name>` /
+# `!forgetanimations` read and reset the `ClientboundAnimatePacket` actions the
+# client has been told about -- a critical hit leaves the server no other way. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
@@ -167,6 +174,9 @@ class Connection:
         self.entities = {}
         # The player's own entity id, which a player command has to carry.
         self.player_entity_id = None
+        # Every `ClientboundAnimatePacket` action the client has been told
+        # about, by name. A critical hit reaches a player no other way.
+        self.animations = set()
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -475,6 +485,8 @@ def run_play(connection, watch_seconds=0):
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
+        elif packet_id == PLAY_C_ANIMATE:
+            note_animation(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -523,6 +535,16 @@ def note_system_chat(payload):
         print(f"  server says: {' '.join(words)}")
 
 
+def note_animation(connection, payload):
+    """Records a `ClientboundAnimatePacket`, which is how a crit is announced."""
+    _, rest = read_varint(payload)
+    if not rest:
+        return
+    name = ANIMATIONS.get(rest[0])
+    if name:
+        connection.animations.add(name)
+
+
 def pump(connection, seconds, spawned):
     """Keeps the connection alive for `seconds`, recording anything that spawns."""
     deadline = time.monotonic() + seconds
@@ -566,6 +588,8 @@ def pump(connection, seconds, spawned):
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
+        elif packet_id == PLAY_C_ANIMATE:
+            note_animation(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -579,6 +603,22 @@ def pump(connection, seconds, spawned):
 
 # Vanilla `Direction.get3DDataValue`.
 FACES = {"down": 0, "up": 1, "north": 2, "south": 3, "west": 4, "east": 5}
+
+# `ServerboundPlayerActionPacket.Action.RELEASE_USE_ITEM`. Letting go is a
+# separate packet from starting to use, and a bow does nothing without it.
+PLAYER_ACTION_RELEASE_USE_ITEM = 5
+
+# The vertical steps of `!hop`, in blocks. Four up and three down: the rise
+# clears whatever the player was standing on and resets their fall distance the
+# way a real jump does, and the descent builds it back up. The arc deliberately
+# ends well above where it started -- a player who has landed is on the ground
+# again, and a player on the ground never crits.
+HOP_ARC = [0.42, 0.33, 0.25, 0.16, -0.08, -0.16, -0.24]
+
+# The `ClientboundAnimatePacket` actions worth naming. A critical hit and an
+# enchanted hit are only ever announced this way -- no command reports one, and
+# the damage they add is invisible from outside.
+ANIMATIONS = {0: "swing", 2: "wake up", 3: "swing off hand", 4: "crit", 5: "magic crit"}
 
 
 def packed_block_pos(x, y, z):
@@ -628,6 +668,22 @@ def send_use_item(connection, yaw, pitch):
     """
     payload = varint(0) + varint(0) + struct.pack(">ff", yaw, pitch)
     connection.send(PLAY_S_USE_ITEM, payload)
+
+
+def send_release_use_item(connection):
+    """Lets go of a drawn item, which is the only thing that fires a bow.
+
+    `!useitem` starts the draw and nothing else ends it: the server waits for
+    this before `releaseUsing` runs, so a bow held without it just stays bent.
+    """
+    payload = (
+        varint(PLAYER_ACTION_RELEASE_USE_ITEM)
+        + struct.pack(">q", packed_block_pos(0, 0, 0))
+        + varint(FACES["down"])
+        + varint(0)  # sequence
+    )
+    connection.send(PLAY_S_PLAYER_ACTION, payload)
+    print("  let go of the drawn item")
 
 
 def run_directive(connection, directive):
@@ -700,6 +756,35 @@ def run_directive(connection, directive):
     elif parts[0] == "slotstate":
         send_slot_state_changed(connection, int(parts[1]), parts[2] == "on")
         print(f"  switched slot {parts[1]} {parts[2]}")
+    elif parts[0] == "releaseuse":
+        send_release_use_item(connection)
+    elif parts[0] == "hop":
+        # One jump, sent as the arc a client sends: up, then down, never
+        # claiming to be on the ground. The descent is what builds the fall
+        # distance a critical hit needs.
+        #
+        # A target name after the position swings at it on the way down, in the
+        # same directive on purpose: the two-second settle between two commands
+        # is long enough for the server to put the player back on their feet,
+        # and a player on their feet never crits.
+        x, y, z = (float(part) for part in parts[1:4])
+        for step in HOP_ARC:
+            y += step
+            send_move_player_pos(connection, x, y, z, on_ground=False)
+            if not pump(connection, 0.05, {}):
+                fail("the connection dropped mid-jump")
+        print(f"  jumped, and is falling through {y:.2f}")
+        if len(parts) > 4:
+            send_attack(connection, parts[4], 0)
+    elif parts[0] == "sawanimation":
+        name = parts[1]
+        if name in connection.animations:
+            print(f"  the client saw a {name}")
+        else:
+            print(f"  no {name} reached the client")
+    elif parts[0] == "forgetanimations":
+        connection.animations.clear()
+        print("  forgot the animations seen so far")
     elif parts[0] == "spawned":
         name = parts[1]
         if name in connection.entities:
@@ -1011,6 +1096,8 @@ def watch_for_spawns(connection, seconds, spawned):
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
+        elif packet_id == PLAY_C_ANIMATE:
+            note_animation(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:

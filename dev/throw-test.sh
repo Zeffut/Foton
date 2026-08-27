@@ -109,6 +109,32 @@ CMDS="$CMDS;;time set day"
 # "was one ever made" is not.
 CMDS="$CMDS;;!spawned experience_orb"
 
+# A bow. Drawing and loosing are two packets: `!useitem` bends the string and
+# `!releaseuse` lets go, and the two-second settle between them is more than
+# the twenty ticks a full draw takes. Unlike a snowball an arrow stays where it
+# landed for a full minute, so it can be asked about directly.
+CMDS="$CMDS;;clear @s"
+CMDS="$CMDS;;kill @e[type=minecraft:arrow]"
+CMDS="$CMDS;;execute unless entity @e[type=minecraft:arrow] run tellraw @s \"NOARROWYET\""
+# A wall to shoot at, five blocks off. It has to land out of arm's reach: a
+# creative player walks over an arrow that fell at their feet and pockets it,
+# and the question here is whether it stuck, not whether it was collected.
+for x in -1 0 1; do
+  for y in 100 101 102; do
+    CMDS="$CMDS;;setblock $x $y 5 minecraft:stone"
+  done
+done
+CMDS="$CMDS;;give @s minecraft:bow 1"
+CMDS="$CMDS;;give @s minecraft:arrow 64"
+CMDS="$CMDS;;!hotbar 0"
+# Level, facing the wall. `handle_use_item` turns the player to these angles,
+# and the bow fires along them when the string is let go.
+CMDS="$CMDS;;!useitem 0 0"
+CMDS="$CMDS;;!releaseuse"
+CMDS="$CMDS;;!spawned arrow"
+CMDS="$CMDS;;time set day"
+CMDS="$CMDS;;execute if entity @e[type=minecraft:arrow] run tellraw @s \"ANARROWSTUCK\""
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -117,7 +143,7 @@ cleanup
 
 echo "=== what happened ==="
 grep -E "server says|saw a snowball" join.log \
-  | grep -oE "NOSNOWBALLYET|NOCHICKENYET|saw a snowball spawn|SNOWBALLSBROKE|ACHICKENHATCHED|NOORBSYET"
+  | grep -oE "NOSNOWBALLYET|NOCHICKENYET|saw a snowball spawn|SNOWBALLSBROKE|ACHICKENHATCHED|NOORBSYET|NOARROWYET|ANARROWSTUCK|saw a arrow spawn"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 
@@ -127,9 +153,15 @@ said() { grep "server says" join.log | grep -q "$1"; }
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
 said NOSNOWBALLYET   || fail "a snowball existed before one was thrown"
 said NOCHICKENYET    || fail "a chicken existed before any egg was thrown"
-grep -q "the client saw a snowball spawn" join.log \n  || fail "throwing a snowball spawned nothing"
+grep -q "the client saw a snowball spawn" join.log \
+  || fail "throwing a snowball spawned nothing"
 said SNOWBALLSBROKE  || fail "the snowballs never broke; they are still lying about"
 said ACHICKENHATCHED || fail "forty eggs hatched nothing"
 said NOORBSYET       || fail "experience orbs were lying about before any bottle"
-grep -q "the client saw a experience_orb spawn" join.log \n  || fail "the bottles broke into no experience"
+grep -q "the client saw a experience_orb spawn" join.log \
+  || fail "the bottles broke into no experience"
+said NOARROWYET      || fail "arrows were lying about before the bow was drawn"
+grep -q "the client saw a arrow spawn" join.log \
+  || fail "drawing and loosing a bow fired nothing"
+said ANARROWSTUCK    || fail "the arrow did not stick where it landed"
 echo "########## THROW TEST PASSED ##########"
