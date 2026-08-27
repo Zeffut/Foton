@@ -37,7 +37,7 @@ impl FeatureDecorationRunner {
         )
     }
 
-    pub(super) fn place_placed_feature_data(
+    pub(crate) fn place_placed_feature_data(
         region: &impl WorldGenLevel,
         registry: &Registry,
         random: &mut WorldgenRandom,

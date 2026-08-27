@@ -40,6 +40,9 @@ fi
 cp -r "$ROOT/run-offline/config" "$RUN_DIR/config"
 sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
+# A scripted client fires commands far faster than a person, and the throttle
+# decays per game tick -- so a busy server turns a normal rig into a kick.
+sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 0/' "$RUN_DIR/config/config.toml"
 
 cd "$RUN_DIR" || exit 1
 nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
