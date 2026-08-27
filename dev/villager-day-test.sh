@@ -129,8 +129,11 @@ CMDS="$CMDS;;execute if block 5 100 0 minecraft:wheat[age=7] run tellraw @s \"FI
 # 12000 onward is the REST stretch of `Timelines.VILLAGER_SCHEDULE`.
 CMDS="$CMDS;;time set 13000"
 # The bed claim is booked on a jittered scan, and then the villager has five
-# blocks to walk, so give it a good while.
-CMDS="$CMDS;;!wait 20"
+# blocks to walk, so give it a good while. Thirty rather than twenty because
+# this half failed one run in four while another build had the machine: the
+# scan's jitter plus a five-block walk is not a fixed cost, and a test that
+# only passes on an idle box is a test that lies on a busy one.
+CMDS="$CMDS;;!wait 30"
 CMDS="$CMDS;;execute if block 0 100 0 minecraft:red_bed[occupied=true] run tellraw @s \"VILLAGERINBED\""
 
 # --- morning -------------------------------------------------------------
