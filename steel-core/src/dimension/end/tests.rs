@@ -16,6 +16,7 @@ use steel_registry::{vanilla_blocks, vanilla_damage_types, vanilla_entities};
 use steel_utils::{BlockPos, ChunkPos, Direction, Downcast as _};
 
 use super::EnderDragonFight;
+use super::fight::PersistentEnderDragonFight;
 use super::respawn_stage::DragonRespawnStage;
 use crate::bootstrap::init_globals_once;
 use crate::entity::damage::DamageSource;
@@ -377,11 +378,9 @@ fn a_reloaded_fight_remembers_that_the_dragon_is_already_dead() {
     let (world, dragon_entity) = started_end("dragon_fight_persistence");
     dragon_entity.kill(world.as_ref());
 
-    let saved = world
-        .dragon_fight()
-        .expect("the End should carry a fight")
-        .to_persistent();
-    let reloaded = EnderDragonFight::from_persistent(saved, world.seed());
+    let fight = world.dragon_fight().expect("the End should carry a fight");
+    let reloaded =
+        EnderDragonFight::from_persistent(fight.to_persistent(), world.seed(), fight.origin());
 
     assert!(
         reloaded.is_dragon_killed(),
@@ -391,6 +390,26 @@ fn a_reloaded_fight_remembers_that_the_dragon_is_already_dead() {
         reloaded.has_previously_killed_dragon(),
         "a reloaded fight should remember the twelve thousand is spent"
     );
+}
+
+/// The fight is written as TOML, which is picky about what it will encode and
+/// in what order. The write happens once, at shutdown, and its failure is
+/// logged rather than raised -- so a saved form the encoder rejects would lose
+/// a world's dragon silently and only show up on the next start.
+#[test]
+fn the_saved_form_survives_the_toml_encoder() {
+    let (world, dragon_entity) = started_end("dragon_fight_toml_round_trip");
+    let fight = world.dragon_fight().expect("the End should carry a fight");
+
+    // Twice over: a fresh fight has none of its optional fields, and a fight
+    // that has lost its dragon has all of them.
+    for saved in [PersistentEnderDragonFight::default(), fight.to_persistent()] {
+        let text = toml::to_string_pretty(&saved).expect("the fight should encode as TOML");
+        let back: PersistentEnderDragonFight =
+            toml::from_str(&text).expect("the fight should decode again");
+        assert_eq!(back, saved, "the fight did not survive a round trip");
+        dragon_entity.kill(world.as_ref());
+    }
 }
 
 fn spike_top(spike: &EndSpike) -> DVec3 {

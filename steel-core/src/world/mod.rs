@@ -207,7 +207,11 @@ async fn load_dragon_fight(
     let persistent: PersistentEnderDragonFight = saved_data
         .load_or_default(saved_data_names::ENDER_DRAGON_FIGHT)
         .await?;
-    Ok(Some(EnderDragonFight::from_persistent(persistent, seed)))
+    Ok(Some(EnderDragonFight::from_persistent(
+        persistent,
+        seed,
+        BlockPos::ZERO,
+    )))
 }
 
 /// Timing information for a world game tick.

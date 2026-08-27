@@ -180,19 +180,19 @@ struct FightState {
 }
 
 impl EnderDragonFight {
-    /// Rebuilds a fight from its saved data and gives it its level.
+    /// Rebuilds a fight from its saved data and centers it.
     ///
     /// Vanilla parity: the codec constructor plus `EnderDragonFight.init`,
-    /// which `ServerLevel` calls immediately after loading the saved data.
-    /// Steel has no separate init step because a `World` never hands out a
-    /// fight before it has one.
+    /// which `ServerLevel` calls immediately after loading the saved data
+    /// with the level, its seed and `BlockPos.ZERO`. Steel has no separate
+    /// init step because a `World` never hands out a fight before it has
+    /// one, and the level itself arrives per call rather than being held.
     #[must_use]
-    pub fn from_persistent(persistent: PersistentEnderDragonFight, seed: i64) -> Self {
-        let origin = BlockPos::new(
-            persistent.origin[0],
-            persistent.origin[1],
-            persistent.origin[2],
-        );
+    pub fn from_persistent(
+        persistent: PersistentEnderDragonFight,
+        seed: i64,
+        origin: BlockPos,
+    ) -> Self {
         let dragon_event = ServerBossEvent::with_random_id(
             entity_type_name(&vanilla_entities::ENDER_DRAGON),
             BossBarColor::Pink,
@@ -245,7 +245,6 @@ impl EnderDragonFight {
             exit_portal_location: state
                 .exit_portal_location
                 .map(|pos| [pos.x(), pos.y(), pos.z()]),
-            origin: [self.origin.x(), self.origin.y(), self.origin.z()],
             gateways: state.gateways.clone(),
             respawn_crystals: state.respawn_crystals.clone(),
         }
@@ -1057,10 +1056,9 @@ fn exit_portal_pattern() -> BlockPattern {
 /// The saved form of a fight.
 ///
 /// The field names follow vanilla's `EnderDragonFight.CODEC` so a reader who
-/// knows the vanilla file knows this one. `origin` is Steel's own addition: the
-/// level hands the origin in at construction in vanilla, and Steel would rather
-/// a reloaded fight kept the one it was built with than take it on faith.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// knows the vanilla file knows this one. The origin is not among them, here
+/// as in vanilla: the level supplies it on every load.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersistentEnderDragonFight {
     #[serde(default = "yes")]
     needs_state_scanning: bool,
@@ -1070,7 +1068,6 @@ pub struct PersistentEnderDragonFight {
     previously_killed: bool,
     #[serde(default)]
     respawn_time: i32,
-    origin: [i32; 3],
     #[serde(default)]
     gateways: Vec<i32>,
     #[serde(default)]
@@ -1096,7 +1093,6 @@ impl Default for PersistentEnderDragonFight {
             dragon_killed: false,
             previously_killed: false,
             respawn_time: 0,
-            origin: [0, 0, 0],
             gateways: Vec::new(),
             respawn_crystals: Vec::new(),
             respawn_stage: None,
