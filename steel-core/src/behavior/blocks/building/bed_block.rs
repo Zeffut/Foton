@@ -6,9 +6,9 @@ use crate::{
         EntityFallDamage, EntityFallOnContext, EntityLandingContext, InteractionResult,
         InventoryAccess, PlacementSource,
     },
-    entity::{Entity, ai::path::PathComputationType, dismount_helper},
+    entity::{Entity, ai::path::PathComputationType, damage::DamageSource, dismount_helper},
     player::Player,
-    world::{ScheduledTickAccess, World},
+    world::{ScheduledTickAccess, World, explosion::ExplosionSpec},
 };
 use glam::DVec3;
 use steel_macros::block_behavior;
@@ -16,20 +16,21 @@ use steel_registry::blocks::properties::{BedPart, BoolProperty, EnumProperty};
 use steel_registry::blocks::{
     BlockRef, block_state_ext::BlockStateExt, properties::BlockStateProperties,
 };
-use steel_registry::vanilla_blocks;
+use steel_registry::vanilla_game_rules::BLOCK_EXPLOSION_DROP_DECAY;
+use steel_registry::{vanilla_blocks, vanilla_damage_types};
 use steel_utils::{BlockPos, BlockStateId, Direction, types::UpdateFlags};
 use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 
 const BED_BOUNCE_SCALE: f64 = 0.660_000_026_226_043_7;
+/// Vanilla parity: the `5.0F` of the explosion in `BedBlock.useWithoutItem` --
+/// the same blast a respawn anchor makes where anchors do not work.
+const BAD_BED_EXPLOSION_RADIUS: f32 = 5.0;
 const BED_PART: &EnumProperty<BedPart> = &BlockStateProperties::BED_PART;
 const FACING: &EnumProperty<Direction> = &BlockStateProperties::HORIZONTAL_FACING;
 const OCCUPIED: &BoolProperty = &BlockStateProperties::OCCUPIED;
 /// Behavior for beds
 ///
-/// TODO: Mirror vanilla `BedBlock.useWithoutItem` invalid-dimension explosion
-/// once Steel has a strict `World::explode` foundation: show the bed-rule error
-/// message, remove both bed halves, and use bad-respawn-point explosion damage.
 /// TODO: Mirror vanilla `BedBlock.kickVillagerOutOfBed` once villager sleeping
 /// entities exist.
 #[block_behavior]
@@ -76,6 +77,63 @@ impl BedBlock {
         let head_pos = state.get_value(FACING).relative(pos);
         let head_state = world.get_block_state(head_pos);
         (head_state.get_block() == self.block).then_some((head_state, head_pos))
+    }
+
+    /// Blows the bed up under a dimension whose bed rule says it explodes.
+    ///
+    /// Vanilla parity: the `bedRule.explodes()` branch of
+    /// `BedBlock.useWithoutItem`. The order matters: the message, then both
+    /// halves removed, and only then the blast -- so the crater is not asked to
+    /// break a bed that is already gone.
+    fn explode(
+        &self,
+        world: &Arc<World>,
+        head_state: BlockStateId,
+        head_pos: BlockPos,
+        player: &Player,
+    ) {
+        if let Some(key) = world.dimension_type.bed_rule.error_message_key {
+            player.send_overlay_message(&TextComponent::translated(TranslatedMessage {
+                key: key.into(),
+                fallback: None,
+                args: None,
+            }));
+        }
+
+        world.set_block(
+            head_pos,
+            vanilla_blocks::AIR.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        );
+        let foot_pos = head_state.get_value(FACING).opposite().relative(head_pos);
+        if world.get_block_state(foot_pos).get_block() == self.block {
+            world.set_block(
+                foot_pos,
+                vanilla_blocks::AIR.default_state(),
+                UpdateFlags::UPDATE_ALL,
+            );
+        }
+
+        // Vanilla's `level.explode(null, badRespawnPointExplosion(pos), null,
+        // pos, 5.0F, true, ExplosionInteraction.BLOCK)`.
+        let center = DVec3::new(
+            f64::from(head_pos.x()) + 0.5,
+            f64::from(head_pos.y()) + 0.5,
+            f64::from(head_pos.z()) + 0.5,
+        );
+        world.explode(
+            ExplosionSpec::new(
+                None,
+                None,
+                Some(DamageSource::environment(
+                    &vanilla_damage_types::BAD_RESPAWN_POINT,
+                )),
+                BAD_BED_EXPLOSION_RADIUS,
+                true,
+                world.explosion_destroy_type(&BLOCK_EXPLOSION_DROP_DECAY),
+            ),
+            center,
+        );
     }
 
     const fn neighbor_direction(part: &BedPart, facing: Direction) -> Direction {
@@ -359,7 +417,7 @@ impl BlockBehavior for BedBlock {
         };
 
         if world.dimension_type.bed_rule.explodes {
-            // TODO: When WOrld::explode foundation exists display the bedrule error remove both halves and create the bad respawn point explosion
+            self.explode(world, head_state, head_pos, player);
             return InteractionResult::SuccessServer;
         }
 
@@ -448,5 +506,82 @@ mod tests {
             BedBlock::velocity_after_fall(landing(DVec3::new(1.0, 0.5, -2.0), true, false));
 
         assert_eq!(velocity, DVec3::new(1.0, 0.5, -2.0));
+    }
+
+    /// A bed used where beds explode takes itself, both halves, and whatever
+    /// was standing next to it.
+    ///
+    /// The note that stood here said this needed a `World::explode` Steel did
+    /// not have. It has had one for a while -- the respawn anchor makes the
+    /// same blast -- so the bed was simply inert: right-clicking one in the End
+    /// or the Nether did nothing at all.
+    #[test]
+    fn a_bed_used_where_beds_explode_takes_the_room_with_it() {
+        use steel_registry::init_vanilla_registry;
+        use steel_utils::{ChunkPos, types::InteractionHand};
+
+        use crate::behavior::init_behaviors;
+        use crate::test_support::{
+            TestPlayerBuilder, fresh_end_test_world, insert_ready_full_chunk,
+        };
+        use crate::world::LevelReader as _;
+
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_end_test_world("bed_explodes_where_it_must");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        assert!(
+            world.dimension_type.bed_rule.explodes,
+            "the End is one of the two places a bed goes off"
+        );
+
+        let foot_pos = BlockPos::new(8, 64, 8);
+        let head_pos = BlockPos::new(8, 64, 7);
+        let bystander = BlockPos::new(8, 64, 9);
+        let behavior = BedBlock::new(&vanilla_blocks::RED_BED);
+        let foot_state = vanilla_blocks::RED_BED
+            .default_state()
+            .set_value(FACING, Direction::North)
+            .set_value(BED_PART, BedPart::Foot);
+        world.set_block(foot_pos, foot_state, UpdateFlags::UPDATE_NONE);
+        world.set_block(
+            head_pos,
+            foot_state.set_value(BED_PART, BedPart::Head),
+            UpdateFlags::UPDATE_NONE,
+        );
+        world.set_block(
+            bystander,
+            vanilla_blocks::STONE.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        );
+
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "Sleeper", 7).build();
+        let mut inv = InventoryAccess::new(player.inventory.clone(), InteractionHand::MainHand);
+        let hit = BlockHitResult {
+            location: DVec3::new(8.5, 64.5, 8.5),
+            direction: Direction::Up,
+            block_pos: foot_pos,
+            miss: false,
+            inside: false,
+            world_border_hit: false,
+        };
+
+        assert_eq!(
+            behavior.use_without_item(foot_state, &world, foot_pos, &player, &hit, &mut inv),
+            InteractionResult::SuccessServer
+        );
+
+        assert!(
+            world.get_block_state(head_pos).is_air(),
+            "the head half should be gone"
+        );
+        assert!(
+            world.get_block_state(foot_pos).is_air(),
+            "and so should the foot"
+        );
+        assert!(
+            world.get_block_state(bystander).is_air(),
+            "a radius-5 blast one block away takes stone with it"
+        );
     }
 }
