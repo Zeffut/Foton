@@ -21,7 +21,11 @@ use crate::entity::ai::brain::Activity;
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::gossip::{GossipType, ReputationEventType};
 use crate::entity::entities::{VillagerEntity, ZombieEntity};
-use crate::entity::{AgeableMob, LivingEntity, Mob, SharedEntity, next_entity_id};
+use crate::entity::{
+    AgeableMob, EquipmentSlot, InventoryCarrier as _, LivingEntity, Mob, SharedEntity,
+    next_entity_id,
+};
+use crate::inventory::container::Container as _;
 use crate::poi::poi_storage::OccupationStatus;
 use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 use crate::trading::Merchant as _;
@@ -513,6 +517,125 @@ fn set_time_of_day(world: &Arc<World>, ticks: i64) {
     );
 }
 
+/// The container the rest of the villager's day hangs off.
+///
+/// `GoToWantedItem` walks a villager to a dropped stack, `makeBread` turns the
+/// wheat in that stack into loaves and `TradeWithVillager` hands them on -- and
+/// every one of them is inert unless the tick can actually put something in the
+/// container. Three pieces have to agree for that: `canPickUpLoot`, the
+/// `wantsToPickUp` override, and the `InventoryCarrier` seam that stows the
+/// stack instead of equipping it.
+///
+/// This enters only through `villager.tick()`, the door the server tick uses.
+#[test]
+fn a_villager_stows_the_bread_it_walks_over() {
+    let world = villager_world("villager_picks_up_bread");
+    let villager = spawn_villager(&world);
+    let dropped = world
+        .spawn_item(SPAWN, ItemStack::with_count(&vanilla_items::BREAD, 3))
+        .expect("the test chunk accepts an item entity");
+
+    let taken = run_ticks_until(&world, &villager, 20, || dropped.is_removed());
+
+    assert!(
+        taken,
+        "a villager standing on bread should have picked it up"
+    );
+    assert_eq!(
+        villager.carried_inventory().lock().get_item(0).count(),
+        3,
+        "the bread has to land in the villager's own container, not its hands"
+    );
+    assert!(
+        LivingEntity::get_item_by_slot(villager.as_ref(), EquipmentSlot::MainHand).is_empty(),
+        "equipping the bread is exactly the failure the InventoryCarrier seam avoids"
+    );
+}
+
+/// Vanilla parity: the `itemStack.is(ItemTags.VILLAGER_PICKS_UP)` half of
+/// `Villager.wantsToPickUp`. Without it a villager with `canPickUpLoot` set
+/// would hoover up whatever fell near it.
+#[test]
+fn a_villager_leaves_alone_what_it_does_not_collect() {
+    let world = villager_world("villager_ignores_diamond");
+    let villager = spawn_villager(&world);
+    let dropped = world
+        .spawn_item(SPAWN, ItemStack::new(&vanilla_items::DIAMOND))
+        .expect("the test chunk accepts an item entity");
+
+    run_ticks(&world, &villager, 20);
+
+    assert!(
+        !dropped.is_removed(),
+        "a diamond is not a villager's business"
+    );
+    assert!(
+        villager.carried_inventory().lock().is_empty(),
+        "nothing outside VILLAGER_PICKS_UP should reach the container"
+    );
+}
+
+/// Vanilla parity: the `profession().requestedItems().contains(item)` half of
+/// `Villager.wantsToPickUp`. Bone meal is the one item that half decides on its
+/// own -- it is not in `VILLAGER_PICKS_UP`, and only the farmer requests it.
+#[test]
+fn only_a_farmer_picks_up_bone_meal() {
+    let world = villager_world("villager_bone_meal_is_the_farmers");
+    let villager = spawn_villager(&world);
+    let dropped = world
+        .spawn_item(SPAWN, ItemStack::new(&vanilla_items::BONE_MEAL))
+        .expect("the test chunk accepts an item entity");
+
+    run_ticks(&world, &villager, 20);
+    assert!(
+        !dropped.is_removed(),
+        "a villager with no profession requests nothing"
+    );
+
+    villager.set_profession(&vanilla_villager_professions::FARMER);
+    let taken = run_ticks_until(&world, &villager, 20, || dropped.is_removed());
+
+    assert!(taken, "a farmer requests bone meal and should take it");
+}
+
+/// The eight slots have to survive a save and load, or a villager that spent an
+/// afternoon gathering wheat arrives at tomorrow empty-handed.
+///
+/// Vanilla parity: `AbstractVillager.addAdditionalSaveData`, which writes the
+/// carried inventory under the shared `Inventory` tag.
+#[test]
+fn a_villager_carries_its_inventory_through_a_save_and_load() {
+    let world = villager_world("villager_inventory_round_trip");
+    let villager = spawn_villager(&world);
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(2, ItemStack::with_count(&vanilla_items::WHEAT, 7));
+
+    let mut nbt = NbtCompound::new();
+    villager.save_additional(&mut nbt);
+
+    let mut bytes = Vec::new();
+    nbt.write(&mut bytes);
+    let borrowed = read_borrowed_compound(&mut Cursor::new(bytes.as_slice()))
+        .unwrap_or_else(|error| panic!("villager nbt should reborrow: {error}"));
+
+    let restored = Arc::new(VillagerEntity::new(
+        &vanilla_entities::VILLAGER,
+        next_entity_id(),
+        SPAWN,
+        Arc::downgrade(&world),
+    ));
+    restored.load_additional((&borrowed).into());
+
+    let inventory = restored.carried_inventory().lock();
+    let stack = inventory.get_item(0);
+    assert!(
+        stack.is(&vanilla_items::WHEAT) && stack.count() == 7,
+        "the wheat should come back -- vanilla's `fromItemList` re-adds it, so it compacts to the first free slot"
+    );
+}
+
 /// The activity the villager's own brain is currently in.
 fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
     Mob::brain(villager.as_ref())?.active_non_core_activity()
@@ -664,7 +787,10 @@ const TICKS_TO_RAISE_A_CHILD: i32 = 800;
 /// Vanilla parity: `Villager.canBreed` adds the food level to the food points
 /// in the inventory and wants twelve; bread is four points each.
 fn feed_for_breeding(villager: &Arc<VillagerEntity>) {
-    villager.inventory().lock()[0] = ItemStack::with_count(&vanilla_items::BREAD, 3);
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::BREAD, 3));
     assert!(
         villager.can_breed(),
         "three bread is the breeding threshold"
