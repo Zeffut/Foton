@@ -24,7 +24,9 @@
 //! ```
 
 pub(crate) mod block_state_nbt;
+mod components;
 pub mod entities;
+mod nameable;
 mod randomizable_container;
 mod registry;
 mod storage;
@@ -40,13 +42,21 @@ use std::{
     },
 };
 
-use simdnbt::borrow::BaseNbtCompound as BorrowedNbtCompound;
+use simdnbt::borrow::{
+    BaseNbtCompound as BorrowedNbtCompound, NbtCompound as BorrowedNbtCompoundView,
+};
 use simdnbt::owned::NbtCompound;
+use simdnbt::{FromNbtTag as _, ToNbtTag as _};
 use smallvec::SmallVec;
 use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::data_components::DataComponentMap;
+use steel_registry::item_stack::ItemStack;
 use steel_utils::{BlockPos, BlockStateId, ErasedType, locks::SyncMutex};
+use text_components::TextComponent;
 
+pub use components::ImplicitComponentInput;
+pub use nameable::BlockEntityName;
 pub use randomizable_container::ContainerLoot;
 pub use registry::{BLOCK_ENTITIES, BlockEntityFactory, BlockEntityRegistry, init_block_entities};
 pub(crate) use storage::{
@@ -172,6 +182,9 @@ pub struct BlockEntityBase {
     /// things it drives -- a chest's open sound, a barrel's `open` state and a
     /// trapped chest's signal -- all hang off the block, not off the inventory.
     open_count: AtomicI32,
+    /// Vanilla parity: `BlockEntity.components`. What an item put on this block
+    /// entity that no `apply_implicit_components` override claimed.
+    components: SyncMutex<DataComponentMap>,
 }
 
 struct BlockEntityLifecycleDispatchGuard<'a> {
@@ -215,6 +228,7 @@ impl BlockEntityBase {
             pos,
             removed: AtomicBool::new(false),
             open_count: AtomicI32::new(0),
+            components: SyncMutex::new(DataComponentMap::new()),
             lifecycle: SyncMutex::new(BlockEntityLifecycle {
                 block_state,
                 events: SmallVec::new(),
@@ -226,6 +240,17 @@ impl BlockEntityBase {
     #[must_use]
     const fn block_entity_type(&self) -> BlockEntityTypeRef {
         self.block_entity_type
+    }
+
+    /// Vanilla parity: `BlockEntity.components()`.
+    #[must_use]
+    fn components(&self) -> DataComponentMap {
+        self.components.lock().clone()
+    }
+
+    /// Vanilla parity: `BlockEntity.setComponents`.
+    fn set_components(&self, components: DataComponentMap) {
+        *self.components.lock() = components;
     }
 
     #[must_use]
@@ -488,6 +513,20 @@ pub trait BlockEntity: ErasedType + Send + Sync + 'static {
     /// Called when saving the block entity to disk.
     fn save_additional(&self, nbt: &mut NbtCompound);
 
+    /// Reads the stored components alongside the entity's own data.
+    ///
+    /// Vanilla parity: `BlockEntity.loadWithComponents`, the load path every
+    /// block entity coming off disk or out of a chunk packet goes through.
+    fn load_with_components(&self, nbt: &BorrowedNbtCompound<'_>) {
+        self.load_additional(nbt);
+        let view: BorrowedNbtCompoundView<'_, '_> = nbt.into();
+        let components = view
+            .get("components")
+            .and_then(DataComponentMap::from_nbt_tag)
+            .unwrap_or_default();
+        self.base().set_components(components);
+    }
+
     /// Saves only entity-specific data, excluding vanilla type and position metadata.
     fn save_custom_only(&self) -> NbtCompound {
         let mut nbt = NbtCompound::new();
@@ -498,18 +537,81 @@ pub trait BlockEntity: ErasedType + Send + Sync + 'static {
         nbt
     }
 
+    /// Saves the entity's own data together with its stored components.
+    ///
+    /// Vanilla parity: `BlockEntity.saveWithoutMetadata`. Steel keeps the type
+    /// and position outside the compound, so this is the payload the chunk
+    /// writer stores.
+    fn save_without_metadata(&self) -> NbtCompound {
+        let mut nbt = self.save_custom_only();
+        // `insert` appends rather than replaces, and readers take the first
+        // match, so any `components` an override wrote has to go first.
+        while nbt.remove("components").is_some() {}
+        nbt.insert("components", self.base().components().to_nbt_tag());
+        nbt
+    }
+
     /// Saves command-visible data together with vanilla block-entity metadata.
     fn save_with_full_metadata(&self) -> NbtCompound {
-        // TODO: Include stored block-entity components once Steel has Vanilla's
-        // block-entity component foundation. NBT predicates targeting the
-        // `components` field cannot match exactly until then.
-        let mut nbt = self.save_custom_only();
+        let mut nbt = self.save_without_metadata();
         let pos = self.get_block_pos();
         nbt.insert("id", self.get_type().key.to_string());
         nbt.insert("x", pos.x());
         nbt.insert("y", pos.y());
         nbt.insert("z", pos.z());
         nbt
+    }
+
+    /// Rebuilds the components this block entity already stores as fields.
+    ///
+    /// Vanilla parity: `BlockEntity.collectImplicitComponents`. Setting a
+    /// component to `None` removes it, which is what lets an unnamed container
+    /// override a name the stored map still carries.
+    #[expect(
+        unused_variables,
+        reason = "default trait impl; parameter used by overrides"
+    )]
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {}
+
+    /// Takes over the components of the item this block entity was placed from.
+    ///
+    /// Vanilla parity: `BlockEntity.applyImplicitComponents`. Every component
+    /// an override reads through `input` is one it has taken responsibility
+    /// for, and is dropped from the stored map.
+    #[expect(
+        unused_variables,
+        reason = "default trait impl; parameter used by overrides"
+    )]
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {}
+
+    /// The title a menu opened on this block entity carries.
+    ///
+    /// Vanilla parity: `MenuProvider.getDisplayName`, which
+    /// `BaseContainerBlockEntity` answers with its custom name or the block's
+    /// own. Vanilla's `getDefaultName` lives on the block entity; in Steel the
+    /// title strings live with the block behavior that opens the menu, so the
+    /// default arrives from the caller.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        default_name
+    }
+
+    /// Everything this block entity would put on the item it becomes.
+    ///
+    /// Vanilla parity: `BlockEntity.collectComponents`, which is what the
+    /// `minecraft:copy_components` loot function reads.
+    fn collect_components(&self) -> DataComponentMap {
+        let mut components = self.base().components();
+        self.collect_implicit_components(&mut components);
+        components
+    }
+
+    /// Applies a placed item's components to this block entity.
+    ///
+    /// Vanilla parity: `BlockEntity.applyComponentsFromItemStack`.
+    fn apply_components_from_item_stack(&self, stack: &ItemStack) {
+        let input = ImplicitComponentInput::new(stack);
+        self.apply_implicit_components(&input);
+        self.base().set_components(input.leftover_components());
     }
 
     /// Returns the NBT data to send to clients for initial sync.

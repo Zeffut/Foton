@@ -37,9 +37,10 @@ impl BedItem {
 
 impl ItemBehavior for BedItem {
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
-        self.base
-            .place_with(context.build_place_context(), |place_context, state| {
-                Self::place_block(place_context, state)
-            })
+        self.base.place_with(
+            context.build_place_context(),
+            |place_context| self.base.placement_state(place_context),
+            Self::place_block,
+        )
     }
 }

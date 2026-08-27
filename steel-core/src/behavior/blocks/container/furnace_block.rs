@@ -82,7 +82,7 @@ impl AbstractFurnaceBlock {
         let shared_entity = block_entity.clone();
         // The title is owned by the menu, so the shared behavior hands it a copy.
         player.open_menu(
-            TextComponent::translated(self.title.clone()),
+            block_entity.display_name(TextComponent::translated(self.title.clone())),
             move |context| {
                 furnace(
                     inventory,

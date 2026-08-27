@@ -6,10 +6,10 @@
 
 use std::sync::Weak;
 
-use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
+use simdnbt::borrow::BaseNbtCompound as BorrowedNbtCompound;
 use simdnbt::owned::NbtCompound;
+use steel_registry::data_components::vanilla_components::CUSTOM_NAME;
 use steel_registry::vanilla_block_entity_types;
-use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 use text_components::TextComponent;
 
@@ -17,10 +17,13 @@ use crate::block_entity::{BlockEntity, BlockEntityBase};
 use crate::world::World;
 
 /// A copper golem statue.
+///
+/// The name lives in the block entity's stored component map rather than in a
+/// field of its own: vanilla's `createStatue` writes straight into
+/// `setComponents`, which is why a statue's name survives being mined without
+/// any `collectImplicitComponents` override.
 pub struct CopperGolemStatueBlockEntity {
     base: BlockEntityBase,
-    /// The name the golem was carrying when it seized up.
-    custom_name: SyncMutex<Option<TextComponent>>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies
@@ -41,22 +44,25 @@ impl CopperGolemStatueBlockEntity {
                 pos,
                 state,
             ),
-            custom_name: SyncMutex::new(None),
         }
     }
 
     /// Returns the name the frozen golem was carrying.
+    ///
+    /// Vanilla parity: the `components().get(CUSTOM_NAME)` of `removeStatue`.
     #[must_use]
     pub fn custom_name(&self) -> Option<TextComponent> {
-        self.custom_name.lock().clone()
+        self.base.components().get(CUSTOM_NAME)
     }
 
     /// Records the name the frozen golem was carrying.
     ///
     /// Vanilla parity: `CopperGolemStatueBlockEntity.createStatue`, which
-    /// copies the golem's `CUSTOM_NAME` component onto the block entity.
+    /// copies the golem's `CUSTOM_NAME` component into the stored map.
     pub fn create_statue(&self, custom_name: Option<TextComponent>) {
-        *self.custom_name.lock() = custom_name;
+        let mut components = self.base.components();
+        components.set(CUSTOM_NAME, custom_name);
+        self.base.set_components(components);
         self.set_changed();
     }
 }
@@ -66,26 +72,98 @@ impl BlockEntity for CopperGolemStatueBlockEntity {
         &self.base
     }
 
-    fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
-        let nbt: NbtCompoundView<'_, '_> = nbt.into();
-        *self.custom_name.lock() = nbt
-            .get("custom_name")
-            .map(|tag| tag.to_owned())
-            .as_ref()
-            .and_then(TextComponent::from_nbt);
+    /// The statue keeps nothing of its own: the name it remembers rides in the
+    /// stored component map, which the base load and save already carry.
+    fn load_additional(&self, _nbt: &BorrowedNbtCompound<'_>) {}
+
+    fn save_additional(&self, _nbt: &mut NbtCompound) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use simdnbt::borrow::read_compound as read_borrowed_compound;
+    use steel_registry::data_components::vanilla_components::CUSTOM_NAME;
+    use steel_registry::item_stack::ItemStack;
+    use steel_registry::{init_vanilla_registry, vanilla_blocks};
+    use steel_utils::types::UpdateFlags;
+    use steel_utils::{ChunkPos, Downcast as _};
+
+    use super::*;
+    use crate::behavior::{BlockLootContext, init_behaviors};
+    use crate::block_entity::init_block_entities;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    /// The statue is the one block entity that keeps its name in the stored
+    /// component map instead of a field of its own, so it is also the proof
+    /// that the map reaches both the chunk file and the loot roll.
+    #[test]
+    fn a_named_statue_keeps_its_name_through_a_save_and_a_break() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world("copper_golem_statue_name");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        let state = vanilla_blocks::COPPER_GOLEM_STATUE.default_state();
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_ALL));
+
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("a placed statue should have a block entity"));
+        let frozen_golem = block_entity
+            .downcast_ref::<CopperGolemStatueBlockEntity>()
+            .unwrap_or_else(|| panic!("the statue's block entity should be a statue"));
+        frozen_golem.create_statue(Some(TextComponent::plain("Rusty")));
+
+        // The chunk writer stores `saveWithoutMetadata`, which is where the
+        // component map rides.
+        let saved = block_entity.save_without_metadata();
+        let mut bytes = Vec::new();
+        saved.write(&mut bytes);
+        let borrowed =
+            read_borrowed_compound(&mut Cursor::new(bytes.as_slice())).expect("statue nbt");
+        let reloaded = CopperGolemStatueBlockEntity::new(Weak::new(), pos, state);
+        reloaded.load_with_components(&borrowed);
+        assert_eq!(
+            reloaded.custom_name(),
+            Some(TextComponent::plain("Rusty")),
+            "the stored components have to come back off disk"
+        );
+
+        let drops = BlockLootContext::new(&world, pos)
+            .with_tool(&ItemStack::empty())
+            .with_block_entity(Some(&block_entity))
+            .get_drops(state);
+        assert_eq!(drops.len(), 1, "a statue drops exactly one statue");
+        assert_eq!(
+            drops[0].get(CUSTOM_NAME).cloned(),
+            Some(TextComponent::plain("Rusty")),
+            "`copy_components` reads the stored map through `collectComponents`"
+        );
     }
 
-    fn save_additional(&self, nbt: &mut NbtCompound) {
-        if let Some(name) = self.custom_name.lock().as_ref() {
-            nbt.insert("custom_name", name.to_codec_nbt());
-        }
-    }
+    /// The control: a statue nobody named has no name to give.
+    #[test]
+    fn a_plain_statue_drops_unnamed() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world("copper_golem_statue_plain");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        let state = vanilla_blocks::COPPER_GOLEM_STATUE.default_state();
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_ALL));
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("a placed statue should have a block entity"));
 
-    /// Vanilla parity: `CopperGolemStatueBlockEntity.getUpdatePacket`, which
-    /// sends the whole saved compound so the name plate shows up with the chunk.
-    fn get_update_tag(&self) -> Option<NbtCompound> {
-        let mut nbt = NbtCompound::new();
-        self.save_additional(&mut nbt);
-        Some(nbt)
+        let drops = BlockLootContext::new(&world, pos)
+            .with_tool(&ItemStack::empty())
+            .with_block_entity(Some(&block_entity))
+            .get_drops(state);
+        assert_eq!(drops.len(), 1);
+        assert!(drops[0].get(CUSTOM_NAME).is_none());
     }
 }

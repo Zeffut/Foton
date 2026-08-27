@@ -43,6 +43,12 @@ pub struct BlockConfig {
     pub replaceable: bool,
     #[serde(default, rename = "sound_type")]
     pub sound_type: Option<Cow<'static, str>>,
+    /// Vanilla `BlockBehaviour.drops`, which is not always `blocks/<block id>`:
+    /// every wall-mounted form is registered with `dropsLike` and points at the
+    /// standing form's table. Absent for the blocks registered with
+    /// `noLootTable`.
+    #[serde(default)]
+    pub loot_table: Option<Cow<'static, str>>,
 }
 
 impl BlockConfig {
@@ -71,6 +77,7 @@ impl BlockConfig {
             instrument: Cow::Borrowed("HARP"),
             replaceable: false,
             sound_type: None,
+            loot_table: None,
         }
     }
 }
@@ -254,6 +261,22 @@ fn offset_type_to_tokens(offset_type: &str) -> TokenStream {
     }
 }
 
+/// Names the generated constant of one loot table id.
+///
+/// The loot table generator derives its constant names from the datapack file
+/// path, so `minecraft:blocks/white_banner` has to arrive at the same
+/// `BLOCKS_WHITE_BANNER` here. A namespace other than `minecraft` would name a
+/// table the generator never wrote.
+fn loot_table_const(key: &str) -> Ident {
+    let path = key
+        .strip_prefix("minecraft:")
+        .unwrap_or_else(|| panic!("extracted block loot table {key} is not a vanilla loot table"));
+    Ident::new(
+        &path.replace('/', "_").to_shouty_snake_case(),
+        Span::call_site(),
+    )
+}
+
 /// Generates builder method calls for properties that differ from defaults
 fn generate_builder_calls(bp: &BlockConfig, default_props: &BlockConfig) -> Vec<TokenStream> {
     let mut builder_calls = Vec::new();
@@ -345,6 +368,10 @@ fn generate_builder_calls(bp: &BlockConfig, default_props: &BlockConfig) -> Vec<
     if let Some(sound_type) = &bp.sound_type {
         let sound_type_ident = Ident::new(sound_type, Span::call_site());
         builder_calls.push(quote! { .sound_type(crate::sound_types::#sound_type_ident) });
+    }
+    if let Some(loot_table) = &bp.loot_table {
+        let const_ident = loot_table_const(loot_table);
+        builder_calls.push(quote! { .loot_table(&crate::vanilla_loot_tables::#const_ident) });
     }
 
     builder_calls

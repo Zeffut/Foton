@@ -22,7 +22,7 @@ use steel_registry::sound_event::SoundEventRef;
 use steel_registry::sound_events;
 use steel_registry::vanilla_block_entity_types;
 use steel_registry::vanilla_block_tags::BlockTag;
-use steel_utils::{BlockPos, BlockStateId, translations};
+use steel_utils::{BlockPos, BlockStateId, Downcast as _, translations};
 use text_components::TextComponent;
 
 use crate::behavior::InventoryAccess;
@@ -31,6 +31,7 @@ use crate::behavior::block::{
 };
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::block_entity::BLOCK_ENTITIES;
+use crate::block_entity::entities::ChestBlockEntity;
 use crate::fluid::get_fluid_state;
 use crate::inventory::container::{Container, calculate_redstone_signal_from_containers};
 use crate::inventory::lock::{AttachedContainers, ContainerLockGuard, ContainerRef};
@@ -296,6 +297,41 @@ impl ChestBlock {
             Some((neighbour, Some(own)))
         }
     }
+
+    /// Vanilla parity: `ChestBlockEntity.getDefaultName` through
+    /// `BaseContainerBlockEntity.getName`.
+    fn single_chest_title(world: &Arc<World>, pos: BlockPos) -> TextComponent {
+        let default = TextComponent::translated(translations::CONTAINER_CHEST.msg());
+        world
+            .get_block_entity(pos)
+            .map_or(default.clone(), |entity| entity.display_name(default))
+    }
+
+    /// Vanilla parity: `DoubleSidedInventory.getDisplayName`, which takes the
+    /// first named half and only falls back to "Large Chest" when neither is.
+    ///
+    /// The halves are ordered exactly as [`Self::combine`] orders them, because
+    /// which one wins is visible whenever the two carry different names.
+    fn double_chest_title(state: BlockStateId, world: &Arc<World>, pos: BlockPos) -> TextComponent {
+        let neighbour_pos = pos.relative(Self::connected_direction(state));
+        let (first_pos, second_pos) = if state.get_value(TYPE) == ChestType::Right {
+            (pos, neighbour_pos)
+        } else {
+            (neighbour_pos, pos)
+        };
+
+        for half in [first_pos, second_pos] {
+            if let Some(name) = world.get_block_entity(half).and_then(|entity| {
+                entity
+                    .downcast_ref::<ChestBlockEntity>()
+                    .and_then(ChestBlockEntity::custom_name)
+            }) {
+                return name;
+            }
+        }
+
+        TextComponent::translated(translations::CONTAINER_CHEST_DOUBLE.msg())
+    }
 }
 
 impl BlockBehavior for ChestBlock {
@@ -389,13 +425,12 @@ impl BlockBehavior for ChestBlock {
         let inventory = player.inventory.clone();
         match second {
             Some(second) => player.open_menu(
-                TextComponent::translated(translations::CONTAINER_CHEST_DOUBLE.msg()),
+                Self::double_chest_title(state, world, pos),
                 move |context| double_chest(inventory, context.container_id, first, second),
             ),
-            None => player.open_menu(
-                TextComponent::translated(translations::CONTAINER_CHEST.msg()),
-                move |context| chest(inventory, context.container_id, first, CHEST_ROWS),
-            ),
+            None => player.open_menu(Self::single_chest_title(world, pos), move |context| {
+                chest(inventory, context.container_id, first, CHEST_ROWS)
+            }),
         }
 
         // The open count, and with it the lid animation and the open/close

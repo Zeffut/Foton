@@ -9,6 +9,7 @@ use std::io::Cursor;
 use std::mem;
 use std::sync::{Arc, Weak};
 
+use simdnbt::ToNbtTag as _;
 use simdnbt::borrow::{
     BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView,
     read_compound as read_borrowed_compound,
@@ -18,6 +19,8 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::IntProperty;
 use steel_registry::blocks::properties::{BlockStateProperties, Direction, EnumProperty};
+use steel_registry::data_components::components::{BeehiveOccupant, Bees, EntityData};
+use steel_registry::data_components::{DataComponentMap, vanilla_components};
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::{
     REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_block_entity_types, vanilla_blocks,
@@ -29,7 +32,7 @@ use steel_utils::{
 };
 
 use crate::behavior::blocks::building::campfire_block::is_smokey_pos;
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ImplicitComponentInput};
 use crate::entity::entities::BeeEntity;
 use crate::entity::{
     AgeableMob, Animal, ENTITIES, Entity, Mob, RemovalReason, SharedEntity, next_entity_id,
@@ -192,6 +195,33 @@ impl BeeOccupant {
         self.entity_data
             .byte("HasNectar")
             .is_some_and(|flag| flag != 0)
+    }
+
+    /// Vanilla parity: `BeehiveBlockEntity.BeeData.toOccupant`, the shape the
+    /// `minecraft:bees` item component stores.
+    fn to_component(&self) -> Option<BeehiveOccupant> {
+        let entity_data = EntityData::from_owned_nbt(&NbtTag::Compound(self.entity_data.clone()))?;
+        Some(BeehiveOccupant::new(
+            entity_data,
+            self.ticks_in_hive,
+            self.min_ticks_in_hive,
+        ))
+    }
+
+    /// Rebuilds a stored bee from the `minecraft:bees` item component.
+    ///
+    /// Vanilla parity: the `storeBee` half of
+    /// `BeehiveBlockEntity.applyImplicitComponents`.
+    fn from_component(occupant: &BeehiveOccupant) -> Self {
+        let entity_data = match occupant.entity_data().clone().to_nbt_tag() {
+            NbtTag::Compound(compound) => compound,
+            _ => default_bee_entity_data(),
+        };
+        Self {
+            entity_data,
+            ticks_in_hive: occupant.ticks_in_hive(),
+            min_ticks_in_hive: occupant.min_ticks_in_hive(),
+        }
     }
 }
 
@@ -726,15 +756,44 @@ impl BlockEntity for BeehiveBlockEntity {
             );
         }
     }
+
+    /// Vanilla parity: `BeehiveBlockEntity.collectImplicitComponents`. This is
+    /// what a silk-touched hive hands to the `minecraft:bees` entry of its loot
+    /// table, and the only reason its occupants survive being mined.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        let bees: Vec<BeehiveOccupant> = self
+            .state
+            .lock()
+            .stored
+            .iter()
+            .filter_map(BeeOccupant::to_component)
+            .collect();
+        components.set(vanilla_components::BEES, Some(Bees::new(bees)));
+    }
+
+    /// Vanilla parity: `BeehiveBlockEntity.applyImplicitComponents`, which
+    /// clears the hive first: a placed hive holds exactly the bees the item
+    /// carried, never those plus whatever was already there.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        let bees = input.get_or_default(vanilla_components::BEES, Bees::empty());
+        let mut state = self.state.lock();
+        state.stored.clear();
+        for occupant in bees.bees().iter().take(BEEHIVE_MAX_OCCUPANTS) {
+            state.stored.push(BeeOccupant::from_component(occupant));
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use steel_registry::{init_vanilla_registry, vanilla_blocks};
+    use steel_registry::item_stack::ItemStack;
+    use steel_registry::{
+        init_vanilla_registry, vanilla_blocks, vanilla_enchantments, vanilla_items,
+    };
     use steel_utils::ChunkPos;
 
     use super::*;
-    use crate::behavior::init_behaviors;
+    use crate::behavior::{BlockLootContext, init_behaviors};
     use crate::block_entity::init_block_entities;
     use crate::entity::init_entities;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
@@ -851,5 +910,120 @@ mod tests {
 
         assert_eq!(hive.occupant_count(), BEEHIVE_MAX_OCCUPANTS);
         assert!(hive.is_full());
+    }
+
+    /// The `minecraft:bees` half of `blocks/beehive.json` is the only thing
+    /// that carries a hive's occupants out of the world, and it reads them off
+    /// `collectComponents()` through `LootContextParams.BLOCK_ENTITY`.
+    ///
+    /// `bees` and `block_state` are both prototype defaults on the beehive
+    /// item, so a broken copy answers an empty list and `honey_level=0` rather
+    /// than nothing -- which is why the counts, not the presence, are asserted.
+    #[test]
+    fn a_silk_touched_hive_drops_with_its_bees_and_its_honey() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world("beehive_silk_touch_drop");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        let state = vanilla_blocks::BEEHIVE
+            .default_state()
+            .set_value(LEVEL_HONEY, 3);
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_ALL));
+
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("placing a beehive should create its block entity"));
+        let hive = block_entity
+            .downcast_ref::<BeehiveBlockEntity>()
+            .unwrap_or_else(|| panic!("the beehive's block entity should be a beehive"));
+        hive.store_worldgen_bee(120);
+        hive.store_worldgen_bee(240);
+        assert_eq!(hive.occupant_count(), 2);
+
+        let mut silk_touch = ItemStack::new(&vanilla_items::DIAMOND_PICKAXE);
+        silk_touch.upgrade_enchantment(vanilla_enchantments::SILK_TOUCH.key.clone(), 1);
+
+        let drops = BlockLootContext::new(&world, pos)
+            .with_tool(&silk_touch)
+            .with_block_entity(Some(&block_entity))
+            .get_drops(state);
+
+        assert_eq!(drops.len(), 1, "a hive drops exactly one hive");
+        let dropped = &drops[0];
+        assert_eq!(dropped.item.key, vanilla_items::BEEHIVE.key);
+
+        let bees = dropped
+            .get(vanilla_components::BEES)
+            .unwrap_or_else(|| panic!("the beehive item always answers its `bees` component"));
+        assert_eq!(
+            bees.bees().len(),
+            2,
+            "both occupants have to travel with the item"
+        );
+        assert_eq!(
+            bees.bees()
+                .iter()
+                .map(BeehiveOccupant::ticks_in_hive)
+                .collect::<Vec<_>>(),
+            vec![120, 240],
+            "each occupant keeps the time it had already served"
+        );
+
+        let block_state = dropped
+            .get(vanilla_components::BLOCK_STATE)
+            .unwrap_or_else(|| panic!("the beehive item always answers its `block_state`"));
+        assert_eq!(
+            block_state.get("honey_level"),
+            Some("3"),
+            "a full hive comes back full"
+        );
+    }
+
+    /// The other direction: placing that item has to refill the hive.
+    #[test]
+    fn placing_a_hive_item_puts_its_bees_back_in() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world("beehive_apply_components");
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::BEEHIVE.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("placing a beehive should create its block entity"));
+        let hive = block_entity
+            .downcast_ref::<BeehiveBlockEntity>()
+            .unwrap_or_else(|| panic!("the beehive's block entity should be a beehive"));
+
+        let mut carried = ItemStack::new(&vanilla_items::BEEHIVE);
+        let occupant = BeehiveOccupant::new(
+            EntityData::from_owned_nbt(&NbtTag::Compound(default_bee_entity_data()))
+                .unwrap_or_else(|| panic!("a bare bee compound is valid entity data")),
+            77,
+            BEEHIVE_MIN_OCCUPATION_TICKS_NECTARLESS,
+        );
+        carried.set(vanilla_components::BEES, Bees::new(vec![occupant]));
+
+        block_entity.apply_components_from_item_stack(&carried);
+
+        assert_eq!(hive.occupant_count(), 1, "the carried bee moved back in");
+        let mut saved = NbtCompound::new();
+        hive.save_additional(&mut saved);
+        let stored_ticks = saved
+            .list("bees")
+            .and_then(NbtList::compounds)
+            .and_then(|compounds| compounds.first().and_then(|bee| bee.int("ticks_in_hive")));
+        assert_eq!(
+            stored_ticks,
+            Some(77),
+            "the bee keeps the time it had already served"
+        );
     }
 }

@@ -30,9 +30,11 @@ use steel_registry::{
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::data_components::DataComponentMap;
+use text_components::TextComponent;
 
 use crate::entity::{Entity as _, LivingEntity as _, MobEffectInstance};
 use crate::player::Player;
@@ -184,6 +186,9 @@ fn filter_effect(effect: Option<MobEffectRef>) -> Option<MobEffectRef> {
 pub struct BeaconBlockEntity {
     base: Arc<BlockEntityBase>,
     data: Arc<BeaconDataSlots>,
+    /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
+    /// name this block was placed with.
+    name: BlockEntityName,
 }
 
 /// The three values the beacon menu mirrors to the client.
@@ -250,6 +255,7 @@ impl BeaconBlockEntity {
                 state,
             )),
             data: Arc::new(BeaconDataSlots::default()),
+            name: BlockEntityName::new(),
         }
     }
 
@@ -278,6 +284,14 @@ impl BeaconBlockEntity {
         *self.data.secondary.lock() = secondary;
         self.set_changed();
         true
+    }
+
+    /// Returns the name an anvil gave this beacon, if any.
+    ///
+    /// Vanilla parity: `Nameable.getCustomName`.
+    #[must_use]
+    pub fn custom_name(&self) -> Option<TextComponent> {
+        self.name.custom_name()
     }
 }
 
@@ -351,17 +365,39 @@ impl BlockEntity for BeaconBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        self.name.load(&nbt_view);
         *self.data.primary.lock() = filter_effect(effect_from_nbt(&nbt_view, "primary_effect"));
         *self.data.secondary.lock() = filter_effect(effect_from_nbt(&nbt_view, "secondary_effect"));
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.name.save(nbt);
         if let Some(effect) = self.data.primary() {
             nbt.insert("primary_effect", effect.key().to_string());
         }
         if let Some(effect) = self.data.secondary() {
             nbt.insert("secondary_effect", effect.key().to_string());
         }
+    }
+
+    /// Vanilla parity: `BaseContainerBlockEntity.getName`, which falls back to
+    /// the block's own name.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        self.name.display_name(default_name)
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
+    /// `LOCK` are not collected: no vanilla loot table asks this block for
+    /// either, and Steel has no lock on a container yet.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        self.name.collect_implicit_components(components);
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.applyImplicitComponents`.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        self.name.apply_implicit_components(input);
     }
 }
 

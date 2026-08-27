@@ -22,6 +22,7 @@ use steel_utils::{
 };
 
 use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, ITEM_BEHAVIORS};
+use crate::block_entity::SharedBlockEntity;
 use crate::entity::{Entity, LivingEntity};
 use crate::fluid::fluid_state_to_block;
 use crate::player::Player;
@@ -365,6 +366,11 @@ impl BlockBreakingManager {
         // TODO: Check blockActionRestricted
 
         let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
+        // Vanilla parity: `ServerPlayerGameMode.destroyBlock` reads the block
+        // entity before it removes the block, then hands that one to the loot
+        // roll and to `playerDestroy`. Looking it up afterwards finds nothing:
+        // removing the block detaches it.
+        let block_entity = world.get_block_entity(pos);
         let adjusted_state = behavior.player_will_destroy(state, world, pos, player);
         world.game_event(
             &vanilla_game_events::BLOCK_DESTROY,
@@ -444,8 +450,14 @@ impl BlockBreakingManager {
                 && game_mode != GameType::Creative
                 && has_correct_tool
             {
-                drop_block_loot(player, world, pos, adjusted_state, &destroyed_with);
-                let block_entity = world.get_block_entity(pos);
+                drop_block_loot(
+                    player,
+                    world,
+                    pos,
+                    adjusted_state,
+                    &destroyed_with,
+                    block_entity.as_ref(),
+                );
                 behavior.player_destroy(
                     world,
                     player,
@@ -618,6 +630,7 @@ fn drop_block_loot(
     pos: BlockPos,
     state: BlockStateId,
     tool: &ItemStack,
+    block_entity: Option<&SharedBlockEntity>,
 ) {
     let luck = player
         .attributes()
@@ -628,6 +641,7 @@ fn drop_block_loot(
     let drops = BlockLootContext::new(world, pos)
         .with_luck(luck)
         .with_tool(tool)
+        .with_block_entity(block_entity)
         .get_drops(state);
 
     // Spawn each dropped item using the player's world reference (Arc<World>)

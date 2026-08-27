@@ -17,10 +17,14 @@ use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_block_entity_types;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, locks::SyncMutex};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
+use crate::block_entity::{
+    BlockEntity, BlockEntityBase, BlockEntityName, ContainerLoot, ImplicitComponentInput,
+};
 use crate::inventory::container::Container;
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
+use steel_registry::data_components::DataComponentMap;
+use text_components::TextComponent;
 
 /// Number of slots in a single chest (3 rows of 9).
 pub const CHEST_SLOTS: usize = 27;
@@ -36,6 +40,9 @@ pub struct ChestBlockEntity {
     /// Vanilla parity: the `RandomizableContainer` half of a chest, which is
     /// what a generated dungeon or mineshaft chest arrives with.
     loot: Arc<ContainerLoot>,
+    /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
+    /// name this block was placed with.
+    name: BlockEntityName,
 }
 
 struct ChestContainer {
@@ -88,7 +95,16 @@ impl ChestBlockEntity {
             base,
             container,
             loot,
+            name: BlockEntityName::new(),
         }
+    }
+
+    /// Returns the name an anvil gave this chest, if any.
+    ///
+    /// Vanilla parity: `Nameable.getCustomName`.
+    #[must_use]
+    pub fn custom_name(&self) -> Option<TextComponent> {
+        self.name.custom_name()
     }
 }
 
@@ -116,6 +132,7 @@ impl BlockEntity for ChestBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        self.name.load(&nbt_view);
         // Vanilla parity: a chest stores either a loot table or its items,
         // never both, and clears the slots either way.
         let packed = self.loot.try_load_loot_table(&nbt_view);
@@ -142,6 +159,7 @@ impl BlockEntity for ChestBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.name.save(nbt);
         if self.loot.try_save_loot_table(nbt) {
             return;
         }
@@ -165,6 +183,26 @@ impl BlockEntity for ChestBlockEntity {
 
     fn container_ref(&self) -> Option<ContainerRef> {
         Some(self.container_ref.clone())
+    }
+
+    /// Vanilla parity: `BaseContainerBlockEntity.getName`, which falls back to
+    /// the block's own name.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        self.name.display_name(default_name)
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
+    /// `LOCK` are not collected: no vanilla loot table asks this block for
+    /// either, and Steel has no lock on a container yet.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        self.name.collect_implicit_components(components);
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.applyImplicitComponents`.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        self.name.apply_implicit_components(input);
     }
 }
 
@@ -204,13 +242,14 @@ mod tests {
 
     use simdnbt::borrow::read_compound as read_borrowed_compound;
     use steel_registry::blocks::properties::Direction;
+    use steel_registry::data_components::vanilla_components::CUSTOM_NAME;
     use steel_registry::{init_vanilla_registry, vanilla_blocks, vanilla_items};
     use steel_utils::ChunkPos;
     use steel_utils::types::UpdateFlags;
 
     use super::*;
-    use crate::behavior::{BLOCK_BEHAVIORS, init_behaviors};
-    use crate::block_entity::init_block_entities;
+    use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, init_behaviors};
+    use crate::block_entity::{SharedBlockEntity, init_block_entities};
     use crate::inventory::lock::ContainerLockGuard;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
@@ -396,6 +435,86 @@ mod tests {
         assert!(
             signal > 0,
             "an untouched dungeon chest read as empty; the table was never rolled"
+        );
+    }
+
+    /// A chest renamed on an anvil has to give that name back when it breaks:
+    /// `blocks/chest.json` copies `minecraft:custom_name` off the block entity,
+    /// and 67 other block tables do the same thing.
+    ///
+    /// `custom_name` is *not* a prototype default on the chest item, so a chest
+    /// that never had one answers `None` rather than an empty component -- the
+    /// unnamed half of this test is what tells the two apart.
+    #[test]
+    fn a_named_chest_drops_with_its_name_and_a_plain_one_does_not() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world("chest_custom_name_drop");
+        let named_pos = BlockPos::new(8, 64, 8);
+        let plain_pos = BlockPos::new(8, 64, 10);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(named_pos));
+        let state = vanilla_blocks::CHEST.default_state();
+        assert!(world.set_block(named_pos, state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(plain_pos, state, UpdateFlags::UPDATE_NONE));
+
+        let named_entity = world
+            .get_block_entity(named_pos)
+            .expect("a placed chest should have a block entity");
+        let mut placed_item = ItemStack::new(&vanilla_items::CHEST);
+        placed_item.set(CUSTOM_NAME, TextComponent::plain("Emeralds"));
+        named_entity.apply_components_from_item_stack(&placed_item);
+
+        let drop_of = |pos: BlockPos, entity: &SharedBlockEntity| {
+            let drops = BlockLootContext::new(&world, pos)
+                .with_tool(&ItemStack::empty())
+                .with_block_entity(Some(entity))
+                .get_drops(state);
+            assert_eq!(drops.len(), 1, "a chest drops exactly one chest");
+            drops.into_iter().next().expect("the chest")
+        };
+
+        let named_drop = drop_of(named_pos, &named_entity);
+        assert_eq!(
+            named_drop.get(CUSTOM_NAME).cloned(),
+            Some(TextComponent::plain("Emeralds")),
+            "the name has to travel with the item"
+        );
+
+        let plain_entity = world
+            .get_block_entity(plain_pos)
+            .expect("a placed chest should have a block entity");
+        assert!(
+            drop_of(plain_pos, &plain_entity).get(CUSTOM_NAME).is_none(),
+            "a chest nobody named must stack with a crafted one"
+        );
+    }
+
+    /// The name has to survive the chunk being written out and read back, and
+    /// it has to survive a chest that is still carrying an unrolled loot table
+    /// -- the packed branch returns early from the items half.
+    #[test]
+    fn a_generated_chest_keeps_its_name_across_a_save_and_load() {
+        let chest = test_chest();
+        load_from_owned_nbt(&chest, &generated_chest_nbt(7));
+        chest
+            .name
+            .set_custom_name(Some(TextComponent::plain("Reward")));
+
+        let mut saved = NbtCompound::new();
+        chest.save_additional(&mut saved);
+        assert_eq!(
+            saved.string("LootTable").map(ToString::to_string),
+            Some(SIMPLE_DUNGEON.to_owned()),
+            "the packed table still has to be there"
+        );
+
+        let reloaded = test_chest();
+        load_from_owned_nbt(&reloaded, &saved);
+        assert_eq!(
+            reloaded.custom_name(),
+            Some(TextComponent::plain("Reward")),
+            "a packed chest saves its name alongside its table"
         );
     }
 

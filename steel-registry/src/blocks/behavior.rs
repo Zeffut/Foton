@@ -55,6 +55,14 @@ pub struct BlockConfig {
     pub instrument: NoteBlockInstrument,
     pub replaceable: bool,
     pub sound_type: SoundType,
+    /// The loot table this block rolls when it is broken.
+    ///
+    /// Vanilla parity: `BlockBehaviour.drops`. It is not always
+    /// `blocks/<block id>`: 61 blocks are registered with `dropsLike`, which
+    /// points a wall banner, a wall sign, a wall torch, a wall skull or a wall
+    /// coral fan at the loot table of the standing form it has no item of its
+    /// own for. `None` is a block vanilla registers with `noLootTable`.
+    pub loot_table: Option<crate::loot_table::LootTableRef>,
 }
 
 impl BlockConfig {
@@ -84,7 +92,17 @@ impl BlockConfig {
             instrument: NoteBlockInstrument::Harp,
             replaceable: false,
             sound_type: crate::sound_types::STONE,
+            loot_table: None,
         }
+    }
+
+    /// Points this block at the loot table it drops.
+    ///
+    /// Vanilla parity: `BlockBehaviour.Properties.drops`/`dropsLike`.
+    #[must_use]
+    pub const fn loot_table(mut self, loot_table: crate::loot_table::LootTableRef) -> Self {
+        self.loot_table = Some(loot_table);
+        self
     }
 
     #[must_use]

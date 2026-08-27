@@ -67,7 +67,9 @@ impl BlockBehavior for BrewingStandBlock {
         let data = stand.data();
         let inventory = player.inventory.clone();
         player.open_menu(
-            TextComponent::translated(translations::CONTAINER_BREWING.msg()),
+            block_entity.display_name(TextComponent::translated(
+                translations::CONTAINER_BREWING.msg(),
+            )),
             move |context| brewing_stand(inventory, context.container_id, container_ref, data),
         );
 

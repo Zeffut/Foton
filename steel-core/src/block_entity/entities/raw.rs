@@ -70,6 +70,17 @@ impl BlockEntity for RawBlockEntity {
     fn save_additional(&self, nbt: &mut NbtCompound) {
         *nbt = self.state.lock().data.clone();
     }
+
+    /// Hands back the preserved compound whole, `components` included.
+    ///
+    /// The generic implementation appends the block entity's own component map,
+    /// which is always empty here: a raw entity is created straight from the
+    /// stored NBT and never goes through `load_with_components`. Letting it
+    /// replace the preserved field would quietly drop the components of every
+    /// block entity type Steel has not implemented yet.
+    fn save_without_metadata(&self) -> NbtCompound {
+        self.save_custom_only()
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +120,38 @@ mod tests {
         assert!(!custom.contains("id"));
         assert!(!custom.contains("x"));
         assert_eq!(custom.int("custom"), Some(7));
+    }
+
+    /// A raw entity exists to hand an unimplemented type's NBT back untouched.
+    /// Its own component map is always empty -- nothing ever loads one -- so
+    /// the payload the chunk writer stores has to keep the `components` that
+    /// came in rather than the empty one.
+    #[test]
+    fn the_preserved_components_survive_the_chunk_payload() {
+        init_vanilla_registry();
+        let mut components = NbtCompound::new();
+        components.insert("minecraft:custom_name", "\"Kept\"");
+        let mut data = NbtCompound::new();
+        data.insert("components", components);
+        data.insert("custom", 7_i32);
+        let entity = RawBlockEntity::with_data(
+            &vanilla_block_entity_types::BARREL,
+            Weak::new(),
+            BlockPos::new(2, 70, -4),
+            vanilla_blocks::BARREL.default_state(),
+            data,
+        );
+
+        let saved = entity.save_without_metadata();
+        assert_eq!(saved.int("custom"), Some(7));
+        assert_eq!(
+            saved
+                .compound("components")
+                .and_then(|components| components.string("minecraft:custom_name"))
+                .map(ToString::to_string),
+            Some("\"Kept\"".to_owned()),
+            "the components of an unimplemented block entity must not be dropped"
+        );
     }
 
     #[test]

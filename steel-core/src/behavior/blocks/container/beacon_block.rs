@@ -89,7 +89,9 @@ impl BlockBehavior for BeaconBlock {
 
         let inventory = player.inventory.clone();
         player.open_menu(
-            TextComponent::translated(translations::CONTAINER_BEACON.msg()),
+            block_entity.display_name(TextComponent::translated(
+                translations::CONTAINER_BEACON.msg(),
+            )),
             move |context| {
                 beacon(
                     inventory,

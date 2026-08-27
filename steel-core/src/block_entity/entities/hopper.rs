@@ -25,7 +25,9 @@ use steel_utils::{
 };
 
 use crate::behavior::BLOCK_BEHAVIORS;
-use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
+use crate::block_entity::{
+    BlockEntity, BlockEntityBase, BlockEntityName, ContainerLoot, ImplicitComponentInput,
+};
 use crate::entity::entities::ItemEntity;
 use crate::entity::{RemovalReason, SharedEntity};
 use crate::inventory::container::{Container, SlotsForFace};
@@ -33,6 +35,8 @@ use crate::inventory::lock::{
     AttachedContainers, ContainerId, ContainerLockGuard, ContainerRef, SharedContainer,
 };
 use crate::world::{LevelReader as _, World};
+use steel_registry::data_components::DataComponentMap;
+use text_components::TextComponent;
 
 /// Slots in a hopper.
 ///
@@ -67,6 +71,9 @@ pub struct HopperBlockEntity {
     container_ref: ContainerRef,
     /// Vanilla parity: the `RandomizableContainer` half of a hopper.
     loot: Arc<ContainerLoot>,
+    /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
+    /// name this block was placed with.
+    name: BlockEntityName,
 }
 
 /// The five slots of a hopper plus its transfer cooldown.
@@ -123,6 +130,14 @@ impl HopperContainer {
 }
 
 impl HopperBlockEntity {
+    /// Returns the name an anvil gave this hopper, if any.
+    ///
+    /// Vanilla parity: `Nameable.getCustomName`.
+    #[must_use]
+    pub fn custom_name(&self) -> Option<TextComponent> {
+        self.name.custom_name()
+    }
+
     /// Creates a hopper block entity.
     #[must_use]
     pub fn new(level: Weak<World>, pos: BlockPos, state: BlockStateId) -> Self {
@@ -148,6 +163,7 @@ impl HopperBlockEntity {
             base,
             container,
             loot,
+            name: BlockEntityName::new(),
         }
     }
 
@@ -718,6 +734,7 @@ impl BlockEntity for HopperBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        self.name.load(&nbt_view);
         // Vanilla parity: a hopper stores either a loot table or its items; the
         // transfer cooldown is read either way.
         let packed = self.loot.try_load_loot_table(&nbt_view);
@@ -744,6 +761,7 @@ impl BlockEntity for HopperBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.name.save(nbt);
         let container = self.container.lock();
         if !self.loot.try_save_loot_table(nbt) {
             let mut items: Vec<NbtCompound> = Vec::new();
@@ -762,6 +780,26 @@ impl BlockEntity for HopperBlockEntity {
 
     fn container_ref(&self) -> Option<ContainerRef> {
         Some(self.container_ref.clone())
+    }
+
+    /// Vanilla parity: `BaseContainerBlockEntity.getName`, which falls back to
+    /// the block's own name.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        self.name.display_name(default_name)
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
+    /// `LOCK` are not collected: no vanilla loot table asks this block for
+    /// either, and Steel has no lock on a container yet.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        self.name.collect_implicit_components(components);
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.applyImplicitComponents`.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        self.name.apply_implicit_components(input);
     }
 }
 

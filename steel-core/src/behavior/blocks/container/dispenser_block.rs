@@ -91,10 +91,10 @@ impl DispenserBase {
         pos: BlockPos,
         player: &Player,
     ) -> InteractionResult {
-        let Some(container_ref) = world
-            .get_block_entity(pos)
-            .and_then(ContainerRef::from_block_entity)
-        else {
+        let Some(block_entity) = world.get_block_entity(pos) else {
+            return InteractionResult::Pass;
+        };
+        let Some(container_ref) = ContainerRef::from_block_entity(block_entity.clone()) else {
             return InteractionResult::Pass;
         };
 
@@ -104,9 +104,10 @@ impl DispenserBase {
 
         let inventory = player.inventory.clone();
         let title = self.title.clone();
-        player.open_menu(TextComponent::translated(title), move |context| {
-            dispenser(inventory, context.container_id, container_ref)
-        });
+        player.open_menu(
+            block_entity.display_name(TextComponent::translated(title)),
+            move |context| dispenser(inventory, context.container_id, container_ref),
+        );
 
         // TODO: Award stat INSPECT_DISPENSER or INSPECT_DROPPER.
 

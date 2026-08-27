@@ -10,16 +10,14 @@
 //! when direction matches `attachmentDirection` and wall block otherwise.
 
 use steel_macros::item_behavior;
+use steel_registry::REGISTRY;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::blocks::properties::Direction;
-use steel_registry::{REGISTRY, vanilla_game_events};
-use steel_utils::types::UpdateFlags;
 
 use crate::behavior::context::{BlockPlaceContext, InteractionResult, UseOnContext};
+use crate::behavior::items::block_item::BlockItem;
 use crate::behavior::{BLOCK_BEHAVIORS, ItemBehavior};
-use crate::entity::Entity;
-use crate::world::game_event::GameEventContext;
 
 /// Behavior for items that place either a standing or wall variant of a block.
 ///
@@ -46,6 +44,9 @@ pub struct StandingAndWallBlockItem {
         json = "attachment_direction"
     )]
     pub attachment_direction: Direction,
+    /// The `BlockItem` half of vanilla's `StandingAndWallBlockItem extends
+    /// BlockItem`, which owns the rest of the placement.
+    base: BlockItem,
 }
 
 impl StandingAndWallBlockItem {
@@ -65,6 +66,7 @@ impl StandingAndWallBlockItem {
             standing_block,
             wall_block,
             attachment_direction,
+            base: BlockItem::new(standing_block),
         }
     }
 
@@ -140,42 +142,16 @@ impl StandingAndWallBlockItem {
 }
 
 impl ItemBehavior for StandingAndWallBlockItem {
+    /// Vanilla parity: `StandingAndWallBlockItem` only overrides
+    /// `getPlacementState`; the rest of `BlockItem.place` runs unchanged. Steel
+    /// used to duplicate the placement here and left out the two steps that
+    /// carry an item's data onto the block it becomes, so a banner hung on a
+    /// wall arrived blank.
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
-        let mut place_context = context.build_place_context();
-        if !place_context.can_place() {
-            return InteractionResult::Fail;
-        }
-        let place_pos = place_context.place_pos();
-
-        let Some(new_state) = self.get_placement_state(&place_context) else {
-            return InteractionResult::Fail;
-        };
-
-        if !context
-            .world
-            .set_block(place_pos, new_state, UpdateFlags::UPDATE_ALL_IMMEDIATE)
-        {
-            return InteractionResult::Fail;
-        }
-        let placed_state = context.world.get_block_state(place_pos);
-
-        let block = self.get_block_for_state(new_state);
-        let sound_type = &block.config.sound_type;
-        context.world.play_block_sound(
-            sound_type.place_sound,
-            place_pos,
-            sound_type.volume,
-            sound_type.pitch,
-            Some(context.player.id()),
-        );
-        context.world.game_event(
-            &vanilla_game_events::BLOCK_PLACE,
-            place_pos,
-            &GameEventContext::new(Some(context.player), Some(placed_state)),
-        );
-
-        place_context.with_item_mut(|item| item.shrink(1));
-
-        InteractionResult::Success
+        self.base.place_with(
+            context.build_place_context(),
+            |place_context| self.get_placement_state(place_context),
+            BlockItem::place_block,
+        )
     }
 }

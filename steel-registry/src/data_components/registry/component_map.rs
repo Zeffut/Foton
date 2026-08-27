@@ -1,8 +1,9 @@
 use super::{
-    ATTRIBUTE_MODIFIERS, BREAK_SOUND, Component, ComponentData, DataComponentType, Debug,
-    DowncastType, ENCHANTMENTS, FxHashMap, Identifier, ItemAttributeModifiers, ItemEnchantments,
-    ItemLore, LORE, MAX_STACK_SIZE, RARITY, REPAIR_COST, Rarity, SWING_ANIMATION, SoundEventHolder,
-    SwingAnimation, TOOLTIP_DISPLAY, TooltipDisplay, USE_EFFECTS, UseEffects, sound_events,
+    ATTRIBUTE_MODIFIERS, BREAK_SOUND, BorrowedNbtTag, Component, ComponentData, DataComponentType,
+    Debug, DowncastType, ENCHANTMENTS, FromNbtTag, FxHashMap, Identifier, ItemAttributeModifiers,
+    ItemEnchantments, ItemLore, LORE, MAX_STACK_SIZE, NbtCompound, OwnedNbtTag, RARITY,
+    REPAIR_COST, Rarity, SWING_ANIMATION, SoundEventHolder, SwingAnimation, TOOLTIP_DISPLAY,
+    ToNbtTag, TooltipDisplay, USE_EFFECTS, UseEffects, sound_events,
 };
 
 /// Storage for component values.
@@ -159,5 +160,64 @@ impl DataComponentMap {
     /// Removes a component by key.
     pub fn remove(&mut self, key: &Identifier) -> Option<ComponentData> {
         self.map.remove(key)
+    }
+
+    /// Iterates over the stored entries.
+    pub fn iter(&self) -> impl Iterator<Item = (&Identifier, &ComponentData)> {
+        self.map.iter()
+    }
+
+    /// Copies every entry of `other` over this map.
+    ///
+    /// Vanilla parity: `DataComponentMap.Builder.addAll`.
+    pub fn add_all(&mut self, other: &Self) {
+        for (key, data) in &other.map {
+            self.map.insert(key.clone(), data.clone());
+        }
+    }
+}
+
+/// Vanilla parity: `DataComponentMap.CODEC`, a plain map of component id to
+/// encoded value that skips transient types.
+impl ToNbtTag for DataComponentMap {
+    fn to_nbt_tag(self) -> OwnedNbtTag {
+        use crate::{REGISTRY, RegistryExt};
+
+        let mut compound = NbtCompound::new();
+        for (key, data) in &self.map {
+            let Some(component) = REGISTRY.data_components.by_key(key) else {
+                continue;
+            };
+            if !component.is_persistent() {
+                continue;
+            }
+            match component.write_nbt(data) {
+                Ok(nbt) => {
+                    compound.insert(key.to_string(), nbt);
+                }
+                Err(error) => {
+                    log::warn!("failed to encode block entity component {key}: {error}");
+                }
+            }
+        }
+        OwnedNbtTag::Compound(compound)
+    }
+}
+
+impl FromNbtTag for DataComponentMap {
+    fn from_nbt_tag(tag: BorrowedNbtTag<'_, '_>) -> Option<Self> {
+        use crate::{REGISTRY, RegistryExt};
+
+        let compound = tag.compound()?;
+        let mut map = Self::new();
+        for (key, value) in compound.iter() {
+            let id = key.to_str().parse::<Identifier>().ok()?;
+            let entry = REGISTRY.data_components.by_key(&id)?;
+            if !entry.is_persistent() {
+                return None;
+            }
+            map.map.insert(id, entry.read_nbt(value)?);
+        }
+        Some(map)
     }
 }

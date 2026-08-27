@@ -41,7 +41,9 @@ impl EntityData {
         &self.data
     }
 
-    pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+    /// Reads vanilla's `{id: <entity type>, ...}` shape.
+    #[must_use]
+    pub fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
         let data = CustomData::from_nbt_value(tag)?;
         let id = typed_data_id(&data)?;
         let entity_type = REGISTRY.entity_types.by_key(&id)?;
