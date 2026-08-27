@@ -122,14 +122,17 @@ CHECKS="$CHECKS$(ask es_state '{active_effects:[{id:"minecraft:strength"}]}' ES_
 CHECKS="$CHECKS$(ask es_state '{active_effects:[{amplifier:3b}]}' ES_EFFECT_AMPLIFIER)"
 CHECKS="$CHECKS$(ask es_state '{attributes:[{id:"minecraft:max_health",base:30.0d}]}' ES_ATTRIBUTE_BASE)"
 CHECKS="$CHECKS$(ask es_state '{attributes:[{modifiers:[{id:"steel:test_speed"}]}]}' ES_ATTRIBUTE_MODIFIER)"
+CHECKS="$CHECKS$(ask es_state '{equipment:{head:{id:"minecraft:diamond_helmet"}}}' ES_EQUIPMENT)"
 # The control again, on the state mob's keys: a plain zombie must answer none
 # of them.
 CHECKS="$CHECKS$(ask es_plain '{AbsorptionAmount:6.0f}' ES_PLAIN_ABSORPTION)"
 CHECKS="$CHECKS$(ask es_plain '{active_effects:[{id:"minecraft:strength"}]}' ES_PLAIN_EFFECT)"
 CHECKS="$CHECKS$(ask es_plain '{attributes:[{modifiers:[{id:"steel:test_speed"}]}]}' ES_PLAIN_MODIFIER)"
+CHECKS="$CHECKS$(ask es_plain '{equipment:{head:{id:"minecraft:diamond_helmet"}}}' ES_PLAIN_EQUIPMENT)"
 
 STATE_NBT='{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Tags:["es_state"],'
 STATE_NBT="$STATE_NBT"'AbsorptionAmount:6.0f,'
+STATE_NBT="$STATE_NBT"'equipment:{head:{id:"minecraft:diamond_helmet",count:1}},'
 STATE_NBT="$STATE_NBT"'active_effects:[{id:"minecraft:strength",amplifier:3b,duration:100000,show_particles:0b}],'
 STATE_NBT="$STATE_NBT"'attributes:[{id:"minecraft:max_health",base:30.0d},'
 STATE_NBT="$STATE_NBT"'{id:"minecraft:movement_speed",base:0.23d,modifiers:[{id:"steel:test_speed",amount:0.5d,operation:"add_value"}]}]}'
@@ -180,7 +183,7 @@ said() { grep -q "server says: $2" "join-$1.log"; }
 [ $SECOND_STATUS -eq 0 ] || { tail -20 join-second.log; fail "the client never settled on the second boot"; }
 
 ALIVE="ES_HURT_ALIVE ES_PLAIN_ALIVE ES_STATE_ALIVE"
-STATE="ES_HEALTH ES_ABSORPTION ES_EFFECT ES_EFFECT_AMPLIFIER ES_ATTRIBUTE_BASE ES_ATTRIBUTE_MODIFIER"
+STATE="ES_HEALTH ES_ABSORPTION ES_EFFECT ES_EFFECT_AMPLIFIER ES_ATTRIBUTE_BASE ES_ATTRIBUTE_MODIFIER ES_EQUIPMENT"
 
 for marker in $ALIVE $STATE ES_PLAIN_FULL; do
   said first "$marker" || fail "$marker was not true even before the restart; the rig is broken"
@@ -190,6 +193,7 @@ said first ES_PLAIN_HURT       && fail "an undamaged zombie read 14 health, so t
 said first ES_PLAIN_ABSORPTION && fail "a zombie summoned with no NBT had absorption anyway"
 said first ES_PLAIN_EFFECT     && fail "a zombie summoned with no NBT had an effect anyway"
 said first ES_PLAIN_MODIFIER   && fail "a zombie summoned with no NBT had an attribute modifier anyway"
+said first ES_PLAIN_EQUIPMENT  && fail "a zombie summoned with no NBT wore a diamond helmet anyway"
 
 for marker in $ALIVE; do
   said second "$marker" || fail "$marker: the mob itself did not survive the restart"
@@ -202,6 +206,7 @@ said second ES_EFFECT             || fail "the potion effect did not survive the
 said second ES_EFFECT_AMPLIFIER   || fail "the effect came back at the wrong amplifier"
 said second ES_ATTRIBUTE_BASE     || fail "the attribute base value did not survive the restart"
 said second ES_ATTRIBUTE_MODIFIER || fail "the attribute modifier did not survive the restart"
+said second ES_EQUIPMENT          || fail "the mob's helmet did not survive the restart"
 said second ES_PLAIN_FULL         || fail "the control zombie did not come back at full health"
 said second ES_PLAIN_EFFECT       && fail "the control zombie came back with an effect, so the selector matches anything"
 
