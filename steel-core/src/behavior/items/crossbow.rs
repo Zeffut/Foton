@@ -452,7 +452,7 @@ fn use_ammo(
     let ammo_to_use = if free {
         0
     } else {
-        enchantment_helper::process_ammo_use(weapon, 1)
+        enchantment_helper::process_ammo_use(weapon, ammo, 1)
     };
 
     if ammo_to_use > ammo.count() {

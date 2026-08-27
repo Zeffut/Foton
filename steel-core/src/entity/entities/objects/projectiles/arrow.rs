@@ -15,6 +15,7 @@ use steel_registry::{sound_events, vanilla_damage_types, vanilla_entities, vanil
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey};
 
+use crate::enchantment_helper::{self, EnchantmentDamageContext};
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, Projectile,
@@ -74,6 +75,26 @@ const DEFLECTED_SPEED_SCALE: f64 = 0.2;
 /// Vanilla parity: the `lengthSqr() < 1.0E-7` of the same branch.
 const STOPPED_SPEED_SQUARED: f64 = 1.0e-7;
 
+/// Vanilla parity: the `knockback * 0.6` of `AbstractArrow.doKnockback`.
+const KNOCKBACK_SCALE: f64 = 0.6;
+
+/// Vanilla parity: the vertical component of the same push.
+const KNOCKBACK_LIFT: f64 = 0.1;
+
+/// Who is allowed to pick an arrow back up.
+///
+/// Vanilla parity: `AbstractArrow.Pickup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrowPickup {
+    /// Nobody -- a skeleton's arrows, and anything an ominous spawner fires.
+    Disallowed,
+    /// Anyone who walks into it.
+    Allowed,
+    /// Only a player who does not pay for their arrows, which is what an
+    /// Infinity or creative shot leaves behind.
+    CreativeOnly,
+}
+
 /// State that is not mirrored to clients.
 struct ArrowState {
     /// Damage before the speed multiplier.
@@ -84,6 +105,12 @@ struct ArrowState {
     ///
     /// Vanilla parity: `AbstractArrow.shakeTime`.
     shake_time: i32,
+    /// Who may collect this arrow once it lands.
+    pickup: ArrowPickup,
+    /// The weapon that loosed this arrow, whose enchantments it carries.
+    ///
+    /// Vanilla parity: `AbstractArrow.firedFromWeapon`.
+    fired_from_weapon: Option<ItemStack>,
     /// Effects the arrow hands to whatever it hits.
     effects: Vec<MobEffectInstance>,
 }
@@ -94,6 +121,8 @@ impl ArrowState {
             base_damage: DEFAULT_BASE_DAMAGE,
             life: 0,
             shake_time: 0,
+            pickup: ArrowPickup::Disallowed,
+            fired_from_weapon: None,
             effects: Vec::new(),
         }
     }
@@ -155,6 +184,7 @@ impl ArrowEntity {
             Arc::downgrade(world),
         ));
         arrow.set_owner_uuid(Some(shooter.uuid()));
+        arrow.apply_owner_pickup(shooter);
         let (yaw, pitch) = shooter.rotation();
         arrow.shoot_from_rotation(shooter, pitch, yaw, 0.0, power, uncertainty);
 
@@ -184,6 +214,7 @@ impl ArrowEntity {
             Arc::downgrade(world),
         ));
         arrow.set_owner_uuid(Some(shooter.uuid()));
+        arrow.apply_owner_pickup(shooter);
 
         let dx = target.x - position.x;
         let dz = target.z - position.z;
@@ -258,6 +289,78 @@ impl ArrowEntity {
             .abstract_arrow
             .pierce_level
             .set(pierce_level);
+    }
+
+    /// Returns who may collect this arrow.
+    #[must_use]
+    pub fn pickup(&self) -> ArrowPickup {
+        self.state.lock().pickup
+    }
+
+    /// Sets who may collect this arrow.
+    pub fn set_pickup(&self, pickup: ArrowPickup) {
+        self.state.lock().pickup = pickup;
+    }
+
+    /// Records the weapon this arrow was loosed from.
+    ///
+    /// Vanilla parity: the `firedFromWeapon` an `AbstractArrow` is built with.
+    /// Its enchantments are read at impact, which is where Power and Punch live.
+    pub fn set_fired_from_weapon(&self, weapon: Option<ItemStack>) {
+        self.state.lock().fired_from_weapon = weapon;
+    }
+
+    /// Returns the weapon this arrow was loosed from.
+    ///
+    /// Vanilla parity: `AbstractArrow.getWeaponItem`.
+    #[must_use]
+    pub fn weapon_item(&self) -> Option<ItemStack> {
+        self.state.lock().fired_from_weapon.clone()
+    }
+
+    /// Applies vanilla's owner-dependent pickup rule.
+    ///
+    /// Vanilla parity: `AbstractArrow.setOwner`, where an arrow a player shot
+    /// becomes collectable unless the ammunition already marked it otherwise.
+    fn apply_owner_pickup(&self, shooter: &dyn Entity) {
+        let mut state = self.state.lock();
+        if shooter.entity_type() == &vanilla_entities::PLAYER
+            && state.pickup == ArrowPickup::Disallowed
+        {
+            state.pickup = ArrowPickup::Allowed;
+        }
+    }
+
+    /// Pushes a target back the way Punch asks.
+    ///
+    /// Vanilla parity: `AbstractArrow.doKnockback`. With no weapon, or an
+    /// unenchanted one, the modified knockback is zero and nothing moves --
+    /// which is why a plain arrow does not shove.
+    fn do_knockback(&self, target: &dyn Entity, damage_source: &DamageSource) {
+        let Some(weapon) = self.weapon_item() else {
+            return;
+        };
+        let Some(living) = target.as_living_entity() else {
+            return;
+        };
+        let owner_type = self.get_owner().map(|owner| owner.entity_type());
+        let context = EnchantmentDamageContext::new(
+            target.entity_type(),
+            owner_type,
+            Some(self.entity_type()),
+            damage_source,
+        );
+        let knockback = f64::from(enchantment_helper::modify_knockback(&weapon, &context, 0.0));
+        if knockback <= 0.0 {
+            return;
+        }
+
+        let resistance = (1.0 - living.knockback_resistance()).max(0.0);
+        let movement = (self.velocity() * DVec3::new(1.0, 0.0, 1.0)).normalize_or_zero()
+            * (knockback * KNOCKBACK_SCALE * resistance);
+        if movement.length_squared() > 0.0 {
+            target.push_impulse(DVec3::new(movement.x, KNOCKBACK_LIFT, movement.z));
+        }
     }
 
     /// Returns how many ticks of landing wobble are left.
@@ -380,13 +483,22 @@ impl Entity for ArrowEntity {
             return;
         }
 
-        // TODO: honor the arrow's pickup mode, so creative-only and
-        // non-collectable arrows behave as in vanilla.
-        let mut stack = ItemStack::new(&vanilla_items::ARROW);
-        let before = stack.count();
-        player.inventory.lock().add(&mut stack);
-        if stack.count() == before {
-            return;
+        // Vanilla parity: `AbstractArrow.tryPickup`.
+        match self.pickup() {
+            ArrowPickup::Disallowed => return,
+            ArrowPickup::CreativeOnly => {
+                if !player.has_infinite_materials() {
+                    return;
+                }
+            }
+            ArrowPickup::Allowed => {
+                let mut stack = ItemStack::new(&vanilla_items::ARROW);
+                let before = stack.count();
+                player.inventory.lock().add(&mut stack);
+                if stack.count() == before {
+                    return;
+                }
+            }
         }
 
         self.set_removed(RemovalReason::Discarded);
@@ -418,7 +530,24 @@ impl Projectile for ArrowEntity {
             source = source.with_causing_entity(owner.id());
         }
 
-        let mut damage = (speed * self.base_damage())
+        // Vanilla parity: the firing weapon's `modifyDamage` runs on the base
+        // damage, before the speed multiplier. That is where Power lives.
+        let mut arrow_damage = self.base_damage();
+        if let Some(weapon) = self.weapon_item() {
+            let context = EnchantmentDamageContext::new(
+                target.entity_type(),
+                owner.as_ref().map(|owner| owner.entity_type()),
+                Some(self.entity_type()),
+                &source,
+            );
+            arrow_damage = f64::from(enchantment_helper::modify_damage(
+                &weapon,
+                &context,
+                arrow_damage as f32,
+            ));
+        }
+
+        let mut damage = (speed * arrow_damage)
             .clamp(0.0, f64::from(i32::MAX))
             .ceil() as i32;
         // Vanilla parity: a critical arrow rolls a bonus in `[0, damage/2 + 2)`.
@@ -466,6 +595,7 @@ impl Projectile for ArrowEntity {
             if self.pierce_level() <= 0 {
                 living.set_arrow_count(living.arrow_count() + 1);
             }
+            self.do_knockback(target, &source);
             self.do_post_hurt_effects(entity);
         }
 

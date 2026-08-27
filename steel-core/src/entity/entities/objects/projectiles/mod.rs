@@ -23,7 +23,7 @@ mod wind_charge;
 mod wind_charge_common;
 mod wither_skull;
 
-pub use arrow::ArrowEntity;
+pub use arrow::{ArrowEntity, ArrowPickup};
 pub use breeze_wind_charge::BreezeWindChargeEntity;
 pub use dragon_fireball::DragonFireballEntity;
 pub use ender_pearl::EnderPearlEntity;
