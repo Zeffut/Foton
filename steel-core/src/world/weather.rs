@@ -344,6 +344,19 @@ impl World {
         environment::creaking_active(self.dimension_type, level_data.world_clocks())
     }
 
+    /// Returns the current vanilla `EYEBLOSSOM_OPEN` environment attribute.
+    ///
+    /// The attribute is a `TriState`, and its only reader resolves it with
+    /// `.toBoolean(this.type.open)`: unset means the flower stays as it is.
+    /// `if_unset` is that fallback. Vanilla reads it at a block position; Steel
+    /// resolves environment attributes per dimension, and nothing varies this
+    /// one within a dimension.
+    #[must_use]
+    pub fn eyeblossom_open(&self, if_unset: bool) -> bool {
+        let level_data = self.level_data.read();
+        environment::eyeblossom_open(self.dimension_type, level_data.world_clocks(), if_unset)
+    }
+
     /// Returns the current vanilla `BEES_STAY_IN_HIVE` environment attribute.
     ///
     /// This is what sends a bee home at dusk and keeps it in during a storm.

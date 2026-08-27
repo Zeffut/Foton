@@ -13,6 +13,7 @@ const SUN_ANGLE_ATTRIBUTE: &str = "minecraft:visual/sun_angle";
 const TURTLE_EGG_HATCH_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/turtle_egg_hatch_chance";
 const CAT_WAKING_UP_GIFT_CHANCE_ATTRIBUTE: &str = "minecraft:gameplay/cat_waking_up_gift_chance";
 const CREAKING_ACTIVE_ATTRIBUTE: &str = "minecraft:gameplay/creaking_active";
+const EYEBLOSSOM_OPEN_ATTRIBUTE: &str = "minecraft:gameplay/eyeblossom_open";
 const BEES_STAY_IN_HIVE_ATTRIBUTE: &str = "minecraft:gameplay/bees_stay_in_hive";
 /// The declared default of `EnvironmentAttributes.CREAKING_ACTIVE`. No dimension type
 /// overrides it, so only the overworld `day` timeline ever turns it on.
@@ -134,6 +135,29 @@ pub(super) fn creaking_active(
         dimension_type,
         clock_manager,
         CREAKING_ACTIVE_ATTRIBUTE,
+    )
+}
+
+/// Returns the `gameplay/eyeblossom_open` environment attribute, already
+/// resolved the way its one reader resolves it.
+///
+/// Vanilla's attribute is a `TriState` whose declared default is
+/// `TriState.DEFAULT`, and `EyeblossomBlock.tryChangingState` reads it as
+/// `.toBoolean(this.type.open)` -- an unset value means "stay as you are".
+/// `if_unset` is that argument. The only source is the overworld `day`
+/// timeline, which turns it on at 12600 and off at 23401, so an eyeblossom in
+/// a dimension without that timeline never moves.
+#[must_use]
+pub(super) fn eyeblossom_open(
+    dimension_type: DimensionTypeRef,
+    clock_manager: &WorldClockManager,
+    if_unset: bool,
+) -> bool {
+    apply_timeline_bool_attribute(
+        if_unset,
+        dimension_type,
+        clock_manager,
+        EYEBLOSSOM_OPEN_ATTRIBUTE,
     )
 }
 
