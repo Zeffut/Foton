@@ -1203,6 +1203,7 @@ mod skeleton_archery;
 mod travel;
 mod villager_doors;
 mod villager_golems;
+mod villager_play;
 mod villager_raids;
 mod villager_variants;
 mod villagers;

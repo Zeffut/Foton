@@ -14,6 +14,7 @@ mod piglin_specific;
 mod player;
 mod secondary_poi;
 mod tempting;
+mod villager_babies;
 mod villager_hostiles;
 mod warden_specific;
 
@@ -33,6 +34,7 @@ pub use piglin_specific::{
 pub use player::PlayerSensor;
 pub use secondary_poi::SecondaryPoiSensor;
 pub use tempting::TemptingSensor;
+pub use villager_babies::VillagerBabiesSensor;
 pub use villager_hostiles::VillagerHostilesSensor;
 pub use warden_specific::WardenEntitySensor;
 
@@ -142,6 +144,8 @@ pub enum SensorType {
     SecondaryPois,
     /// Vanilla `SensorType.GOLEM_DETECTED`.
     GolemDetected,
+    /// Vanilla `SensorType.VILLAGER_BABIES`.
+    VillagerBabies,
 }
 
 impl SensorType {
@@ -205,6 +209,7 @@ impl SensorType {
             Self::VillagerHostiles => Box::new(VillagerHostilesSensor),
             Self::SecondaryPois => Box::new(SecondaryPoiSensor),
             Self::GolemDetected => Box::new(GolemSensor),
+            Self::VillagerBabies => Box::new(VillagerBabiesSensor),
         }
     }
 }

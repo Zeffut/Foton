@@ -56,11 +56,11 @@ use crate::behavior::BlockStateBehaviorExt as _;
 use crate::entity::ai::brain::behavior::{
     AcquirePoi, Behavior, BehaviorControl, DoNothing, GateBehavior, GoToWantedItem, InteractWith,
     InteractWithDoor, LocateHidingPlace, LookAtTargetSink, MoveToSkySeeingSpot, MoveToTargetSink,
-    OneShot, OrderPolicy, ReactToBell, ResetRaidStatus, RingBell, RunOne, RunningPolicy, Sequence,
-    SetEntityLookTarget, SetHiddenState, SetLookAndInteract, SetRaidStatus, SetWalkTargetAwayFrom,
-    SetWalkTargetFromLookTarget, SleepInBed, SocializeAtBell, StrollAroundPoi, StrollToPoi,
-    StrollToPoiList, Swim, TriggerGate, TriggerIf, UpdateActivityFromSchedule, ValidateNearbyPoi,
-    VillageBoundRandomStroll, WakeUp,
+    OneShot, OrderPolicy, PlayTagWithOtherKids, ReactToBell, ResetRaidStatus, RingBell, RunOne,
+    RunningPolicy, Sequence, SetEntityLookTarget, SetHiddenState, SetLookAndInteract,
+    SetRaidStatus, SetWalkTargetAwayFrom, SetWalkTargetFromLookTarget, SleepInBed, SocializeAtBell,
+    StrollAroundPoi, StrollToPoi, StrollToPoiList, Swim, TriggerGate, TriggerIf,
+    UpdateActivityFromSchedule, ValidateNearbyPoi, VillageBoundRandomStroll, WakeUp,
 };
 use crate::entity::ai::brain::memory::{
     EntityMemory, MemoryModuleType, MemoryStatus, memory_module_types,
@@ -159,9 +159,9 @@ const HIDE_CLOSE_ENOUGH_DIST: i32 = 3;
 
 /// Vanilla parity: the sensor list of `Villager.BRAIN_PROVIDER`.
 ///
-/// MISSING FOUNDATION: vanilla also asks for `NEAREST_BED` and
-/// `VILLAGER_BABIES`, which feed behaviors Steel has not ported (`JumpOnBed`,
-/// `PlayTagWithOtherKids`).
+/// MISSING FOUNDATION: vanilla also asks for `NEAREST_BED`, which feeds
+/// `JumpOnBed` -- and that sensor is the point-of-interest search
+/// [`AcquirePoi`] does, on a baby's own budget.
 ///
 /// The raid packages need no sensor of their own: what they read is the raid
 /// manager, at the villager's own block, and the `HEARD_BELL_TIME` a rung bell
@@ -174,6 +174,7 @@ const SENSORS: &[SensorType] = &[
     SensorType::VillagerHostiles,
     SensorType::SecondaryPois,
     SensorType::GolemDetected,
+    SensorType::VillagerBabies,
 ];
 
 /// Reaches for the villager behind a brain context.
@@ -664,9 +665,11 @@ fn can_breed(candidate: &dyn LivingEntity) -> bool {
 
 /// Vanilla parity: `VillagerGoalPackages.getPlayPackage`.
 ///
-/// MISSING FOUNDATION: `PlayTagWithOtherKids` needs the `VILLAGER_BABIES`
-/// sensor and `JumpOnBed` needs `NEAREST_BED`, so a baby wanders and stares
-/// rather than playing tag.
+/// MISSING FOUNDATION: `JumpOnBed` needs the `NEAREST_BED` sensor.
+///
+/// The `RunOne` is gated on there being no other children in sight, which is
+/// what stops a baby wandering off in the middle of a game -- tag runs at the
+/// same priority and takes the round whenever it has somebody to play with.
 fn play_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Play,
@@ -679,39 +682,46 @@ fn play_package() -> ActivityData {
                 )),
             ),
             full_look_behavior(),
+            (5, OneShot::boxed(PlayTagWithOtherKids)),
             (
                 5,
-                Box::new(RunOne::unconditional(vec![
-                    (
-                        OneShot::boxed(interact_with(
-                            &vanilla_entities::VILLAGER,
-                            memory_module_types::INTERACTION_TARGET,
-                        )),
-                        2,
-                    ),
-                    (
-                        OneShot::boxed(interact_with(
-                            &vanilla_entities::CAT,
-                            memory_module_types::INTERACTION_TARGET,
-                        )),
-                        1,
-                    ),
-                    (
-                        OneShot::boxed(VillageBoundRandomStroll::new(SPEED_MODIFIER)),
-                        1,
-                    ),
-                    (
-                        OneShot::boxed(SetWalkTargetFromLookTarget::new(
-                            SPEED_MODIFIER,
-                            INTERACT_WALKUP_DIST,
-                        )),
-                        1,
-                    ),
-                    (
-                        Box::new(DoNothing::new(PLAY_DO_NOTHING_MIN, PLAY_DO_NOTHING_MAX)),
-                        2,
-                    ),
-                ])),
+                Box::new(RunOne::gated(
+                    vec![(
+                        memory_module_types::VISIBLE_VILLAGER_BABIES.id(),
+                        MemoryStatus::ValueAbsent,
+                    )],
+                    vec![
+                        (
+                            OneShot::boxed(interact_with(
+                                &vanilla_entities::VILLAGER,
+                                memory_module_types::INTERACTION_TARGET,
+                            )),
+                            2,
+                        ),
+                        (
+                            OneShot::boxed(interact_with(
+                                &vanilla_entities::CAT,
+                                memory_module_types::INTERACTION_TARGET,
+                            )),
+                            1,
+                        ),
+                        (
+                            OneShot::boxed(VillageBoundRandomStroll::new(SPEED_MODIFIER)),
+                            1,
+                        ),
+                        (
+                            OneShot::boxed(SetWalkTargetFromLookTarget::new(
+                                SPEED_MODIFIER,
+                                INTERACT_WALKUP_DIST,
+                            )),
+                            1,
+                        ),
+                        (
+                            Box::new(DoNothing::new(PLAY_DO_NOTHING_MIN, PLAY_DO_NOTHING_MAX)),
+                            2,
+                        ),
+                    ],
+                )),
             ),
             (99, OneShot::boxed(UpdateActivityFromSchedule)),
         ],
