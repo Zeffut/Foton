@@ -122,3 +122,48 @@ fn a_captains_loot_reference_reports_the_raider_status() {
         })
     );
 }
+
+/// Vanilla parity: `Pillager.pickUpItem`, which reaches for a banner and for
+/// nothing else.
+///
+/// A pillager is born with `canPickUpLoot` set, so it is the one mob the shared
+/// `Mob.pickUpItem` body would otherwise have turned into a scavenger. The
+/// banner is the control: it proves the refusal below is the item test rather
+/// than the pickup never running at all.
+#[test]
+fn a_pillager_reaches_for_a_banner_and_leaves_the_sword() {
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use std::sync::Arc;
+    use steel_utils::ChunkPos;
+
+    init_vanilla_registry();
+    let world = fresh_test_world("pillager_picks_up_banners_only");
+    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+    let pillager = Arc::new(PillagerEntity::new(
+        &vanilla_entities::PILLAGER,
+        next_entity_id(),
+        TEST_POSITION,
+        Arc::downgrade(&world),
+    ));
+    world
+        .try_add_entity(Arc::clone(&pillager) as SharedEntity)
+        .expect("the test chunk is loaded, so the pillager should attach");
+
+    let sword = world
+        .spawn_item(TEST_POSITION, ItemStack::new(&vanilla_items::IRON_SWORD))
+        .expect("the test chunk accepts an item entity");
+    Mob::pick_up_item(pillager.as_ref(), &world, &(sword.clone() as SharedEntity));
+    assert!(
+        !sword.is_removed(),
+        "a pillager has no use for a sword on the ground"
+    );
+
+    let banner = world
+        .spawn_item(TEST_POSITION, ItemStack::new(&vanilla_items::WHITE_BANNER))
+        .expect("the test chunk accepts an item entity");
+    Mob::pick_up_item(pillager.as_ref(), &world, &(banner.clone() as SharedEntity));
+    assert!(
+        banner.is_removed(),
+        "a banner is the one thing a pillager does reach for"
+    );
+}
