@@ -3701,6 +3701,10 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     }
 
     /// Mirrors vanilla `Entity.checkFallDamage`.
+    ///
+    /// Vanilla puts a `LivingEntity.checkFallDamage` between this and its own
+    /// body; dispatching here is what keeps a mob that never overrides the
+    /// method from skipping that layer.
     fn check_fall_damage(
         &self,
         vertical_movement: f64,
@@ -3709,7 +3713,11 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         pos: BlockPos,
         world: &Arc<World>,
     ) {
-        self.entity_check_fall_damage(vertical_movement, on_ground, on_state, pos, world);
+        if let Some(living) = self.as_living_entity() {
+            living.living_check_fall_damage(vertical_movement, on_ground, on_state, pos, world);
+        } else {
+            self.entity_check_fall_damage(vertical_movement, on_ground, on_state, pos, world);
+        }
     }
 
     /// The body of [`Self::check_fall_damage`], callable from an override.

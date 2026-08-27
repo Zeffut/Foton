@@ -97,8 +97,15 @@ drop() { # drop <x> <topY>
   CMDS="$CMDS;;!fall $(( $1 )).5 $2 0.5 151"
 }
 
-# Eight blocks onto stone: `ceil(8 - 3)` is five half hearts.
-drop 0 159
+# Eight blocks onto stone: `ceil(8 - 3)` is five half hearts, and a landing
+# that hurts also puffs the block underfoot. Nothing but the particle packet
+# reports that puff, and anything else drawing within thirty-two blocks lands
+# in the same channel, so it is cleared on the command before the drop and
+# read on the command after it -- the narrowest window the harness has.
+CMDS="$CMDS;;teleport @s 0 159 0"
+CMDS="$CMDS;;!forgetparticles"
+CMDS="$CMDS;;!fall 0.5 159 0.5 151"
+CMDS="$CMDS;;!sawparticle block"
 CMDS="$CMDS;;execute if entity @s[nbt={Health:15.0f}] run tellraw @s \"STONECOSTSFIVE\""
 
 # The same eight blocks onto a hay bale, which multiplies the fall by 0.2.
@@ -139,6 +146,7 @@ STATUS=$?
 cleanup
 
 echo "=== what happened ==="
+grep -oE "the client saw block particles|no block particles reached the client" join.log
 grep "server says" join.log | grep -oE "STONECOSTSFIVE|HAYCOSTSONE|WATERCOSTSNOTHING|SLIMECOSTSNOTHING|THEBOOTSAREWORN|FEATHERFALLINGCUTSITBYHALF|APIGWASDROPPED|THEPIGTOOKTHREE"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|wrongly|too quickly" | tail -5
@@ -147,6 +155,8 @@ fail() { echo "########## FALL TEST FAILED ($1) ##########"; exit 1; }
 said() { grep "server says" join.log | grep -q "$1"; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
+grep -q "the client saw block particles" join.log \
+  || fail "a landing hard enough to hurt kicked up no block particles"
 said STONECOSTSFIVE || fail "an eight block fall onto stone did not cost five half hearts"
 said HAYCOSTSONE || fail "a hay bale did not soften the same fall to one"
 said WATERCOSTSNOTHING || fail "a twelve block fall into water hurt"

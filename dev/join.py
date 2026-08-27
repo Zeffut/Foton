@@ -68,6 +68,7 @@ CLICK_QUICK_MOVE = 1
 PLAY_C_SET_PASSENGERS = 107
 PLAY_C_SYSTEM_CHAT = 121
 PLAY_C_ANIMATE = 2
+PLAY_C_LEVEL_PARTICLES = 47
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
@@ -132,7 +133,10 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # is the only way a script takes fall damage -- a teleport arrives as one
 # jump the server refuses to read as a fall; and `!sawanimation <name>` /
 # `!forgetanimations` read and reset the `ClientboundAnimatePacket` actions the
-# client has been told about -- a critical hit leaves the server no other way. Those are the only way to reach an item's `use_on` and
+# client has been told about -- a critical hit leaves the server no other way;
+# and `!sawparticle <name>` / `!forgetparticles` do the same for the particles
+# the server has asked for, which is how the puff a hard landing kicks up is
+# read back. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do. The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
@@ -182,6 +186,9 @@ class Connection:
         # Every `ClientboundAnimatePacket` action the client has been told
         # about, by name. A critical hit reaches a player no other way.
         self.animations = set()
+        # Every particle the server has asked the client to draw, by name.
+        # A hard landing puffs the block underfoot and reports it nowhere else.
+        self.particles = set()
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -403,6 +410,44 @@ MOB_EFFECT_NAMES = mob_effect_names()
 MOB_EFFECT_IDS = {name: index for index, name in MOB_EFFECT_NAMES.items()}
 
 
+def particle_names():
+    """Maps particle type ids to names by reading the generated registry.
+
+    Unlike the entity and effect tables, the ids here are not declaration
+    order: the file declares every particle and then registers them in a
+    separate list at the end, and that list is the order the protocol counts
+    in.
+    """
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "steel-registry",
+        "src",
+        "generated",
+        "vanilla_particle_types.rs",
+    )
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            source = handle.read()
+    except OSError:
+        return {}
+    paths = dict(
+        re.findall(
+            r'pub static (\w+) : ParticleType[^;]*?path : Cow :: Borrowed \("([a-z_]+)"\)',
+            source,
+        )
+    )
+    return {
+        index: paths.get(constant, constant.lower())
+        for index, constant in enumerate(
+            re.findall(r"registry \. register \(& (\w+)\)", source)
+        )
+    }
+
+
+PARTICLE_NAMES = particle_names()
+
+
 def describe_spawns(spawned):
     if not spawned:
         return "nothing"
@@ -492,6 +537,8 @@ def run_play(connection, watch_seconds=0):
             report_passengers(payload)
         elif packet_id == PLAY_C_ANIMATE:
             note_animation(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_PARTICLES:
+            note_particles(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -538,6 +585,20 @@ def note_system_chat(payload):
     words = [word for word in text.split() if len(word) >= 4]
     if words:
         print(f"  server says: {' '.join(words)}")
+
+
+def note_particles(connection, payload):
+    """Records which particle the server just asked the client to draw.
+
+    The packet's header is fixed width -- two flags, three doubles, four
+    floats and a count -- and the particle id follows it as a varint. Whatever
+    the id carries after that is per-particle and not needed to name it.
+    """
+    header = 2 + 3 * 8 + 4 * 4 + 4
+    if len(payload) <= header:
+        return
+    particle_id, _rest = read_varint(payload[header:])
+    connection.particles.add(PARTICLE_NAMES.get(particle_id, str(particle_id)))
 
 
 def note_animation(connection, payload):
@@ -595,6 +656,8 @@ def pump(connection, seconds, spawned):
             report_passengers(payload)
         elif packet_id == PLAY_C_ANIMATE:
             note_animation(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_PARTICLES:
+            note_particles(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -824,6 +887,15 @@ def run_directive(connection, directive):
             print(f"  the client saw a {name}")
         else:
             print(f"  no {name} reached the client")
+    elif parts[0] == "sawparticle":
+        name = parts[1]
+        if name in connection.particles:
+            print(f"  the client saw {name} particles")
+        else:
+            print(f"  no {name} particles reached the client")
+    elif parts[0] == "forgetparticles":
+        connection.particles.clear()
+        print("  forgot the particles seen so far")
     elif parts[0] == "forgetanimations":
         connection.animations.clear()
         print("  forgot the animations seen so far")
@@ -1161,6 +1233,8 @@ def watch_for_spawns(connection, seconds, spawned):
             report_passengers(payload)
         elif packet_id == PLAY_C_ANIMATE:
             note_animation(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_PARTICLES:
+            note_particles(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
