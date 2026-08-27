@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stand an enderman in a ring of grass and watch it walk off with a block.
+# Wall an enderman in with dirt and watch it walk off with a block.
 #
 # `EndermanTakeBlockGoal` and `EndermanLeaveBlockGoal` sit at priorities 11 and
 # 10 of the enderman's goal selector, and both are gated behind a die roll --
@@ -8,11 +8,12 @@
 # selector ever reaches them. This does: it summons an enderman and lets the
 # real tick run.
 #
-# Midnight, because daylight makes an enderman teleport away from its ring, and
+# Midnight, because daylight makes an enderman teleport away from its wall, and
 # clear weather, because rain hurts it into teleporting too.
 #
-# The grass is at the enderman's own feet level and above rather than under it:
-# the take box is `y .. y+3`, so a floor is out of reach by construction.
+# The holdable blocks are at the enderman's own feet level and above rather than
+# under it: the take box is `y .. y+3`, so a floor is out of reach by
+# construction.
 #
 # Usage: bash dev/enderman-block-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -68,7 +69,7 @@ CMDS="$CMDS;;teleport @s 0 108 0"
 CMDS="$CMDS;;gamerule spawn_mobs false"
 CMDS="$CMDS;;kill @e[type=minecraft:enderman]"
 
-# A slab floor, then grass filling every cell around the middle for the
+# A slab floor, then dirt filling every cell around the middle for the
 # enderman's whole height. The middle stays empty for it to stand in.
 #
 # Two details in that are load-bearing, both learned from watching this test
@@ -81,31 +82,45 @@ CMDS="$CMDS;;kill @e[type=minecraft:enderman]"
 # the leave goal is free to set the block down in the enderman's own cell, which
 # vanilla allows (it passes itself as the exclusion), and the suffocation that
 # follows teleports it out of the rig.
+#
+# Dirt rather than grass because a grass block under cover random-ticks itself
+# into dirt: a wall three grass blocks high demolishes its own bottom two courses
+# within a few hundred ticks, which is how a run failed here claiming the wall
+# had never been built.
 for x in -1 0 1; do
   for z in -1 0 1; do
     CMDS="$CMDS;;setblock $x 99 $z minecraft:smooth_stone_slab"
     if [ "$x" != 0 ] || [ "$z" != 0 ]; then
       for y in 100 101 102; do
-        CMDS="$CMDS;;setblock $x $y $z minecraft:grass_block"
+        CMDS="$CMDS;;setblock $x $y $z minecraft:dirt"
       done
     fi
   done
 done
 
-CMDS="$CMDS;;summon minecraft:enderman 0 100 0 {PersistenceRequired:1b,Silent:1b,Tags:[\"carrier\"]}"
+# The wall is counted before the enderman exists. The world keeps ticking
+# between commands, so a control asked afterwards is racing the very thing it is
+# a control for -- and this one lost: a run failed here because the enderman had
+# already walked off with the block the check was looking at.
+CMDS="$CMDS;;execute if block 1 100 0 minecraft:dirt run tellraw @s \"RINGDOWN\""
 
-# The controls, asked before anything is allowed to tick.
+CMDS="$CMDS;;summon minecraft:enderman 0 100 0 {PersistenceRequired:1b,Silent:1b,Tags:[\"carrier\"]}"
 CMDS="$CMDS;;execute if entity @e[type=minecraft:enderman,tag=carrier] run tellraw @s \"ENDERMANUP\""
-CMDS="$CMDS;;execute if block 1 100 0 minecraft:grass_block run tellraw @s \"RINGDOWN\""
 # And the flag came off the summon NBT, which is also the load path the carried
 # block itself uses.
 CMDS="$CMDS;;execute if entity @e[type=minecraft:enderman,tag=carrier,nbt={PersistenceRequired:1b}] run tellraw @s \"ENDERMANPINNED\""
 
-# A take attempt is one tick in ten and lands on a reachable cell one time in
-# four, so two hundred ticks is already a near-certainty and nothing in this rig
-# can take the block away again. The checkpoints repeat only so a failure says
-# how long it held out.
-CARRYING='nbt={carriedBlockState:{Name:"minecraft:grass_block"}}'
+# The take box reaches two blocks out, further than the wall this rig builds, so
+# the enderman can also reach whatever the generator put beside the platform.
+# That is why the assertion asks only that it is holding *a* block: which one is
+# the unit tests' business, and a run that failed here had walked off with
+# something the generator had put there rather than with the wall.
+#
+# A take attempt is one tick in ten and lands on a reachable cell about one time
+# in five, and nothing in this rig can take the block away again, so a few
+# hundred ticks is already a near-certainty. The checkpoints repeat only so a
+# failure says how long it held out.
+CARRYING='nbt={carriedBlockState:{}}'
 for _ in 1 2 3; do
   CMDS="$CMDS;;tick sprint 200"
   CMDS="$CMDS;;execute if entity @e[type=minecraft:enderman,tag=carrier,$CARRYING] run tellraw @s \"ENDERMANCARRIES\""
@@ -132,7 +147,7 @@ fail() { echo "########## ENDERMAN BLOCK TEST FAILED ($1) ##########"; exit 1; }
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
 
 said ENDERMANUP     || fail "the enderman never spawned"
-said RINGDOWN       || fail "the ring of grass never got placed"
+said RINGDOWN       || fail "the wall of dirt never got placed"
 said ENDERMANPINNED || fail "the summon NBT never reached the mob"
 
 said ENDERMANSURVIVED || fail "the enderman did not live through the run"
