@@ -1190,6 +1190,7 @@ mod fall_and_fluids;
 mod hostile_ai;
 mod important_interactions;
 mod item_use;
+mod live_nbt_load;
 mod living_state;
 mod mob_persistence;
 mod mob_pickup;

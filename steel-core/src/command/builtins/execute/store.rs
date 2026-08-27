@@ -22,6 +22,7 @@ use super::{
     condition::{invalid_block_data_source, loaded_block_position},
     objective, source_command_storage, source_scoreboard,
 };
+use crate::entity::{SharedEntity, nbt_load::load_live_entity};
 use crate::scoreboard::{ScoreHolder, Scoreboard, ScoreboardError, ScoreboardObjective};
 use crate::{block_entity::SharedBlockEntity, command::storage::CommandStorage};
 
@@ -37,7 +38,6 @@ pub(super) fn target(name: &'static str, store_result: bool) -> Builder {
     // `CustomBossEvents` saved data that owns them. Neither exists yet, and
     // the shape of the persistence is best settled alongside `/bossbar`,
     // which is its only other caller.
-    // TODO: Add entity after live entity NBT can reload every command-visible field.
     literal(name)
         .then(
             literal("score").then(
@@ -47,6 +47,12 @@ pub(super) fn target(name: &'static str, store_result: bool) -> Builder {
                             store_score(context, store_result)
                         }),
                 ),
+            ),
+        )
+        .then(
+            literal("entity").then(
+                argument("target", SteelArgumentType::entity())
+                    .then(data_path(StoreDataTarget::Entity, store_result)),
             ),
         )
         .then(
@@ -105,6 +111,7 @@ fn data_type(
 #[derive(Clone, Copy)]
 enum StoreDataTarget {
     Block,
+    Entity,
     Storage,
 }
 
@@ -140,8 +147,37 @@ fn store_data(
 ) -> Result<CommandSource, CommandSyntaxError> {
     match target {
         StoreDataTarget::Block => store_block_data(context, data_type, store_result),
+        StoreDataTarget::Entity => store_entity_data(context, data_type, store_result),
         StoreDataTarget::Storage => store_storage_data(context, data_type, store_result),
     }
+}
+
+fn store_entity_data(
+    context: &SteelCommandContext<CommandSource>,
+    data_type: StoreDataType,
+    store_result: bool,
+) -> Result<CommandSource, CommandSyntaxError> {
+    // Vanilla resolves the accessor when the `store` clause is parsed, so a
+    // selector that matches no entity fails the whole command rather than
+    // failing quietly once the stored command has already run.
+    let entity = context.entity("target")?;
+    let path = parsed_path(context)?;
+    let scale = parsed_scale(context)?;
+    let source = context.source();
+    let callback = CommandResultCallback::new(move |success, result| {
+        // Vanilla parity: `EntityDataAccessor.setData` refuses a player, and
+        // `ExecuteCommand.storeData` swallows that refusal. The store is a
+        // no-op, not a command failure.
+        if entity.as_player().is_some() {
+            return;
+        }
+        let value = stored_value(store_result, success, result);
+        if let Err(error) = store_entity_data_value(&entity, &path, data_type.tag(value, scale)) {
+            tracing::warn!(%error, "failed to store execute result in entity data");
+        }
+    });
+    let callback = CommandResultCallback::chain(source.callback(), callback);
+    Ok(source.with_callback(callback))
 }
 
 fn store_block_data(
@@ -271,6 +307,20 @@ fn store_block_data_value(
     Ok(())
 }
 
+fn store_entity_data_value(
+    entity: &SharedEntity,
+    path: &NbtPath,
+    value: NbtTag,
+) -> Result<(), StoreDataMutationError> {
+    let data = mutate_compound_path(entity.nbt_for_data_compare(), path, value)?;
+    let mut bytes = Vec::new();
+    data.write(&mut bytes);
+    let borrowed = read_borrowed_compound(&mut Cursor::new(bytes.as_slice()))
+        .map_err(|_| StoreDataMutationError::InvalidWrittenNbt)?;
+    load_live_entity(entity.as_ref(), (&borrowed).into());
+    Ok(())
+}
+
 fn mutate_compound_path(
     data: NbtCompound,
     path: &NbtPath,
@@ -306,9 +356,78 @@ impl Error for StoreDataMutationError {}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Weak;
+
+    use glam::DVec3;
+    use steel_registry::{init_vanilla_registry, vanilla_entities};
     use steel_utils::nbt::parse_nbt_path_argument;
+    use text_components::TextComponent;
 
     use super::*;
+    use crate::entity::{ENTITIES, init_entities, next_entity_id};
+
+    /// Builds one live slime with a name, a tag and a known amount of health.
+    ///
+    /// Everything here is deliberately not a default, so the store below can be
+    /// asked what it left alone.
+    fn dressed_slime() -> SharedEntity {
+        init_vanilla_registry();
+        init_entities();
+        let Some(entity) = ENTITIES.create(
+            &vanilla_entities::SLIME,
+            next_entity_id(),
+            DVec3::ZERO,
+            Weak::new(),
+        ) else {
+            panic!("a slime should have an entity factory");
+        };
+        entity.set_custom_name(Some(TextComponent::from("Blob")));
+        assert!(entity.add_tag("store_test".to_owned()));
+        let Some(living) = entity.as_living_entity() else {
+            panic!("a slime is a living entity");
+        };
+        living.set_health(7.0);
+        entity
+    }
+
+    /// A store writes one value and has to leave the rest of the entity alone.
+    ///
+    /// The read-modify-write is the whole trick: a store that handed the entity
+    /// a compound containing only the stored path would pass an assertion on
+    /// `Air` and quietly wipe the name, the tag and the health with it.
+    #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "an exact value that survived an NBT round trip"
+    )]
+    fn storing_into_an_entity_replaces_only_the_path_it_was_given() {
+        let entity = dressed_slime();
+        let (path, _) = parse_nbt_path_argument("Air").expect("path should parse");
+        assert_ne!(entity.air_supply(), 42);
+
+        assert!(store_entity_data_value(&entity, &path, NbtTag::Short(42)).is_ok());
+
+        assert_eq!(entity.air_supply(), 42);
+        assert_eq!(entity.custom_name(), Some(TextComponent::from("Blob")));
+        assert_eq!(entity.tags(), vec!["store_test".to_owned()]);
+        let Some(living) = entity.as_living_entity() else {
+            panic!("a slime is a living entity");
+        };
+        assert_eq!(living.get_health(), 7.0);
+    }
+
+    /// A path vanilla creates on the way down works here too: `data` is the one
+    /// compound a datapack owns outright, and it starts out absent.
+    #[test]
+    fn storing_into_an_entity_creates_the_compounds_a_path_walks_through() {
+        let entity = dressed_slime();
+        assert!(entity.custom_data().is_empty());
+        let (path, _) = parse_nbt_path_argument("data.counter").expect("path should parse");
+
+        assert!(store_entity_data_value(&entity, &path, NbtTag::Int(9)).is_ok());
+
+        assert_eq!(entity.custom_data().int("counter"), Some(9));
+    }
 
     #[test]
     fn score_store_creates_and_updates_each_holder() {
