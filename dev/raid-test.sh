@@ -142,7 +142,7 @@ CMDS="$CMDS;;summon minecraft:villager 1 100 1"
 CMDS="$CMDS;;teleport @s 1 100 0"
 # Both claims are booked on a jittered scan, and the bell is ten blocks off, so
 # give the villager a good while to take them and settle into its evening.
-CMDS="$CMDS;;!wait 20"
+CMDS="$CMDS;;!wait 30"
 
 # The villager has to be in the world at all for its bed claim to mean
 # anything, so that is asserted before the raid is blamed for anything.
@@ -153,14 +153,18 @@ CMDS="$CMDS;;execute unless entity @e[type=minecraft:villager,x=10,y=100,z=0,dis
 CMDS="$CMDS;;raid start 1"
 # The countdown is three hundred ticks; the villager has ten blocks to cover at
 # one and a half times its usual pace, so it should be at the bell well before
-# the wave lands.
-CMDS="$CMDS;;!wait 10"
-CMDS="$CMDS;;execute if entity @e[type=minecraft:villager,x=10,y=100,z=0,distance=..4] run tellraw @s \"VILLAGERATBELL\""
+# the wave lands. It does not stand still once it is there -- PRE_RAID strolls
+# around the meeting point between walks -- so the question is asked across the
+# countdown rather than at one guessed moment.
+CMDS="$CMDS;;!wait 5"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  CMDS="$CMDS;;execute if entity @e[type=minecraft:villager,x=10,y=100,z=0,distance=..4] run tellraw @s \"VILLAGERATBELL\""
+done
 
 # --- 3: the wave ----------------------------------------------------------
 # The rest of the countdown, plus room for the spawn-position search and for
 # the mobs to be streamed to the client.
-CMDS="$CMDS;;!wait 15"
+CMDS="$CMDS;;!wait 10"
 CMDS="$CMDS;;execute if entity @e[type=minecraft:pillager] run tellraw @s \"RAIDWAVEARRIVED\""
 CMDS="$CMDS;;!spawned pillager"
 
