@@ -89,7 +89,6 @@ use arc_swap::ArcSwap;
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::{Difficulty, GameType, InteractionHand};
 use text_components::resolving::TextResolutor;
-use text_components::translation::TranslatedMessage;
 use text_components::{
     Modifier as _, TextComponent,
     interactivity::{ClickEvent, HoverEvent},
@@ -813,16 +812,18 @@ impl Player {
 
         let show_death_messages = world.get_game_rule(&SHOW_DEATH_MESSAGES);
 
-        // TODO: use CombatTracker for multi-arg messages (killer name, item, etc.)
-        let death_key = format!("death.attack.{}", source.damage_type.message_id);
-        let death_message = TranslatedMessage {
-            key: death_key.into(),
-            fallback: None,
-            args: Some(Box::new([TextComponent::plain(
-                self.gameprofile.name.clone(),
-            )])),
-        }
-        .component();
+        // TODO: `CombatTracker` proper, for the fall-damage variants and the
+        // "intentional game design" message. Everything else a death line needs
+        // is in the damage source itself.
+        // Vanilla parity: `LivingEntity.getKillCredit`. The last player to hurt
+        // them wins over the last mob, which is what makes a shove into lava
+        // read as a murder rather than an accident.
+        let kill_credit = self
+            .living_base
+            .last_hurt_by_player_uuid()
+            .and_then(|uuid| world.get_entity_by_uuid(&uuid))
+            .or_else(|| self.living_base.last_hurt_by_mob());
+        let death_message = source.localized_death_message(&world, self, kill_credit.as_deref());
 
         self.send_packet(CPlayerCombatKill {
             player_id: self.id(),

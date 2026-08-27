@@ -423,6 +423,19 @@ impl World {
             .unwrap_or(self.dimension_type.snow_golem_melts)
     }
 
+    /// Returns the `gameplay/increased_fire_burnout` environment attribute here.
+    ///
+    /// Vanilla parity: the biome layer of `EnvironmentAttributeSystem`. No
+    /// dimension type overrides the declared `false` default, so only the humid
+    /// overworld biomes -- jungle, swamp, the wet ones -- turn it on, and that
+    /// is what makes fire there both catch and die faster.
+    #[must_use]
+    pub fn increased_fire_burnout_at(&self, pos: BlockPos) -> bool {
+        self.biome_at(pos)
+            .and_then(|biome| biome.increased_fire_burnout)
+            .unwrap_or(false)
+    }
+
     /// Returns the seed vanilla's `BiomeManager` fuzzes block-level biome lookups with.
     pub(crate) fn biome_zoom_seed(&self) -> i64 {
         obfuscate_biome_seed(self.seed())

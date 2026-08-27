@@ -22,6 +22,11 @@ pub struct Biome {
     /// layers the biome on top of the dimension value, so a biome that sets it
     /// wins wherever it applies.
     pub snow_golem_melts: Option<bool>,
+    /// This biome's override of vanilla `EnvironmentAttributes.INCREASED_FIRE_BURNOUT`.
+    ///
+    /// `None` when the biome leaves the attribute alone. No dimension type sets
+    /// it, so only the humid overworld biomes ever turn it on.
+    pub increased_fire_burnout: Option<bool>,
     pub effects: BiomeEffects,
     pub creature_spawn_probability: f32,
     pub spawners: FxHashMap<String, Vec<SpawnerData>>,
