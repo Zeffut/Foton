@@ -336,6 +336,10 @@ impl Entity for ArmorStandEntity {
         false
     }
 
+    /// Vanilla parity: `ArmorStand.thunderHit`, an empty override. Lightning
+    /// neither breaks a stand nor sets its armor alight.
+    fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
+
     /// Vanilla parity: `ArmorStand.isPickable`, where a marker cannot be hit.
     fn is_pickable(&self) -> bool {
         !self.is_removed() && !self.is_marker()

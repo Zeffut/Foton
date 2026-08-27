@@ -9,11 +9,14 @@ use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_macros::entity_behavior;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::item_stack::ItemStack;
 use steel_registry::painting_variant::PaintingVariantRef;
 use steel_registry::vanilla_entity_data::PaintingEntityData;
+use steel_registry::vanilla_game_rules::ENTITY_DROPS;
 use steel_registry::vanilla_painting_variant_tags::PaintingVariantTag;
 use steel_registry::{
-    REGISTRY, RegistryExt as _, RegistryReference, TaggedRegistryExt as _, vanilla_blocks,
+    REGISTRY, RegistryExt as _, RegistryReference, TaggedRegistryExt as _, sound_events,
+    vanilla_blocks, vanilla_items,
 };
 use steel_utils::locks::SyncMutex;
 use steel_utils::{
@@ -21,8 +24,11 @@ use steel_utils::{
     WorldAabb, axis::Axis,
 };
 
+use crate::entity::block_attached::drop_would_be_wasted;
+use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData, ItemFrame,
+    BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
+    ItemFrame, SharedEntity,
 };
 use crate::physics::{WorldCollisionProvider, has_block_collision};
 use crate::world::World;
@@ -30,10 +36,10 @@ use crate::world::World;
 /// A painting hanging on a wall.
 ///
 /// Vanilla parity: `Painting`. The variant carries the size, so every change
-/// of variant or facing resizes the entity. Not implemented: the drop when a
-/// painting is broken (`Painting.dropItem`) and the periodic survival check of
-/// `BlockAttachedEntity.tick` that pops a painting off a wall someone mined --
-/// Steel has no block-attached tick pass, so a painting outlives its wall.
+/// of variant or facing resizes the entity. Not implemented: the periodic
+/// survival check of `BlockAttachedEntity.tick` that pops a painting off a wall
+/// someone mined -- Steel has no block-attached tick pass, so a painting
+/// outlives its wall.
 #[entity_behavior(class = "Painting")]
 pub struct PaintingEntity {
     base: EntityBase,
@@ -344,6 +350,14 @@ impl Entity for PaintingEntity {
         self.direction().get_3d_data_value()
     }
 
+    /// Vanilla parity: `BlockAttachedEntity.thunderHit`, an empty override.
+    /// Lightning passes straight through anything hung on a block.
+    fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
+
+    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
+        self.hurt_block_attached(world, source)
+    }
+
     /// Vanilla parity: `Painting.trackingPosition`, the lower corner of the
     /// block rather than the middle of the canvas.
     fn spawn_position(&self) -> DVec3 {
@@ -462,14 +476,33 @@ const fn direction_from_2d_data_value(value: i32) -> Direction {
     }
 }
 
+impl BlockAttached for PaintingEntity {
+    /// Vanilla parity: `Painting.dropItem`. Every painting drops the same
+    /// plain item -- the variant is rolled again when it is hung back up.
+    fn drop_item(&self, world: &World, caused_by: Option<&SharedEntity>) {
+        if !world.get_game_rule(&ENTITY_DROPS) {
+            return;
+        }
+        self.play_sound(&sound_events::ENTITY_PAINTING_BREAK, 1.0, 1.0);
+        if drop_would_be_wasted(caused_by) {
+            return;
+        }
+        self.spawn_at_location(ItemStack::new(&vanilla_items::PAINTING), 0.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use steel_registry::{init_vanilla_registry, vanilla_entities, vanilla_painting_variants};
     use steel_utils::ChunkPos;
     use steel_utils::types::UpdateFlags;
 
+    use steel_registry::vanilla_damage_types;
+
     use super::*;
     use crate::behavior::init_behaviors;
+    use crate::entity::entities::ItemEntity;
+    use crate::entity::next_entity_id;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     /// The block a test painting is anchored to.
@@ -632,5 +665,47 @@ mod tests {
 
         assert_eq!(nbt.byte("facing"), Some(1), "west is 1 in 2-D, 4 in 3-D");
         assert_eq!(nbt.int_array("block_pos"), Some([4, 70, 9].as_slice()));
+    }
+
+    /// A painting is not a living entity, so the ordinary damage path refuses
+    /// it and it would be indestructible without `BlockAttachedEntity`.
+    #[test]
+    fn a_punched_painting_comes_off_the_wall_and_drops_its_item() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("painting_breaks_and_drops");
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(anchor()));
+
+        let painting = Arc::new(PaintingEntity::new_attached(
+            &vanilla_entities::PAINTING,
+            next_entity_id(),
+            anchor(),
+            Direction::West,
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(painting.clone())
+            .expect("the painting's chunk is loaded");
+
+        assert!(painting.hurt(
+            &world,
+            &DamageSource::environment(&vanilla_damage_types::GENERIC),
+            1.0
+        ));
+
+        assert!(painting.is_removed());
+        let everywhere = WorldAabb::new(-32.0, 0.0, -32.0, 32.0, 128.0, 32.0);
+        assert!(
+            world
+                .get_entities_in_aabb(&everywhere)
+                .iter()
+                .any(|entity| {
+                    entity
+                        .as_ref()
+                        .downcast_ref::<ItemEntity>()
+                        .is_some_and(|item| item.get_item().is(&vanilla_items::PAINTING))
+                }),
+            "breaking a painting leaves the painting item behind"
+        );
     }
 }

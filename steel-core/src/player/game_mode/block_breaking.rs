@@ -12,7 +12,7 @@ use steel_registry::data_components::vanilla_components::CAN_BREAK;
 use steel_registry::vanilla_attributes;
 use steel_registry::{
     REGISTRY, blocks::properties::Direction, item_stack::ItemStack, vanilla_blocks,
-    vanilla_game_events,
+    vanilla_game_events, vanilla_mob_effects,
 };
 use steel_utils::{
     BlockPos, BlockStateId,
@@ -26,6 +26,17 @@ use crate::fluid::fluid_state_to_block;
 use crate::player::Player;
 use crate::player::food_data::food_constants;
 use crate::world::{ConditionalBlockSetResult, World, game_event::GameEventContext};
+
+/// How much each level of haste or conduit power adds.
+///
+/// Vanilla parity: the `(amplification + 1) * 0.2F` of
+/// `Player.getDestroySpeed`.
+const DIG_SPEED_PER_LEVEL: f32 = 0.2;
+
+/// How much slower mining is with both feet off the ground.
+///
+/// Vanilla parity: the `speed /= 5.0F` of `Player.getDestroySpeed`.
+const AIRBORNE_MINING_PENALTY: f32 = 5.0;
 
 impl Player {
     /// Mirrors vanilla `Player.blockActionRestricted` for block breaking.
@@ -509,12 +520,7 @@ fn get_destroy_progress(player: &Player, block_state: BlockStateId) -> f32 {
         main_hand.is_correct_tool_for_drops(block_state)
     };
 
-    // Apply speed modifiers
-    let speed = mining_speed;
-
-    // TODO: Apply efficiency enchantment
-    // TODO: Apply haste/mining fatigue effects
-    // TODO: Apply underwater/in-air penalties
+    let speed = apply_mining_speed_modifiers(player, mining_speed);
 
     // Calculate destroy progress per tick
     // Vanilla formula: speed / hardness / (hasCorrectTool ? 30 : 100)
@@ -525,6 +531,74 @@ fn get_destroy_progress(player: &Player, block_state: BlockStateId) -> f32 {
     };
 
     speed / destroy_time / divisor
+}
+
+/// Scales a tool's raw speed by everything the digger's own state does to it.
+///
+/// Vanilla parity: the body of `Player.getDestroySpeed` after the tool has been
+/// asked. What is left out is named on [`mining_speed_from_attributes`].
+#[must_use]
+pub(crate) fn apply_mining_speed_modifiers(player: &Player, tool_speed: f32) -> f32 {
+    let mut speed = mining_speed_from_attributes(player, tool_speed);
+
+    // Vanilla parity: `MobEffectUtil.hasDigSpeed` and
+    // `getDigSpeedAmplification`, which take the better of haste and conduit
+    // power rather than stacking them.
+    if let Some(amplification) = dig_speed_amplification(player) {
+        speed *= 1.0 + (amplification + 1) as f32 * DIG_SPEED_PER_LEVEL;
+    }
+
+    // Vanilla parity: the `switch` of `Player.getDestroySpeed`. The steps are
+    // steeper than a multiplier would be, which is why an elder guardian's
+    // curse is worth swimming away from rather than working through.
+    if let Some(fatigue) = player.mob_effect(vanilla_mob_effects::MINING_FATIGUE) {
+        speed *= match fatigue.amplifier() {
+            0 => 0.3,
+            1 => 0.09,
+            2 => 0.0027,
+            _ => 0.000_81,
+        };
+    }
+
+    // Vanilla parity: the `if (!this.onGround()) speed /= 5.0F`, which is why
+    // mining while falling or jumping takes five times as long.
+    if !player.on_ground() {
+        speed /= AIRBORNE_MINING_PENALTY;
+    }
+
+    speed
+}
+
+/// Returns the better of the two effects that speed digging up.
+///
+/// Vanilla parity: `MobEffectUtil.getDigSpeedAmplification`, guarded by
+/// `hasDigSpeed`; `None` here is vanilla's "neither is active".
+fn dig_speed_amplification(player: &Player) -> Option<i32> {
+    let haste = player
+        .mob_effect(vanilla_mob_effects::HASTE)
+        .map(|active| active.amplifier());
+    let conduit = player
+        .mob_effect(vanilla_mob_effects::CONDUIT_POWER)
+        .map(|active| active.amplifier());
+    match (haste, conduit) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (None, None) => None,
+    }
+}
+
+/// MISSING FOUNDATION: the three attribute terms of `Player.getDestroySpeed`.
+///
+/// Vanilla adds `MINING_EFFICIENCY` when the tool is worth more than a bare
+/// hand, then multiplies by `BLOCK_BREAK_SPEED`, then by
+/// `SUBMERGED_MINING_SPEED` when the digger's eyes are under water. All three
+/// exist in the generated registry, but no player carries them: Steel has no
+/// attribute supplier that puts them on one, and nothing translates the
+/// Efficiency enchantment into the `MINING_EFFICIENCY` modifier it is in 26.2.
+/// Until both land, an enchanted pick digs like a plain one and Aqua Affinity
+/// does nothing.
+const fn mining_speed_from_attributes(_player: &Player, tool_speed: f32) -> f32 {
+    tool_speed
 }
 
 /// Drops loot for a destroyed block using its loot table.
@@ -588,4 +662,110 @@ fn item_can_destroy_block(
             .set_item_in_hand(InteractionHand::MainHand, held);
     }
     allowed
+}
+
+#[cfg(test)]
+mod mining_speed_tests {
+    use steel_registry::init_vanilla_registry;
+
+    use super::*;
+    use crate::entity::MobEffectInstance;
+    use crate::test_support::{TestPlayerBuilder, fresh_test_world};
+
+    /// A tool speed that is easy to read the multipliers off.
+    const BASE: f32 = 10.0;
+
+    fn digger(key: &'static str) -> Arc<Player> {
+        init_vanilla_registry();
+        let world = fresh_test_world(key);
+        let player = TestPlayerBuilder::new(world, "Digger", 1).build();
+        player.set_on_ground(true);
+        player
+    }
+
+    fn close(left: f32, right: f32) -> bool {
+        (left - right).abs() <= right.abs() * 1.0e-5
+    }
+
+    #[test]
+    fn haste_and_conduit_power_do_not_stack() {
+        let player = digger("mining_speed_haste");
+        assert!(close(apply_mining_speed_modifiers(&player, BASE), BASE));
+
+        // Haste II is `1 + (1 + 1) * 0.2`.
+        assert!(player.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::HASTE,
+            200,
+            1,
+        )));
+        assert!(close(
+            apply_mining_speed_modifiers(&player, BASE),
+            BASE * 1.4
+        ));
+
+        // Conduit Power III alongside it takes the better amplifier, not the
+        // sum: `1 + (2 + 1) * 0.2`, where adding them would give `1.8`.
+        assert!(player.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::CONDUIT_POWER,
+            200,
+            2,
+        )));
+        assert!(close(
+            apply_mining_speed_modifiers(&player, BASE),
+            BASE * 1.6
+        ));
+    }
+
+    /// The modifiers are worth nothing if the breaking path never asks for
+    /// them, so this one goes the long way round through `get_destroy_progress`.
+    #[test]
+    fn the_breaking_path_asks_for_the_modifiers() {
+        let player = digger("mining_speed_reaches_breaking");
+        let stone = vanilla_blocks::STONE.default_state();
+        let unhindered = get_destroy_progress(&player, stone);
+        assert!(unhindered > 0.0, "a bare hand still chips at stone");
+
+        assert!(player.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::MINING_FATIGUE,
+            200,
+            0,
+        )));
+        assert!(close(
+            get_destroy_progress(&player, stone),
+            unhindered * 0.3
+        ));
+    }
+
+    /// The fatigue steps are a table rather than a curve, and getting them
+    /// wrong is the difference between a slow dig and a hopeless one.
+    #[test]
+    fn mining_fatigue_walks_its_own_table() {
+        for (amplifier, expected) in [(0, 0.3_f32), (1, 0.09), (2, 0.0027), (3, 0.000_81)] {
+            let player = digger(match amplifier {
+                0 => "mining_speed_fatigue_0",
+                1 => "mining_speed_fatigue_1",
+                2 => "mining_speed_fatigue_2",
+                _ => "mining_speed_fatigue_3",
+            });
+            assert!(player.add_mob_effect(MobEffectInstance::with_duration(
+                vanilla_mob_effects::MINING_FATIGUE,
+                200,
+                amplifier,
+            )));
+            assert!(
+                close(apply_mining_speed_modifiers(&player, BASE), BASE * expected),
+                "fatigue {amplifier} should scale by {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn mining_off_the_ground_takes_five_times_as_long() {
+        let player = digger("mining_speed_airborne");
+        player.set_on_ground(false);
+        assert!(close(
+            apply_mining_speed_modifiers(&player, BASE),
+            BASE / 5.0
+        ));
+    }
 }

@@ -12,9 +12,10 @@ use glam::DVec3;
 use steel_macros::entity_behavior;
 use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::item_stack::ItemStack;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_entity_data::ZombifiedPiglinEntityData;
-use steel_registry::{sound_events, vanilla_attributes, vanilla_blocks};
+use steel_registry::{sound_events, vanilla_attributes, vanilla_blocks, vanilla_items};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, Downcast, DowncastType, DowncastTypeKey, WorldAabb};
 
@@ -29,6 +30,7 @@ use crate::entity::{
     AgeableMobGroupData, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob, SharedEntity, SpawnGroupData,
 };
+use crate::inventory::equipment::EquipmentSlot;
 use crate::world::{LevelReader as _, World};
 use std::ptr;
 use steel_utils::types::Difficulty;
@@ -38,6 +40,12 @@ use steel_utils::types::Difficulty;
 /// Vanilla parity: the `this.xpReward = 5` of the `Monster` constructor, which
 /// every monster inherits and this one does not override.
 const XP_REWARD: i32 = 5;
+
+/// Odds of the spawn weapon being a spear rather than a sword.
+///
+/// Vanilla parity: the `random.nextInt(20) == 0` of
+/// `ZombifiedPiglin.populateDefaultEquipmentSlots`.
+const ONE_IN_N_BLADES_IS_A_SPEAR: i32 = 20;
 
 /// Speed multiplier while chasing.
 const ATTACK_SPEED_MODIFIER: f64 = 1.0;
@@ -172,6 +180,20 @@ impl ZombifiedPiglinEntity {
             play_first_anger_sound_in: SyncMutex::new(0),
             ticks_until_next_alert: SyncMutex::new(0),
         }
+    }
+
+    /// Puts a golden blade in this one's hand.
+    ///
+    /// Vanilla parity: `ZombifiedPiglin.populateDefaultEquipmentSlots`, which
+    /// ignores the difficulty its signature takes: the roll is the same
+    /// everywhere, and one in twenty carries the spear instead of the sword.
+    pub fn populate_default_equipment_slots(&self) {
+        let weapon = if rand::random_range(0..ONE_IN_N_BLADES_IS_A_SPEAR) == 0 {
+            &vanilla_items::GOLDEN_SPEAR
+        } else {
+            &vanilla_items::GOLDEN_SWORD
+        };
+        self.set_item_slot(EquipmentSlot::MainHand, ItemStack::new(weapon));
     }
 
     /// Grunts once, shortly after being roused.

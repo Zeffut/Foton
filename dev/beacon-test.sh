@@ -96,6 +96,32 @@ CMDS="$CMDS;;!close"
 # inventory afterwards is the second half of the same answer.
 CMDS="$CMDS;;clear @s"
 
+# A second beacon, roofed with bedrock. Bedrock dampens light as fully as
+# stone, and vanilla's column walk spells out an exception for it -- which is
+# the only reason a beacon under the Nether roof works. Haste rather than speed
+# so the grant is told apart from the first beacon's.
+CMDS="$CMDS;;setblock 31 99 -1 minecraft:iron_block"
+CMDS="$CMDS;;setblock 32 99 -1 minecraft:iron_block"
+CMDS="$CMDS;;setblock 33 99 -1 minecraft:iron_block"
+CMDS="$CMDS;;setblock 31 99 0 minecraft:iron_block"
+CMDS="$CMDS;;setblock 32 99 0 minecraft:iron_block"
+CMDS="$CMDS;;setblock 33 99 0 minecraft:iron_block"
+CMDS="$CMDS;;setblock 31 99 1 minecraft:iron_block"
+CMDS="$CMDS;;setblock 32 99 1 minecraft:iron_block"
+CMDS="$CMDS;;setblock 33 99 1 minecraft:iron_block"
+CMDS="$CMDS;;setblock 32 100 0 minecraft:beacon"
+CMDS="$CMDS;;setblock 32 106 0 minecraft:bedrock"
+CMDS="$CMDS;;teleport @s 34 100 0"
+CMDS="$CMDS;;!wait 5"
+CMDS="$CMDS;;clear @s"
+CMDS="$CMDS;;give @s minecraft:iron_ingot 1"
+CMDS="$CMDS;;!hotbar 0"
+CMDS="$CMDS;;!useon 32 100 0 east"
+CMDS="$CMDS;;!shiftclick 28"
+CMDS="$CMDS;;!setbeacon haste"
+CMDS="$CMDS;;!wait 5"
+CMDS="$CMDS;;!close"
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=6 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -111,10 +137,13 @@ fail() { echo "########## BEACON TEST FAILED ($1) ##########"; exit 1; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
 screens=$(grep -c "a screen opened" join.log)
-[ "$screens" -eq 2 ] || fail "expected the beacon to open twice, got $screens"
+[ "$screens" -eq 3 ] || fail "expected a beacon to open three times, got $screens"
 
 effects=$(grep -c "got the effect speed" join.log)
 [ "$effects" -ge 1 ] || fail "the beacon never handed out speed"
+
+roofed=$(grep -c "got the effect haste" join.log)
+[ "$roofed" -ge 1 ] || fail "a beacon under a bedrock roof handed out nothing"
 
 # The control: the first attempt came before the pyramid existed, so the very
 # first `clear` must have found the ingot still in the inventory.

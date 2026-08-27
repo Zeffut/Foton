@@ -21,6 +21,7 @@ use steel_registry::{vanilla_mob_effects, vanilla_particle_types};
 use steel_utils::locks::SyncMutex;
 use steel_utils::{DowncastType, DowncastTypeKey, WorldAabb};
 
+use crate::entity::living_base::{apply_instantaneous_mob_effect, is_instantaneous};
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, RemovalReason,
 };
@@ -65,6 +66,13 @@ pub const DEFAULT_LINGERING_WAIT_TIME: i32 = 10;
 ///
 /// Vanilla parity: `DEFAULT_REAPPLICATION_DELAY`.
 const DEFAULT_REAPPLICATION_DELAY: i32 = 20;
+
+/// How much of an instant effect one dose from a cloud is worth.
+///
+/// Vanilla parity: the `0.5` scale of the `applyInstantaneousEffect` call in
+/// `AreaEffectCloud.tick`. A cloud of harming costs three points a dose where
+/// the bottle costs six.
+const CLOUD_INSTANT_SCALE: f64 = 0.5;
 
 /// How long a dragon fireball's cloud lasts.
 ///
@@ -225,11 +233,6 @@ impl AreaEffectCloudEntity {
         state.radius_on_use = 0.0;
         state.radius_per_tick =
             (DRAGON_BREATH_FINAL_RADIUS - DRAGON_BREATH_RADIUS) / DRAGON_BREATH_DURATION as f32;
-        // NOT IMPLEMENTED: vanilla applies `INSTANT_DAMAGE` through `MobEffect`s
-        // instant-effect hook (whose vanilla name is misspelled), which Steel has
-        // no equivalent for -- `MobEffectInstance::apply_effect_tick` only knows
-        // how to tick wither. The effect is stored so the cloud carries and saves
-        // the right thing, but standing in a dragon breath does no damage yet.
         state.effects = vec![(
             vanilla_mob_effects::INSTANT_DAMAGE,
             1,
@@ -255,9 +258,10 @@ impl AreaEffectCloudEntity {
 
         let mut state = self.state.lock();
         state.duration = DRAGON_SITTING_FLAME_DURATION;
-        // NOT IMPLEMENTED: the same instant-damage gap `configure_as_dragon_breath`
-        // documents. The effect is carried and saved, but standing in the breath
-        // does no damage yet.
+        // Vanilla's `new MobEffectInstance(MobEffects.INSTANT_DAMAGE)`, whose
+        // one-argument constructor is duration zero. That never matters: a
+        // cloud applies an instant effect on the spot rather than afflicting
+        // anyone with it, so the duration is never read.
         state.effects = vec![(vanilla_mob_effects::INSTANT_DAMAGE, 0, 0)];
     }
 
@@ -335,6 +339,22 @@ impl AreaEffectCloudEntity {
 
             let mut dosed = false;
             for (effect, duration, amplifier) in &effects {
+                // Vanilla parity: the `isInstantaneous` branch of
+                // `AreaEffectCloud.tick`. A cloud does not afflict anyone with
+                // an instant effect -- it applies it on the spot, and at half
+                // strength, which is why standing in a dragon's breath costs
+                // three points a dose rather than six.
+                if is_instantaneous(effect) {
+                    apply_instantaneous_mob_effect(
+                        world,
+                        living,
+                        effect,
+                        *amplifier,
+                        CLOUD_INSTANT_SCALE,
+                    );
+                    dosed = true;
+                    continue;
+                }
                 let instance = MobEffectInstance::with_duration(effect, *duration, *amplifier);
                 if !living.can_be_affected(&instance) {
                     continue;
@@ -450,5 +470,66 @@ impl Entity for AreaEffectCloudEntity {
 
         // TODO: the effects a saved cloud carried are not restored yet; a world
         // reloaded mid-cloud leaves a shrinking patch that doses nobody.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use steel_registry::{init_vanilla_registry, vanilla_entities};
+    use steel_utils::ChunkPos;
+
+    use super::*;
+    use crate::entity::entities::CowEntity;
+    use crate::entity::{LivingEntity as _, next_entity_id};
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    /// A dragon's breath carries `INSTANT_DAMAGE`, which a cloud applies on the
+    /// spot rather than afflicting anyone with. Before that branch existed the
+    /// cloud handed out an effect instance nothing ever ticked, and standing in
+    /// a dragon's breath was free.
+    #[test]
+    fn a_dragon_breath_cloud_hurts_what_stands_in_it() {
+        init_vanilla_registry();
+        let world = fresh_test_world("area_effect_cloud_dragon_breath");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let cow = Arc::new(CowEntity::new(
+            &vanilla_entities::COW,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(cow.clone())
+            .expect("the cow's chunk is loaded");
+        let full_health = cow.get_health();
+
+        let cloud = Arc::new(AreaEffectCloudEntity::new(
+            &vanilla_entities::AREA_EFFECT_CLOUD,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(cloud.clone())
+            .expect("the cloud's chunk is loaded");
+        cloud.configure_as_dragon_breath();
+
+        // The cloud waits ten ticks before it starts, and only sweeps every
+        // fifth tick after that.
+        for _ in 0..=(DEFAULT_LINGERING_WAIT_TIME + TIME_BETWEEN_APPLICATIONS) {
+            cloud.advance_tick_count();
+            cloud.tick();
+        }
+
+        // Amplifier one at the cloud's half scale: `(0.5 * (6 << 1) + 0.5)`.
+        assert_f32_close(full_health - cow.get_health(), 6.0);
+    }
+
+    fn assert_f32_close(left: f32, right: f32) {
+        assert!(
+            (left - right).abs() <= f32::EPSILON,
+            "expected {left} to equal {right}"
+        );
     }
 }

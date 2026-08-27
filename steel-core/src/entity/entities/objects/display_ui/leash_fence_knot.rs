@@ -12,9 +12,10 @@ use steel_registry::vanilla_entities;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, Downcast as _, DowncastType, DowncastTypeKey, WorldAabb};
 
+use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntityBaseState, RemovalReason, SharedEntity,
-    next_entity_id,
+    BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, RemovalReason,
+    SharedEntity, next_entity_id,
 };
 use crate::world::World;
 
@@ -214,6 +215,14 @@ impl Entity for LeashFenceKnotEntity {
         self.entity_type
     }
 
+    /// Vanilla parity: `BlockAttachedEntity.thunderHit`, an empty override.
+    /// Lightning passes straight through anything hung on a block.
+    fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
+
+    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
+        self.hurt_block_attached(world, source)
+    }
+
     fn spawn_position(&self) -> DVec3 {
         let block_pos = self.block_pos();
         DVec3::new(
@@ -242,6 +251,15 @@ impl Entity for LeashFenceKnotEntity {
 
     fn is_pickable(&self) -> bool {
         true
+    }
+}
+
+impl BlockAttached for LeashFenceKnotEntity {
+    /// Vanilla parity: `LeashFenceKnotEntity.dropItem`, which drops nothing --
+    /// the lead is already on whatever was tied to it. All a broken knot leaves
+    /// is the untie sound.
+    fn drop_item(&self, _world: &World, _caused_by: Option<&SharedEntity>) {
+        self.play_drop_sound();
     }
 }
 

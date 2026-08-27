@@ -871,6 +871,133 @@ fn wither_effect_only_damages_on_its_vanilla_interval() {
 }
 
 #[test]
+fn poison_hurts_on_its_interval_and_never_finishes_the_job() {
+    let world = test_world();
+    let entity = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world);
+    assert!(entity.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::POISON,
+        25,
+        0,
+    )));
+
+    // The schedule reads the remaining duration, so 25 lands on the interval
+    // and the 24 left afterwards does not.
+    entity.tick_mob_effects();
+    assert_f32_close(entity.get_health(), 19.0);
+    assert_eq!(
+        entity.damage_type_keys(),
+        vec![vanilla_damage_types::MAGIC.key.clone()]
+    );
+
+    entity.tick_mob_effects();
+    assert_f32_close(entity.get_health(), 19.0);
+
+    // Vanilla's `getHealth() > 1.0F` guard: poison brings you to half a heart
+    // and leaves you there.
+    let dying = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world).with_health(1.0);
+    assert!(dying.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::POISON,
+        25,
+        0,
+    )));
+    dying.tick_mob_effects();
+    assert_f32_close(dying.get_health(), 1.0);
+    assert!(dying.damage_type_keys().is_empty());
+}
+
+#[test]
+fn a_higher_amplifier_halves_the_poison_interval() {
+    let world = test_world();
+    // Poison II is `25 >> 1`, so a duration of 12 is on the beat where a
+    // duration of 25 is not.
+    let entity = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world);
+    assert!(entity.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::POISON,
+        12,
+        1,
+    )));
+    entity.tick_mob_effects();
+    assert_f32_close(entity.get_health(), 19.0);
+
+    let off_beat = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world);
+    assert!(off_beat.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::POISON,
+        13,
+        1,
+    )));
+    off_beat.tick_mob_effects();
+    assert_f32_close(off_beat.get_health(), 20.0);
+}
+
+#[test]
+fn regeneration_heals_on_its_interval_and_stops_at_full_health() {
+    let world = test_world();
+    let entity = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world).with_health(10.0);
+    assert!(entity.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::REGENERATION,
+        50,
+        0,
+    )));
+
+    entity.tick_mob_effects();
+    assert_f32_close(entity.get_health(), 11.0);
+    entity.tick_mob_effects();
+    assert_f32_close(entity.get_health(), 11.0);
+
+    let unhurt = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world);
+    assert!(unhurt.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::REGENERATION,
+        50,
+        0,
+    )));
+    unhurt.tick_mob_effects();
+    assert_f32_close(unhurt.get_health(), 20.0);
+}
+
+/// `HealOrHarmMobEffect` swaps its two halves for anything tagged
+/// `inverted_healing_and_harm`, which is why a splash of healing is a weapon
+/// against the undead.
+#[test]
+fn instant_health_hurts_the_undead_and_instant_damage_mends_them() {
+    let world = test_world();
+
+    let living = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world).with_health(10.0);
+    assert!(living.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::INSTANT_HEALTH,
+        1,
+        0,
+    )));
+    living.tick_mob_effects();
+    assert_f32_close(living.get_health(), 14.0);
+
+    let undead = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world)
+        .with_entity_type(&vanilla_entities::ZOMBIE)
+        .with_health(10.0);
+    assert!(undead.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::INSTANT_HEALTH,
+        1,
+        0,
+    )));
+    undead.tick_mob_effects();
+    assert_f32_close(undead.get_health(), 4.0);
+    assert_eq!(
+        undead.damage_type_keys(),
+        vec![vanilla_damage_types::MAGIC.key.clone()]
+    );
+
+    let mended = LivingFluidTestEntity::new_in_world(0.0, 0.0, true, world)
+        .with_entity_type(&vanilla_entities::ZOMBIE)
+        .with_health(10.0);
+    assert!(mended.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::INSTANT_DAMAGE,
+        1,
+        0,
+    )));
+    mended.tick_mob_effects();
+    assert_f32_close(mended.get_health(), 14.0);
+}
+
+#[test]
 fn wither_rose_respects_difficulty_invulnerability_and_effect_immunity() {
     let peaceful_world = fresh_test_world("wither_rose_peaceful");
     peaceful_world.set_difficulty(Difficulty::Peaceful);

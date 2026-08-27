@@ -95,6 +95,22 @@ CMDS="$CMDS;;execute if block 0 100 -1 minecraft:redstone_wire[power=1] run tell
 CMDS="$CMDS;;!useentity item_frame"
 CMDS="$CMDS;;execute if block 0 100 -1 minecraft:redstone_wire[power=2] run tellraw @s \"TURNEDFRAMEREADSTWO\""
 
+# Breaking it is two hits, not one: the first takes the item out and leaves the
+# frame on the wall, the second takes the frame down. Survival, because a
+# creative player gets nothing back.
+CMDS="$CMDS;;gamemode survival"
+
+# A frame on the south face of the wall at y=100,z=1 sits at z=2.03, which is
+# what the two checks below are anchored to. The world generates item frames of
+# its own, so every check names the spot rather than asking whether one exists.
+CMDS="$CMDS;;!attack item_frame"
+CMDS="$CMDS;;execute positioned 0.5 100.5 2.03 if entity @e[type=minecraft:item_frame,distance=..1] run tellraw @s \"FRAMESURVIVEDTHEPUNCH\""
+CMDS="$CMDS;;execute if block 0 100 -1 minecraft:redstone_wire[power=0] run tellraw @s \"PUNCHEMPTIEDTHEFRAME\""
+
+# The second hit takes the frame itself down.
+CMDS="$CMDS;;!attack item_frame"
+CMDS="$CMDS;;execute positioned 0.5 100.5 2.03 unless entity @e[type=minecraft:item_frame,distance=..1] run tellraw @s \"FRAMECAMEOFFTHEWALL\""
+
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -102,7 +118,7 @@ STATUS=$?
 cleanup
 
 echo "=== what happened ==="
-grep "server says" join.log | grep -oE "WIREEXISTS|DUSTSTARTSDARK|NOFRAMEYET|FRAMEHUNG|EMPTYFRAMEREADSNOTHING|FILLEDFRAMEREADSONE|TURNEDFRAMEREADSTWO"
+grep "server says" join.log | grep -oE "WIREEXISTS|DUSTSTARTSDARK|NOFRAMEYET|FRAMEHUNG|EMPTYFRAMEREADSNOTHING|FILLEDFRAMEREADSONE|TURNEDFRAMEREADSTWO|FRAMESURVIVEDTHEPUNCH|PUNCHEMPTIEDTHEFRAME|FRAMECAMEOFFTHEWALL"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect" | tail -5
 
@@ -117,4 +133,7 @@ said FRAMEHUNG              || fail "the item frame item hung nothing"
 said EMPTYFRAMEREADSNOTHING || fail "an empty frame gave a signal"
 said FILLEDFRAMEREADSONE    || fail "putting an item in the frame read nothing"
 said TURNEDFRAMEREADSTWO    || fail "turning the item did not step the signal"
+said PUNCHEMPTIEDTHEFRAME   || fail "punching a full frame did not take the item out"
+said FRAMESURVIVEDTHEPUNCH  || fail "the first punch broke the frame instead of emptying it"
+said FRAMECAMEOFFTHEWALL    || fail "the frame survived the hit that should have broken it"
 echo "########## FRAME TEST PASSED ##########"

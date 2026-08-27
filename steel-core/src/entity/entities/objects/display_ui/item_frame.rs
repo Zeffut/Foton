@@ -10,20 +10,27 @@ use steel_protocol::packets::game::SoundSource;
 use steel_registry::data_components::vanilla_components::MAP_ID;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
+use steel_registry::items::ItemRef;
 use steel_registry::sound_event::SoundEventRef;
+use steel_registry::vanilla_damage_type_tags::DamageTypeTag;
 use steel_registry::vanilla_entity_data::ItemFrameEntityData;
-use steel_registry::{sound_events, vanilla_blocks, vanilla_game_events};
+use steel_registry::vanilla_game_rules::ENTITY_DROPS;
+use steel_registry::{sound_events, vanilla_blocks, vanilla_game_events, vanilla_items};
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, Direction, DowncastType, DowncastTypeKey, WorldAabb, axis::Axis};
 
 use crate::behavior::InteractionResult;
+use crate::entity::block_attached::{caused_by_entity, drop_would_be_wasted};
+use crate::entity::damage::DamageSource;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData, ItemFrame,
+    BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
+    ItemFrame, SharedEntity,
 };
 use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
+use steel_utils::types::GameType;
 
 /// An item frame.
 ///
@@ -38,6 +45,152 @@ pub struct ItemFrameEntity {
     entity_type: EntityTypeRef,
     entity_data: SyncMutex<ItemFrameEntityData>,
     block_pos: SyncMutex<BlockPos>,
+    state: SyncMutex<FrameState>,
+}
+
+/// The two saved fields a frame keeps outside its synced data.
+///
+/// Vanilla parity: `ItemFrame.fixed` and `ItemFrame.dropChance`.
+pub(super) struct FrameState {
+    pub(super) fixed: bool,
+    pub(super) drop_chance: f32,
+}
+
+impl Default for FrameState {
+    fn default() -> Self {
+        Self {
+            fixed: false,
+            drop_chance: 1.0,
+        }
+    }
+}
+
+/// The half of `ItemFrame` that the glow frame inherits in vanilla.
+///
+/// Steel's two frames are separate structs rather than a subclass pair, so what
+/// vanilla gets from `extends ItemFrame` lives here: the fixed flag, the drop
+/// chance, and the damage rules built on them. An implementation supplies the
+/// five accessors its own storage decides.
+pub(super) trait FrameLike: BlockAttached {
+    /// The saved fields outside the synced data.
+    fn frame_state(&self) -> &SyncMutex<FrameState>;
+
+    /// Vanilla parity: `ItemFrame.getItem`.
+    fn framed_item(&self) -> ItemStack;
+
+    /// Vanilla parity: the `setItem(ItemStack.EMPTY)` of `ItemFrame.dropItem`.
+    fn clear_framed_item(&self);
+
+    /// Vanilla parity: `ItemFrame.getFrameItemStack`, which the glow frame
+    /// overrides with the glowing one.
+    fn frame_item(&self) -> ItemRef;
+
+    /// Plays one of the frame's own sounds at the frame.
+    fn play_frame_sound(&self, sound: SoundEventRef);
+
+    /// Returns whether this frame refuses to be emptied or broken.
+    ///
+    /// Vanilla parity: the `fixed` field, set by structures so a frame that is
+    /// part of the scenery survives a wandering skeleton.
+    fn is_fixed(&self) -> bool {
+        self.frame_state().lock().fixed
+    }
+
+    /// Returns how often the framed item survives the frame breaking.
+    ///
+    /// Vanilla parity: the `dropChance` field, one by default.
+    fn drop_chance(&self) -> f32 {
+        self.frame_state().lock().drop_chance
+    }
+
+    /// Drops what a broken or emptied frame leaves behind.
+    ///
+    /// Vanilla parity: the private `ItemFrame.dropItem(level, causedBy, withFrame)`.
+    /// A fixed frame drops nothing and keeps its item; a creative player gets
+    /// nothing back; and the framed item rolls against its own drop chance,
+    /// which is how a map in a structure frame stays put.
+    ///
+    /// Not implemented: `removeFramedMap`, the map-tracking bookkeeping. Steel
+    /// tracks no frames on a map, so there is nothing to remove.
+    fn drop_frame_contents(
+        &self,
+        world: &World,
+        caused_by: Option<&SharedEntity>,
+        with_frame: bool,
+    ) {
+        if self.is_fixed() {
+            return;
+        }
+
+        let item = self.framed_item();
+        self.clear_framed_item();
+
+        if !world.get_game_rule(&ENTITY_DROPS) || drop_would_be_wasted(caused_by) {
+            return;
+        }
+        if with_frame {
+            self.spawn_at_location(ItemStack::new(self.frame_item()), 0.0);
+        }
+        if !item.is_empty() && rand::random::<f32>() < self.drop_chance() {
+            self.spawn_at_location(item, 0.0);
+        }
+    }
+
+    /// Vanilla parity: `ItemFrame.dropItem(level, causedBy)`, the public one,
+    /// which is the break rather than the emptying.
+    fn drop_broken_frame(&self, world: &World, caused_by: Option<&SharedEntity>) {
+        self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_BREAK);
+        self.drop_frame_contents(world, caused_by, true);
+        self.frame_block_change(caused_by);
+    }
+
+    /// Vanilla parity: `ItemFrame.hurtServer`.
+    ///
+    /// A punch on a frame holding something empties it and leaves the frame on
+    /// the wall; a punch on an empty one takes the frame down. An explosion
+    /// skips the emptying and always breaks it.
+    fn hurt_item_frame(&self, world: &World, source: &DamageSource) -> bool {
+        if self.is_fixed() {
+            return can_hurt_when_fixed(world, source) && self.hurt_block_attached(world, source);
+        }
+        if self.is_invulnerable_to_base(source) {
+            return false;
+        }
+        if source.is(&DamageTypeTag::IS_EXPLOSION) || self.framed_item().is_empty() {
+            return self.hurt_block_attached(world, source);
+        }
+
+        let caused_by = caused_by_entity(world, source);
+        self.drop_frame_contents(world, caused_by.as_ref(), false);
+        self.frame_block_change(caused_by.as_ref());
+        self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_REMOVE_ITEM);
+        true
+    }
+
+    /// Vanilla parity: the `gameEvent(BLOCK_CHANGE, causedBy)` both drop paths
+    /// end with.
+    fn frame_block_change(&self, caused_by: Option<&SharedEntity>) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        world.game_event_at(
+            &vanilla_game_events::BLOCK_CHANGE,
+            self.position(),
+            &GameEventContext::new(caused_by.map(AsRef::as_ref), None),
+        );
+    }
+}
+
+/// Vanilla parity: `ItemFrame.canHurtWhenFixed`.
+fn can_hurt_when_fixed(world: &World, source: &DamageSource) -> bool {
+    if source.bypasses_invulnerability() {
+        return true;
+    }
+    caused_by_entity(world, source).is_some_and(|entity| {
+        entity
+            .as_player()
+            .is_some_and(|player| player.game_mode() == GameType::Creative)
+    })
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `ItemFrameEntity`.
@@ -91,6 +244,7 @@ impl ItemFrameEntity {
             entity_type,
             entity_data: SyncMutex::new(ItemFrameEntityData::new()),
             block_pos: SyncMutex::new(block_pos),
+            state: SyncMutex::new(FrameState::default()),
         };
         entity
             .entity_data
@@ -114,6 +268,7 @@ impl ItemFrameEntity {
                 position.y.floor() as i32,
                 position.z.floor() as i32,
             )),
+            state: SyncMutex::new(FrameState::default()),
         }
     }
 
@@ -146,7 +301,7 @@ impl ItemFrameEntity {
     }
 
     /// Plays one of the frame's own sounds at the frame.
-    fn play_frame_sound(&self, sound: SoundEventRef) {
+    fn play_sound_at_frame(&self, sound: SoundEventRef) {
         let Some(world) = self.level() else {
             return;
         };
@@ -275,6 +430,14 @@ impl Entity for ItemFrameEntity {
         direction_3d_data_value(*self.entity_data.lock().hanging_entity.direction.get())
     }
 
+    /// Vanilla parity: `BlockAttachedEntity.thunderHit`, an empty override.
+    /// Lightning passes straight through anything hung on a block.
+    fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
+
+    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
+        self.hurt_item_frame(world, source)
+    }
+
     fn spawn_position(&self) -> DVec3 {
         let block_pos = *self.block_pos.lock();
         DVec3::new(
@@ -313,7 +476,7 @@ impl Entity for ItemFrameEntity {
             }
 
             self.set_item(held);
-            self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_ADD_ITEM);
+            self.play_sound_at_frame(&sound_events::ENTITY_ITEM_FRAME_ADD_ITEM);
             self.frame_changed(player);
 
             if !player.has_infinite_materials() {
@@ -328,7 +491,7 @@ impl Entity for ItemFrameEntity {
             let next = (*entity_data.rotation.get() + 1).rem_euclid(ROTATION_STEPS);
             entity_data.rotation.set(next);
         }
-        self.play_frame_sound(&sound_events::ENTITY_ITEM_FRAME_ROTATE_ITEM);
+        self.play_sound_at_frame(&sound_events::ENTITY_ITEM_FRAME_ROTATE_ITEM);
         self.frame_changed(player);
         InteractionResult::Success
     }
@@ -350,13 +513,13 @@ impl Entity for ItemFrameEntity {
             nbt.insert("Item", item.to_nbt_tag_ref());
         }
         nbt.insert("ItemRotation", *entity_data.rotation.get() as i8);
-        nbt.insert("ItemDropChance", 1.0_f32);
+        nbt.insert("ItemDropChance", self.drop_chance());
         nbt.insert(
             "Facing",
             direction_3d_data_value(*entity_data.hanging_entity.direction.get()) as i8,
         );
         nbt.insert("Invisible", 0_i8);
-        nbt.insert("Fixed", 0_i8);
+        nbt.insert("Fixed", i8::from(self.is_fixed()));
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
@@ -370,6 +533,16 @@ impl Entity for ItemFrameEntity {
             && let Some(item) = ItemStack::from_borrowed_compound(&item_tag)
         {
             self.set_item_with_update(item, false);
+        }
+
+        {
+            let mut state = self.state.lock();
+            if let Some(drop_chance) = nbt.float("ItemDropChance") {
+                state.drop_chance = drop_chance;
+            }
+            if let Some(fixed) = nbt.byte("Fixed") {
+                state.fixed = fixed != 0;
+            }
         }
 
         if let Some(item_rotation) = nbt.byte("ItemRotation") {
@@ -388,6 +561,34 @@ impl Entity for ItemFrameEntity {
         }
 
         self.recalculate_position();
+    }
+}
+
+impl BlockAttached for ItemFrameEntity {
+    fn drop_item(&self, world: &World, caused_by: Option<&SharedEntity>) {
+        self.drop_broken_frame(world, caused_by);
+    }
+}
+
+impl FrameLike for ItemFrameEntity {
+    fn frame_state(&self) -> &SyncMutex<FrameState> {
+        &self.state
+    }
+
+    fn framed_item(&self) -> ItemStack {
+        self.entity_data.lock().item.get().clone()
+    }
+
+    fn clear_framed_item(&self) {
+        self.set_item_with_update(ItemStack::empty(), true);
+    }
+
+    fn frame_item(&self) -> ItemRef {
+        &vanilla_items::ITEM_FRAME
+    }
+
+    fn play_frame_sound(&self, sound: SoundEventRef) {
+        self.play_sound_at_frame(sound);
     }
 }
 
@@ -431,7 +632,14 @@ pub(super) const fn direction_2d_data_value(direction: Direction) -> u8 {
 mod tests {
     use super::*;
     use std::string::ToString;
-    use steel_registry::{vanilla_entities, vanilla_items};
+    use std::sync::Arc;
+    use steel_registry::{init_vanilla_registry, vanilla_damage_types, vanilla_entities};
+    use steel_utils::{ChunkPos, Downcast as _, Identifier};
+
+    use crate::behavior::init_behaviors;
+    use crate::entity::entities::ItemEntity;
+    use crate::entity::next_entity_id;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 
     #[test]
     fn item_frame_persists_structure_marker_state() {
@@ -490,5 +698,101 @@ mod tests {
         assert_eq!(frame.analog_output(), 1);
         frame.entity_data.lock().rotation.set(7);
         assert_eq!(frame.analog_output(), 8);
+    }
+
+    /// The two halves of `ItemFrame.hurtServer`: a full frame gives up its item
+    /// and stays on the wall, and the next hit takes the frame itself down.
+    #[test]
+    fn a_punch_empties_a_full_frame_and_the_next_one_breaks_it() {
+        let world = frame_world("item_frame_two_stage_break");
+        let frame = frame_in(&world, BlockPos::new(8, 64, 8));
+        frame.set_item(ItemStack::new(&vanilla_items::ELYTRA));
+
+        assert!(frame.hurt(&world, &punch(), 1.0));
+        assert!(!frame.is_removed(), "the frame stays up while it empties");
+        assert!(dropped_items(&world).contains(&vanilla_items::ELYTRA.key.clone()));
+
+        assert!(frame.hurt(&world, &punch(), 1.0));
+        assert!(frame.is_removed(), "an empty frame comes off the wall");
+        assert!(dropped_items(&world).contains(&vanilla_items::ITEM_FRAME.key.clone()));
+    }
+
+    /// Vanilla parity: `ItemFrame.shouldDamageDropItem`, which sends an
+    /// explosion straight down the breaking path even on a full frame.
+    #[test]
+    fn an_explosion_takes_the_whole_frame_at_once() {
+        let world = frame_world("item_frame_explosion_break");
+        let frame = frame_in(&world, BlockPos::new(8, 64, 8));
+        frame.set_item(ItemStack::new(&vanilla_items::ELYTRA));
+
+        let blast = DamageSource::environment(&vanilla_damage_types::EXPLOSION);
+        assert!(frame.hurt(&world, &blast, 6.0));
+
+        assert!(frame.is_removed());
+        let dropped = dropped_items(&world);
+        assert!(dropped.contains(&vanilla_items::ITEM_FRAME.key.clone()));
+        assert!(dropped.contains(&vanilla_items::ELYTRA.key.clone()));
+    }
+
+    /// Vanilla parity: the `fixed` field, which structures set so their scenery
+    /// survives whatever wanders past.
+    #[test]
+    fn a_fixed_frame_shrugs_off_an_ordinary_hit() {
+        let world = frame_world("item_frame_fixed");
+        let frame = frame_in(&world, BlockPos::new(8, 64, 8));
+        frame.set_item(ItemStack::new(&vanilla_items::ELYTRA));
+        frame.state.lock().fixed = true;
+
+        assert!(!frame.hurt(&world, &punch(), 1.0));
+        assert!(!frame.is_removed());
+        assert!(dropped_items(&world).is_empty());
+    }
+
+    fn frame_world(key: &'static str) -> Arc<World> {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        world
+    }
+
+    fn frame_in(world: &Arc<World>, block_pos: BlockPos) -> Arc<ItemFrameEntity> {
+        let frame = Arc::new(ItemFrameEntity::new_attached(
+            &vanilla_entities::ITEM_FRAME,
+            next_entity_id(),
+            block_pos,
+            Direction::West,
+            Arc::downgrade(world),
+        ));
+        world
+            .try_add_entity(frame.clone())
+            .expect("the frame's chunk is loaded");
+        frame
+    }
+
+    /// A hit with no entity behind it, which is the shape the tests need: the
+    /// mob-griefing guard only fires for a mob, and the creative check only for
+    /// a player.
+    fn punch() -> DamageSource {
+        DamageSource::environment(&vanilla_damage_types::GENERIC)
+    }
+
+    fn dropped_items(world: &Arc<World>) -> Vec<Identifier> {
+        let everywhere = WorldAabb::new(-32.0, 0.0, -32.0, 32.0, 128.0, 32.0);
+        world
+            .get_entities_in_aabb(&everywhere)
+            .iter()
+            .filter_map(|entity| {
+                Some(
+                    entity
+                        .as_ref()
+                        .downcast_ref::<ItemEntity>()?
+                        .get_item()
+                        .item()
+                        .key
+                        .clone(),
+                )
+            })
+            .collect()
     }
 }

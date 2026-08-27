@@ -761,6 +761,7 @@ pub(crate) mod ai;
 mod animal;
 pub mod attribute;
 mod base;
+pub mod block_attached;
 mod block_effects;
 pub mod bucketable;
 mod callback;
@@ -822,6 +823,7 @@ pub use base::{
     EntityMovementProgress, EntityVerticalMovementStateUpdate, MAX_ENTITY_TAGS,
     PendingWorldChangeToken,
 };
+pub use block_attached::BlockAttached;
 pub use bucketable::Bucketable;
 pub use callback::{
     EntityChunkCallback, EntityLevelCallback, InactiveEntityCallback, NullEntityCallback,
