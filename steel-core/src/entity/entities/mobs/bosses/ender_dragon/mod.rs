@@ -11,11 +11,13 @@
 //! Two of those are why this file exists at all, and why the entity manager and
 //! the interact handler had to learn about parts. See [`part`] for the details.
 //!
+//! The dragon owns none of the fight around it. The boss bar, the crystal
+//! count, the exit portal and the experience all belong to
+//! [`EnderDragonFight`], which the End hangs on its [`World`]; a dragon
+//! summoned anywhere else has no bar and no crystals, exactly as in vanilla.
+//!
 //! **Gaps**, all of them things nothing in the tree can yet express:
 //!
-//! * `EnderDragonFight` is not implemented, so [`Self::alive_crystals`] is
-//!   always zero and [`Self::fight_origin`] is always the world origin. The
-//!   phases already ask through the accessors the fight would answer.
 //! * `applyEffectsFromBlocks`, and the `interpolation` the client half of
 //!   `aiStep` drives, are not carried.
 //! * The growl and flap sounds, the death particles and the `onFlap` hook are
@@ -29,7 +31,7 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 use steel_macros::entity_behavior;
 use steel_math::trig;
-use steel_protocol::packets::game::{BossBarColor, BossBarOverlay, SoundSource};
+use steel_protocol::packets::game::SoundSource;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_block_tags::BlockTag;
@@ -44,15 +46,13 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{
     BlockPos, Downcast as _, DowncastType, DowncastTypeKey, WorldAabb, wrap_degrees,
 };
-use text_components::TextComponent;
 
-use crate::boss_event::ServerBossEvent;
 use crate::chunk::heightmap::HeightmapType;
+use crate::dimension::end::EnderDragonFight;
 use crate::entity::ai::node::Node;
 use crate::entity::ai::path::Path;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::{EndCrystalEntity, ExperienceOrbEntity};
-use crate::entity::entity_type_name;
 use crate::entity::{
     Enemy, Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase,
     Mob, MobBase, MobEffectInstance, MoveControlKind, NavigationKind, PathfinderMob, RemovalReason,
@@ -186,13 +186,6 @@ pub struct EnderDragon {
     phase_manager: EnderDragonPhaseManager,
     /// Vanilla parity: `EnderDragon.nodes`, `nodeAdjacency` and `openSet`.
     pathfinder: SyncMutex<DragonPathfinder>,
-    /// The purple bar with the notches in it.
-    ///
-    /// Vanilla parity: `EnderDragonFight.dragonEvent`. Vanilla hangs the bar on
-    /// the fight rather than on the dragon, and the fight drives it from
-    /// `updateDragon`. With no fight in the tree yet the dragon carries its own,
-    /// the way the wither does; when the fight lands, it takes this over.
-    boss_event: ServerBossEvent,
     state: SyncMutex<DragonState>,
 }
 
@@ -284,14 +277,6 @@ impl EnderDragon {
         // Vanilla parity: the `setHealth(getMaxHealth())` of the constructor.
         living_base.initialize_synced_data(&mut entity_data);
 
-        let boss_event = ServerBossEvent::with_random_id(
-            entity_type_name(entity_type),
-            BossBarColor::Pink,
-            BossBarOverlay::Progress,
-        );
-        boss_event.set_play_boss_music(true);
-        boss_event.set_create_world_fog(true);
-
         Self {
             base,
             entity_type,
@@ -302,7 +287,6 @@ impl EnderDragon {
             flight_history: SyncMutex::new(DragonFlightHistory::new()),
             phase_manager: EnderDragonPhaseManager::new(),
             pathfinder: SyncMutex::new(DragonPathfinder::new()),
-            boss_event,
             state: SyncMutex::new(DragonState {
                 dragon_death_time: 0,
                 y_rot_a: 0.0,
@@ -338,12 +322,6 @@ impl EnderDragon {
         self.part(DragonPartIndex::Head)
     }
 
-    /// Returns the bar the players fighting this dragon see.
-    #[must_use]
-    pub const fn boss_event(&self) -> &ServerBossEvent {
-        &self.boss_event
-    }
-
     /// Returns the dragon's phases.
     ///
     /// Vanilla parity: `EnderDragon.getPhaseManager`.
@@ -373,18 +351,36 @@ impl EnderDragon {
         self.state.lock().fight_origin = origin;
     }
 
+    /// Returns the fight this dragon is the dragon of.
+    ///
+    /// Vanilla parity: `EnderDragon.getDragonFight`. Vanilla caches the level's
+    /// fight on the dragon the first tick its UUID matches the fight's
+    /// `dragonUUID`, and `EnderDragonFight.createNewDragon` hands it over
+    /// directly; both amount to "the level has a fight and this is its dragon",
+    /// which is what is tested here rather than carrying a second copy of the
+    /// answer. The one case the two differ in is a fight that re-targets
+    /// another dragon after twenty seconds of not seeing this one: vanilla
+    /// leaves the old dragon holding the fight, and this drops it at once.
+    #[must_use]
+    pub fn dragon_fight<'world>(
+        &self,
+        world: &'world Arc<World>,
+    ) -> Option<&'world EnderDragonFight> {
+        let fight = world.dragon_fight()?;
+        (fight.dragon_uuid() == Some(self.uuid())).then_some(fight)
+    }
+
     /// Returns whether this dragon belongs to a fight.
     ///
-    /// Vanilla parity: `getDragonFight() != null`. Always false until
-    /// `EnderDragonFight` exists, which is what keeps a summoned dragon on the
-    /// inner rings and stops it ever rolling for a landing.
+    /// Vanilla parity: `getDragonFight() != null`. False for a dragon summoned
+    /// outside the End, which is what keeps it on the inner rings and stops it
+    /// ever rolling for a landing.
     #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "reads the fight the dragon will hold once EnderDragonFight lands"
-    )]
-    pub const fn has_fight(&self) -> bool {
-        false
+    pub fn has_fight(&self) -> bool {
+        let Some(world) = self.level() else {
+            return false;
+        };
+        self.dragon_fight(&world).is_some()
     }
 
     /// Returns how many pillar crystals are still standing.
@@ -392,12 +388,12 @@ impl EnderDragon {
     /// Vanilla parity: `getDragonFight() == null ? 0 : aliveCrystals()`, the
     /// null-guarded form every caller in vanilla writes.
     #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "reads the fight the dragon will hold once EnderDragonFight lands"
-    )]
-    pub const fn alive_crystals(&self) -> i32 {
-        0
+    pub fn alive_crystals(&self) -> i32 {
+        let Some(world) = self.level() else {
+            return 0;
+        };
+        self.dragon_fight(&world)
+            .map_or(0, EnderDragonFight::alive_crystals)
     }
 
     /// Vanilla parity: `EnderDragon.yRotA`.
@@ -861,6 +857,10 @@ impl EnderDragon {
     /// experience through the mob path -- it awards the orbs here, in a trickle
     /// over the last two and a half seconds and then a lump at the end.
     fn run_death_animation(&self, world: &Arc<World>) {
+        if let Some(fight) = world.dragon_fight() {
+            fight.update_dragon(self);
+        }
+
         let death_time = {
             let mut state = self.state.lock();
             state.dragon_death_time += 1;
@@ -869,7 +869,14 @@ impl EnderDragon {
 
         // Vanilla parity: the fight substitutes twelve thousand for the first
         // dragon of a world. With no fight, every dragon is worth five hundred.
-        let xp_count = DEATH_XP;
+        let xp_count = if self
+            .dragon_fight(world)
+            .is_some_and(|fight| !fight.has_previously_killed_dragon())
+        {
+            FIRST_KILL_DEATH_XP
+        } else {
+            DEATH_XP
+        };
 
         if world.get_game_rule(&MOB_DROPS)
             && death_time > DEATH_XP_START_TICK
@@ -903,6 +910,13 @@ impl EnderDragon {
                 self.position(),
                 (xp_count as f32 * DEATH_XP_FINAL_SHARE).floor() as i32,
             );
+        }
+
+        // Vanilla parity: `tickDeath` tells the fight before it removes itself.
+        // This is what opens the exit portal, drops the egg and hands out a
+        // gateway, and it is the only caller any of the three have.
+        if let Some(fight) = world.dragon_fight() {
+            fight.set_dragon_killed(world, self);
         }
 
         self.set_removed(RemovalReason::Killed);
@@ -946,19 +960,6 @@ impl Entity for EnderDragon {
         false
     }
 
-    fn start_seen_by_player(&self, player: &Arc<Player>) {
-        self.boss_event.add_player(player);
-    }
-
-    fn stop_seen_by_player(&self, player: &Player) {
-        self.boss_event.remove_player(player);
-    }
-
-    fn set_custom_name(&self, custom_name: Option<TextComponent>) {
-        self.base().set_custom_name(custom_name);
-        self.boss_event.set_name(self.display_name());
-    }
-
     /// Vanilla parity: `EnderDragon.checkDespawn` is empty.
     fn check_despawn(&self) {}
 
@@ -972,11 +973,22 @@ impl Entity for EnderDragon {
         false
     }
 
-    /// Vanilla parity: `EnderDragon.kill`.
-    fn kill(&self, world: &World) {
+    /// Vanilla parity: `EnderDragon.kill`, which skips the death animation
+    /// entirely and still closes the fight out -- `/kill` on a dragon opens the
+    /// exit portal exactly as beating it does.
+    fn kill(&self, _world: &World) {
         self.set_removed(RemovalReason::Killed);
         self.game_event(&vanilla_game_events::ENTITY_DIE);
-        let _ = world;
+
+        // The fight needs the owning `Arc`, which the borrowed level cannot
+        // hand over, so it is read back off the dragon.
+        let Some(world) = self.level() else {
+            return;
+        };
+        if let Some(fight) = world.dragon_fight() {
+            fight.update_dragon(self);
+            fight.set_dragon_killed(&world, self);
+        }
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
@@ -996,10 +1008,6 @@ impl Entity for EnderDragon {
         let mut state = self.state.lock();
         state.dragon_death_time = nbt.int("DragonDeathTime").unwrap_or(0);
         state.sitting_damage_received = nbt.float("sitting_damage_received").unwrap_or(0.0);
-        drop(state);
-        if self.custom_name().is_some() {
-            self.boss_event.set_name(self.display_name());
-        }
     }
 }
 
@@ -1129,13 +1137,13 @@ impl LivingEntity for EnderDragon {
             | Self::check_walls(&world, self.part(DragonPartIndex::Neck).bounding_box())
             | Self::check_walls(&world, self.part(DragonPartIndex::Body).bounding_box());
         self.state.lock().in_wall = in_wall;
+        if let Some(fight) = world.dragon_fight() {
+            fight.update_dragon(self);
+        }
 
         for (part, old) in self.parts.iter().zip(old_positions) {
             part.set_old_position(old);
         }
-
-        self.boss_event
-            .set_progress(self.get_health() / self.get_max_health());
 
         result
     }

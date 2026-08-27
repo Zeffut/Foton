@@ -644,6 +644,23 @@ impl ChunkMap {
         }
     }
 
+    /// Holds the dragon arena loaded and simulated while the fight runs.
+    ///
+    /// Vanilla parity: the `addTicketWithRadius(TicketType.DRAGON, ChunkPos, 9)`
+    /// of `EnderDragonFight.tick`. `TicketType.DRAGON` has no timeout and both
+    /// the loading and simulation flags, so the fight adds it every tick a
+    /// player is on the bar and removes it on the first tick none is.
+    pub(crate) fn add_arena_ticket(&self, center: ChunkPos, radius: u8) {
+        self.add_chunk_ticket(center, ChunkTicket::simulated_full_chunks(radius));
+    }
+
+    /// Drops the arena ticket again.
+    ///
+    /// Vanilla parity: the `removeTicketWithRadius` of the same branch.
+    pub(crate) fn remove_arena_ticket(&self, center: ChunkPos, radius: u8) {
+        self.remove_chunk_ticket(center, ChunkTicket::simulated_full_chunks(radius));
+    }
+
     /// Advances gameplay-owned timed chunk tickets by one server tick.
     pub(crate) fn tick_timed_tickets(&self) {
         let mut timed_tickets = self.timed_chunk_tickets.lock();

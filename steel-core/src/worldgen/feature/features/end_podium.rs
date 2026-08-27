@@ -66,15 +66,9 @@ pub const fn location(origin: BlockPos) -> BlockPos {
 ///
 /// Vanilla parity: `EndPodiumFeature.place`.
 ///
-/// NOT WIRED: `EnderDragonFight` is vanilla's only caller -- it places an
-/// inactive podium when the End is first entered and an active one when the
-/// dragon dies -- and the fight is not implemented. Nothing else in vanilla
-/// places a podium, so this waits for it rather than being called from
-/// somewhere that would not match.
-#[expect(
-    dead_code,
-    reason = "EnderDragonFight is the only vanilla caller and is not implemented yet"
-)]
+/// [`EnderDragonFight`](crate::dimension::end::EnderDragonFight) is the only
+/// caller, here as in vanilla: it places an inactive podium when the End is
+/// first entered and an active one when the dragon dies.
 pub fn place(world: &Arc<World>, origin: BlockPos, active: bool) {
     let bedrock = vanilla_blocks::BEDROCK.default_state();
     let end_stone = vanilla_blocks::END_STONE.default_state();

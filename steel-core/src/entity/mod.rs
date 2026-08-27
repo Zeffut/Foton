@@ -82,7 +82,7 @@ fn nbt_bool(value: bool) -> NbtTag {
     NbtTag::Byte(i8::from(value))
 }
 
-fn entity_type_name(entity_type: EntityTypeRef) -> TextComponent {
+pub(crate) fn entity_type_name(entity_type: EntityTypeRef) -> TextComponent {
     TextComponent::translated(TranslatedMessage {
         key: Cow::Owned(format!(
             "entity.{}.{}",
