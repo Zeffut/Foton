@@ -448,12 +448,20 @@ fn find_gateway(world: &Arc<World>) -> Option<BlockPos> {
         .find(|pos| world.get_block_state(*pos).get_block() == &vanilla_blocks::END_GATEWAY)
 }
 
+/// Sums the experience lying on the ground.
+///
+/// An orb's `count` is how many pickups it is worth, not decoration:
+/// `ExperienceOrb.award` merges a new orb into a matching one nearby by
+/// bumping that instead of spawning anything, and `playerTouch` pays out
+/// `value` once per count. Summing `value` alone loses one orb's worth every
+/// time a merge happens -- which is a one-in-forty roll per orb, and is why
+/// this read used to fail about one run in six.
 fn experience_in(world: &Arc<World>) -> i32 {
     world
         .entity_manager()
         .get_accessible_entities()
         .iter()
         .filter_map(|entity| entity.downcast_ref::<ExperienceOrbEntity>())
-        .map(ExperienceOrbEntity::value)
+        .map(|orb| orb.value() * orb.count())
         .sum()
 }
