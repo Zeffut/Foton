@@ -83,7 +83,7 @@ impl GiveGiftToHero {
             .get()?;
         let is_hero = player
             .as_living_entity()
-            .is_some_and(|living| living.has_mob_effect(&vanilla_mob_effects::HERO_OF_THE_VILLAGE));
+            .is_some_and(|living| living.has_mob_effect(vanilla_mob_effects::HERO_OF_THE_VILLAGE));
         is_hero.then_some(player)
     }
 }

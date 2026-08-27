@@ -930,7 +930,7 @@ fn a_villager_throws_a_gift_at_the_hero_of_the_village() {
     assert!(
         LivingEntity::add_mob_effect(
             hero.as_ref(),
-            MobEffectInstance::with_duration(&vanilla_mob_effects::HERO_OF_THE_VILLAGE, 20_000, 0),
+            MobEffectInstance::with_duration(vanilla_mob_effects::HERO_OF_THE_VILLAGE, 20_000, 0),
         ),
         "the hero has to actually carry the effect the behavior looks for"
     );
