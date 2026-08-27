@@ -63,7 +63,7 @@ CMDS='gamemode creative'
 # the chunk around the player is ready.
 CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;difficulty easy"
-CMDS="$CMDS;;gamerule mobGriefing false"
+CMDS="$CMDS;;gamerule mob_griefing false"
 
 # A strip of floor under the two leashables and the two places the player
 # stands, laid one block at a time because Steel has no `/fill` yet.

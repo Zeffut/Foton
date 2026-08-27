@@ -130,7 +130,12 @@ CMDS="$CMDS;;execute if block 0 100 0 minecraft:red_bed[occupied=false] run tell
 # hundreds. Sprinting is what keeps this test to a sane wall-clock length;
 # freezing the day first is what stops the sprint running the clock out of the
 # WORK stretch and putting the villager back to bed.
-CMDS="$CMDS;;gamerule doDaylightCycle false"
+CMDS="$CMDS;;gamerule advance_time false"
+# Stop crops growing during the sprint. `SQUARESOWN` asks for `wheat[age=0]`,
+# and twelve thousand ticks of random ticks are ample for a freshly sown seed
+# to leave that state -- the assertion would then miss a replant that did
+# happen. The field is set to `age=7` by hand, so nothing here needs growth.
+CMDS="$CMDS;;gamerule random_tick_speed 0"
 CMDS="$CMDS;;time set 3000"
 CMDS="$CMDS;;tick sprint 12000t"
 CMDS="$CMDS;;!wait 90"

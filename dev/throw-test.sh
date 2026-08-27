@@ -61,7 +61,7 @@ CMDS="$CMDS;;teleport @s 0 100 0"
 # Chickens spawn on their own, which would make both the "no chicken yet"
 # control and the hatch assertion meaningless -- a natural spawn reads
 # exactly like a hatched chick.
-CMDS="$CMDS;;gamerule doMobSpawning false"
+CMDS="$CMDS;;gamerule spawn_mobs false"
 CMDS="$CMDS;;kill @e[type=minecraft:chicken]"
 
 CMDS="$CMDS;;execute unless entity @e[type=minecraft:snowball] run tellraw @s \"NOSNOWBALLYET\""

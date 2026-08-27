@@ -75,7 +75,7 @@ CMDS="$CMDS;;time set day"
 # Not peaceful: peaceful deletes the ghast. Not hard either -- a ghast that got
 # a fireball away would move the holder this whole test measures from.
 CMDS="$CMDS;;difficulty easy"
-CMDS="$CMDS;;gamerule mobGriefing false"
+CMDS="$CMDS;;gamerule mob_griefing false"
 
 # A strip of floor under the two mobs and the two places the player stands,
 # laid one block at a time because Steel has no `/fill` yet. The horse ends up
