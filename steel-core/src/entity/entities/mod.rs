@@ -58,7 +58,7 @@ pub use objects::vehicles::{
     SpawnerMinecartEntity, TntMinecartEntity,
 };
 pub use objects::{
-    AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity, OminousItemSpawnerEntity,
-    default_thunder_hit,
+    AreaEffectCloudEntity, CREEPER_CLOUD_DURATION_SCALE, LightningBoltEntity, MarkerEntity,
+    OminousItemSpawnerEntity, default_thunder_hit,
 };
 pub use raw::RawEntity;

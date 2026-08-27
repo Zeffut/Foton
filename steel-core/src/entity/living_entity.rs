@@ -806,7 +806,16 @@ pub trait LivingEntity: Entity {
         {
             damage *= 5.0;
         }
-        // TODO: apply helmet damage once those equipment hooks exist.
+        // Vanilla parity: a blow tagged `damages_helmet` -- a falling anvil,
+        // a stalactite -- is spent on the hat first, and a quarter of it never
+        // reaches the wearer at all.
+        if source.is(&vanilla_damage_type_tags::DamageTypeTag::DAMAGES_HELMET)
+            && self.has_item_in_slot(EquipmentSlot::Head)
+        {
+            self.hurt_helmet(source, damage);
+            damage *= 0.75;
+        }
+
         if !damage.is_finite() {
             damage = f32::MAX;
         }
@@ -888,6 +897,13 @@ pub trait LivingEntity: Entity {
 
     /// Damages equipment that participates in vanilla armor absorption.
     fn hurt_armor(&self, _source: &DamageSource, _damage: f32) {}
+
+    /// Spends the wearer's helmet on a blow aimed at it.
+    ///
+    /// Vanilla parity: `LivingEntity.hurtHelmet`, which does nothing unless the
+    /// wearer is a player -- a falling anvil dents a player's helmet and
+    /// nobody else's.
+    fn hurt_helmet(&self, _source: &DamageSource, _damage: f32) {}
 
     /// Mirrors vanilla `LivingEntity.doHurtEquipment`.
     fn do_hurt_equipment(&self, source: &DamageSource, damage: f32, slots: &[EquipmentSlot]) {

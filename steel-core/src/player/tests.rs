@@ -1243,3 +1243,38 @@ fn block_action_restriction_precedes_redstone_ore_attack() {
             .get_value(&BlockStateProperties::LIT)
     );
 }
+
+/// A blow tagged `damages_helmet` is spent on the hat before the wearer.
+///
+/// Vanilla parity: the `hurtHelmet` branch of `LivingEntity.hurtServer`, which
+/// only a player overrides. Without it a falling anvil went straight through a
+/// diamond helmet and left it unmarked.
+#[test]
+fn a_falling_anvil_is_taken_out_of_the_helmet() {
+    init_vanilla_registry();
+    let world = fresh_test_world("helmet_takes_the_anvil");
+    let player = test_player(Arc::clone(&world));
+    player.set_item_slot(
+        EquipmentSlot::Head,
+        ItemStack::new(&vanilla_items::DIAMOND_HELMET),
+    );
+
+    let anvil = DamageSource::environment(&vanilla_damage_types::FALLING_ANVIL);
+    let before = player.get_health();
+    assert!(player.hurt(&world, &anvil, 8.0));
+
+    let mut helmet_damage = 0;
+    player.with_equipment_slot(EquipmentSlot::Head, &mut |helmet| {
+        helmet_damage = helmet.get_damage_value();
+    });
+    assert!(
+        helmet_damage > 0,
+        "the helmet should have taken the wear instead of the wearer"
+    );
+
+    let taken = before - player.get_health();
+    assert!(
+        taken > 0.0 && taken < 8.0,
+        "a helmeted anvil hit lands lighter than a bare one, got {taken}"
+    );
+}

@@ -489,10 +489,10 @@ impl Projectile for SpectralArrowEntity {
         self.projectile_on_hit_block(hit);
 
         // Vanilla parity: `AbstractArrow.stepMoveAndHit` puts the arrow on the
-        // hit point and `onHitBlock` steps it back along the axis signs of its
-        // movement, burying the head in the face it struck. Steel's projectile
-        // engine does not advance a projectile to its hit point, so both halves
-        // are done here off the hit result.
+        // hit point and `onHitBlock` backs it off by a twentieth of a block
+        // along the axis signs of its travel, which leaves the shaft showing.
+        // Steel's projectile engine does not advance a projectile to its hit
+        // point at all, so both halves are done here off the hit result.
         let movement = self.velocity();
         let offset_direction = DVec3::new(
             movement.x.signum(),

@@ -8,6 +8,7 @@ use crate::entity::entities::ZombieEntity;
 use crate::entity::{Entity, next_entity_id};
 use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 use crate::world::World;
+use steel_utils::types::UpdateFlags;
 
 /// Ticks to give the sun.
 ///
@@ -21,6 +22,19 @@ fn open_sky_world(key: &'static str) -> Arc<World> {
     init_behaviors();
     let world = fresh_test_world(key);
     insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+    // Something to stand on. A zombie left in an empty chunk falls out of the
+    // world part way through, and how many sun rolls it got first is a matter
+    // of how loaded the machine is -- which is exactly the sort of test that
+    // passes alone and fails in the suite.
+    for x in 7..=9 {
+        for z in 7..=9 {
+            assert!(world.set_block(
+                BlockPos::new(x, 63, z),
+                vanilla_blocks::STONE.default_state(),
+                UpdateFlags::UPDATE_NONE,
+            ));
+        }
+    }
     world
 }
 

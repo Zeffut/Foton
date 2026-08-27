@@ -62,6 +62,25 @@ pub const DEFAULT_LINGERING_RADIUS_ON_USE: f32 = -0.5;
 /// Ticks before a lingering cloud starts working.
 pub const DEFAULT_LINGERING_WAIT_TIME: i32 = 10;
 
+/// Radius of the cloud a creeper carrying effects leaves behind.
+///
+/// Vanilla parity: the `setRadius(2.5F)` of `Creeper.spawnLingeringCloud`.
+const CREEPER_CLOUD_RADIUS: f32 = 2.5;
+
+/// How long that cloud lasts: fifteen seconds, half a potion's.
+const CREEPER_CLOUD_DURATION: i32 = 300;
+
+/// Ticks before it starts working.
+const CREEPER_CLOUD_WAIT_TIME: i32 = 10;
+
+/// How much each victim costs it.
+const CREEPER_CLOUD_RADIUS_ON_USE: f32 = -0.5;
+
+/// What a creeper's cloud divides each effect's duration by.
+///
+/// Vanilla parity: the `setPotionDurationScale(0.25F)` of the same method.
+pub const CREEPER_CLOUD_DURATION_SCALE: i32 = 4;
+
 /// Ticks before the same entity may be dosed again.
 ///
 /// Vanilla parity: `DEFAULT_REAPPLICATION_DELAY`.
@@ -204,6 +223,32 @@ impl AreaEffectCloudEntity {
             reason = "the lingering duration is six hundred ticks"
         )]
         let per_tick = -DEFAULT_LINGERING_RADIUS / DEFAULT_LINGERING_DURATION as f32;
+        state.radius_per_tick = per_tick;
+        state.effects = effects;
+    }
+
+    /// Sets this cloud up the way a creeper's death does.
+    ///
+    /// Vanilla parity: `Creeper.spawnLingeringCloud`. It is smaller and
+    /// shorter-lived than a lingering potion's, and it hands out a quarter of
+    /// each effect it carries.
+    ///
+    /// Deviation: vanilla keeps that quarter on the cloud as
+    /// `potionDurationScale` and applies it per victim. Steel stores plain
+    /// durations, so the quarter is taken when the cloud is built -- which
+    /// afflicts a victim for the same length of time either way.
+    pub fn configure_as_creeper_cloud(&self, effects: Vec<(MobEffectRef, i32, i32)>) {
+        self.set_radius(CREEPER_CLOUD_RADIUS);
+
+        let mut state = self.state.lock();
+        state.duration = CREEPER_CLOUD_DURATION;
+        state.wait_time = CREEPER_CLOUD_WAIT_TIME;
+        state.radius_on_use = CREEPER_CLOUD_RADIUS_ON_USE;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "the creeper cloud's duration is three hundred ticks"
+        )]
+        let per_tick = -CREEPER_CLOUD_RADIUS / CREEPER_CLOUD_DURATION as f32;
         state.radius_per_tick = per_tick;
         state.effects = effects;
     }

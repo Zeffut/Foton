@@ -619,11 +619,12 @@ impl Projectile for ArrowEntity {
         self.projectile_on_hit_block(hit);
 
         // Vanilla parity: `AbstractArrow.stepMoveAndHit` puts the arrow on the
-        // hit point, and `onHitBlock` then steps it back along the axis signs of
-        // its movement -- which is what buries the head in the face it struck
-        // instead of leaving it floating short of the block. Steel's shared
-        // projectile engine does not advance a projectile to its hit point, so
-        // both halves are done here off the hit result.
+        // hit point, and `onHitBlock` then backs it off by a twentieth of a
+        // block along the axis signs of its travel, which is what leaves the
+        // shaft showing rather than the head. Steel's shared projectile engine
+        // does not advance a projectile to its hit point at all -- it stops
+        // where the tick began, which can be blocks short -- so both halves are
+        // done here off the hit result.
         let movement = self.velocity();
         let offset_direction = DVec3::new(
             movement.x.signum(),
@@ -755,8 +756,8 @@ mod tests {
     }
 
     #[test]
-    fn an_arrow_buries_itself_in_the_face_it_struck() {
-        let world = arrow_world("arrow_buries_in_block");
+    fn an_arrow_settles_against_the_face_it_struck() {
+        let world = arrow_world("arrow_settles_against_block");
         assert!(world.set_block(
             BlockPos::new(WALL_X, 64, 8),
             vanilla_blocks::STONE.default_state(),
@@ -774,8 +775,8 @@ mod tests {
         let overshoot = f64::from(WALL_X) - arrow.position().x;
         assert!(
             (overshoot - 0.05).abs() < 1.0e-6,
-            "the arrow should sit 0.05 inside the face it hit, but it stopped \
-             {overshoot} short of it"
+            "the arrow should settle a twentieth of a block off the face it hit, \
+             but it stopped {overshoot} short of it"
         );
     }
 

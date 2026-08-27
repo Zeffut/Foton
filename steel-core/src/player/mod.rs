@@ -1655,6 +1655,11 @@ impl LivingEntity for Player {
         Player::die(self, source);
     }
 
+    /// Vanilla parity: `Player.hurtHelmet`, the only override of it.
+    fn hurt_helmet(&self, source: &DamageSource, damage: f32) {
+        self.do_hurt_equipment(source, damage, &[EquipmentSlot::Head]);
+    }
+
     fn with_equipment_slot(&self, slot: EquipmentSlot, visitor: &mut dyn FnMut(&ItemStack)) {
         let inventory = self.inventory.lock();
         visitor(inventory.get_ref(slot));
