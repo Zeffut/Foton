@@ -28,6 +28,11 @@ if [ ! -d "$ROOT/run-offline/config" ]; then
 fi
 cp -r "$ROOT/run-offline/config" "$RUN_DIR/config"
 sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
+# A scripted client fires commands far faster than a person, and the throttle
+# decays one point per game tick -- so a busy server turns this rig's burst of
+# `setblock`s into a `disconnect.spam` kick. This test failed exactly that way
+# under load.
+sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 0/' \n  "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1

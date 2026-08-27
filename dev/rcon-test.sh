@@ -37,7 +37,11 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 0/' \
   "$RUN_DIR/config/config.toml"
 # A TOML table header is an absolute path, so appending this at the end of the
-# file puts it under [server] wherever it lands.
+# file puts it under [server] wherever it lands. Strip any [server.rcon] the
+# reference config already carries first: a freshly generated config has one
+# now that the server speaks RCON, and two of them is a `duplicate key` the
+# server refuses to start on.
+python3 "$ROOT/dev/strip-rcon-section.py" "$RUN_DIR/config/config.toml"
 cat >> "$RUN_DIR/config/config.toml" <<TOML
 
 [server.rcon]
