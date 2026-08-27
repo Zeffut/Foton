@@ -15,11 +15,13 @@ use steel_utils::{BlockLocalAabb, BlockPos, BlockStateId, Direction, types::Upda
 
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::behavior::block::{
-    BlockBehavior, BlockCollisionContext, EntityFallDamage, EntityFallOnContext, push_entities_up,
-    schedule_water_tick_if_waterlogged,
+    BlockBehavior, BlockCollisionContext, EntityFallDamage, EntityFallOnContext, Fallable,
+    push_entities_up, schedule_water_tick_if_waterlogged,
 };
 use crate::behavior::context::BlockPlaceContext;
+use crate::entity::Entity as _;
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::FallingBlockEntity;
 use crate::entity::projectile::Projectile;
 use crate::fluid::FluidStateExt as _;
 use crate::world::game_event::GameEventContext;
@@ -33,7 +35,6 @@ use super::BlockRef;
 /// Survival mirrors vanilla's `isValidPointedDripstonePlacement`: the block
 /// opposite the tip direction must be face-sturdy on the face pointing toward
 /// us, or be another pointed dripstone with the same `vertical_direction`.
-// TODO: Implement falling stalactites after falling block entities exist.
 #[block_behavior]
 pub struct PointedDripstoneBlock {
     block: BlockRef,
@@ -124,6 +125,26 @@ impl BlockBehavior for PointedDripstoneBlock {
     ) {
         SpeleothemBlockBehavior::on_projectile_hit(world, hit.block_pos, projectile);
     }
+
+    fn as_fallable(&self) -> Option<&dyn Fallable> {
+        Some(self)
+    }
+}
+
+/// Vanilla parity: the `Fallable` half of `SpeleothemBlock`.
+impl Fallable for PointedDripstoneBlock {
+    fn on_broken_after_fall(&self, world: &Arc<World>, pos: BlockPos, entity: &FallingBlockEntity) {
+        SpeleothemBlockBehavior::on_broken_after_fall(
+            world,
+            pos,
+            entity,
+            level_events::SOUND_POINTED_DRIPSTONE_LAND,
+        );
+    }
+
+    fn get_fall_damage_source(&self, entity: &FallingBlockEntity) -> DamageSource {
+        SpeleothemBlockBehavior::fall_damage_source(entity)
+    }
 }
 
 /// Vanilla `SulfurSpikeBlock` behavior
@@ -186,6 +207,26 @@ impl BlockBehavior for SulfurSpikeBlock {
     ) {
         SpeleothemBlockBehavior::on_projectile_hit(world, hit.block_pos, projectile);
     }
+
+    fn as_fallable(&self) -> Option<&dyn Fallable> {
+        Some(self)
+    }
+}
+
+/// Vanilla parity: the `Fallable` half of `SpeleothemBlock`.
+impl Fallable for SulfurSpikeBlock {
+    fn on_broken_after_fall(&self, world: &Arc<World>, pos: BlockPos, entity: &FallingBlockEntity) {
+        SpeleothemBlockBehavior::on_broken_after_fall(
+            world,
+            pos,
+            entity,
+            level_events::SOUND_SULFUR_SPIKE_LAND,
+        );
+    }
+
+    fn get_fall_damage_source(&self, entity: &FallingBlockEntity) -> DamageSource {
+        SpeleothemBlockBehavior::fall_damage_source(entity)
+    }
 }
 
 struct SpeleothemBlockBehavior {
@@ -199,6 +240,12 @@ enum SpeleothemKind {
     Sulfur,
 }
 
+/// Vanilla parity: `SpeleothemBlock.STALACTITE_DAMAGE_PER_FALL_DISTANCE_AND_SIZE`.
+const STALACTITE_DAMAGE_PER_FALL_DISTANCE_AND_SIZE: f32 = 1.0;
+/// Vanilla parity: `SpeleothemBlock.STALACTITE_MAX_DAMAGE`.
+const STALACTITE_MAX_DAMAGE: i32 = 40;
+/// Vanilla parity: `SpeleothemBlock.MAX_STALACTITE_HEIGHT_FOR_DAMAGE_CALCULATION`.
+const MAX_STALACTITE_HEIGHT_FOR_DAMAGE_CALCULATION: i32 = 6;
 const GROWTH_PROBABILITY_PER_RANDOM_TICK: f32 = 0.011_377_778;
 const MAX_GROWTH_LENGTH: i32 = 7;
 const MAX_STALAGMITE_SEARCH_RANGE_WHEN_GROWING: i32 = 10;
@@ -302,7 +349,62 @@ impl SpeleothemBlockBehavior {
     fn tick(&self, state: BlockStateId, world: &Arc<World>, pos: BlockPos) {
         if Self::is_stalagmite(state) && !self.can_survive(state, world.as_ref(), pos) {
             world.destroy_block(pos, true);
+        } else {
+            Self::spawn_falling_stalactite(world, pos, state);
         }
+    }
+
+    /// Drops a whole stalactite as falling blocks, tip first.
+    ///
+    /// Vanilla parity: `SpeleothemBlock.spawnFallingStalactite`. Only the tip
+    /// is made to hurt, and only it stops the walk: the blocks above it are the
+    /// same column and are already falling behind it.
+    ///
+    /// The `max` in the size is vanilla's, not a slip for `min`: a stalactite
+    /// under six long still lands with a six-block stalactite's weight, and a
+    /// longer one hits harder for every block of it.
+    fn spawn_falling_stalactite(world: &Arc<World>, pos: BlockPos, state: BlockStateId) {
+        let mut fall_pos = pos;
+        let mut fall_state = state;
+
+        while Self::is_stalactite(fall_state) {
+            // `fall` takes the block out of the world, so the next read down
+            // the column sees the block below rather than this one again.
+            let entity = FallingBlockEntity::fall(world, fall_pos, fall_state);
+            if Self::is_tip(fall_state, true) {
+                let size =
+                    (1 + pos.y() - fall_pos.y()).max(MAX_STALACTITE_HEIGHT_FOR_DAMAGE_CALCULATION);
+                entity.set_hurts_entities(
+                    STALACTITE_DAMAGE_PER_FALL_DISTANCE_AND_SIZE * size as f32,
+                    STALACTITE_MAX_DAMAGE,
+                );
+                break;
+            }
+
+            fall_pos = fall_pos.below();
+            fall_state = world.get_block_state(fall_pos);
+        }
+    }
+
+    /// Vanilla parity: `SpeleothemBlock.onBrokenAfterFall`, which is the crack
+    /// a landing stalactite makes when it shatters.
+    fn on_broken_after_fall(
+        world: &Arc<World>,
+        pos: BlockPos,
+        entity: &FallingBlockEntity,
+        landing_sound: i32,
+    ) {
+        if !entity.is_silent() {
+            world.level_event(landing_sound, pos, 0, None);
+        }
+    }
+
+    /// Vanilla parity: `SpeleothemBlock.getFallDamageSource`, which is a
+    /// falling stalactite rather than the generic falling block.
+    fn fall_damage_source(entity: &FallingBlockEntity) -> DamageSource {
+        DamageSource::environment(&vanilla_damage_types::FALLING_STALACTITE)
+            .with_direct_entity(entity.id())
+            .with_causing_entity(entity.id())
     }
 
     fn calculate_tip_direction(

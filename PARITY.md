@@ -417,6 +417,12 @@ mobs that need it.
       target crosses the wire -- everything else a conduit shows is derived
       client-side, so the server has nothing else to send.
 
+      Stalactites fall. Take the ceiling out and the whole column comes down as
+      falling blocks, tip first and tip only carrying the weight, at one damage
+      per fall distance per block of stalactite. That was the last of
+      `SpeleothemBlock` waiting on a falling-block entity, which has existed for
+      a while -- the TODO outlived what it was waiting for.
+
 ### 3. The end of the game
 
 - [x] **The boss bar**: `BossEvent`, `ServerBossEvent` and the boss-event packet
