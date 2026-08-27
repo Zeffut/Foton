@@ -1795,6 +1795,92 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn AbstractNautilus>(self)
     }
 
+    /// Returns this entity as a mount that can wear a chest.
+    ///
+    /// Mirrors vanilla's `instanceof AbstractChestedHorse` branches, which is
+    /// what puts a chest in command slot 499.
+    fn as_abstract_chested_horse(&self) -> Option<&dyn AbstractChestedHorse> {
+        try_as_dyn::<Self, dyn AbstractChestedHorse>(self)
+    }
+
+    /// Reads the stack in one of vanilla's numeric command slots.
+    ///
+    /// Vanilla parity: the read half of `SlotProvider.getSlot`. Vanilla hands
+    /// back a `SlotAccess`, a get-and-set pair over the slot; Steel's slots
+    /// live behind locks, so a handle outliving the call would have to carry a
+    /// guard with it. Only the read half is modeled, because reading is all
+    /// the commands Steel has that address slots by number ever do. `/item`
+    /// and `/loot replace`, when they arrive, will need the write half beside
+    /// this one.
+    ///
+    /// `None` is vanilla's null return: this entity has no such slot at all.
+    /// `Some` holding an empty stack is a slot that exists and is empty, which
+    /// `execute if items` tests and does not skip.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        self.entity_slot_item(slot)
+    }
+
+    /// Runs the shared body of [`Self::slot_item`].
+    ///
+    /// Every `getSlot` override an entity inherits rather than declares lives
+    /// here. Vanilla spreads them down a class chain -- `AbstractHorse`,
+    /// `AbstractChestedHorse`, `AbstractNautilus`, `Pillager`, `Piglin`,
+    /// `AbstractVillager`, then `LivingEntity` -- but in Steel each of those is
+    /// a capability trait rather than a superclass, so the chain collapses into
+    /// one dispatch. A type with a slot of its own overrides
+    /// [`Self::slot_item`] and calls this for the rest, the way vanilla falls
+    /// through to `super.getSlot`.
+    fn entity_slot_item(&self, slot: i32) -> Option<ItemStack> {
+        // Vanilla `AbstractChestedHorse.getSlot`: 499 is the chest itself, a
+        // slot with no storage behind it that answers with the chest item when
+        // the mount is wearing one.
+        if slot == CURSOR_AND_MOUNT_CHEST_SLOT
+            && let Some(chested) = self.as_abstract_chested_horse()
+        {
+            return Some(if chested.has_chest() {
+                ItemStack::new(&vanilla_items::CHEST)
+            } else {
+                ItemStack::empty()
+            });
+        }
+
+        // Vanilla `AbstractHorse.getSlot` and `AbstractNautilus.getSlot`, which
+        // are the same offset over each mount's own inventory.
+        if let Some(horse) = self.as_abstract_horse() {
+            let inventory = horse.abstract_horse_base().inventory();
+            let item = container_slot_item(&*inventory.lock(), slot - MOUNT_INVENTORY_SLOT_OFFSET);
+            if item.is_some() {
+                return item;
+            }
+        }
+        if let Some(nautilus) = self.as_abstract_nautilus() {
+            let inventory = nautilus.abstract_nautilus_base().inventory();
+            let item = container_slot_item(&*inventory.lock(), slot - MOUNT_INVENTORY_SLOT_OFFSET);
+            if item.is_some() {
+                return item;
+            }
+        }
+
+        // Vanilla `Pillager.getSlot`, `Piglin.getSlot` and
+        // `AbstractVillager.getSlot`, all of them the same offset over the
+        // inventory a mob carries.
+        if let Some(carrier) = self.as_inventory_carrier() {
+            let item = container_slot_item(
+                &*carrier.carried_inventory().lock(),
+                slot - MOB_INVENTORY_SLOT_OFFSET,
+            );
+            if item.is_some() {
+                return item;
+            }
+        }
+
+        // Vanilla `LivingEntity.getSlot`, the last override before
+        // `Entity.getSlot` answers null.
+        let living = self.as_living_entity()?;
+        let equipment = equipment_slot_from_command_slot(slot)?;
+        Some(living.get_item_by_slot(equipment))
+    }
+
     /// Throws every passenger off.
     ///
     /// Mirrors vanilla `Entity.ejectPassengers`.

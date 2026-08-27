@@ -49,6 +49,7 @@ use crate::world::{LevelReader as _, World};
 
 use super::abstract_piglin::{self, PiglinArmPose};
 use super::piglin_ai;
+use crate::entity::InventoryCarrier;
 use steel_registry::entity_data::EntityPose;
 use steel_registry::entity_type::{EntityAttachmentPoint, EntityAttachments, EntityDimensions};
 use steel_utils::Identifier;
@@ -832,5 +833,11 @@ impl Mob for PiglinEntity {
 }
 
 impl PathfinderMob for PiglinEntity {}
+
+impl InventoryCarrier for PiglinEntity {
+    fn carried_inventory(&self) -> &SyncMutex<SimpleContainer> {
+        &self.inventory
+    }
+}
 
 impl Enemy for PiglinEntity {}

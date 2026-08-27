@@ -111,6 +111,10 @@ use crate::inventory::equipment::{EntityEquipment, EquipmentSlot, EquipmentSlotT
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::menu::Menu;
 use crate::inventory::menu::kinds::inventory_menu;
+use crate::inventory::slot_ranges::{
+    CURSOR_AND_MOUNT_CHEST_SLOT, ENDER_CHEST_SLOT_OFFSET, PLAYER_CRAFTING_SIZE,
+    PLAYER_CRAFTING_SLOT_OFFSET, container_slot_item,
+};
 use crate::level_data::RespawnData;
 use crate::permission::{
     PermissionContext, PermissionExpr, PermissionMetadataSet, PermissionMetadataValue,
@@ -1235,6 +1239,39 @@ impl Entity for Player {
 
     fn entity_type(&self) -> EntityTypeRef {
         &vanilla_entities::PLAYER
+    }
+
+    /// Vanilla parity: `Player.getSlot`, in its order.
+    ///
+    /// The player is the only entity with four numeric ranges of its own: the
+    /// cursor, its own crafting grid, the storage slots and the ender chest.
+    /// Everything else falls through to the equipment `LivingEntity` owns.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CURSOR_AND_MOUNT_CHEST_SLOT {
+            return Some(self.carried_item());
+        }
+
+        let crafting_slot = slot - PLAYER_CRAFTING_SLOT_OFFSET;
+        if (0..PLAYER_CRAFTING_SIZE).contains(&crafting_slot) {
+            return self.inventory_menu.lock().crafting_slot_item(crafting_slot);
+        }
+
+        // Vanilla bounds this on `getNonEquipmentItems().size()`. Steel's
+        // player container runs longer than that -- it keeps the worn
+        // equipment inline behind the storage slots -- and those seven belong
+        // to the `armor.*`, `weapon.*` and `saddle` names instead.
+        if (0..PlayerInventory::INVENTORY_SIZE as i32).contains(&slot) {
+            return container_slot_item(&*self.inventory.lock(), slot);
+        }
+
+        let ender_slot = slot - ENDER_CHEST_SLOT_OFFSET;
+        if ender_slot >= 0
+            && let Some(item) = container_slot_item(&*self.ender_chest.lock(), ender_slot)
+        {
+            return Some(item);
+        }
+
+        self.entity_slot_item(slot)
     }
 
     fn base_tick(&self) {

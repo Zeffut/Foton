@@ -105,6 +105,26 @@ impl EquipmentSlot {
         }
     }
 
+    /// Returns vanilla's `index` field: where this slot sits inside its own
+    /// type rather than inside the whole set.
+    ///
+    /// Not [`Self::index`], which numbers all eight slots for array storage.
+    /// Vanilla's `EquipmentSlot.getIndex(base)` adds this to a per-type base
+    /// to build the numeric slot ids commands address, so the two hands and
+    /// the four humanoid armor pieces each count from zero again.
+    #[must_use]
+    pub const fn type_index(self) -> i32 {
+        match self {
+            EquipmentSlot::MainHand
+            | EquipmentSlot::Feet
+            | EquipmentSlot::Body
+            | EquipmentSlot::Saddle => 0,
+            EquipmentSlot::OffHand | EquipmentSlot::Legs => 1,
+            EquipmentSlot::Chest => 2,
+            EquipmentSlot::Head => 3,
+        }
+    }
+
     /// Returns vanilla's protocol ID for this slot.
     #[must_use]
     pub const fn id(self) -> i32 {

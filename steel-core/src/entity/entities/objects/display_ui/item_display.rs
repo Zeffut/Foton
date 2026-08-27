@@ -20,6 +20,7 @@ use steel_utils::{DowncastType, DowncastTypeKey};
 use uuid::Uuid;
 
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntitySyncedData};
+use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::world::World;
 
 /// Which of an item's models the client should draw.
@@ -238,6 +239,14 @@ impl Entity for ItemDisplayEntity {
 
     fn entity_type(&self) -> EntityTypeRef {
         self.entity_type
+    }
+
+    /// Vanilla parity: `Display.ItemDisplay.getSlot`, whose one slot is the item on show.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CONTENTS_SLOT {
+            return Some(self.item_stack());
+        }
+        self.entity_slot_item(slot)
     }
 
     fn synced_data(&self) -> Option<&dyn EntitySyncedData> {

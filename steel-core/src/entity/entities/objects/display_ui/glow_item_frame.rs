@@ -33,6 +33,7 @@ use crate::entity::{
     BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
     ItemFrame, SharedEntity,
 };
+use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -235,6 +236,15 @@ impl Entity for GlowItemFrameEntity {
 
     fn entity_type(&self) -> EntityTypeRef {
         self.entity_type
+    }
+
+    /// Vanilla parity: `ItemFrame.getSlot`, whose one slot is what is hung in
+    /// the frame.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CONTENTS_SLOT {
+            return Some(self.framed_item());
+        }
+        self.entity_slot_item(slot)
     }
 
     fn spawn_data(&self) -> i32 {

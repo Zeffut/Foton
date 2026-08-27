@@ -1,5 +1,6 @@
 //! `/execute if` and `/execute unless` conditions.
 
+use std::slice;
 use std::sync::Arc;
 
 use simdnbt::owned::NbtTag;
@@ -19,6 +20,8 @@ use super::super::super::{
     },
 };
 use super::{objective, source_command_storage, source_scoreboard};
+use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
+use crate::inventory::slot_ranges::container_slot_item;
 use crate::{block_entity::SharedBlockEntity, world::World};
 
 type Builder = CommandNodeBuilder<CommandSource, SteelCommandRuntime>;
@@ -27,8 +30,6 @@ const EXECUTE_ROOT: CommandRedirectTarget = CommandRedirectTarget::CommandRoot;
 const MAX_BLOCKS_REGION: i64 = 32_768;
 
 pub(super) fn conditionals(name: &'static str, expected: bool) -> Builder {
-    // TODO: Add items after every vanilla command-slot provider and container inventory is
-    // modeled, including deferred loot-table unpacking.
     // TODO: Add predicate and function after their runtime registries are ported.
     // TODO: Restore Steel stopwatch conditions with the stopwatch command system.
     literal(name)
@@ -38,6 +39,7 @@ pub(super) fn conditionals(name: &'static str, expected: bool) -> Builder {
         .then(data_condition(expected))
         .then(dimension_condition(expected))
         .then(entity_condition(expected))
+        .then(items_condition(expected))
         .then(loaded_condition(expected))
         .then(score_condition(expected))
 }
@@ -408,6 +410,130 @@ fn entity_condition(expected: bool) -> Builder {
                     })?;
                 execute_numeric_condition(context, expected, count)
             }),
+    )
+}
+
+fn items_condition(expected: bool) -> Builder {
+    literal("items")
+        .then(
+            literal("entity").then(
+                argument("entities", SteelArgumentType::entities()).then(
+                    argument("slots", SteelArgumentType::item_slots()).then(
+                        argument("item_predicate", SteelArgumentType::item_predicate())
+                            .forks(EXECUTE_ROOT, move |context| {
+                                let matches = entity_item_count(context)? > 0;
+                                Ok(conditional_sources(context.source(), expected, matches))
+                            })
+                            .executes(move |context| {
+                                let count = entity_item_count(context)?;
+                                execute_numeric_condition(context, expected, count)
+                            }),
+                    ),
+                ),
+            ),
+        )
+        .then(
+            literal("block").then(
+                argument("pos", SteelArgumentType::block_pos()).then(
+                    argument("slots", SteelArgumentType::item_slots()).then(
+                        argument("item_predicate", SteelArgumentType::item_predicate())
+                            .forks(EXECUTE_ROOT, move |context| {
+                                let matches = block_item_count(context)? > 0;
+                                Ok(conditional_sources(context.source(), expected, matches))
+                            })
+                            .executes(move |context| {
+                                let count = block_item_count(context)?;
+                                execute_numeric_condition(context, expected, count)
+                            }),
+                    ),
+                ),
+            ),
+        )
+}
+
+/// Counts matching items across every named slot of every matched entity.
+///
+/// Vanilla parity: the `SlotProvider` overload of `ExecuteCommand.countItems`.
+/// The answer is the number of *items*, not of slots: a stack of sixty-four
+/// counts sixty-four. A slot the entity does not have is skipped; one it has
+/// and has left empty is tested and contributes its count, which is zero.
+fn entity_item_count(
+    context: &SteelCommandContext<CommandSource>,
+) -> Result<i32, CommandSyntaxError> {
+    // Vanilla uses `EntityArgument.getEntities`, which refuses to match
+    // nothing: a selector that finds no entity fails the command rather than
+    // quietly counting zero.
+    let entities = context.entities("entities")?;
+    let slots = context.item_slots("slots")?;
+    let predicate = context.item_predicate("item_predicate")?;
+
+    let mut count = 0i64;
+    for entity in &entities {
+        for &slot in slots.slots() {
+            let Some(stack) = entity.slot_item(slot) else {
+                continue;
+            };
+            if predicate.matches(&stack) {
+                count += i64::from(stack.count());
+            }
+        }
+    }
+    item_count_result(count)
+}
+
+/// Counts matching items across every named slot of one container block.
+///
+/// Vanilla parity: the `BlockPos` overload of `ExecuteCommand.countItems`,
+/// which bounds every slot id against the container's own size rather than
+/// against the range that named it -- `container.*` over a hopper reads five
+/// slots and stops.
+fn block_item_count(
+    context: &SteelCommandContext<CommandSource>,
+) -> Result<i32, CommandSyntaxError> {
+    let position = loaded_block_position(context, "pos")?;
+    let slots = context.item_slots("slots")?;
+    let predicate = context.item_predicate("item_predicate")?;
+
+    let block_entity = context
+        .source()
+        .world()
+        .get_block_entity(position)
+        .ok_or_else(|| not_a_container(position))?;
+    let container_ref =
+        ContainerRef::from_block_entity(block_entity).ok_or_else(|| not_a_container(position))?;
+    // Locking is also what rolls a still-packed loot table, so an untouched
+    // dungeon chest answers with what a player opening it would find.
+    let guard = ContainerLockGuard::lock_all(slice::from_ref(&container_ref));
+    let Some(container) = guard.get(container_ref.container_id()) else {
+        return Err(not_a_container(position));
+    };
+
+    let mut count = 0i64;
+    for &slot in slots.slots() {
+        let Some(stack) = container_slot_item(container, slot) else {
+            continue;
+        };
+        if predicate.matches(&stack) {
+            count += i64::from(stack.count());
+        }
+    }
+    item_count_result(count)
+}
+
+fn item_count_result(count: i64) -> Result<i32, CommandSyntaxError> {
+    i32::try_from(count)
+        .map_err(|_| CommandSyntaxError::dynamic("Item count exceeds the command result range"))
+}
+
+fn not_a_container(position: BlockPos) -> CommandSyntaxError {
+    CommandSyntaxError::dynamic(
+        translations::COMMANDS_ITEM_SOURCE_NOT_A_CONTAINER
+            .message([
+                position.x().to_string(),
+                position.y().to_string(),
+                position.z().to_string(),
+            ])
+            .component(),
     )
 }
 

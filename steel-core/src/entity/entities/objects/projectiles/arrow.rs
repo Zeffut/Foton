@@ -22,6 +22,7 @@ use crate::entity::{
     ProjectileBase, ProjectileDeflection, RemovalReason, SharedEntity, next_entity_id,
 };
 use crate::inventory::container::Container as _;
+use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::{ClipHitResult, World};
@@ -291,6 +292,23 @@ impl ArrowEntity {
             .set(pierce_level);
     }
 
+    /// The stack a player picking this arrow up receives.
+    ///
+    /// Vanilla parity: `Arrow.getDefaultPickupItem`, which is what
+    /// `AbstractArrow.getPickupItemStackOrigin` answers with until something
+    /// overrides it. Vanilla keeps that stack per arrow, so a tipped one comes
+    /// back tipped; Steel has no potion component on projectiles yet -- the
+    /// same gap `on_hit_entity` documents -- and this is the one place that
+    /// changes when it does.
+    #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "vanilla reads the per-arrow origin stack through this receiver"
+    )]
+    pub fn pickup_item(&self) -> ItemStack {
+        ItemStack::new(&vanilla_items::ARROW)
+    }
+
     /// Returns who may collect this arrow.
     #[must_use]
     pub fn pickup(&self) -> ArrowPickup {
@@ -431,6 +449,14 @@ impl Entity for ArrowEntity {
         self.entity_type
     }
 
+    /// Vanilla parity: `AbstractArrow.getSlot`, whose one slot is what a player picking it up receives.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CONTENTS_SLOT {
+            return Some(self.pickup_item());
+        }
+        self.entity_slot_item(slot)
+    }
+
     fn tick(&self) {
         // Vanilla parity: the `if (this.shakeTime > 0) this.shakeTime--;` of
         // `AbstractArrow.tick`, which runs whether or not the arrow has landed.
@@ -492,7 +518,7 @@ impl Entity for ArrowEntity {
                 }
             }
             ArrowPickup::Allowed => {
-                let mut stack = ItemStack::new(&vanilla_items::ARROW);
+                let mut stack = self.pickup_item();
                 let before = stack.count();
                 player.inventory.lock().add(&mut stack);
                 if stack.count() == before {

@@ -1047,6 +1047,28 @@ impl Player {
         }
     }
 
+    /// The stack the cursor is holding.
+    ///
+    /// Vanilla parity: `Player.containerMenu.getCarried()`. `containerMenu` is
+    /// whichever menu is open and falls back to the player's own inventory
+    /// menu when none is, which is the same pair
+    /// [`Self::clear_or_count_matching_items`] walks.
+    pub(crate) fn carried_item(&self) -> ItemStack {
+        let open_menu = self.open_menu.lock();
+        if let Some(menu) = open_menu.menu.as_ref() {
+            return menu.behavior().carried().clone();
+        }
+        if open_menu.dispatch.is_some() {
+            // A menu handed to a callback has been moved out of `open_menu`
+            // and is not the inventory menu either, so there is nothing here
+            // to read. Reading the inventory menu instead would answer with a
+            // cursor the player is not holding.
+            return ItemStack::empty();
+        }
+        drop(open_menu);
+        self.inventory_menu.lock().behavior().carried().clone()
+    }
+
     /// Removes or counts matching stacks across every location used by vanilla `/clear`.
     pub(crate) fn clear_or_count_matching_items(
         &self,

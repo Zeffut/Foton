@@ -24,6 +24,7 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
 use crate::chunk::light::LightLayer;
+use crate::entity::InventoryCarrier;
 use crate::entity::abstract_illager::{AbstractIllager, IllagerArmPose};
 use crate::entity::ai::goal::{
     FloatGoal, HoldGroundAttackGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
@@ -603,6 +604,12 @@ impl AbstractIllager for PillagerEntity {
             return IllagerArmPose::Attacking;
         }
         IllagerArmPose::Neutral
+    }
+}
+
+impl InventoryCarrier for PillagerEntity {
+    fn carried_inventory(&self) -> &SyncMutex<SimpleContainer> {
+        &self.inventory
     }
 }
 

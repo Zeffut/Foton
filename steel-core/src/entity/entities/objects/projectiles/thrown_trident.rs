@@ -31,6 +31,7 @@ use crate::entity::{
     ProjectileDeflection, ProjectileHit, RemovalReason, SharedEntity, next_entity_id,
 };
 use crate::inventory::container::Container as _;
+use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::{ClipBlockShape, ClipFluid, ClipHitResult, World};
@@ -601,6 +602,14 @@ impl Entity for ThrownTridentEntity {
 
     fn entity_type(&self) -> EntityTypeRef {
         self.entity_type
+    }
+
+    /// Vanilla parity: `AbstractArrow.getSlot`, whose one slot is the trident that was thrown.
+    fn slot_item(&self, slot: i32) -> Option<ItemStack> {
+        if slot == CONTENTS_SLOT {
+            return Some(self.pickup_item_stack());
+        }
+        self.entity_slot_item(slot)
     }
 
     /// Vanilla parity: `ThrownTrident.tick`, which runs the return leg and then
