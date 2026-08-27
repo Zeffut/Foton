@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use steel_macros::block_behavior;
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::properties::{
     BlockStateProperties, BoolProperty, Direction, EnumProperty,
 };
@@ -9,17 +10,24 @@ use steel_registry::fluid::FluidState;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_damage_types;
 use steel_registry::{
-    REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_blocks, vanilla_fluids,
-    vanilla_game_events,
+    REGISTRY, TaggedRegistryExt as _, sound_events, vanilla_block_entity_types, vanilla_blocks,
+    vanilla_fluids, vanilla_game_events,
 };
-use steel_utils::{BlockPos, BlockStateId, types::UpdateFlags};
+use steel_utils::types::InteractionHand;
+use steel_utils::{BlockPos, BlockStateId, Downcast as _, types::UpdateFlags};
 
-use crate::behavior::block::schedule_water_tick_if_waterlogged;
+use crate::behavior::InventoryAccess;
+use crate::behavior::block::{BlockEntityCreation, schedule_water_tick_if_waterlogged};
+use crate::behavior::context::{BlockHitResult, InteractionResult};
+use crate::block_entity::entities::CampfireBlockEntity;
+use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
+use crate::player::Player;
 use crate::{
     behavior::{BlockBehavior, BlockPlaceContext, block::schedule_placed_liquid_tick},
     entity::{Entity, InsideBlockEffectCollector, damage::DamageSource, projectile::Projectile},
     world::{
-        ClipHitResult, LevelAccessor, ScheduledTickAccess, World, game_event::GameEventContext,
+        ClipHitResult, LevelAccessor, LevelReader as _, ScheduledTickAccess, World,
+        game_event::GameEventContext,
     },
 };
 
@@ -67,7 +75,8 @@ pub(crate) fn is_lit_campfire(state: BlockStateId) -> bool {
 
 /// Behavior for campfires and soul campfires.
 ///
-/// TODO: Add campfire cooking, smoke particles, and dowse item ejection.
+/// Smoke and crackle particles are vanilla `animateTick`, which is client-only
+/// and has no server counterpart.
 #[block_behavior]
 pub struct CampfireBlock {
     block: BlockRef,
@@ -193,6 +202,86 @@ impl BlockBehavior for CampfireBlock {
         }
 
         self.default_entity_inside(state, world, pos, entity, effect_collector, is_precise);
+    }
+
+    fn new_block_entity(
+        &self,
+        level: Weak<World>,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> BlockEntityCreation {
+        BlockEntityCreation::from_registered_factory(BLOCK_ENTITIES.create(
+            &vanilla_block_entity_types::CAMPFIRE,
+            level,
+            pos,
+            state,
+        ))
+    }
+
+    /// Vanilla parity: `CampfireBlock.getTicker`, which picks the callback from
+    /// the live state rather than branching inside the block entity. A lit
+    /// campfire cooks; an unlit one walks its progress back down.
+    ///
+    /// The selection is re-run whenever the state changes, so dousing a
+    /// campfire swaps the ticker on the same tick the `lit` property flips.
+    fn get_block_entity_ticker(
+        &self,
+        _world: &Arc<World>,
+        state: BlockStateId,
+        block_entity_type: BlockEntityTypeRef,
+    ) -> Option<BlockEntityTicker> {
+        let tick = if state.get_value(LIT) {
+            CampfireBlockEntity::cook_tick
+        } else {
+            CampfireBlockEntity::cooldown_tick
+        };
+        BlockEntityTicker::for_matching_tick(
+            block_entity_type,
+            &vanilla_block_entity_types::CAMPFIRE,
+            tick,
+        )
+    }
+
+    /// Vanilla parity: `CampfireBlock.useItemOn`.
+    ///
+    /// The `awardStat(INTERACT_WITH_CAMPFIRE)` of vanilla has no counterpart:
+    /// Steel has no statistics system.
+    fn use_item_on(
+        &self,
+        _state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+        _hand: InteractionHand,
+        _hit_result: &BlockHitResult,
+        inv: &mut InventoryAccess,
+    ) -> InteractionResult {
+        let Some(block_entity) = world.get_block_entity(pos) else {
+            return InteractionResult::TryEmptyHandInteraction;
+        };
+        let Some(campfire) = block_entity.downcast_ref::<CampfireBlockEntity>() else {
+            return InteractionResult::TryEmptyHandInteraction;
+        };
+
+        // Vanilla tests `RecipePropertySet.CAMPFIRE_INPUT`, which is built from
+        // exactly the campfire recipes' ingredients, so the recipe lookup is
+        // the same question. Anything else falls through to the empty-hand
+        // interaction rather than being swallowed.
+        let held = inv.with_item(|item| item.clone());
+        if REGISTRY.recipes.find_campfire_recipe(&held).is_none() {
+            return InteractionResult::TryEmptyHandInteraction;
+        }
+
+        if !campfire.place_food(world, Some(player), &held) {
+            return InteractionResult::Consume;
+        }
+
+        // Vanilla's `consumeAndReturn` shrinks the held stack unless the holder
+        // has infinite materials; the block entity only took a copy.
+        if !player.has_infinite_materials() {
+            inv.with_item(|item| item.shrink(1));
+        }
+        InteractionResult::SuccessServer
     }
 
     fn place_liquid(

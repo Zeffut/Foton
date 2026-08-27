@@ -6,6 +6,7 @@ mod beacon;
 mod beehive;
 mod brewing_stand;
 mod brushable;
+mod campfire;
 mod chest;
 mod chiseled_bookshelf;
 mod command_block;
@@ -54,6 +55,7 @@ pub use brewing_stand::{
     SLOT_FIRST_BOTTLE, SLOT_INGREDIENT,
 };
 pub use brushable::BrushableBlockEntity;
+pub use campfire::{CAMPFIRE_SLOTS, CampfireBlockEntity};
 pub use chest::{CHEST_SLOTS, ChestBlockEntity};
 pub use chiseled_bookshelf::{CHISELED_BOOKSHELF_SLOTS, ChiseledBookShelfBlockEntity};
 pub use command_block::{CommandBlockEntity, CommandBlockMode, is_command_block};
