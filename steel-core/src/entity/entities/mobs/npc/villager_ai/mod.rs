@@ -37,6 +37,7 @@
 
 mod breed;
 mod farm;
+mod gift;
 mod job_site;
 mod panic;
 mod trade;
@@ -67,6 +68,7 @@ use crate::world::World;
 
 pub use breed::VillagerMakeLove;
 pub use farm::HarvestFarmland;
+pub use gift::{GIFT_TIMEOUT, GiveGiftToHero};
 pub use job_site::{
     AssignProfessionFromJobSite, GoToPotentialJobSite, PoiCompetitorScan, ResetProfession,
     SetWalkTargetFromBlockMemory, WorkAtPoi, YieldJobSite,
@@ -324,8 +326,7 @@ fn core_package() -> ActivityData {
 /// Vanilla parity: `VillagerGoalPackages.getWorkPackage`.
 ///
 /// MISSING FOUNDATION: vanilla's `RunOne` also holds `UseBonemeal`, which needs
-/// the bone-meal application seam, and the package ends with `GiveGiftToHero`,
-/// which needs the hero-of-the-village effect.
+/// the bone-meal application seam.
 fn work_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Work,
@@ -389,6 +390,7 @@ fn work_package() -> ActivityData {
                     1200,
                 )),
             ),
+            (3, Behavior::boxed(GiveGiftToHero::new(GIFT_TIMEOUT))),
             (99, OneShot::boxed(UpdateActivityFromSchedule)),
         ],
     )
@@ -439,8 +441,6 @@ fn rest_package() -> ActivityData {
 
 /// Vanilla parity: `VillagerGoalPackages.getMeetPackage`.
 ///
-/// MISSING FOUNDATION: `GiveGiftToHero` is not ported yet -- it needs the
-/// hero-of-the-village effect.
 fn meet_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Meet,
@@ -483,6 +483,7 @@ fn meet_package() -> ActivityData {
                     200,
                 )),
             ),
+            (3, Behavior::boxed(GiveGiftToHero::new(GIFT_TIMEOUT))),
             (
                 3,
                 OneShot::boxed(ValidateNearbyPoi::new(
@@ -518,8 +519,7 @@ fn meet_package() -> ActivityData {
 
 /// Vanilla parity: `VillagerGoalPackages.getIdlePackage`.
 ///
-/// MISSING FOUNDATION: `JumpOnBed` needs the `NEAREST_BED` sensor and
-/// `GiveGiftToHero` needs the hero-of-the-village effect.
+/// MISSING FOUNDATION: `JumpOnBed` needs the `NEAREST_BED` sensor.
 fn idle_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Idle,
@@ -570,6 +570,7 @@ fn idle_package() -> ActivityData {
                     ),
                 ])),
             ),
+            (3, Behavior::boxed(GiveGiftToHero::new(GIFT_TIMEOUT))),
             (
                 3,
                 OneShot::boxed(SetLookAndInteract::new(

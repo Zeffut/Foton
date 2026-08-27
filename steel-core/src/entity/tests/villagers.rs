@@ -20,13 +20,14 @@ use crate::block_entity::init_block_entities;
 use crate::entity::ai::brain::Activity;
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::gossip::{GossipType, ReputationEventType};
-use crate::entity::entities::{VillagerEntity, ZombieEntity};
+use crate::entity::entities::{ItemEntity, VillagerEntity, ZombieEntity};
 use crate::entity::{
-    AgeableMob, InventoryCarrier as _, LivingEntity, Mob, SharedEntity, next_entity_id,
+    AgeableMob, InventoryCarrier as _, LivingEntity, Mob, MobEffectInstance, SharedEntity,
+    next_entity_id,
 };
 use crate::inventory::container::Container as _;
 use crate::poi::poi_storage::OccupationStatus;
-use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 use crate::trading::Merchant as _;
 use crate::world::World;
 
@@ -700,12 +701,25 @@ fn only_a_farmer_notices_the_farmland_it_is_standing_on() {
 /// The five-by-five field the farming test plants and then watches.
 const FIELD_RADIUS: i32 = 2;
 
+/// Where the farming test puts the composter that makes the villager a farmer.
+///
+/// It has to be next to the villager: `AcquirePoi` only claims a workstation it
+/// can path to, and the composter's own POI reach is one block.
+const COMPOSTER: BlockPos = BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z());
+
 /// Every square of that field, at crop height.
+///
+/// The composter stands in the middle of it and is not farmland, so it is not
+/// one of the squares the assertions watch -- leaving it in would make "some
+/// square is no longer ripe wheat" true before the villager had done anything.
 fn field() -> Vec<BlockPos> {
     let mut positions = Vec::new();
     for x in (STAND.x() - FIELD_RADIUS)..=(STAND.x() + FIELD_RADIUS) {
         for z in (STAND.z() - FIELD_RADIUS)..=(STAND.z() + FIELD_RADIUS) {
-            positions.push(BlockPos::new(x, STAND.y(), z));
+            let pos = BlockPos::new(x, STAND.y(), z);
+            if pos != COMPOSTER {
+                positions.push(pos);
+            }
         }
     }
     positions
@@ -739,7 +753,7 @@ fn a_farmer_pulls_ripe_wheat_and_puts_a_seed_back_in_the_ground() {
     let villager = spawn_villager(&world);
     sow_a_ripe_field(&world);
     assert!(world.set_block(
-        BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()),
+        COMPOSTER,
         vanilla_blocks::COMPOSTER.default_state(),
         UpdateFlags::UPDATE_NONE,
     ));
@@ -758,6 +772,12 @@ fn a_farmer_pulls_ripe_wheat_and_puts_a_seed_back_in_the_ground() {
         "the composter should have made this villager a farmer"
     );
 
+    assert!(
+        field()
+            .iter()
+            .all(|&pos| world.get_block_state(pos).crop_is_max_age() == Some(true)),
+        "every square of the field starts as ripe wheat"
+    );
     let harvested = || {
         field()
             .iter()
@@ -887,6 +907,57 @@ fn a_villager_with_food_to_spare_throws_half_of_it_to_a_neighbour() {
             .count_item(&vanilla_items::BREAD),
         CARRIED / 2,
         "vanilla throws half a stack that is more than half full"
+    );
+}
+
+/// A villager gives a present back to the player who saved its village.
+///
+/// Vanilla parity: `GiveGiftToHero`. It rides on `NEAREST_VISIBLE_PLAYER`, on
+/// the hero effect, and on the gift loot table its profession names -- and it
+/// enters only through `villager.tick()`.
+#[test]
+fn a_villager_throws_a_gift_at_the_hero_of_the_village() {
+    let world = villager_world("villager_gift");
+    let villager = spawn_villager(&world);
+
+    let hero = TestPlayerBuilder::new(Arc::clone(&world), "Hero", next_entity_id()).build();
+    hero.try_set_position(SPAWN)
+        .expect("the test chunk is loaded, so the hero can stand in it");
+    assert!(world.players.insert(Arc::clone(&hero)));
+    world
+        .try_add_entity(Arc::clone(&hero) as SharedEntity)
+        .expect("the test chunk is loaded, so the hero should attach");
+    assert!(
+        LivingEntity::add_mob_effect(
+            hero.as_ref(),
+            MobEffectInstance::with_duration(&vanilla_mob_effects::HERO_OF_THE_VILLAGE, 20_000, 0),
+        ),
+        "the hero has to actually carry the effect the behavior looks for"
+    );
+
+    // 10..2000 is the IDLE stretch, one of the three packages the gift is in.
+    set_time_of_day(&world, 1_000);
+    let gift_near_the_villager = || {
+        let around = WorldAabb::new(
+            SPAWN.x - 8.0,
+            SPAWN.y - 4.0,
+            SPAWN.z - 8.0,
+            SPAWN.x + 8.0,
+            SPAWN.y + 4.0,
+            SPAWN.z + 8.0,
+        );
+        !world
+            .get_entities_in_aabb_matching(&around, |entity| {
+                entity.downcast_ref::<ItemEntity>().is_some()
+            })
+            .is_empty()
+    };
+
+    // The countdown before a villager will offer a gift is six hundred ticks,
+    // and it only runs down while a hero is in sight.
+    assert!(
+        run_ticks_until(&world, &villager, 4_000, gift_near_the_villager),
+        "a villager that can see a hero of the village should have thrown it something"
     );
 }
 
