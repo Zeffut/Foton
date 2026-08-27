@@ -976,10 +976,12 @@ impl Entity for EnderDragon {
     /// Vanilla parity: `EnderDragon.kill`, which skips the death animation
     /// entirely and still closes the fight out -- `/kill` on a dragon opens the
     /// exit portal exactly as beating it does.
-    fn kill(&self, world: &World) {
+    fn kill(&self, _world: &World) {
         self.set_removed(RemovalReason::Killed);
         self.game_event(&vanilla_game_events::ENTITY_DIE);
-        let _ = world;
+
+        // The fight needs the owning `Arc`, which the borrowed level cannot
+        // hand over, so it is read back off the dragon.
         let Some(world) = self.level() else {
             return;
         };

@@ -1,5 +1,14 @@
 #!/bin/bash
-# Hit an ender dragon on a hitbox that was never spawned to the client.
+# Two things about the ender dragon that a unit test cannot settle.
+#
+# The first is the fight. Nothing in this script summons the End's dragon: the
+# client walks into the End and `EnderDragonFight` does the rest -- it ticks off
+# the world, holds the seventeen-chunk arena loaded, builds the exit podium and
+# puts a dragon over it. Killing that dragon is what lights the portal and drops
+# the egg. Every one of those steps needs a live server with real chunk loading
+# behind it, which is exactly what a unit test substitutes away.
+#
+# The second is the hitboxes.
 #
 # This is the one thing about multi-part entities that a unit test cannot
 # settle. The dragon is eight `EnderDragonPart` boxes, and the client is never
@@ -69,10 +78,39 @@ CMDS='gamemode creative'
 CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;difficulty normal"
 # Mob griefing off: a dragon eats every block its head, neck and body pass
-# through, and the floor under it is not what is being tested.
-CMDS="$CMDS;;gamerule mobGriefing false"
+# through, and the floor under it is not what is being tested. Steel's game
+# rules are named after their registry path, so this is `mob_griefing` and not
+# vanilla's `mobGriefing` -- the camel-case spelling is silently rejected.
+CMDS="$CMDS;;gamerule mob_griefing false"
 
-CMDS="$CMDS;;teleport @s 8 100 8"
+# --- the fight ---------------------------------------------------------
+# Nothing below summons anything. Standing in the End is the whole input:
+# `EnderDragonFight` ticks off the world, holds the arena loaded, and puts a
+# dragon there by itself. Killing it is what opens the exit portal and drops
+# the egg, and `EndPodiumFeature` has no other caller in vanilla or here.
+CMDS="$CMDS;;execute in minecraft:the_end run teleport @s 0 120 0"
+# Two throwaway commands: the arena is seventeen chunks across and the fight
+# refuses to run until they are loaded, so the dragon is not there instantly.
+CMDS="$CMDS;;time set day"
+CMDS="$CMDS;;difficulty normal"
+CMDS="$CMDS;;execute if entity @e[type=ender_dragon] run tellraw @s \"THEENDMADEADRAGONBYITSELF\""
+
+# The podium the fight builds when the End is first entered, inactive: a
+# bedrock pillar with the portal socket left as air. Y comes from the End
+# island's own surface at the origin, which the central island makes the same
+# in every world; if the End generator moves, re-probe rather than widening.
+PODIUM_Y=63
+EGG_Y=$((PODIUM_Y + 4))
+CMDS="$CMDS;;execute if block 0 $PODIUM_Y 0 minecraft:bedrock run tellraw @s \"PODIUMSTANDS\""
+CMDS="$CMDS;;execute if block 1 $PODIUM_Y 0 minecraft:air run tellraw @s \"PORTALSTARTSSHUT\""
+
+CMDS="$CMDS;;kill @e[type=ender_dragon]"
+CMDS="$CMDS;;execute if block 1 $PODIUM_Y 0 minecraft:end_portal run tellraw @s \"EXITPORTALOPENED\""
+CMDS="$CMDS;;execute if block 0 $EGG_Y 0 minecraft:dragon_egg run tellraw @s \"DRAGONEGGDROPPED\""
+
+# --- the hitboxes ------------------------------------------------------
+# Back to the overworld, where there is no fight, for the original claim.
+CMDS="$CMDS;;execute in minecraft:overworld run teleport @s 8 100 8"
 CMDS="$CMDS;;summon minecraft:ender_dragon 8 100 8"
 CMDS="$CMDS;;tick freeze"
 CMDS="$CMDS;;execute if entity @e[type=ender_dragon] run tellraw @s \"DRAGONISHERE\""
@@ -96,7 +134,7 @@ cleanup
 
 echo "=== what happened ==="
 grep "server says" join.log \
-  | grep -oE "DRAGONISHERE|DRAGONSTARTSATFULLHEALTH|HITONAHITBOXREACHEDTHEDRAGON|DRAGONSURVIVEDTHEHIT"
+  | grep -oE "THEENDMADEADRAGONBYITSELF|PODIUMSTANDS|PORTALSTARTSSHUT|EXITPORTALOPENED|DRAGONEGGDROPPED|DRAGONISHERE|DRAGONSTARTSATFULLHEALTH|HITONAHITBOXREACHEDTHEDRAGON|DRAGONSURVIVEDTHEHIT"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic" | tail -5
 
@@ -106,6 +144,11 @@ fail() { echo "########## DRAGON TEST FAILED ($1) ##########"; exit 1; }
 said() { grep "server says" join.log | grep -q "$1"; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
+said THEENDMADEADRAGONBYITSELF    || fail "standing in the End did not produce a dragon"
+said PODIUMSTANDS                 || fail "the fight never built the exit podium"
+said PORTALSTARTSSHUT             || fail "the podium was already active before the dragon died"
+said EXITPORTALOPENED             || fail "killing the dragon did not open the exit portal"
+said DRAGONEGGDROPPED             || fail "the first dragon of the world left no egg"
 said DRAGONISHERE                 || fail "no dragon was summoned"
 said DRAGONSTARTSATFULLHEALTH     || fail "the dragon did not start on two hundred health"
 said HITONAHITBOXREACHEDTHEDRAGON || fail "an attack on a hitbox id never reached the dragon"

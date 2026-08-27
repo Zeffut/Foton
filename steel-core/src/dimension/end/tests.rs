@@ -315,6 +315,60 @@ fn four_crystals_on_a_spent_portal_start_the_respawn_ritual() {
     );
 }
 
+/// Starting the ritual is only half of it. The five stages run off the world
+/// tick, six hundred ticks of beams and rebuilt pillars, and the last of them
+/// puts a dragon back in the sky -- code nothing would otherwise ever enter.
+#[test]
+fn the_ritual_runs_its_stages_and_brings_the_dragon_back() {
+    let (world, dragon_entity) = started_end("dragon_fight_respawn_completes");
+    dragon_entity.kill(world.as_ref());
+    let fight = world.dragon_fight().expect("the End should carry a fight");
+
+    let center = BlockPos::new(0, exit_portal_y(&world), 0).above();
+    for direction in Direction::HORIZONTAL {
+        let pos = center.relative_n(direction, 3);
+        place_crystal(
+            &world,
+            DVec3::new(
+                f64::from(pos.x()) + 0.5,
+                f64::from(pos.y()),
+                f64::from(pos.z()) + 0.5,
+            ),
+        );
+    }
+    fight.try_respawn(&world);
+
+    // One tick for `Start`, a hundred to charge, forty per pillar for ten
+    // pillars, and a hundred for the summon: a little over six hundred.
+    let mut seen_pillars = false;
+    for tick in 2..1000 {
+        world.tick_game(tick, true);
+        seen_pillars |= fight.respawn_stage() == Some(DragonRespawnStage::SummoningPillars);
+        if fight.respawn_stage().is_none() {
+            break;
+        }
+    }
+
+    assert!(
+        seen_pillars,
+        "the ritual should have walked through the pillar stage"
+    );
+    assert_eq!(
+        fight.respawn_stage(),
+        None,
+        "the ritual should have finished inside a thousand ticks"
+    );
+    assert!(
+        !fight.is_dragon_killed(),
+        "the ritual should have brought the dragon back"
+    );
+    assert_eq!(
+        dragons(&world).len(),
+        1,
+        "the ritual should have left exactly one dragon in the sky"
+    );
+}
+
 /// The saved form is what a reloaded world is rebuilt from, and getting it
 /// wrong means a second dragon in a world that already paid out its twelve
 /// thousand.
