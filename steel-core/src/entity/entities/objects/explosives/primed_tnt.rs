@@ -122,6 +122,15 @@ impl PrimedTntEntity {
         entity
     }
 
+    /// Rolls a shortened fuse for explosives caught in a blast.
+    ///
+    /// Vanilla parity: `PrimedTnt.getRandomShortFuse`, which is what makes a
+    /// chain of TNT go off in a ragged burst rather than all at once.
+    #[must_use]
+    pub fn random_short_fuse(fuse: i32) -> i32 {
+        rand::random_range(0..(fuse / 4).max(1)) + fuse / 8
+    }
+
     /// Returns the ticks left before detonation.
     #[must_use]
     pub fn fuse(&self) -> i32 {

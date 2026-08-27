@@ -1343,6 +1343,28 @@ pub trait BlockBehavior: Send + Sync {
         None
     }
 
+    /// Called after a blast has cleared this block away.
+    ///
+    /// Vanilla parity: `Block.wasExploded`, which `BlockBehaviour.onExplosionHit`
+    /// invokes once the position has been set to air. `causing_entity_id` is
+    /// vanilla's `Explosion.getIndirectSourceEntity` -- the player who lit the
+    /// TNT rather than the TNT itself -- so a chain of blasts keeps blaming
+    /// whoever started it.
+    #[expect(
+        unused_variables,
+        reason = "default trait implementation ignores all params"
+    )]
+    fn was_exploded(&self, world: &Arc<World>, pos: BlockPos, causing_entity_id: Option<i32>) {}
+
+    /// Returns whether a blast leaves this block's drops behind.
+    ///
+    /// Vanilla parity: `Block.dropFromExplosion`. TNT is the only vanilla block
+    /// that says no: it answers a blast by lighting rather than by dropping,
+    /// and dropping as well would duplicate it.
+    fn drop_from_explosion(&self) -> bool {
+        true
+    }
+
     /// Returns the shared vanilla `Fallable` capability implemented by this block.
     fn as_fallable(&self) -> Option<&dyn Fallable> {
         None

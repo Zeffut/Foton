@@ -149,8 +149,11 @@ JOIN_COMMANDS = [
 ]
 
 # How long to keep reading after each command before sending the next, so the
-# server has a tick or two to act on it.
-COMMAND_SETTLE_SECONDS = 2.0
+# server has a tick or two to act on it. A test that has to lay down a hundred
+# blocks before it can ask anything can shorten this and use `!wait` where it
+# actually needs the server to have caught up; two seconds is the default
+# because most tests want a settle after every line.
+COMMAND_SETTLE_SECONDS = float(os.environ.get("JOIN_COMMAND_SETTLE_SECONDS", "2.0"))
 
 
 def varint(value):

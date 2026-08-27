@@ -6,10 +6,12 @@ mod beacon;
 mod beehive;
 mod brewing_stand;
 mod brushable;
+mod campfire;
 mod chest;
 mod chiseled_bookshelf;
 mod command_block;
 mod comparator;
+mod conduit;
 mod copper_golem_statue;
 mod crafter;
 mod creaking_heart;
@@ -54,10 +56,12 @@ pub use brewing_stand::{
     SLOT_FIRST_BOTTLE, SLOT_INGREDIENT,
 };
 pub use brushable::BrushableBlockEntity;
+pub use campfire::{CAMPFIRE_SLOTS, CampfireBlockEntity};
 pub use chest::{CHEST_SLOTS, ChestBlockEntity};
 pub use chiseled_bookshelf::{CHISELED_BOOKSHELF_SLOTS, ChiseledBookShelfBlockEntity};
 pub use command_block::{CommandBlockEntity, CommandBlockMode, is_command_block};
 pub use comparator::ComparatorBlockEntity;
+pub use conduit::ConduitBlockEntity;
 pub use copper_golem_statue::CopperGolemStatueBlockEntity;
 pub use crafter::{
     CRAFTER_DATA_SLOTS, CRAFTER_HEIGHT, CRAFTER_SLOTS, CRAFTER_WIDTH, CrafterBlockEntity,

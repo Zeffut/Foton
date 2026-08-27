@@ -52,7 +52,7 @@ use crate::entity::bucketable::{
     save_default_data_to_bucket_tag, set_bucket_entity_data,
 };
 use crate::entity::damage::DamageSource;
-use crate::entity::entities::ItemEntity;
+use crate::entity::entities::{ItemEntity, PrimedTntEntity};
 use crate::entity::mob::rotlerp;
 use crate::entity::{
     AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntitySpawnReason,
@@ -533,7 +533,7 @@ impl SulfurCubeEntity {
                 return false;
             }
             if imminent {
-                random_short_fuse(explosion.fuse)
+                PrimedTntEntity::random_short_fuse(explosion.fuse)
             } else {
                 explosion.fuse
             }
@@ -830,15 +830,6 @@ fn is_burning_projectile(world: &World, source: &DamageSource) -> bool {
         return false;
     };
     entity.as_projectile().is_some() && entity.is_on_fire()
-}
-
-/// Rolls a shortened fuse for a cube caught in a blast.
-///
-/// Vanilla parity: `PrimedTnt.getRandomShortFuse`, which is what makes a chain
-/// of explosive cubes go off in a ragged burst rather than all at once.
-#[must_use]
-fn random_short_fuse(fuse: i32) -> i32 {
-    rand::random_range(0..(fuse / 4).max(1)) + fuse / 8
 }
 
 impl Entity for SulfurCubeEntity {

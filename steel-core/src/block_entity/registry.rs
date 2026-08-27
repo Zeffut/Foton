@@ -17,15 +17,15 @@ use steel_utils::{BlockPos, BlockStateId};
 use super::SharedBlockEntity;
 use super::entities::{
     BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity,
-    BrewingStandBlockEntity, BrushableBlockEntity, ChestBlockEntity, ChiseledBookShelfBlockEntity,
-    CommandBlockEntity, ComparatorBlockEntity, CopperGolemStatueBlockEntity, CrafterBlockEntity,
-    CreakingHeartBlockEntity, DaylightDetectorBlockEntity, DecoratedPotBlockEntity,
-    DispenserBlockEntity, EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity,
-    HopperBlockEntity, JigsawBlockEntity, JukeboxBlockEntity, LecternBlockEntity,
-    PistonMovingBlockEntity, PotentSulfurBlockEntity, RawBlockEntity, SculkCatalystBlockEntity,
-    SculkSensorBlockEntity, SculkShriekerBlockEntity, ShelfBlockEntity, ShulkerBoxBlockEntity,
-    SignBlockEntity, SkullBlockEntity, SpawnerBlockEntity, StructureBlockEntity,
-    TrialSpawnerBlockEntity,
+    BrewingStandBlockEntity, BrushableBlockEntity, CampfireBlockEntity, ChestBlockEntity,
+    ChiseledBookShelfBlockEntity, CommandBlockEntity, ComparatorBlockEntity, ConduitBlockEntity,
+    CopperGolemStatueBlockEntity, CrafterBlockEntity, CreakingHeartBlockEntity,
+    DaylightDetectorBlockEntity, DecoratedPotBlockEntity, DispenserBlockEntity,
+    EndGatewayBlockEntity, EndPortalBlockEntity, FurnaceBlockEntity, HopperBlockEntity,
+    JigsawBlockEntity, JukeboxBlockEntity, LecternBlockEntity, PistonMovingBlockEntity,
+    PotentSulfurBlockEntity, RawBlockEntity, SculkCatalystBlockEntity, SculkSensorBlockEntity,
+    SculkShriekerBlockEntity, ShelfBlockEntity, ShulkerBoxBlockEntity, SignBlockEntity,
+    SkullBlockEntity, SpawnerBlockEntity, StructureBlockEntity, TrialSpawnerBlockEntity,
 };
 use super::vault::VaultBlockEntity;
 use crate::world::World;
@@ -219,6 +219,16 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
 
     registry.register(&vanilla_block_entity_types::BEACON, |level, pos, state| {
         Arc::new(BeaconBlockEntity::new(level, pos, state))
+    });
+
+    // One type covers both the campfire and the soul campfire.
+    registry.register(
+        &vanilla_block_entity_types::CAMPFIRE,
+        |level, pos, state| Arc::new(CampfireBlockEntity::new(level, pos, state)),
+    );
+
+    registry.register(&vanilla_block_entity_types::CONDUIT, |level, pos, state| {
+        Arc::new(ConduitBlockEntity::new(level, pos, state))
     });
 
     registry.register(

@@ -401,6 +401,35 @@ mobs that need it.
       to write into a mid-generation `WorldGenRegion`. It now writes into anything
       that implements `WorldGenLevel`, which a live world does.
 
+      The campfire cooks. It has the four-slot block entity, food goes on by
+      hand, cooked food drops on the ground, and breaking it gives back whatever
+      was still on it. The lit and unlit tickers are chosen from the block state
+      the way vanilla does it, so dousing one stops it and lighting it starts it
+      again. The nine `campfire_cooking` recipes had been sitting unread in the
+      builtin datapack -- the build script's match dropped them with the recipe
+      types Steel does not model, and an empty family answers every lookup with
+      nothing, so this looked like a missing block rather than a missing recipe.
+
+      The conduit works, which means the prismarine people build around it now
+      buys something: sixteen frame blocks switch it on and hand Conduit Power
+      to anyone swimming in range, forty-two make it hunt, and it beats a
+      hostile mob in the water for four every two seconds. Only the attack
+      target crosses the wire -- everything else a conduit shows is derived
+      client-side, so the server has nothing else to send.
+
+      Stalactites fall. Take the ceiling out and the whole column comes down as
+      falling blocks, tip first and tip only carrying the weight, at one damage
+      per fall distance per block of stalactite. That was the last of
+      `SpeleothemBlock` waiting on a falling-block entity, which has existed for
+      a while -- the TODO outlived what it was waiting for.
+
+      TNT chains. A blast now tells every block it cleared that it was exploded,
+      through a new `BlockBehavior::was_exploded` on the explosion path, and TNT
+      answers by lighting itself on a short random fuse -- which is what turns a
+      row of it into a rolling burst rather than one crack. It also stops
+      dropping itself when blown up, through `drop_from_explosion`, so a chain no
+      longer hands out a free block per stick. A burning arrow lights it too.
+
 ### 3. The end of the game
 
 - [x] **The boss bar**: `BossEvent`, `ServerBossEvent` and the boss-event packet

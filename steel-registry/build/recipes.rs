@@ -473,10 +473,10 @@ fn stonecutting_tokens(
     (creator_fns, fields, field_inits, registers)
 }
 
-/// Parses a cooking recipe (furnace, blast furnace or smoker) from JSON.
+/// Parses a cooking recipe (furnace, blast furnace, smoker or campfire) from JSON.
 ///
-/// `default_cooking_time` is 200 for smelting and 100 for blasting and smoking,
-/// matching the defaults of the vanilla recipe classes.
+/// `default_cooking_time` is 200 for smelting and 100 for blasting, smoking and
+/// campfire cooking, matching the defaults of the vanilla recipe classes.
 fn parse_smelting_recipe(
     recipe_name: &str,
     recipe: &RecipeJson,
@@ -503,7 +503,7 @@ fn parse_smelting_recipe(
 /// Generates the creator functions, struct fields, field initializers and
 /// registration calls for one cooking family.
 ///
-/// The three families share `SmeltingRecipe`, so only the generated identifiers
+/// The four families share `SmeltingRecipe`, so only the generated identifiers
 /// differ: `create_smoking_*`, `RECIPES.smoking.*`, `register_smoking`.
 fn cooking_family_tokens(
     family: &str,
@@ -620,6 +620,7 @@ pub(crate) fn build() -> TokenStream {
         smelting: Vec<SmeltingRecipeData>,
         blasting: Vec<SmeltingRecipeData>,
         smoking: Vec<SmeltingRecipeData>,
+        campfire: Vec<SmeltingRecipeData>,
         stonecutting: Vec<StonecuttingRecipeData>,
         smithing: Vec<SmithingRecipeData>,
     }
@@ -673,6 +674,11 @@ pub(crate) fn build() -> TokenStream {
                             into.smoking.push(r);
                         }
                     }
+                    "minecraft:campfire_cooking" => {
+                        if let Some(r) = parse_smelting_recipe(recipe_name, &recipe, 100) {
+                            into.campfire.push(r);
+                        }
+                    }
                     "minecraft:stonecutting" => {
                         if let Some(r) = parse_stonecutting_recipe(recipe_name, &recipe) {
                             into.stonecutting.push(r);
@@ -697,6 +703,7 @@ pub(crate) fn build() -> TokenStream {
         smelting: smelting_recipes,
         blasting: blasting_recipes,
         smoking: smoking_recipes,
+        campfire: campfire_recipes,
         stonecutting: stonecutting_recipes,
         smithing: smithing_recipes,
     } = collected;
@@ -847,6 +854,8 @@ pub(crate) fn build() -> TokenStream {
         cooking_family_tokens("blasting", &blasting_recipes);
     let (smoking_creator_fns, smoking_fields, smoking_field_inits, smoking_registers) =
         cooking_family_tokens("smoking", &smoking_recipes);
+    let (campfire_creator_fns, campfire_fields, campfire_field_inits, campfire_registers) =
+        cooking_family_tokens("campfire", &campfire_recipes);
     let (
         stonecutting_creator_fns,
         stonecutting_fields,
@@ -895,6 +904,10 @@ pub(crate) fn build() -> TokenStream {
             #(#smoking_fields)*
         }
 
+        pub struct CampfireRecipes {
+            #(#campfire_fields)*
+        }
+
         pub struct StonecuttingRecipes {
             #(#stonecutting_fields)*
         }
@@ -909,6 +922,7 @@ pub(crate) fn build() -> TokenStream {
             pub smelting: SmeltingRecipes,
             pub blasting: BlastingRecipes,
             pub smoking: SmokingRecipes,
+            pub campfire: CampfireRecipes,
             pub stonecutting: StonecuttingRecipes,
             pub smithing: SmithingRecipes,
         }
@@ -929,6 +943,7 @@ pub(crate) fn build() -> TokenStream {
         #(#smelting_creator_fns)*
         #(#blasting_creator_fns)*
         #(#smoking_creator_fns)*
+        #(#campfire_creator_fns)*
         #(#stonecutting_creator_fns)*
         #(#smithing_creator_fns)*
 
@@ -950,6 +965,9 @@ pub(crate) fn build() -> TokenStream {
                     smoking: SmokingRecipes {
                         #(#smoking_field_inits)*
                     },
+                    campfire: CampfireRecipes {
+                        #(#campfire_field_inits)*
+                    },
                     stonecutting: StonecuttingRecipes {
                         #(#stonecutting_field_inits)*
                     },
@@ -969,6 +987,7 @@ pub(crate) fn build() -> TokenStream {
             #(#smelting_registers)*
             #(#blasting_registers)*
             #(#smoking_registers)*
+            #(#campfire_registers)*
             #(#stonecutting_registers)*
             #(#smithing_registers)*
         }
