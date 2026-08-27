@@ -51,6 +51,28 @@ use crate::world::{
 };
 use steel_registry::vanilla_fluids;
 
+/// Returns `state` after every neighbour has had its say about its shape.
+///
+/// Vanilla parity: `Block.updateFromNeighbourShapes`. It is what gives a grass
+/// block its `snowy` value and a fence its connections at the moment it is
+/// placed, rather than waiting for the next neighbour update.
+#[must_use]
+pub(crate) fn update_from_neighbour_shapes(
+    world: &Arc<World>,
+    state: BlockStateId,
+    pos: BlockPos,
+) -> BlockStateId {
+    let mut updated = state;
+    for direction in Direction::UPDATE_SHAPE_ORDER {
+        let neighbor_pos = pos.relative(direction);
+        let neighbor_state = world.get_block_state(neighbor_pos);
+        let behavior = BLOCK_BEHAVIORS.get_behavior(updated.get_block());
+        updated =
+            behavior.update_shape(updated, world, pos, direction, neighbor_pos, neighbor_state);
+    }
+    updated
+}
+
 /// Vanilla `BlockBehaviour.canBeReplaced(BlockState, BlockPlaceContext)`.
 pub(crate) fn default_can_be_replaced(
     state: BlockStateId,
