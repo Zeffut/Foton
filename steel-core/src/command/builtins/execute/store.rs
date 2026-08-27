@@ -22,6 +22,7 @@ use super::{
     condition::{invalid_block_data_source, loaded_block_position},
     objective, source_command_storage, source_scoreboard,
 };
+use crate::command::builtins::bossbar::boss_bar;
 use crate::entity::{SharedEntity, nbt_load::load_live_entity};
 use crate::scoreboard::{ScoreHolder, Scoreboard, ScoreboardError, ScoreboardObjective};
 use crate::{block_entity::SharedBlockEntity, command::storage::CommandStorage};
@@ -31,13 +32,6 @@ type Builder = CommandNodeBuilder<CommandSource, SteelCommandRuntime>;
 const EXECUTE_ROOT: CommandRedirectTarget = CommandRedirectTarget::CommandRoot;
 
 pub(super) fn target(name: &'static str, store_result: bool) -> Builder {
-    // TODO: Add bossbar. The bar itself now exists -- `crate::boss_event`
-    // carries `BossEvent`/`ServerBossEvent` and the packet -- but this target
-    // stores into a *named* bar, which needs vanilla's `CustomBossEvent`
-    // (an id, a value and a max over a `ServerBossEvent`) and the per-domain
-    // `CustomBossEvents` saved data that owns them. Neither exists yet, and
-    // the shape of the persistence is best settled alongside `/bossbar`,
-    // which is its only other caller.
     literal(name)
         .then(
             literal("score").then(
@@ -47,6 +41,19 @@ pub(super) fn target(name: &'static str, store_result: bool) -> Builder {
                             store_score(context, store_result)
                         }),
                 ),
+            ),
+        )
+        .then(
+            literal("bossbar").then(
+                argument("id", SteelArgumentType::boss_bar_id())
+                    .then(
+                        literal("value").redirects_with(EXECUTE_ROOT, move |context| {
+                            store_boss_bar(context, BossBarField::Value, store_result)
+                        }),
+                    )
+                    .then(literal("max").redirects_with(EXECUTE_ROOT, move |context| {
+                        store_boss_bar(context, BossBarField::Max, store_result)
+                    })),
             ),
         )
         .then(
@@ -150,6 +157,36 @@ fn store_data(
         StoreDataTarget::Entity => store_entity_data(context, data_type, store_result),
         StoreDataTarget::Storage => store_storage_data(context, data_type, store_result),
     }
+}
+
+/// Which of a named bar's two numbers a store writes.
+#[derive(Clone, Copy)]
+enum BossBarField {
+    Value,
+    Max,
+}
+
+/// Vanilla parity: the `CustomBossEvent` overload of
+/// `ExecuteCommand.storeValue`.
+fn store_boss_bar(
+    context: &SteelCommandContext<CommandSource>,
+    field: BossBarField,
+    store_result: bool,
+) -> Result<CommandSource, CommandSyntaxError> {
+    // Vanilla resolves the bar when the `store` clause is parsed, so naming a
+    // bar that does not exist fails the whole command rather than running it
+    // and dropping the result on the floor.
+    let bar = boss_bar(context)?;
+    let source = context.source();
+    let callback = CommandResultCallback::new(move |success, result| {
+        let value = stored_value(store_result, success, result);
+        match field {
+            BossBarField::Value => bar.set_value(value),
+            BossBarField::Max => bar.set_max(value),
+        }
+    });
+    let callback = CommandResultCallback::chain(source.callback(), callback);
+    Ok(source.with_callback(callback))
 }
 
 fn store_entity_data(

@@ -234,6 +234,10 @@ impl Server {
             Ok(saved) => tracing::debug!(saved, "Domain map autosave completed"),
             Err(error) => tracing::error!(%error, "Domain map autosave failed"),
         }
+        match results.boss_bars {
+            Ok(saved) => tracing::debug!(saved, "Domain boss-bar autosave completed"),
+            Err(error) => tracing::error!(%error, "Domain boss-bar autosave failed"),
+        }
     }
 
     fn tick_command_data_autosave(

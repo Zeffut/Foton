@@ -347,6 +347,10 @@ impl SteelArgumentType {
         Self::new(StorageKeyParser)
     }
 
+    pub(crate) fn boss_bar_id() -> Self {
+        Self::new(BossBarIdParser)
+    }
+
     pub(crate) fn world_clock() -> Self {
         Self::new(WorldClockParser)
     }
@@ -1063,6 +1067,21 @@ unit_argument_parser!(
     )
 );
 unit_argument_parser!(
+    BossBarIdParser,
+    "steel:command/parser/boss_bar_id",
+    IdentifierValue,
+    parse | reader,
+    _source | { parse_identifier(reader).map(IdentifierValue) },
+    suggest | context,
+    builder | {
+        suggest_boss_bar_ids(context.source(), builder);
+    },
+    protocol(
+        ProtocolArgumentType::ResourceLocation,
+        Some(ProtocolSuggestionType::AskServer),
+    )
+);
+unit_argument_parser!(
     ItemSlotsParser,
     "steel:command/parser/item_slots",
     ItemSlotsValue,
@@ -1514,6 +1533,18 @@ fn suggest_resources<'a>(
     for suggestion in suggestions {
         builder.suggest(suggestion);
     }
+}
+
+fn suggest_boss_bar_ids<S>(source: &S, builder: &mut SuggestionsBuilder<'_>)
+where
+    S: CommandArgumentSource + ?Sized,
+{
+    let ids = source
+        .boss_bar_ids()
+        .into_iter()
+        .filter_map(|id| id.parse::<Identifier>().ok())
+        .collect::<Vec<_>>();
+    suggest_resources(ids.iter(), builder);
 }
 
 fn suggest_storage_keys<S>(source: &S, builder: &mut SuggestionsBuilder<'_>)

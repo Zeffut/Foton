@@ -333,6 +333,11 @@ where
         self.typed_argument(name)
     }
 
+    pub(crate) fn boss_bar_id(&self, name: &str) -> Result<&Identifier, CommandSyntaxError> {
+        self.typed_argument::<IdentifierValue>(name)
+            .map(|value| &value.0)
+    }
+
     pub(crate) fn item_slots(&self, name: &str) -> Result<&'static SlotRange, CommandSyntaxError> {
         self.typed_argument::<ItemSlotsValue>(name)
             .map(|value| value.0)

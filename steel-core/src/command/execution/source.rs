@@ -95,6 +95,10 @@ pub(crate) trait CommandArgumentSource: Send + Sync {
         Vec::new()
     }
 
+    fn boss_bar_ids(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     fn permission_rule_suggestions(&self) -> Vec<String> {
         Vec::new()
     }
@@ -624,6 +628,15 @@ impl CommandArgumentSource for CommandSource {
                     .into_iter()
                     .map(|key| key.to_string())
                     .collect()
+            })
+    }
+
+    fn boss_bar_ids(&self) -> Vec<String> {
+        self.server
+            .boss_bars
+            .get(self.world.domain())
+            .map_or_else(Vec::new, |events| {
+                events.ids().into_iter().map(|id| id.to_string()).collect()
             })
     }
 
