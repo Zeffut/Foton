@@ -30,7 +30,7 @@ use steel_registry::vanilla_entity_data::VillagerEntityData;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::vanilla_poi_type_tags::PoiTag;
 use steel_registry::villager_profession::VillagerProfessionRef;
-use steel_registry::villager_type::VillagerTypeRef;
+use steel_registry::villager_type::{VillagerType, VillagerTypeRef};
 use steel_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, sound_events,
     vanilla_entities, vanilla_items, vanilla_mob_effects, vanilla_poi_types,
@@ -57,7 +57,7 @@ use crate::entity::spawn_util::{SpawnStrategy, try_spawn_mob};
 use crate::entity::{
     AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntityPose, EntitySpawnReason,
     EntitySyncedData, LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance,
-    PathfinderMob, SharedEntity,
+    PathfinderMob, SharedEntity, SpawnGroupData,
 };
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::physics::MoveResult;
@@ -818,6 +818,33 @@ impl VillagerEntity {
         self.make_sound(self.profession().work_sound);
     }
 
+    /// The variant the biome under this villager calls for.
+    ///
+    /// Vanilla parity: `VillagerType.byBiome(level.getBiome(pos))`. Vanilla's
+    /// biome lookup always answers; Steel's can miss when the column is not
+    /// loaded, which is nowhere a villager can be standing -- so a miss falls
+    /// through to the same `plains` the mapping's own default is.
+    #[must_use]
+    pub fn biome_variant(&self, world: &World) -> VillagerTypeRef {
+        world
+            .biome_at(self.block_position())
+            .map_or(&vanilla_villager_types::PLAINS, VillagerType::by_biome)
+    }
+
+    /// Gives a villager the look of the biome it appeared in, once.
+    ///
+    /// Vanilla parity: `VillagerDataHolder.finalizeVillagerType`. The
+    /// finalized flag is why a villager that walks into the desert stays a
+    /// plains one, and why a cured or bred villager keeps the variant it was
+    /// given rather than taking the one under its feet.
+    pub fn finalize_villager_type(&self, world: &World) {
+        if self.villager_data_finalized() {
+            return;
+        }
+        self.set_villager_type(self.biome_variant(world));
+        self.set_villager_data_finalized(true);
+    }
+
     /// Vanilla parity: `AbstractVillager.playCelebrateSound`, the cheer a
     /// village lets out over a raid it survived.
     pub fn play_celebrate_sound(&self) {
@@ -1168,6 +1195,25 @@ impl AgeableMob for VillagerEntity {
 }
 
 impl Mob for VillagerEntity {
+    /// Vanilla parity: `Villager.finalizeSpawn`.
+    ///
+    /// MISSING FOUNDATION: vanilla also sets `assignProfessionWhenSpawned` for
+    /// `EntitySpawnReason.STRUCTURE`, so a villager that arrives as part of a
+    /// generated village has a trade the moment it lands. Steel generates no
+    /// villages, so nothing can reach that reason yet.
+    fn finalize_spawn(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        group_data: Option<SpawnGroupData>,
+    ) -> Option<SpawnGroupData> {
+        if spawn_reason == EntitySpawnReason::Breeding {
+            self.set_profession(&vanilla_villager_professions::NONE);
+        }
+        self.finalize_villager_type(world);
+        self.finalize_spawn_mob_base(world, spawn_reason, group_data)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

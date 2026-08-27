@@ -1204,6 +1204,7 @@ mod travel;
 mod villager_doors;
 mod villager_golems;
 mod villager_raids;
+mod villager_variants;
 mod villagers;
 mod wandering_traders;
 mod zombie_villagers;
