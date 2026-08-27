@@ -1,8 +1,8 @@
 //! The pickup rules every zombie shares.
 //!
 //! Vanilla parity: the `Zombie` overrides of `canHoldItem` and `wantsToPickUp`.
-//! Java gets them by inheritance; Steel's zombie, husk, drowned and zombified
-//! piglin are separate types, so they call these instead.
+//! Java gets them by inheritance; Steel's zombie, husk, drowned, zombified
+//! piglin and zombie villager are separate types, so they call these instead.
 
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
@@ -40,7 +40,11 @@ pub(super) fn wants_to_pick_up(zombie: &dyn Mob, world: &World, item_stack: &Ite
 /// `CanBreakDoors`, `InWaterTime` and `DrownedConversionTime`; Steel has
 /// neither the door-breaking goal nor the drowning conversion, so there is no
 /// state behind those keys to write.
-pub(super) fn save_zombie(zombie: &dyn Mob, is_baby: bool, nbt: &mut NbtCompound) {
+pub(in crate::entity::entities::mobs) fn save_zombie(
+    zombie: &dyn Mob,
+    is_baby: bool,
+    nbt: &mut NbtCompound,
+) {
     zombie.save_mob(nbt);
     nbt.insert("IsBaby", i8::from(is_baby));
 }
@@ -49,7 +53,10 @@ pub(super) fn save_zombie(zombie: &dyn Mob, is_baby: bool, nbt: &mut NbtCompound
 ///
 /// Vanilla parity: `Zombie.readAdditionalSaveData`, whose `getBooleanOr("IsBaby",
 /// false)` is why a zombie saved before the key existed comes back an adult.
-pub(super) fn load_zombie(zombie: &dyn Mob, nbt: BorrowedNbtCompoundView<'_, '_>) {
+pub(in crate::entity::entities::mobs) fn load_zombie(
+    zombie: &dyn Mob,
+    nbt: BorrowedNbtCompoundView<'_, '_>,
+) {
     zombie.load_mob(nbt);
     zombie.set_baby(nbt.byte("IsBaby").is_some_and(|value| value != 0));
 }

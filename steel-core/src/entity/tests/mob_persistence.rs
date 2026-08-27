@@ -51,6 +51,10 @@ const MOBS: &[EntityTypeRef] = &[
     &vanilla_entities::WITHER_SKELETON,
     &vanilla_entities::ZOMBIE,
     &vanilla_entities::ZOMBIFIED_PIGLIN,
+    // Not in the report this started from, and broken the same way: a zombie
+    // villager kept the shared half but not `Zombie.IsBaby`, so a baby one grew
+    // up on the next boot.
+    &vanilla_entities::ZOMBIE_VILLAGER,
     // Controls.
     &vanilla_entities::ENDERMAN,
     &vanilla_entities::PIG,
@@ -214,7 +218,8 @@ fn own_state_cases() -> Vec<(EntityTypeRef, Vec<(&'static str, NbtTag)>)> {
         (&vanilla_entities::ZOMBIE, baby.clone()),
         (&vanilla_entities::HUSK, baby.clone()),
         (&vanilla_entities::DROWNED, baby.clone()),
-        (&vanilla_entities::ZOMBIFIED_PIGLIN, baby),
+        (&vanilla_entities::ZOMBIFIED_PIGLIN, baby.clone()),
+        (&vanilla_entities::ZOMBIE_VILLAGER, baby),
         (
             &vanilla_entities::BOGGED,
             vec![("sheared", NbtTag::Byte(1))],
@@ -270,6 +275,7 @@ fn a_zombie_saved_without_the_baby_flag_comes_back_grown() {
         &vanilla_entities::HUSK,
         &vanilla_entities::DROWNED,
         &vanilla_entities::ZOMBIFIED_PIGLIN,
+        &vanilla_entities::ZOMBIE_VILLAGER,
     ] {
         assert_eq!(
             round_trip(entity_type, &NbtCompound::new()).get("IsBaby"),
