@@ -13,6 +13,7 @@ pub use tags::RegistryTags;
 use crate::game_events::GameEventRegistry;
 use crate::world_clock::WorldClockRegistry;
 use crate::{
+    advancement::AdvancementRegistry,
     attribute::AttributeRegistry,
     banner_pattern::BannerPatternRegistry,
     biome::BiomeRegistry,
@@ -67,9 +68,9 @@ use crate::{
     trading::{TradeSetRegistry, VillagerTradeRegistry},
     trim_material::TrimMaterialRegistry,
     trim_pattern::TrimPatternRegistry,
-    vanilla_attributes, vanilla_banner_pattern_tags, vanilla_banner_patterns, vanilla_biome_tags,
-    vanilla_biomes, vanilla_block_entity_types, vanilla_block_tags, vanilla_blocks,
-    vanilla_cat_sound_variants, vanilla_cat_variants, vanilla_chat_types,
+    vanilla_advancements, vanilla_attributes, vanilla_banner_pattern_tags, vanilla_banner_patterns,
+    vanilla_biome_tags, vanilla_biomes, vanilla_block_entity_types, vanilla_block_tags,
+    vanilla_blocks, vanilla_cat_sound_variants, vanilla_cat_variants, vanilla_chat_types,
     vanilla_chicken_sound_variants, vanilla_chicken_variants, vanilla_configured_carvers,
     vanilla_configured_features, vanilla_cow_sound_variants, vanilla_cow_variants,
     vanilla_damage_type_tags, vanilla_damage_types, vanilla_dialog_tags, vanilla_dialogs,
@@ -270,6 +271,8 @@ pub struct Registry {
     pub recipes: RecipeRegistry,
     pub entity_types: EntityTypeRegistry,
     pub loot_tables: LootTableRegistry,
+    /// Every advancement of the built-in datapack.
+    pub advancements: AdvancementRegistry,
     pub block_entity_types: BlockEntityTypeRegistry,
     pub game_rules: GameRuleRegistry,
     pub game_events: GameEventRegistry,
@@ -387,6 +390,7 @@ impl Registry {
             &mut registry.entity_types,
         );
         vanilla_loot_tables::register_loot_tables(&mut registry.loot_tables);
+        vanilla_advancements::register_advancements(&mut registry.advancements);
         vanilla_villager_trades::register_villager_trades(&mut registry.villager_trades);
         vanilla_villager_trades::register_trade_sets(&mut registry.trade_sets);
         vanilla_block_entity_types::register_block_entity_types(&mut registry.block_entity_types);
@@ -469,6 +473,7 @@ impl Registry {
         self.recipes.freeze();
         self.entity_types.freeze();
         self.loot_tables.freeze();
+        self.advancements.freeze();
         self.block_entity_types.freeze();
         self.game_rules.freeze();
         self.game_events.freeze();
@@ -728,6 +733,7 @@ impl Registry {
             recipes: RecipeRegistry::new(),
             entity_types: EntityTypeRegistry::new(),
             loot_tables: LootTableRegistry::new(),
+            advancements: AdvancementRegistry::new(),
             block_entity_types: BlockEntityTypeRegistry::new(),
             game_rules: GameRuleRegistry::new(),
             game_events: GameEventRegistry::new(),

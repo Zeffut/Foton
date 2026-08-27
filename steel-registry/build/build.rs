@@ -24,6 +24,7 @@
 
 use std::{env, fs, path::Path, process::Command};
 
+mod advancements;
 mod attributes;
 mod banner_patterns;
 mod biomes;
@@ -89,6 +90,7 @@ mod tags;
 
 const FMT: bool = cfg!(feature = "fmt");
 
+const ADVANCEMENTS: &str = "advancements";
 const ATTRIBUTES: &str = "attributes";
 const BLOCKS: &str = "blocks";
 const BLOCK_TAGS: &str = "block_tags";
@@ -182,6 +184,7 @@ pub fn main() {
     }
 
     let vanilla_builds = [
+        (advancements::build(), ADVANCEMENTS),
         (attributes::build(), ATTRIBUTES),
         (blocks::build(), BLOCKS),
         (tags::block(), BLOCK_TAGS),

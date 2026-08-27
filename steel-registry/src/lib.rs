@@ -27,6 +27,7 @@
     )
 )]
 
+pub mod advancement;
 pub mod attribute;
 pub mod banner_pattern;
 pub mod biome;
@@ -124,6 +125,11 @@ pub use resolvable_profile::{
 #[rustfmt::skip]
 #[path = "generated/vanilla_attributes.rs"]
 pub mod vanilla_attributes;
+
+#[expect(warnings)]
+#[rustfmt::skip]
+#[path = "generated/vanilla_advancements.rs"]
+pub mod vanilla_advancements;
 
 #[expect(warnings)]
 #[rustfmt::skip]
