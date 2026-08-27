@@ -113,10 +113,10 @@ impl BlockBehavior for HopperBlock {
         _hit_result: &BlockHitResult,
         _inv: &mut InventoryAccess,
     ) -> InteractionResult {
-        let Some(container_ref) = world
-            .get_block_entity(pos)
-            .and_then(ContainerRef::from_block_entity)
-        else {
+        let Some(block_entity) = world.get_block_entity(pos) else {
+            return InteractionResult::Pass;
+        };
+        let Some(container_ref) = ContainerRef::from_block_entity(block_entity.clone()) else {
             return InteractionResult::Pass;
         };
 
@@ -126,7 +126,9 @@ impl BlockBehavior for HopperBlock {
 
         let inventory = player.inventory.clone();
         player.open_menu(
-            TextComponent::translated(translations::CONTAINER_HOPPER.msg()),
+            block_entity.display_name(TextComponent::translated(
+                translations::CONTAINER_HOPPER.msg(),
+            )),
             move |context| hopper(inventory, context.container_id, container_ref),
         );
 

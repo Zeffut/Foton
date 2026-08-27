@@ -99,7 +99,7 @@ impl BlockBehavior for BarrelBlock {
         };
 
         // Create a container reference from the block entity
-        let Some(container_ref) = ContainerRef::from_block_entity(block_entity) else {
+        let Some(container_ref) = ContainerRef::from_block_entity(block_entity.clone()) else {
             return InteractionResult::Pass;
         };
 
@@ -110,7 +110,9 @@ impl BlockBehavior for BarrelBlock {
         // Open the chest menu (3 rows for barrel)
         let inventory = player.inventory.clone();
         player.open_menu(
-            TextComponent::translated(translations::CONTAINER_BARREL.msg()),
+            block_entity.display_name(TextComponent::translated(
+                translations::CONTAINER_BARREL.msg(),
+            )),
             move |context| chest(inventory, context.container_id, container_ref, 3),
         );
 

@@ -26,6 +26,7 @@
 pub(crate) mod block_state_nbt;
 mod components;
 pub mod entities;
+mod nameable;
 mod randomizable_container;
 mod registry;
 mod storage;
@@ -52,8 +53,10 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::data_components::DataComponentMap;
 use steel_registry::item_stack::ItemStack;
 use steel_utils::{BlockPos, BlockStateId, ErasedType, locks::SyncMutex};
+use text_components::TextComponent;
 
 pub use components::ImplicitComponentInput;
+pub use nameable::BlockEntityName;
 pub use randomizable_container::ContainerLoot;
 pub use registry::{BLOCK_ENTITIES, BlockEntityFactory, BlockEntityRegistry, init_block_entities};
 pub(crate) use storage::{
@@ -580,6 +583,17 @@ pub trait BlockEntity: ErasedType + Send + Sync + 'static {
         reason = "default trait impl; parameter used by overrides"
     )]
     fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {}
+
+    /// The title a menu opened on this block entity carries.
+    ///
+    /// Vanilla parity: `MenuProvider.getDisplayName`, which
+    /// `BaseContainerBlockEntity` answers with its custom name or the block's
+    /// own. Vanilla's `getDefaultName` lives on the block entity; in Steel the
+    /// title strings live with the block behavior that opens the menu, so the
+    /// default arrives from the caller.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        default_name
+    }
 
     /// Everything this block entity would put on the item it becomes.
     ///

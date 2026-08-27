@@ -26,11 +26,13 @@ use steel_utils::{
     BlockPos, BlockStateId, Direction, DowncastType, DowncastTypeKey, locks::SyncMutex,
 };
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
 use std::array;
+use steel_registry::data_components::DataComponentMap;
+use text_components::TextComponent;
 
 /// First of the three bottle slots.
 pub const SLOT_FIRST_BOTTLE: usize = 0;
@@ -88,6 +90,9 @@ pub struct BrewingStandBlockEntity {
     container: Arc<SyncMutex<BrewingStandContainer>>,
     container_ref: ContainerRef,
     data: Arc<BrewingStandDataSlots>,
+    /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
+    /// name this block was placed with.
+    name: BlockEntityName,
 }
 
 /// Items and brewing state, held under one lock because a tick mutates both.
@@ -187,6 +192,7 @@ impl BrewingStandBlockEntity {
             base,
             container,
             data: Arc::new(BrewingStandDataSlots::default()),
+            name: BlockEntityName::new(),
         }
     }
 
@@ -194,6 +200,14 @@ impl BrewingStandBlockEntity {
     #[must_use]
     pub fn data(&self) -> Arc<BrewingStandDataSlots> {
         Arc::clone(&self.data)
+    }
+
+    /// Returns the name an anvil gave this brewing stand, if any.
+    ///
+    /// Vanilla parity: `Nameable.getCustomName`.
+    #[must_use]
+    pub fn custom_name(&self) -> Option<TextComponent> {
+        self.name.custom_name()
     }
 }
 
@@ -280,6 +294,7 @@ impl BlockEntity for BrewingStandBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        self.name.load(&nbt_view);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
 
@@ -308,6 +323,7 @@ impl BlockEntity for BrewingStandBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.name.save(nbt);
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items.iter().enumerate() {
@@ -329,6 +345,26 @@ impl BlockEntity for BrewingStandBlockEntity {
 
     fn container_ref(&self) -> Option<ContainerRef> {
         Some(self.container_ref.clone())
+    }
+
+    /// Vanilla parity: `BaseContainerBlockEntity.getName`, which falls back to
+    /// the block's own name.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        self.name.display_name(default_name)
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
+    /// `LOCK` are not collected: no vanilla loot table asks this block for
+    /// either, and Steel has no lock on a container yet.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        self.name.collect_implicit_components(components);
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.applyImplicitComponents`.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        self.name.apply_implicit_components(input);
     }
 }
 

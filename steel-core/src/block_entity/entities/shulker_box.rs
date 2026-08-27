@@ -16,10 +16,14 @@ use steel_registry::vanilla_block_entity_types;
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase, ContainerLoot};
+use crate::block_entity::{
+    BlockEntity, BlockEntityBase, BlockEntityName, ContainerLoot, ImplicitComponentInput,
+};
 use crate::inventory::container::Container;
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
+use steel_registry::data_components::DataComponentMap;
+use text_components::TextComponent;
 
 /// Number of slots in a shulker box.
 pub const SHULKER_BOX_SLOTS: usize = 27;
@@ -32,6 +36,9 @@ pub struct ShulkerBoxBlockEntity {
     /// Vanilla parity: the `RandomizableContainer` half of a shulker box, which
     /// is how an end city box arrives stocked.
     loot: Arc<ContainerLoot>,
+    /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
+    /// name this block was placed with.
+    name: BlockEntityName,
 }
 
 struct ShulkerBoxContainer {
@@ -72,6 +79,7 @@ impl ShulkerBoxBlockEntity {
             base,
             container,
             loot,
+            name: BlockEntityName::new(),
         }
     }
 
@@ -114,6 +122,14 @@ impl ShulkerBoxBlockEntity {
         self.container_ref.unpack_loot_table(None);
         self.container.lock().items.iter().all(ItemStack::is_empty)
     }
+
+    /// Returns the name an anvil gave this shulker box, if any.
+    ///
+    /// Vanilla parity: `Nameable.getCustomName`.
+    #[must_use]
+    pub fn custom_name(&self) -> Option<TextComponent> {
+        self.name.custom_name()
+    }
 }
 
 impl BlockEntity for ShulkerBoxBlockEntity {
@@ -127,6 +143,7 @@ impl BlockEntity for ShulkerBoxBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        self.name.load(&nbt_view);
         // Vanilla parity: `ShulkerBoxBlockEntity.loadFromTag`, which stores
         // either a loot table or its items.
         let packed = self.loot.try_load_loot_table(&nbt_view);
@@ -153,6 +170,7 @@ impl BlockEntity for ShulkerBoxBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.name.save(nbt);
         if self.loot.try_save_loot_table(nbt) {
             return;
         }
@@ -179,6 +197,26 @@ impl BlockEntity for ShulkerBoxBlockEntity {
 
     fn container_ref(&self) -> Option<ContainerRef> {
         Some(self.container_ref.clone())
+    }
+
+    /// Vanilla parity: `BaseContainerBlockEntity.getName`, which falls back to
+    /// the block's own name.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        self.name.display_name(default_name)
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
+    /// `LOCK` are not collected: no vanilla loot table asks this block for
+    /// either, and Steel has no lock on a container yet.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        self.name.collect_implicit_components(components);
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.applyImplicitComponents`.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        self.name.apply_implicit_components(input);
     }
 }
 

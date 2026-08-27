@@ -28,10 +28,12 @@ use steel_utils::{
     BlockPos, BlockStateId, Direction, DowncastType, DowncastTypeKey, Identifier, locks::SyncMutex,
 };
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
+use steel_registry::data_components::DataComponentMap;
+use text_components::TextComponent;
 
 /// Slot holding the item being cooked.
 pub const SLOT_INPUT: usize = 0;
@@ -95,6 +97,9 @@ pub struct FurnaceBlockEntity {
     container: Arc<SyncMutex<FurnaceContainer>>,
     container_ref: ContainerRef,
     data: Arc<FurnaceDataSlots>,
+    /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
+    /// name this block was placed with.
+    name: BlockEntityName,
 }
 
 /// Items and cooking state, held under one lock because a tick mutates both.
@@ -239,6 +244,7 @@ impl FurnaceBlockEntity {
             base,
             container,
             data: Arc::new(FurnaceDataSlots::default()),
+            name: BlockEntityName::new(),
         }
     }
 
@@ -305,6 +311,14 @@ impl FurnaceBlockEntity {
                     .map(|recipe| recipe.experience * *count as f32)
             })
             .sum()
+    }
+
+    /// Returns the name an anvil gave this furnace, if any.
+    ///
+    /// Vanilla parity: `Nameable.getCustomName`.
+    #[must_use]
+    pub fn custom_name(&self) -> Option<TextComponent> {
+        self.name.custom_name()
     }
 }
 
@@ -405,6 +419,7 @@ impl BlockEntity for FurnaceBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
+        self.name.load(&nbt_view);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
 
@@ -430,6 +445,7 @@ impl BlockEntity for FurnaceBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.name.save(nbt);
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items.iter().enumerate() {
@@ -453,6 +469,26 @@ impl BlockEntity for FurnaceBlockEntity {
 
     fn container_ref(&self) -> Option<ContainerRef> {
         Some(self.container_ref.clone())
+    }
+
+    /// Vanilla parity: `BaseContainerBlockEntity.getName`, which falls back to
+    /// the block's own name.
+    fn display_name(&self, default_name: TextComponent) -> TextComponent {
+        self.name.display_name(default_name)
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
+    /// `LOCK` are not collected: no vanilla loot table asks this block for
+    /// either, and Steel has no lock on a container yet.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        self.name.collect_implicit_components(components);
+    }
+
+    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// `BaseContainerBlockEntity.applyImplicitComponents`.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        self.name.apply_implicit_components(input);
     }
 }
 
