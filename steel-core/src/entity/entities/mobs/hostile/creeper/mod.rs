@@ -18,11 +18,14 @@ use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
     NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::{AreaEffectCloudEntity, CREEPER_CLOUD_DURATION_SCALE};
+use crate::entity::next_entity_id;
 use crate::entity::spawn_rules::check_monster_spawn_rules;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
@@ -31,6 +34,7 @@ use crate::entity::{
 use crate::world::World;
 use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
 use std::sync::Arc;
+use steel_registry::vanilla_entities;
 use steel_utils::BlockPos;
 
 /// Experience this mob drops.
@@ -231,9 +235,42 @@ impl CreeperEntity {
             ),
             self.position(),
         );
-        // TODO: vanilla also leaves a lingering cloud of whatever effects the
-        // creeper carried.
+        self.spawn_lingering_cloud(&world);
         self.set_removed(RemovalReason::Killed);
+    }
+
+    /// Leaves behind a cloud of whatever this creeper was carrying.
+    ///
+    /// Vanilla parity: `Creeper.spawnLingeringCloud`. A creeper that walked
+    /// through a lingering potion carries it into its own explosion, which is
+    /// what an ominous raid's creepers are for.
+    fn spawn_lingering_cloud(&self, world: &Arc<World>) {
+        let effects = self
+            .active_mob_effects()
+            .into_iter()
+            .map(|active| {
+                let duration = if active.is_infinite_duration() {
+                    active.duration()
+                } else {
+                    active.duration() / CREEPER_CLOUD_DURATION_SCALE
+                };
+                (active.effect(), duration, active.amplifier())
+            })
+            .collect::<Vec<_>>();
+        if effects.is_empty() {
+            return;
+        }
+
+        let cloud = Arc::new(AreaEffectCloudEntity::new(
+            &vanilla_entities::AREA_EFFECT_CLOUD,
+            next_entity_id(),
+            self.position(),
+            Arc::downgrade(world),
+        ));
+        cloud.configure_as_creeper_cloud(effects);
+        if let Err(error) = world.try_add_entity(cloud as SharedEntity) {
+            log::debug!("failed to spawn a creeper's lingering cloud: {error}");
+        }
     }
 }
 
@@ -386,3 +423,80 @@ impl Mob for CreeperEntity {
 impl PathfinderMob for CreeperEntity {}
 
 impl Enemy for CreeperEntity {}
+
+#[cfg(test)]
+mod lingering_cloud_tests {
+    use super::*;
+    use crate::behavior::init_behaviors;
+    use crate::entity::entities::AreaEffectCloudEntity;
+    use crate::entity::{LivingEntity, MobEffectInstance};
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use steel_registry::{init_vanilla_registry, vanilla_mob_effects};
+    use steel_utils::{ChunkPos, WorldAabb};
+
+    /// Ticks of poison the creeper is carrying when it goes off.
+    const CARRIED_POISON_TICKS: i32 = 400;
+
+    fn creeper_world(key: &'static str) -> Arc<World> {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        world
+    }
+
+    fn creeper_at(world: &Arc<World>) -> Arc<CreeperEntity> {
+        let creeper = Arc::new(CreeperEntity::new(
+            &vanilla_entities::CREEPER,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&creeper) as SharedEntity)
+            .expect("the test chunk is loaded");
+        creeper
+    }
+
+    fn clouds(world: &Arc<World>) -> Vec<SharedEntity> {
+        let everywhere = WorldAabb::new(-256.0, -64.0, -256.0, 256.0, 320.0, 256.0);
+        world.get_entities_in_aabb_matching(&everywhere, |entity| {
+            entity.downcast_ref::<AreaEffectCloudEntity>().is_some()
+        })
+    }
+
+    #[test]
+    fn a_creeper_carrying_nothing_leaves_no_cloud() {
+        let world = creeper_world("creeper_plain_leaves_nothing");
+        let creeper = creeper_at(&world);
+
+        creeper.explode();
+
+        assert!(clouds(&world).is_empty());
+    }
+
+    #[test]
+    fn a_creeper_carrying_an_effect_leaves_it_behind() {
+        let world = creeper_world("creeper_leaves_its_effect");
+        let creeper = creeper_at(&world);
+        assert!(creeper.add_mob_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::POISON,
+            CARRIED_POISON_TICKS,
+            0,
+        )));
+
+        creeper.explode();
+
+        let left = clouds(&world);
+        assert_eq!(left.len(), 1, "a creeper with an effect leaves one cloud");
+        let cloud = left[0]
+            .as_ref()
+            .downcast_ref::<AreaEffectCloudEntity>()
+            .expect("filtered above");
+        assert!(
+            (cloud.radius() - 2.5).abs() < 1.0e-6,
+            "a creeper's cloud is smaller than a potion's, got {}",
+            cloud.radius()
+        );
+    }
+}

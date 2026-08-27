@@ -17,6 +17,7 @@ use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey};
 
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::SpawnGroupData;
 use crate::entity::ai::goal::{
     FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, RangedBowAttackGoal, RestrictSunGoal, WaterAvoidingRandomStrollGoal,
@@ -24,13 +25,17 @@ use crate::entity::ai::goal::{
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ArrowEntity;
 use crate::entity::spawn_rules::check_stray_spawn_rules;
+use crate::entity::weapon_holding_hand;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase, Mob,
     MobBase, MobEffectInstance, PathfinderMob,
 };
 use crate::world::World;
 use std::sync::Arc;
+use steel_registry::item_stack::ItemStack;
+use steel_registry::vanilla_items;
 use steel_utils::BlockPos;
+use steel_utils::types::InteractionHand;
 
 /// Experience this mob drops.
 ///
@@ -168,9 +173,16 @@ fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3) {
     let Some(world) = archer.level() else {
         return;
     };
-    // TODO: vanilla reads the bow from the skeleton's hand and consumes a
-    // projectile; Steel's skeletons are not equipped yet.
+    // Vanilla parity: `AbstractSkeleton.performRangedAttack` reads the bow out
+    // of whichever hand holds one and hands it to `ProjectileUtil.getMobArrow`,
+    // so the arrow can read Power and Flame off it when it lands. Nothing
+    // leaves a quiver: `Monster.getProjectile` conjures the arrow when the mob
+    // carries none, which is why a skeleton never runs out.
+    let bow = archer.get_item_in_hand(weapon_holding_hand(archer, &vanilla_items::BOW));
     let arrow = ArrowEntity::shoot_at(&world, archer, target, ARROW_POWER, ARROW_UNCERTAINTY);
+    if bow.is(&vanilla_items::BOW) {
+        arrow.set_fired_from_weapon(Some(bow));
+    }
     // Vanilla parity: `Stray.getArrow` tips every arrow with slowness.
     arrow.add_effect(MobEffectInstance::with_duration(
         vanilla_mob_effects::SLOWNESS,
@@ -246,6 +258,24 @@ impl LivingEntity for StrayEntity {
 }
 
 impl Mob for StrayEntity {
+    /// Arms the skeleton with the bow it shoots with.
+    ///
+    /// Vanilla parity: `AbstractSkeleton.finalizeSpawn`, which runs the shared
+    /// `Mob.finalizeSpawn` and then `populateDefaultEquipmentSlots` -- and that
+    /// is the only place a skeleton's bow comes from.
+    fn finalize_spawn(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        group_data: Option<SpawnGroupData>,
+    ) -> Option<SpawnGroupData> {
+        let group_data = self.finalize_spawn_mob_base(world, spawn_reason, group_data);
+        self.set_item_in_hand(
+            InteractionHand::MainHand,
+            ItemStack::new(&vanilla_items::BOW),
+        );
+        group_data
+    }
     /// Vanilla parity: `Stray` derives from `Monster`.
     fn is_monster(&self) -> bool {
         true

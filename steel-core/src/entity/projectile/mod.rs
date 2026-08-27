@@ -23,11 +23,13 @@ use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
+use steel_registry::items::ItemRef;
 use steel_registry::vanilla_entity_type_tags::EntityTypeTag;
 use steel_registry::vanilla_game_rules::{MOB_GRIEFING, PROJECTILES_CAN_BREAK_BLOCKS};
 use steel_registry::{REGISTRY, TaggedRegistryExt as _, vanilla_game_events};
 use steel_utils::axis::Axis;
 use steel_utils::locks::SyncMutex;
+use steel_utils::types::InteractionHand;
 use steel_utils::{UuidExt, WorldAabb};
 use uuid::Uuid;
 
@@ -171,6 +173,22 @@ impl ProjectileBase {
 impl Default for ProjectileBase {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Returns the hand `shooter` is holding `weapon` in.
+///
+/// Vanilla parity: `ProjectileUtil.getWeaponHoldingHand`, which falls back to
+/// the off hand rather than reporting that nothing was found.
+#[must_use]
+pub fn weapon_holding_hand(shooter: &dyn LivingEntity, weapon: ItemRef) -> InteractionHand {
+    if shooter
+        .get_item_in_hand(InteractionHand::MainHand)
+        .is(weapon)
+    {
+        InteractionHand::MainHand
+    } else {
+        InteractionHand::OffHand
     }
 }
 

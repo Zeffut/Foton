@@ -104,6 +104,12 @@ pub trait LivingEntitySyncedData: EntitySyncedData {
     /// Clears synchronized vanilla sleeping position.
     fn clear_sleeping_pos(&self);
 
+    /// Returns vanilla `DATA_ARROW_COUNT_ID`, the arrows stuck in this entity.
+    fn arrow_count(&self) -> i32;
+
+    /// Sets vanilla `DATA_ARROW_COUNT_ID`.
+    fn set_arrow_count(&self, count: i32);
+
     /// Returns vanilla `DATA_LIVING_ENTITY_FLAGS`.
     fn living_entity_flags(&self) -> i8;
 
@@ -115,6 +121,14 @@ impl<T> LivingEntitySyncedData for SyncMutex<T>
 where
     T: VanillaLivingEntityData + Send + Sync,
 {
+    fn arrow_count(&self) -> i32 {
+        *self.lock().living_entity().arrow_count.get()
+    }
+
+    fn set_arrow_count(&self, count: i32) {
+        self.lock().living_entity_mut().arrow_count.set(count);
+    }
+
     fn living_entity_flags(&self) -> i8 {
         *self.lock().living_entity().living_entity_flags.get()
     }

@@ -569,24 +569,80 @@ pub trait Mob: LivingEntity {
         {
             return;
         }
+        if !LivingEntity::is_alive(self) || !self.is_sun_burn_tick() {
+            return;
+        }
+
+        // Vanilla parity: `Mob.burnUndead` spends the helmet instead of the mob.
+        // A hat is the whole reason a zombie can cross an open field at noon.
+        let slot = self.sun_protection_slot();
+        let mut wearing_a_hat = false;
+        let mut broke_the_hat = false;
+        self.with_equipment_slot_mut(slot, &mut |sun_blocker| {
+            if sun_blocker.is_empty() {
+                return;
+            }
+            wearing_a_hat = true;
+            if !sun_blocker.is_damageable_item() {
+                return;
+            }
+            sun_blocker.set_damage_value(sun_blocker.get_damage_value() + rand::random_range(0..2));
+            if sun_blocker.get_damage_value() >= sun_blocker.get_max_damage() {
+                broke_the_hat = true;
+                *sun_blocker = ItemStack::empty();
+            }
+        });
+
+        if broke_the_hat {
+            self.on_equipped_item_broken(slot);
+        }
+        if !wearing_a_hat {
+            self.ignite_for_ticks(DAYLIGHT_BURN_TICKS);
+        }
+    }
+
+    /// The slot an undead mob can keep the sun off with.
+    ///
+    /// Vanilla parity: `Mob.sunProtectionSlot`, which the zombie horse and the
+    /// zombie nautilus override.
+    fn sun_protection_slot(&self) -> EquipmentSlot {
+        EquipmentSlot::Head
+    }
+
+    /// Returns whether the sun is currently strong enough to set this mob alight.
+    ///
+    /// Vanilla parity: `Mob.isSunBurnTick`. The roll against the local
+    /// brightness is why a zombie in the shade of a tree survives, and why one
+    /// standing on open ground can last a few ticks before catching.
+    fn is_sun_burn_tick(&self) -> bool {
         let Some(world) = self.level() else {
-            return;
+            return false;
         };
+        // Deviation: 26.2 reads the `gameplay/monsters_burn` environment
+        // attribute off the dimension's timeline. Steel has no timelines, and
+        // the vanilla overworld track turns the attribute on for exactly the
+        // daylight `isBrightOutside` already describes.
         if !world.is_bright_outside() {
-            return;
+            return false;
         }
 
-        let pos = self.block_position();
-        if !world.can_see_sky(pos) || world.is_raining_at(pos) {
-            return;
+        let brightness = world.light_level_dependent_magic_value(self.block_position());
+        if brightness <= 0.5 {
+            return false;
         }
-        if self.is_in_water() {
-            return;
+        if rand::random::<f32>() * 30.0 >= (brightness - 0.4) * 2.0 {
+            return false;
+        }
+        if self.is_in_water_or_rain() || self.is_in_powder_snow() || self.was_in_powder_snow() {
+            return false;
         }
 
-        // TODO: vanilla burns the mob's helmet instead when it wears one, and rolls
-        // against the local brightness rather than igniting outright.
-        self.set_remaining_fire_ticks(DAYLIGHT_BURN_TICKS);
+        let position = self.position();
+        world.can_see_sky(BlockPos::containing(
+            position.x,
+            self.get_eye_y(),
+            position.z,
+        ))
     }
 
     /// Returns whether this mob accepts the spot the spawner picked for it.

@@ -45,11 +45,12 @@ pub use objects::display_ui::{
 pub use objects::explosives::{EndCrystalEntity, PrimedTntEntity};
 pub use objects::items::{ExperienceOrbEntity, FallingBlockEntity, ItemEntity};
 pub use objects::projectiles::{
-    ArrowEntity, BreezeWindChargeEntity, DragonFireballEntity, EnderPearlEntity, EvokerFangsEntity,
-    ExperienceBottleEntity, EyeOfEnderEntity, FireworkRocketEntity, FishingHookEntity,
-    LargeFireballEntity, LingeringPotionEntity, LlamaSpitEntity, ShulkerBulletEntity,
-    SmallFireballEntity, SnowballEntity, SpectralArrowEntity, SplashPotionEntity, ThrownEggEntity,
-    ThrownTridentEntity, TridentPickup, WindChargeEntity, WitherSkullEntity,
+    ArrowEntity, ArrowPickup, BreezeWindChargeEntity, DragonFireballEntity, EnderPearlEntity,
+    EvokerFangsEntity, ExperienceBottleEntity, EyeOfEnderEntity, FireworkRocketEntity,
+    FishingHookEntity, LargeFireballEntity, LingeringPotionEntity, LlamaSpitEntity,
+    ShulkerBulletEntity, SmallFireballEntity, SnowballEntity, SpectralArrowEntity,
+    SplashPotionEntity, ThrownEggEntity, ThrownTridentEntity, TridentPickup, WindChargeEntity,
+    WitherSkullEntity,
 };
 pub use objects::vehicles::{
     BoatEntity, ChestBoatEntity, ChestMinecartEntity, ChestRaftEntity, FurnaceMinecartEntity,
@@ -57,7 +58,7 @@ pub use objects::vehicles::{
     SpawnerMinecartEntity, TntMinecartEntity,
 };
 pub use objects::{
-    AreaEffectCloudEntity, LightningBoltEntity, MarkerEntity, OminousItemSpawnerEntity,
-    default_thunder_hit,
+    AreaEffectCloudEntity, CREEPER_CLOUD_DURATION_SCALE, LightningBoltEntity, MarkerEntity,
+    OminousItemSpawnerEntity, default_thunder_hit,
 };
 pub use raw::RawEntity;

@@ -1182,6 +1182,7 @@ fn villager_job_site(villager: &VillagerEntity) -> Option<BlockPos> {
 
 mod brains;
 mod damage;
+mod daylight_burning;
 mod entity_ids;
 mod equine;
 mod equipment_and_freezing;
@@ -1196,6 +1197,7 @@ mod nether_ocean_end_hostiles;
 mod pets;
 mod portals;
 mod riding_and_leashes;
+mod skeleton_archery;
 mod travel;
 mod villagers;
 mod wandering_traders;

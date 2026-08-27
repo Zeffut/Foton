@@ -6,6 +6,7 @@ use steel_registry::enchantment_effect::{
 };
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
+use steel_registry::items::ItemRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::{REGISTRY, RegistryExt, TaggedRegistryExt, vanilla_entities};
 
@@ -120,9 +121,9 @@ impl<'a> EnchantmentPostAttackContext<'a> {
 /// enchantment requirement contexts around a `DamageSource`, so a conditional
 /// effect is skipped here rather than guessed at. Every vanilla enchantment
 /// that reaches this path unconditionally -- Quick Charge, Multishot,
-/// Piercing -- therefore applies in full. Infinity is the exception: its
-/// `ammo_use` effect is gated on a `match_tool` predicate, so a bow does not
-/// yet keep its arrow through [`process_ammo_use`].
+/// Piercing -- therefore applies in full. The effects vanilla judges against an
+/// ammunition stack instead, Infinity's `ammo_use` among them, go through
+/// [`apply_item_filtered_value_effects`].
 fn apply_unconditional_value_effects(
     item: &ItemStack,
     component: EnchantmentEffectComponent,
@@ -189,11 +190,60 @@ pub(crate) fn process_projectile_spread(weapon: &ItemStack, angle: f32) -> f32 {
         .max(0.0)
 }
 
+/// Runs every value effect an item's enchantments declare for `component`,
+/// judging each one against `context_item`.
+///
+/// Vanilla parity: `Enchantment.modifyItemFilteredCount`, which builds its loot
+/// context around an item rather than an entity. That is the context Infinity's
+/// `match_tool` predicate reads, so this is the only path on which it applies.
+/// A requirement Steel's item-only context cannot decide fails closed, the same
+/// way [`apply_unconditional_value_effects`] skips a conditional effect.
+fn apply_item_filtered_value_effects(
+    item: &ItemStack,
+    component: EnchantmentEffectComponent,
+    context_item: ItemRef,
+    input: f32,
+) -> f32 {
+    let Some(enchantments) = item.get_enchantments() else {
+        return input;
+    };
+
+    let mut value = input;
+    for (key, level) in enchantments.iter() {
+        if *level == 0 {
+            continue;
+        }
+        let Some(enchantment) = REGISTRY.enchantments.by_key(key) else {
+            continue;
+        };
+        let level = *level as i32;
+
+        for effect in enchantment.effects.value_effects(component) {
+            let applies = match effect.requirements {
+                None => true,
+                Some(requirements) => requirements.matches_item_context(context_item) == Some(true),
+            };
+            if !applies {
+                continue;
+            }
+            if let Some(updated) = effect.effect.process_without_random(level, value) {
+                value = updated;
+            }
+        }
+    }
+
+    value
+}
+
 /// Returns vanilla `EnchantmentHelper.processAmmoUse`.
-pub(crate) fn process_ammo_use(weapon: &ItemStack, amount: i32) -> i32 {
-    let modified = apply_unconditional_value_effects(
+///
+/// The count is judged against the ammunition, not the weapon: that is how
+/// Infinity's `match_tool` predicate tells a plain arrow from a tipped one.
+pub(crate) fn process_ammo_use(weapon: &ItemStack, ammo: &ItemStack, amount: i32) -> i32 {
+    let modified = apply_item_filtered_value_effects(
         weapon,
         EnchantmentEffectComponent::AmmoUse,
+        ammo.item(),
         amount as f32,
     );
     modified as i32
