@@ -25,12 +25,6 @@ const MAX_SCAFFOLDING_REACH: i32 = 7;
 /// Steel gap: Vanilla warns a player who runs into the build limit with
 /// `ServerPlayer.sendBuildLimitMessage`; Steel has no such message and simply
 /// stops walking.
-///
-/// Steel gap: `ScaffoldingBlock` does not yet maintain its `distance` property,
-/// so `ScaffoldingBlock::get_distance` reports the default `7` for anything
-/// resting on other scaffolding. Placing upwards works, because that path
-/// never consults the distance; placing sideways off an existing tower is
-/// refused until the block keeps the property up to date.
 #[item_behavior]
 pub struct ScaffoldingBlockItem {
     #[json_arg(vanilla_blocks, json = "block")]
