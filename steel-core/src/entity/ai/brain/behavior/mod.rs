@@ -46,13 +46,17 @@ mod give_items;
 mod go_to_target_location;
 mod go_to_wanted_item;
 mod interact_with;
+mod interact_with_door;
 mod long_jump;
 mod look_at_target_sink;
 mod melee_attack;
 mod mount;
 mod move_to_target_sink;
+mod play_tag_with_other_kids;
+mod raid;
 mod random_look_around;
 mod random_stroll;
+mod sequence;
 mod set_entity_look_target;
 mod set_walk_target_away_from;
 mod set_walk_target_from_attack_target;
@@ -90,9 +94,16 @@ pub use gate_behavior::RunOne;
 pub use go_to_target_location::GoToTargetLocation;
 pub use go_to_wanted_item::GoToWantedItem;
 pub use interact_with::{InteractWith, SetLookAndInteract};
+pub use interact_with_door::{InteractWithDoor, close_doors_behind};
 pub use look_at_target_sink::LookAtTargetSink;
 pub use move_to_target_sink::MoveToTargetSink;
+pub use play_tag_with_other_kids::PlayTagWithOtherKids;
+pub use raid::{
+    LocateHidingPlace, MoveToSkySeeingSpot, ReactToBell, ResetRaidStatus, RingBell, SetHiddenState,
+    SetRaidStatus, has_no_blocks_above,
+};
 pub use random_stroll::RandomStroll;
+pub use sequence::Sequence;
 pub use set_entity_look_target::SetEntityLookTarget;
 pub use set_entity_look_target::SetEntityLookTargetSometimes;
 pub use set_walk_target_away_from::SetWalkTargetAwayFrom;

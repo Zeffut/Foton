@@ -25,7 +25,7 @@ mod wandering_trader;
 mod zombie_villager;
 
 pub use merchant_state::MerchantState;
-pub use villager::VillagerEntity;
+pub use villager::{VILLAGERS_NEEDED_TO_AGREE_WHEN_GOSSIPING, VillagerEntity};
 pub use wandering_trader::WanderingTraderEntity;
 pub use zombie_villager::ZombieVillagerEntity;
 

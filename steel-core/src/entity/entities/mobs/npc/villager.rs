@@ -30,31 +30,34 @@ use steel_registry::vanilla_entity_data::VillagerEntityData;
 use steel_registry::vanilla_item_tags::ItemTag;
 use steel_registry::vanilla_poi_type_tags::PoiTag;
 use steel_registry::villager_profession::VillagerProfessionRef;
-use steel_registry::villager_type::VillagerTypeRef;
+use steel_registry::villager_type::{VillagerType, VillagerTypeRef};
 use steel_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, sound_events,
-    vanilla_items, vanilla_mob_effects, vanilla_poi_types, vanilla_villager_professions,
-    vanilla_villager_types,
+    vanilla_entities, vanilla_items, vanilla_mob_effects, vanilla_poi_types,
+    vanilla_villager_professions, vanilla_villager_types,
 };
 use steel_utils::entity_events::EntityStatus;
 use steel_utils::locks::SyncMutex;
 use steel_utils::types::InteractionHand;
-use steel_utils::{DowncastType, DowncastTypeKey, GlobalPos, Identifier};
+use steel_utils::{Downcast as _, DowncastType, DowncastTypeKey, GlobalPos, Identifier};
 use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 use uuid::Uuid;
 
 use crate::behavior::InteractionResult;
 use crate::entity::ai::brain::memory::{MemoryModuleType, memory_module_types};
+use crate::entity::ai::brain::sensor::GolemSensor;
 use crate::entity::ai::brain::{Brain, ScheduleAttribute};
 use crate::entity::ai::gossip::{GossipContainer, GossipType, ReputationEventType};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::mobs::npc::merchant_state::{MerchantState, villager_data};
 use crate::entity::entities::mobs::npc::villager_ai;
 use crate::entity::inventory_carrier::{self, InventoryCarrier, load_inventory, save_inventory};
+use crate::entity::spawn_util::{SpawnStrategy, try_spawn_mob};
 use crate::entity::{
-    AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntityPose, EntitySyncedData,
-    LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance, PathfinderMob, SharedEntity,
+    AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntityPose, EntitySpawnReason,
+    EntitySyncedData, LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance,
+    PathfinderMob, SharedEntity, SpawnGroupData,
 };
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::physics::MoveResult;
@@ -96,6 +99,37 @@ const MAX_BREAD_PER_BAKE: i32 = 3;
 const WHEAT_PER_BREAD: i32 = 3;
 /// Vanilla parity: the `0.5F` offset the bread it cannot carry is dropped at.
 const BREAD_DROP_OFFSET: f64 = 0.5;
+
+/// How long a path a villager will follow.
+///
+/// Vanilla parity: the `getNavigation().setRequiredPathLength(48.0F)` of the
+/// `Villager` constructor, which is what lets one walk across a village rather
+/// than the sixteen blocks a mob's follow range would otherwise allow.
+const REQUIRED_PATH_LENGTH: f32 = 48.0;
+
+/// How far a villager looks for neighbours who also want a golem.
+///
+/// Vanilla parity: the `getBoundingBox().inflate(10.0, 10.0, 10.0)` of
+/// `Villager.spawnGolemIfNeeded`.
+const GOLEM_AGREEMENT_RANGE: f64 = 10.0;
+/// How many of those neighbours are counted before the rest are ignored.
+///
+/// Vanilla parity: the `.limit(5L)` of the same stream, which is also why
+/// asking for more than five to agree can never succeed.
+const MAX_VILLAGERS_THAT_AGREE: usize = 5;
+/// How long since a villager last slept its wish for a golem survives.
+///
+/// Vanilla parity: the `gameTime - lastSlept < 24000L` of
+/// `Villager.golemSpawnConditionsMet` -- a village that has not been to bed in
+/// a day has, as far as the game is concerned, stopped being a village.
+const GOLEM_WISH_AFTER_SLEEP: i64 = 24_000;
+/// Vanilla parity: the `10, 8, 6` of the `SpawnUtil.trySpawnMob` call.
+const GOLEM_SPAWN_ATTEMPTS: i32 = 10;
+const GOLEM_SPAWN_RANGE_XZ: i32 = 8;
+const GOLEM_SPAWN_RANGE_Y: i32 = 6;
+/// Vanilla parity: the `5` of `Villager.gossip`, which is the ordinary way a
+/// village raises a golem -- five neighbours standing around agreeing.
+pub const VILLAGERS_NEEDED_TO_AGREE_WHEN_GOSSIPING: i32 = 5;
 
 /// Vanilla parity: `Villager.FOOD_POINTS`.
 fn food_points_table() -> [(ItemRef, i32); 4] {
@@ -182,6 +216,19 @@ impl VillagerEntity {
         let ageable_base = AgeableMobBase::new();
         let mut entity_data = VillagerEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
+
+        {
+            // Vanilla parity: the three navigation lines of the `Villager`
+            // constructor. `setCanOpenDoors` is the one with teeth: without it
+            // a closed door is not pathfindable, so a villager would never plan
+            // a route through one and `InteractWithDoor` would have nothing to
+            // open.
+            let mut navigation = mob_base.navigation().lock();
+            navigation.set_can_open_doors(true);
+            navigation.set_can_float(true);
+            navigation
+                .set_required_path_length(REQUIRED_PATH_LENGTH, f64::from(REQUIRED_PATH_LENGTH));
+        }
 
         let villager = Self {
             base,
@@ -450,8 +497,10 @@ impl VillagerEntity {
     /// Swaps gossip with another villager standing nearby.
     ///
     /// Vanilla parity: `Villager.gossip`, gated on both villagers being off
-    /// their thousand-two-hundred-tick cooldown.
-    pub fn gossip_with(&self, other: &Self, timestamp: i64) {
+    /// their thousand-two-hundred-tick cooldown. Two villagers finding time to
+    /// talk is also what vanilla reads as the village being calm and populated
+    /// enough to want an iron golem, so the golem check hangs off the end of it.
+    pub fn gossip_with(&self, world: &Arc<World>, other: &Self, timestamp: i64) {
         let mine = *self.last_gossip_time.lock();
         let theirs = *other.last_gossip_time.lock();
         let ready = |last: i64| timestamp < last || timestamp >= last + GOSSIP_COOLDOWN;
@@ -466,6 +515,83 @@ impl VillagerEntity {
             .transfer_from(&source, &mut rng, MAX_GOSSIP_TOPICS);
         *self.last_gossip_time.lock() = timestamp;
         *other.last_gossip_time.lock() = timestamp;
+        self.spawn_golem_if_needed(world, timestamp, VILLAGERS_NEEDED_TO_AGREE_WHEN_GOSSIPING);
+    }
+
+    /// Raises an iron golem if enough of the village agrees it wants one.
+    ///
+    /// Vanilla parity: `Villager.spawnGolemIfNeeded`. Nothing counts the golems
+    /// a village already has; what stops a second one is that every villager
+    /// who agreed to the first is told about it -- see
+    /// [`GolemSensor::golem_detected`] -- and spends the next thirty seconds
+    /// not wanting another. Every villager in range is told, not only the ones
+    /// that agreed, so a villager who was asleep through the vote does not
+    /// immediately call for a second golem.
+    ///
+    /// [`GolemSensor::golem_detected`]: crate::entity::ai::brain::sensor::GolemSensor::golem_detected
+    pub fn spawn_golem_if_needed(
+        &self,
+        world: &Arc<World>,
+        timestamp: i64,
+        villagers_needed_to_agree: i32,
+    ) {
+        if !self.wants_to_spawn_golem(timestamp) {
+            return;
+        }
+
+        let search_box = self.bounding_box().inflate(GOLEM_AGREEMENT_RANGE);
+        let nearby: Vec<SharedEntity> = world
+            .get_entities_in_aabb_matching(&search_box, |entity| {
+                entity.downcast_ref::<Self>().is_some()
+            });
+        let agreeing = nearby
+            .iter()
+            .filter_map(|entity| entity.downcast_ref::<Self>())
+            .filter(|villager| villager.wants_to_spawn_golem(timestamp))
+            .take(MAX_VILLAGERS_THAT_AGREE)
+            .count();
+        if i32::try_from(agreeing).unwrap_or(i32::MAX) < villagers_needed_to_agree {
+            return;
+        }
+
+        let spawned = try_spawn_mob(
+            &vanilla_entities::IRON_GOLEM,
+            EntitySpawnReason::MobSummoned,
+            world,
+            self.block_position(),
+            GOLEM_SPAWN_ATTEMPTS,
+            GOLEM_SPAWN_RANGE_XZ,
+            GOLEM_SPAWN_RANGE_Y,
+            SpawnStrategy::LegacyIronGolem,
+            false,
+        );
+        if spawned.is_none() {
+            return;
+        }
+        for entity in &nearby {
+            if let Some(brain) = entity.as_mob().and_then(Mob::brain) {
+                GolemSensor::golem_detected(brain);
+            }
+        }
+    }
+
+    /// Vanilla parity: `Villager.wantsToSpawnGolem`.
+    #[must_use]
+    pub fn wants_to_spawn_golem(&self, timestamp: i64) -> bool {
+        self.golem_spawn_conditions_met(timestamp)
+            && !self
+                .brain
+                .has_memory_value(memory_module_types::GOLEM_DETECTED_RECENTLY.id())
+    }
+
+    /// Vanilla parity: the private `Villager.golemSpawnConditionsMet`. Vanilla
+    /// reads the level's game time here rather than the timestamp it was
+    /// handed; the two are the same tick for every caller, and the timestamp is
+    /// what the rest of the check already uses.
+    fn golem_spawn_conditions_met(&self, timestamp: i64) -> bool {
+        self.brain
+            .get_memory(memory_module_types::LAST_SLEPT)
+            .is_some_and(|last_slept| timestamp - last_slept < GOLEM_WISH_AFTER_SLEEP)
     }
 
     /// Vanilla parity: `Villager.maybeDecayGossip`.
@@ -690,6 +816,39 @@ impl VillagerEntity {
     /// Vanilla parity: `Villager.playWorkSound`.
     pub fn play_work_sound(&self) {
         self.make_sound(self.profession().work_sound);
+    }
+
+    /// The variant the biome under this villager calls for.
+    ///
+    /// Vanilla parity: `VillagerType.byBiome(level.getBiome(pos))`. Vanilla's
+    /// biome lookup always answers; Steel's can miss when the column is not
+    /// loaded, which is nowhere a villager can be standing -- so a miss falls
+    /// through to the same `plains` the mapping's own default is.
+    #[must_use]
+    pub fn biome_variant(&self, world: &World) -> VillagerTypeRef {
+        world
+            .biome_at(self.block_position())
+            .map_or(&vanilla_villager_types::PLAINS, VillagerType::by_biome)
+    }
+
+    /// Gives a villager the look of the biome it appeared in, once.
+    ///
+    /// Vanilla parity: `VillagerDataHolder.finalizeVillagerType`. The
+    /// finalized flag is why a villager that walks into the desert stays a
+    /// plains one, and why a cured or bred villager keeps the variant it was
+    /// given rather than taking the one under its feet.
+    pub fn finalize_villager_type(&self, world: &World) {
+        if self.villager_data_finalized() {
+            return;
+        }
+        self.set_villager_type(self.biome_variant(world));
+        self.set_villager_data_finalized(true);
+    }
+
+    /// Vanilla parity: `AbstractVillager.playCelebrateSound`, the cheer a
+    /// village lets out over a raid it survived.
+    pub fn play_celebrate_sound(&self) {
+        self.make_sound(Some(&sound_events::ENTITY_VILLAGER_CELEBRATE));
     }
 
     /// Gives back the POI ticket a memory holds.
@@ -1036,6 +1195,25 @@ impl AgeableMob for VillagerEntity {
 }
 
 impl Mob for VillagerEntity {
+    /// Vanilla parity: `Villager.finalizeSpawn`.
+    ///
+    /// MISSING FOUNDATION: vanilla also sets `assignProfessionWhenSpawned` for
+    /// `EntitySpawnReason.STRUCTURE`, so a villager that arrives as part of a
+    /// generated village has a trade the moment it lands. Steel generates no
+    /// villages, so nothing can reach that reason yet.
+    fn finalize_spawn(
+        &self,
+        world: &Arc<World>,
+        spawn_reason: EntitySpawnReason,
+        group_data: Option<SpawnGroupData>,
+    ) -> Option<SpawnGroupData> {
+        if spawn_reason == EntitySpawnReason::Breeding {
+            self.set_profession(&vanilla_villager_professions::NONE);
+        }
+        self.finalize_villager_type(world);
+        self.finalize_spawn_mob_base(world, spawn_reason, group_data)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

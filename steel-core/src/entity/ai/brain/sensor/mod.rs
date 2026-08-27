@@ -4,6 +4,7 @@ mod adult;
 mod axolotl_attackables;
 mod breeze_attack_entity;
 mod frog_attackables;
+mod golem;
 mod hurt_by;
 mod is_in_water;
 mod mob_sensor;
@@ -13,6 +14,7 @@ mod piglin_specific;
 mod player;
 mod secondary_poi;
 mod tempting;
+mod villager_babies;
 mod villager_hostiles;
 mod warden_specific;
 
@@ -20,6 +22,7 @@ pub use adult::{AdultSensor, AdultSensorAnyType};
 pub use axolotl_attackables::AxolotlAttackablesSensor;
 pub use breeze_attack_entity::BreezeAttackEntitySensor;
 pub use frog_attackables::FrogAttackablesSensor;
+pub use golem::GolemSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
 pub use mob_sensor::MobSensor;
@@ -31,6 +34,7 @@ pub use piglin_specific::{
 pub use player::PlayerSensor;
 pub use secondary_poi::SecondaryPoiSensor;
 pub use tempting::TemptingSensor;
+pub use villager_babies::VillagerBabiesSensor;
 pub use villager_hostiles::VillagerHostilesSensor;
 pub use warden_specific::WardenEntitySensor;
 
@@ -95,8 +99,7 @@ pub trait Sensor: Send {
 /// `Activity` and `MemoryModuleType`, vanilla's registry is a hardcoded Java
 /// list that never reaches a packet or a save file, and `SteelExtractor` emits no
 /// `sensor_type` asset, so the constants are mirrored as an enum. Only the
-/// sensors a Steel mob drives are here; the rest (`WARDEN_ENTITY_SENSOR`,
-/// `GOLEM_DETECTED`, ...) arrive with their mobs.
+/// sensors a Steel mob drives are here; the rest arrive with their mobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SensorType {
     /// Vanilla `SensorType.NEAREST_LIVING_ENTITIES`.
@@ -139,6 +142,10 @@ pub enum SensorType {
     VillagerHostiles,
     /// Vanilla `SensorType.SECONDARY_POIS`.
     SecondaryPois,
+    /// Vanilla `SensorType.GOLEM_DETECTED`.
+    GolemDetected,
+    /// Vanilla `SensorType.VILLAGER_BABIES`.
+    VillagerBabies,
 }
 
 impl SensorType {
@@ -201,6 +208,8 @@ impl SensorType {
             Self::WardenEntity => Box::new(WardenEntitySensor),
             Self::VillagerHostiles => Box::new(VillagerHostilesSensor),
             Self::SecondaryPois => Box::new(SecondaryPoiSensor),
+            Self::GolemDetected => Box::new(GolemSensor),
+            Self::VillagerBabies => Box::new(VillagerBabiesSensor),
         }
     }
 }

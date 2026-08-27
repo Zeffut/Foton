@@ -4,30 +4,31 @@
 //! it can actually swing towards -- a floor bell hangs on an axis and will not
 //! ring if struck end-on. Redstone rings it too, once per rising edge.
 //!
-//! Not implemented: the raid part. Vanilla's bell reveals nearby raiders for
-//! three seconds, and Steel has no raids.
-//!
-//! Nor is there a block entity. Vanilla keeps one to hold the swing timer and
-//! the raid scan; the swing itself is a block event the client animates, and
-//! with no raids there is nothing left for the block entity to remember.
+//! Ringing is only the start of it. The swing, the sixty-block sweep that tells
+//! every mob nearby the bell rang, and the resonance that gives away the
+//! raiders standing in it all live on [`BellBlockEntity`]; this block is the
+//! part that decides whether a hit counts and hands the ring over to it.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use steel_macros::block_behavior;
+use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{
     BellAttachType, BlockStateProperties, BoolProperty, Direction, EnumProperty,
 };
 use steel_registry::blocks::shapes::SupportType;
-use steel_registry::{sound_events, vanilla_game_events};
+use steel_registry::{sound_events, vanilla_block_entity_types, vanilla_game_events};
 use steel_utils::axis::Axis;
 use steel_utils::types::UpdateFlags;
-use steel_utils::{BlockPos, BlockStateId};
+use steel_utils::{BlockPos, BlockStateId, Downcast as _};
 
-use crate::behavior::InventoryAccess;
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::behavior::{BlockEntityCreation, InventoryAccess};
+use crate::block_entity::entities::BellBlockEntity;
+use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::entity::Entity;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
@@ -53,10 +54,6 @@ const BELL_VOLUME: f32 = 2.0;
 /// Vanilla parity: the `0.8124F` of `isProperHit`. Striking the very top of a
 /// bell does not swing it.
 const TOP_HIT_HEIGHT: f64 = 0.812_4;
-
-/// Vanilla parity: the `1` event id of `BellBlockEntity`, which starts the
-/// swing on the client.
-const RING_EVENT: i32 = 1;
 
 /// Behavior for the bell.
 #[block_behavior]
@@ -91,23 +88,37 @@ impl BellBlock {
         }
     }
 
-    /// Rings the bell.
+    /// Rings the bell at `pos`, if there is one there to ring.
     ///
-    /// Vanilla parity: `BellBlock.attemptToRing`.
-    pub fn ring(
-        &self,
+    /// Vanilla parity: `BellBlock.attemptToRing`, both overloads -- `direction`
+    /// of `None` is the `@Nullable Direction` it falls back to the bell's own
+    /// facing for. It is an associated function because vanilla's is an
+    /// instance method that never touches the instance: everything it needs it
+    /// reads back out of the level.
+    ///
+    /// Returns whether there was a bell block entity to ring, which is what
+    /// tells a player whether the swing earned them the statistic.
+    pub fn attempt_to_ring(
         world: &Arc<World>,
         pos: BlockPos,
-        direction: Direction,
+        direction: Option<Direction>,
         ringer: Option<&dyn Entity>,
-    ) {
-        world.block_event(pos, self.block, RING_EVENT, direction.get_3d_data_value());
+    ) -> bool {
+        let Some(block_entity) = world.get_block_entity(pos) else {
+            return false;
+        };
+        let Some(bell) = block_entity.downcast_ref::<BellBlockEntity>() else {
+            return false;
+        };
+        let direction = direction.unwrap_or_else(|| world.get_block_state(pos).get_value(FACING));
+        bell.on_hit(world, direction);
         world.play_block_sound(&sound_events::BLOCK_BELL_USE, pos, BELL_VOLUME, 1.0, None);
         world.game_event(
             &vanilla_game_events::BLOCK_CHANGE,
             pos,
             &GameEventContext::new(ringer, None),
         );
+        true
     }
 }
 
@@ -161,7 +172,7 @@ impl BlockBehavior for BellBlock {
             return InteractionResult::Pass;
         }
 
-        self.ring(world, pos, hit_result.direction, Some(player));
+        Self::attempt_to_ring(world, pos, Some(hit_result.direction), Some(player));
         // TODO: Award stat BELL_RING; Steel has no statistics registry.
         InteractionResult::Success
     }
@@ -181,12 +192,56 @@ impl BlockBehavior for BellBlock {
             return;
         }
         if signal {
-            self.ring(world, pos, state.get_value(FACING), None);
+            Self::attempt_to_ring(world, pos, None, None);
         }
         world.set_block(
             pos,
             state.set_value(POWERED, signal),
             UpdateFlags::UPDATE_ALL,
         );
+    }
+
+    /// Vanilla parity: `BellBlock.newBlockEntity`.
+    fn new_block_entity(
+        &self,
+        level: Weak<World>,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) -> BlockEntityCreation {
+        BlockEntityCreation::from_registered_factory(BLOCK_ENTITIES.create(
+            &vanilla_block_entity_types::BELL,
+            level,
+            pos,
+            state,
+        ))
+    }
+
+    /// Vanilla parity: the server half of `BellBlock.getTicker`.
+    fn get_block_entity_ticker(
+        &self,
+        _world: &Arc<World>,
+        _state: BlockStateId,
+        block_entity_type: BlockEntityTypeRef,
+    ) -> Option<BlockEntityTicker> {
+        BlockEntityTicker::for_matching_entity_tick(
+            block_entity_type,
+            &vanilla_block_entity_types::BELL,
+        )
+    }
+
+    /// Vanilla parity: `BaseEntityBlock.triggerEvent`, which forwards the event
+    /// to the block entity -- the swing counter and the raider sweep both start
+    /// from there rather than from the block.
+    fn trigger_event(
+        &self,
+        _state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        param_a: i32,
+        param_b: i32,
+    ) -> bool {
+        world
+            .get_block_entity(pos)
+            .is_some_and(|block_entity| block_entity.trigger_event(param_a, param_b))
     }
 }

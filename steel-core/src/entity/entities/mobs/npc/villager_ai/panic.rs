@@ -3,6 +3,7 @@
 //! Vanilla parity: `VillagerPanicTrigger` and `VillagerCalmDown`, the pair that
 //! switch a villager into and back out of [`Activity::Panic`].
 
+use super::villager;
 use crate::entity::ai::brain::Activity;
 use crate::entity::ai::brain::behavior::{
     BrainContext, MemoryModuleId, MemoryStatus, TimedBehavior, Trigger,
@@ -12,17 +13,23 @@ use crate::entity::ai::brain::memory::memory_module_types;
 /// Vanilla parity: `VillagerCalmDown.SAFE_DISTANCE_FROM_DANGER`, squared.
 const SAFE_DISTANCE_FROM_DANGER_SQR: f64 = 36.0;
 
+/// Vanilla parity: the `timestamp % 100L` of `VillagerPanicTrigger.tick`.
+const GOLEM_CHECK_INTERVAL: i64 = 100;
+
+/// Vanilla parity: the `3` of that same call -- a frightened village settles
+/// for less agreement than a chatting one.
+const VILLAGERS_NEEDED_TO_AGREE_WHEN_PANICKING: i32 = 3;
+
 /// Switches a villager to PANIC while something is hurting or hunting it.
 ///
 /// Vanilla parity: `net.minecraft.world.entity.ai.behavior.VillagerPanicTrigger`,
 /// which sits at priority zero of the core package so it overrides whatever the
 /// schedule had the villager doing.
 ///
-/// MISSING FOUNDATION: vanilla's `tick` also calls
-/// `Villager.spawnGolemIfNeeded` every hundred ticks, which is how a frightened
-/// village summons an iron golem. That needs the `GOLEM_DETECTED` sensor and
-/// the golem spawn rules, neither of which Steel has, so the panic itself is
-/// ported and the golem is not.
+/// Its tick is also the urgent half of raising an iron golem: a village under
+/// attack needs only three villagers to agree rather than the five that
+/// gossiping asks for, and it asks every five seconds for as long as the fright
+/// lasts.
 pub struct VillagerPanicTrigger;
 
 impl VillagerPanicTrigger {
@@ -48,6 +55,21 @@ impl TimedBehavior for VillagerPanicTrigger {
 
     fn can_still_use(&mut self, ctx: &BrainContext<'_>) -> bool {
         Self::is_hurt(ctx) || Self::has_hostile(ctx)
+    }
+
+    /// Vanilla parity: the `timestamp % 100L == 0L` of
+    /// `VillagerPanicTrigger.tick`.
+    fn tick(&mut self, ctx: &BrainContext<'_>) {
+        if ctx.game_time() % GOLEM_CHECK_INTERVAL != 0 {
+            return;
+        }
+        if let Some(villager) = villager(ctx) {
+            villager.spawn_golem_if_needed(
+                ctx.world(),
+                ctx.game_time(),
+                VILLAGERS_NEEDED_TO_AGREE_WHEN_PANICKING,
+            );
+        }
     }
 
     fn start(&mut self, ctx: &BrainContext<'_>) {

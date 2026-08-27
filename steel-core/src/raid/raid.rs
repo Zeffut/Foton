@@ -427,6 +427,25 @@ impl Raid {
         self.state.lock().groups_spawned
     }
 
+    /// Vanilla parity: `Raid.hasFirstWaveSpawned`.
+    #[must_use]
+    pub fn has_first_wave_spawned(&self) -> bool {
+        self.state.lock().groups_spawned > 0
+    }
+
+    /// Returns whether the wave that was here has been killed and the next one
+    /// is not due yet.
+    ///
+    /// Vanilla parity: `Raid.isBetweenWaves`. Vanilla asks three getters; one
+    /// lock answers all three here, which also makes the answer a consistent
+    /// snapshot rather than three separate ones.
+    #[must_use]
+    pub fn is_between_waves(&self) -> bool {
+        let state = self.state.lock();
+        let raiders_alive: usize = state.group_raiders.values().map(FxHashSet::len).sum();
+        state.groups_spawned > 0 && raiders_alive == 0 && state.raid_cooldown_ticks > 0
+    }
+
     /// Vanilla parity: `Raid.getTotalHealth`.
     #[must_use]
     pub fn total_health(&self) -> f32 {

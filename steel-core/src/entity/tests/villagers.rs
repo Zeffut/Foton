@@ -33,10 +33,10 @@ use crate::world::World;
 
 /// The one spot the test world is guaranteed to be solid ground rather than a
 /// column the fluid scan walks.
-const SPAWN: DVec3 = DVec3::new(8.5, 64.0, 8.5);
-const STAND: BlockPos = BlockPos::new(8, 64, 8);
+pub(super) const SPAWN: DVec3 = DVec3::new(8.5, 64.0, 8.5);
+pub(super) const STAND: BlockPos = BlockPos::new(8, 64, 8);
 
-fn villager_world(key: &'static str) -> Arc<World> {
+pub(super) fn villager_world(key: &'static str) -> Arc<World> {
     init_vanilla_registry();
     init_behaviors();
     init_block_entities();
@@ -57,7 +57,7 @@ fn villager_world(key: &'static str) -> Arc<World> {
     world
 }
 
-fn spawn_villager(world: &Arc<World>) -> Arc<VillagerEntity> {
+pub(super) fn spawn_villager(world: &Arc<World>) -> Arc<VillagerEntity> {
     let villager = Arc::new(VillagerEntity::new(
         &vanilla_entities::VILLAGER,
         next_entity_id(),
@@ -75,10 +75,10 @@ fn spawn_villager(world: &Arc<World>) -> Arc<VillagerEntity> {
 /// `AcquirePoi` books its first scan up to twenty ticks out and re-books every
 /// twenty-plus-jitter, and an idle villager strolls -- so the walk back to the
 /// site it just claimed, at half speed, is the long pole rather than the scan.
-const TICKS_TO_TAKE_A_JOB: i32 = 400;
+pub(super) const TICKS_TO_TAKE_A_JOB: i32 = 400;
 
 /// Ticks the villager the way the server would, clock and all.
-fn run_ticks(world: &Arc<World>, villager: &Arc<VillagerEntity>, ticks: i32) {
+pub(super) fn run_ticks(world: &Arc<World>, villager: &Arc<VillagerEntity>, ticks: i32) {
     for _ in 0..ticks {
         advance_time(world);
         villager.base_tick();
@@ -91,7 +91,7 @@ fn run_ticks(world: &Arc<World>, villager: &Arc<VillagerEntity>, ticks: i32) {
 /// A villager wanders while it waits, so a test that only looks at the end of a
 /// fixed run can miss the moment it is watching for. This watches every tick
 /// instead, which is what makes those assertions stable.
-fn run_ticks_until(
+pub(super) fn run_ticks_until(
     world: &Arc<World>,
     villager: &Arc<VillagerEntity>,
     ticks: i32,
@@ -113,7 +113,7 @@ fn run_ticks_until(
 /// The entity tests drive entities directly rather than running a whole world
 /// tick, so nothing else advances game time -- and a villager that never sees
 /// the clock move never runs its job-site scan.
-fn advance_time(world: &Arc<World>) {
+pub(super) fn advance_time(world: &Arc<World>) {
     let now = world.game_time();
     world.level_data.write().set_game_time(now + 1);
 }
@@ -479,7 +479,7 @@ fn a_baby_villager_will_not_take_a_job() {
 }
 
 /// Puts a bed at `head`, with its foot one block further east.
-fn place_bed(world: &Arc<World>, head: BlockPos) {
+pub(super) fn place_bed(world: &Arc<World>, head: BlockPos) {
     let bed = vanilla_blocks::WHITE_BED.default_state();
     // The head's `facing` points from the foot toward the head, so a foot to
     // the east makes a bed that faces west.
@@ -509,7 +509,7 @@ fn place_bed(world: &Arc<World>, head: BlockPos) {
 
 /// Moves the overworld clock, which is what the `villager_schedule` timeline
 /// samples -- game time alone does not change the hour of the day.
-fn set_time_of_day(world: &Arc<World>, ticks: i64) {
+pub(super) fn set_time_of_day(world: &Arc<World>, ticks: i64) {
     assert_eq!(
         world.set_clock_total_ticks(&vanilla_world_clocks::OVERWORLD, ticks),
         Some(()),
@@ -1064,7 +1064,7 @@ fn a_villager_throws_a_gift_at_the_hero_of_the_village() {
 }
 
 /// The activity the villager's own brain is currently in.
-fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
+pub(super) fn active_activity(villager: &Arc<VillagerEntity>) -> Option<Activity> {
     Mob::brain(villager.as_ref())?.active_non_core_activity()
 }
 

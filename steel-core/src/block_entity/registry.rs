@@ -16,7 +16,7 @@ use steel_utils::{BlockPos, BlockStateId};
 
 use super::SharedBlockEntity;
 use super::entities::{
-    BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity,
+    BannerBlockEntity, BarrelBlockEntity, BeaconBlockEntity, BeehiveBlockEntity, BellBlockEntity,
     BrewingStandBlockEntity, BrushableBlockEntity, CampfireBlockEntity, ChestBlockEntity,
     ChiseledBookShelfBlockEntity, CommandBlockEntity, ComparatorBlockEntity, ConduitBlockEntity,
     CopperGolemStatueBlockEntity, CrafterBlockEntity, CreakingHeartBlockEntity,
@@ -219,6 +219,10 @@ fn register_late_arrivals(registry: &mut BlockEntityRegistry) {
 
     registry.register(&vanilla_block_entity_types::BEACON, |level, pos, state| {
         Arc::new(BeaconBlockEntity::new(level, pos, state))
+    });
+
+    registry.register(&vanilla_block_entity_types::BELL, |level, pos, state| {
+        Arc::new(BellBlockEntity::new(level, pos, state))
     });
 
     // One type covers both the campfire and the soul campfire.

@@ -2,13 +2,15 @@ use std::cell::{Cell, RefCell};
 use std::slice;
 use std::sync::{Arc, OnceLock};
 
+use steel_registry::biome::BiomeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::dimension_type::DimensionTypeRef;
 use steel_registry::fluid::FluidRef;
 use steel_registry::game_events::GameEventRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::{
-    init_vanilla_registry, vanilla_blocks, vanilla_dimension_types, vanilla_fluids,
+    RegistryEntry as _, init_vanilla_registry, vanilla_blocks, vanilla_dimension_types,
+    vanilla_fluids,
 };
 use steel_utils::types::{Difficulty, GameType, UpdateFlags};
 use steel_utils::{BlockPos, BlockStateId, Identifier};
@@ -19,6 +21,7 @@ use crate::chunk::Chunk;
 use crate::chunk::chunk_holder::{ChunkHolder, TickingReadiness};
 use crate::chunk::chunk_ticket_manager::ChunkTicketLevel;
 use crate::chunk::heightmap::HeightmapType;
+use crate::chunk::paletted_container::{BiomePalette, BlockPalette};
 use crate::chunk::section::{ChunkSection, Sections};
 use crate::chunk::status::ChunkStatus;
 use crate::entity::Entity;
@@ -78,10 +81,33 @@ pub(crate) fn insert_entity_ticking_chunk(world: &Arc<World>, pos: ChunkPos) -> 
     insert_ready_chunk(world, pos, TickingReadiness::EntityTicking)
 }
 
+/// Inserts a ready chunk whose every section reports `biome`.
+///
+/// The ordinary test chunk is plains throughout, which is also the fallback
+/// for anything that reads a biome -- so a test about what a biome *does* has
+/// to be able to ask for one that is not the default, or it cannot tell the
+/// answer from the fallback.
+pub(crate) fn insert_ready_full_chunk_in_biome(
+    world: &Arc<World>,
+    pos: ChunkPos,
+    biome: BiomeRef,
+) -> Arc<ChunkHolder> {
+    insert_ready_chunk_with_biome(world, pos, TickingReadiness::BlockTicking, Some(biome))
+}
+
 fn insert_ready_chunk(
     world: &Arc<World>,
     pos: ChunkPos,
     readiness: TickingReadiness,
+) -> Arc<ChunkHolder> {
+    insert_ready_chunk_with_biome(world, pos, readiness, None)
+}
+
+fn insert_ready_chunk_with_biome(
+    world: &Arc<World>,
+    pos: ChunkPos,
+    readiness: TickingReadiness,
+    biome: Option<BiomeRef>,
 ) -> Arc<ChunkHolder> {
     let ticket_level = match readiness {
         TickingReadiness::EntityTicking => ChunkTicketLevel::ENTITY_TICKING_CHUNK,
@@ -92,7 +118,15 @@ fn insert_ready_chunk(
     let min_y = world.get_min_y();
     let height = world.get_height();
     let sections = (0..height / 16)
-        .map(|_| ChunkSection::new_empty())
+        .map(|_| match biome {
+            None => ChunkSection::new_empty(),
+            Some(biome) => ChunkSection::new_with_biomes(
+                BlockPalette::Homogeneous(BlockStateId(0)),
+                BiomePalette::Homogeneous(
+                    u16::try_from(biome.id()).expect("a biome id fits a palette entry"),
+                ),
+            ),
+        })
         .collect::<Vec<_>>()
         .into_boxed_slice();
     let proto = Chunk::new(

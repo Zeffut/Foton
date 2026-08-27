@@ -4,6 +4,7 @@ mod banner;
 mod barrel;
 mod beacon;
 mod beehive;
+mod bell;
 mod brewing_stand;
 mod brushable;
 mod campfire;
@@ -51,6 +52,7 @@ pub use beehive::{
     BEEHIVE_MIN_OCCUPATION_TICKS_NECTARLESS, BEEHIVE_MIN_TICKS_BEFORE_REENTERING, BeeReleaseStatus,
     BeehiveBlockEntity,
 };
+pub use bell::{BellBlockEntity, EVENT_BELL_RING};
 pub use brewing_stand::{
     BOTTLE_SLOTS, BREWING_STAND_SLOTS, BrewingStandBlockEntity, BrewingStandDataSlots,
     SLOT_FIRST_BOTTLE, SLOT_INGREDIENT,

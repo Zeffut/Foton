@@ -42,6 +42,8 @@ const PARENT_BREEDING_COOLDOWN: i32 = 6_000;
 const CHILD_AGE: i32 = -24_000;
 /// Vanilla parity: the `0.75` above which `getBreedOffspring` takes the other
 /// parent's variant rather than its own.
+const BIOME_VARIANT_CHANCE: f64 = 0.5;
+/// Vanilla parity: the `biomeRoll < 0.75` arm of the same roll.
 const OWN_VARIANT_CHANCE: f64 = 0.75;
 
 /// Two villagers court, and a village gains a child.
@@ -248,22 +250,19 @@ fn take_vacant_bed(world: &Arc<World>, body: &VillagerEntity) -> Option<BlockPos
 /// Makes the child two villagers have just earned.
 ///
 /// Vanilla parity: the private `VillagerMakeLove.breed` plus
-/// `Villager.getBreedOffspring`, which rolls the child's biome variant.
-///
-/// MISSING FOUNDATION: vanilla's roll has three arms -- the variant of the
-/// biome the parents are standing in below 0.5, this parent's below 0.75, and
-/// the other parent's above. Steel has no `VillagerType.byBiome`; in fact
-/// nothing sets a villager's variant from its surroundings at all, so every
-/// Steel villager is a plains one. The first two arms are therefore folded
-/// together here, which is the same answer today and leaves the split where it
-/// belongs for when biome variants land.
+/// `Villager.getBreedOffspring`, whose roll has three arms -- the variant of
+/// the biome the parents are standing in below 0.5, this parent's below 0.75,
+/// and the other parent's above. A village on a border therefore drifts toward
+/// the ground it stands on rather than breeding true.
 fn breed(
     world: &Arc<World>,
     body: &VillagerEntity,
     partner: &VillagerEntity,
 ) -> Option<Arc<VillagerEntity>> {
     let variant_roll = rand::random::<f64>();
-    let child_type = if variant_roll < OWN_VARIANT_CHANCE {
+    let child_type = if variant_roll < BIOME_VARIANT_CHANCE {
+        body.biome_variant(world)
+    } else if variant_roll < OWN_VARIANT_CHANCE {
         body.villager_type()
     } else {
         partner.villager_type()
@@ -296,4 +295,75 @@ fn breed(
     }
     child.broadcast_entity_event(EntityStatus::LoveHearts);
     Some(child)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use glam::DVec3;
+    use steel_registry::{
+        init_vanilla_registry, vanilla_biomes, vanilla_entities, vanilla_villager_types,
+    };
+    use steel_utils::ChunkPos;
+
+    use super::breed;
+    use crate::behavior::init_behaviors;
+    use crate::block_entity::init_block_entities;
+    use crate::entity::SharedEntity;
+    use crate::entity::entities::VillagerEntity;
+    use crate::entity::next_entity_id;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk_in_biome};
+
+    /// Enough births that the biome arm coming up zero times is a one in a
+    /// million million accident -- and, with the arm gone, a certainty.
+    const BIRTHS: usize = 40;
+
+    /// Vanilla rolls a newborn's variant three ways: half the time the biome
+    /// under its parents, a quarter its mother's, a quarter its father's. Two
+    /// plains parents standing in a desert can only produce a desert child
+    /// through the first of those, so a run of births with no desert child in
+    /// it says that arm is not there.
+    #[test]
+    fn a_villager_born_in_a_desert_is_sometimes_a_desert_villager() {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world("villager_breed_desert_variant");
+        insert_ready_full_chunk_in_biome(&world, ChunkPos::new(0, 0), &vanilla_biomes::DESERT);
+
+        let parent = |offset: f64| {
+            let villager = Arc::new(VillagerEntity::new(
+                &vanilla_entities::VILLAGER,
+                next_entity_id(),
+                DVec3::new(8.5 + offset, 64.0, 8.5),
+                Arc::downgrade(&world),
+            ));
+            world
+                .try_add_entity(Arc::clone(&villager) as SharedEntity)
+                .expect("the test chunk is loaded, so the parent should attach");
+            villager
+        };
+        let body = parent(0.0);
+        let partner = parent(1.0);
+        assert_eq!(
+            body.villager_type().key,
+            vanilla_villager_types::PLAINS.key,
+            "both parents are plains, so a desert child can only come from the biome"
+        );
+        assert_eq!(
+            partner.villager_type().key,
+            vanilla_villager_types::PLAINS.key
+        );
+
+        let desert_children = (0..BIRTHS)
+            .filter_map(|_| breed(&world, &body, &partner))
+            .filter(|child| child.villager_type().key == vanilla_villager_types::DESERT.key)
+            .count();
+
+        assert!(
+            desert_children > 0,
+            "none of {BIRTHS} newborns took the desert it was born in"
+        );
+    }
 }

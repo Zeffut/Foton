@@ -348,9 +348,15 @@ impl World {
                 continue;
             }
 
+            // `can_update_path` locks the navigation itself, so it is asked
+            // before the guard exists. As an argument it was evaluated inside
+            // the borrow and took the same lock twice, which parking_lot parks
+            // on forever -- see `PathfinderMob::update_path`, which already
+            // reads it out first for the same reason.
+            let can_update_path = pathfinder.can_update_path();
             let request = {
                 let mut navigation = pathfinder.mob_base().navigation().lock();
-                navigation.request_recompute_path(game_time, pathfinder.can_update_path())
+                navigation.request_recompute_path(game_time, can_update_path)
             };
             if let Some(request) = request {
                 pathfinder.recompute_path(request);
