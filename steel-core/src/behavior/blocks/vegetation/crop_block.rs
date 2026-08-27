@@ -224,6 +224,12 @@ impl Bonemealable for CropBlock {
 }
 
 impl<T: CropLike + Bonemealable + Send + Sync> BlockBehavior for T {
+    /// Vanilla parity: the `instanceof CropBlock` half of the test, answered
+    /// here for all five of vanilla's `CropBlock` subclasses at once.
+    fn crop_is_max_age(&self, state: BlockStateId) -> Option<bool> {
+        Some(CropLike::is_max_age(self, state))
+    }
+
     fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {
         if self.may_place_on(
             context.world.get_block_state(context.place_pos().below()),

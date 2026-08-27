@@ -662,6 +662,18 @@ pub trait BlockBehavior: Send + Sync {
         false
     }
 
+    /// Whether this state is a crop, and if so whether it has finished growing.
+    ///
+    /// Vanilla parity: the `block instanceof CropBlock cropBlock` test that
+    /// `HarvestFarmland` and `UseBonemeal` each follow with
+    /// `cropBlock.isMaxAge(state)`. Steel has no class hierarchy to ask, so a
+    /// crop behavior answers here; `None` is the `instanceof` falling through,
+    /// which is what keeps a stem or a pitcher crop -- neither of which vanilla
+    /// derives from `CropBlock` -- out of a farmer's hands.
+    fn crop_is_max_age(&self, _state: BlockStateId) -> Option<bool> {
+        None
+    }
+
     /// Mirrors vanilla `DoorBlock.isWoodenDoor`.
     ///
     /// Despite the vanilla name, this returns true for any door block type that

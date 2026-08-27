@@ -620,6 +620,16 @@ impl VillagerEntity {
         self.food_points_in_inventory() < BREEDING_FOOD_THRESHOLD
     }
 
+    /// Vanilla parity: `Villager.hasFarmSeeds`.
+    #[must_use]
+    pub fn has_farm_seeds(&self) -> bool {
+        self.inventory
+            .lock()
+            .items()
+            .iter()
+            .any(|stack| stack.item().has_tag(&ItemTag::VILLAGER_PLANTABLE_SEEDS))
+    }
+
     /// The experience this villager has banked toward its next level.
     ///
     /// Vanilla parity: `Villager.getVillagerXp`.

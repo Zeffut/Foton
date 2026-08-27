@@ -607,9 +607,7 @@ const WORK_DISTANCE: f64 = 1.73;
 /// brain with, is not here. Its `useWorkstation` both bakes bread out of the
 /// wheat in the villager's inventory and feeds seeds through the composter; the
 /// composting needs `ComposterBlock.insertItem`/`extractProduce`, which Steel's
-/// composter block behavior does not implement, and the baking needs the
-/// `SimpleContainer` add/count/remove helpers Steel's villager inventory does
-/// not have yet.
+/// composter block behavior does not implement.
 pub struct WorkAtPoi {
     last_check: i64,
 }

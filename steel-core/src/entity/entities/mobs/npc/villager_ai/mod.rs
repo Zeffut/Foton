@@ -36,6 +36,7 @@
 //! [`ScheduleAttribute`]: crate::entity::ai::brain::ScheduleAttribute
 
 mod breed;
+mod farm;
 mod job_site;
 mod panic;
 mod trade;
@@ -65,6 +66,7 @@ use crate::entity::entities::mobs::npc::VillagerEntity;
 use crate::world::World;
 
 pub use breed::VillagerMakeLove;
+pub use farm::HarvestFarmland;
 pub use job_site::{
     AssignProfessionFromJobSite, GoToPotentialJobSite, PoiCompetitorScan, ResetProfession,
     SetWalkTargetFromBlockMemory, WorkAtPoi, YieldJobSite,
@@ -114,6 +116,10 @@ const MEETING_POINT_STROLL_DISTANCE: i32 = 40;
 /// Vanilla parity: the `maxDistanceFromPoi` of the work package's
 /// `StrollToPoiList.create(SECONDARY_JOB_SITE, speedModifier, 1, 6, JOB_SITE)`.
 const SECONDARY_JOB_SITE_MAX_DIST: i32 = 6;
+/// Vanilla parity: the weight `getWorkPackage` gives `HarvestFarmland` for a
+/// farmer -- see the module docs on why the farmer's weights are used
+/// throughout.
+const FARMING_WEIGHT: i32 = 2;
 /// Vanilla parity: the `VillageBoundRandomStroll.create(runawaySpeed, 2, 2)` of
 /// the panic package, which keeps a frightened villager's hops short.
 const PANIC_STROLL_DIST: i32 = 2;
@@ -231,17 +237,6 @@ pub fn make_brain() -> Brain {
 /// MISSING FOUNDATION: vanilla also runs `InteractWithDoor`, `ReactToBell` and
 /// `SetRaidStatus` here. Doors need the `DOORS_TO_CLOSE` bookkeeping Steel does
 /// not do, and the other two need the bell event and the raid seam.
-///
-/// MISSING FOUNDATION: `GoToWantedItem` is here, and is inert. It walks to
-/// whatever `NEAREST_VISIBLE_WANTED_ITEM` names, and `NearestItemSensor` only
-/// names something the body `wantsToPickUp` -- which needs `canPickUpLoot`,
-/// which vanilla's `Villager` constructor sets and Steel's does not. Turning
-/// the flag on alone would be worse than leaving it off: Steel's villager holds
-/// a bare `Vec<ItemStack>` rather than the `SimpleContainer` that
-/// `InventoryCarrier::pick_up_item` fills, so the shared `Mob::pick_up_item`
-/// would try to *equip* the bread instead of stowing it. The behavior is placed
-/// where vanilla places it so that wiring the inventory up is the only step
-/// left.
 fn core_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Core,
@@ -328,16 +323,9 @@ fn core_package() -> ActivityData {
 
 /// Vanilla parity: `VillagerGoalPackages.getWorkPackage`.
 ///
-/// MISSING FOUNDATION: vanilla's `RunOne` also holds `StrollToPoiList` over
-/// `SECONDARY_JOB_SITE`, `HarvestFarmland` and `UseBonemeal`, and the package
-/// ends with `GiveGiftToHero`. Farming needs three things Steel does not have:
-/// the `SECONDARY_POIS` sensor, which reads `VillagerProfession.secondaryPoi`
-/// -- a hardcoded Java field `SteelExtractor` emits nothing for, and the reason
-/// `HarvestFarmland` could not start even if it were ported, since it is gated
-/// on `SECONDARY_JOB_SITE` being present; a way to ask a block behavior whether
-/// it is a crop at max age, which `BlockBehavior` has no seam for; and the
-/// container the villager would keep seeds in (see the core package). The gift
-/// needs the hero-of-the-village effect.
+/// MISSING FOUNDATION: vanilla's `RunOne` also holds `UseBonemeal`, which needs
+/// the bone-meal application seam, and the package ends with `GiveGiftToHero`,
+/// which needs the hero-of-the-village effect.
 fn work_package() -> ActivityData {
     ActivityData::with_priorities(
         Activity::Work,
@@ -374,6 +362,7 @@ fn work_package() -> ActivityData {
                         )),
                         5,
                     ),
+                    (Behavior::boxed(HarvestFarmland::new()), FARMING_WEIGHT),
                 ])),
             ),
             (

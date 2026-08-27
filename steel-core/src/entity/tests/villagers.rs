@@ -15,15 +15,14 @@ use steel_registry::{vanilla_villager_professions, vanilla_world_clocks};
 use steel_utils::types::UpdateFlags;
 
 use super::*;
-use crate::behavior::init_behaviors;
+use crate::behavior::{BlockStateBehaviorExt as _, init_behaviors};
 use crate::block_entity::init_block_entities;
 use crate::entity::ai::brain::Activity;
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::gossip::{GossipType, ReputationEventType};
 use crate::entity::entities::{VillagerEntity, ZombieEntity};
 use crate::entity::{
-    AgeableMob, EquipmentSlot, InventoryCarrier as _, LivingEntity, Mob, SharedEntity,
-    next_entity_id,
+    AgeableMob, InventoryCarrier as _, LivingEntity, Mob, SharedEntity, next_entity_id,
 };
 use crate::inventory::container::Container as _;
 use crate::poi::poi_storage::OccupationStatus;
@@ -695,6 +694,90 @@ fn only_a_farmer_notices_the_farmland_it_is_standing_on() {
             .iter()
             .all(|pos| pos.dimension == world.key && pos.pos.y() == STAND.y() - 1),
         "the sensor should report the farmland it scanned, in this dimension"
+    );
+}
+
+/// The five-by-five field the farming test plants and then watches.
+const FIELD_RADIUS: i32 = 2;
+
+/// Every square of that field, at crop height.
+fn field() -> Vec<BlockPos> {
+    let mut positions = Vec::new();
+    for x in (STAND.x() - FIELD_RADIUS)..=(STAND.x() + FIELD_RADIUS) {
+        for z in (STAND.z() - FIELD_RADIUS)..=(STAND.z() + FIELD_RADIUS) {
+            positions.push(BlockPos::new(x, STAND.y(), z));
+        }
+    }
+    positions
+}
+
+/// Lays farmland under the field and ripe wheat on top of it.
+fn sow_a_ripe_field(world: &Arc<World>) {
+    let ripe = vanilla_blocks::WHEAT
+        .default_state()
+        .set_value(&BlockStateProperties::AGE_7, 7);
+    for pos in field() {
+        assert!(world.set_block(
+            pos.below(),
+            vanilla_blocks::FARMLAND.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        assert!(world.set_block(pos, ripe, UpdateFlags::UPDATE_NONE));
+    }
+}
+
+/// The farming loop, end to end: a farmer walks into a ripe field, pulls the
+/// wheat and puts a seed back in the ground.
+///
+/// Three separate pieces have to be right for this at once -- the
+/// `SECONDARY_POIS` sensor `HarvestFarmland` is gated on, the `crop_is_max_age`
+/// block seam that tells a ripe crop from a growing one, and the container the
+/// seeds come out of. It enters only through `villager.tick()`.
+#[test]
+fn a_farmer_pulls_ripe_wheat_and_puts_a_seed_back_in_the_ground() {
+    let world = villager_world("villager_harvests_farmland");
+    let villager = spawn_villager(&world);
+    sow_a_ripe_field(&world);
+    assert!(world.set_block(
+        BlockPos::new(STAND.x() + 1, STAND.y(), STAND.z()),
+        vanilla_blocks::COMPOSTER.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    villager
+        .carried_inventory()
+        .lock()
+        .set_item(0, ItemStack::with_count(&vanilla_items::WHEAT_SEEDS, 8));
+
+    // 2000..9000 is the WORK stretch of the schedule, and nothing here ticks
+    // the day clock, so the villager stays in working hours for the whole run.
+    set_time_of_day(&world, 3_000);
+    assert!(
+        run_ticks_until(&world, &villager, TICKS_TO_TAKE_A_JOB, || {
+            villager.profession().key.path == "farmer"
+        }),
+        "the composter should have made this villager a farmer"
+    );
+
+    let harvested = || {
+        field()
+            .iter()
+            .any(|&pos| world.get_block_state(pos).crop_is_max_age() != Some(true))
+    };
+    assert!(
+        run_ticks_until(&world, &villager, 8_000, harvested),
+        "a farmer standing in ripe wheat should have pulled some of it"
+    );
+
+    let replanted = || {
+        field().iter().any(|&pos| {
+            let state = world.get_block_state(pos);
+            state.get_block().key == vanilla_blocks::WHEAT.key
+                && state.get_value(&BlockStateProperties::AGE_7) == 0
+        })
+    };
+    assert!(
+        run_ticks_until(&world, &villager, 8_000, replanted),
+        "the square it pulled should have been sown again from its own seeds"
     );
 }
 
