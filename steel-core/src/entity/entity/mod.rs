@@ -228,7 +228,7 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         }
 
         if let Some(living) = self.as_living_entity() {
-            living.save_command_nbt(&mut nbt);
+            living.save_living(&mut nbt);
         }
         self.save_additional(&mut nbt);
 

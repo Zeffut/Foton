@@ -9,6 +9,7 @@ use std::{array, mem, sync::Arc};
 
 use glam::DVec3;
 use rustc_hash::FxHashMap;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_protocol::packets::game::{CRemoveMobEffect, CUpdateMobEffect, MobEffectPacketFlags};
 use steel_registry::RegistryEntry;
@@ -21,7 +22,9 @@ use steel_registry::mob_effect::MobEffectRef;
 use steel_registry::vanilla_attributes;
 use steel_registry::vanilla_entity_data::VanillaLivingEntityData;
 use steel_registry::vanilla_entity_type_tags::EntityTypeTag;
-use steel_registry::{REGISTRY, TaggedRegistryExt as _, vanilla_damage_types, vanilla_mob_effects};
+use steel_registry::{
+    REGISTRY, RegistryExt as _, TaggedRegistryExt as _, vanilla_damage_types, vanilla_mob_effects,
+};
 use steel_utils::locks::{IntoShared, Shared, SyncMutex};
 use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, Identifier};
@@ -220,6 +223,42 @@ impl MobEffectInstance {
             );
         }
         nbt
+    }
+
+    /// Reads back what [`Self::to_vanilla_nbt`] wrote.
+    ///
+    /// Vanilla parity: `MobEffectInstance.CODEC`. Returns `None` only for an
+    /// effect id no registry entry answers to, which is the one thing the codec
+    /// cannot default its way past.
+    #[must_use]
+    pub(crate) fn from_vanilla_nbt(nbt: &BorrowedNbtCompoundView<'_, '_>) -> Option<Self> {
+        let key = nbt.string("id")?.to_str().parse::<Identifier>().ok()?;
+        let effect = REGISTRY.mob_effects.by_key(&key)?;
+        Some(Self::details_from_vanilla_nbt(effect, nbt))
+    }
+
+    /// Vanilla parity: `MobEffectInstance.Details.MAP_CODEC`, whose every field
+    /// has a default -- including `show_icon`, which falls back to whatever
+    /// `show_particles` resolved to rather than to a constant.
+    fn details_from_vanilla_nbt(
+        effect: MobEffectRef,
+        nbt: &BorrowedNbtCompoundView<'_, '_>,
+    ) -> Self {
+        // `ExtraCodecs.UNSIGNED_BYTE`: amplifier 200 is written as the byte
+        // -56, so reading it as signed would come back as a negative level.
+        let amplifier = i32::from(nbt.byte("amplifier").unwrap_or(0).cast_unsigned());
+        let visible = nbt.byte("show_particles").is_none_or(|value| value != 0);
+        Self {
+            effect,
+            duration: nbt.int("duration").unwrap_or(0),
+            amplifier,
+            ambient: nbt.byte("ambient").is_some_and(|value| value != 0),
+            visible,
+            show_icon: nbt.byte("show_icon").map_or(visible, |value| value != 0),
+            hidden_effect: nbt
+                .compound("hidden_effect")
+                .map(|hidden| Box::new(Self::details_from_vanilla_nbt(effect, &hidden))),
+        }
     }
 
     #[must_use]
@@ -1127,7 +1166,16 @@ impl LivingEntityBase {
             .attributes
             .lock()
             .required_value(vanilla_attributes::MAX_ABSORPTION) as f32;
-        self.state.lock().absorption_amount = amount.clamp(0.0, max_absorption);
+        self.internal_set_absorption_amount(amount.clamp(0.0, max_absorption));
+    }
+
+    /// Sets vanilla `LivingEntity.absorptionAmount` without the cap.
+    ///
+    /// Vanilla parity: `LivingEntity.internalSetAbsorptionAmount`, which the
+    /// save loader uses because `max_absorption` is zero by default and the
+    /// attributes that raise it are read *after* the shield they cap.
+    pub fn internal_set_absorption_amount(&self, amount: f32) {
+        self.state.lock().absorption_amount = amount;
     }
 
     /// Runs vanilla `LivingEntity.skipDropExperience`.
@@ -1221,6 +1269,26 @@ impl LivingEntityBase {
     #[must_use]
     pub fn active_mob_effects(&self) -> Vec<ActiveMobEffect> {
         self.active_mob_effects.lock().values().cloned().collect()
+    }
+
+    /// Replaces the active effects with a set read back off disk.
+    ///
+    /// Vanilla parity: the `active_effects` block of
+    /// `LivingEntity.readAdditionalSaveData`, which clears the map and puts the
+    /// saved instances straight into it. It deliberately runs neither
+    /// `onEffectAdded` nor `onEffectStarted`: vanilla applies an effect's
+    /// attribute modifiers, and grants Absorption its shield, only when the
+    /// effect is *given*. Going through [`Self::add_mob_effect`] here would
+    /// hand a reloaded mob a second set of both.
+    pub fn load_mob_effects(&self, effects: Vec<MobEffectInstance>) {
+        {
+            let mut active = self.active_mob_effects.lock();
+            active.clear();
+            for effect in effects {
+                active.insert(effect.effect, effect);
+            }
+        }
+        self.mark_effects_dirty();
     }
 
     /// Adds or updates active vanilla mob-effect state.
@@ -1470,6 +1538,19 @@ impl LivingEntityBase {
         let mut state = self.state.lock();
         state.current_impulse_context_reset_grace_time =
             state.current_impulse_context_reset_grace_time.max(ticks);
+    }
+
+    /// Restores the saved impulse context.
+    ///
+    /// Vanilla parity: the two `LivingEntity.readAdditionalSaveData` lines that
+    /// assign `currentImpulseContextResetGraceTime` and
+    /// `currentImpulseImpactPos` directly. The live setter below cannot do it:
+    /// it forces its own grace time and only ever sets the impact position
+    /// alongside one.
+    pub fn load_current_impulse_context(&self, grace_time: i32, impact_pos: Option<DVec3>) {
+        let mut state = self.state.lock();
+        state.current_impulse_context_reset_grace_time = grace_time;
+        state.current_impulse_impact_pos = impact_pos;
     }
 
     /// Mirrors vanilla `LivingEntity.setIgnoreFallDamageFromCurrentImpulse`.
@@ -1881,6 +1962,11 @@ impl LivingEntityBase {
         let mut state = self.state.lock();
         state.death_time += 1;
         state.death_time
+    }
+
+    /// Sets vanilla `LivingEntity.deathTime`.
+    pub fn set_death_time(&self, death_time: i32) {
+        self.state.lock().death_time = death_time;
     }
 
     /// Returns vanilla `LivingEntity.deathTime`.

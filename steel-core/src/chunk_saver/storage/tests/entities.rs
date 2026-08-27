@@ -530,3 +530,126 @@ fn unimplemented_block_entities_preserve_nbt_through_proto_save_load() {
     );
     assert_eq!(saved.long("LootTableSeed"), Some(42));
 }
+
+/// Position inside chunk (0, 0), so a saved entity loads back into it.
+const LIVING_STATE_POS: DVec3 = DVec3::new(5.5, 6.0, 7.5);
+
+/// The modifier id the attribute round trip looks for.
+const TEST_SPEED_MODIFIER: Identifier = Identifier::new_static("steel", "test_speed");
+
+fn living_state_round_trip(zombie: &SharedEntity) -> SharedEntity {
+    let Some(persistent) = ChunkStorage::entity_tree_to_persistent(zombie) else {
+        panic!("a live zombie should be saveable");
+    };
+    let Some(loaded) =
+        ChunkStorage::persistent_to_entity_at_level(&persistent, ChunkPos::new(0, 0), &Weak::new())
+    else {
+        panic!("a saved zombie should load back");
+    };
+    loaded
+}
+
+fn test_zombie() -> SharedEntity {
+    let Some(zombie) = ENTITIES.create(
+        &vanilla_entities::ZOMBIE,
+        next_entity_id(),
+        LIVING_STATE_POS,
+        Weak::new(),
+    ) else {
+        panic!("a zombie should have an entity factory");
+    };
+    zombie
+}
+
+/// The half of a save that belongs to every living entity rather than to a type.
+///
+/// The chunk saver used to write only `save_additional`, which is the *type's*
+/// half, so health, potion effects, absorption and attribute modifiers reached
+/// no chunk file and were read from none: every mob in the world came back at
+/// full health with nothing on it. Saving one compound and loading it is what
+/// proves the pair: a writer that writes nothing fails the loaded assertions,
+/// and a reader that ignores the compound fails them too.
+///
+/// Every value here is deliberately not a zombie's default, and the untouched
+/// control below is what says so -- a loader that hardcoded these numbers would
+/// pass this test alone and fail that one.
+#[test]
+fn living_state_survives_a_chunk_save_and_load() {
+    init_globals_once();
+
+    let zombie = test_zombie();
+    let Some(living) = zombie.as_living_entity() else {
+        panic!("a zombie is a living entity");
+    };
+    living
+        .attributes()
+        .lock()
+        .set_base_value(vanilla_attributes::MAX_HEALTH, 30.0);
+    living.attributes().lock().set_modifier(
+        vanilla_attributes::MOVEMENT_SPEED,
+        AttributeModifier {
+            id: TEST_SPEED_MODIFIER,
+            amount: 0.5,
+            operation: AttributeModifierOperation::AddValue,
+        },
+        true,
+    );
+    living.set_health(14.0);
+    living.internal_set_absorption_amount(6.0);
+    living.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::STRENGTH,
+        1200,
+        3,
+    ));
+
+    let loaded = living_state_round_trip(&zombie);
+    let Some(loaded) = loaded.as_living_entity() else {
+        panic!("a loaded zombie is a living entity");
+    };
+
+    assert!((loaded.get_health() - 14.0).abs() <= f32::EPSILON);
+    assert!((loaded.get_absorption_amount() - 6.0).abs() <= f32::EPSILON);
+    let base_max_health = loaded
+        .attributes()
+        .lock()
+        .get_base_value(vanilla_attributes::MAX_HEALTH);
+    assert!(base_max_health.is_some_and(|base| (base - 30.0).abs() <= f64::EPSILON));
+    assert!(
+        loaded
+            .attributes()
+            .lock()
+            .has_modifier(vanilla_attributes::MOVEMENT_SPEED, &TEST_SPEED_MODIFIER)
+    );
+    let Some(effect) = loaded.mob_effect(vanilla_mob_effects::STRENGTH) else {
+        panic!("the strength effect should survive the save");
+    };
+    assert_eq!(effect.amplifier(), 3);
+    assert_eq!(effect.duration(), 1200);
+}
+
+/// The control for the test above: an untouched mob keeps its own defaults.
+///
+/// Vanilla's `readAdditionalSaveData` defaults a missing `Health` to *full*
+/// health rather than to zero, which is exactly the kind of full-looking
+/// default that makes a broken loader look healthy. This says out loud what the
+/// numbers above have to differ from.
+#[test]
+fn an_untouched_mob_round_trips_to_its_own_defaults() {
+    init_globals_once();
+
+    let zombie = test_zombie();
+    let loaded = living_state_round_trip(&zombie);
+    let Some(loaded) = loaded.as_living_entity() else {
+        panic!("a loaded zombie is a living entity");
+    };
+
+    assert!((loaded.get_health() - 20.0).abs() <= f32::EPSILON);
+    assert!(loaded.get_absorption_amount().abs() <= f32::EPSILON);
+    assert!(loaded.active_mob_effects().is_empty());
+    assert!(
+        !loaded
+            .attributes()
+            .lock()
+            .has_modifier(vanilla_attributes::MOVEMENT_SPEED, &TEST_SPEED_MODIFIER)
+    );
+}

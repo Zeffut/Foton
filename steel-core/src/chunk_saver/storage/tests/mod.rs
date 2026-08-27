@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use crate::bootstrap::init_globals_once;
 use crate::entity::{
-    DEFAULT_MAX_AIR_SUPPLY, Entity, SharedEntity,
+    DEFAULT_MAX_AIR_SUPPLY, ENTITIES, Entity, MobEffectInstance, SharedEntity,
+    attribute::{AttributeModifier, AttributeModifierOperation},
     entities::{EndCrystalEntity, RawEntity},
     next_entity_id,
 };
@@ -13,10 +14,12 @@ use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 use steel_registry::init_vanilla_registry;
+use steel_registry::vanilla_attributes;
 use steel_registry::vanilla_block_entity_types;
 use steel_registry::vanilla_blocks;
 use steel_registry::vanilla_entities;
 use steel_registry::vanilla_fluids;
+use steel_registry::vanilla_mob_effects;
 use steel_utils::BoundingBox;
 use steel_utils::types::UpdateFlags;
 use steel_worldgen::structure::StructureReferenceSet;

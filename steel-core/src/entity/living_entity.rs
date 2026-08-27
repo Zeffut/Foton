@@ -223,8 +223,14 @@ pub trait LivingEntity: Entity {
         self.drain_dirty_living_equipment()
     }
 
-    /// Appends vanilla-shaped living state used by command NBT predicates.
-    fn save_command_nbt(&self, nbt: &mut NbtCompound) {
+    /// Writes the state every living entity has, whoever it is.
+    ///
+    /// Vanilla parity: `LivingEntity.addAdditionalSaveData`. This is the half a
+    /// concrete entity's own [`Entity::save_additional`] sits on top of, so
+    /// both the chunk saver and the command NBT snapshot ask for it -- they are
+    /// the same compound in vanilla, where one `addAdditionalSaveData` serves
+    /// `saveWithoutId` and every `/data` read alike.
+    fn save_living(&self, nbt: &mut NbtCompound) {
         nbt.insert("Health", self.get_health());
         nbt.insert(
             "DeathTime",
@@ -298,6 +304,84 @@ pub trait LivingEntity: Entity {
         if !equipment.is_empty() {
             nbt.insert("equipment", NbtTag::Compound(equipment));
         }
+    }
+
+    /// Reads back what [`Self::save_living`] wrote.
+    ///
+    /// Vanilla parity: `LivingEntity.readAdditionalSaveData`, including its
+    /// order -- absorption and the attributes come before the health they cap,
+    /// and a missing `Health` means full health rather than zero.
+    ///
+    /// One key travels one way only. `last_hurt_by_mob` names the aggressor by
+    /// UUID, and Steel holds that as a live handle; resolving one from a saved
+    /// UUID needs the deferred lookup vanilla has in `EntityReference` and
+    /// Steel does not, so a reloaded mob forgets who hurt it. The key stays in
+    /// the compound because command predicates still read it off a live entity.
+    fn load_living(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.internal_set_absorption_amount(nbt.float("AbsorptionAmount").unwrap_or(0.0));
+
+        if let Some(attributes) = nbt.list("attributes").and_then(|list| list.compounds()) {
+            let packed = attributes.into_iter().collect::<Vec<_>>();
+            self.attributes().lock().apply_vanilla_nbt(&packed);
+        }
+
+        let effects = nbt
+            .list("active_effects")
+            .and_then(|list| list.compounds())
+            .map(|effects| {
+                effects
+                    .into_iter()
+                    .filter_map(|effect| MobEffectInstance::from_vanilla_nbt(&effect))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.living_base().load_mob_effects(effects);
+
+        self.set_health(nbt.float("Health").unwrap_or_else(|| self.get_max_health()));
+        self.living_base()
+            .set_death_time(i32::from(nbt.short("DeathTime").unwrap_or(0)));
+        self.set_fall_flying(nbt.byte("FallFlying").is_some_and(|value| value != 0));
+
+        match nbt
+            .int_array("sleeping_pos")
+            .filter(|position| position.len() == 3)
+        {
+            Some(position) => {
+                self.set_sleeping_pos(BlockPos::new(position[0], position[1], position[2]));
+            }
+            None => self.clear_sleeping_pos(),
+        }
+
+        if let Some(uuid) = nbt
+            .int_array("last_hurt_by_player")
+            .filter(|uuid| uuid.len() == 4)
+            .and_then(|uuid| Uuid::from_int_array(&uuid))
+        {
+            self.set_last_hurt_by_player(
+                uuid,
+                nbt.int("last_hurt_by_player_memory_time").unwrap_or(0),
+            );
+        }
+
+        for slot in EquipmentSlot::ALL {
+            let item = nbt
+                .compound("equipment")
+                .and_then(|equipment| equipment.compound(slot.name()))
+                .and_then(|item| ItemStack::from_borrowed_compound(&item))
+                .unwrap_or_default();
+            self.set_item_slot(slot, item);
+        }
+
+        let impact_pos = nbt
+            .list("current_explosion_impact_pos")
+            .and_then(|list| list.doubles())
+            .filter(|position| position.len() == 3)
+            .map(|position| DVec3::new(position[0], position[1], position[2]));
+        self.living_base().load_current_impulse_context(
+            nbt.int("current_impulse_context_reset_grace_time")
+                .unwrap_or(0),
+            impact_pos,
+        );
     }
 
     /// Gets the current health of the entity.
@@ -1376,6 +1460,15 @@ pub trait LivingEntity: Entity {
     /// Sets the absorption amount.
     fn set_absorption_amount(&self, amount: f32) {
         self.living_base().set_absorption_amount(amount);
+    }
+
+    /// Sets the absorption amount past the `max_absorption` cap.
+    ///
+    /// Vanilla parity: `LivingEntity.internalSetAbsorptionAmount`, which the
+    /// save loader uses because `max_absorption` is zero by default and the
+    /// attributes that raise it are read *after* the shield they would cap.
+    fn internal_set_absorption_amount(&self, amount: f32) {
+        self.living_base().internal_set_absorption_amount(amount);
     }
 
     /// Returns vanilla `LivingEntity.getFallDamageSound()`.

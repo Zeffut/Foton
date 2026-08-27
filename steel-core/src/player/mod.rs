@@ -1797,10 +1797,11 @@ impl LivingEntity for Player {
             .attributes()
             .lock()
             .required_value(vanilla_attributes::MAX_ABSORPTION) as f32;
-        self.entity_data
-            .lock()
-            .player_absorption
-            .set(amount.clamp(0.0, max_absorption));
+        self.internal_set_absorption_amount(amount.clamp(0.0, max_absorption));
+    }
+
+    fn internal_set_absorption_amount(&self, amount: f32) {
+        self.entity_data.lock().player_absorption.set(amount);
     }
 
     fn is_affected_by_fluids(&self) -> bool {

@@ -172,7 +172,14 @@ impl ChunkStorage {
             return None;
         }
 
+        // The living half first, then the type's own, the way vanilla's
+        // `addAdditionalSaveData` chain runs `super` before the subclass.
+        // Without the first call a chunk file keeps no health, no potion
+        // effects and no attribute modifiers for anything alive.
         let mut nbt = NbtCompound::new();
+        if let Some(living) = entity.as_living_entity() {
+            living.save_living(&mut nbt);
+        }
         entity.save_additional(&mut nbt);
         let mut nbt_bytes = Vec::new();
         nbt.write(&mut nbt_bytes);

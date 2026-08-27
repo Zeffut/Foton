@@ -96,12 +96,16 @@ impl EntityRegistry {
     /// the load factory has reconstructed the entity's base state.
     fn finish_registered_load(entity: &SharedEntity, nbt: &BorrowedNbtCompound<'_>) {
         let yaw = entity.rotation().0;
+        let nbt: BorrowedNbtCompoundView<'_, '_> = nbt.into();
         if let Some(living) = entity.as_living_entity() {
             living.set_y_head_rot(yaw);
             living.set_y_body_rot(yaw);
+            // Before the type's own load, the way vanilla's
+            // `readAdditionalSaveData` chain runs `super` first: a slime reads
+            // its size on top of the health the shared half just restored.
+            living.load_living(nbt);
         }
 
-        let nbt: BorrowedNbtCompoundView<'_, '_> = nbt.into();
         entity.load_additional(nbt);
         entity.sync_base_entity_data();
     }
