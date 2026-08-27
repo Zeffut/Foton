@@ -36,6 +36,15 @@ impl SpawnEggItem {
         stack.get(ENTITY_DATA).map(EntityData::entity_type)
     }
 
+    /// Puts one mob of `entity_type` at `pos`.
+    ///
+    /// Vanilla parity: the `EntityType.spawn` both `SpawnEggItem.spawnMob` and
+    /// `SpawnEggItemBehavior` go through, so a dispenser and a right click make
+    /// the same mob under the same rules.
+    pub fn spawn_at(world: &Arc<World>, entity_type: EntityTypeRef, pos: BlockPos) -> Option<()> {
+        spawn_mob(world, entity_type, pos)
+    }
+
     /// Breeds a baby out of `parent` when `stack` is that mob's own spawn egg.
     ///
     /// Vanilla parity: `SpawnEggItem.spawnOffspringFromSpawnEgg`. The egg has to

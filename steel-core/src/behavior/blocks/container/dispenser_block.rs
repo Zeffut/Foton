@@ -23,10 +23,7 @@ use steel_utils::{BlockPos, BlockStateId, Downcast as _, translations};
 use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 
-use super::dispense_behavior::{
-    DispenseOutcome, DispenseSource, dispense_behavior_for, feed_sulfur_cube,
-    is_sulfur_cube_swallowable,
-};
+use super::dispense_behavior::{DispenseOutcome, DispenseSource, dispense_behavior_for};
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
@@ -173,7 +170,12 @@ fn dispense_position(pos: BlockPos, facing: Direction) -> DVec3 {
 ///
 /// Vanilla parity: `DefaultDispenseItemBehavior.spawnItem` at the dispenser's
 /// own accuracy.
-fn spawn_dispensed_item(world: &Arc<World>, pos: BlockPos, facing: Direction, stack: ItemStack) {
+pub(super) fn spawn_dispensed_item(
+    world: &Arc<World>,
+    pos: BlockPos,
+    facing: Direction,
+    stack: ItemStack,
+) {
     spawn_item_toward(
         world,
         dispense_position(pos, facing),
@@ -237,18 +239,17 @@ impl DropperBlock {
     }
 }
 
-/// Takes one item out of the block and throws it.
+/// Takes one item out of the block and does whatever that item means.
 ///
-/// Vanilla parity: `DispenserBlock.dispenseFrom` with
-/// `DefaultDispenseItemBehavior`.
+/// Vanilla parity: `DispenserBlock.dispenseFrom`. An item with nothing else to
+/// say is thrown, which is also what vanilla does.
 ///
-/// An item with no registered behavior is thrown, which is what vanilla does
-/// too.
-///
-/// TODO: Steel registers arrows and TNT so far. Vanilla also places water and
-/// lava, equips armor on the mob in front, shears sheep, spreads bone meal,
-/// hatches spawn eggs and launches boats and minecarts; each needs a system
-/// Steel does not have yet.
+/// TODO: Steel covers arrows, TNT, bone meal, flint and steel, shears,
+/// equipment, spawn eggs and sulfur cubes. Vanilla also places a filled
+/// bucket's contents and picks a fluid up with an empty one, launches boats and
+/// minecarts, plants a wither skull or a carved pumpkin, opens a shulker box,
+/// fills a bottle, charges a respawn anchor, waxes with a honeycomb, brushes an
+/// armadillo, and makes mud with a water bottle.
 fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
     let Some(block_entity) = world.get_block_entity(pos) else {
         return;
@@ -262,33 +263,14 @@ fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
         return;
     };
 
-    let mut stack = dispenser.get_item(slot);
+    let stack = dispenser.get_item(slot);
     if stack.is_empty() {
         return;
     }
 
     let facing = state.get_value(FACING);
     let source = DispenseSource { world, pos, facing };
-
-    let Some(behavior) = dispense_behavior_for(stack.item()) else {
-        // Vanilla parity: the sulfur-cube branch of
-        // `DispenserBlock.getDefaultDispenseMethod`, which offers the block to a
-        // cube standing in front of the dispenser and throws it only when no
-        // cube takes it.
-        if is_sulfur_cube_swallowable(stack.item())
-            && feed_sulfur_cube(world, pos.relative(facing), &mut stack)
-        {
-            dispenser.set_item(slot, stack);
-            play_dispense_effects(world, pos, facing);
-            return;
-        }
-
-        let thrown = stack.split(1);
-        spawn_dispensed_item(world, pos, facing, thrown);
-        dispenser.set_item(slot, stack);
-        play_dispense_effects(world, pos, facing);
-        return;
-    };
+    let behavior = dispense_behavior_for(&stack);
 
     match behavior.execute(&source, stack) {
         DispenseOutcome::Acted {
