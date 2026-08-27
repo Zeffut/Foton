@@ -794,6 +794,7 @@ mod manager;
 mod mob;
 mod movement_sync;
 pub mod nautilus;
+pub(crate) mod nbt_load;
 pub mod neutral_mob;
 pub mod patrolling_monster;
 pub mod projectile;

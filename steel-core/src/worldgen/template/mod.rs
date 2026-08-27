@@ -35,14 +35,13 @@ use steel_utils::value_providers::IntProvider;
 use steel_utils::{
     BlockPos, BlockStateId, BoundingBox, Direction, Identifier, Rotation, types::UpdateFlags,
 };
-use text_components::TextComponent;
 use uuid::Uuid;
 
 use crate::behavior::BLOCK_BEHAVIORS;
 use crate::chunk::heightmap::HeightmapType;
 use crate::entity::{
-    DEFAULT_MAX_AIR_SUPPLY, ENTITIES, EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest,
-    MAX_ENTITY_TAGS,
+    ENTITIES, EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest,
+    nbt_load::read_entity_nbt,
 };
 use crate::world::WorldGenLevel;
 use steel_worldgen::state_resolver::WorldgenStateResolver;

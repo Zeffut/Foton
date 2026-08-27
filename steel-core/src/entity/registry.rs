@@ -197,6 +197,20 @@ impl EntityRegistry {
         let id = entity_type.id();
         self.entries.get(id).is_some_and(|e| e.factory.is_some())
     }
+
+    /// Returns whether this type can be rebuilt from saved data.
+    ///
+    /// [`Self::create_and_load_or_raw`] never fails, because a world save has
+    /// to round-trip an entity Steel cannot model yet rather than lose it. A
+    /// caller building an entity on demand wants the opposite: a raw entity is
+    /// inert, and reporting success for one would hide the gap.
+    #[must_use]
+    pub fn has_load_factory(&self, entity_type: EntityTypeRef) -> bool {
+        let id = entity_type.id();
+        self.entries
+            .get(id)
+            .is_some_and(|e| e.load_factory.is_some())
+    }
 }
 
 impl Default for EntityRegistry {
