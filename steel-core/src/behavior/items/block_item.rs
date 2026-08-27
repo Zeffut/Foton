@@ -57,9 +57,16 @@ impl BlockItem {
         self
     }
 
+    /// Runs vanilla's `BlockItem.place` with the two steps subclasses replace.
+    ///
+    /// `placement_state` stands in for `getPlacementState`, which the
+    /// standing-and-wall item overrides to choose between two blocks;
+    /// `place_block` stands in for `placeBlock`, which the double-high item
+    /// overrides to clear the space above.
     pub(super) fn place_with(
         &self,
         mut context: BlockPlaceContext<'_>,
+        placement_state: impl FnOnce(&BlockPlaceContext<'_>) -> Option<BlockStateId>,
         place_block: impl FnOnce(&BlockPlaceContext<'_>, BlockStateId) -> bool,
     ) -> InteractionResult {
         if !context.can_place() {
@@ -67,11 +74,11 @@ impl BlockItem {
         }
         let place_pos = context.place_pos();
 
-        let behavior = BLOCK_BEHAVIORS.get_behavior(self.block);
-        let Some(new_state) = behavior.get_state_for_placement(&context) else {
+        let Some(new_state) = placement_state(&context) else {
             return InteractionResult::Fail;
         };
 
+        let behavior = BLOCK_BEHAVIORS.get_behavior(new_state.get_block());
         if self.must_survive && !behavior.can_survive(new_state, context.world, place_pos) {
             return InteractionResult::Fail;
         }
@@ -86,15 +93,17 @@ impl BlockItem {
         }
 
         let mut placed_state = context.world.get_block_state(place_pos);
-        if placed_state.get_block() == self.block {
+        if placed_state.get_block() == new_state.get_block() {
             placed_state = Self::update_block_state_from_tag(&context, place_pos, placed_state);
             Self::update_block_entity_components(&context, place_pos);
             let placed_behavior = BLOCK_BEHAVIORS.get_behavior(placed_state.get_block());
             placed_behavior.set_placed_by(placed_state, context.world, place_pos, context.source());
         }
 
-        // Play place sound (exclude the placing player, they hear it client-side)
-        let sound_type = &self.block.config.sound_type;
+        // Play place sound (exclude the placing player, they hear it
+        // client-side). Vanilla reads the sound off the state that ended up in
+        // the world, which is how a wall banner sounds like the wall form.
+        let sound_type = &placed_state.get_block().config.sound_type;
         context.world.play_block_sound(
             self.place_sound.unwrap_or(sound_type.place_sound),
             place_pos,
@@ -118,10 +127,17 @@ impl BlockItem {
 
     /// Places this block using an already constructed placement context.
     pub fn place(&self, context: BlockPlaceContext<'_>) -> InteractionResult {
-        self.place_with(context, Self::place_block)
+        self.place_with(context, |c| self.placement_state(c), Self::place_block)
     }
 
-    fn place_block(context: &BlockPlaceContext<'_>, state: BlockStateId) -> bool {
+    /// Vanilla parity: `BlockItem.getPlacementState`.
+    pub(super) fn placement_state(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {
+        BLOCK_BEHAVIORS
+            .get_behavior(self.block)
+            .get_state_for_placement(context)
+    }
+
+    pub(super) fn place_block(context: &BlockPlaceContext<'_>, state: BlockStateId) -> bool {
         context
             .world
             .set_block(context.place_pos(), state, Self::PLACE_BLOCK_FLAGS)
@@ -232,7 +248,10 @@ impl DoubleHighBlockItem {
 
 impl ItemBehavior for DoubleHighBlockItem {
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
-        self.base
-            .place_with(context.build_place_context(), Self::place_block)
+        self.base.place_with(
+            context.build_place_context(),
+            |c| self.base.placement_state(c),
+            Self::place_block,
+        )
     }
 }

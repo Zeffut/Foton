@@ -13,7 +13,9 @@ use std::sync::{Arc, Weak};
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use simdnbt::{FromNbtTag as _, ToNbtTag as _};
+use steel_registry::data_components::DataComponentMap;
 use steel_registry::data_components::components::{BannerPatternLayer, BannerPatternLayers};
+use steel_registry::data_components::vanilla_components::{BANNER_PATTERNS, CUSTOM_NAME};
 use steel_registry::dye_color::DyeColor;
 use steel_registry::registry::holder::RegistryHolder;
 use steel_registry::vanilla_block_entity_types;
@@ -21,7 +23,7 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 use text_components::TextComponent;
 
-use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::block_entity::{BlockEntity, BlockEntityBase, ImplicitComponentInput};
 use crate::world::World;
 
 /// Banner block entity, shared by the standing and wall forms.
@@ -75,19 +77,6 @@ impl BannerBlockEntity {
     #[must_use]
     pub fn custom_name(&self) -> Option<TextComponent> {
         self.state.lock().name.clone()
-    }
-
-    /// Replaces what the banner remembers.
-    ///
-    /// Vanilla parity: the `applyImplicitComponents` of `BannerBlockEntity`,
-    /// which is what carries an item's patterns onto the block it becomes.
-    pub fn set_from_item(&self, patterns: BannerPatternLayers, name: Option<TextComponent>) {
-        {
-            let mut state = self.state.lock();
-            state.patterns = patterns;
-            state.name = name;
-        }
-        self.set_changed();
     }
 }
 
@@ -150,5 +139,25 @@ impl BlockEntity for BannerBlockEntity {
         let mut nbt = NbtCompound::new();
         self.save_additional(&mut nbt);
         Some(nbt)
+    }
+
+    /// Vanilla parity: `BannerBlockEntity.collectImplicitComponents`. This is
+    /// what the `minecraft:banner_patterns` entry of every banner loot table
+    /// reads, so it is the whole reason a broken banner is still the banner the
+    /// loom made.
+    fn collect_implicit_components(&self, components: &mut DataComponentMap) {
+        let state = self.state.lock();
+        components.set(BANNER_PATTERNS, Some(state.patterns.clone()));
+        components.set(CUSTOM_NAME, state.name.clone());
+    }
+
+    /// Vanilla parity: `BannerBlockEntity.applyImplicitComponents`, which is
+    /// what carries an item's layers onto the banner just placed.
+    fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
+        let patterns = input.get_or_default(BANNER_PATTERNS, BannerPatternLayers::empty());
+        let name = input.get(CUSTOM_NAME);
+        let mut state = self.state.lock();
+        state.patterns = patterns;
+        state.name = name;
     }
 }

@@ -2,9 +2,9 @@ use super::{
     Arc, BLOCK_BEHAVIORS, BlockEntityRef, BlockLootContext, BlockPos, BlockStateExt, BlockStateId,
     CLevelEvent, CLevelParticles, CSound, ChunkPos, ConnectionProtocol, DVec3, EncodedPacket,
     Entity, GLOBAL_SOUND_EVENTS, GameEventContext, ItemStack, LevelReader, LootContext,
-    NetworkConnection, ParticleData, Player, REGISTRY, RegistryExt, SectionPos, SoundEventRef,
-    SoundSource, UpdateFlags, World, WorldEntityManager, entity_loot_ref, fluid_state_to_block,
-    level_events, vanilla_blocks, vanilla_game_events,
+    NetworkConnection, ParticleData, Player, SectionPos, SoundEventRef, SoundSource, UpdateFlags,
+    World, WorldEntityManager, entity_loot_ref, fluid_state_to_block, level_events, vanilla_blocks,
+    vanilla_game_events,
 };
 
 pub(super) fn sound_is_within_range(
@@ -399,10 +399,12 @@ impl World {
         state: BlockStateId,
         context: &BlockLootContext<'_>,
     ) -> Vec<ItemStack> {
-        let block = state.get_block();
-        let loot_key = steel_utils::Identifier::vanilla(format!("blocks/{}", block.key.path));
-
-        let Some(loot_table) = REGISTRY.loot_tables.by_key(&loot_key) else {
+        // Vanilla parity: `BlockBehaviour.getLootTable`. Deriving the id from the
+        // block's own name instead is wrong for the 61 blocks registered with
+        // `dropsLike` -- every wall banner, wall sign, wall torch, wall skull and
+        // wall coral fan rolls the standing form's table, and there is no
+        // `blocks/white_wall_banner` to find.
+        let Some(loot_table) = state.get_block().config.loot_table else {
             return Vec::new();
         };
 
