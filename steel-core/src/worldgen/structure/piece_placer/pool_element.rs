@@ -19,7 +19,7 @@ impl StructurePiecePlacer {
         clippy::too_many_arguments,
         reason = "mirrors StructurePoolElement.place inputs"
     )]
-    pub(super) fn place_pool_element(
+    pub(crate) fn place_pool_element(
         region: &impl WorldGenLevel,
         registry: &Registry,
         element: &PoolElement,
@@ -30,6 +30,7 @@ impl StructurePiecePlacer {
         random: &mut WorldgenRandom,
         liquid_settings: LiquidSettingsData,
         biome_zoom_seed: i64,
+        keep_jigsaws: bool,
     ) -> bool {
         match element {
             PoolElement::Single {
@@ -50,6 +51,7 @@ impl StructurePiecePlacer {
                 clip,
                 random,
                 liquid_settings,
+                keep_jigsaws,
             ),
             PoolElement::LegacySingle {
                 location,
@@ -69,6 +71,7 @@ impl StructurePiecePlacer {
                 clip,
                 random,
                 liquid_settings,
+                keep_jigsaws,
             ),
             PoolElement::Empty => true,
             PoolElement::Feature { feature, .. } => {
@@ -94,6 +97,7 @@ impl StructurePiecePlacer {
                         random,
                         liquid_settings,
                         biome_zoom_seed,
+                        keep_jigsaws,
                     ) {
                         return false;
                     }
@@ -121,6 +125,7 @@ impl StructurePiecePlacer {
         clip: BoundingBox,
         random: &mut WorldgenRandom,
         liquid_settings: LiquidSettingsData,
+        keep_jigsaws: bool,
     ) -> bool {
         let template = match StructureTemplate::load_vanilla(registry, location) {
             Ok(template) => template,
@@ -135,7 +140,10 @@ impl StructurePiecePlacer {
             processors: processor_list,
             block_ignore,
             late_block_ignore,
-            replace_jigsaws: true,
+            // Vanilla parity: `SinglePoolElement.getSettings` adds
+            // `JigsawReplacementProcessor` unless the caller asked to keep the
+            // jigsaws standing, which only a jigsaw block's generate button does.
+            replace_jigsaws: !keep_jigsaws,
             projection: Some(projection),
             processor_random: StructureProcessorRandom::Positional,
             liquid_settings,

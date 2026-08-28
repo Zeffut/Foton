@@ -85,6 +85,80 @@ pub struct TerrainProbe<N: DimensionNoises> {
     aquifer: Aquifer<N>,
 }
 
+/// Off-chunk `getBaseHeight` for one column, reusing the per-chunk probe that
+/// answered the last column in the same chunk.
+fn probe_surface_height<N: DimensionNoises>(
+    probes: &mut FxHashMap<(i32, i32), TerrainProbe<N>>,
+    noises: &N,
+    splitter: &RandomSplitter,
+    x: i32,
+    z: i32,
+    ocean_floor: bool,
+) -> i32 {
+    let cell_w = N::Settings::CELL_WIDTH;
+    let cell_x = x.div_euclid(cell_w) * cell_w;
+    let cell_z = z.div_euclid(cell_w) * cell_w;
+    let aq_chunk_x = (cell_x >> 4) * 16;
+    let aq_chunk_z = (cell_z >> 4) * 16;
+    let probe = probes
+        .entry((aq_chunk_x, aq_chunk_z))
+        .or_insert_with(|| TerrainProbe::<N>::new(aq_chunk_x, aq_chunk_z, splitter, noises));
+    iterate_noise_column_with_aquifer::<N>(
+        &mut probe.cache,
+        noises,
+        &mut probe.aquifer,
+        x,
+        z,
+        ocean_floor,
+    )
+}
+
+/// Terrain height queries for a caller that is not generating a chunk.
+///
+/// Vanilla's `ChunkGenerator.getFirstFreeHeight` answers from the generator's
+/// own noise rather than from the blocks a world already holds, so a live-world
+/// caller -- a jigsaw block's generate button -- needs the same column
+/// machinery a [`GenerationContext`] owns without owning a context. Keeping one
+/// of these across a run of columns keeps the noise caches those columns share.
+pub struct TerrainHeightSampler<'src, N: DimensionNoises> {
+    noises: &'src N,
+    splitter: &'src RandomSplitter,
+    probes: FxHashMap<(i32, i32), TerrainProbe<N>>,
+    heights: FxHashMap<(i32, i32, bool), i32>,
+}
+
+impl<'src, N: DimensionNoises> TerrainHeightSampler<'src, N> {
+    /// Creates a sampler over one dimension's noise router.
+    #[must_use]
+    pub fn new(noises: &'src N, splitter: &'src RandomSplitter) -> Self {
+        Self {
+            noises,
+            splitter,
+            probes: FxHashMap::default(),
+            heights: FxHashMap::default(),
+        }
+    }
+
+    /// Vanilla's `getFirstFreeHeight`: the first free Y above the noise terrain.
+    ///
+    /// `ocean_floor=false` is `WORLD_SURFACE_WG`; `true` is `OCEAN_FLOOR_WG`.
+    pub fn surface_height(&mut self, x: i32, z: i32, ocean_floor: bool) -> i32 {
+        if let Some(&height) = self.heights.get(&(x, z, ocean_floor)) {
+            return height;
+        }
+        let height = probe_surface_height::<N>(
+            &mut self.probes,
+            self.noises,
+            self.splitter,
+            x,
+            z,
+            ocean_floor,
+        );
+        self.heights.insert((x, z, ocean_floor), height);
+        height
+    }
+}
+
 impl<N: DimensionNoises> TerrainProbe<N> {
     fn new(chunk_min_x: i32, chunk_min_z: i32, splitter: &RandomSplitter, noises: &N) -> Self {
         let mut cache = N::ColumnCache::default();
@@ -411,25 +485,14 @@ impl<N: DimensionNoises> StructureGenerationContext for GenerationContext<'_, '_
             return height;
         }
 
-        let cell_w = N::Settings::CELL_WIDTH;
-        let cell_x = x.div_euclid(cell_w) * cell_w;
-        let cell_z = z.div_euclid(cell_w) * cell_w;
-        let aq_chunk_x = (cell_x >> 4) * 16;
-        let aq_chunk_z = (cell_z >> 4) * 16;
-        let height = {
-            let mut probes = self.terrain_probes.borrow_mut();
-            let probe = probes.entry((aq_chunk_x, aq_chunk_z)).or_insert_with(|| {
-                TerrainProbe::<N>::new(aq_chunk_x, aq_chunk_z, self.splitter, self.noises)
-            });
-            iterate_noise_column_with_aquifer::<N>(
-                &mut probe.cache,
-                self.noises,
-                &mut probe.aquifer,
-                x,
-                z,
-                ocean_floor,
-            )
-        };
+        let height = probe_surface_height::<N>(
+            &mut self.terrain_probes.borrow_mut(),
+            self.noises,
+            self.splitter,
+            x,
+            z,
+            ocean_floor,
+        );
         self.terrain_height_cache
             .borrow_mut()
             .insert((x, z, ocean_floor), height);

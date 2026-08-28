@@ -81,6 +81,7 @@ mod s_container_close;
 mod s_container_slot_state_changed;
 mod s_edit_book;
 mod s_interact;
+mod s_jigsaw_generate;
 mod s_move_player;
 mod s_move_vehicle;
 mod s_pick_item_from_block;
@@ -212,6 +213,7 @@ pub use s_container_close::SContainerClose;
 pub use s_container_slot_state_changed::SContainerSlotStateChanged;
 pub use s_edit_book::SEditBook;
 pub use s_interact::SInteract;
+pub use s_jigsaw_generate::SJigsawGenerate;
 pub use s_move_player::{
     SMovePlayer, SMovePlayerPos, SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly,
 };

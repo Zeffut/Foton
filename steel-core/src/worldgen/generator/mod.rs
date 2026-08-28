@@ -29,6 +29,13 @@ use crate::worldgen::region::WorldGenRegion;
 use crate::worldgen::structure::StructureGenerator;
 use steel_worldgen::noise::Beardifier;
 
+/// Vanilla's `getFirstFreeHeight` for one column, handed to the body of
+/// [`ChunkGenerator::with_first_free_height`].
+pub type FirstFreeHeight<'a> = dyn FnMut(i32, i32) -> i32 + 'a;
+
+/// The body [`ChunkGenerator::with_first_free_height`] runs against a height query.
+pub type FirstFreeHeightBody<'a> = dyn FnMut(&mut FirstFreeHeight<'_>) + 'a;
+
 /// A trait for generating chunks.
 #[enum_dispatch]
 pub trait ChunkGenerator: Send + Sync {
@@ -95,6 +102,18 @@ pub trait ChunkGenerator: Send + Sync {
 
     /// Applies structure piece placement and biome feature decorations.
     fn apply_biome_decorations(&self, region: &WorldGenRegion<'_>);
+
+    /// Runs `body` with vanilla's
+    /// `ChunkGenerator.getFirstFreeHeight(x, z, WORLD_SURFACE_WG, level, randomState)`.
+    ///
+    /// Chunk generation asks this through a per-chunk `StructureGenerationContext`;
+    /// a live-world caller -- the jigsaw block's generate button -- has no such
+    /// context, and vanilla still answers it from the generator's own terrain
+    /// rather than from the blocks the world already holds. The query is handed
+    /// to `body` instead of returned so a caller probing many columns keeps one
+    /// set of noise caches. `min_y` is the dimension's build floor, vanilla's
+    /// `LevelHeightAccessor`.
+    fn with_first_free_height(&self, min_y: i32, body: &mut FirstFreeHeightBody<'_>);
 }
 
 pub(crate) fn worldgen_region_random_from_splitter(

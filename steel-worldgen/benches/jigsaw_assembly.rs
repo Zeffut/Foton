@@ -3,6 +3,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use glam::IVec3;
 use steel_registry::init_vanilla_registry;
 use steel_registry::template_pool::{TemplateData, TemplatePoolData};
 use steel_registry::vanilla_template_pools::{vanilla_template_pools, vanilla_templates};
@@ -13,7 +14,7 @@ use steel_registry::{
 use steel_utils::Identifier;
 use steel_utils::random::legacy_random::LegacyRandom;
 use steel_utils::random::{PositionalRandom, Random};
-use steel_worldgen::structure::jigsaw::{assemble, resolve_aliases};
+use steel_worldgen::structure::jigsaw::{JigsawPlacement, assemble, resolve_aliases};
 
 struct JigsawBenchCase {
     name: &'static str,
@@ -90,23 +91,20 @@ fn run_assembly(
 
     let mut rng = LegacyRandom::from_seed(0);
     rng.set_large_feature_seed(SEED, case.chunk_x, case.chunk_z);
+    let start_y = sample_start_height(config, &mut rng);
+    let start_pos = IVec3::new(case.chunk_x << 4, start_y, case.chunk_z << 4);
 
-    let mut alias_position_rng = LegacyRandom::from_seed(0);
-    alias_position_rng.set_large_feature_seed(SEED, case.chunk_x, case.chunk_z);
-    let start_y = sample_start_height(config, &mut alias_position_rng);
     let mut alias_source = LegacyRandom::from_seed(SEED as u64);
-    let mut alias_rng =
-        alias_source
-            .next_positional()
-            .at(case.chunk_x << 4, start_y, case.chunk_z << 4);
+    let mut alias_rng = alias_source
+        .next_positional()
+        .at(start_pos.x, start_pos.y, start_pos.z);
     let alias_map = resolve_aliases(&config.pool_aliases, &mut alias_rng);
 
+    let placement = JigsawPlacement::from_config(config, start_pos);
     let mut get_height = |_: i32, _: i32| 64i32;
     let result = assemble(
-        config,
+        &placement,
         &mut rng,
-        case.chunk_x,
-        case.chunk_z,
         pools,
         templates,
         &alias_map,

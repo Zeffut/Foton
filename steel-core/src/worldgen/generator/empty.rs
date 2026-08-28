@@ -1,6 +1,6 @@
 use crate::chunk::Chunk;
 use crate::worldgen::generator::{
-    CarversPhase, ChunkGenerator, GenerationChunk, NoisePhase, SurfacePhase,
+    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoisePhase, SurfacePhase,
     xoroshiro_worldgen_region_random,
 };
 use crate::worldgen::region::WorldGenRegion;
@@ -54,6 +54,11 @@ impl ChunkGenerator for EmptyChunkGenerator {
     }
 
     fn apply_carvers(&self, _chunk: GenerationChunk<'_, CarversPhase>) {}
+
+    fn with_first_free_height(&self, min_y: i32, body: &mut FirstFreeHeightBody<'_>) {
+        // Nothing is ever generated, so every column is free from the floor up.
+        body(&mut |_, _| min_y);
+    }
 
     fn create_worldgen_region_random(&self, world_seed: i64, center: ChunkPos) -> RandomSource {
         xoroshiro_worldgen_region_random(world_seed, center)

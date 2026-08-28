@@ -9,7 +9,7 @@ use steel_utils::{BlockStateId, ChunkPos, Identifier};
 
 use crate::chunk::Chunk;
 use crate::worldgen::generator::{
-    CarversPhase, ChunkGenerator, GenerationChunk, NoisePhase, SurfacePhase,
+    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoisePhase, SurfacePhase,
     xoroshiro_worldgen_region_random,
 };
 use crate::worldgen::region::WorldGenRegion;
@@ -70,6 +70,39 @@ impl FlatChunkGenerator {
     }
 }
 
+impl FlatChunkGenerator {
+    /// The layer at an absolute Y, if the stack reaches that high.
+    fn state_at_y(&self, min_y: i32, y: i32) -> Option<BlockStateId> {
+        let relative_y = y.checked_sub(min_y)? as usize;
+        self.layers.get(relative_y).copied()
+    }
+
+    /// Whether the layer at `y` counts as terrain for the heightmap.
+    ///
+    /// `ocean_floor=false` is `WORLD_SURFACE_WG`; `true` is `OCEAN_FLOOR_WG`.
+    fn is_opaque_at_y(&self, min_y: i32, y: i32, ocean_floor: bool) -> bool {
+        let Some(state) = self.state_at_y(min_y, y) else {
+            return false;
+        };
+        if ocean_floor {
+            state.is_solid()
+        } else {
+            state.is_solid() || state.has_fluid()
+        }
+    }
+
+    /// Vanilla's `FlatLevelSource.getBaseHeight`: one above the topmost layer
+    /// that counts, or the floor when none does.
+    fn base_height(&self, min_y: i32, height: i32, ocean_floor: bool) -> i32 {
+        for y in (min_y..min_y + height).rev() {
+            if self.is_opaque_at_y(min_y, y, ocean_floor) {
+                return y + 1;
+            }
+        }
+        min_y
+    }
+}
+
 struct FlatGenerationContext<'a> {
     seed: i64,
     chunk_x: i32,
@@ -81,7 +114,7 @@ struct FlatGenerationContext<'a> {
     sea_level: i32,
     min_y: i32,
     height: i32,
-    layers: &'a [BlockStateId],
+    generator: &'a FlatChunkGenerator,
     biome: BiomeRef,
     template_pools: &'a FxHashMap<Identifier, TemplatePoolData>,
     templates: &'a FxHashMap<Identifier, TemplateData>,
@@ -90,28 +123,16 @@ struct FlatGenerationContext<'a> {
 
 impl FlatGenerationContext<'_> {
     fn state_at_y(&self, y: i32) -> Option<BlockStateId> {
-        let relative_y = y.checked_sub(self.min_y)? as usize;
-        self.layers.get(relative_y).copied()
+        self.generator.state_at_y(self.min_y, y)
     }
 
     fn is_opaque_at_y(&self, y: i32, ocean_floor: bool) -> bool {
-        let Some(state) = self.state_at_y(y) else {
-            return false;
-        };
-        if ocean_floor {
-            state.is_solid()
-        } else {
-            state.is_solid() || state.has_fluid()
-        }
+        self.generator.is_opaque_at_y(self.min_y, y, ocean_floor)
     }
 
     fn base_height_flat(&self, ocean_floor: bool) -> i32 {
-        for y in (self.min_y..self.min_y + self.height).rev() {
-            if self.is_opaque_at_y(y, ocean_floor) {
-                return y + 1;
-            }
-        }
-        self.min_y
+        self.generator
+            .base_height(self.min_y, self.height, ocean_floor)
     }
 }
 
@@ -249,7 +270,7 @@ impl ChunkGenerator for FlatChunkGenerator {
             sea_level: self.sea_level,
             min_y: chunk.min_y(),
             height: (chunk.sections().sections.len() * 16) as i32,
-            layers: &self.layers,
+            generator: self,
             biome: &vanilla_biomes::PLAINS,
             template_pools: structure_generator.template_pools(),
             templates: structure_generator.templates(),
@@ -313,4 +334,11 @@ impl ChunkGenerator for FlatChunkGenerator {
     }
 
     fn apply_biome_decorations(&self, _region: &WorldGenRegion<'_>) {}
+
+    fn with_first_free_height(&self, min_y: i32, body: &mut FirstFreeHeightBody<'_>) {
+        // Vanilla parity: `FlatLevelSource.getBaseHeight` reads the layer list,
+        // which is the same for every column.
+        let height = self.base_height(min_y, self.layers.len() as i32, false);
+        body(&mut |_, _| height);
+    }
 }

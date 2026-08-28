@@ -78,6 +78,9 @@ impl StructurePiecePlacer {
                 random,
                 data.liquid_settings,
                 biome_zoom_seed,
+                // Chunk generation always replaces jigsaws; only a jigsaw
+                // block's generate button can keep them.
+                false,
             ),
             StructurePiecePayload::Template(data) => Self::place_template_piece(
                 region,

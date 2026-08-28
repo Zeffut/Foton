@@ -6,28 +6,14 @@
 //! two priorities that order a pool's candidates.
 //!
 //! Steel's worldgen already reads all of this out of the *template* copies of
-//! jigsaw blocks when it builds a village. What was missing is the placed block:
-//! a jigsaw a map-maker puts down by hand and configures through its editor.
+//! jigsaw blocks when it builds a village; this is the placed block, a jigsaw a
+//! map-maker puts down by hand and configures through its editor.
 //!
-//! Not implemented: `generate`. Writing the pieces is no longer what stops it --
-//! `StructurePiecePlacer::place_piece` takes any `WorldGenLevel`, so a live world
-//! is a fine target. What is missing is the assembly:
-//!
-//! * Vanilla's `JigsawPlacement.generateJigsaw` runs the same `addPieces` a jigsaw
-//!   structure runs, against a `Structure.GenerationContext` built from the live
-//!   level's chunk source. Steel's `steel_worldgen::structure::jigsaw::assemble`
-//!   needs the terrain-height query that context provides, and the only things
-//!   implementing `StructureGenerationContext` are the per-chunk contexts a
-//!   generator owns while it is generating. A live world has no way to ask for one.
-//! * `assemble` starts from a chunk corner and a sampled start height; a jigsaw
-//!   block starts from the block in front of itself, at its own Y.
-//! * `place_pool_element` always replaces jigsaw blocks with their final state;
-//!   `generateJigsaw` has a `keepJigsaws` flag that leaves them standing.
-//!
-//! Until then the `ServerboundJigsawGeneratePacket` -- which Steel does not model
-//! either -- has nothing to call, so it stays unhandled.
+//! `generate` runs the assembly in
+//! [`crate::worldgen::structure::generate_jigsaw`], which is
+//! `JigsawPlacement.generateJigsaw`.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::NbtCompound;
@@ -40,6 +26,7 @@ use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identif
 
 use crate::block_entity::{BlockEntity, BlockEntityBase};
 use crate::world::World;
+use crate::worldgen::structure::generate_jigsaw;
 
 /// The identifier an unconfigured jigsaw uses for its name, target and pool.
 ///
@@ -207,6 +194,30 @@ impl JigsawBlockEntity {
     #[must_use]
     pub fn selection_priority(&self) -> i32 {
         self.state.lock().selection_priority
+    }
+
+    /// Assembles this jigsaw's pool into the world and places the pieces.
+    ///
+    /// Vanilla parity: `JigsawBlockEntity.generate`. The assembly starts at the
+    /// block this jigsaw faces, at that block's own Y -- not at a chunk corner
+    /// and not at a sampled start height. Returns whether an assembly was found.
+    pub fn generate(&self, world: &Arc<World>, levels: i32, keep_jigsaws: bool) -> bool {
+        let Some(orientation) = self
+            .base
+            .block_state()
+            .try_get_value(&BlockStateProperties::ORIENTATION)
+        else {
+            return false;
+        };
+        let position = self.base.pos().relative(orientation.front());
+        // The lock is released before the placement runs: placing pieces writes
+        // block entities back into the same world.
+        let (pool, target) = {
+            let state = self.state.lock();
+            (state.pool.clone(), state.target.clone())
+        };
+
+        generate_jigsaw(world, &pool, &target, levels, position, keep_jigsaws)
     }
 
     /// Stores everything a jigsaw editor sends at once.

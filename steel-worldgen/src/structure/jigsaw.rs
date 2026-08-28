@@ -9,7 +9,7 @@ use std::{array, mem, ptr};
 use glam::IVec3;
 use rustc_hash::{FxHashMap, FxHashSet};
 use steel_registry::structure::{
-    JigsawConfig, LiquidSettingsData, PoolAlias, StartHeight, StructureData,
+    DimensionPadding, JigsawConfig, LiquidSettingsData, PoolAlias, StartHeight, StructureData,
 };
 use steel_registry::template_pool::{
     JigsawOrientation, JointType, PoolElement, Projection, TemplateData, TemplatePoolData,
@@ -121,6 +121,82 @@ fn sample_start_height(config: &JigsawConfig, rng: &mut impl Random) -> i32 {
     match &config.start_height {
         StartHeight::Constant(y) => *y,
         StartHeight::Uniform { min, max } => rng.next_i32_between(*min, *max),
+    }
+}
+
+/// Vanilla's `JigsawStructure.MaxDistance`: how far from the start a piece may
+/// sit. Vanilla structure data always gives the horizontal limit alone, and the
+/// vertical one then defaults to the whole world; only a caller asking for a
+/// smaller vertical limit is constrained by it.
+#[derive(Debug, Clone, Copy)]
+pub struct MaxDistance {
+    /// Horizontal limit in blocks.
+    pub horizontal: i32,
+    /// Vertical limit in blocks.
+    pub vertical: i32,
+}
+
+impl MaxDistance {
+    /// Vanilla's `DimensionType.Y_SIZE`, the default vertical limit.
+    pub const Y_SIZE: i32 = (1 << 12) - 32;
+
+    /// The limit vanilla's one-argument `MaxDistance` builds: a horizontal
+    /// limit and no practical vertical one.
+    #[must_use]
+    pub const fn new(horizontal: i32) -> Self {
+        Self {
+            horizontal,
+            vertical: Self::Y_SIZE,
+        }
+    }
+}
+
+/// Vanilla's `JigsawPlacement.addPieces` arguments other than the generation
+/// context.
+///
+/// A jigsaw structure fills this from its `JigsawConfig` and the start height
+/// that config sampled; a jigsaw block's generate button fills it from the
+/// block's own settings and its own position, which is why the assembly takes
+/// this rather than the config.
+#[derive(Debug, Clone)]
+pub struct JigsawPlacement<'a> {
+    /// Pool the start piece is drawn from, before alias resolution.
+    pub start_pool: &'a Identifier,
+    /// Named jigsaw inside the start piece to anchor on.
+    pub start_jigsaw_name: Option<&'a Identifier>,
+    /// Maximum recursion depth (vanilla calls this `size`).
+    pub max_depth: i32,
+    /// World-space position the start piece anchors at.
+    pub position: IVec3,
+    /// Whether the vertical expansion hack runs.
+    pub use_expansion_hack: bool,
+    /// Whether the start piece is projected onto the terrain surface.
+    pub project_start_to_heightmap: bool,
+    /// How far a piece may sit from the start.
+    pub max_distance: MaxDistance,
+    /// Minimum distance from the world height limits.
+    pub dimension_padding: DimensionPadding,
+    /// Liquid handling mode for the placed pieces.
+    pub liquid_settings: LiquidSettingsData,
+}
+
+impl<'a> JigsawPlacement<'a> {
+    /// The arguments a jigsaw structure passes, given the start position its
+    /// `start_height` sampled.
+    #[must_use]
+    pub const fn from_config(config: &'a JigsawConfig, position: IVec3) -> Self {
+        Self {
+            start_pool: &config.start_pool,
+            start_jigsaw_name: config.start_jigsaw_name.as_ref(),
+            max_depth: config.max_depth,
+            position,
+            use_expansion_hack: config.use_expansion_hack,
+            project_start_to_heightmap: config.project_start_to_heightmap.is_some(),
+            // Vanilla structure data only ever carries the horizontal limit.
+            max_distance: MaxDistance::new(config.max_distance_from_center),
+            dimension_padding: config.dimension_padding,
+            liquid_settings: config.liquid_settings,
+        }
     }
 }
 
@@ -714,10 +790,8 @@ struct StartedAssembly {
     reason = "matches vanilla's addPieces call surface"
 )]
 fn start_assembly(
-    config: &JigsawConfig,
+    placement: &JigsawPlacement<'_>,
     rng: &mut LegacyRandom,
-    chunk_x: i32,
-    chunk_z: i32,
     pools: &FxHashMap<Identifier, TemplatePoolData>,
     templates: &FxHashMap<Identifier, TemplateData>,
     alias_map: &FxHashMap<Identifier, Identifier>,
@@ -725,21 +799,19 @@ fn start_assembly(
     min_y: i32,
     max_y: i32,
 ) -> Option<StartedAssembly> {
-    let start_y = sample_start_height(config, rng);
-    let start_x = chunk_x * 16;
-    let start_z = chunk_z * 16;
+    let start = placement.position;
     let center_rotation = Rotation::get_random(rng);
 
     let start_pool_key = alias_map
-        .get(&config.start_pool)
-        .unwrap_or(&config.start_pool);
+        .get(placement.start_pool)
+        .unwrap_or(placement.start_pool);
     let start_pool = pools.get(start_pool_key)?;
     let center_element = get_random_template(start_pool, rng);
     if center_element.is_empty() {
         return None;
     }
 
-    let anchor_offset = if let Some(ref jigsaw_name) = config.start_jigsaw_name {
+    let anchor_offset = if let Some(jigsaw_name) = placement.start_jigsaw_name {
         shuffled_element_jigsaws(center_element, templates, center_rotation, rng)
             .into_iter()
             .find_map(|block| (block.name == jigsaw_name).then_some(block.pos))?
@@ -747,18 +819,14 @@ fn start_assembly(
         IVec3::ZERO
     };
 
-    let adjusted = IVec3::new(
-        start_x - anchor_offset.x,
-        start_y - anchor_offset.y,
-        start_z - anchor_offset.z,
-    );
+    let adjusted = start - anchor_offset;
 
     let center_bb = element_bounding_box(center_element, templates, adjusted, center_rotation)?;
 
-    let bottom_y = if config.project_start_to_heightmap.is_some() {
+    let bottom_y = if placement.project_start_to_heightmap {
         let mid_x = java_center(center_bb.min_x(), center_bb.max_x());
         let mid_z = java_center(center_bb.min_z(), center_bb.max_z());
-        start_y + get_height(mid_x, mid_z)
+        start.y + get_height(mid_x, mid_z)
     } else {
         adjusted.y
     };
@@ -771,7 +839,7 @@ fn start_assembly(
     );
     let adjusted_y = adjusted.y + dy;
 
-    let padding = &config.dimension_padding;
+    let padding = &placement.dimension_padding;
     if center_bb.min_y() < min_y + padding.bottom || center_bb.max_y() > max_y - 1 - padding.top {
         return None;
     }
@@ -806,7 +874,7 @@ fn start_assembly(
 )]
 fn finish_assembly<'a>(
     mut started: StartedAssembly,
-    config: &JigsawConfig,
+    placement: &JigsawPlacement<'_>,
     rng: &mut LegacyRandom,
     pools: &'a FxHashMap<Identifier, TemplatePoolData>,
     templates: &'a FxHashMap<Identifier, TemplateData>,
@@ -817,7 +885,7 @@ fn finish_assembly<'a>(
 ) -> AssemblyResult {
     let biome_check_pos = started.biome_check_pos;
 
-    if config.max_depth <= 0 {
+    if placement.max_depth <= 0 {
         return AssemblyResult {
             pieces: started.pieces,
             biome_check_pos,
@@ -835,17 +903,17 @@ fn finish_assembly<'a>(
     let center_stub_y = biome_check_pos.y;
     let center_stub_z = biome_check_pos.z;
 
-    let max_dist = config.max_distance_from_center;
+    let max_dist = placement.max_distance;
     let constraint_bb = BoundingBox::new(
         IVec3::new(
-            center_stub_x - max_dist,
-            (center_stub_y - max_dist).max(min_y + config.dimension_padding.bottom),
-            center_stub_z - max_dist,
+            center_stub_x - max_dist.horizontal,
+            (center_stub_y - max_dist.vertical).max(min_y + placement.dimension_padding.bottom),
+            center_stub_z - max_dist.horizontal,
         ),
         IVec3::new(
-            center_stub_x + max_dist,
-            (center_stub_y + max_dist).min(max_y - 1 - config.dimension_padding.top),
-            center_stub_z + max_dist,
+            center_stub_x + max_dist.horizontal,
+            (center_stub_y + max_dist.vertical).min(max_y - 1 - placement.dimension_padding.top),
+            center_stub_z + max_dist.horizontal,
         ),
     );
 
@@ -862,7 +930,7 @@ fn finish_assembly<'a>(
         0,
         0,
         0,
-        config,
+        placement,
         pools,
         templates,
         alias_map,
@@ -880,7 +948,7 @@ fn finish_assembly<'a>(
             entry.piece_idx,
             entry.depth,
             entry.context_idx,
-            config,
+            placement,
             pools,
             templates,
             alias_map,
@@ -911,10 +979,8 @@ fn finish_assembly<'a>(
     reason = "FxHashMap avoids SipHash overhead on Identifier lookups"
 )]
 pub fn assemble(
-    config: &JigsawConfig,
+    placement: &JigsawPlacement<'_>,
     rng: &mut LegacyRandom,
-    chunk_x: i32,
-    chunk_z: i32,
     pools: &FxHashMap<Identifier, TemplatePoolData>,
     templates: &FxHashMap<Identifier, TemplateData>,
     alias_map: &FxHashMap<Identifier, Identifier>,
@@ -923,10 +989,10 @@ pub fn assemble(
     max_y: i32,
 ) -> Option<AssemblyResult> {
     let started = start_assembly(
-        config, rng, chunk_x, chunk_z, pools, templates, alias_map, get_height, min_y, max_y,
+        placement, rng, pools, templates, alias_map, get_height, min_y, max_y,
     )?;
     Some(finish_assembly(
-        started, config, rng, pools, templates, alias_map, get_height, min_y, max_y,
+        started, placement, rng, pools, templates, alias_map, get_height, min_y, max_y,
     ))
 }
 
@@ -943,26 +1009,28 @@ impl Structure for JigsawStructure {
     ) -> Option<GenerationStub> {
         let config = structure.config.as_jigsaw()?;
 
-        let mut alias_position_rng = LegacyRandom::from_seed(0);
-        alias_position_rng.set_large_feature_seed(ctx.seed(), ctx.chunk_x(), ctx.chunk_z());
-        let start_y = sample_start_height(config, &mut alias_position_rng);
+        // Vanilla parity: `JigsawStructure.findGenerationPoint` samples the
+        // start height from the same `context.random()` that `addPieces` then
+        // draws the start rotation from, so the sample has to happen here and
+        // on this stream.
+        let mut assembly_rng = LegacyRandom::from_seed(0);
+        assembly_rng.set_large_feature_seed(ctx.seed(), ctx.chunk_x(), ctx.chunk_z());
+        let start_y = sample_start_height(config, &mut assembly_rng);
+        let start_pos = IVec3::new(ctx.chunk_min_x(), start_y, ctx.chunk_min_z());
+        let placement = JigsawPlacement::from_config(config, start_pos);
+
         let mut alias_source = LegacyRandom::from_seed(ctx.seed() as u64);
         let mut alias_rng =
             alias_source
                 .next_positional()
-                .at(ctx.chunk_min_x(), start_y, ctx.chunk_min_z());
+                .at(start_pos.x, start_pos.y, start_pos.z);
         let alias_map = resolve_aliases(&config.pool_aliases, &mut alias_rng);
-
-        let mut assembly_rng = LegacyRandom::from_seed(0);
-        assembly_rng.set_large_feature_seed(ctx.seed(), ctx.chunk_x(), ctx.chunk_z());
 
         let started = {
             let mut get_height = |x: i32, z: i32| ctx.terrain_surface_height(x, z, false);
             start_assembly(
-                config,
+                &placement,
                 &mut assembly_rng,
-                ctx.chunk_x(),
-                ctx.chunk_z(),
                 ctx.template_pools(),
                 ctx.templates(),
                 &alias_map,
@@ -989,7 +1057,7 @@ impl Structure for JigsawStructure {
             let mut get_height = |x: i32, z: i32| ctx.terrain_surface_height(x, z, false);
             finish_assembly(
                 started,
-                config,
+                &placement,
                 &mut assembly_rng,
                 ctx.template_pools(),
                 ctx.templates(),
@@ -1012,7 +1080,7 @@ impl Structure for JigsawStructure {
                     pool_element: piece.element,
                     position: piece.position,
                     rotation: piece.rotation,
-                    liquid_settings: config.liquid_settings,
+                    liquid_settings: placement.liquid_settings,
                 }),
                 ground_level_delta: piece.ground_level_delta,
                 junctions: piece.junctions,
@@ -1046,7 +1114,7 @@ fn try_placing_children<'a>(
     source_idx: usize,
     depth: i32,
     context_idx: usize,
-    config: &JigsawConfig,
+    placement: &JigsawPlacement<'_>,
     pools: &'a FxHashMap<Identifier, TemplatePoolData>,
     templates: &'a FxHashMap<Identifier, TemplateData>,
     alias_map: &FxHashMap<Identifier, Identifier>,
@@ -1137,7 +1205,7 @@ fn try_placing_children<'a>(
             target_jigsaw_world.z,
         );
 
-        if depth != config.max_depth
+        if depth != placement.max_depth
             && let Some(pool) = target_pool
         {
             append_shuffled_templates_cached(pool, pool_template_cache, rng, &mut candidates);
@@ -1182,7 +1250,7 @@ fn try_placing_children<'a>(
             let candidate_rigid = candidate_projection == Projection::Rigid;
 
             for candidate_rotation in rotations {
-                let expand_to = if config.use_expansion_hack {
+                let expand_to = if placement.use_expansion_hack {
                     if let Some((hack_location, template_data)) = candidate_template {
                         let hack_box = candidate_rotation
                             .get_bounding_box(IVec3::ZERO, IVec3::from(template_data.size));
@@ -1368,7 +1436,7 @@ fn try_placing_children<'a>(
 
                     pieces.push(target_piece);
 
-                    if depth < config.max_depth {
+                    if depth < placement.max_depth {
                         scratch.queue_order += 1;
                         queue.push(PieceQueueEntry {
                             priority: placement_priority,
@@ -1503,12 +1571,11 @@ mod tests {
         };
         let mut rng = LegacyRandom::from_seed(1);
         let mut get_height = |_: i32, _: i32| 64;
+        let placement = JigsawPlacement::from_config(&config, IVec3::new(0, 70, 0));
 
         let assembly = assemble(
-            &config,
+            &placement,
             &mut rng,
-            0,
-            0,
             &pools,
             &templates,
             &alias_map,

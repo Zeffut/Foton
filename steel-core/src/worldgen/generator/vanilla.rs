@@ -29,7 +29,7 @@ use crate::worldgen::carver::{
 };
 use crate::worldgen::feature::FeatureDecorationRunner;
 use crate::worldgen::generator::{
-    CarversPhase, ChunkGenerator, GenerationChunk, NoisePhase, SurfacePhase,
+    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoisePhase, SurfacePhase,
     worldgen_region_random_from_splitter,
 };
 use crate::worldgen::region::WorldGenRegion;
@@ -41,7 +41,7 @@ use steel_worldgen::noise::Beardifier;
 use steel_worldgen::noise::NoiseChunk;
 use steel_worldgen::noise::OreVeinifier;
 use steel_worldgen::noise::{Aquifer, AquiferResult, LazyAquifer, preliminary_surface_level};
-use steel_worldgen::structure::GenerationContext;
+use steel_worldgen::structure::{GenerationContext, TerrainHeightSampler};
 
 const CARVER_SOURCE_CHUNK_COUNT: usize = 17 * 17;
 
@@ -305,6 +305,13 @@ impl<N: VanillaPostNoiseStateType> ChunkGenerator for VanillaGenerator<N> {
 
     fn structure_generator(&self) -> Option<&StructureGenerator> {
         Some(&self.structure_generator)
+    }
+
+    fn with_first_free_height(&self, _min_y: i32, body: &mut FirstFreeHeightBody<'_>) {
+        // The noise column already spans the dimension, so the build floor the
+        // caller passes adds nothing here.
+        let mut sampler = TerrainHeightSampler::<N>::new(&self.noises, &self.splitter);
+        body(&mut |x, z| sampler.surface_height(x, z, false));
     }
 
     fn create_structures(&self, chunk: &Chunk) {

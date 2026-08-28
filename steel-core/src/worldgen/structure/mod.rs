@@ -1,6 +1,9 @@
 //! Core chunk adapter for the worldgen structure engine.
 
+mod jigsaw_generate;
 pub(crate) mod piece_placer;
+
+pub(crate) use jigsaw_generate::generate_jigsaw;
 
 use crate::chunk::Chunk;
 use steel_utils::Identifier;

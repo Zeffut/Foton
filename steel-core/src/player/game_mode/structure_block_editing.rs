@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use steel_protocol::packets::game::{
-    CBlockEntityData, SSetJigsawBlock, SSetStructureBlock, StructureUpdateType,
+    CBlockEntityData, SJigsawGenerate, SSetJigsawBlock, SSetStructureBlock, StructureUpdateType,
 };
 use steel_registry::RegistryEntry as _;
 use steel_utils::serial::OptionalNbt;
@@ -160,6 +160,26 @@ impl Player {
         });
 
         send_block_entity_update(self, &world, pos, block_entity);
+    }
+
+    /// Runs a jigsaw block's generate button.
+    ///
+    /// Vanilla parity: `handleJigsawGenerate`. Vanilla reports nothing back
+    /// either way, so a pool the server does not know simply does nothing.
+    pub fn handle_jigsaw_generate(self: &Arc<Self>, packet: SJigsawGenerate) {
+        if !self.can_use_game_master_blocks() {
+            return;
+        }
+
+        let world = self.get_world();
+        let Some(shared) = world.get_block_entity(packet.pos) else {
+            return;
+        };
+        let Some(block_entity) = shared.downcast_ref::<JigsawBlockEntity>() else {
+            return;
+        };
+
+        block_entity.generate(&world, packet.levels, packet.keep_jigsaws);
     }
 }
 

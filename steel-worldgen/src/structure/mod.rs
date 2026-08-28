@@ -41,7 +41,10 @@ pub use piece::{
     TemplatePlacementAdjustment, TemplatePlacementClip, TemplatePostProcess, TemplateProcessorList,
 };
 
-pub use generation::{ColumnBlock, GenerationContext, GenerationStub, StructureGenerationContext};
+pub use generation::{
+    ColumnBlock, GenerationContext, GenerationStub, StructureGenerationContext,
+    TerrainHeightSampler,
+};
 pub use generator::{
     FixedStructureBiomeProvider, StructureBiomeProvider, StructureGenerator,
     StructureGeneratorAssets, StructureLocateCandidate, StructureLocatePlacement,

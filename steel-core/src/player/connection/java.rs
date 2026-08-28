@@ -15,7 +15,7 @@ use steel_protocol::packets::game::{
     SAcceptTeleportation, SAttack, SChangeDifficulty, SChangeGameMode, SChat, SChatAck,
     SChatCommand, SChatSessionUpdate, SChunkBatchReceived, SClientCommand, SClientTickEnd,
     SCommandSuggestion, SContainerButtonClick, SContainerClick, SContainerClose,
-    SContainerSlotStateChanged, SEditBook, SInteract, SMovePlayer, SMovePlayerPos,
+    SContainerSlotStateChanged, SEditBook, SInteract, SJigsawGenerate, SMovePlayer, SMovePlayerPos,
     SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
     SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem,
     SSeenAdvancements, SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem,
@@ -97,6 +97,7 @@ enum ScheduledPlayPacketKind {
     SetCommandBlock(SSetCommandBlock),
     SetCommandMinecart(SSetCommandMinecart),
     SetJigsawBlock(SSetJigsawBlock),
+    JigsawGenerate(SJigsawGenerate),
     SetStructureBlock(Box<SSetStructureBlock>),
     SetCreativeModeSlot(SSetCreativeModeSlot),
     PlayerInput(SPlayerInput),
@@ -220,6 +221,7 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::SetCommandBlock(_)
             | ScheduledPlayPacketKind::SetCommandMinecart(_)
             | ScheduledPlayPacketKind::SetJigsawBlock(_)
+            | ScheduledPlayPacketKind::JigsawGenerate(_)
             | ScheduledPlayPacketKind::SetStructureBlock(_)
             | ScheduledPlayPacketKind::RenameItem(_)
             | ScheduledPlayPacketKind::UseItemOn(_)
@@ -298,6 +300,9 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::SetJigsawBlock(packet) => {
                 player.handle_set_jigsaw_block(packet);
             }
+            ScheduledPlayPacketKind::JigsawGenerate(packet) => {
+                player.handle_jigsaw_generate(packet);
+            }
             ScheduledPlayPacketKind::SetStructureBlock(packet) => {
                 player.handle_set_structure_block(*packet);
             }
@@ -372,6 +377,7 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::SetCommandBlock(_)
             | ScheduledPlayPacketKind::SetCommandMinecart(_)
             | ScheduledPlayPacketKind::SetJigsawBlock(_)
+            | ScheduledPlayPacketKind::JigsawGenerate(_)
             | ScheduledPlayPacketKind::SetStructureBlock(_) => {
                 Self::handle_gamemaster_block(kind, &player);
             }
@@ -824,6 +830,9 @@ impl JavaConnection {
             )),
             play::S_SET_JIGSAW_BLOCK => scheduled(ScheduledPlayPacketKind::SetJigsawBlock(
                 SSetJigsawBlock::read_packet(data)?,
+            )),
+            play::S_JIGSAW_GENERATE => scheduled(ScheduledPlayPacketKind::JigsawGenerate(
+                SJigsawGenerate::read_packet(data)?,
             )),
             play::S_SET_STRUCTURE_BLOCK => scheduled(ScheduledPlayPacketKind::SetStructureBlock(
                 Box::new(SSetStructureBlock::read_packet(data)?),
