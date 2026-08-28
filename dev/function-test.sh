@@ -113,6 +113,18 @@ cat > "$FN/cond_false.mcfunction" <<'EOF'
 return 0
 EOF
 
+# `return run` hands the callee's value to the caller's caller and ends the
+# caller there, so the line after it must never run.
+cat > "$FN/returns_five.mcfunction" <<'EOF'
+tellraw @a {"text":"FN_RETURN_INNER"}
+return 5
+EOF
+
+cat > "$FN/call_and_return.mcfunction" <<'EOF'
+return run function test:returns_five
+tellraw @a {"text":"FN_RETURN_TAIL_RAN"}
+EOF
+
 # The first line is perfectly valid. If a broken file compiled up to its bad
 # line and kept what it had, this marker would appear.
 cat > "$FN/broken.mcfunction" <<'EOF'
@@ -267,6 +279,11 @@ CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;execute if entity @e[tag=fn_probe,nbt={data:{probe:99}},distance=..20] run tellraw @s {\"text\":\"FN_TICK_TAG\"}"
 CMDS="$CMDS;;execute if entity @e[tag=fn_probe,nbt={data:{probe:7}},distance=..20] run tellraw @s {\"text\":\"FN_LOAD_TAG_ONLY\"}"
 
+# --- return run function, whose value has to reach the outer caller -------
+CMDS="$CMDS;;execute store result entity @n[tag=fn_probe,distance=..20] data.ret int 1 run function test:call_and_return"
+CMDS="$CMDS;;!wait 1"
+CMDS="$CMDS;;execute if entity @e[tag=fn_probe,nbt={data:{ret:5}},distance=..20] run tellraw @s {\"text\":\"FN_RETURN_VALUE\"}"
+
 CMDS="$CMDS;;tellraw @s {\"text\":\"FN_ALIVE\"}"
 CMDS="$CMDS;;kill @e[tag=fn_probe,distance=..20]"
 
@@ -332,6 +349,10 @@ grep -q "commands.bossbar.get.max" join.log \
 said FN_PROBE_READY || fail "the probe pig was never summoned"
 said FN_LOAD_TAG_ONLY && fail "#minecraft:load ran but #minecraft:tick never did"
 said FN_TICK_TAG || fail "#minecraft:tick never changed what #minecraft:load left behind"
+
+said FN_RETURN_INNER || fail "return run never reached the function it names"
+said FN_RETURN_TAIL_RAN && fail "return run did not end the function it ran in"
+said FN_RETURN_VALUE || fail "return run's value never reached the outer caller"
 
 said FN_ALIVE || fail "the server stopped answering after an unknown function name"
 
