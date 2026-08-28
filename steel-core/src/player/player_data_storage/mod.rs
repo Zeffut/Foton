@@ -26,8 +26,8 @@ use self::{
 };
 use super::PlayerRespawnConfig;
 use super::player_data::{
-    PLAYER_DATA_VERSION, PersistentAbilities, PersistentEnderPearl, PersistentPlayerData,
-    PersistentRootVehicle, PersistentSlot,
+    PLAYER_DATA_VERSION, PersistentAbilities, PersistentAdvancement, PersistentCriterion,
+    PersistentEnderPearl, PersistentPlayerData, PersistentRootVehicle, PersistentSlot,
 };
 use crate::chunk_saver::PersistentEntity;
 use crate::config::StorageSelection;
@@ -43,7 +43,7 @@ use steel_utils::{BlockPos, Identifier};
 
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
-const PLAYER_STORAGE_VERSION: u16 = 9;
+const PLAYER_STORAGE_VERSION: u16 = 10;
 const GLOBAL_STORAGE_VERSION: u16 = 1;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 1;
 
@@ -104,8 +104,22 @@ struct PlayerDataFile {
     root_vehicle: Option<RootVehicleFile>,
     respawn_config: Option<RespawnConfigFile>,
     ender_pearls: Vec<EnderPearlFile>,
+    /// Advancement progress, one entry per advancement with anything to save.
+    advancements: Vec<AdvancementFile>,
     /// Written `LivingEntity.addAdditionalSaveData` compound.
     living_nbt: Vec<u8>,
+}
+
+#[derive(SchemaWrite, SchemaRead)]
+struct AdvancementFile {
+    key: String,
+    criteria: Vec<CriterionFile>,
+}
+
+#[derive(SchemaWrite, SchemaRead)]
+struct CriterionFile {
+    name: String,
+    obtained_epoch_millis: i64,
 }
 
 #[derive(SchemaWrite, SchemaRead)]
@@ -668,6 +682,21 @@ impl PlayerDataFile {
                     entity: pearl.entity.clone(),
                 })
                 .collect(),
+            advancements: data
+                .advancements
+                .iter()
+                .map(|advancement| AdvancementFile {
+                    key: advancement.key.clone(),
+                    criteria: advancement
+                        .criteria
+                        .iter()
+                        .map(|criterion| CriterionFile {
+                            name: criterion.name.clone(),
+                            obtained_epoch_millis: criterion.obtained_epoch_millis,
+                        })
+                        .collect(),
+                })
+                .collect(),
             living_nbt: data.living_nbt.clone(),
         })
     }
@@ -752,6 +781,21 @@ impl PlayerDataFile {
                 .map(|pearl| PersistentEnderPearl {
                     world: pearl.world,
                     entity: pearl.entity,
+                })
+                .collect(),
+            advancements: self
+                .advancements
+                .into_iter()
+                .map(|advancement| PersistentAdvancement {
+                    key: advancement.key,
+                    criteria: advancement
+                        .criteria
+                        .into_iter()
+                        .map(|criterion| PersistentCriterion {
+                            name: criterion.name,
+                            obtained_epoch_millis: criterion.obtained_epoch_millis,
+                        })
+                        .collect(),
                 })
                 .collect(),
             living_nbt: self.living_nbt,
@@ -999,6 +1043,13 @@ mod tests {
             root_vehicle: None,
             respawn_config: None,
             ender_pearls: Vec::new(),
+            advancements: vec![AdvancementFile {
+                key: "minecraft:story/root".to_owned(),
+                criteria: vec![CriterionFile {
+                    name: "crafting_table".to_owned(),
+                    obtained_epoch_millis: 1_234,
+                }],
+            }],
             living_nbt: Vec::new(),
         }
     }
@@ -1371,6 +1422,16 @@ mod tests {
         assert_eq!(decoded.enchantment_seed, 4242);
         assert_eq!(decoded.score, 9);
         assert!(decoded.seen_credits);
+
+        // Advancements are the reason a relog does not start the tree over.
+        assert_eq!(decoded.advancements.len(), 1);
+        assert_eq!(decoded.advancements[0].key, "minecraft:story/root");
+        assert_eq!(decoded.advancements[0].criteria.len(), 1);
+        assert_eq!(decoded.advancements[0].criteria[0].name, "crafting_table");
+        assert_eq!(
+            decoded.advancements[0].criteria[0].obtained_epoch_millis,
+            1_234
+        );
     }
 
     #[test]

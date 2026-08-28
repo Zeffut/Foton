@@ -3,11 +3,13 @@
 //! This module defines the data format for saving and loading player state.
 
 use std::io::Cursor;
+use std::str::FromStr as _;
 
 use rustc_hash::FxHashSet;
 use simdnbt::borrow::read_compound as read_borrowed_compound;
 use simdnbt::owned::NbtCompound;
 use steel_registry::item_stack::ItemStack;
+use steel_utils::Identifier;
 use steel_utils::types::GameType;
 
 use crate::{
@@ -24,7 +26,7 @@ use super::{
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 9;
+pub const PLAYER_DATA_VERSION: i32 = 10;
 
 /// Persistent player data saved by Steel's storage backend.
 ///
@@ -138,6 +140,13 @@ pub struct PersistentPlayerData {
     /// Vanilla in-flight ender pearls stored with the player (`ServerPlayer.enderPearls`).
     pub ender_pearls: Vec<PersistentEnderPearl>,
 
+    /// Advancement progress, one entry per advancement with anything to save.
+    ///
+    /// Vanilla writes this to its own `advancements/<uuid>.json` because it has
+    /// one world; Steel scopes it to the domain, beside the experience and the
+    /// inventory it was earned with.
+    pub advancements: Vec<PersistentAdvancement>,
+
     /// The half of the save every living entity has, as a written NBT compound.
     ///
     /// Vanilla parity: the `LivingEntity.addAdditionalSaveData` a player's own
@@ -148,6 +157,28 @@ pub struct PersistentPlayerData {
     /// applied first and then overwritten by that field, which is the order
     /// vanilla's `super`-first read runs in.
     pub living_nbt: Vec<u8>,
+}
+
+/// One advancement's saved progress.
+///
+/// Vanilla parity: one entry of `PlayerAdvancements.Data`, whose value is an
+/// `AdvancementProgress` -- and the only part of that worth keeping is which
+/// criteria were met and when.
+#[derive(Debug, Clone)]
+pub struct PersistentAdvancement {
+    /// The advancement's registry key.
+    pub key: String,
+    /// The criteria that have been met.
+    pub criteria: Vec<PersistentCriterion>,
+}
+
+/// One met criterion and the moment it was met.
+#[derive(Debug, Clone)]
+pub struct PersistentCriterion {
+    /// The criterion's name within its advancement.
+    pub name: String,
+    /// When it was met, in epoch milliseconds.
+    pub obtained_epoch_millis: i64,
 }
 
 /// A vanilla `RootVehicle` tree persisted with player data.
@@ -257,6 +288,7 @@ impl PersistentPlayerData {
             (lock.level(), lock.progress(), lock.total_points())
         };
         let score = player.score();
+        let advancements = Self::advancements_from_player(player);
         let root_vehicle = Self::root_vehicle_from_player(player)
             .or_else(|| player.pending_root_vehicle_for_current_world());
         let ender_pearls = Self::ender_pearls_from_player(player);
@@ -306,6 +338,7 @@ impl PersistentPlayerData {
             respawn_config: player.respawn_config(),
 
             ender_pearls,
+            advancements,
             living_nbt,
         }
     }
@@ -328,6 +361,53 @@ impl PersistentPlayerData {
             return;
         };
         player.load_living((&living).into());
+    }
+
+    /// Snapshots the player's advancement progress for persistence.
+    fn advancements_from_player(player: &Player) -> Vec<PersistentAdvancement> {
+        player
+            .saved_advancements()
+            .into_iter()
+            .map(|(key, criteria)| PersistentAdvancement {
+                key: key.to_string(),
+                criteria: criteria
+                    .into_iter()
+                    .map(|(name, obtained_epoch_millis)| PersistentCriterion {
+                        name: name.to_owned(),
+                        obtained_epoch_millis,
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Restores the saved advancement progress.
+    ///
+    /// A key that will not parse any more is dropped with a warning rather than
+    /// failing the load, which is what
+    /// [`crate::advancement::PlayerAdvancements::load`] already does for an
+    /// advancement or a criterion the tree no longer declares.
+    fn apply_advancements(&self, player: &Player) {
+        let restored = self.advancements.iter().filter_map(|advancement| {
+            let key = match Identifier::from_str(&advancement.key) {
+                Ok(key) => key,
+                Err(error) => {
+                    tracing::warn!(
+                        key = advancement.key,
+                        %error,
+                        "Ignoring saved advancement progress under an unparsable key"
+                    );
+                    return None;
+                }
+            };
+            let criteria = advancement
+                .criteria
+                .iter()
+                .map(|criterion| (criterion.name.clone(), criterion.obtained_epoch_millis))
+                .collect();
+            Some((key, criteria))
+        });
+        player.load_advancements(restored);
     }
 
     /// Snapshots the player's live in-flight ender pearls for persistence.
@@ -389,6 +469,7 @@ impl Player {
 
         self.set_score(0);
         self.set_seen_credits(false);
+        self.reset_advancements();
         // Vanilla parity: the `this.wardenSpawnTracker.reset()` of `ServerPlayer.reset`,
         // which is what makes dying to a warden clear the way to the next one.
         let mut tracker = self.warden_spawn_tracker();
@@ -560,6 +641,7 @@ impl PersistentPlayerData {
                 self.experience_total,
             );
         }
+        self.apply_advancements(player);
         player.set_enchantment_seed(self.enchantment_seed);
         player.set_score(self.score);
         player.set_seen_credits(self.seen_credits);

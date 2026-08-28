@@ -110,6 +110,34 @@ impl Player {
         self.advancements.lock().is_done(node)
     }
 
+    /// Every advancement with progress, in the shape the save file keeps.
+    ///
+    /// Vanilla parity: `PlayerAdvancements.asData`.
+    #[must_use]
+    pub fn saved_advancements(&self) -> Vec<(Identifier, Vec<(&'static str, i64)>)> {
+        self.advancements.lock().save_data()
+    }
+
+    /// Replaces this player's progress with what was saved.
+    ///
+    /// Vanilla parity: `PlayerAdvancements.applyFrom` on a freshly built
+    /// counter -- so it replaces rather than merges, and the client is sent a
+    /// resetting first packet on the next tick.
+    pub fn load_advancements(
+        &self,
+        saved: impl IntoIterator<Item = (Identifier, Vec<(String, i64)>)>,
+    ) {
+        let mut advancements = self.advancements.lock();
+        advancements.reset();
+        advancements.load(saved);
+    }
+
+    /// Forgets every advancement, for a player entering a domain they have
+    /// never visited.
+    pub fn reset_advancements(&self) {
+        self.advancements.lock().reset();
+    }
+
     /// The criteria of `trigger_id` this player could still be awarded.
     ///
     /// Vanilla parity: `PlayerAdvancements.getTriggerMapForType`, whose map is

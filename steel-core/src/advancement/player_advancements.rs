@@ -111,6 +111,16 @@ impl PlayerAdvancements {
         }
     }
 
+    /// Throws every bit of progress away and starts the client's tree over.
+    ///
+    /// Vanilla parity: `PlayerAdvancements.reload`, minus the datapack swap it
+    /// exists for. Steel uses it where vanilla builds a fresh
+    /// `PlayerAdvancements`: when a player's saved data is applied, and when
+    /// they set foot in a domain for the first time.
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+
     /// Restores saved progress.
     ///
     /// Criteria the advancement no longer declares are dropped, which is what

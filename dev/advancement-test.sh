@@ -45,23 +45,41 @@ sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 
   "$RUN_DIR/config/config.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
-PID=$!
-cleanup() {
-  kill "$PID" 2>/dev/null
-  for _ in $(seq 1 30); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
-  kill -9 "$PID" 2>/dev/null
+
+wait_for_port() {
+  for _ in $(seq 1 180); do
+    ss -ltn 2>/dev/null | grep -q ":$PORT" && return 0
+    sleep 1
+  done
+  return 1
 }
 
-for _ in $(seq 1 180); do
-  ss -ltn 2>/dev/null | grep -q ":$PORT" && break
-  sleep 1
-done
-if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
-  echo "SERVER NEVER LISTENED ON $PORT"
-  sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | tail -20
-  cleanup; exit 1
-fi
+PID=
+start_server() {
+  # stdin from /dev/null: the server reads console commands, and a background
+  # process that reads a terminal is stopped by SIGTTIN instead of running.
+  nohup "$ROOT/target/debug/steel" > "server-$1.log" 2>&1 < /dev/null &
+  PID=$!
+  if ! wait_for_port; then
+    echo "SERVER NEVER LISTENED ON $PORT ($1)"
+    sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "server-$1.log" | tail -20
+    kill -9 "$PID" 2>/dev/null
+    return 1
+  fi
+}
+
+# A clean stop, because that is what flushes the player file the second boot
+# reads.
+stop_server() {
+  kill "$PID" 2>/dev/null
+  for _ in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
+  kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null
+  sleep 2
+}
+
+# ------------------------------------------------------------- first boot
+echo "=== First boot: earns the advancements ==="
+start_server first || exit 1
 
 CMDS='gamemode creative'
 CMDS="$CMDS;;clear @s"
@@ -80,21 +98,42 @@ CMDS="$CMDS;;tellraw @s {\"text\":\"ADVMARKERFOUR\"}"
 # And the screen has to accept a tab the client opens.
 CMDS="$CMDS;;!seentab story/root"
 CMDS="$CMDS;;!seenclose"
+# Emptied on the way out, so the second boot has nothing left to re-earn from.
+# Without this a broken save would look exactly like a working one: the client
+# would be handed the same two advancements, just earned a second time.
+CMDS="$CMDS;;clear @s"
+CMDS="$CMDS;;!wait 2"
 
-export JOIN_COMMANDS="$CMDS"
-JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
+JOIN_WATCH_SECONDS=3 JOIN_COMMANDS="$CMDS" python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
+stop_server
 
-cleanup
+# ------------------------------------------------------------ second boot
+echo "=== Second boot: the same player logs back in ==="
+start_server second || exit 1
+
+RELOG='!wait 2'
+RELOG="$RELOG;;tellraw @s {\"text\":\"ADVRELOG\"}"
+RELOG="$RELOG;;!seentab story/root"
+RELOG="$RELOG;;!wait 2"
+
+JOIN_WATCH_SECONDS=3 JOIN_COMMANDS="$RELOG" python3 "$ROOT/dev/join.py" "$PORT" > join-second.log 2>&1
+RELOG_STATUS=$?
+stop_server
 
 echo "=== what happened ==="
-grep -E "advancement|advancements|server says" join.log | tail -40
+grep -E "advancement|advancements|server says" join.log | tail -30
+echo "=== after the relog ==="
+grep -E "advancement|advancements|server says" join-second.log | tail -20
 echo "=== server ==="
-sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|incorrect|unknown" | tail -6
+for boot in first second; do
+  sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "server-$boot.log" | grep -iE "error|panic|incorrect|unknown" | tail -4
+done
 
 fail() { echo "########## ADVANCEMENT TEST FAILED ($1) ##########"; exit 1; }
 
 [ $STATUS -eq 0 ] || { tail -20 join.log; fail "the client never settled"; }
+[ $RELOG_STATUS -eq 0 ] || { tail -20 join-second.log; fail "the client never settled after the relog"; }
 
 line_of() { grep -n -- "$1" join.log | head -1 | cut -d: -f1; }
 
@@ -177,5 +216,18 @@ grep -q "advancements tab selected minecraft:story/root" join.log \
 #    revealed child has to arrive with its criteria unmet rather than missing.
 grep -q "advancement minecraft:story/upgrade_tools criterion .* not met" join.log \
   || fail "the revealed child arrived without its unmet criteria"
+
+# 9. The progress survives a restart. The inventory was emptied before the
+#    logout, so nothing on the second boot can re-earn either advancement --
+#    which is what makes the two checks below say "restored" rather than
+#    "earned again". The absence of a chat announcement is the same statement
+#    read from the other side: `load` grants a criterion outright where `award`
+#    would have announced it.
+grep -q "advancement minecraft:story/root is complete" join-second.log   || fail "story/root did not survive the restart"
+grep -q "advancement minecraft:story/mine_stone is complete" join-second.log   || fail "story/mine_stone did not survive the restart"
+grep -q "advancements packet: reset=true" join-second.log   || fail "the restored tree did not reach the client as a first packet"
+grep -q "advancement minecraft:story/upgrade_tools is drawn at" join-second.log   || fail "visibility was not recomputed from the restored progress"
+grep -q "server says:.*chat.type.advancement" join-second.log   && fail "a restored advancement was announced again, so it was re-earned rather than loaded"
+grep -q "advancements tab selected minecraft:story/root" join-second.log   || fail "the restored tree would not accept a tab"
 
 echo "########## ADVANCEMENT TEST PASSED ##########"
