@@ -137,7 +137,7 @@ impl CommandLogger {
 
         let time_str = self.format_time();
         let module_path_str = self.format_module_path(&data, true);
-        let extra_str = self.format_extra(&data, true);
+        let extra_str = self.format_extra(&lvl, &data, true);
         let rendered = normalize_terminal_newlines(&format!(
             "{time_str}{lvl} {module_path_str}{}{extra_str}",
             data.message
@@ -170,7 +170,7 @@ impl CommandLogger {
 
         let time_str = self.format_time();
         let module_path_str = self.format_module_path(&data, false);
-        let extra_str = self.format_extra(&data, false);
+        let extra_str = self.format_extra(&lvl, &data, false);
 
         if let Err(err) = writeln!(
             input.file,
@@ -220,8 +220,8 @@ impl CommandLogger {
         }
     }
 
-    fn format_extra(&self, data: &LogData, color: bool) -> String {
-        if self.log_config.as_ref().is_some_and(|l| l.extra) {
+    fn format_extra(&self, lvl: &Level, data: &LogData, color: bool) -> String {
+        if should_render_extra(lvl, self.log_config.as_ref()) {
             if color {
                 format!(
                     "{}{}{}",
@@ -284,9 +284,80 @@ impl<S: Subscriber> Layer<S> for LoggerLayer {
     }
 }
 
+/// Whether a log line's structured fields should be rendered.
+///
+/// A warning or an error always shows them: the fields are the reason the line
+/// was worth writing. `extra` is `#[serde(default)]`, so it is false in every
+/// generated config -- which turned `Chunk scheduling epoch slow` and its
+/// fifteen timings into a sentence that told nobody anything, on a real crash.
+/// Anything quieter than a warning keeps the flag, so routine lines stay short.
+fn should_render_extra(lvl: &Level, log_config: Option<&LogConfig>) -> bool {
+    matches!(
+        lvl,
+        Level::Tracing(tracing::Level::WARN | tracing::Level::ERROR)
+    ) || log_config.is_some_and(|l| l.extra)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{normalize_terminal_newlines, rendered_terminal_rows};
+    use crate::config::{LogLevel, RotationTimeFormat};
+
+    use super::{
+        Level, LogConfig, LogTimeFormat, normalize_terminal_newlines, rendered_terminal_rows,
+        should_render_extra,
+    };
+
+    fn config_with_extra(extra: bool) -> LogConfig {
+        LogConfig {
+            log_path: String::new(),
+            log_level: LogLevel::default(),
+            time: LogTimeFormat::default(),
+            module_path: false,
+            extra,
+            log_file: false,
+            rotation_time: RotationTimeFormat::default(),
+            max_history: 0,
+        }
+    }
+
+    /// A warning carries its fields because the fields are the point.
+    ///
+    /// `extra` defaults to false and is written `extra = false` into every
+    /// generated config, so before this a fifteen-field slow-epoch warning
+    /// printed nothing but its sentence.
+    #[test]
+    fn a_warning_shows_its_fields_even_with_extra_off() {
+        let off = config_with_extra(false);
+        assert!(should_render_extra(
+            &Level::Tracing(tracing::Level::WARN),
+            Some(&off)
+        ));
+        assert!(should_render_extra(
+            &Level::Tracing(tracing::Level::ERROR),
+            Some(&off)
+        ));
+        assert!(should_render_extra(
+            &Level::Tracing(tracing::Level::WARN),
+            None
+        ));
+    }
+
+    /// Anything quieter keeps the flag, so routine lines stay readable.
+    #[test]
+    fn a_routine_line_still_obeys_the_flag() {
+        assert!(!should_render_extra(
+            &Level::Tracing(tracing::Level::INFO),
+            Some(&config_with_extra(false))
+        ));
+        assert!(should_render_extra(
+            &Level::Tracing(tracing::Level::INFO),
+            Some(&config_with_extra(true))
+        ));
+        assert!(!should_render_extra(
+            &Level::Tracing(tracing::Level::DEBUG),
+            None
+        ));
+    }
 
     #[test]
     fn rendered_rows_include_wrapping_and_trailing_newlines() {
