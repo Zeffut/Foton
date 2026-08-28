@@ -8,6 +8,7 @@ use super::{
     biome::{parse_biome_or_tag, suggest_biomes},
     block::{parse_block_predicate, suggest_blocks},
     coordinates::{parse_block_pos, parse_rotation, parse_vec3, suggest_coordinates},
+    function::{FunctionOrTag, parse_function_or_tag, suggest_functions},
     item::{parse_item_stack, suggest_item_stack},
     item_predicate::{parse_item_predicate, suggest_item_predicate},
     nbt::{parse_nbt_compound, parse_nbt_path},
@@ -347,6 +348,10 @@ impl SteelArgumentType {
         Self::new(StorageKeyParser)
     }
 
+    pub(crate) fn function() -> Self {
+        Self::new(FunctionParser)
+    }
+
     pub(crate) fn boss_bar_id() -> Self {
         Self::new(BossBarIdParser)
     }
@@ -505,6 +510,7 @@ impl_downcast_type!(
 impl_downcast_type!(BlockPredicate, "steel:command/value/block_predicate");
 impl_downcast_type!(WorldArgument, "steel:command/value/world");
 impl_downcast_type!(ItemPredicate, "steel:command/value/item_predicate");
+impl_downcast_type!(FunctionOrTag, "steel:command/value/function");
 
 macro_rules! argument_value_wrapper {
     ($name:ident($value:ty), $key:literal) => {
@@ -1124,6 +1130,21 @@ unit_argument_parser!(
     suggest | _context,
     _builder | {},
     protocol(ProtocolArgumentType::Nbt, None)
+);
+unit_argument_parser!(
+    FunctionParser,
+    "steel:command/parser/function",
+    FunctionOrTag,
+    parse | reader,
+    _source | { parse_function_or_tag(reader) },
+    suggest | context,
+    builder | {
+        suggest_functions(context.source(), builder);
+    },
+    protocol(
+        ProtocolArgumentType::Function,
+        Some(ProtocolSuggestionType::AskServer),
+    )
 );
 unit_argument_parser!(
     StorageKeyParser,

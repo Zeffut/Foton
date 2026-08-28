@@ -95,6 +95,14 @@ pub(crate) trait CommandArgumentSource: Send + Sync {
         Vec::new()
     }
 
+    fn command_function_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn command_function_tag_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     fn boss_bar_ids(&self) -> Vec<String> {
         Vec::new()
     }
@@ -467,20 +475,12 @@ impl CommandSource {
         self.position
     }
 
-    #[expect(
-        dead_code,
-        reason = "silent command-source derivation is retained for future vanilla command paths"
-    )]
     pub(crate) fn with_suppressed_output(&self) -> Self {
         let mut source = self.clone();
         source.silent = true;
         source
     }
 
-    #[expect(
-        dead_code,
-        reason = "custom executors need to inspect silent command-source state"
-    )]
     pub(crate) const fn is_silent(&self) -> bool {
         self.silent
     }
@@ -629,6 +629,24 @@ impl CommandArgumentSource for CommandSource {
                     .map(|key| key.to_string())
                     .collect()
             })
+    }
+
+    fn command_function_names(&self) -> Vec<String> {
+        self.server
+            .functions
+            .library()
+            .function_names()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    fn command_function_tag_names(&self) -> Vec<String> {
+        self.server
+            .functions
+            .library()
+            .tag_names()
+            .map(ToString::to_string)
+            .collect()
     }
 
     fn boss_bar_ids(&self) -> Vec<String> {

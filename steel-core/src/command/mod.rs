@@ -5,6 +5,7 @@ pub(crate) mod base_command_block;
 pub(crate) mod brigadier;
 mod builtins;
 pub(crate) mod execution;
+pub(crate) mod functions;
 mod protocol;
 mod queue;
 pub mod rcon;

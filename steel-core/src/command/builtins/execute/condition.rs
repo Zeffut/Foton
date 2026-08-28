@@ -7,6 +7,7 @@ use simdnbt::owned::NbtTag;
 use steel_registry::{blocks::block_state_ext::BlockStateExt as _, vanilla_blocks};
 use steel_utils::{
     BlockPos, BoundingBox, ChunkPos, SectionPos,
+    locks::SyncMutex,
     nbt::{NbtPath, compare_nbt_compounds},
     translations,
 };
@@ -15,10 +16,12 @@ use text_components::TextComponent;
 use super::super::super::{
     brigadier::{CommandNodeBuilder, CommandRedirectTarget, CommandSyntaxError},
     execution::{
-        CommandSource, SteelArgumentType, SteelCommandContext, SteelCommandRuntime, argument,
-        literal,
+        ChainModifiers, CommandResultCallback, CommandSource, CustomModifierExecutor,
+        ExecutionCommandSource, ExecutionControl, SteelArgumentType, SteelCommandContext,
+        SteelCommandRuntime, SteelContextChain, argument, literal,
     },
 };
+use super::super::function::resolve_functions;
 use super::{objective, source_command_storage, source_scoreboard};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::slot_ranges::container_slot_item;
@@ -30,7 +33,7 @@ const EXECUTE_ROOT: CommandRedirectTarget = CommandRedirectTarget::CommandRoot;
 const MAX_BLOCKS_REGION: i64 = 32_768;
 
 pub(super) fn conditionals(name: &'static str, expected: bool) -> Builder {
-    // TODO: Add predicate and function after their runtime registries are ported.
+    // TODO: Add predicate after its runtime registry is ported.
     // TODO: Restore Steel stopwatch conditions with the stopwatch command system.
     literal(name)
         .then(biome_condition(expected))
@@ -39,9 +42,96 @@ pub(super) fn conditionals(name: &'static str, expected: bool) -> Builder {
         .then(data_condition(expected))
         .then(dimension_condition(expected))
         .then(entity_condition(expected))
+        .then(function_condition(expected))
         .then(items_condition(expected))
         .then(loaded_condition(expected))
         .then(score_condition(expected))
+}
+
+/// `execute if|unless function <name>`.
+///
+/// Vanilla parity: `ExecuteCommand.ExecuteIfFunctionCustomModifier`. The
+/// condition cannot be a plain fork modifier, because whether a source passes
+/// depends on the result of a function that only runs later in the queue.
+fn function_condition(expected: bool) -> Builder {
+    literal("function").then(
+        argument("name", SteelArgumentType::function()).redirects_custom(
+            EXECUTE_ROOT,
+            ExecuteIfFunction { expected },
+            true,
+        ),
+    )
+}
+
+struct ExecuteIfFunction {
+    expected: bool,
+}
+
+impl CustomModifierExecutor<CommandSource> for ExecuteIfFunction {
+    fn apply(
+        &self,
+        original_source: Arc<CommandSource>,
+        sources: Vec<Arc<CommandSource>>,
+        chain: &SteelContextChain<CommandSource>,
+        modifiers: ChainModifiers,
+        control: &mut ExecutionControl<'_, CommandSource>,
+    ) {
+        let context = chain.top_context().copy_for(Arc::clone(&original_source));
+        let functions = match context
+            .function_or_tag("name")
+            .and_then(|reference| resolve_functions(&original_source, reference))
+        {
+            Ok(functions) => functions,
+            Err(error) => {
+                original_source.handle_error(&error, modifiers.is_forked());
+                return;
+            }
+        };
+        // Vanilla parity: with no functions to run, nothing at all is queued --
+        // not even the continuation -- so the rest of the chain never runs.
+        if functions.is_empty() {
+            return;
+        }
+
+        let entries = functions
+            .iter()
+            .map(|function| function.entries())
+            .collect::<Vec<_>>();
+        let passing = Arc::new(SyncMutex::new(Vec::new()));
+        let expected = self.expected;
+        for source in sources {
+            let function_source = Arc::new(
+                source
+                    .with_suppressed_output()
+                    .with_callback(CommandResultCallback::empty()),
+            );
+            let passing = Arc::clone(&passing);
+            let candidate = Arc::clone(&source);
+            let result_callback = CommandResultCallback::new(move |_success, result| {
+                if (result != 0) == expected {
+                    passing.lock().push(Arc::clone(&candidate));
+                }
+            });
+            let entries = entries.clone();
+            control.queue_isolated(result_callback, move |isolated| {
+                let consumer = isolated.current_frame().return_value_consumer();
+                for entries in entries {
+                    isolated.queue_function_call(
+                        entries,
+                        Arc::clone(&function_source),
+                        consumer.clone(),
+                        true,
+                    );
+                }
+                isolated.queue_fallthrough();
+            });
+        }
+
+        let Some(next_stage) = chain.next_stage() else {
+            unreachable!("an execute condition redirects to a following command stage")
+        };
+        control.queue_deferred_contexts(next_stage, original_source, passing, modifiers);
+    }
 }
 
 fn data_condition(expected: bool) -> Builder {

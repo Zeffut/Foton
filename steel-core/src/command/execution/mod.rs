@@ -4,6 +4,7 @@ mod argument;
 mod biome;
 mod block;
 mod coordinates;
+mod function;
 mod item;
 mod item_predicate;
 mod nbt;
@@ -23,13 +24,14 @@ pub(crate) use argument::{SteelArgumentParser, SteelArgumentSuggestionContext};
 pub(crate) use biome::BiomeOrTag;
 pub(crate) use block::BlockPredicate;
 pub(crate) use coordinates::Coordinates;
+pub(crate) use function::FunctionOrTag;
 pub(crate) use item_predicate::ItemPredicate;
 pub(crate) use permission::PermissionGroupName;
 pub(crate) use profile::GameProfileArgument;
 pub use queue::CommandSuspensionOrder;
 pub(crate) use queue::{
     ChainModifiers, CommandExecutionContext, CommandResultSuspension, CommandResultSuspensionPoll,
-    ExecutionControl, ExecutionStop,
+    ExecutionControl, ExecutionStop, FunctionEntries, UnboundCommand, UnboundEntryAction,
 };
 #[cfg_attr(
     not(test),

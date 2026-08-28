@@ -25,6 +25,7 @@ use crate::command::execution::{
     CommandExecutionContext, CommandResultCallback, CommandSource, ExecutionCommandSource,
     ExecutionStop,
 };
+use crate::command::functions::{FunctionManager, FunctionReloadReport};
 use crate::command::rcon::RconOutput;
 use crate::command::sender::{CommandExecutionOwner, CommandSender};
 use crate::command::storage::DomainCommandStorage;
@@ -438,6 +439,8 @@ pub struct Server {
     pub boss_bars: DomainCustomBossEvents,
     /// Saves and dispatches commands to appropriate handlers.
     command_dispatcher: SyncRwLock<CommandDispatcher>,
+    /// Datapack-loaded command functions, shared by every domain like vanilla's.
+    pub(crate) functions: FunctionManager,
     /// Steel-owned permission keys exposed for command autocomplete.
     command_permission_keys: Vec<String>,
     /// Command work submitted from connection and console tasks.
@@ -735,6 +738,7 @@ impl Server {
             map_data,
             boss_bars,
             command_dispatcher: SyncRwLock::new(registered_commands.dispatcher),
+            functions: FunctionManager::new(resolved_worlds.save_path.join("datapacks")),
             command_permission_keys,
             command_requests: CommandRequestQueue::new(),
             packet_processor: PacketProcessor::new(),
@@ -791,6 +795,25 @@ impl Server {
         for world in self.worlds.values() {
             world.attach_server(self);
         }
+    }
+
+    /// Reloads every datapack function and reports what the load produced.
+    ///
+    /// Vanilla parity: the function half of `ReloadableServerResources`, which
+    /// the server runs once at startup and again on a resource reload.
+    pub(crate) fn reload_functions(self: &Arc<Self>) -> FunctionReloadReport {
+        let compilation_source = self.function_source();
+        let dispatcher = self.command_dispatcher.read();
+        self.functions.reload(&dispatcher, &compilation_source)
+    }
+
+    /// The source `.mcfunction` lines are compiled and run against.
+    ///
+    /// Vanilla parity: `Commands.createCompilationContext` for the load and
+    /// `ServerFunctionManager.getGameLoopSender` for the tick, both of which are
+    /// a server-level source at gamemaster permission with suppressed output.
+    pub(crate) fn function_source(self: &Arc<Self>) -> CommandSource {
+        CommandSource::new(CommandSender::Console, Arc::clone(self)).with_suppressed_output()
     }
 
     /// Runs one command to completion inside the current tick.

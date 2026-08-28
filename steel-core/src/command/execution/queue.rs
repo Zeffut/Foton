@@ -6,7 +6,9 @@
     )
 )]
 
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, mem, sync::Arc};
+
+use steel_utils::locks::SyncMutex;
 
 use crate::command::brigadier::{CommandSyntaxError, ContextChainStage};
 
@@ -74,6 +76,14 @@ impl Frame {
 
     pub(crate) fn return_failure(&self) {
         self.return_value_consumer.on_result(false, 0);
+    }
+
+    /// Returns the callback this frame reports its result to.
+    ///
+    /// Vanilla parity: `Frame.returnValueConsumer`, which `/function` chains
+    /// onto its own callback when it runs inside a `return run`.
+    pub(crate) fn return_value_consumer(&self) -> CommandResultCallback {
+        self.return_value_consumer.clone()
     }
 }
 
@@ -233,6 +243,29 @@ where
         let mut context = Self::new(command_limit, fork_limit);
         context.queue_limit = queue_limit;
         context
+    }
+
+    /// Queues one loaded function as a top-level execution.
+    ///
+    /// Vanilla parity: `ExecutionContext.queueInitialFunctionCall`.
+    pub(crate) fn queue_initial_function_call(
+        &mut self,
+        entries: FunctionEntries<S>,
+        sender: S,
+        function_return: CommandResultCallback,
+    ) {
+        let sender = Arc::new(sender);
+        let result_callback = sender.callback();
+        let frame = self.create_top_frame(function_return);
+        self.queue_entry(CommandQueueEntry {
+            frame,
+            action: Box::new(CallFunctionAction {
+                entries,
+                sender,
+                result_callback,
+                return_parent_frame: false,
+            }),
+        });
     }
 
     pub(crate) fn queue_initial_command(
@@ -489,12 +522,78 @@ where
         );
     }
 
+    /// Queues the rest of a chain against sources that earlier queued work fills in.
+    ///
+    /// Vanilla parity: the `BuildContexts.Continuation` that
+    /// `execute if function` queues over the list its isolated calls append
+    /// their passing sources to. The list has to stay shared: the continuation
+    /// is queued before those calls have run.
+    pub(crate) fn queue_deferred_contexts(
+        &mut self,
+        chain: SteelContextChain<S>,
+        original_source: Arc<S>,
+        sources: Arc<SyncMutex<Vec<Arc<S>>>>,
+        modifiers: ChainModifiers,
+    ) {
+        self.queue_next(DeferredBuildContextsAction {
+            chain,
+            original_source,
+            sources,
+            modifiers,
+        });
+    }
+
     pub(crate) fn discard_frame(&mut self) {
         self.context.discard(&self.frame);
     }
 
     pub(crate) fn queue_fallthrough(&mut self) {
         self.queue_next(FallthroughAction);
+    }
+
+    /// Queues a plain callback at this queue position.
+    ///
+    /// Vanilla parity: the lambda `EntryAction` `/function` queues to report the
+    /// summed result of several functions once they have all run.
+    pub(crate) fn queue_callback(&mut self, callback: impl FnOnce() + Send + 'static) {
+        self.queue_next(CallbackAction {
+            callback: Box::new(callback),
+        });
+    }
+
+    /// Queues work that runs in its own frame and reports that frame's result
+    /// to `output` instead of to the caller's frame.
+    ///
+    /// Vanilla parity: `IsolatedCall`.
+    pub(crate) fn queue_isolated(
+        &mut self,
+        output: CommandResultCallback,
+        task: impl FnOnce(&mut ExecutionControl<'_, S>) + Send + 'static,
+    ) {
+        self.queue_next(IsolatedCallAction {
+            task: Box::new(task),
+            output,
+        });
+    }
+
+    /// Queues one loaded function's entries in a frame of their own.
+    ///
+    /// Vanilla parity: `CallFunction`. `return_parent_frame` keeps the caller's
+    /// frame control so a `/return` inside the function ends the caller too,
+    /// which is what `execute if function` and `return run function` rely on.
+    pub(crate) fn queue_function_call(
+        &mut self,
+        entries: FunctionEntries<S>,
+        sender: Arc<S>,
+        result_callback: CommandResultCallback,
+        return_parent_frame: bool,
+    ) {
+        self.queue_next(CallFunctionAction {
+            entries,
+            sender,
+            result_callback,
+            return_parent_frame,
+        });
     }
 
     pub(crate) fn return_success(&mut self, result: i32) {
@@ -555,68 +654,34 @@ where
 {
     fn execute(self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
         let Self {
-            mut chain,
+            chain,
             original_source,
-            mut sources,
-            mut modifiers,
+            sources,
+            modifiers,
         } = *self;
+        build_contexts(context, frame, chain, original_source, sources, modifiers);
+    }
+}
 
-        while chain.stage() == ContextChainStage::Modify {
-            sources.retain(|source| source.execution_is_current());
-            if sources.is_empty() {
-                if modifiers.is_return() {
-                    context.queue_next(frame, FallthroughAction);
-                }
-                return;
-            }
-            if chain.top_context().is_forked() {
-                modifiers = modifiers.with_forked();
-            }
+/// Walks a context chain's modifier stages and schedules its terminal executor.
+///
+/// Vanilla parity: `BuildContexts.execute`, shared by the queued entry action
+/// and by the unbound entry a loaded function keeps for each of its lines.
+fn build_contexts<S>(
+    context: &mut CommandExecutionContext<S>,
+    frame: Frame,
+    chain: SteelContextChain<S>,
+    original_source: Arc<S>,
+    sources: Vec<Arc<S>>,
+    modifiers: ChainModifiers,
+) where
+    S: ExecutionCommandSource,
+{
+    let mut chain = chain;
+    let mut sources = sources;
+    let mut modifiers = modifiers;
 
-            match chain.top_context().modifier() {
-                Some(SteelModifier::Custom(modifier)) => {
-                    let mut control = ExecutionControl::new(context, frame);
-                    modifier.apply(original_source, sources, &chain, modifiers, &mut control);
-                    return;
-                }
-                Some(SteelModifier::Standard(modifier)) => {
-                    context.increment_cost();
-                    let mut next_sources = Vec::new();
-                    for source in sources {
-                        let command_context = chain.top_context().copy_for(Arc::clone(&source));
-                        let new_sources = match modifier(&command_context) {
-                            Ok(sources) => sources,
-                            Err(error) => {
-                                if modifiers.is_forked() {
-                                    continue;
-                                }
-                                source.handle_error(&error, false);
-                                return;
-                            }
-                        };
-                        if next_sources.len().saturating_add(new_sources.len())
-                            >= context.fork_limit()
-                        {
-                            let error = CommandSyntaxError::dynamic(format!(
-                                "Command fork limit reached ({})",
-                                context.fork_limit()
-                            ));
-                            original_source.handle_error(&error, modifiers.is_forked());
-                            return;
-                        }
-                        next_sources.extend(new_sources.into_iter().map(Arc::new));
-                    }
-                    sources = next_sources;
-                }
-                None => {}
-            }
-
-            let Some(next_stage) = chain.next_stage() else {
-                unreachable!("a modifying command stage always has a following stage")
-            };
-            chain = next_stage;
-        }
-
+    while chain.stage() == ContextChainStage::Modify {
         sources.retain(|source| source.execution_is_current());
         if sources.is_empty() {
             if modifiers.is_return() {
@@ -624,31 +689,84 @@ where
             }
             return;
         }
+        if chain.top_context().is_forked() {
+            modifiers = modifiers.with_forked();
+        }
 
-        let Some(executor) = chain.top_context().executor() else {
-            unreachable!("a context chain's final stage is always executable")
-        };
-        match executor {
-            SteelExecutor::Custom(executor) => {
-                for source in sources {
-                    let mut control = ExecutionControl::new(context, frame.clone());
-                    executor.run(source, &chain, modifiers, &mut control);
-                }
+        match chain.top_context().modifier() {
+            Some(SteelModifier::Custom(modifier)) => {
+                let mut control = ExecutionControl::new(context, frame);
+                modifier.apply(original_source, sources, &chain, modifiers, &mut control);
+                return;
             }
-            SteelExecutor::Standard(_) | SteelExecutor::Suspended(_) => {
-                if modifiers.is_return() {
-                    let Some(source) = sources.into_iter().next() else {
-                        unreachable!("empty source lists return before terminal scheduling")
+            Some(SteelModifier::Standard(modifier)) => {
+                context.increment_cost();
+                let mut next_sources = Vec::new();
+                for source in sources {
+                    let command_context = chain.top_context().copy_for(Arc::clone(&source));
+                    let new_sources = match modifier(&command_context) {
+                        Ok(sources) => sources,
+                        Err(error) => {
+                            if modifiers.is_forked() {
+                                continue;
+                            }
+                            source.handle_error(&error, false);
+                            return;
+                        }
                     };
-                    let callback = CommandResultCallback::chain(
-                        source.callback(),
-                        frame.return_value_consumer.clone(),
-                    );
-                    let source = Arc::new(source.with_callback(callback));
-                    schedule_executions(context, frame, chain, vec![source], modifiers);
-                } else {
-                    schedule_executions(context, frame, chain, sources, modifiers);
+                    if next_sources.len().saturating_add(new_sources.len()) >= context.fork_limit()
+                    {
+                        let error = CommandSyntaxError::dynamic(format!(
+                            "Command fork limit reached ({})",
+                            context.fork_limit()
+                        ));
+                        original_source.handle_error(&error, modifiers.is_forked());
+                        return;
+                    }
+                    next_sources.extend(new_sources.into_iter().map(Arc::new));
                 }
+                sources = next_sources;
+            }
+            None => {}
+        }
+
+        let Some(next_stage) = chain.next_stage() else {
+            unreachable!("a modifying command stage always has a following stage")
+        };
+        chain = next_stage;
+    }
+
+    sources.retain(|source| source.execution_is_current());
+    if sources.is_empty() {
+        if modifiers.is_return() {
+            context.queue_next(frame, FallthroughAction);
+        }
+        return;
+    }
+
+    let Some(executor) = chain.top_context().executor() else {
+        unreachable!("a context chain's final stage is always executable")
+    };
+    match executor {
+        SteelExecutor::Custom(executor) => {
+            for source in sources {
+                let mut control = ExecutionControl::new(context, frame.clone());
+                executor.run(source, &chain, modifiers, &mut control);
+            }
+        }
+        SteelExecutor::Standard(_) | SteelExecutor::Suspended(_) => {
+            if modifiers.is_return() {
+                let Some(source) = sources.into_iter().next() else {
+                    unreachable!("empty source lists return before terminal scheduling")
+                };
+                let callback = CommandResultCallback::chain(
+                    source.callback(),
+                    frame.return_value_consumer.clone(),
+                );
+                let source = Arc::new(source.with_callback(callback));
+                schedule_executions(context, frame, chain, vec![source], modifiers);
+            } else {
+                schedule_executions(context, frame, chain, sources, modifiers);
             }
         }
     }
@@ -873,5 +991,235 @@ where
     fn execute(self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
         frame.return_failure();
         context.discard(&frame);
+    }
+}
+
+/// A queued action bound to its command source only when it runs.
+///
+/// Vanilla parity: `UnboundEntryAction`. A loaded function keeps one action per
+/// command line and binds every caller's source to it, so unlike [`EntryAction`]
+/// the action is shared and runs from `&self`.
+pub(crate) trait UnboundEntryAction<S>: Send + Sync
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(&self, sender: Arc<S>, context: &mut CommandExecutionContext<S>, frame: Frame);
+}
+
+/// The compiled lines of one function, shared by every call to it.
+pub(crate) type FunctionEntries<S> = Arc<[Arc<dyn UnboundEntryAction<S>>]>;
+
+/// One parsed function line, ready to run against any source.
+///
+/// Vanilla parity: `BuildContexts.Unbound`.
+pub(crate) struct UnboundCommand<S>
+where
+    S: ExecutionCommandSource,
+{
+    chain: SteelContextChain<S>,
+}
+
+impl<S> UnboundCommand<S>
+where
+    S: ExecutionCommandSource,
+{
+    pub(crate) const fn new(chain: SteelContextChain<S>) -> Self {
+        Self { chain }
+    }
+}
+
+impl<S> UnboundEntryAction<S> for UnboundCommand<S>
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(&self, sender: Arc<S>, context: &mut CommandExecutionContext<S>, frame: Frame) {
+        build_contexts(
+            context,
+            frame,
+            self.chain.clone(),
+            Arc::clone(&sender),
+            vec![sender],
+            ChainModifiers::default(),
+        );
+    }
+}
+
+struct BoundEntryAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    action: Arc<dyn UnboundEntryAction<S>>,
+    sender: Arc<S>,
+}
+
+impl<S> EntryAction<S> for BoundEntryAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
+        self.action.execute(self.sender, context, frame);
+    }
+}
+
+struct CallFunctionAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    entries: FunctionEntries<S>,
+    sender: Arc<S>,
+    result_callback: CommandResultCallback,
+    return_parent_frame: bool,
+}
+
+impl<S> EntryAction<S> for CallFunctionAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
+        context.increment_cost();
+        let depth = frame.depth + 1;
+        let discard = if self.return_parent_frame {
+            frame.discard
+        } else {
+            FrameDiscard::AtOrAbove(depth)
+        };
+        let function_frame = Frame {
+            depth,
+            return_value_consumer: self.result_callback,
+            discard,
+        };
+        schedule_function_entries(context, function_frame, self.entries, self.sender);
+    }
+}
+
+/// Queues a function's entries in order, deferring long bodies to a continuation.
+///
+/// Vanilla parity: `ContinuationTask.schedule`.
+fn schedule_function_entries<S>(
+    context: &mut CommandExecutionContext<S>,
+    frame: Frame,
+    entries: FunctionEntries<S>,
+    sender: Arc<S>,
+) where
+    S: ExecutionCommandSource,
+{
+    match entries.len() {
+        0 => {}
+        1 | 2 => {
+            for entry in entries.iter() {
+                context.queue_next(
+                    frame.clone(),
+                    BoundEntryAction {
+                        action: Arc::clone(entry),
+                        sender: Arc::clone(&sender),
+                    },
+                );
+            }
+        }
+        _ => context.queue_next(
+            frame,
+            FunctionEntryContinuation {
+                entries,
+                sender,
+                index: 0,
+            },
+        ),
+    }
+}
+
+struct FunctionEntryContinuation<S>
+where
+    S: ExecutionCommandSource,
+{
+    entries: FunctionEntries<S>,
+    sender: Arc<S>,
+    index: usize,
+}
+
+impl<S> EntryAction<S> for FunctionEntryContinuation<S>
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(mut self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
+        let Some(entry) = self.entries.get(self.index) else {
+            return;
+        };
+        context.queue_next(
+            frame.clone(),
+            BoundEntryAction {
+                action: Arc::clone(entry),
+                sender: Arc::clone(&self.sender),
+            },
+        );
+        self.index += 1;
+        if self.index < self.entries.len() {
+            context.queue_boxed(frame, self);
+        }
+    }
+}
+
+struct DeferredBuildContextsAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    chain: SteelContextChain<S>,
+    original_source: Arc<S>,
+    sources: Arc<SyncMutex<Vec<Arc<S>>>>,
+    modifiers: ChainModifiers,
+}
+
+impl<S> EntryAction<S> for DeferredBuildContextsAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
+        let sources = mem::take(&mut *self.sources.lock());
+        build_contexts(
+            context,
+            frame,
+            self.chain,
+            self.original_source,
+            sources,
+            self.modifiers,
+        );
+    }
+}
+
+struct CallbackAction {
+    callback: Box<dyn FnOnce() + Send>,
+}
+
+impl<S> EntryAction<S> for CallbackAction
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(self: Box<Self>, _context: &mut CommandExecutionContext<S>, _frame: Frame) {
+        (self.callback)();
+    }
+}
+
+type IsolatedTask<S> = dyn FnOnce(&mut ExecutionControl<'_, S>) + Send;
+
+struct IsolatedCallAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    task: Box<IsolatedTask<S>>,
+    output: CommandResultCallback,
+}
+
+impl<S> EntryAction<S> for IsolatedCallAction<S>
+where
+    S: ExecutionCommandSource,
+{
+    fn execute(self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
+        let depth = frame.depth + 1;
+        let isolated_frame = Frame {
+            depth,
+            return_value_consumer: self.output,
+            discard: FrameDiscard::AtOrAbove(depth),
+        };
+        let mut control = ExecutionControl::new(context, isolated_frame);
+        (self.task)(&mut control);
     }
 }

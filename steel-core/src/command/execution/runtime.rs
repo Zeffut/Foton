@@ -23,8 +23,8 @@ use text_components::TextComponent;
 
 use super::{
     BiomeOrTag, BlockPredicate, ChainModifiers, CommandResultSuspension, CommandSource,
-    Coordinates, ExecutionCommandSource, ExecutionControl, GameProfileArgument, IntRange,
-    ItemPredicate, PermissionGroupName, ScoreHolderArgument, ScoreHolderWildcard,
+    Coordinates, ExecutionCommandSource, ExecutionControl, FunctionOrTag, GameProfileArgument,
+    IntRange, ItemPredicate, PermissionGroupName, ScoreHolderArgument, ScoreHolderWildcard,
     SteelArgumentType, StructureOrTagKey, WorldArgument,
     argument::{
         ComponentValue, CoordinateAxes, DomainValue, EnchantmentValue, EntityTypeValue,
@@ -330,6 +330,10 @@ where
     }
 
     pub(crate) fn item_predicate(&self, name: &str) -> Result<&ItemPredicate, CommandSyntaxError> {
+        self.typed_argument(name)
+    }
+
+    pub(crate) fn function_or_tag(&self, name: &str) -> Result<&FunctionOrTag, CommandSyntaxError> {
         self.typed_argument(name)
     }
 

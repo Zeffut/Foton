@@ -32,6 +32,7 @@ use crate::command::execution::{
     CommandArgumentSource, CommandExecutionContext, CommandPermissionSource, CommandResultCallback,
     CommandSource, ExecutionCommandSource, ExecutionStop, parse_entity_selector_text,
 };
+use crate::command::functions::FunctionManager;
 use crate::command::rcon::RconOutput;
 use crate::command::sender::{CommandExecutionOwner, CommandSender};
 use crate::config::{ResolvedDomainConfig, RuntimeConfig, StorageSelection};
@@ -246,6 +247,7 @@ async fn test_server_with_worlds(
         map_data,
         boss_bars,
         command_dispatcher: SyncRwLock::new(registered_commands.dispatcher),
+        functions: FunctionManager::new(PathBuf::from("datapacks")),
         command_permission_keys,
         command_requests: CommandRequestQueue::new(),
         packet_processor: PacketProcessor::new(),

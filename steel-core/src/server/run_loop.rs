@@ -10,6 +10,7 @@ use super::{
     ThreadPool, World, command_suggestions_packet, configured_packet_workers, sleep,
     spawn_blocking,
 };
+use crate::command::functions::CommandFunction;
 
 impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
@@ -18,6 +19,18 @@ impl Server {
         // A world is built before the server that owns it, so the link back is
         // filled in here, before anything can tick.
         self.attach_worlds();
+        // Functions are compiled against a command source, and a source needs
+        // the server, so the datapack load cannot happen before this point.
+        let report = self.reload_functions();
+        for error in &report.errors {
+            log::error!("Datapack load: {error}");
+        }
+        log::info!(
+            "Loaded {} function(s) and {} function tag(s) from {}",
+            report.functions,
+            report.tags,
+            self.functions.root().display()
+        );
         self.packet_processor.open_after_tick();
         let packet_worker_count = configured_packet_workers(self.config.packet_workers);
         let mut packet_handles = Vec::with_capacity(packet_worker_count);
@@ -138,6 +151,7 @@ impl Server {
 
             self.tick_pending_command_executions(&mut pending_command_executions);
             self.tick_command_requests(&mut pending_command_executions);
+            self.tick_functions(&mut pending_command_executions, runs_normally);
             if let Err(error) = self
                 .tick_worlds_game(&world_tick_workers, tick_count, runs_normally)
                 .await
@@ -192,6 +206,9 @@ impl Server {
         self.jobs.cancel_all();
         pending_command_executions.cancel_all();
         self.command_requests.clear();
+        // A compiled function holds the source it was parsed with, and that
+        // source holds the server; dropping the library breaks the cycle.
+        self.functions.unload();
         self.packet_processor.stop();
         self.start_player_disconnect_saves(&mut player_disconnect_saves);
         self.pending_player_disconnects.clear();
@@ -275,6 +292,52 @@ impl Server {
                 finished = stats.finished,
                 pending = stats.pending,
                 "Command resumption tick reached per-tick processing limit"
+            );
+        }
+    }
+
+    /// Runs the `#minecraft:load` and `#minecraft:tick` function tags.
+    ///
+    /// Vanilla parity: `ServerFunctionManager.tick`, which skips the tags
+    /// entirely while the tick rate manager is frozen or stepping.
+    fn tick_functions(
+        self: &Arc<Self>,
+        pending: &mut PendingCommandExecutionQueue<CommandSource>,
+        runs_normally: bool,
+    ) {
+        if !runs_normally {
+            return;
+        }
+        let load = self.functions.take_load_functions();
+        let tick = self.functions.ticking_functions();
+        if load.is_empty() && tick.is_empty() {
+            return;
+        }
+        for function in load.into_iter().chain(tick) {
+            self.run_function_now(pending, &function);
+        }
+    }
+
+    /// Starts one function as its own top-level execution.
+    fn run_function_now(
+        self: &Arc<Self>,
+        pending: &mut PendingCommandExecutionQueue<CommandSource>,
+        function: &CommandFunction,
+    ) {
+        let sender = CommandSender::Console;
+        let owner = CommandExecutionOwner::capture(sender.clone(), self);
+        let source = self.function_source();
+        let mut execution = CommandExecutionContext::for_source(&source);
+        execution.queue_initial_function_call(
+            function.entries(),
+            source,
+            CommandResultCallback::empty(),
+        );
+        if execution.run() == ExecutionStop::Suspended && !pending.push_suspended(owner, execution)
+        {
+            tracing::error!(
+                function = %function.id(),
+                "suspended function execution could not be retained"
             );
         }
     }
