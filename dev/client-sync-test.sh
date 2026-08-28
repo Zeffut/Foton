@@ -379,7 +379,7 @@ grep -q "the client was told main hand 0" join.log \
 
 # The experience bar across a world change. The respawn has to have happened
 # first, or a missing experience packet would prove nothing.
-grep -q "the client was respawned" join.log \
+grep -q "the client was respawned [1-9]" join.log \
   || fail "the player never changed world, so the experience bar proves nothing"
 grep -q "the client was told experience .* level 7 " join.log \
   || fail "a world change threw the experience bar away and nothing put it back"
