@@ -637,7 +637,7 @@ fn shoot(
         let angle = angle_step.mul_add(side * index.div_ceil(2) as f32, angle_offset);
         side = -side;
 
-        let projectile = create_projectile(world, shooter, &ammo);
+        let projectile = create_projectile(world, shooter, weapon, &ammo);
         shoot_projectile(
             world,
             shooter,
@@ -653,8 +653,7 @@ fn shoot(
         }
         // Vanilla parity: `Projectile.applyOnProjectileSpawned` runs the
         // enchantments of the ammunition, then those of the weapon the arrow
-        // remembers. Steel's arrow does not carry a weapon stack, so the
-        // crossbow is handed over directly.
+        // remembers -- which is the same crossbow, handed over directly here.
         enchantment_helper::on_projectile_spawned(
             world,
             &mut ammo,
@@ -685,6 +684,7 @@ fn shoot(
 fn create_projectile(
     world: &Arc<World>,
     shooter: &dyn LivingEntity,
+    weapon: &ItemStack,
     ammo: &ItemStack,
 ) -> SharedEntity {
     let position = shooter.position();
@@ -711,9 +711,12 @@ fn create_projectile(
         Arc::downgrade(world),
     );
     arrow.set_owner_uuid(Some(shooter.uuid()));
-    // TODO: vanilla also swaps the arrow's hit sound to `CROSSBOW_HIT`, marks a
-    // player's shot critical and applies Piercing. Steel's arrow entity models
-    // none of those three, so a crossbow bolt currently hits like a bow's.
+    // Vanilla parity: `ProjectileWeaponItem.createProjectile` hands the arrow
+    // the weapon it came off, which is where the bolt's Piercing is read from.
+    // Without it a Piercing crossbow stops at the first mob like a plain one.
+    arrow.set_fired_from_weapon(Some(weapon.copy_with_count(weapon.count())));
+    // TODO: vanilla also swaps the arrow's hit sound to `CROSSBOW_HIT` and
+    // marks a player's shot critical. Steel's arrow models neither.
     Arc::new(arrow)
 }
 
@@ -835,8 +838,11 @@ mod tests {
     use steel_utils::types::GameType;
     use steel_utils::{ChunkPos, WorldAabb};
 
+    use steel_utils::Downcast as _;
+
     use super::*;
     use crate::bootstrap::init_globals_once;
+    use crate::entity::entities::ArrowEntity;
     use crate::player::Player;
     use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 
@@ -1163,6 +1169,82 @@ mod tests {
         let weapon = player.inventory.lock().get_item(WEAPON_SLOT).clone();
         assert!(!is_charged(&weapon), "firing empties the crossbow");
         assert!(weapon.get_damage_value() > 0, "firing costs durability");
+    }
+
+    /// Fires a charged crossbow and reports the pierce level of the bolt that
+    /// left it.
+    fn fired_bolt_pierce_level(world: &Arc<World>, player: &Arc<Player>) -> i8 {
+        let charged = charge_to_completion(world, player);
+        player.inventory.lock().set_item(WEAPON_SLOT, charged);
+
+        let mut context = UseItemContext::new(
+            player.as_ref(),
+            InteractionHand::MainHand,
+            world,
+            Arc::clone(&player.inventory),
+        );
+        assert_eq!(
+            CrossbowItem.use_item(&mut context),
+            InteractionResult::Consume
+        );
+
+        let arrows = world.get_entities_in_aabb_matching(
+            &WorldAabb::from_min_max(
+                TEST_POSITION - DVec3::splat(4.0),
+                TEST_POSITION + DVec3::splat(4.0),
+            ),
+            |entity| entity.downcast_ref::<ArrowEntity>().is_some(),
+        );
+        assert_eq!(arrows.len(), 1, "exactly one bolt should have left");
+        arrows[0]
+            .as_ref()
+            .downcast_ref::<ArrowEntity>()
+            .expect("the matcher already proved this is an arrow")
+            .pierce_level()
+    }
+
+    /// Piercing was inert: nothing ever set a bolt's pierce level above zero.
+    ///
+    /// The crossbow never handed the arrow the weapon it came off, so
+    /// `getPiercingCount` had nothing to read, and every bolt stopped in the
+    /// first mob it touched. The test fires a real crossbow through
+    /// `use_item` and reads the pierce level off the entity that lands in the
+    /// world, because that is where the number has to be by the time it hits
+    /// anything.
+    #[test]
+    fn piercing_reaches_the_bolt_that_leaves_the_crossbow() {
+        init_globals_once();
+        let world = fresh_test_world("crossbow_piercing_reaches_the_bolt");
+        insert_ready_full_chunk(&world, TEST_CHUNK);
+        let player = test_player(&world);
+        {
+            let mut inventory = player.inventory.lock();
+            inventory.set_item(WEAPON_SLOT, crossbow_with(None));
+            inventory.set_item(QUIVER_SLOT, ItemStack::with_count(&vanilla_items::ARROW, 5));
+        }
+        assert_eq!(
+            fired_bolt_pierce_level(&world, &player),
+            0,
+            "a plain crossbow's bolt pierces nothing"
+        );
+
+        let world = fresh_test_world("crossbow_piercing_reaches_the_bolt_enchanted");
+        insert_ready_full_chunk(&world, TEST_CHUNK);
+        let player = test_player(&world);
+        {
+            let mut inventory = player.inventory.lock();
+            inventory.set_item(
+                WEAPON_SLOT,
+                crossbow_with(Some((&vanilla_enchantments::PIERCING.key, 3))),
+            );
+            inventory.set_item(QUIVER_SLOT, ItemStack::with_count(&vanilla_items::ARROW, 5));
+        }
+        // Vanilla `piercing.json` is `add_value` of one per level.
+        assert_eq!(
+            fired_bolt_pierce_level(&world, &player),
+            3,
+            "Piercing III should let a bolt through three mobs"
+        );
     }
 
     #[test]

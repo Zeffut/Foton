@@ -288,6 +288,20 @@ fn apply_item_filtered_value_effects(
     value
 }
 
+/// Returns vanilla `EnchantmentHelper.getPiercingCount`.
+///
+/// Like the ammo count, this is judged against the ammunition rather than the
+/// weapon, because `modifyPiercingCount` is a `modifyItemFilteredCount`.
+pub(crate) fn get_piercing_count(weapon: &ItemStack, ammo: &ItemStack) -> i32 {
+    let modified = apply_item_filtered_value_effects(
+        weapon,
+        EnchantmentEffectComponent::ProjectilePiercing,
+        ammo.item(),
+        0.0,
+    );
+    (modified as i32).max(0)
+}
+
 /// Returns vanilla `EnchantmentHelper.processAmmoUse`.
 ///
 /// The count is judged against the ammunition, not the weapon: that is how
