@@ -99,6 +99,12 @@ cat > "$FN/tagged_b.mcfunction" <<'EOF'
 tellraw @a {"text":"FN_TAG_B"}
 EOF
 
+# A macro line is not a command until the call supplies its arguments.
+cat > "$FN/macro.mcfunction" <<'EOF'
+tellraw @a {"text":"FN_MACRO_PLAIN_LINE"}
+$tellraw @a {"text":"FN_MACRO_$(word)"}
+EOF
+
 cat > "$FN/cond_true.mcfunction" <<'EOF'
 return 1
 EOF
@@ -210,6 +216,12 @@ CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;function test:nobody_wrote_this"
 CMDS="$CMDS;;!wait 1"
 
+# --- a macro, with and without the argument it needs ---------------------
+CMDS="$CMDS;;function test:macro {word:\"FILLED\"}"
+CMDS="$CMDS;;!wait 1"
+CMDS="$CMDS;;function test:macro"
+CMDS="$CMDS;;!wait 1"
+
 # --- execute if|unless function ------------------------------------------
 CMDS="$CMDS;;execute if function test:cond_true run tellraw @s {\"text\":\"FN_IF_TRUE\"}"
 CMDS="$CMDS;;execute if function test:cond_false run tellraw @s {\"text\":\"FN_IF_FALSE_RAN\"}"
@@ -274,6 +286,10 @@ said FN_TAG_B || fail "a function tag's second function never ran"
 [ "$(said_times FN_TAG_A)" = "1" ] || fail "a function tag ran its function more than once"
 
 said FN_BROKEN_FIRST_LINE && fail "a file that does not compile kept the lines before its bad one"
+
+said FN_MACRO_FILLED || fail "a macro line never had its argument substituted in"
+[ "$(said_times FN_MACRO_PLAIN_LINE)" = "1" ] \
+  || fail "a macro function ran its plain line the wrong number of times"
 
 said FN_IF_TRUE || fail "execute if function never ran the command after a passing function"
 said FN_IF_FALSE_RAN && fail "execute if function ran the command after a function that returned 0"

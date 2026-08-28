@@ -21,7 +21,7 @@ use super::super::super::{
         SteelCommandRuntime, SteelContextChain, argument, literal,
     },
 };
-use super::super::function::resolve_functions;
+use super::super::function::{instantiate, resolve_functions};
 use super::{objective, source_command_storage, source_scoreboard};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::slot_ranges::container_slot_item;
@@ -93,10 +93,24 @@ impl CustomModifierExecutor<CommandSource> for ExecuteIfFunction {
             return;
         }
 
-        let entries = functions
-            .iter()
-            .map(|function| function.entries())
-            .collect::<Vec<_>>();
+        // Vanilla parity: `ExecuteCommand.scheduleFunctionConditionsAndTest`
+        // instantiates with no arguments, so a macro function used as a
+        // condition fails here rather than running with empty substitutions.
+        let mut entries = Vec::with_capacity(functions.len());
+        for function in &functions {
+            match instantiate(&original_source, function, None) {
+                Ok(instantiated) => entries.push(instantiated),
+                Err(reason) => {
+                    let error = CommandSyntaxError::dynamic(
+                        translations::COMMANDS_EXECUTE_FUNCTION_INSTANTIATION_FAILURE
+                            .message([TextComponent::from(function.id().to_string()), *reason])
+                            .component(),
+                    );
+                    original_source.handle_error(&error, modifiers.is_forked());
+                    return;
+                }
+            }
+        }
         let passing = Arc::new(SyncMutex::new(Vec::new()));
         let expected = self.expected;
         for source in sources {

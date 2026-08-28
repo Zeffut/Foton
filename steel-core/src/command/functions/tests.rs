@@ -10,6 +10,7 @@ use std::{
 };
 
 use rustc_hash::FxHashMap;
+use simdnbt::owned::{NbtCompound, NbtTag};
 use steel_utils::{Identifier, locks::SyncMutex};
 
 use super::super::brigadier::{
@@ -17,12 +18,13 @@ use super::super::brigadier::{
 };
 use super::super::execution::{
     CommandArgumentSource, CommandExecutionContext, CommandResultCallback, ExecutionCommandSource,
-    ExecutionStop, SteelCommandRuntime, argument, literal,
+    ExecutionStop, FunctionEntries, SteelCommandRuntime, argument, literal,
 };
 use super::library::{CommandFunction, FunctionLibrary};
 use super::loader::{self, TagEntry};
+use super::macros::MacroFunction;
 use super::manager::build_tags;
-use super::parser::parse_entries;
+use super::parser::{FunctionBody, FunctionParseError, parse_body};
 
 /// A source whose only job is to record what the compiled lines did.
 #[derive(Clone)]
@@ -101,7 +103,35 @@ fn function(id: &str) -> Arc<CommandFunction> {
     let Ok(id) = id.parse::<Identifier>() else {
         panic!("test function ids are valid");
     };
-    Arc::new(CommandFunction::new(id, Vec::new().into()))
+    Arc::new(CommandFunction::new(
+        id,
+        FunctionBody::Plain(Vec::new().into()),
+    ))
+}
+
+/// Compiles a body that is expected to have no macro lines.
+fn parse_entries(
+    body: &str,
+    dispatcher: &TestDispatcher,
+    source: &TestSource,
+) -> Result<FunctionEntries<TestSource>, FunctionParseError> {
+    match parse_body(body, dispatcher, source)? {
+        FunctionBody::Plain(entries) => Ok(entries),
+        FunctionBody::Macro(_) => panic!("this body was not supposed to contain macro lines"),
+    }
+}
+
+/// Compiles a body that is expected to have at least one macro line.
+fn parse_macro(
+    body: &str,
+    dispatcher: &TestDispatcher,
+    source: &TestSource,
+) -> MacroFunction<TestSource> {
+    match parse_body(body, dispatcher, source) {
+        Ok(FunctionBody::Macro(function)) => function,
+        Ok(FunctionBody::Plain(_)) => panic!("this body was supposed to contain macro lines"),
+        Err(error) => panic!("macro body should compile: {error}"),
+    }
 }
 
 fn tag_entry(id: &str, references_tag: bool, required: bool) -> TagEntry {
@@ -178,11 +208,85 @@ fn a_leading_slash_is_rejected_at_the_line_it_appears_on() {
 }
 
 #[test]
-fn a_macro_line_is_rejected_rather_than_silently_dropped() {
+fn a_macro_body_substitutes_its_arguments_and_keeps_its_plain_lines() {
     let dispatcher = test_dispatcher();
     let source = TestSource::new();
-    let Err(error) = parse_entries("record 1\n$record $(value)\n", &dispatcher, &source) else {
-        panic!("a macro line should not compile while macros are unsupported");
+    let function = parse_macro("record 1\n$record $(value)\n", &dispatcher, &source);
+    let mut arguments = NbtCompound::new();
+    arguments.insert("value", NbtTag::Int(42));
+    let Ok(entries) =
+        function.instantiate(&identifier("test:macro"), Some(&arguments), &dispatcher)
+    else {
+        panic!("the macro should instantiate with its argument supplied");
+    };
+
+    let log = Arc::clone(&source.log);
+    let mut execution = CommandExecutionContext::new(100, 100);
+    execution.queue_initial_function_call(entries, source, CommandResultCallback::empty());
+    assert_eq!(execution.run(), ExecutionStop::Completed);
+    assert_eq!(snapshot(&log), vec![1, 42]);
+}
+
+#[test]
+fn a_macro_reuses_one_instantiation_for_the_same_arguments() {
+    let dispatcher = test_dispatcher();
+    let source = TestSource::new();
+    let function = parse_macro("$record $(value)\n", &dispatcher, &source);
+    let mut arguments = NbtCompound::new();
+    arguments.insert("value", NbtTag::Int(3));
+    let id = identifier("test:macro");
+    let (Ok(first), Ok(second)) = (
+        function.instantiate(&id, Some(&arguments), &dispatcher),
+        function.instantiate(&id, Some(&arguments), &dispatcher),
+    ) else {
+        panic!("both instantiations should succeed");
+    };
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "the second call should come back from the cache"
+    );
+}
+
+#[test]
+fn a_macro_called_without_its_argument_fails_instead_of_substituting_nothing() {
+    let dispatcher = test_dispatcher();
+    let source = TestSource::new();
+    let function = parse_macro("$record $(value)\n", &dispatcher, &source);
+    let id = identifier("test:macro");
+
+    assert!(
+        function.instantiate(&id, None, &dispatcher).is_err(),
+        "a macro with no arguments at all must not run"
+    );
+    assert!(
+        function
+            .instantiate(&id, Some(&NbtCompound::new()), &dispatcher)
+            .is_err(),
+        "a macro missing one of its arguments must not run"
+    );
+}
+
+#[test]
+fn a_macro_line_that_substitutes_into_nonsense_fails_at_the_call() {
+    let dispatcher = test_dispatcher();
+    let source = TestSource::new();
+    let function = parse_macro("$$(command) 1\n", &dispatcher, &source);
+    let mut arguments = NbtCompound::new();
+    arguments.insert("command", NbtTag::String("nosuchcommand".into()));
+    assert!(
+        function
+            .instantiate(&identifier("test:macro"), Some(&arguments), &dispatcher)
+            .is_err(),
+        "a substitution that is not a command must not be queued"
+    );
+}
+
+#[test]
+fn a_macro_line_with_no_variable_is_a_load_error() {
+    let dispatcher = test_dispatcher();
+    let source = TestSource::new();
+    let Err(error) = parse_body("record 1\n$record 2\n", &dispatcher, &source) else {
+        panic!("a macro line with nothing to substitute should not compile");
     };
     assert_eq!(error.line(), 2);
 }

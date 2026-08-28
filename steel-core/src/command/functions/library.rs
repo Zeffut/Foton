@@ -3,31 +3,47 @@
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
+use simdnbt::owned::NbtCompound;
 use steel_utils::Identifier;
+use text_components::TextComponent;
 
-use super::super::execution::{CommandSource, FunctionEntries};
+use super::super::brigadier::CommandDispatcher;
+use super::super::execution::{CommandSource, FunctionEntries, SteelCommandRuntime};
+use super::parser::FunctionBody;
 
-/// One loaded `.mcfunction`, already compiled into one action per command line.
+/// One loaded `.mcfunction`.
 ///
-/// Vanilla parity: `PlainTextFunction`, which is both the stored
-/// `CommandFunction` and the `InstantiatedFunction` it hands to a call.
+/// Vanilla parity: `CommandFunction`. A file with no macro lines is already
+/// runnable; one with macro lines only becomes runnable once a call supplies
+/// its arguments, which is what [`Self::instantiate`] is for.
 pub(crate) struct CommandFunction {
     id: Identifier,
-    entries: FunctionEntries<CommandSource>,
+    body: FunctionBody<CommandSource>,
 }
 
 impl CommandFunction {
-    pub(crate) const fn new(id: Identifier, entries: FunctionEntries<CommandSource>) -> Self {
-        Self { id, entries }
+    pub(crate) const fn new(id: Identifier, body: FunctionBody<CommandSource>) -> Self {
+        Self { id, body }
     }
 
     pub(crate) const fn id(&self) -> &Identifier {
         &self.id
     }
 
-    /// Returns the shared command actions this function runs, in file order.
-    pub(crate) fn entries(&self) -> FunctionEntries<CommandSource> {
-        Arc::clone(&self.entries)
+    /// Returns the command actions this call should run, in file order.
+    ///
+    /// Vanilla parity: `CommandFunction.instantiate`. The error is the reason a
+    /// macro could not be filled in, which the caller wraps in the command
+    /// error its own message uses.
+    pub(crate) fn instantiate(
+        &self,
+        arguments: Option<&NbtCompound>,
+        dispatcher: &CommandDispatcher<CommandSource, SteelCommandRuntime>,
+    ) -> Result<FunctionEntries<CommandSource>, Box<TextComponent>> {
+        match &self.body {
+            FunctionBody::Plain(entries) => Ok(Arc::clone(entries)),
+            FunctionBody::Macro(function) => function.instantiate(&self.id, arguments, dispatcher),
+        }
     }
 }
 

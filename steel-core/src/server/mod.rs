@@ -807,6 +807,18 @@ impl Server {
         self.functions.reload(&dispatcher, &compilation_source)
     }
 
+    /// Runs `visit` against the live command graph.
+    ///
+    /// Instantiating a function macro reparses its lines, so it needs the same
+    /// dispatcher the load used. No command holds this lock while it runs, so
+    /// a command executor may take it.
+    pub(crate) fn with_command_dispatcher<R>(
+        &self,
+        visit: impl FnOnce(&CommandDispatcher) -> R,
+    ) -> R {
+        visit(&self.command_dispatcher.read())
+    }
+
     /// The source `.mcfunction` lines are compiled and run against.
     ///
     /// Vanilla parity: `Commands.createCompilationContext` for the load and

@@ -8,6 +8,7 @@
 
 mod library;
 mod loader;
+mod macros;
 mod manager;
 mod parser;
 

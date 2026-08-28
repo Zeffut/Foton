@@ -5,6 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
+use simdnbt::owned::NbtCompound;
 use steel_utils::{Identifier, translations};
 use text_components::TextComponent;
 
@@ -12,8 +13,8 @@ use super::super::{
     brigadier::{CommandNodeBuilder, CommandSyntaxError},
     execution::{
         ChainModifiers, CommandResultCallback, CommandSource, CustomCommandExecutor,
-        ExecutionCommandSource, ExecutionControl, FunctionOrTag, SteelArgumentType,
-        SteelCommandRuntime, SteelContextChain, argument, literal,
+        ExecutionCommandSource, ExecutionControl, FunctionEntries, FunctionOrTag,
+        SteelArgumentType, SteelCommandRuntime, SteelContextChain, argument, literal,
     },
     functions::CommandFunction,
     registration::CommandRegistration,
@@ -24,8 +25,17 @@ pub(super) fn registration() -> CommandRegistration<CommandSource> {
 }
 
 fn command() -> CommandNodeBuilder<CommandSource, SteelCommandRuntime> {
-    literal("function")
-        .then(argument("name", SteelArgumentType::function()).executes_custom(RunFunction))
+    // TODO: `function <name> with block|entity|storage <...>` needs the data
+    // accessors `/data` has not been ported yet, so only the literal compound
+    // form of macro arguments is available.
+    literal("function").then(
+        argument("name", SteelArgumentType::function())
+            .executes_custom(RunFunction)
+            .then(
+                argument("arguments", SteelArgumentType::nbt_compound_tag())
+                    .executes_custom(RunFunction),
+            ),
+    )
 }
 
 struct RunFunction;
@@ -56,10 +66,34 @@ fn run_function(
     let context = chain.top_context().copy_for(Arc::clone(source));
     let reference = context.function_or_tag("name")?.clone();
     let functions = resolve_functions(source, &reference)?;
+    let arguments = context.nbt_compound("arguments").ok().cloned();
+
+    let mut instantiated = Vec::with_capacity(functions.len());
+    for function in &functions {
+        let entries = instantiate(source, function, arguments.as_ref()).map_err(|reason| {
+            CommandSyntaxError::dynamic(
+                translations::COMMANDS_FUNCTION_INSTANTIATION_FAILURE
+                    .message([TextComponent::from(function.id().to_string()), *reason])
+                    .component(),
+            )
+        })?;
+        instantiated.push(entries);
+    }
 
     source.send_success(&scheduled_message(&functions), true);
-    queue_functions(&functions, source, control, modifiers);
+    queue_functions(&functions, &instantiated, source, control, modifiers);
     Ok(())
+}
+
+/// Compiles one function for this call's arguments.
+pub(crate) fn instantiate(
+    source: &CommandSource,
+    function: &CommandFunction,
+    arguments: Option<&NbtCompound>,
+) -> Result<FunctionEntries<CommandSource>, Box<TextComponent>> {
+    source
+        .server()
+        .with_command_dispatcher(|dispatcher| function.instantiate(arguments, dispatcher))
 }
 
 /// Resolves a parsed name into the functions it stands for.
@@ -118,6 +152,7 @@ fn scheduled_message(functions: &[Arc<CommandFunction>]) -> TextComponent {
 /// Vanilla parity: `FunctionCommand.queueFunctions`.
 fn queue_functions(
     functions: &[Arc<CommandFunction>],
+    instantiated: &[FunctionEntries<CommandSource>],
     original_source: &Arc<CommandSource>,
     control: &mut ExecutionControl<'_, CommandSource>,
     modifiers: ChainModifiers,
@@ -137,10 +172,10 @@ fn queue_functions(
             original_source.callback(),
             control.current_frame().return_value_consumer(),
         );
-        for function in functions {
+        for (function, entries) in functions.iter().zip(instantiated) {
             let callback = decorate_output(original_source, function.id(), shared.clone());
             control.queue_function_call(
-                function.entries(),
+                Arc::clone(entries),
                 Arc::clone(&function_source),
                 callback,
                 true,
@@ -151,18 +186,18 @@ fn queue_functions(
     }
 
     let original_callback = original_source.callback();
-    match functions {
-        [] => {}
-        [only] => {
+    match (functions, instantiated) {
+        ([], _) | (_, []) => {}
+        ([only], [entries]) => {
             let callback = decorate_output(original_source, only.id(), original_callback);
-            control.queue_function_call(only.entries(), function_source, callback, false);
+            control.queue_function_call(Arc::clone(entries), function_source, callback, false);
         }
         _ => {
             // Vanilla parity: several functions report one summed result to the
             // caller, and only when at least one of them produced a result.
             let any_result = Arc::new(AtomicBool::new(false));
             let sum = Arc::new(AtomicI32::new(0));
-            for function in functions {
+            for (function, entries) in functions.iter().zip(instantiated) {
                 let any_result = Arc::clone(&any_result);
                 let sum = Arc::clone(&sum);
                 let partial = CommandResultCallback::new(move |_success, result| {
@@ -171,7 +206,7 @@ fn queue_functions(
                 });
                 let callback = decorate_output(original_source, function.id(), partial);
                 control.queue_function_call(
-                    function.entries(),
+                    Arc::clone(entries),
                     Arc::clone(&function_source),
                     callback,
                     false,
@@ -217,7 +252,7 @@ mod tests {
     use crate::command::execution::SteelArgumentType;
 
     #[test]
-    fn function_graph_takes_one_function_name() {
+    fn function_graph_takes_a_name_and_optional_macro_arguments() {
         init_vanilla_registry();
         let Ok(dispatcher) = create_dispatcher() else {
             panic!("built-in commands should register");
@@ -241,5 +276,19 @@ mod tests {
         assert_eq!(name.name(), "name");
         assert!(name.is_executable());
         assert_eq!(name.argument_type(), Some(&SteelArgumentType::function()));
+
+        let Some(name_children) = dispatcher.children(children[0]) else {
+            panic!("function name should accept macro arguments");
+        };
+        assert_eq!(name_children.len(), 1);
+        let Some(arguments) = dispatcher.node(name_children[0]) else {
+            panic!("function arguments should exist");
+        };
+        assert_eq!(arguments.name(), "arguments");
+        assert!(arguments.is_executable());
+        assert_eq!(
+            arguments.argument_type(),
+            Some(&SteelArgumentType::nbt_compound_tag())
+        );
     }
 }

@@ -324,15 +324,21 @@ impl Server {
         pending: &mut PendingCommandExecutionQueue<CommandSource>,
         function: &CommandFunction,
     ) {
-        let sender = CommandSender::Console;
-        let owner = CommandExecutionOwner::capture(sender.clone(), self);
+        let owner = CommandExecutionOwner::capture(CommandSender::Console, self);
         let source = self.function_source();
+        // A macro function in a tag has no arguments to fill in, so it fails
+        // here the way vanilla's does rather than running half-substituted.
+        let entries = match self
+            .with_command_dispatcher(|dispatcher| function.instantiate(None, dispatcher))
+        {
+            Ok(entries) => entries,
+            Err(reason) => {
+                log::error!("Failed to instantiate function {}: {reason}", function.id());
+                return;
+            }
+        };
         let mut execution = CommandExecutionContext::for_source(&source);
-        execution.queue_initial_function_call(
-            function.entries(),
-            source,
-            CommandResultCallback::empty(),
-        );
+        execution.queue_initial_function_call(entries, source, CommandResultCallback::empty());
         if execution.run() == ExecutionStop::Suspended && !pending.push_suspended(owner, execution)
         {
             tracing::error!(
