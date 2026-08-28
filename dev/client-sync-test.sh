@@ -31,6 +31,15 @@
 #     opposite sides and asks whether the two angles are half a turn apart.
 #     A yaw would give the same answer twice, whatever the yaw happened to be.
 #
+#   * A game rule only the client acts on. `limitedCrafting` gates the recipe
+#     book and `immediateRespawn` decides whether the death screen appears, and
+#     both are enforced client-side. Changing one published nothing, so every
+#     player kept acting on the old value until they reconnected.
+#
+#   * A player whose vehicle is destroyed under them. The eject unlinked on
+#     `EntityBase`, which skips the player's own `stopRiding` override -- and
+#     that override is what sends the packet saying the seat is empty.
+#
 # Usage: bash dev/client-sync-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
@@ -211,6 +220,28 @@ CMDS="$CMDS;;!useitem 0 0"
 CMDS="$CMDS;;!wait 4"
 CMDS="$CMDS;;!sawabsorption"
 
+# --- a rule only the client enforces ----------------------------------------
+#
+# `immediateRespawn` decides whether the death screen appears, and the client
+# decides that alone. There is nothing on the server to read: either the game
+# event arrived or the player is still acting on the value they joined with.
+CMDS="$CMDS;;!forgetgameevents"
+CMDS="$CMDS;;gamerule immediate_respawn true"
+CMDS="$CMDS;;!sawgameevent immediate_respawn"
+
+# --- a vehicle destroyed under its rider -------------------------------------
+#
+# Nothing but `ClientboundSetPassengersPacket` tells the rider their seat is
+# gone. The boat is killed rather than stepped out of, because that is the path
+# that went through the base and skipped the player's own override.
+CMDS="$CMDS;;gamemode creative"
+CMDS="$CMDS;;teleport @s 0 $STAND_Y 0 0 0"
+CMDS="$CMDS;;summon minecraft:oak_boat 0 $STAND_Y 0"
+CMDS="$CMDS;;!useentity oak_boat"
+CMDS="$CMDS;;execute if entity @s[nbt={RootVehicle:{}}] run tellraw @s BOARDED"
+CMDS="$CMDS;;kill @e[type=minecraft:oak_boat]"
+CMDS="$CMDS;;!wait 2"
+
 export JOIN_COMMANDS="$CMDS"
 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -218,8 +249,8 @@ STATUS=$?
 cleanup
 
 echo "=== what the client was told ==="
-grep -E "told about [0-9]+ explosions|pushed the client by|no explosion knockback|tilted by|no hurt animation|given .* absorption|no absorption reached" join.log
-grep "server says" join.log | grep -owE "THEFLOORISTHERE|THEFLOORREACHESTHETNT|THEGUSTDIDNOTHURT|THETNTDIDNOTHURT"
+grep -E "told about [0-9]+ explosions|pushed the client by|no explosion knockback|tilted by|no hurt animation|given .* absorption|no absorption reached|told immediate_respawn|no immediate_respawn|is carrying" join.log
+grep "server says" join.log | grep -owE "THEFLOORISTHERE|THEFLOORREACHESTHETNT|THEGUSTDIDNOTHURT|THETNTDIDNOTHURT|BOARDED"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|too quickly" | tail -5
 
@@ -274,5 +305,16 @@ awk -v a="$1" -v b="$2" 'BEGIN {
 # The golden hearts.
 grep -q "given 16.00 absorption" join.log \
   || fail "an enchanted golden apple put no golden hearts on the wire"
+
+# The rule the client enforces alone.
+grep -q "told immediate_respawn 1.0" join.log \
+  || fail "changing immediateRespawn told the client nothing, so it still shows the old death screen"
+
+# The seat that was destroyed under the rider. The boat has to have been
+# boarded first, or an empty-seat packet would prove nothing.
+said BOARDED || fail "the player never boarded the boat, so the eject proves nothing"
+BOAT_AT=$(grep -n "server says: BOARDED" join.log | tail -1 | cut -d: -f1)
+tail -n "+$BOAT_AT" join.log | grep -q "is carrying nobody" \
+  || fail "a boat destroyed under its rider never told them their seat was gone"
 
 echo "########## CLIENT SYNC TEST PASSED ##########"

@@ -76,6 +76,7 @@ PLAY_C_SYSTEM_CHAT = 121
 PLAY_C_ANIMATE = 2
 PLAY_C_LEVEL_PARTICLES = 47
 PLAY_C_EXPLODE = 36
+PLAY_C_GAME_EVENT = 38
 PLAY_C_HURT_ANIMATION = 42
 PLAY_C_SET_ENTITY_DATA = 99
 PLAY_S_ACCEPT_TELEPORTATION = 0
@@ -166,7 +167,9 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # tilted the screen by, which is the only way to tell the direction a blow
 # came from apart from the direction the player happens to be facing; and
 # `!sawabsorption` reports the golden hearts the synchronized data carried,
-# which no server-side reading can stand in for. Those are the only way to reach an item's `use_on` and
+# which no server-side reading can stand in for; and `!sawgameevent <name>`
+# reports whether a `ClientboundGameEventPacket` of that kind arrived, which is
+# the only channel for the handful of rules the client alone enforces. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do.
 # `!respawn` presses the Respawn button on the death screen, which is the one
 # packet no command can stand in for, and `!alive` stops the run unless the
@@ -250,6 +253,8 @@ class Connection:
         self.hurt_directions = []
         # The last absorption the player's own synchronized data carried.
         self.absorption = None
+        # Every game event the server has announced, by name and value.
+        self.game_events = []
 
     def note_drop(self, reason):
         """Records that the server stopped talking, and says so once."""
@@ -614,6 +619,8 @@ def run_play(connection, watch_seconds=0):
             note_particles(connection, payload)
         elif packet_id == PLAY_C_EXPLODE:
             note_explosion(connection, payload)
+        elif packet_id == PLAY_C_GAME_EVENT:
+            note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
             note_hurt_animation(connection, payload)
         elif packet_id == PLAY_C_SET_ENTITY_DATA:
@@ -744,6 +751,33 @@ def note_explosion(connection, payload):
     connection.explosion_knockbacks.append(struct.unpack(">ddd", rest[:24]))
 
 
+# Vanilla `ClientboundGameEventPacket`'s type ids. Only the ones a test reads
+# are named.
+GAME_EVENT_NAMES = {
+    3: "change_gamemode",
+    6: "arrow_hit_sound",
+    11: "immediate_respawn",
+    12: "limited_crafting",
+    13: "chunks_load_start",
+}
+
+
+def note_game_event(connection, payload):
+    """Records a game event, which is how the client learns the rules it enforces.
+
+    `limitedCrafting` and `immediateRespawn` are acted on entirely by the
+    client -- whether the recipe book gates crafting, whether the death screen
+    appears -- so a server that changes one and sends nothing leaves every
+    player acting on the old value. Nothing readable on the server can tell the
+    two apart.
+    """
+    if not payload:
+        return
+    name = GAME_EVENT_NAMES.get(payload[0], str(payload[0]))
+    value = struct.unpack(">f", payload[1:5])[0] if len(payload) >= 5 else 0.0
+    connection.game_events.append((name, value))
+
+
 def note_hurt_animation(connection, payload):
     """Records the angle the server tilted this player's screen by.
 
@@ -872,6 +906,8 @@ def pump(connection, seconds, spawned):
             note_particles(connection, payload)
         elif packet_id == PLAY_C_EXPLODE:
             note_explosion(connection, payload)
+        elif packet_id == PLAY_C_GAME_EVENT:
+            note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
             note_hurt_animation(connection, payload)
         elif packet_id == PLAY_C_SET_ENTITY_DATA:
@@ -1173,6 +1209,17 @@ def run_directive(connection, directive):
     elif parts[0] == "forgetabsorption":
         connection.absorption = None
         print("  forgot the absorption seen so far")
+    elif parts[0] == "sawgameevent":
+        name = parts[1]
+        seen = [value for event, value in connection.game_events if event == name]
+        if seen:
+            values = " ".join(f"{value:.1f}" for value in seen)
+            print(f"  the client was told {name} {values}")
+        else:
+            print(f"  no {name} game event reached the client")
+    elif parts[0] == "forgetgameevents":
+        connection.game_events.clear()
+        print("  forgot the game events seen so far")
     elif parts[0] == "forgetanimations":
         connection.animations.clear()
         print("  forgot the animations seen so far")
@@ -1906,6 +1953,8 @@ def watch_for_spawns(connection, seconds, spawned):
             note_particles(connection, payload)
         elif packet_id == PLAY_C_EXPLODE:
             note_explosion(connection, payload)
+        elif packet_id == PLAY_C_GAME_EVENT:
+            note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
             note_hurt_animation(connection, payload)
         elif packet_id == PLAY_C_SET_ENTITY_DATA:
