@@ -40,6 +40,20 @@
 #     `EntityBase`, which skips the player's own `stopRiding` override -- and
 #     that override is what sends the packet saying the seat is empty.
 #
+#   * The skin the rest of the server draws you with. The client announces its
+#     skin-part mask and its main hand and the server filed them away, but
+#     those two are read out of synchronized entity data, which is the only
+#     thing any other client can see. Everyone was bald and right-handed.
+#
+#   * The experience bar across a world change. `CRespawn` makes the client
+#     build a fresh `LocalPlayer`, and level, progress and total are plain
+#     fields on it -- no `dataToKeep` bit reaches them, and the only packet
+#     that can is sent when a writer flags it, which a portal is not.
+#
+#   * The rules a world enforces client-side, on arrival in it. Steel keeps
+#     game rules per world where vanilla keeps them per server, and the client
+#     is told the three it enforces alone exactly once, in `CLogin`.
+#
 # Usage: bash dev/client-sync-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
@@ -242,6 +256,46 @@ CMDS="$CMDS;;execute if entity @s[nbt={RootVehicle:{}}] run tellraw @s BOARDED"
 CMDS="$CMDS;;kill @e[type=minecraft:oak_boat]"
 CMDS="$CMDS;;!wait 2"
 
+# --- the skin the rest of the server draws you with --------------------------
+#
+# The client announces its skin-part mask and its main hand in
+# `ServerboundClientInformationPacket`, and vanilla `ServerPlayer.updateOptions`
+# copies both into synchronized entity data, because that is the only channel
+# any other client can read them from. A left hand and a partial mask are used
+# rather than the defaults: synchronized data only travels when it differs from
+# the value the client already assumes, so asking for the defaults would prove
+# nothing either way.
+CMDS="$CMDS;;!forgetskinparts"
+CMDS="$CMDS;;!clientinfo 42 0"
+CMDS="$CMDS;;!wait 3"
+CMDS="$CMDS;;!sawskinparts"
+
+# --- the experience bar across a world change --------------------------------
+#
+# A same-domain world change sends `CRespawn`, which makes the client build a
+# fresh `LocalPlayer`. Level, progress and total are plain fields on it -- not
+# attributes, not entity data -- so no `dataToKeep` bit can carry them and
+# nothing but `ClientboundSetExperiencePacket` can put them back. The respawn
+# is read back too: without it a missing experience packet would be explained
+# just as well by a teleport that never left the overworld.
+#
+# The same trip also carries the rules only the client enforces. Steel keeps
+# game rules per world where vanilla keeps them per server, and the client is
+# told them once, in `CLogin`, computed from the world it logged into. The rule
+# is set from inside the destination world so the announcement it makes goes to
+# that world's players -- of whom there are none -- leaving the arriving player
+# to be told or not told on arrival, which is the whole question.
+CMDS="$CMDS;;execute in minecraft:the_nether run gamerule limited_crafting true"
+CMDS="$CMDS;;experience set @s 7 levels"
+CMDS="$CMDS;;!wait 3"
+CMDS="$CMDS;;!forgetexperience"
+CMDS="$CMDS;;!forgetgameevents"
+CMDS="$CMDS;;execute in minecraft:the_nether run teleport @s 0 100 0"
+CMDS="$CMDS;;!wait 6"
+CMDS="$CMDS;;!sawrespawn"
+CMDS="$CMDS;;!sawexperience"
+CMDS="$CMDS;;!sawgameevent limited_crafting"
+
 export JOIN_COMMANDS="$CMDS"
 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
@@ -249,7 +303,7 @@ STATUS=$?
 cleanup
 
 echo "=== what the client was told ==="
-grep -E "told about [0-9]+ explosions|pushed the client by|no explosion knockback|tilted by|no hurt animation|given .* absorption|no absorption reached|told immediate_respawn|no immediate_respawn|is carrying" join.log
+grep -E "told about [0-9]+ explosions|pushed the client by|no explosion knockback|tilted by|no hurt animation|given .* absorption|no absorption reached|told immediate_respawn|no immediate_respawn|told limited_crafting|no limited_crafting|is carrying|told skin parts|no skin parts|told main hand|no main hand|told experience|no experience bar|was respawned" join.log
 grep "server says" join.log | grep -owE "THEFLOORISTHERE|THEFLOORREACHESTHETNT|THEGUSTDIDNOTHURT|THETNTDIDNOTHURT|BOARDED"
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic|too quickly" | tail -5
@@ -316,5 +370,22 @@ said BOARDED || fail "the player never boarded the boat, so the eject proves not
 BOAT_AT=$(grep -n "server says: BOARDED" join.log | tail -1 | cut -d: -f1)
 tail -n "+$BOAT_AT" join.log | grep -q "is carrying nobody" \
   || fail "a boat destroyed under its rider never told them their seat was gone"
+
+# The skin every other client draws this player with.
+grep -q "the client was told skin parts 42" join.log \
+  || fail "the skin parts the client asked for were never put on the wire"
+grep -q "the client was told main hand 0" join.log \
+  || fail "the main hand the client asked for was never put on the wire"
+
+# The experience bar across a world change. The respawn has to have happened
+# first, or a missing experience packet would prove nothing.
+grep -q "the client was respawned" join.log \
+  || fail "the player never changed world, so the experience bar proves nothing"
+grep -q "the client was told experience .* level 7 " join.log \
+  || fail "a world change threw the experience bar away and nothing put it back"
+
+# The rule the destination world enforces, on arrival.
+grep -q "told limited_crafting 1.0" join.log \
+  || fail "arriving in a world never told the client the rules it enforces there"
 
 echo "########## CLIENT SYNC TEST PASSED ##########"

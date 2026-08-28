@@ -1,4 +1,8 @@
-use steel_protocol::packets::game::{CPlayerInfoUpdate, CUpdateAttributes};
+use steel_protocol::packets::game::{
+    CEntityEvent, CPlayerInfoUpdate, CSetEntityData, CUpdateAttributes,
+};
+use steel_registry::vanilla_game_rules::{IMMEDIATE_RESPAWN, LIMITED_CRAFTING, REDUCED_DEBUG_INFO};
+use steel_utils::entity_events::EntityStatus;
 
 use super::{
     Arc, BlockBreakingManager, CContainerClose, CGameEvent, CRespawn, CSetDefaultSpawnPosition,
@@ -222,8 +226,11 @@ impl Player {
 
     fn send_spawn_state_packets(&self, world: &World) {
         self.send_abilities();
+        self.publish_client_options();
         self.resend_attributes();
+        self.resend_entity_data();
         self.rebroadcast_game_mode();
+        self.send_client_enforced_game_rules(world);
         self.send_packet(CSetHeldSlot {
             slot: i32::from(self.inventory.lock().get_selected_slot()),
         });
@@ -252,6 +259,55 @@ impl Player {
         self.send_packet(CUpdateAttributes::new(self.id(), snapshots));
     }
 
+    /// Hands the player their whole synchronized entity data again.
+    ///
+    /// The same story as the attributes above, and from the same bit: a
+    /// `CRespawn` whose `data_kept` lacks 0x02 tells the client to throw its
+    /// copy of this player's metadata away, which is what vanilla wants
+    /// because its replacement `ServerPlayer` carries a fresh
+    /// `SynchedEntityData` whose every non-default entry is dirty. Steel reuses
+    /// the entry map, and an entry only travels when its value *changes*, so a
+    /// field that already holds the right number goes quiet forever: skin
+    /// parts, main hand, score, a parrot still on a shoulder. `pack_all` is
+    /// exactly the "every non-default value" set the vanilla replacement would
+    /// have sent. An initial join needs it too -- no `CRespawn` there, but no
+    /// tracker either, because a player never tracks themselves.
+    fn resend_entity_data(&self) {
+        let values = self.pack_all_entity_data();
+        if values.is_empty() {
+            return;
+        }
+        self.send_packet(CSetEntityData::new(self.id(), values));
+    }
+
+    /// Tells the arriving player which rules their new world makes them keep.
+    ///
+    /// Vanilla parity: the `reducedDebugInfo`, `showDeathScreen` and
+    /// `doLimitedCrafting` fields of `ClientboundLoginPacket`. Vanilla can
+    /// afford to send those once and never again because its game rules belong
+    /// to the server. Steel's belong to a world, `CRespawn` carries none of the
+    /// three, and the client enforces all three by itself -- so a player who
+    /// walked from a world that allows free crafting into one that does not
+    /// went on crafting freely until they reconnected.
+    fn send_client_enforced_game_rules(&self, world: &World) {
+        self.send_packet(CGameEvent {
+            event: GameEventType::LimitedCrafting,
+            data: game_event_flag(world.get_game_rule(&LIMITED_CRAFTING)),
+        });
+        self.send_packet(CGameEvent {
+            event: GameEventType::ImmediateRespawn,
+            data: game_event_flag(world.get_game_rule(&IMMEDIATE_RESPAWN)),
+        });
+        self.send_packet(CEntityEvent {
+            entity_id: self.id(),
+            event: if world.get_game_rule(&REDUCED_DEBUG_INFO) {
+                EntityStatus::ReducedDebugInfo
+            } else {
+                EntityStatus::FullDebugInfo
+            },
+        });
+    }
+
     /// Tells everyone else what game mode this player is now in.
     ///
     /// Vanilla parity: the `broadcastAll` of
@@ -260,10 +316,11 @@ impl Player {
     /// creative in one domain and survival in another switched between them
     /// without anyone's tab list hearing about it.
     fn rebroadcast_game_mode(&self) {
-        self.server().broadcast_to_online(CPlayerInfoUpdate::update_game_mode(
-            self.gameprofile.id,
-            self.game_mode() as i32,
-        ));
+        self.server()
+            .broadcast_to_online(CPlayerInfoUpdate::update_game_mode(
+                self.gameprofile.id,
+                self.game_mode() as i32,
+            ));
     }
 
     fn send_time_sync(&self, world: &World) {
@@ -381,4 +438,9 @@ impl Player {
 
 pub(in crate::player) fn nullable_game_mode_id(game_mode: Option<GameType>) -> i8 {
     game_mode.map_or(-1, |game_mode| game_mode as i8)
+}
+
+/// Vanilla writes a boolean game event's value as 1.0 or 0.0.
+const fn game_event_flag(enabled: bool) -> f32 {
+    if enabled { 1.0 } else { 0.0 }
 }

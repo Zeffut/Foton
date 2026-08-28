@@ -62,9 +62,22 @@ impl HealthSyncState {
 }
 
 impl Player {
-    /// Invalidates the delta-tracking state so that the next `tick()` will send
-    /// `CSetHealth` to the client (vanilla: `resetSentInfo`).
+    /// Invalidates every delta the client's HUD is drawn from, so that the next
+    /// `tick()` sends the lot again.
+    ///
+    /// Vanilla parity: the three assignments of `ServerPlayer.resetSentInfo` --
+    /// `lastSentHealth`, `lastSentFood` and `lastSentExp`. The experience third
+    /// is the one that cannot be left out: health and food are polled against a
+    /// remembered value every tick, so any stale copy eventually corrects
+    /// itself, but the experience packet is sent only when a writer flags it.
+    /// A `ClientboundRespawnPacket` throws away the `LocalPlayer` that held the
+    /// bar with no writer involved at all, and level, progress and total are
+    /// plain fields on it -- not attributes, not entity data -- so no
+    /// `dataToKeep` bit can carry them across. Without this the bar reads zero
+    /// from the moment a player walks a portal until something happens to
+    /// change their experience.
     pub fn reset_sent_info(&self) {
         self.health_sync.lock().invalidate();
+        self.experience.lock().dirty = true;
     }
 }

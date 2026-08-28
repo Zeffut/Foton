@@ -221,6 +221,7 @@ impl Player {
             particle_status: packet.particle_status,
         };
         self.set_client_information(info);
+        self.publish_client_options();
 
         // Vanilla does not echo CSetChunkCacheRadius here; it is only broadcast
         // when the server-wide view distance changes.
@@ -238,6 +239,28 @@ impl Player {
     /// Updates the player's client information settings.
     pub fn set_client_information(&self, info: ClientInformation) {
         *self.client_information.lock() = info;
+    }
+
+    /// Copies the two client options that other people have to see into
+    /// synchronized entity data.
+    ///
+    /// Vanilla parity: the two `entityData.set` calls of
+    /// `ServerPlayer.updateOptions`. The skin-part mask and the main hand are
+    /// announced by the client and were only ever stored on the server, but
+    /// storing them helps nobody: they are drawn from synchronized data, which
+    /// is the one channel every *other* client reads. Kept to the seven bits
+    /// vanilla defines, which is what `PlayerModelPart` covers.
+    pub(in crate::player) fn publish_client_options(&self) {
+        let (model_customization, main_hand) = {
+            let info = self.client_information.lock();
+            (info.model_customization, info.main_hand)
+        };
+        let model_customization = i8::try_from(model_customization & 0x7F).unwrap_or_default();
+
+        let mut entity_data = self.entity_data.lock();
+        let avatar = entity_data.avatar_mut();
+        avatar.player_mode_customisation.set(model_customization);
+        avatar.player_main_hand.set(main_hand);
     }
 
     /// Returns the effective view distance for this player.

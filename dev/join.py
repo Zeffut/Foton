@@ -79,7 +79,9 @@ PLAY_C_EXPLODE = 36
 PLAY_C_GAME_EVENT = 38
 PLAY_C_HURT_ANIMATION = 42
 PLAY_C_SET_ENTITY_DATA = 99
+PLAY_C_SET_EXPERIENCE = 103
 PLAY_S_ACCEPT_TELEPORTATION = 0
+PLAY_S_CLIENT_INFORMATION = 14
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
 PLAY_S_CONTAINER_BUTTON_CLICK = 17
@@ -255,6 +257,13 @@ class Connection:
         self.absorption = None
         # Every game event the server has announced, by name and value.
         self.game_events = []
+        # The skin parts and main hand the player's own synchronized data
+        # carried. These are what every *other* client draws this player with,
+        # and the server knowing the setting is not the same as sending it.
+        self.skin_parts = None
+        self.main_hand = None
+        # The last experience bar the server sent, as (progress, level, total).
+        self.experience = None
 
     def note_drop(self, reason):
         """Records that the server stopped talking, and says so once."""
@@ -323,7 +332,7 @@ def read_string(data):
     return rest[:length].decode("utf-8", "replace"), rest[length:]
 
 
-def client_information():
+def client_information(skin_parts=0x7F, main_hand=1):
     """Builds the settings packet a real client sends during configuration.
 
     Field order follows `SClientInformation` in steel-protocol.
@@ -333,8 +342,8 @@ def client_information():
         + varint(8)  # view distance
         + varint(0)  # chat visibility: full
         + b"\x01"  # chat colors
-        + varint(0x7F)  # displayed skin parts
-        + varint(1)  # main hand: right
+        + varint(skin_parts)  # displayed skin parts
+        + varint(main_hand)  # main hand: 0 left, 1 right
         + b"\x00"  # text filtering
         + b"\x01"  # allows listing
         + varint(0)  # particle status: all
@@ -623,6 +632,8 @@ def run_play(connection, watch_seconds=0):
             note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
             note_hurt_animation(connection, payload)
+        elif packet_id == PLAY_C_SET_EXPERIENCE:
+            note_experience(connection, payload)
         elif packet_id == PLAY_C_SET_ENTITY_DATA:
             note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
@@ -690,6 +701,16 @@ def note_particles(connection, payload):
 # Vanilla `Player.DATA_PLAYER_ABSORPTION_ID`, the eighteenth entry of a
 # player's synchronized data and the only place the golden hearts live.
 ABSORPTION_DATA_INDEX = 17
+
+# Vanilla `Avatar.DATA_PLAYER_MAIN_HAND` and
+# `DATA_PLAYER_MODE_CUSTOMISATION`, which sit just below absorption. They are
+# the only channel by which anyone learns which skin layers a player wears and
+# which hand they hold things in: the client announces both in
+# `ServerboundClientInformationPacket`, and vanilla `ServerPlayer.updateOptions`
+# copies them straight into synchronized data so every other client can draw
+# them. A server that keeps the setting to itself draws everyone bald.
+MAIN_HAND_DATA_INDEX = 15
+SKIN_PARTS_DATA_INDEX = 16
 
 # Vanilla `EntityDataSerializers` registration order. Only the fixed-width
 # entries are listed: a walker that guessed at a variable-width payload it does
@@ -813,7 +834,9 @@ def note_entity_data(connection, payload):
             return
         serializer, rest = read_varint(rest[1:])
         if serializer in VARINT_SERIALIZERS:
-            _value, rest = read_varint(rest)
+            value, rest = read_varint(rest)
+            if index == MAIN_HAND_DATA_INDEX:
+                connection.main_hand = value
             continue
         if serializer == PARTICLES_SERIALIZER:
             rest = skip_particle_list(rest)
@@ -828,7 +851,39 @@ def note_entity_data(connection, payload):
             return
         if index == ABSORPTION_DATA_INDEX and serializer == 3:
             connection.absorption = struct.unpack(">f", rest[:4])[0]
+        if index == SKIN_PARTS_DATA_INDEX and serializer == 0:
+            connection.skin_parts = rest[0]
         rest = rest[width:]
+
+
+def note_experience(connection, payload):
+    """Records the experience bar the server last drew.
+
+    `ClientboundSetExperiencePacket` is the only thing that puts a number on
+    the bar. The three fields are plain `LocalPlayer` fields on the client, not
+    attributes and not entity data, so nothing else can restore them -- and a
+    `ClientboundRespawnPacket` throws the whole `LocalPlayer` away.
+    """
+    if len(payload) < 4:
+        return
+    progress = struct.unpack(">f", payload[:4])[0]
+    level, rest = read_varint(payload[4:])
+    total, _ = read_varint(rest)
+    connection.experience = (progress, level, total)
+
+
+def send_client_information(connection, skin_parts, main_hand=1):
+    """Re-announces this client's settings the way the options screen does.
+
+    Vanilla sends `ServerboundClientInformationPacket` again on every options
+    change, and `ServerPlayer.updateOptions` is what turns the new skin-part
+    mask into synchronized data. Sending it mid-play is the only way to tell
+    the join-time path and the update path apart.
+    """
+    connection.send(
+        PLAY_S_CLIENT_INFORMATION,
+        client_information(skin_parts=skin_parts, main_hand=main_hand),
+    )
 
 
 def note_animation(connection, payload):
@@ -910,6 +965,8 @@ def pump(connection, seconds, spawned):
             note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
             note_hurt_animation(connection, payload)
+        elif packet_id == PLAY_C_SET_EXPERIENCE:
+            note_experience(connection, payload)
         elif packet_id == PLAY_C_SET_ENTITY_DATA:
             note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
@@ -1220,6 +1277,36 @@ def run_directive(connection, directive):
     elif parts[0] == "forgetgameevents":
         connection.game_events.clear()
         print("  forgot the game events seen so far")
+    elif parts[0] == "clientinfo":
+        skin_parts = int(parts[1])
+        main_hand = int(parts[2]) if len(parts) > 2 else 1
+        send_client_information(connection, skin_parts, main_hand)
+        print(f"  told the server skin parts {skin_parts} main hand {main_hand}")
+    elif parts[0] == "sawskinparts":
+        if connection.skin_parts is None:
+            print("  no skin parts reached the client")
+        else:
+            print(f"  the client was told skin parts {connection.skin_parts}")
+        if connection.main_hand is None:
+            print("  no main hand reached the client")
+        else:
+            print(f"  the client was told main hand {connection.main_hand}")
+    elif parts[0] == "forgetskinparts":
+        connection.skin_parts = None
+        connection.main_hand = None
+        print("  forgot the skin parts seen so far")
+    elif parts[0] == "sawexperience":
+        if connection.experience is None:
+            print("  no experience bar reached the client")
+        else:
+            progress, level, total = connection.experience
+            print(
+                f"  the client was told experience {progress:.2f} "
+                f"level {level} total {total}"
+            )
+    elif parts[0] == "forgetexperience":
+        connection.experience = None
+        print("  forgot the experience bar seen so far")
     elif parts[0] == "forgetanimations":
         connection.animations.clear()
         print("  forgot the animations seen so far")
@@ -1957,6 +2044,8 @@ def watch_for_spawns(connection, seconds, spawned):
             note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
             note_hurt_animation(connection, payload)
+        elif packet_id == PLAY_C_SET_EXPERIENCE:
+            note_experience(connection, payload)
         elif packet_id == PLAY_C_SET_ENTITY_DATA:
             note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
