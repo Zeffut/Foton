@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunk::chunk_pyramid::GENERATION_PYRAMID;
 
 #[test]
 fn ticket_changes_move_the_same_holder_only_at_boundary_commit() {
@@ -528,5 +529,134 @@ fn full_load_activation_uses_packed_chunk_position_order() {
     assert_eq!(
         world.block_entity_tickers().active_positions(),
         [first_sign, second_sign]
+    );
+}
+
+/// A neighbor caught between lifecycle boundaries must postpone a schedule,
+/// not take the server down with it.
+///
+/// `ChunkGenerationTask` claims a holder for every chunk in the worst-case
+/// square around its target. Vanilla can assume they all exist, because it
+/// schedules on the server thread between ticket propagation and
+/// `processUnloads`. Steel cannot: `update_chunk_level` deliberately returns
+/// `None` for a chunk whose revival lost the race with its own in-flight save,
+/// parking it in `deferred_revivals` until the next boundary. That leaves a hole
+/// in the square of any neighbor scheduled in the same epoch, and the claim
+/// used to be an `expect` -- so one deferred revival killed the chunk worker,
+/// and the server went down under whoever was playing.
+#[test]
+fn a_deferred_neighbor_postpones_a_generation_schedule_instead_of_panicking() {
+    init_vanilla_registry();
+    init_behaviors();
+    let world = fresh_test_world("deferred_neighbor_schedule");
+    let center = ChunkPos::new(0, 0);
+    // Immediately east of the center, so it sits inside the worst-case square
+    // whatever the target status turns out to be.
+    let neighbor = ChunkPos::new(1, 0);
+    let level = ChunkTicketLevel::FULL_CHUNK;
+    let Some(status) = generation_status(Some(level)) else {
+        panic!("a full-chunk level should map to a generation status");
+    };
+
+    // The same square the task itself claims.
+    let radius = GENERATION_PYRAMID
+        .get_step_to(status)
+        .accumulated_dependencies
+        .get_radius_of(ChunkStatus::Empty) as i32;
+    for x in -radius..=radius {
+        for z in -radius..=radius {
+            assert!(
+                world
+                    .chunk_map
+                    .update_chunk_level(ChunkPos::new(x, z), Some(level), None)
+                    .is_some(),
+                "the square around the center should start out fully held"
+            );
+        }
+    }
+    let Some(center_holder) = world
+        .chunk_map
+        .chunks
+        .read_sync(&center, |_, holder| Arc::clone(holder))
+    else {
+        panic!("the center should hold a live holder");
+    };
+    let Some(neighbor_holder) = world
+        .chunk_map
+        .chunks
+        .read_sync(&neighbor, |_, holder| Arc::clone(holder))
+    else {
+        panic!("the neighbor should hold a live holder");
+    };
+
+    // Take the neighbor out and catch it mid-save, which is the one state where
+    // ticket propagation says a chunk is loaded and `chunks` disagrees.
+    world.chunk_map.update_chunk_level(neighbor, None, None);
+    let preparation = neighbor_holder
+        .try_begin_save_preparation()
+        .expect("the unloading neighbor should reserve save preparation");
+    assert!(
+        world
+            .chunk_map
+            .update_chunk_level(neighbor, Some(level), None)
+            .is_none(),
+        "a revival racing its own save must be staged, not completed"
+    );
+    assert!(!world.chunk_map.chunks.contains_sync(&neighbor));
+
+    // The real door: a scheduling epoch is the only thing that ever offers a
+    // holder for generation, and it is the thing that panicked.
+    let epoch = world.chunk_map.prepare_scheduling_epoch(
+        ChunkTicketManager::new(),
+        ChunkTicketRevision::default(),
+        vec![(Arc::clone(&center_holder), level)],
+    );
+    assert_eq!(
+        (
+            epoch.timings.scheduled_count,
+            epoch.timings.deferred_schedule_count
+        ),
+        (0, 1),
+        "a square with a hole in it must postpone its schedule, not fill it"
+    );
+    assert!(
+        world.chunk_map.pending_generation_tasks.lock().is_empty(),
+        "no task may be built over a square with a missing neighbor"
+    );
+
+    // Let the save go and put the neighbor back the way a lifecycle boundary
+    // does. Nothing offers the center again -- if it is not picked up on its
+    // own it stays at its old status forever, which is the silent failure a
+    // plain skip would have left behind.
+    drop(preparation);
+    let mut changes = Vec::new();
+    world.chunk_map.merge_deferred_revivals(&mut changes);
+    assert_eq!(
+        changes.len(),
+        1,
+        "the deferred revival should come back at the next boundary"
+    );
+    for change in changes {
+        assert!(
+            world
+                .chunk_map
+                .update_chunk_level(change.pos, change.new_level, change.new_simulation_level)
+                .is_some(),
+            "the neighbor should revive once its save has let go"
+        );
+    }
+
+    let epoch = world.chunk_map.prepare_scheduling_epoch(
+        ChunkTicketManager::new(),
+        ChunkTicketRevision::default(),
+        Vec::new(),
+    );
+    assert_eq!(
+        (
+            epoch.timings.scheduled_count,
+            epoch.timings.deferred_schedule_count
+        ),
+        (1, 0),
+        "the postponed chunk must schedule itself once its square is whole again"
     );
 }

@@ -60,6 +60,37 @@ impl<T> StaticCache2D<T> {
         }
     }
 
+    /// Creates a `StaticCache2D`, or nothing if the factory misses one element.
+    ///
+    /// The generation cache is all-or-nothing: a task built over a square with a
+    /// hole in it would generate against a neighbor that is not there.
+    pub fn try_create<F>(center_x: i32, center_z: i32, radius: i32, factory: F) -> Option<Self>
+    where
+        F: Fn(i32, i32) -> Option<T> + Send + Sync + 'static,
+        T: Send + 'static,
+    {
+        let size = radius * 2 + 1;
+        let min_x = center_x - radius;
+        let min_z = center_z - radius;
+        let cap = (size * size) as usize;
+        let size_usize = size as usize;
+
+        let cache = (0..cap)
+            .map(|index| {
+                let x_offset = (index % size_usize) as i32;
+                let z_offset = (index / size_usize) as i32;
+                factory(min_x + x_offset, min_z + z_offset)
+            })
+            .collect::<Option<Vec<T>>>()?;
+
+        Some(Self {
+            min_x,
+            min_z,
+            size,
+            cache,
+        })
+    }
+
     /// Gets a reference to an element by world coordinates.
     ///
     /// # Panics
@@ -130,35 +161,49 @@ pub struct ChunkGenerationTask {
 }
 
 impl ChunkGenerationTask {
-    /// Creates a new generation task.
+    /// Creates a new generation task, or nothing if the square is not all there.
+    ///
+    /// Vanilla parity: `ChunkGenerationTask.create`, which claims a holder for
+    /// every chunk in the worst-case square through `ChunkMap.acquireGeneration`
+    /// and can assume they all exist -- vanilla schedules on the server thread,
+    /// between ticket propagation and `processUnloads`, so nothing removes a
+    /// holder underneath it.
+    ///
+    /// Steel cannot assume it. `ChunkMap::update_chunk_level` is allowed to
+    /// return `None` for a chunk ticket propagation says should be loaded: a
+    /// holder that lost the `try_revive_from_unloading` race against its own
+    /// in-flight save is parked in `deferred_revivals` and stays out of `chunks`
+    /// until the next lifecycle boundary. That is deliberate -- reviving it in
+    /// place would block the lifecycle thread on disk -- but it leaves a hole in
+    /// the square of a neighbor being scheduled in the same epoch.
+    ///
+    /// So the missing holder is a wait, not a fault. Returning `None` here keeps
+    /// the guarantee the square is meant to give -- no task is ever built over a
+    /// hole -- and the caller re-offers the chunk on the next epoch, by which
+    /// time the deferred revival has been merged back in.
     #[must_use]
     #[inline]
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "panic is unreachable: ThreadPoolBuilder::build only fails on OS thread errors"
-    )]
-    pub fn new(
+    pub fn try_new(
         pos: ChunkPos,
         target_status: ChunkStatus,
         chunk_map: Arc<ChunkMap>,
         thread_pool: Arc<ThreadPool>,
         cancel_token: CancellationToken,
-    ) -> Self {
+    ) -> Option<Self> {
         let worst_case_radius = GENERATION_PYRAMID
             .get_step_to(target_status)
             .accumulated_dependencies
             .get_radius_of(ChunkStatus::Empty) as i32;
 
         let chunk_map_clone = chunk_map.clone();
-        let cache = StaticCache2D::create(pos.0.x, pos.0.y, worst_case_radius, move |x, y| {
+        let cache = StaticCache2D::try_create(pos.0.x, pos.0.y, worst_case_radius, move |x, y| {
             chunk_map_clone
                 .chunks
                 .read_sync(&ChunkPos::new(x, y), |_, chunk_holder| chunk_holder.clone())
-                .expect("The chunkholder should be created by distance manager before the generation task is scheduled. This occurring means there is a bug in the distance manager or you called this yourself.")
-        });
+        })?;
         let center_holder = Arc::clone(cache.get(pos.0.x, pos.0.y));
 
-        Self {
+        Some(Self {
             chunk_map,
             pos,
             target_status,
@@ -170,7 +215,7 @@ impl ChunkGenerationTask {
             center_holder,
             needs_generation: AtomicBool::new(true),
             thread_pool,
-        }
+        })
     }
 
     /// Cancels this task by triggering the cancellation token.

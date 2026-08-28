@@ -142,6 +142,18 @@ impl ChangedLightSections {
     }
 }
 
+/// What came of asking a chunk to schedule its next generation step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChunkGenerationScheduleOutcome {
+    /// A task was created and queued.
+    Scheduled,
+    /// The chunk is already at or heading for the target status.
+    NotNeeded,
+    /// A chunk the task depends on is between lifecycle boundaries. The chunk
+    /// keeps its current target and must be offered again next epoch.
+    Deferred,
+}
+
 /// Holds chunk data and coordinates asynchronous generation work.
 ///
 /// `published_status` is released only after the corresponding data and Full
@@ -542,27 +554,24 @@ impl ChunkHolder {
     }
 
     /// Schedules a generation task for this chunk if needed.
-    ///
-    /// Returns `true` if a new task was actually scheduled, `false` if the chunk
-    /// already has a suitable task or is already at the target status.
     #[inline]
     pub(crate) fn schedule_chunk_generation_task_b(
         &self,
         status: ChunkStatus,
         chunk_map: &Arc<ChunkMap>,
-    ) -> bool {
+    ) -> ChunkGenerationScheduleOutcome {
         if self.is_status_disallowed(status) {
-            return false;
+            return ChunkGenerationScheduleOutcome::NotNeeded;
         }
 
         if self.try_chunk(status).is_some() {
-            return false;
+            return ChunkGenerationScheduleOutcome::NotNeeded;
         }
 
         let status_index = status.get_index() as u8;
         let current_target = self.generation_task_target.load(Ordering::Acquire);
         if current_target != STATUS_NONE && status_index <= current_target {
-            return false;
+            return ChunkGenerationScheduleOutcome::NotNeeded;
         }
 
         let task = self.generation_task.lock();
@@ -571,18 +580,28 @@ impl ChunkHolder {
             .as_ref()
             .is_some_and(|task| status <= task.target_status)
         {
-            return false;
+            return ChunkGenerationScheduleOutcome::NotNeeded;
         }
 
         drop(task);
-        self.reschedule_chunk_task_b(status, chunk_map);
-        true
+        self.reschedule_chunk_task_b(status, chunk_map)
     }
 
     /// Reschedules the chunk task to the given status.
+    ///
+    /// A chunk whose dependency square is not all present yet keeps the task and
+    /// the target it already had: claiming the new target here would make the
+    /// early-out above swallow every later attempt, and the chunk would sit at
+    /// its old status forever instead of being retried.
     #[inline]
-    pub(crate) fn reschedule_chunk_task_b(&self, status: ChunkStatus, chunk_map: &Arc<ChunkMap>) {
-        let new_task = chunk_map.schedule_generation_task_b(status, self.pos);
+    pub(crate) fn reschedule_chunk_task_b(
+        &self,
+        status: ChunkStatus,
+        chunk_map: &Arc<ChunkMap>,
+    ) -> ChunkGenerationScheduleOutcome {
+        let Some(new_task) = chunk_map.schedule_generation_task_b(status, self.pos) else {
+            return ChunkGenerationScheduleOutcome::Deferred;
+        };
         let mut old_task_guard = self.generation_task.lock();
 
         let old_task = old_task_guard.replace(new_task);
@@ -595,6 +614,7 @@ impl ChunkHolder {
         }
 
         chunk_map.notify_generation_refill();
+        ChunkGenerationScheduleOutcome::Scheduled
     }
 
     /// Gets access to the chunk if it has reached the given status.

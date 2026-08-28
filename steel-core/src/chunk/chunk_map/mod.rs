@@ -30,7 +30,8 @@ use tracing::instrument;
 use crate::behavior::{BLOCK_BEHAVIORS, FLUID_BEHAVIORS};
 use crate::block_entity::{BlockEntityLifecycleExt as _, ClearedBlockEntities, SharedBlockEntity};
 use crate::chunk::chunk_holder::{
-    ChunkHolder, ChunkSaveDependency, PostProcessGenerationError, TickingReadiness,
+    ChunkGenerationScheduleOutcome, ChunkHolder, ChunkSaveDependency, PostProcessGenerationError,
+    TickingReadiness,
 };
 pub use crate::chunk::chunk_scheduler::ChunkMapSchedulingTimings;
 use crate::chunk::chunk_scheduler::{
@@ -223,6 +224,9 @@ pub struct ChunkMap {
     pub(crate) unloading_chunks: scc::HashMap<ChunkPos, Arc<ChunkHolder>, FxBuildHasher>,
     /// Ticket states waiting for an unloading holder's save preparation to finish.
     deferred_revivals: SyncMutex<FxHashMap<ChunkPos, DeferredChunkRevival>>,
+    /// Chunks whose dependency square was incomplete when they were last
+    /// offered for scheduling, to be offered again at the next epoch.
+    deferred_generation_schedules: SyncMutex<FxHashMap<ChunkPos, Arc<ChunkHolder>>>,
     /// Queue of pending generation tasks.
     pub pending_generation_tasks: SyncMutex<Vec<Arc<ChunkGenerationTask>>>,
     /// Tracker for background scheduling, generation, save, and unload tasks.
@@ -366,6 +370,7 @@ impl ChunkMap {
             chunks: scc::HashMap::default(),
             unloading_chunks: scc::HashMap::default(),
             deferred_revivals: SyncMutex::new(FxHashMap::default()),
+            deferred_generation_schedules: SyncMutex::new(FxHashMap::default()),
             pending_generation_tasks: SyncMutex::new(Vec::new()),
             task_tracker: TaskTracker::new(),
             scheduling: ChunkSchedulingCoordinator::new(chunk_tickets),
@@ -1156,15 +1161,28 @@ impl ChunkMap {
         {
             let _span = tracing::trace_span!("schedule_generation").entered();
             let start = Instant::now();
-            timings.scheduled_count = holders_to_schedule
-                .iter()
-                .filter(|(holder, level)| {
-                    let Some(status) = generation_status(Some(*level)) else {
-                        return false;
-                    };
-                    holder.schedule_chunk_generation_task_b(status, self)
-                })
-                .count();
+            // Chunks a previous epoch could not schedule go first: their
+            // dependency square was incomplete only because a neighbor was
+            // mid-revival, and this epoch's `merge_deferred_revivals` has
+            // already put that neighbor back.
+            let mut scheduled_count = 0;
+            let mut deferred_count = 0;
+            let retries = self.take_deferred_generation_schedules();
+            for (holder, level) in retries.iter().chain(holders_to_schedule.iter()) {
+                let Some(status) = generation_status(Some(*level)) else {
+                    continue;
+                };
+                match holder.schedule_chunk_generation_task_b(status, self) {
+                    ChunkGenerationScheduleOutcome::Scheduled => scheduled_count += 1,
+                    ChunkGenerationScheduleOutcome::NotNeeded => {}
+                    ChunkGenerationScheduleOutcome::Deferred => {
+                        deferred_count += 1;
+                        self.defer_generation_schedule(holder);
+                    }
+                }
+            }
+            timings.scheduled_count = scheduled_count;
+            timings.deferred_schedule_count = deferred_count;
             timings.schedule_generation = start.elapsed();
         }
 

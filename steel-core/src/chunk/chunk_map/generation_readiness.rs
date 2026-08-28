@@ -9,23 +9,53 @@ use super::{
 };
 
 impl ChunkMap {
-    /// Schedules a new generation task.
+    /// Schedules a new generation task, unless its dependency square has a hole.
+    ///
+    /// Returns `None` when a chunk the task would generate against is between
+    /// lifecycle boundaries -- see [`ChunkGenerationTask::try_new`]. The chunk is
+    /// not dropped: the caller parks it in `deferred_generation_schedules` and
+    /// the next epoch offers it again.
     #[inline]
     #[instrument(level = "trace", skip(self), fields(chunk = ?pos, target = ?target_status))]
     pub(crate) fn schedule_generation_task_b(
         self: &Arc<Self>,
         target_status: ChunkStatus,
         pos: ChunkPos,
-    ) -> Arc<ChunkGenerationTask> {
-        let task = Arc::new(ChunkGenerationTask::new(
+    ) -> Option<Arc<ChunkGenerationTask>> {
+        let task = Arc::new(ChunkGenerationTask::try_new(
             pos,
             target_status,
             self.clone(),
             self.generation_pool.clone(),
             self.cancel_token.child_token(),
-        ));
+        )?);
         self.pending_generation_tasks.lock().push(Arc::clone(&task));
-        task
+        Some(task)
+    }
+
+    /// Parks a chunk whose dependency square was incomplete this epoch.
+    pub(super) fn defer_generation_schedule(&self, holder: &Arc<ChunkHolder>) {
+        self.deferred_generation_schedules
+            .lock()
+            .insert(holder.get_pos(), Arc::clone(holder));
+    }
+
+    /// Re-offers every chunk a previous epoch could not schedule.
+    ///
+    /// The level is read from the holder rather than remembered, so a chunk
+    /// whose ticket level moved on since it was parked is retried at the level
+    /// it has now, and one that lost its level entirely is dropped.
+    pub(super) fn take_deferred_generation_schedules(
+        &self,
+    ) -> Vec<(Arc<ChunkHolder>, ChunkTicketLevel)> {
+        let mut deferred = self.deferred_generation_schedules.lock();
+        deferred
+            .drain()
+            .filter_map(|(_, holder)| {
+                let level = holder.load_level()?;
+                Some((holder, level))
+            })
+            .collect()
     }
 
     /// Runs queued generation tasks.

@@ -42,6 +42,9 @@ pub struct ChunkMapSchedulingTimings {
     pub schedule_generation: Duration,
     /// Number of holders scheduled for generation.
     pub scheduled_count: usize,
+    /// Number of holders whose dependency square was still incomplete, to be
+    /// offered again at the next epoch.
+    pub deferred_schedule_count: usize,
     /// Time spent refilling generation worker slots.
     pub run_generation: Duration,
     /// Time spent processing physical chunk unloads.
@@ -57,6 +60,7 @@ pub(crate) struct ChunkMapPreparationTimings {
     pub(crate) ticket_updates: Duration,
     pub(crate) schedule_generation: Duration,
     pub(crate) scheduled_count: usize,
+    pub(crate) deferred_schedule_count: usize,
     pub(crate) run_generation: Duration,
     pub(crate) process_unloads: Duration,
 }
@@ -67,6 +71,7 @@ impl ChunkMapPreparationTimings {
             ticket_updates: self.ticket_updates,
             schedule_generation: self.schedule_generation,
             scheduled_count: self.scheduled_count,
+            deferred_schedule_count: self.deferred_schedule_count,
             run_generation: self.run_generation,
             process_unloads: self.process_unloads,
             ..ChunkMapSchedulingTimings::default()
