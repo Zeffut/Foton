@@ -1,3 +1,5 @@
+use steel_protocol::packets::game::{CPlayerInfoUpdate, CUpdateAttributes};
+
 use super::{
     Arc, BlockBreakingManager, CContainerClose, CGameEvent, CRespawn, CSetDefaultSpawnPosition,
     CSetHeldSlot, CSetPassengers, DVec3, Entity, GameEventType, GameType, MenuRemovalStatus,
@@ -220,6 +222,8 @@ impl Player {
 
     fn send_spawn_state_packets(&self, world: &World) {
         self.send_abilities();
+        self.resend_attributes();
+        self.rebroadcast_game_mode();
         self.send_packet(CSetHeldSlot {
             slot: i32::from(self.inventory.lock().get_selected_slot()),
         });
@@ -227,6 +231,39 @@ impl Player {
         self.send_packet(world.initialize_border_packet());
         self.send_default_spawn_position(world);
         self.send_weather_sync(world);
+    }
+
+    /// Hands the player their whole attribute map again.
+    ///
+    /// Vanilla has no equivalent call because it does not need one: a respawn
+    /// builds a fresh `ServerPlayer`, and `restoreFrom`'s `assignBaseValues`
+    /// dirties every attribute on that new map, so `ServerEntity` sends the lot
+    /// on the next tick. Steel reuses the player and its attribute map, while
+    /// the respawn packet still tells the client to throw its copy away -- so
+    /// any attribute whose base value differs from the client's default and
+    /// which happens not to change again is lost on the client for good. Sent
+    /// on every spawn path rather than only on respawn, because a world change
+    /// keeps its attributes and a resend there costs one packet.
+    fn resend_attributes(&self) {
+        let snapshots = self.living_base.attributes().lock().syncable_snapshots();
+        if snapshots.is_empty() {
+            return;
+        }
+        self.send_packet(CUpdateAttributes::new(self.id(), snapshots));
+    }
+
+    /// Tells everyone else what game mode this player is now in.
+    ///
+    /// Vanilla parity: the `broadcastAll` of
+    /// `ServerPlayerGameMode.setGameModeForPlayer`. Steel keeps the game mode
+    /// per domain and restores it with a plain setter, so a player who was
+    /// creative in one domain and survival in another switched between them
+    /// without anyone's tab list hearing about it.
+    fn rebroadcast_game_mode(&self) {
+        self.server().broadcast_to_online(CPlayerInfoUpdate::update_game_mode(
+            self.gameprofile.id,
+            self.game_mode() as i32,
+        ));
     }
 
     fn send_time_sync(&self, world: &World) {
