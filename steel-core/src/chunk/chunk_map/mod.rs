@@ -74,6 +74,8 @@ use crate::worldgen::{ChunkGeneratorType, WorldGenContext};
 use crate::{entity::Entity, player::Player};
 
 mod generation_readiness;
+
+use generation_readiness::DeferredGenerationSchedule;
 mod light_update_state;
 mod light_updates;
 mod persistence;
@@ -226,7 +228,7 @@ pub struct ChunkMap {
     deferred_revivals: SyncMutex<FxHashMap<ChunkPos, DeferredChunkRevival>>,
     /// Chunks whose dependency square was incomplete when they were last
     /// offered for scheduling, to be offered again at the next epoch.
-    deferred_generation_schedules: SyncMutex<FxHashMap<ChunkPos, Arc<ChunkHolder>>>,
+    deferred_generation_schedules: SyncMutex<FxHashMap<ChunkPos, DeferredGenerationSchedule>>,
     /// Queue of pending generation tasks.
     pub pending_generation_tasks: SyncMutex<Vec<Arc<ChunkGenerationTask>>>,
     /// Tracker for background scheduling, generation, save, and unload tasks.
@@ -1168,8 +1170,16 @@ impl ChunkMap {
             let mut scheduled_count = 0;
             let mut deferred_count = 0;
             let retries = self.take_deferred_generation_schedules();
-            for (holder, level) in retries.iter().chain(holders_to_schedule.iter()) {
-                let Some(status) = generation_status(Some(*level)) else {
+            let offers = retries
+                .iter()
+                .map(|(holder, level, epochs)| (holder, *level, *epochs));
+            let offers = offers.chain(
+                holders_to_schedule
+                    .iter()
+                    .map(|(holder, level)| (holder, *level, 0)),
+            );
+            for (holder, level, epochs) in offers {
+                let Some(status) = generation_status(Some(level)) else {
                     continue;
                 };
                 match holder.schedule_chunk_generation_task_b(status, self) {
@@ -1177,7 +1187,7 @@ impl ChunkMap {
                     ChunkGenerationScheduleOutcome::NotNeeded => {}
                     ChunkGenerationScheduleOutcome::Deferred => {
                         deferred_count += 1;
-                        self.defer_generation_schedule(holder);
+                        self.defer_generation_schedule(holder, epochs + 1);
                     }
                 }
             }

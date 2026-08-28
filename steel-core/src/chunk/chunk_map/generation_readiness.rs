@@ -8,6 +8,19 @@ use super::{
     is_full,
 };
 
+/// How many boundaries a chunk may wait for its dependency square before the
+/// wait stops looking like a revival and starts looking like a bug.
+///
+/// One epoch runs per world tick, so this is about ten seconds.
+const STUCK_GENERATION_SCHEDULE_EPOCHS: u32 = 200;
+
+/// A chunk parked because its dependency square had a hole in it.
+pub(super) struct DeferredGenerationSchedule {
+    pub(super) holder: Arc<ChunkHolder>,
+    /// Boundaries this chunk has waited so far.
+    pub(super) epochs: u32,
+}
+
 impl ChunkMap {
     /// Schedules a new generation task, unless its dependency square has a hole.
     ///
@@ -34,26 +47,47 @@ impl ChunkMap {
     }
 
     /// Parks a chunk whose dependency square was incomplete this epoch.
-    pub(super) fn defer_generation_schedule(&self, holder: &Arc<ChunkHolder>) {
-        self.deferred_generation_schedules
-            .lock()
-            .insert(holder.get_pos(), Arc::clone(holder));
+    ///
+    /// A deferral is meant to last one boundary: the neighbor that was mid-save
+    /// comes back through `merge_deferred_revivals` and the retry goes through.
+    /// A chunk still waiting after [`STUCK_GENERATION_SCHEDULE_EPOCHS`] is a
+    /// different animal -- ticket propagation and the holder map disagreeing for
+    /// good -- and it would sit at its old status forever without a word. Say so
+    /// rather than let the world go quietly wrong.
+    pub(super) fn defer_generation_schedule(&self, holder: &Arc<ChunkHolder>, epochs: u32) {
+        let pos = holder.get_pos();
+        if epochs > 0 && epochs.is_multiple_of(STUCK_GENERATION_SCHEDULE_EPOCHS) {
+            tracing::warn!(
+                chunk = ?pos,
+                epochs,
+                load_level = ?holder.load_level(),
+                "Chunk generation has waited many epochs for a neighbor that never came back"
+            );
+        }
+        self.deferred_generation_schedules.lock().insert(
+            pos,
+            DeferredGenerationSchedule {
+                holder: Arc::clone(holder),
+                epochs,
+            },
+        );
     }
 
     /// Re-offers every chunk a previous epoch could not schedule.
     ///
     /// The level is read from the holder rather than remembered, so a chunk
     /// whose ticket level moved on since it was parked is retried at the level
-    /// it has now, and one that lost its level entirely is dropped.
+    /// it has now, and one that lost its level entirely is dropped -- nothing
+    /// wants that chunk any more.
     pub(super) fn take_deferred_generation_schedules(
         &self,
-    ) -> Vec<(Arc<ChunkHolder>, ChunkTicketLevel)> {
+    ) -> Vec<(Arc<ChunkHolder>, ChunkTicketLevel, u32)> {
         let mut deferred = self.deferred_generation_schedules.lock();
         deferred
             .drain()
-            .filter_map(|(_, holder)| {
-                let level = holder.load_level()?;
-                Some((holder, level))
+            .filter_map(|(_, entry)| {
+                let level = entry.holder.load_level()?;
+                Some((entry.holder, level, entry.epochs))
             })
             .collect()
     }

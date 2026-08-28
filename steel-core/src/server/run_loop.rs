@@ -600,6 +600,10 @@ impl Server {
                     lookup_cache_evictions = timings.lookup_cache.evictions,
                     schedule_generation = ?timings.schedule_generation,
                     scheduled_count = timings.scheduled_count,
+                    // A non-zero count is the lifecycle boundary and the
+                    // scheduler disagreeing about which chunks are loaded --
+                    // the state that used to end the epoch in a panic.
+                    deferred_schedule_count = timings.deferred_schedule_count,
                     run_generation = ?timings.run_generation,
                     process_unloads = ?timings.process_unloads,
                     "Chunk scheduling epoch slow"
