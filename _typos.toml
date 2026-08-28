@@ -17,6 +17,9 @@ neighbour = "neighbour"
 Neighbours = "Neighbours"
 # Mojang's own typo in FrostedIceBlock.fewerNeigboursThan.
 Neigbours = "Neigbours"
+# Mojang's own typo in
+# AdvancementVisibilityEvaluator.evaluateVisiblityForUnfinishedNode.
+Visiblity = "Visiblity"
 # Vanilla stronghold piece-type IDs (shs, shsd, shrc, ...).
 shs = "shs"
 # Vanilla carver tag name (minecraft:overworld_carver_replaceables).

@@ -61,6 +61,8 @@ PLAY_C_MOUNT_SCREEN_OPEN = 41
 PLAY_C_MAP_ITEM_DATA = 51
 PLAY_C_SET_EQUIPMENT = 102
 PLAY_C_UPDATE_MOB_EFFECT = 132
+PLAY_C_UPDATE_ADVANCEMENTS = 130
+PLAY_C_SELECT_ADVANCEMENTS_TAB = 85
 
 # Vanilla parity: `ClickType`. Only the two this script sends are named.
 CLICK_PICKUP = 0
@@ -87,9 +89,14 @@ PLAY_S_KEEP_ALIVE = 28
 PLAY_S_PLAYER_LOADED = 44
 PLAY_S_PLAYER_COMMAND = 42
 PLAY_S_PLAYER_ACTION = 41
+PLAY_S_SEEN_ADVANCEMENTS = 50
 
 # Vanilla parity: `ServerboundPlayerCommandPacket.Action`.
 PLAYER_COMMAND_OPEN_VEHICLE_INVENTORY = 5
+
+# Vanilla parity: `ServerboundSeenAdvancementsPacket.Action`.
+SEEN_ADVANCEMENTS_OPENED_TAB = 0
+SEEN_ADVANCEMENTS_CLOSED_SCREEN = 1
 
 # A joining client should not need anywhere near this many packets to be placed
 # in the world and sent its surroundings; the bound just stops a stall from
@@ -137,7 +144,12 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # and `!sawparticle <name>` / `!forgetparticles` do the same for the particles
 # the server has asked for, which is how the puff a hard landing kicks up is
 # read back. Those are the only way to reach an item's `use_on` and
-# `use`, which no command can do. The server
+# `use`, which no command can do.
+# `!seentab <id>` opens the advancements screen on that tab and `!seenclose`
+# shuts it again -- the server only keeps a player's advancement progress
+# flowing while their client says which tab it is watching, so an
+# advancement's criteria reach a scripted client no other way.
+# The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
 # because it is the path a player takes. The joining player needs a permission
@@ -535,6 +547,10 @@ def run_play(connection, watch_seconds=0):
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
+        elif packet_id == PLAY_C_UPDATE_ADVANCEMENTS:
+            note_advancements(payload)
+        elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
+            note_advancements_tab(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
@@ -654,6 +670,10 @@ def pump(connection, seconds, spawned):
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
+        elif packet_id == PLAY_C_UPDATE_ADVANCEMENTS:
+            note_advancements(payload)
+        elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
+            note_advancements_tab(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
@@ -918,6 +938,13 @@ def run_directive(connection, directive):
     elif parts[0] == "attack":
         offset = int(parts[2]) if len(parts) > 2 else 0
         send_attack(connection, parts[1], offset)
+    elif parts[0] == "seentab":
+        # A tab only receives its progress while a client says it is looking
+        # at that tab, so nothing about an advancement arrives until this does.
+        tab = parts[1] if ":" in parts[1] else f"minecraft:{parts[1]}"
+        send_seen_advancements(connection, tab)
+    elif parts[0] == "seenclose":
+        send_seen_advancements(connection, None)
     elif parts[0] == "useentity":
         send_interact(connection, parts[1], secondary=False)
     elif parts[0] == "sneakuse":
@@ -925,6 +952,254 @@ def run_directive(connection, directive):
     else:
         fail(f"unknown directive {directive}")
     return True
+
+
+# Vanilla parity: `AdvancementType`, the frame drawn around an icon.
+FRAME_NAMES = {0: "task", 1: "challenge", 2: "goal"}
+
+# `DisplayInfo`'s flags. They arrive as a plain big-endian four-byte int, not
+# the varint everything around them uses. Reading them as one byte leaves the
+# parser three bytes short, and every field after it then decodes to nonsense
+# -- which reads exactly like a server that wrote the wrong position.
+DISPLAY_HAS_BACKGROUND = 1
+DISPLAY_SHOW_TOAST = 2
+DISPLAY_HIDDEN = 4
+
+# NBT payload widths for the tags that have a fixed one, by tag type.
+NBT_FIXED_SIZES = {1: 1, 2: 2, 3: 4, 4: 8, 5: 4, 6: 8}
+
+
+def truth(value):
+    """Spells a boolean the way the advancement report lines do."""
+    return "true" if value else "false"
+
+
+def skip_nbt(data, tag_type=None):
+    """Walks past one NBT value and returns whatever follows it.
+
+    An advancement's title and description are unnamed network NBT tags, and
+    the icon sits behind them, so the icon cannot be reached without measuring
+    them. Only their length matters here: a text component is a tree of styling
+    that no report line asks about.
+    """
+    if tag_type is None:
+        tag_type, data = data[0], data[1:]
+    if tag_type == 0:  # TAG_End
+        return data
+    fixed = NBT_FIXED_SIZES.get(tag_type)
+    if fixed is not None:
+        return data[fixed:]
+    if tag_type == 8:  # TAG_String
+        return data[2 + struct.unpack(">H", data[:2])[0] :]
+    if tag_type == 7:  # TAG_Byte_Array
+        return data[4 + struct.unpack(">i", data[:4])[0] :]
+    if tag_type == 11:  # TAG_Int_Array
+        return data[4 + struct.unpack(">i", data[:4])[0] * 4 :]
+    if tag_type == 12:  # TAG_Long_Array
+        return data[4 + struct.unpack(">i", data[:4])[0] * 8 :]
+    if tag_type == 9:  # TAG_List
+        element_type, data = data[0], data[1:]
+        length = struct.unpack(">i", data[:4])[0]
+        data = data[4:]
+        for _ in range(length):
+            data = skip_nbt(data, element_type)
+        return data
+    if tag_type == 10:  # TAG_Compound
+        while True:
+            entry_type, data = data[0], data[1:]
+            if entry_type == 0:
+                return data
+            name_length = struct.unpack(">H", data[:2])[0]
+            data = skip_nbt(data[2 + name_length :], entry_type)
+    raise ValueError(f"unknown NBT tag {tag_type}")
+
+
+def read_advancement_display(data):
+    """Reads one advancement `DisplayInfo`, or `(None, data)` for an icon patch.
+
+    The icon is an item stack, and the component patch on the end of one can
+    only be stepped over by a parser that knows every component's own encoding
+    -- which this is not. An empty patch is two zero varints and costs nothing
+    to skip, and that is what every advancement worth testing carries; anything
+    else stops the read rather than guessing where the next field begins.
+    """
+    data = skip_nbt(data)  # title
+    data = skip_nbt(data)  # description
+    item, data = read_varint(data)  # the icon's item
+    _count, data = read_varint(data)
+    added, data = read_varint(data)
+    removed, data = read_varint(data)
+    if added or removed:
+        return None, data
+    frame, data = read_varint(data)
+    # Four bytes, big-endian and signed. Not a varint; see DISPLAY_* above.
+    flags = struct.unpack(">i", data[:4])[0]
+    data = data[4:]
+    background = None
+    if flags & DISPLAY_HAS_BACKGROUND:
+        background, data = read_string(data)
+    x, y = struct.unpack(">ff", data[:8])
+    return (
+        {
+            "item": item,
+            "frame": frame,
+            "toast": bool(flags & DISPLAY_SHOW_TOAST),
+            "hidden": bool(flags & DISPLAY_HIDDEN),
+            "background": background,
+            "x": x,
+            "y": y,
+        },
+        data[8:],
+    )
+
+
+def read_advancements(payload):
+    """Decodes an `update_advancements` payload into what it says.
+
+    Kept apart from the printing so a synthetic packet can be fed to it
+    directly: the server sends this one only to a client that asked for a tab,
+    which makes it awkward to provoke and easy to get subtly wrong.
+
+    `stopped` names the advancement whose icon carried a component patch, if
+    one did. Everything before it is real; nothing after it was read, because
+    the width of that patch is not knowable here.
+    """
+    update = {
+        "reset": payload[0] != 0,
+        "added": [],
+        "removed": [],
+        "progress": [],
+        "show": None,
+        "stopped": None,
+    }
+    rest = payload[1:]
+
+    count, rest = read_varint(rest)
+    for _ in range(count):
+        identifier, rest = read_string(rest)
+        has_parent, rest = rest[0], rest[1:]
+        parent = None
+        if has_parent:
+            parent, rest = read_string(rest)
+        has_display, rest = rest[0], rest[1:]
+        display = None
+        if has_display:
+            display, rest = read_advancement_display(rest)
+            if display is None:
+                update["stopped"] = identifier
+                return update
+        requirements = []
+        groups, rest = read_varint(rest)
+        for _ in range(groups):
+            group = []
+            names, rest = read_varint(rest)
+            for _ in range(names):
+                name, rest = read_string(rest)
+                group.append(name)
+            requirements.append(group)
+        telemetry, rest = rest[0] != 0, rest[1:]
+        update["added"].append(
+            {
+                "id": identifier,
+                "parent": parent,
+                "display": display,
+                "requirements": requirements,
+                "telemetry": telemetry,
+            }
+        )
+
+    count, rest = read_varint(rest)
+    for _ in range(count):
+        identifier, rest = read_string(rest)
+        update["removed"].append(identifier)
+
+    count, rest = read_varint(rest)
+    for _ in range(count):
+        identifier, rest = read_string(rest)
+        criteria = []
+        criterion_count, rest = read_varint(rest)
+        for _ in range(criterion_count):
+            name, rest = read_string(rest)
+            obtained, rest = rest[0] != 0, rest[1:]
+            date = None
+            if obtained:
+                date = struct.unpack(">q", rest[:8])[0]
+                rest = rest[8:]
+            criteria.append({"name": name, "obtained": obtained, "date": date})
+        update["progress"].append({"id": identifier, "criteria": criteria})
+
+    update["show"] = rest[0] != 0
+    return update
+
+
+def note_advancements(payload):
+    """Prints what an advancements update tells the client.
+
+    An advancement is server-side state that no command reads back, so this
+    packet is the only thing that says one was granted, drawn where it should
+    be, or revoked.
+    """
+    try:
+        update = read_advancements(payload)
+    except (IndexError, ValueError, UnicodeDecodeError, struct.error):
+        print("  an advancements update arrived that could not be parsed")
+        return
+
+    if update["stopped"] is None:
+        print(
+            f"  advancements packet: reset={truth(update['reset'])} "
+            f"added={len(update['added'])} removed={len(update['removed'])} "
+            f"progress={len(update['progress'])} show={truth(update['show'])}"
+        )
+
+    for advancement in update["added"]:
+        display = advancement["display"]
+        if display is None:
+            print(f"  advancement {advancement['id']} is not drawn")
+            continue
+        line = (
+            f"  advancement {advancement['id']} is drawn at "
+            f"{display['x']:g},{display['y']:g} "
+            f"frame {FRAME_NAMES.get(display['frame'], display['frame'])} "
+            f"toast={truth(display['toast'])} hidden={truth(display['hidden'])}"
+        )
+        if display["background"] is not None:
+            line += f" background={display['background']}"
+        print(line)
+
+    for entry in update["progress"]:
+        criteria = entry["criteria"]
+        met = [criterion for criterion in criteria if criterion["obtained"]]
+        print(
+            f"  advancement {entry['id']} progress "
+            f"{len(met)}/{len(criteria)} criteria"
+        )
+        for criterion in criteria:
+            state = "met" if criterion["obtained"] else "not met"
+            print(f"  advancement {entry['id']} criterion {criterion['name']} {state}")
+        # An advancement with no criteria at all is not an earned one, so the
+        # empty case is deliberately not called complete.
+        if criteria and len(met) == len(criteria):
+            print(f"  advancement {entry['id']} is complete")
+
+    if update["stopped"] is not None:
+        print(
+            f"  advancement {update['stopped']} icon carries a component patch, "
+            f"so parsing stopped"
+        )
+
+
+def note_advancements_tab(payload):
+    """Prints which advancement tab the server put the screen on.
+
+    The server can move the screen itself, so this says what the client is
+    actually being shown rather than what it last asked for.
+    """
+    if not payload or payload[0] == 0:
+        print("  advancements tab cleared")
+        return
+    identifier, _rest = read_string(payload[1:])
+    print(f"  advancements tab selected {identifier}")
 
 
 def note_map_item_data(payload):
@@ -1168,6 +1443,26 @@ def send_player_command(connection, action, data=0):
     )
 
 
+def send_seen_advancements(connection, tab):
+    """Opens the advancements screen on `tab`, or shuts it when `tab` is None.
+
+    A tab's identifier goes on the wire bare, with no present flag in front of
+    it, because the action already says whether one follows.
+    """
+    if tab is None:
+        connection.send(
+            PLAY_S_SEEN_ADVANCEMENTS,
+            varint(SEEN_ADVANCEMENTS_CLOSED_SCREEN),
+        )
+        print("  the advancements screen was closed")
+        return
+    connection.send(
+        PLAY_S_SEEN_ADVANCEMENTS,
+        varint(SEEN_ADVANCEMENTS_OPENED_TAB) + string(tab),
+    )
+    print(f"  opened the advancements tab {tab}")
+
+
 def send_container_close(connection):
     """Shuts the open screen, as pressing escape does.
 
@@ -1238,6 +1533,10 @@ def watch_for_spawns(connection, seconds, spawned):
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
+        elif packet_id == PLAY_C_UPDATE_ADVANCEMENTS:
+            note_advancements(payload)
+        elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
+            note_advancements_tab(payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)

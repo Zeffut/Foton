@@ -14,6 +14,8 @@ use std::str::FromStr as _;
 use std::sync::OnceLock;
 
 use steel_utils::Identifier;
+use steel_utils::translations;
+use text_components::translation::Translation;
 use text_components::{TextComponent, format::Color};
 
 use crate::item_stack_template::ItemStackTemplate;
@@ -62,16 +64,17 @@ impl AdvancementType {
         }
     }
 
-    /// The translation key of the chat announcement for this frame.
+    /// The chat announcement for this frame, which takes the player's name
+    /// and the decorated advancement name.
     ///
     /// Vanilla parity: `AdvancementType.createAnnouncement`, which builds
     /// `chat.type.advancement.<name>`.
     #[must_use]
-    pub const fn announcement_key(self) -> &'static str {
+    pub const fn announcement(self) -> &'static Translation<2> {
         match self {
-            Self::Task => "chat.type.advancement.task",
-            Self::Challenge => "chat.type.advancement.challenge",
-            Self::Goal => "chat.type.advancement.goal",
+            Self::Task => &translations::CHAT_TYPE_ADVANCEMENT_TASK,
+            Self::Challenge => &translations::CHAT_TYPE_ADVANCEMENT_CHALLENGE,
+            Self::Goal => &translations::CHAT_TYPE_ADVANCEMENT_GOAL,
         }
     }
 }

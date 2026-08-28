@@ -18,9 +18,9 @@ use steel_protocol::packets::game::{
     SContainerSlotStateChanged, SEditBook, SInteract, SMovePlayer, SMovePlayerPos,
     SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
     SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem,
-    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCommandBlock,
-    SSetCommandMinecart, SSetCreativeModeSlot, SSetJigsawBlock, SSetStructureBlock, SSignUpdate,
-    SSpectatorAction, SSwing, SUseItem, SUseItemOn,
+    SSeenAdvancements, SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem,
+    SSetCommandBlock, SSetCommandMinecart, SSetCreativeModeSlot, SSetJigsawBlock,
+    SSetStructureBlock, SSignUpdate, SSpectatorAction, SSwing, SUseItem, SUseItemOn,
 };
 
 use steel_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
@@ -112,6 +112,7 @@ enum ScheduledPlayPacketKind {
     SignUpdate(SSignUpdate),
     SpectatorAction(SSpectatorAction),
     ClientCommand(SClientCommand),
+    SeenAdvancements(SSeenAdvancements),
     ChangeGameMode(SChangeGameMode),
     ChangeDifficulty(SChangeDifficulty),
 }
@@ -177,7 +178,8 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::SetCarriedItem(_)
             | ScheduledPlayPacketKind::Swing(_)
             | ScheduledPlayPacketKind::PickItemFromBlock(_)
-            | ScheduledPlayPacketKind::ClientCommand(_) => ScheduledPacketExecution::PlayerLocal,
+            | ScheduledPlayPacketKind::ClientCommand(_)
+            | ScheduledPlayPacketKind::SeenAdvancements(_) => ScheduledPacketExecution::PlayerLocal,
             ScheduledPlayPacketKind::PlayerCommand(packet) => match packet.action {
                 PlayerCommandAction::StartSprinting
                 | PlayerCommandAction::StopSprinting
@@ -402,6 +404,9 @@ impl ScheduledPlayPacket {
             }
             ScheduledPlayPacketKind::ClientCommand(packet) => {
                 player.handle_client_command(packet.action);
+            }
+            ScheduledPlayPacketKind::SeenAdvancements(packet) => {
+                player.handle_seen_advancements(packet.tab);
             }
             ScheduledPlayPacketKind::ChangeGameMode(packet) => {
                 handle_client_request(&player, server, packet.gamemode);
@@ -864,6 +869,9 @@ impl JavaConnection {
             )),
             play::S_CLIENT_COMMAND => scheduled(ScheduledPlayPacketKind::ClientCommand(
                 SClientCommand::read_packet(data)?,
+            )),
+            play::S_SEEN_ADVANCEMENTS => scheduled(ScheduledPlayPacketKind::SeenAdvancements(
+                SSeenAdvancements::read_packet(data)?,
             )),
             play::S_PING_REQUEST => DecodedPlayPacket::Immediate(ImmediatePlayPacket::PingRequest(
                 SPingRequest::read_packet(data)?,

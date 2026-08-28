@@ -1,5 +1,6 @@
 //! This module contains all things player-related.
 mod abilities;
+mod advancements;
 pub mod chat;
 pub mod chunk_sender;
 /// This module contains the `PlayerConnection` trait that abstracts network connections.
@@ -95,6 +96,7 @@ use text_components::{
 };
 use text_components::{content::Resolvable, custom::CustomData};
 
+use crate::advancement::PlayerAdvancements;
 use crate::behavior::{BlockStateBehaviorExt as _, InteractionResult};
 use crate::chunk::chunk_request::{ChunkRequestHandle, ChunkRequestState};
 use crate::config::RuntimeConfig;
@@ -309,6 +311,15 @@ pub struct Player {
     /// pending raid. The effect itself is not persisted across that boundary
     /// either, so the two gaps line up.
     raid_omen_position: SyncMutex<Option<BlockPos>>,
+
+    /// Which advancements this player has earned and what the screen has
+    /// already been told.
+    ///
+    /// Vanilla parity: `ServerPlayer.advancements`. Vanilla caches these on the
+    /// player list by UUID so they survive the new `ServerPlayer` a respawn
+    /// builds; Steel keeps them on the player and restores them from the save,
+    /// which is the same thing through a different door.
+    advancements: SyncMutex<PlayerAdvancements>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `Player`.
@@ -499,6 +510,7 @@ impl Player {
             ender_pearls: SyncMutex::new(Vec::new()),
             fishing: SyncMutex::new(None),
             raid_omen_position: SyncMutex::new(None),
+            advancements: SyncMutex::new(PlayerAdvancements::new()),
         }
     }
 
@@ -643,6 +655,8 @@ impl Player {
         if let Some(packet) = experience_packet {
             self.send_packet(packet);
         }
+
+        self.flush_dirty_advancements();
 
         self.connection.tick();
     }
