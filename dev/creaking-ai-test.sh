@@ -13,13 +13,19 @@
 # it stayed green the whole time. This comes in the only way the server does:
 # `World::tick_entities` -> `Entity::tick`.
 #
-# Two rigs, because the break has two visible ends:
+# The witness is the second rig: a creaking nobody is looking at has to wander.
+# `RandomStroll` is in its idle activity and the only road to it is the brain.
+# Reverting the fix and running this again is what it was measured against:
+# `WANDERERMOVED` appears two to three times out of four samples with the living
+# tick and *never* without it -- the creaking stands exactly where it was put
+# for four thousand eight hundred ticks.
 #
-#   * a creaking that has been killed has to leave. Removal happens in
-#     `tick_death`, which lives inside `tick_living_entity` -- so without the
-#     living tick a creaking at zero health stands in the world for good.
-#   * a creaking nobody is looking at has to wander. `RandomStroll` is in its
-#     idle activity, and the only road to it is the brain.
+# The first rig is a control on the rig itself, not a second witness. It was
+# built expecting a creaking at zero health to linger without `tick_death`, and
+# the reverted run disproved that: `DEADRIGREMOVED` fires either way, because a
+# lethal blow removes the mob without needing the living tick. It stays because
+# summoning, tagging, damaging and clearing a creaking are the machinery the
+# second rig depends on, and it is cheap to know they work.
 #
 # The player faces west while the wandering creaking stands to the east: a
 # creaking freezes under a bare-headed gaze, so a player staring at it would
@@ -154,10 +160,10 @@ fail() { echo "########## CREAKING AI TEST FAILED ($1) ##########"; exit 1; }
 
 said DEADRIGSUMMONED || fail "no creaking was summoned, so nothing below means anything"
 said DEADRIGWASHURT  || fail "the creaking is still at full health, so the blow never landed and the removal below would prove nothing"
-said DEADRIGREMOVED  || fail "a killed creaking is still in the world: \`tick_death\` never ran, so neither did the living tick"
+said DEADRIGREMOVED  || fail "a killed creaking is still in the world; the summon-damage-clear rig the wander test depends on is broken"
 
 said WANDERERINRANGE    || fail "the distance selector never matched the second creaking, so the assertion below would be vacuous"
 said WANDERERSTILLTHERE || fail "the second creaking left the world; it was supposed to wander, not despawn"
-said WANDERERMOVED      || fail "the creaking never moved a step in four thousand eight hundred ticks: its brain is not ticking"
+said WANDERERMOVED      || fail "the creaking never moved a step in four thousand eight hundred ticks: its tick is not reaching its brain"
 
 echo "########## CREAKING AI TEST PASSED ##########"
