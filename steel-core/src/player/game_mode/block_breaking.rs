@@ -567,10 +567,22 @@ fn get_destroy_progress(player: &Player, block_state: BlockStateId) -> f32 {
 /// Scales a tool's raw speed by everything the digger's own state does to it.
 ///
 /// Vanilla parity: the body of `Player.getDestroySpeed` after the tool has been
-/// asked. What is left out is named on [`mining_speed_from_attributes`].
+/// asked, in vanilla's order -- the `MINING_EFFICIENCY` term is added before
+/// haste and mining fatigue scale the result, and `BLOCK_BREAK_SPEED` and
+/// `SUBMERGED_MINING_SPEED` multiply after them.
 #[must_use]
 pub(crate) fn apply_mining_speed_modifiers(player: &Player, tool_speed: f32) -> f32 {
-    let mut speed = mining_speed_from_attributes(player, tool_speed);
+    let mut speed = tool_speed;
+
+    // Vanilla parity: `if (speed > 1.0F) speed += MINING_EFFICIENCY`. That
+    // attribute is where Efficiency lands, and the `> 1.0` guard is why the
+    // enchantment does nothing for a block the tool is not the tool for.
+    if speed > 1.0 {
+        speed += player
+            .attributes()
+            .lock()
+            .required_value(vanilla_attributes::MINING_EFFICIENCY) as f32;
+    }
 
     // Vanilla parity: `MobEffectUtil.hasDigSpeed` and
     // `getDigSpeedAmplification`, which take the better of haste and conduit
@@ -589,6 +601,24 @@ pub(crate) fn apply_mining_speed_modifiers(player: &Player, tool_speed: f32) -> 
             2 => 0.0027,
             _ => 0.000_81,
         };
+    }
+
+    // Vanilla parity: `speed *= BLOCK_BREAK_SPEED`, the attribute a command or
+    // a plugin scales digging with. Its base value is 1, so this is a no-op
+    // until something modifies it.
+    speed *= player
+        .attributes()
+        .lock()
+        .required_value(vanilla_attributes::BLOCK_BREAK_SPEED) as f32;
+
+    // Vanilla parity: `if (isEyeInFluid(WATER)) speed *= SUBMERGED_MINING_SPEED`.
+    // The base value is 0.2, and Aqua Affinity is the modifier that lifts it
+    // back to 1 -- which is the whole of the enchantment.
+    if player.is_eye_in_water() {
+        speed *= player
+            .attributes()
+            .lock()
+            .required_value(vanilla_attributes::SUBMERGED_MINING_SPEED) as f32;
     }
 
     // Vanilla parity: the `if (!this.onGround()) speed /= 5.0F`, which is why
@@ -616,20 +646,6 @@ fn dig_speed_amplification(player: &Player) -> Option<i32> {
         (Some(a), None) | (None, Some(a)) => Some(a),
         (None, None) => None,
     }
-}
-
-/// MISSING FOUNDATION: the three attribute terms of `Player.getDestroySpeed`.
-///
-/// Vanilla adds `MINING_EFFICIENCY` when the tool is worth more than a bare
-/// hand, then multiplies by `BLOCK_BREAK_SPEED`, then by
-/// `SUBMERGED_MINING_SPEED` when the digger's eyes are under water. All three
-/// exist in the generated registry, but no player carries them: Steel has no
-/// attribute supplier that puts them on one, and nothing translates the
-/// Efficiency enchantment into the `MINING_EFFICIENCY` modifier it is in 26.2.
-/// Until both land, an enchanted pick digs like a plain one and Aqua Affinity
-/// does nothing.
-const fn mining_speed_from_attributes(_player: &Player, tool_speed: f32) -> f32 {
-    tool_speed
 }
 
 /// Drops loot for a destroyed block using its loot table.
@@ -699,10 +715,15 @@ fn item_can_destroy_block(
 
 #[cfg(test)]
 mod mining_speed_tests {
+    use steel_registry::data_components::vanilla_components::{ENCHANTMENTS, ItemEnchantments};
     use steel_registry::init_vanilla_registry;
+    use steel_registry::items::ItemRef;
+    use steel_registry::vanilla_items;
+    use steel_utils::Identifier;
 
     use super::*;
-    use crate::entity::MobEffectInstance;
+    use crate::entity::{EntityFluidContact, MobEffectInstance};
+    use crate::inventory::equipment::EntityEquipment as _;
     use crate::test_support::{TestPlayerBuilder, fresh_test_world};
 
     /// A tool speed that is easy to read the multipliers off.
@@ -800,6 +821,171 @@ mod mining_speed_tests {
             apply_mining_speed_modifiers(&player, BASE),
             BASE / 5.0
         ));
+    }
+
+    fn enchanted(item: ItemRef, enchantment: Identifier, level: u32) -> ItemStack {
+        let mut levels = ItemEnchantments::empty();
+        levels.set(enchantment, level);
+        let mut stack = ItemStack::new(item);
+        stack.set(ENCHANTMENTS, levels);
+        stack
+    }
+
+    /// Equips a slot the way the tick does.
+    ///
+    /// `LivingEntity::detect_equipment_updates` is what
+    /// `tick_living_entity` calls, and it is the only thing that reaches
+    /// `refresh_equipment_attribute_modifiers` in game -- so these tests come
+    /// in through it rather than calling the refresh directly.
+    fn equip(player: &Arc<Player>, slot: EquipmentSlot, stack: ItemStack) {
+        player.inventory.lock().set(slot, stack);
+        LivingEntity::detect_equipment_updates(player.as_ref());
+    }
+
+    /// The whole of Efficiency, from the item to the dig.
+    ///
+    /// This is the first enchantment nearly every player puts on anything, and
+    /// it was inert: the enchantment landed on the pickaxe, showed in the
+    /// tooltip, and `mining_speed_from_attributes` threw the attribute away.
+    /// The route runs enchantment -> `MINING_EFFICIENCY` modifier ->
+    /// `Player.getDestroySpeed`, so this comes in at `get_destroy_progress`,
+    /// which is the call the breaking path makes.
+    #[test]
+    fn an_efficiency_pickaxe_digs_faster_than_a_plain_one() {
+        let player = digger("mining_speed_efficiency");
+        let stone = vanilla_blocks::STONE.default_state();
+
+        equip(
+            &player,
+            EquipmentSlot::MainHand,
+            ItemStack::new(&vanilla_items::DIAMOND_PICKAXE),
+        );
+        let plain = get_destroy_progress(&player, stone);
+        assert!(plain > 0.0, "a diamond pickaxe should dig stone");
+
+        // Vanilla `efficiency.json` is `levels_squared` with `added: 1`, so
+        // level five adds 26 to a diamond pickaxe's speed of 8.
+        equip(
+            &player,
+            EquipmentSlot::MainHand,
+            enchanted(
+                &vanilla_items::DIAMOND_PICKAXE,
+                Identifier::vanilla_static("efficiency"),
+                5,
+            ),
+        );
+        let enchanted_progress = get_destroy_progress(&player, stone);
+
+        assert!(
+            close(enchanted_progress, plain * (8.0 + 26.0) / 8.0),
+            "Efficiency V should take a diamond pickaxe from 8 to 34: \
+             {plain} -> {enchanted_progress}"
+        );
+    }
+
+    /// Efficiency is worth nothing on a block the tool is not for.
+    ///
+    /// Vanilla guards the term with `if (speed > 1.0F)`, and dropping the guard
+    /// would let an Efficiency pickaxe tear through wool.
+    #[test]
+    fn efficiency_does_nothing_for_a_tool_that_does_not_apply() {
+        let player = digger("mining_speed_efficiency_wrong_tool");
+
+        equip(
+            &player,
+            EquipmentSlot::MainHand,
+            enchanted(
+                &vanilla_items::DIAMOND_PICKAXE,
+                Identifier::vanilla_static("efficiency"),
+                5,
+            ),
+        );
+        let wool = vanilla_blocks::WHITE_WOOL.default_state();
+        let with_pickaxe = get_destroy_progress(&player, wool);
+
+        equip(&player, EquipmentSlot::MainHand, ItemStack::empty());
+        let bare_handed = get_destroy_progress(&player, wool);
+
+        assert!(
+            close(with_pickaxe, bare_handed),
+            "a pickaxe is speed 1 on wool, so Efficiency's `> 1.0` guard should \
+             hold it back: {with_pickaxe} vs {bare_handed}"
+        );
+    }
+
+    /// The whole of Aqua Affinity.
+    ///
+    /// `SUBMERGED_MINING_SPEED` starts at 0.2, which is the five-times penalty
+    /// for mining with your head under water; the enchantment's
+    /// `add_multiplied_total` of 4 takes it back to 1.
+    #[test]
+    fn aqua_affinity_lifts_the_underwater_penalty() {
+        let player = digger("mining_speed_aqua_affinity");
+        player
+            .base()
+            .set_fluid_contact(EntityFluidContact::from_parts(2.0, 0.0, true, false));
+        assert!(
+            player.is_eye_in_water(),
+            "test setup failed: the assertions below only mean something with \
+             the digger's head under water"
+        );
+
+        let drowning = apply_mining_speed_modifiers(&player, BASE);
+        assert!(
+            close(drowning, BASE * 0.2),
+            "a bare head underwater digs at a fifth speed: {drowning}"
+        );
+
+        equip(
+            &player,
+            EquipmentSlot::Head,
+            enchanted(
+                &vanilla_items::DIAMOND_HELMET,
+                Identifier::vanilla_static("aqua_affinity"),
+                1,
+            ),
+        );
+
+        assert!(
+            close(apply_mining_speed_modifiers(&player, BASE), BASE),
+            "Aqua Affinity should cancel the penalty entirely"
+        );
+    }
+
+    /// One modifier per slot, not one per enchantment.
+    ///
+    /// `EnchantmentAttributeEffect.getModifier` suffixes the modifier id with
+    /// the slot, and without that suffix a second armor piece carrying the same
+    /// enchantment overwrites the first instead of adding to it.
+    #[test]
+    fn the_same_enchantment_on_two_slots_installs_two_modifiers() {
+        let player = digger("enchantment_attributes_per_slot");
+        let base = player
+            .attributes()
+            .lock()
+            .required_value(vanilla_attributes::EXPLOSION_KNOCKBACK_RESISTANCE);
+
+        for (slot, item) in [
+            (EquipmentSlot::Head, &vanilla_items::DIAMOND_HELMET),
+            (EquipmentSlot::Chest, &vanilla_items::DIAMOND_CHESTPLATE),
+        ] {
+            equip(
+                &player,
+                slot,
+                enchanted(item, Identifier::vanilla_static("blast_protection"), 1),
+            );
+        }
+
+        // `blast_protection.json` is `add_value` of 0.15 per level.
+        let both = player
+            .attributes()
+            .lock()
+            .required_value(vanilla_attributes::EXPLOSION_KNOCKBACK_RESISTANCE);
+        assert!(
+            close((both - base) as f32, 0.30),
+            "two Blast Protection pieces should add 0.15 twice, not once: \
+             {base} -> {both}"
+        );
     }
 }
 

@@ -30,6 +30,7 @@ use steel_utils::types::{Difficulty, InteractionHand};
 use steel_utils::{BlockPos, Identifier};
 use uuid::Uuid;
 
+use crate::enchantment_helper;
 use crate::entity::attribute::{AttributeMap, AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity as _, LivingEntity, SharedEntity, WeakEntity};
@@ -1223,34 +1224,41 @@ impl LivingEntityBase {
             return;
         }
 
-        let Some(modifiers) = item_stack.get_attribute_modifiers() else {
-            return;
-        };
-
-        for entry in modifiers.for_slot(slot) {
+        let mut install = |attribute: AttributeRef, modifier: AttributeModifier| {
             for (index, keys) in installed_modifiers.iter_mut().enumerate() {
                 if index == slot_index {
                     continue;
                 }
-                keys.retain(|key| key.attribute.key != entry.attribute.key || key.id != entry.id);
+                keys.retain(|key| key.attribute.key != attribute.key || key.id != modifier.id);
             }
 
-            attributes.remove_modifier(entry.attribute, &entry.id);
-            if attributes.add_modifier(
-                entry.attribute,
-                AttributeModifier {
-                    id: entry.id.clone(),
-                    amount: entry.amount,
-                    operation: entry.operation,
-                },
-                false,
-            ) {
-                installed_modifiers[slot_index].push(EquipmentAttributeModifierKey {
-                    attribute: entry.attribute,
-                    id: entry.id.clone(),
-                });
+            attributes.remove_modifier(attribute, &modifier.id);
+            let id = modifier.id.clone();
+            if attributes.add_modifier(attribute, modifier, false) {
+                installed_modifiers[slot_index]
+                    .push(EquipmentAttributeModifierKey { attribute, id });
+            }
+        };
+
+        if let Some(modifiers) = item_stack.get_attribute_modifiers() {
+            for entry in modifiers.for_slot(slot) {
+                install(
+                    entry.attribute,
+                    AttributeModifier {
+                        id: entry.id.clone(),
+                        amount: entry.amount,
+                        operation: entry.operation,
+                    },
+                );
             }
         }
+
+        // Vanilla parity: `ItemStack.forEachModifier` is the item's own
+        // `attribute_modifiers` component followed by
+        // `EnchantmentHelper.forEachModifier`, both feeding one consumer. Both
+        // halves install the same way here, so an Efficiency pickaxe reaches
+        // the attribute map by the path the component already used.
+        enchantment_helper::for_each_attribute_modifier(item_stack, slot, install);
     }
 
     /// Returns whether this living entity has an active vanilla mob effect.
