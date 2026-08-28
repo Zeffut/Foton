@@ -37,11 +37,14 @@ use crate::entity::entities::{
     SkeletonEntity, SkeletonHorseEntity, SlimeEntity, SnifferEntity, SnowGolemEntity, SpiderEntity,
     SquidEntity, StrayEntity, StriderEntity, SulfurCubeEntity, TadpoleEntity, TraderLlamaEntity,
     TropicalFishEntity, TurtleEntity, VexEntity, VillagerEntity, VindicatorEntity,
-    WanderingTraderEntity, WardenEntity, WitchEntity, WitherBoss, WitherSkeletonEntity,
-    WolfEntity, ZoglinEntity, ZombieEntity, ZombieHorseEntity, ZombieNautilusEntity,
-    ZombieVillagerEntity, ZombifiedPiglinEntity,
+    WanderingTraderEntity, WardenEntity, WitchEntity, WitherBoss, WitherSkeletonEntity, WolfEntity,
+    ZoglinEntity, ZombieEntity, ZombieHorseEntity, ZombieNautilusEntity, ZombieVillagerEntity,
+    ZombifiedPiglinEntity,
 };
-use crate::entity::{Entity, LivingEntity, Mob, MobEffectInstance, next_entity_id};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::entity::ai::goal::{Goal, GoalControls};
+use crate::entity::{Entity, LivingEntity, Mob, MobEffectInstance, PathfinderMob, next_entity_id};
 use steel_registry::{vanilla_entities, vanilla_mob_effects};
 
 /// A living entity's own tick is the door every one of the above comes through.
@@ -349,4 +352,312 @@ assert_the_tick_reaches_the_goals! {
     a_tropical_fish_ticks_its_goals: TropicalFishEntity, &vanilla_entities::TROPICAL_FISH;
     a_pufferfish_ticks_its_goals: PufferfishEntity, &vanilla_entities::PUFFERFISH;
     a_dolphin_ticks_its_goals: DolphinEntity, &vanilla_entities::DOLPHIN;
+}
+
+/// Ticking an empty goal list is still not an AI.
+///
+/// `assert_the_tick_reaches_the_goals` proves the tick arrives; this proves
+/// there is something waiting for it. A mob that registered nothing would pass
+/// the first and stand still in game, which is the same symptom by another
+/// road.
+fn has_something_to_run(mob: &impl Mob) -> bool {
+    let goal_count = mob.mob_base().goal_selector().lock().goal_count()
+        + mob.mob_base().target_selector().lock().goal_count();
+    let brain_is_alive = Mob::brain(mob).is_some_and(|brain| !brain.is_brain_dead());
+    goal_count > 0 || brain_is_alive
+}
+
+macro_rules! assert_it_has_something_to_run {
+    ($($name:ident: $ty:ty, $entity_type:expr;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                init_vanilla_registry();
+                let mob = <$ty>::new($entity_type, next_entity_id(), DVec3::ZERO, Weak::new());
+                assert!(
+                    has_something_to_run(&mob),
+                    "this mob registers neither a goal nor a brain, so the tick \
+                     that reaches it has nothing to run"
+                );
+            }
+        )*
+    };
+}
+
+// Four mobs are deliberately absent, and the reasons are not the same.
+//
+// The bat and the giant are right. Neither overrides `registerGoals` in
+// vanilla: a giant genuinely stands where it spawned, and everything a bat does
+// is in `Bat.customServerAiStep`, which `mob_server_ai_step` reaches without a
+// goal list. There is no generic way to see a `custom_server_ai_step` override
+// from here, so they are named rather than asserted.
+//
+// The goat and the wandering trader are wrong, and this is the ledger of it.
+// Vanilla's goat is brain-driven through `GoatAi` -- ramming, the long jump,
+// the wandering, the tempting -- and Steel builds it no brain, so a goat stands
+// still. `goat/mod.rs` says Steel has no `Brain` system, which stopped being
+// true some time ago: the villager, the piglins, the warden, the frog, the
+// axolotl, the allay, the sniffer, the creaking, the breeze and both nautilus
+// mobs all have one. Vanilla's `WanderingTrader.registerGoals` adds twelve
+// goals -- the invisibility potion at dusk, the milk at dawn, trading, and
+// fleeing five kinds of illager -- and Steel registers none, so a trader stands
+// still too. Both belong in the list above the moment they have something to
+// run.
+assert_it_has_something_to_run! {
+
+    a_zombie_registers_its_goals: ZombieEntity, &vanilla_entities::ZOMBIE;
+    a_husk_registers_its_goals: HuskEntity, &vanilla_entities::HUSK;
+    a_drowned_registers_its_goals: DrownedEntity, &vanilla_entities::DROWNED;
+    a_zombified_piglin_registers_its_goals: ZombifiedPiglinEntity, &vanilla_entities::ZOMBIFIED_PIGLIN;
+    a_skeleton_registers_its_goals: SkeletonEntity, &vanilla_entities::SKELETON;
+    a_stray_registers_its_goals: StrayEntity, &vanilla_entities::STRAY;
+    a_bogged_registers_its_goals: BoggedEntity, &vanilla_entities::BOGGED;
+    a_parched_registers_its_goals: ParchedEntity, &vanilla_entities::PARCHED;
+    a_wither_skeleton_registers_its_goals: WitherSkeletonEntity, &vanilla_entities::WITHER_SKELETON;
+    a_creeper_registers_its_goals: CreeperEntity, &vanilla_entities::CREEPER;
+    a_spider_registers_its_goals: SpiderEntity, &vanilla_entities::SPIDER;
+    a_cave_spider_registers_its_goals: CaveSpiderEntity, &vanilla_entities::CAVE_SPIDER;
+    an_enderman_registers_its_goals: EndermanEntity, &vanilla_entities::ENDERMAN;
+    a_silverfish_registers_its_goals: SilverfishEntity, &vanilla_entities::SILVERFISH;
+    a_witch_registers_its_goals: WitchEntity, &vanilla_entities::WITCH;
+    a_pillager_registers_its_goals: PillagerEntity, &vanilla_entities::PILLAGER;
+    a_vindicator_registers_its_goals: VindicatorEntity, &vanilla_entities::VINDICATOR;
+    an_evoker_registers_its_goals: EvokerEntity, &vanilla_entities::EVOKER;
+    an_illusioner_registers_its_goals: IllusionerEntity, &vanilla_entities::ILLUSIONER;
+    a_ravager_registers_its_goals: RavagerEntity, &vanilla_entities::RAVAGER;
+    a_slime_registers_its_goals: SlimeEntity, &vanilla_entities::SLIME;
+    a_magma_cube_registers_its_goals: MagmaCubeEntity, &vanilla_entities::MAGMA_CUBE;
+    a_sulfur_cube_registers_its_goals: SulfurCubeEntity, &vanilla_entities::SULFUR_CUBE;
+    an_iron_golem_registers_its_goals: IronGolemEntity, &vanilla_entities::IRON_GOLEM;
+    a_snow_golem_registers_its_goals: SnowGolemEntity, &vanilla_entities::SNOW_GOLEM;
+    a_copper_golem_registers_its_goals: CopperGolemEntity, &vanilla_entities::COPPER_GOLEM;
+    a_blaze_registers_its_goals: BlazeEntity, &vanilla_entities::BLAZE;
+    a_ghast_registers_its_goals: GhastEntity, &vanilla_entities::GHAST;
+    a_guardian_registers_its_goals: GuardianEntity, &vanilla_entities::GUARDIAN;
+    an_elder_guardian_registers_its_goals: ElderGuardianEntity, &vanilla_entities::ELDER_GUARDIAN;
+    an_endermite_registers_its_goals: EndermiteEntity, &vanilla_entities::ENDERMITE;
+    a_vex_registers_its_goals: VexEntity, &vanilla_entities::VEX;
+    a_phantom_registers_its_goals: PhantomEntity, &vanilla_entities::PHANTOM;
+    a_shulker_registers_its_goals: ShulkerEntity, &vanilla_entities::SHULKER;
+    a_wither_registers_its_goals: WitherBoss, &vanilla_entities::WITHER;
+    a_piglin_registers_its_brain: PiglinEntity, &vanilla_entities::PIGLIN;
+    a_piglin_brute_registers_its_brain: PiglinBruteEntity, &vanilla_entities::PIGLIN_BRUTE;
+    a_hoglin_registers_its_brain: HoglinEntity, &vanilla_entities::HOGLIN;
+    a_zoglin_registers_its_brain: ZoglinEntity, &vanilla_entities::ZOGLIN;
+    a_breeze_registers_its_brain: BreezeEntity, &vanilla_entities::BREEZE;
+    a_creaking_registers_its_brain: CreakingEntity, &vanilla_entities::CREAKING;
+    a_warden_registers_its_brain: WardenEntity, &vanilla_entities::WARDEN;
+    a_nautilus_registers_its_brain: NautilusEntity, &vanilla_entities::NAUTILUS;
+    a_zombie_nautilus_registers_its_brain: ZombieNautilusEntity, &vanilla_entities::ZOMBIE_NAUTILUS;
+    // Ambient, neutral and passive mobs. None of these were in either list
+    // above, and a player meets most of them before ever meeting a hostile.
+    a_wolf_registers_its_goals: WolfEntity, &vanilla_entities::WOLF;
+    a_pig_registers_its_goals: PigEntity, &vanilla_entities::PIG;
+    a_cow_registers_its_goals: CowEntity, &vanilla_entities::COW;
+    a_mooshroom_registers_its_goals: MushroomCowEntity, &vanilla_entities::MOOSHROOM;
+    a_sheep_registers_its_goals: SheepEntity, &vanilla_entities::SHEEP;
+    a_chicken_registers_its_goals: ChickenEntity, &vanilla_entities::CHICKEN;
+    a_rabbit_registers_its_goals: RabbitEntity, &vanilla_entities::RABBIT;
+    a_polar_bear_registers_its_goals: PolarBearEntity, &vanilla_entities::POLAR_BEAR;
+    a_panda_registers_its_goals: PandaEntity, &vanilla_entities::PANDA;
+    a_fox_registers_its_goals: FoxEntity, &vanilla_entities::FOX;
+    a_cat_registers_its_goals: CatEntity, &vanilla_entities::CAT;
+    an_ocelot_registers_its_goals: OcelotEntity, &vanilla_entities::OCELOT;
+    a_parrot_registers_its_goals: ParrotEntity, &vanilla_entities::PARROT;
+    a_bee_registers_its_goals: BeeEntity, &vanilla_entities::BEE;
+    a_turtle_registers_its_goals: TurtleEntity, &vanilla_entities::TURTLE;
+    a_strider_registers_its_goals: StriderEntity, &vanilla_entities::STRIDER;
+    a_happy_ghast_registers_its_goals: HappyGhastEntity, &vanilla_entities::HAPPY_GHAST;
+    an_armadillo_registers_its_goals: ArmadilloEntity, &vanilla_entities::ARMADILLO;
+    an_allay_registers_its_brain: AllayEntity, &vanilla_entities::ALLAY;
+    a_frog_registers_its_brain: FrogEntity, &vanilla_entities::FROG;
+    a_tadpole_registers_its_brain: TadpoleEntity, &vanilla_entities::TADPOLE;
+    an_axolotl_registers_its_brain: AxolotlEntity, &vanilla_entities::AXOLOTL;
+    a_sniffer_registers_its_brain: SnifferEntity, &vanilla_entities::SNIFFER;
+    // The equines, which all override `Entity::tick` for their own reasons.
+    a_horse_registers_its_goals: HorseEntity, &vanilla_entities::HORSE;
+    a_donkey_registers_its_goals: DonkeyEntity, &vanilla_entities::DONKEY;
+    a_mule_registers_its_goals: MuleEntity, &vanilla_entities::MULE;
+    a_llama_registers_its_goals: LlamaEntity, &vanilla_entities::LLAMA;
+    a_trader_llama_registers_its_goals: TraderLlamaEntity, &vanilla_entities::TRADER_LLAMA;
+    a_skeleton_horse_registers_its_goals: SkeletonHorseEntity, &vanilla_entities::SKELETON_HORSE;
+    a_zombie_horse_registers_its_goals: ZombieHorseEntity, &vanilla_entities::ZOMBIE_HORSE;
+    a_camel_registers_its_goals: CamelEntity, &vanilla_entities::CAMEL;
+    a_camel_husk_registers_its_goals: CamelHuskEntity, &vanilla_entities::CAMEL_HUSK;
+    // The villagers and the trader, all three brain-driven.
+    a_villager_registers_its_brain: VillagerEntity, &vanilla_entities::VILLAGER;
+    a_zombie_villager_registers_its_goals: ZombieVillagerEntity, &vanilla_entities::ZOMBIE_VILLAGER;
+    // The water mobs.
+    a_squid_registers_its_goals: SquidEntity, &vanilla_entities::SQUID;
+    a_glow_squid_registers_its_goals: GlowSquidEntity, &vanilla_entities::GLOW_SQUID;
+    a_cod_registers_its_goals: CodEntity, &vanilla_entities::COD;
+    a_salmon_registers_its_goals: SalmonEntity, &vanilla_entities::SALMON;
+    a_tropical_fish_registers_its_goals: TropicalFishEntity, &vanilla_entities::TROPICAL_FISH;
+    a_pufferfish_registers_its_goals: PufferfishEntity, &vanilla_entities::PUFFERFISH;
+    a_dolphin_registers_its_goals: DolphinEntity, &vanilla_entities::DOLPHIN;
+}
+
+/// A goal that answers "no" and remembers being asked.
+///
+/// Empty controls, so it can never lose a priority conflict: whether it was
+/// polled is a fact about the selector, not about this goal. It answers `false`
+/// so it never starts, because a running goal stops being offered `can_use`.
+struct ProbeGoal(Arc<AtomicBool>);
+
+impl Goal for ProbeGoal {
+    fn controls(&self) -> GoalControls {
+        GoalControls::EMPTY
+    }
+
+    fn can_use(&mut self, _mob: &dyn PathfinderMob) -> bool {
+        self.0.store(true, Ordering::Relaxed);
+        false
+    }
+}
+
+/// Reaching `mob_server_ai_step` is not the same as running the goals.
+///
+/// `Mob::tick_goal_selectors` is the sixth call in that body and its trait
+/// default is `{}`, so a mob that forgets the override registers a full goal
+/// set, ticks past it every tick and stands still -- and `no_action_time`, the
+/// witness the tests above use, is bumped one line earlier and never notices.
+/// Vanilla `Mob.serverAiStep` ticks the goal selector for every mob it runs,
+/// brain-driven or not, so every mob is asked here.
+///
+/// The probe is polled only on the ticks where `tick_count + id` is even, which
+/// is why this runs the tick four times rather than once.
+fn the_tick_polls_the_goals(mob: &impl Mob) -> bool {
+    let polled = Arc::new(AtomicBool::new(false));
+    mob.mob_base()
+        .goal_selector()
+        .lock()
+        .add_goal(0, ProbeGoal(Arc::clone(&polled)));
+
+    mob.set_health(1.0);
+    assert!(
+        !LivingEntity::is_dead_or_dying(mob),
+        "test setup failed: a dead mob skips `ai_step`, so the assertion would \
+         be vacuous"
+    );
+    for _ in 0..4 {
+        Entity::tick(mob);
+    }
+    polled.load(Ordering::Relaxed)
+}
+
+macro_rules! assert_the_tick_polls_the_goals {
+    ($($name:ident: $ty:ty, $entity_type:expr;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                init_vanilla_registry();
+                let mob = <$ty>::new($entity_type, next_entity_id(), DVec3::ZERO, Weak::new());
+                assert!(
+                    the_tick_polls_the_goals(&mob),
+                    "this mob's goal selector is never ticked: `mob_server_ai_step` \
+                     reaches `tick_goal_selectors`, whose trait default is empty, \
+                     and this mob does not override it"
+                );
+            }
+        )*
+    };
+}
+
+assert_the_tick_polls_the_goals! {
+
+
+    a_zombie_polls_its_goals: ZombieEntity, &vanilla_entities::ZOMBIE;
+    a_husk_polls_its_goals: HuskEntity, &vanilla_entities::HUSK;
+    a_drowned_polls_its_goals: DrownedEntity, &vanilla_entities::DROWNED;
+    a_zombified_piglin_polls_its_goals: ZombifiedPiglinEntity, &vanilla_entities::ZOMBIFIED_PIGLIN;
+    a_skeleton_polls_its_goals: SkeletonEntity, &vanilla_entities::SKELETON;
+    a_stray_polls_its_goals: StrayEntity, &vanilla_entities::STRAY;
+    a_bogged_polls_its_goals: BoggedEntity, &vanilla_entities::BOGGED;
+    a_parched_polls_its_goals: ParchedEntity, &vanilla_entities::PARCHED;
+    a_giant_polls_its_goals: GiantEntity, &vanilla_entities::GIANT;
+    a_wither_skeleton_polls_its_goals: WitherSkeletonEntity, &vanilla_entities::WITHER_SKELETON;
+    a_creeper_polls_its_goals: CreeperEntity, &vanilla_entities::CREEPER;
+    a_spider_polls_its_goals: SpiderEntity, &vanilla_entities::SPIDER;
+    a_cave_spider_polls_its_goals: CaveSpiderEntity, &vanilla_entities::CAVE_SPIDER;
+    an_enderman_polls_its_goals: EndermanEntity, &vanilla_entities::ENDERMAN;
+    a_silverfish_polls_its_goals: SilverfishEntity, &vanilla_entities::SILVERFISH;
+    a_witch_polls_its_goals: WitchEntity, &vanilla_entities::WITCH;
+    a_pillager_polls_its_goals: PillagerEntity, &vanilla_entities::PILLAGER;
+    a_vindicator_polls_its_goals: VindicatorEntity, &vanilla_entities::VINDICATOR;
+    an_evoker_polls_its_goals: EvokerEntity, &vanilla_entities::EVOKER;
+    an_illusioner_polls_its_goals: IllusionerEntity, &vanilla_entities::ILLUSIONER;
+    a_ravager_polls_its_goals: RavagerEntity, &vanilla_entities::RAVAGER;
+    a_slime_polls_its_goals: SlimeEntity, &vanilla_entities::SLIME;
+    a_magma_cube_polls_its_goals: MagmaCubeEntity, &vanilla_entities::MAGMA_CUBE;
+    a_sulfur_cube_polls_its_goals: SulfurCubeEntity, &vanilla_entities::SULFUR_CUBE;
+    an_iron_golem_polls_its_goals: IronGolemEntity, &vanilla_entities::IRON_GOLEM;
+    a_snow_golem_polls_its_goals: SnowGolemEntity, &vanilla_entities::SNOW_GOLEM;
+    a_copper_golem_polls_its_goals: CopperGolemEntity, &vanilla_entities::COPPER_GOLEM;
+    a_blaze_polls_its_goals: BlazeEntity, &vanilla_entities::BLAZE;
+    a_ghast_polls_its_goals: GhastEntity, &vanilla_entities::GHAST;
+    a_guardian_polls_its_goals: GuardianEntity, &vanilla_entities::GUARDIAN;
+    an_elder_guardian_polls_its_goals: ElderGuardianEntity, &vanilla_entities::ELDER_GUARDIAN;
+    an_endermite_polls_its_goals: EndermiteEntity, &vanilla_entities::ENDERMITE;
+    a_vex_polls_its_goals: VexEntity, &vanilla_entities::VEX;
+    a_phantom_polls_its_goals: PhantomEntity, &vanilla_entities::PHANTOM;
+    a_shulker_polls_its_goals: ShulkerEntity, &vanilla_entities::SHULKER;
+    a_wither_polls_its_goals: WitherBoss, &vanilla_entities::WITHER;
+    a_piglin_polls_its_goals: PiglinEntity, &vanilla_entities::PIGLIN;
+    a_piglin_brute_polls_its_goals: PiglinBruteEntity, &vanilla_entities::PIGLIN_BRUTE;
+    a_hoglin_polls_its_goals: HoglinEntity, &vanilla_entities::HOGLIN;
+    a_zoglin_polls_its_goals: ZoglinEntity, &vanilla_entities::ZOGLIN;
+    a_breeze_polls_its_goals: BreezeEntity, &vanilla_entities::BREEZE;
+    a_creaking_polls_its_goals: CreakingEntity, &vanilla_entities::CREAKING;
+    a_warden_polls_its_goals: WardenEntity, &vanilla_entities::WARDEN;
+    a_nautilus_polls_its_goals: NautilusEntity, &vanilla_entities::NAUTILUS;
+    a_zombie_nautilus_polls_its_goals: ZombieNautilusEntity, &vanilla_entities::ZOMBIE_NAUTILUS;
+    // Ambient, neutral and passive mobs. None of these were in either list
+    // above, and a player meets most of them before ever meeting a hostile.
+    a_bat_polls_its_goals: BatEntity, &vanilla_entities::BAT;
+    a_wolf_polls_its_goals: WolfEntity, &vanilla_entities::WOLF;
+    a_pig_polls_its_goals: PigEntity, &vanilla_entities::PIG;
+    a_cow_polls_its_goals: CowEntity, &vanilla_entities::COW;
+    a_mooshroom_polls_its_goals: MushroomCowEntity, &vanilla_entities::MOOSHROOM;
+    a_sheep_polls_its_goals: SheepEntity, &vanilla_entities::SHEEP;
+    a_chicken_polls_its_goals: ChickenEntity, &vanilla_entities::CHICKEN;
+    a_rabbit_polls_its_goals: RabbitEntity, &vanilla_entities::RABBIT;
+    a_goat_polls_its_goals: GoatEntity, &vanilla_entities::GOAT;
+    a_polar_bear_polls_its_goals: PolarBearEntity, &vanilla_entities::POLAR_BEAR;
+    a_panda_polls_its_goals: PandaEntity, &vanilla_entities::PANDA;
+    a_fox_polls_its_goals: FoxEntity, &vanilla_entities::FOX;
+    a_cat_polls_its_goals: CatEntity, &vanilla_entities::CAT;
+    an_ocelot_polls_its_goals: OcelotEntity, &vanilla_entities::OCELOT;
+    a_parrot_polls_its_goals: ParrotEntity, &vanilla_entities::PARROT;
+    a_bee_polls_its_goals: BeeEntity, &vanilla_entities::BEE;
+    a_turtle_polls_its_goals: TurtleEntity, &vanilla_entities::TURTLE;
+    a_strider_polls_its_goals: StriderEntity, &vanilla_entities::STRIDER;
+    a_happy_ghast_polls_its_goals: HappyGhastEntity, &vanilla_entities::HAPPY_GHAST;
+    an_armadillo_polls_its_goals: ArmadilloEntity, &vanilla_entities::ARMADILLO;
+    an_allay_polls_its_goals: AllayEntity, &vanilla_entities::ALLAY;
+    a_frog_polls_its_goals: FrogEntity, &vanilla_entities::FROG;
+    a_tadpole_polls_its_goals: TadpoleEntity, &vanilla_entities::TADPOLE;
+    an_axolotl_polls_its_goals: AxolotlEntity, &vanilla_entities::AXOLOTL;
+    a_sniffer_polls_its_goals: SnifferEntity, &vanilla_entities::SNIFFER;
+    // The equines, which all override `Entity::tick` for their own reasons.
+    a_horse_polls_its_goals: HorseEntity, &vanilla_entities::HORSE;
+    a_donkey_polls_its_goals: DonkeyEntity, &vanilla_entities::DONKEY;
+    a_mule_polls_its_goals: MuleEntity, &vanilla_entities::MULE;
+    a_llama_polls_its_goals: LlamaEntity, &vanilla_entities::LLAMA;
+    a_trader_llama_polls_its_goals: TraderLlamaEntity, &vanilla_entities::TRADER_LLAMA;
+    a_skeleton_horse_polls_its_goals: SkeletonHorseEntity, &vanilla_entities::SKELETON_HORSE;
+    a_zombie_horse_polls_its_goals: ZombieHorseEntity, &vanilla_entities::ZOMBIE_HORSE;
+    a_camel_polls_its_goals: CamelEntity, &vanilla_entities::CAMEL;
+    a_camel_husk_polls_its_goals: CamelHuskEntity, &vanilla_entities::CAMEL_HUSK;
+    // The villagers and the trader, all three brain-driven.
+    a_villager_polls_its_goals: VillagerEntity, &vanilla_entities::VILLAGER;
+    a_wandering_trader_polls_its_goals: WanderingTraderEntity, &vanilla_entities::WANDERING_TRADER;
+    a_zombie_villager_polls_its_goals: ZombieVillagerEntity, &vanilla_entities::ZOMBIE_VILLAGER;
+    // The water mobs.
+    a_squid_polls_its_goals: SquidEntity, &vanilla_entities::SQUID;
+    a_glow_squid_polls_its_goals: GlowSquidEntity, &vanilla_entities::GLOW_SQUID;
+    a_cod_polls_its_goals: CodEntity, &vanilla_entities::COD;
+    a_salmon_polls_its_goals: SalmonEntity, &vanilla_entities::SALMON;
+    a_tropical_fish_polls_its_goals: TropicalFishEntity, &vanilla_entities::TROPICAL_FISH;
+    a_pufferfish_polls_its_goals: PufferfishEntity, &vanilla_entities::PUFFERFISH;
+    a_dolphin_polls_its_goals: DolphinEntity, &vanilla_entities::DOLPHIN;
 }

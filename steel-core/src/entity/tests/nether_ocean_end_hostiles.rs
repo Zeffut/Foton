@@ -62,11 +62,16 @@ fn run_ai(world: &Arc<World>, mob: SharedEntity) {
     // passes the assertion above. `no_action_time` is bumped at the top of
     // that body, so it is the cheapest proof the AI ran -- and it ran in a real
     // world, through `Entity::tick`, which is what this file is for.
+    //
+    // "At least once" rather than "every tick": the world here is one loaded
+    // chunk, and the flyers steer themselves out of it partway through. That
+    // made a `>= TICKS` assertion depend on which way the mob happened to go,
+    // which is the entity id, which is how many entities the rest of the suite
+    // built first -- green alone and red in a full run.
     assert!(
-        as_mob.no_action_time() >= TICKS,
-        "{}'s tick reached `mob_server_ai_step` on only {} of {TICKS} ticks",
-        mob.entity_type().key,
-        as_mob.no_action_time()
+        as_mob.no_action_time() > 0,
+        "{}'s tick never reached `mob_server_ai_step` in a live world",
+        mob.entity_type().key
     );
 }
 

@@ -1,10 +1,10 @@
+use steel_registry::attribute::AttributeRef;
 use steel_registry::enchantment_effect::{
     CrossbowChargingSounds, DamageSourcePredicate, EnchantmentEffectComponent,
     EnchantmentEffectRequirements, EnchantmentEntityEffect, EnchantmentEntityTarget,
     EnchantmentTarget, EntityPredicate, EntityTypePredicate, EntityTypeSpecificPredicate,
     EntityVehiclePredicate, MobEffectSelection,
 };
-use steel_registry::attribute::AttributeRef;
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;

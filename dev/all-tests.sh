@@ -42,6 +42,7 @@ for test in dev/join-test.sh dev/selector-test.sh dev/rcon-test.sh \
             dev/dripstone-test.sh dev/tnt-test.sh \
             dev/spawner-test.sh dev/catalyst-test.sh \
             dev/sculk-vibration-test.sh dev/warden-test.sh \
+            dev/creaking-ai-test.sh \
             dev/fishing-test.sh \
             dev/nautilus-test.sh \
             dev/villager-day-test.sh \
