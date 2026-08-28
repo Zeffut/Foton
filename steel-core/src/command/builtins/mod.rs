@@ -20,6 +20,7 @@ mod locate;
 mod operator;
 mod perms;
 mod raid;
+mod reload;
 mod return_command;
 mod seed;
 mod setblock;
@@ -81,6 +82,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(operator::op_registration())?;
     builder.register(perms::registration())?;
     builder.register(raid::registration())?;
+    builder.register(reload::registration())?;
     builder.register(return_command::registration())?;
     builder.register(seed::registration())?;
     builder.register(setblock::registration())?;
@@ -157,6 +159,7 @@ mod tests {
                 "op",
                 "perms",
                 "raid",
+                "reload",
                 "return",
                 "seed",
                 "setblock",

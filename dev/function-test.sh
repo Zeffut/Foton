@@ -120,6 +120,12 @@ tellraw @a {"text":"FN_BROKEN_FIRST_LINE"}
 thiscommanddoesnotexist
 EOF
 
+# Rewritten after the server has booted, so what it prints says whether the
+# call used the body that was compiled at boot or the one on disk now.
+cat > "$FN/reloadable.mcfunction" <<'EOF'
+tellraw @a {"text":"FN_RELOAD_BEFORE"}
+EOF
+
 cat > "$FN/on_load.mcfunction" <<'EOF'
 bossbar add steel_test:probe {"text":"probe"}
 bossbar set steel_test:probe max 7
@@ -165,6 +171,16 @@ if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
   sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | tail -20
   cleanup; exit 1
 fi
+
+# The server has read the datapack by now, so everything written from here on
+# is only visible to a reload.
+cat > "$FN/reloadable.mcfunction" <<'EOF'
+tellraw @a {"text":"FN_RELOAD_AFTER"}
+EOF
+
+cat > "$FN/added.mcfunction" <<'EOF'
+tellraw @a {"text":"FN_RELOAD_ADDED"}
+EOF
 
 CMDS='gamemode creative'
 CMDS="$CMDS;;difficulty normal"
@@ -227,6 +243,16 @@ CMDS="$CMDS;;execute if function test:cond_true run tellraw @s {\"text\":\"FN_IF
 CMDS="$CMDS;;execute if function test:cond_false run tellraw @s {\"text\":\"FN_IF_FALSE_RAN\"}"
 CMDS="$CMDS;;execute unless function test:cond_false run tellraw @s {\"text\":\"FN_UNLESS_FALSE\"}"
 CMDS="$CMDS;;execute unless function test:cond_true run tellraw @s {\"text\":\"FN_UNLESS_TRUE_RAN\"}"
+CMDS="$CMDS;;!wait 1"
+
+# --- a reload picks the datapack back up off disk ------------------------
+CMDS="$CMDS;;function test:reloadable"
+CMDS="$CMDS;;function test:added"
+CMDS="$CMDS;;!wait 1"
+CMDS="$CMDS;;reload"
+CMDS="$CMDS;;!wait 3"
+CMDS="$CMDS;;function test:reloadable"
+CMDS="$CMDS;;function test:added"
 CMDS="$CMDS;;!wait 1"
 
 # --- what the load and tick tags left behind -----------------------------
@@ -295,6 +321,11 @@ said FN_IF_TRUE || fail "execute if function never ran the command after a passi
 said FN_IF_FALSE_RAN && fail "execute if function ran the command after a function that returned 0"
 said FN_UNLESS_FALSE || fail "execute unless function never ran after a function that returned 0"
 said FN_UNLESS_TRUE_RAN && fail "execute unless function ran after a function that returned 1"
+
+[ "$(said_times FN_RELOAD_BEFORE)" = "1" ] \
+  || fail "the body compiled at boot did not run exactly once before the reload"
+said FN_RELOAD_AFTER || fail "a reload did not pick a rewritten function back up"
+said FN_RELOAD_ADDED || fail "a reload did not pick up a function added after boot"
 
 grep -q "commands.bossbar.get.max" join.log \
   || fail "#minecraft:load never ran, so the boss bar it creates does not exist"
