@@ -492,7 +492,11 @@ impl Entity for CreakingEntity {
         if self.is_heart_bound() && !self.has_protecting_heart() {
             self.set_health(0.0);
         }
-        self.default_tick();
+        // `Entity::default_tick` is only vanilla's `Entity.baseTick`. The
+        // `super.tick()` of `Creaking.tick` is `LivingEntity.tick`, and taking
+        // the wrong one costs the creaking its mob effects, its death handling
+        // and its whole `ai_step` -- which is the only path to its brain.
+        LivingEntity::tick_living_entity(self);
     }
 
     /// Vanilla parity: `Creaking.fireImmune`. Nothing hurts a heart-bound

@@ -2,11 +2,18 @@
 //!
 //! Vanilla parity: `Goat`. Everything a goat does on its own -- ramming, the
 //! long jump, wandering, following a tempting item -- lives in `GoatAi`, which
-//! is a `Brain` of behaviors rather than a goal list. Steel has no `Brain`
-//! system, so this file is the goat itself: the screaming variant, the two
+//! is a `Brain` of behaviors rather than a goal list. `Goat` has no
+//! `registerGoals` at all, so without that brain a goat stands where it
+//! spawned: this file is the rest of the goat, the screaming variant, the two
 //! horns and where they come from, the milking, the softened fall, the sounds,
 //! the breeding and the spawn rules. See the note on [`GoatEntity::drop_horn`]
 //! for exactly what the missing brain would have driven.
+//!
+//! MISSING FOUNDATION: `GoatAi`. Steel does have a `Brain` -- the villager, the
+//! piglins, the warden, the frog, the axolotl, the allay, the sniffer, the
+//! creaking, the breeze and both nautilus mobs run on it -- so what is missing
+//! is the long-jump and ram behaviors, not the layer. `hostile_ai.rs` keeps the
+//! goat out of `assert_it_has_something_to_run` until they land.
 
 use std::sync::{Arc, Weak};
 

@@ -324,7 +324,17 @@ impl ArrowEntity {
     ///
     /// Vanilla parity: the `firedFromWeapon` an `AbstractArrow` is built with.
     /// Its enchantments are read at impact, which is where Power and Punch live.
+    ///
+    /// Piercing is the exception: the constructor reads it off the weapon the
+    /// moment it is handed over and raises the pierce level once, because the
+    /// bolt has to know how many mobs to pass through before it hits the first.
     pub fn set_fired_from_weapon(&self, weapon: Option<ItemStack>) {
+        if let Some(weapon) = &weapon {
+            let piercing = enchantment_helper::get_piercing_count(weapon, &self.pickup_item());
+            if piercing > 0 {
+                self.set_pierce_level(i8::try_from(piercing).unwrap_or(i8::MAX));
+            }
+        }
         self.state.lock().fired_from_weapon = weapon;
     }
 

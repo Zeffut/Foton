@@ -1,3 +1,4 @@
+use steel_registry::attribute::AttributeRef;
 use steel_registry::enchantment_effect::{
     CrossbowChargingSounds, DamageSourcePredicate, EnchantmentEffectComponent,
     EnchantmentEffectRequirements, EnchantmentEntityEffect, EnchantmentEntityTarget,
@@ -9,7 +10,9 @@ use steel_registry::item_stack::ItemStack;
 use steel_registry::items::ItemRef;
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::{REGISTRY, RegistryExt, TaggedRegistryExt, vanilla_entities};
+use steel_utils::Identifier;
 
+use crate::entity::attribute::AttributeModifier;
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
 use crate::inventory::equipment::EquipmentSlot;
@@ -190,6 +193,56 @@ pub(crate) fn process_projectile_spread(weapon: &ItemStack, angle: f32) -> f32 {
         .max(0.0)
 }
 
+/// Runs vanilla `EnchantmentHelper.forEachModifier` for one concrete slot.
+///
+/// This is the half of `ItemStack.forEachModifier` that comes from the
+/// enchantments rather than from the item's `attribute_modifiers` component,
+/// and it is the only path an enchantment has to an attribute. Without it
+/// Efficiency, Aqua Affinity, Depth Strider, Respiration, Sweeping Edge, Swift
+/// Sneak and the attribute halves of Blast and Fire Protection are inert: the
+/// enchantment sits on the item, shows in the tooltip and changes nothing.
+///
+/// Vanilla parity: `EnchantmentAttributeEffect.getModifier` suffixes the
+/// modifier id with the slot's serialized name, which is what lets one
+/// enchantment on four armor pieces install four modifiers instead of
+/// overwriting one.
+pub(crate) fn for_each_attribute_modifier(
+    item: &ItemStack,
+    slot: EquipmentSlot,
+    mut consumer: impl FnMut(AttributeRef, AttributeModifier),
+) {
+    let Some(enchantments) = item.get_enchantments() else {
+        return;
+    };
+
+    for (key, level) in enchantments.iter() {
+        if *level == 0 {
+            continue;
+        }
+        let Some(enchantment) = REGISTRY.enchantments.by_key(key) else {
+            continue;
+        };
+        if !enchantment.matching_slot(slot) {
+            continue;
+        }
+
+        let level = *level as i32;
+        for effect in enchantment.effects.attributes {
+            consumer(
+                effect.attribute,
+                AttributeModifier {
+                    id: Identifier::new(
+                        effect.id.namespace.clone(),
+                        format!("{}/{}", effect.id.path, slot.name()),
+                    ),
+                    amount: f64::from(effect.amount.calculate(level)),
+                    operation: effect.operation,
+                },
+            );
+        }
+    }
+}
+
 /// Runs every value effect an item's enchantments declare for `component`,
 /// judging each one against `context_item`.
 ///
@@ -233,6 +286,20 @@ fn apply_item_filtered_value_effects(
     }
 
     value
+}
+
+/// Returns vanilla `EnchantmentHelper.getPiercingCount`.
+///
+/// Like the ammo count, this is judged against the ammunition rather than the
+/// weapon, because `modifyPiercingCount` is a `modifyItemFilteredCount`.
+pub(crate) fn get_piercing_count(weapon: &ItemStack, ammo: &ItemStack) -> i32 {
+    let modified = apply_item_filtered_value_effects(
+        weapon,
+        EnchantmentEffectComponent::ProjectilePiercing,
+        ammo.item(),
+        0.0,
+    );
+    (modified as i32).max(0)
 }
 
 /// Returns vanilla `EnchantmentHelper.processAmmoUse`.

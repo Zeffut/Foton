@@ -39,6 +39,10 @@ use uuid::Uuid;
 
 use super::super::hostile::zombie_common;
 use crate::behavior::InteractionResult;
+use crate::entity::ai::goal::{
+    HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
+    RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
+};
 use crate::entity::ai::gossip::{GossipContainer, ReputationEventType};
 use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
@@ -95,6 +99,20 @@ unsafe impl DowncastType for ZombieVillagerEntity {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/zombie_villager");
 }
 
+/// Speed multiplier a zombie villager uses while chasing.
+///
+/// Vanilla parity: the `ZombieAttackGoal(this, 1.0, false)` of
+/// `Zombie.addBehaviourGoals`, which a zombie villager inherits.
+const ATTACK_SPEED_MODIFIER: f64 = 1.0;
+
+/// Distance at which a zombie villager turns to watch a player.
+///
+/// Vanilla parity: `LookAtPlayerGoal(this, Player.class, 8.0F)`.
+const LOOK_AT_PLAYER_RANGE: f64 = 8.0;
+
+/// Speed multiplier for aimless wandering.
+const STROLL_SPEED_MODIFIER: f64 = 1.0;
+
 impl ZombieVillagerEntity {
     /// Creates a zombie villager at runtime.
     #[must_use]
@@ -123,6 +141,29 @@ impl ZombieVillagerEntity {
         let mut random = LegacyRandom::from_seed(rand::random());
         let mut entity_data = ZombieVillagerEntityData::new(&mut random);
         living_base.initialize_synced_data(&mut entity_data);
+
+        {
+            // Vanilla parity: `ZombieVillager` never overrides `registerGoals`,
+            // so it gets `Zombie`'s set exactly -- the same one the husk, the
+            // drowned and the zombified piglin each carry. Registering none of
+            // them left a zombie villager ticking an empty goal list: it never
+            // chased, never swung and never wandered.
+            let mut goals = mob_base.goal_selector().lock();
+            goals.add_goal(3, MeleeAttackGoal::new(ATTACK_SPEED_MODIFIER, false));
+            goals.add_goal(7, WaterAvoidingRandomStrollGoal::new(STROLL_SPEED_MODIFIER));
+            goals.add_goal(8, LookAtPlayerGoal::new(LOOK_AT_PLAYER_RANGE));
+            goals.add_goal(8, RandomLookAroundGoal::new());
+        }
+
+        {
+            // Vanilla parity: the zombie's targetSelector.
+            let mut targets = mob_base.target_selector().lock();
+            targets.add_goal(1, HurtByTargetGoal::new());
+            targets.add_goal(
+                2,
+                NearestAttackableTargetGoal::new_for_players(true, |_, _, _| true),
+            );
+        }
 
         Self {
             base,
@@ -597,6 +638,14 @@ impl LivingEntity for ZombieVillagerEntity {
 }
 
 impl Mob for ZombieVillagerEntity {
+    /// Vanilla parity: `Mob.serverAiStep` ticks the goal selector for every
+    /// mob it runs, brain-driven or not. `Mob::tick_goal_selectors` has an
+    /// empty default, so leaving it out is how a registered goal set never
+    /// runs.
+    fn tick_goal_selectors(&self) {
+        PathfinderMob::tick_pathfinder_goal_selectors(self);
+    }
+
     /// Sets whether this is a baby zombie villager.
     ///
     /// Vanilla parity: the `Zombie.setBaby` a zombie villager inherits. The

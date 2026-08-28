@@ -782,6 +782,14 @@ impl LivingEntity for AllayEntity {
 }
 
 impl Mob for AllayEntity {
+    /// Vanilla parity: `Mob.serverAiStep` ticks the goal selector for every
+    /// mob it runs, brain-driven or not. `Mob::tick_goal_selectors` has an
+    /// empty default, so leaving it out is how a registered goal set never
+    /// runs.
+    fn tick_goal_selectors(&self) {
+        PathfinderMob::tick_pathfinder_goal_selectors(self);
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

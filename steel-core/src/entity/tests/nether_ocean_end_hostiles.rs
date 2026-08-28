@@ -41,6 +41,11 @@ fn run_ai(world: &Arc<World>, mob: SharedEntity) {
         .try_add_entity(Arc::clone(&mob))
         .expect("the test chunk is loaded, so the mob should attach");
 
+    let as_mob = mob
+        .as_mob()
+        .expect("every entity this file drives is a `Mob`");
+    as_mob.set_no_action_time(0);
+
     for _ in 0..TICKS {
         mob.base_tick();
         mob.tick();
@@ -49,6 +54,23 @@ fn run_ai(world: &Arc<World>, mob: SharedEntity) {
     assert!(
         mob.is_alive(),
         "{} should still be alive after {TICKS} ticks",
+        mob.entity_type().key
+    );
+
+    // Staying alive is not the same as having an AI: a mob whose tick never
+    // reaches `mob_server_ai_step` stands there breathing for twenty ticks and
+    // passes the assertion above. `no_action_time` is bumped at the top of
+    // that body, so it is the cheapest proof the AI ran -- and it ran in a real
+    // world, through `Entity::tick`, which is what this file is for.
+    //
+    // "At least once" rather than "every tick": the world here is one loaded
+    // chunk, and the flyers steer themselves out of it partway through. That
+    // made a `>= TICKS` assertion depend on which way the mob happened to go,
+    // which is the entity id, which is how many entities the rest of the suite
+    // built first -- green alone and red in a full run.
+    assert!(
+        as_mob.no_action_time() > 0,
+        "{}'s tick never reached `mob_server_ai_step` in a live world",
         mob.entity_type().key
     );
 }

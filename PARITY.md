@@ -315,8 +315,8 @@ cannot.
       Two honest limits. An iron golem's *village* half is absent -- no
       `MoveBackToVillage`, no `DefendVillage`, no natural village spawn --
       because those need a POI distance tracker Steel has not got, and
-      villagers. And the copper golem never moves an item: vanilla drives it
-      entirely from a `Brain`, and Steel has no brain layer, only goals.
+      villagers. The copper golem's `Brain` half is done -- see the brain entry
+      below -- so the limit there is the POI tracker, not the layer.
 
 - [ ] **Villager, trading, iron golem in a village.** One mob unlocks a whole
       economy, and the zombie villager behind it. It is also what would make
