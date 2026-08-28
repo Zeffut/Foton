@@ -1483,6 +1483,7 @@ fn try_placing_children<'a>(
 mod tests {
     use super::*;
     use steel_registry::structure::DimensionPadding;
+    use steel_registry::template_pool::{JigsawBlock, ProcessorList};
 
     fn bbox(min: IVec3, max: IVec3) -> BoundingBox {
         BoundingBox::new(min, max)
@@ -1535,6 +1536,107 @@ mod tests {
                 "collision mismatch for {candidate:?}"
             );
         }
+    }
+
+    /// A jigsaw block asks for an assembly at the block it faces, and the piece
+    /// has to arrive there whichever way the start rotation turns it: the named
+    /// jigsaw lands on that block, one lower for vanilla's ground level delta.
+    /// Reading the anchor off the wrong corner would still look like a placed
+    /// structure, just a rotation-dependent number of blocks away.
+    #[test]
+    fn an_anchored_start_lands_on_the_named_block_for_every_rotation() {
+        let pool_key = Identifier::vanilla_static("test/wells");
+        let template_key = Identifier::vanilla_static("test/well_bottom");
+        let anchor_name = Identifier::vanilla_static("bottom");
+        let anchor_local = IVec3::new(3, 2, 0);
+
+        let mut pools = FxHashMap::default();
+        pools.insert(
+            pool_key.clone(),
+            TemplatePoolData {
+                key: pool_key.clone(),
+                fallback: Identifier::vanilla_static("empty"),
+                elements: vec![(
+                    PoolElement::Single {
+                        location: template_key.clone(),
+                        processors: ProcessorList::Empty,
+                        projection: Projection::Rigid,
+                    },
+                    1,
+                )],
+            },
+        );
+
+        let mut templates = FxHashMap::default();
+        templates.insert(
+            template_key,
+            TemplateData {
+                size: [4, 3, 4],
+                jigsaws: vec![JigsawBlock {
+                    pos: [anchor_local.x, anchor_local.y, anchor_local.z],
+                    orientation: JigsawOrientation::UpNorth,
+                    name: anchor_name.clone(),
+                    target: Identifier::vanilla_static("empty"),
+                    pool: Identifier::vanilla_static("empty"),
+                    joint: JointType::Aligned,
+                    final_state: Identifier::vanilla_static("cobblestone"),
+                    selection_priority: 0,
+                    placement_priority: 0,
+                }],
+            },
+        );
+
+        let alias_map = FxHashMap::default();
+        let config = JigsawConfig {
+            start_pool: pool_key,
+            max_depth: 0,
+            use_expansion_hack: false,
+            project_start_to_heightmap: None,
+            start_height: StartHeight::Constant(0),
+            max_distance_from_center: 128,
+            start_jigsaw_name: Some(anchor_name.clone()),
+            dimension_padding: DimensionPadding { bottom: 0, top: 0 },
+            pool_aliases: Vec::new(),
+            liquid_settings: LiquidSettingsData::ApplyWaterlogging,
+        };
+        let start = IVec3::new(10, 100, -7);
+        let placement = JigsawPlacement::from_config(&config, start);
+        let expected = start - IVec3::new(0, Projection::Rigid.ground_level_delta(), 0);
+
+        let mut rotations = Vec::new();
+        for chunk_x in 0..32 {
+            let mut rng = LegacyRandom::from_seed(0);
+            rng.set_large_feature_seed(20_260_828, chunk_x, 0);
+            let mut get_height = |_: i32, _: i32| 0;
+            let assembly = assemble(
+                &placement,
+                &mut rng,
+                &pools,
+                &templates,
+                &alias_map,
+                &mut get_height,
+                -64,
+                320,
+            )
+            .expect("the start pool has one element with the named jigsaw");
+
+            let [piece] = assembly.pieces.as_slice() else {
+                panic!("a depth-zero assembly places exactly the start piece");
+            };
+            if !rotations.contains(&piece.rotation) {
+                rotations.push(piece.rotation);
+            }
+            assert_eq!(
+                piece.position + piece.rotation.transform_pos(anchor_local, IVec3::ZERO),
+                expected,
+                "chunk {chunk_x} put the anchored jigsaw in the wrong place"
+            );
+        }
+        assert_eq!(
+            rotations.len(),
+            4,
+            "the seeds have to sweep every rotation for this to mean anything"
+        );
     }
 
     #[test]

@@ -91,6 +91,7 @@ PLAY_S_PLAYER_LOADED = 44
 PLAY_S_PLAYER_COMMAND = 42
 PLAY_S_PLAYER_ACTION = 41
 PLAY_S_SEEN_ADVANCEMENTS = 50
+PLAY_S_JIGSAW_GENERATE = 27
 PLAY_S_CLIENT_COMMAND = 12
 
 # Vanilla parity: `ServerboundPlayerCommandPacket.Action`.
@@ -774,6 +775,20 @@ def send_use_item_on(connection, x, y, z, face):
     connection.send(PLAY_S_USE_ITEM_ON, payload)
 
 
+def send_jigsaw_generate(connection, x, y, z, levels, keep_jigsaws):
+    """Presses the generate button on a jigsaw block's editor.
+
+    No command reaches this: vanilla's only way in is the editor screen, so a
+    scripted client sending the same packet is the only way to test it.
+    """
+    payload = (
+        struct.pack(">q", packed_block_pos(x, y, z))
+        + varint(levels)
+        + (b"\x01" if keep_jigsaws else b"\x00")
+    )
+    connection.send(PLAY_S_JIGSAW_GENERATE, payload)
+
+
 def send_use_item(connection, yaw, pitch):
     """Right-clicks holding an item, without a block under the cursor.
 
@@ -883,6 +898,12 @@ def run_directive(connection, directive):
         for _ in range(count):
             send_container_click(connection, int(parts[1]), CLICK_QUICK_MOVE)
         print(f"  shift-clicked slot {parts[1]} {count} time(s)")
+    elif parts[0] == "jigsawgenerate":
+        x, y, z = (int(part) for part in parts[1:4])
+        levels = int(parts[4])
+        keep = len(parts) > 5 and parts[5] == "keep"
+        send_jigsaw_generate(connection, x, y, z, levels, keep)
+        print(f"  pressed generate on the jigsaw at {x} {y} {z}")
     elif parts[0] == "wait":
         # Some blocks only act on a slow beat -- a beacon recounts its pyramid
         # every four seconds -- and a settle between commands is far shorter
