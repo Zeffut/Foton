@@ -64,6 +64,9 @@ PLAY_C_UPDATE_MOB_EFFECT = 132
 PLAY_C_AWARD_STATS = 3
 PLAY_C_UPDATE_ADVANCEMENTS = 130
 PLAY_C_SELECT_ADVANCEMENTS_TAB = 85
+PLAY_C_PLAYER_COMBAT_KILL = 68
+PLAY_C_RESPAWN = 82
+PLAY_C_SET_HEALTH = 104
 
 # Vanilla parity: `ClickType`. Only the two this script sends are named.
 CLICK_PICKUP = 0
@@ -97,8 +100,9 @@ PLAY_S_CLIENT_COMMAND = 12
 # Vanilla parity: `ServerboundPlayerCommandPacket.Action`.
 PLAYER_COMMAND_OPEN_VEHICLE_INVENTORY = 5
 
-# Vanilla parity: `ServerboundClientCommandPacket.Action`. Only the one this
-# script sends is named.
+# Vanilla parity: `ServerboundClientCommandPacket.Action`. Only the ones this
+# script sends are named.
+CLIENT_COMMAND_PERFORM_RESPAWN = 0
 CLIENT_COMMAND_REQUEST_STATS = 1
 
 # Vanilla parity: `ServerboundSeenAdvancementsPacket.Action`.
@@ -152,6 +156,11 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # the server has asked for, which is how the puff a hard landing kicks up is
 # read back. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do.
+# `!respawn` presses the Respawn button on the death screen, which is the one
+# packet no command can stand in for, and `!alive` stops the run unless the
+# player is still connected -- a server that hangs up without a disconnect
+# packet is otherwise indistinguishable from a quiet one. `!sawdeathscreen` and
+# `!sawrespawn` read back the two packets that bracket a death.
 # `!seentab <id>` opens the advancements screen on that tab and `!seenclose`
 # shuts it again, which is the only way to read back the tab the server puts
 # the screen on. The advancement updates themselves arrive without it: the
@@ -211,6 +220,23 @@ class Connection:
         # Every particle the server has asked the client to draw, by name.
         # A hard landing puffs the block underfoot and reports it nowhere else.
         self.particles = set()
+        # Set when the server hangs up on us -- either a disconnect packet or a
+        # bare socket close. A bare close reads as an ordinary end of stream to
+        # every read in this script, so without recording it here a server that
+        # drops the player mid-test looks exactly like a quiet one.
+        self.dropped = None
+        # The last health the server told the client it has, and how many times
+        # the death screen and the respawn have arrived. Health is the only
+        # thing that says a respawned player is actually alive again.
+        self.health = None
+        self.death_screens = 0
+        self.respawns = 0
+
+    def note_drop(self, reason):
+        """Records that the server stopped talking, and says so once."""
+        if self.dropped is None:
+            self.dropped = reason
+            print(f"  the server dropped the connection: {reason}")
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -648,10 +674,20 @@ def pump(connection, seconds, spawned):
             packet_id, payload = connection.receive()
         except socket.timeout:
             break
-        except (OSError, EOFError):
+        except (OSError, EOFError) as error:
+            # A server that hangs up without a disconnect packet ends the
+            # stream exactly the way a quiet one does. Recording it is the only
+            # thing that tells the two apart later.
+            connection.note_drop(f"{type(error).__name__}: {error}")
             break
 
-        if packet_id == PLAY_C_ADD_ENTITY:
+        if packet_id == PLAY_C_PLAYER_COMBAT_KILL:
+            note_combat_kill(connection)
+        elif packet_id == PLAY_C_RESPAWN:
+            note_respawn(connection)
+        elif packet_id == PLAY_C_SET_HEALTH:
+            note_set_health(connection, payload)
+        elif packet_id == PLAY_C_ADD_ENTITY:
             entity_id, spawn_type = read_add_entity(payload)
             spawned[spawn_type] = spawned.get(spawn_type, 0) + 1
             name = ENTITY_NAMES.get(spawn_type)
@@ -697,6 +733,7 @@ def pump(connection, seconds, spawned):
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
+            connection.note_drop(f"disconnect packet {payload[:200]!r}")
             fail(f"disconnected: {payload[:200]!r}")
             return False
     connection.sock.settimeout(TIMEOUT_SECONDS)
@@ -978,6 +1015,20 @@ def run_directive(connection, directive):
         send_seen_advancements(connection, None)
     elif parts[0] == "requeststats":
         send_request_stats(connection)
+    elif parts[0] == "respawn":
+        send_perform_respawn(connection)
+    elif parts[0] == "alive":
+        report_alive(connection)
+    elif parts[0] == "sawdeathscreen":
+        if connection.death_screens:
+            print(f"  the death screen opened {connection.death_screens} time(s)")
+        else:
+            print("  no death screen reached the client")
+    elif parts[0] == "sawrespawn":
+        if connection.respawns:
+            print(f"  the client was respawned {connection.respawns} time(s)")
+        else:
+            print("  no respawn reached the client")
     elif parts[0] == "useentity":
         send_interact(connection, parts[1], secondary=False)
     elif parts[0] == "sneakuse":
@@ -1542,6 +1593,67 @@ def send_container_close(connection):
     connection.send(PLAY_S_CONTAINER_CLOSE, varint(connection.open_container))
     print("  the screen was closed")
     connection.open_container = None
+
+
+def send_perform_respawn(connection):
+    """Presses the Respawn button on the death screen.
+
+    Nothing else sends this: a player only reaches it by dying, and no command
+    respawns them. It is the packet the whole death screen exists to send.
+    """
+    connection.send(
+        PLAY_S_CLIENT_COMMAND,
+        varint(CLIENT_COMMAND_PERFORM_RESPAWN),
+    )
+    print("  pressed Respawn")
+
+
+def note_combat_kill(connection):
+    """Records the death screen the server just put in front of the player."""
+    connection.death_screens += 1
+    print("  the death screen opened")
+
+
+def note_respawn(connection):
+    """Records the respawn the server just sent."""
+    connection.respawns += 1
+    print("  the client was respawned")
+
+
+def note_set_health(connection, payload):
+    """Records the health the server last told the client it has.
+
+    A respawned player is only actually back if their health came back with
+    them, and health is server-side state no command reads out of the client.
+    """
+    if len(payload) < 4:
+        return
+    connection.health = struct.unpack(">f", payload[:4])[0]
+    print(f"  health is now {connection.health}")
+
+
+def report_alive(connection):
+    """Says whether the player is still in the world, and stops if they are not.
+
+    A server that hangs up without a disconnect packet reads as an ordinary end
+    of stream everywhere else in this script, so this is the assertion that a
+    test can hang a marker on.
+    """
+    if connection.dropped is not None:
+        fail(f"the player is no longer connected: {connection.dropped}")
+    try:
+        connection.sock.settimeout(0.2)
+        if connection.sock.recv(1, socket.MSG_PEEK) == b"":
+            connection.note_drop("the socket is at end of stream")
+            fail("the player is no longer connected: the socket is at end of stream")
+    except socket.timeout:
+        pass
+    except OSError as error:
+        connection.note_drop(f"{type(error).__name__}: {error}")
+        fail(f"the player is no longer connected: {error}")
+    finally:
+        connection.sock.settimeout(TIMEOUT_SECONDS)
+    print(f"  the player is still connected, at {connection.health} health")
 
 
 def run_commands(connection, commands, spawned):
