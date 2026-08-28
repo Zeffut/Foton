@@ -25,6 +25,7 @@ mod profile;
 mod shoulder;
 mod sleep;
 mod sleep_state;
+mod statistics;
 mod tick_state;
 
 pub use abilities::{Abilities, DEFAULT_FLYING_SPEED};
@@ -63,6 +64,7 @@ use steel_registry::entity_data::{EntityPose, HumanoidArm, ParticleList};
 use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::game_rules::GameRuleRef;
 use steel_registry::sound_event::SoundEventRef;
+use steel_registry::stat::Stat;
 use steel_registry::vanilla_block_tags::BlockTag;
 use steel_registry::vanilla_entity_data::PlayerEntityData;
 use steel_registry::vanilla_game_rules::{
@@ -73,6 +75,7 @@ use steel_registry::{
     level_events, sound_events, vanilla_attributes, vanilla_damage_type_tags, vanilla_entities,
     vanilla_game_events,
 };
+use steel_registry::{vanilla_custom_stats, vanilla_stat_types};
 use steel_utils::{entity_events::EntityStatus, locks::Shared};
 
 use crate::inventory::container::SimpleContainer;
@@ -103,6 +106,7 @@ use crate::config::RuntimeConfig;
 use crate::enchantment_helper;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::{ExperienceOrbEntity, WardenSpawnTracker};
+use crate::entity::kill_score;
 use crate::entity::{
     DEATH_DURATION, Entity, EntityAnchor, EntityBase, EntityEventSource, EntityMovementEmission,
     EntitySyncedData, LivingEntity, LivingEntityBase, LivingEntitySyncedData, MobEffectSyncChange,
@@ -132,6 +136,7 @@ use crate::server::{
     Server,
     jobs::{JobPoll, ServerJob, ServerJobContext},
 };
+use crate::stat::StatsCounter;
 use crate::world::player_spawn_finder::{PlayerSpawnSearch, PlayerSpawnSearchPoll};
 use steel_registry::vanilla_damage_types;
 
@@ -330,6 +335,13 @@ pub struct Player {
     /// criterion that is already met, and starting empty reproduces the login
     /// case vanilla gets from a freshly built menu.
     last_seen_inventory: SyncMutex<Box<[ItemStack]>>,
+
+    /// What this player has counted.
+    ///
+    /// Vanilla parity: `ServerPlayer.stats`, which vanilla keeps on the player
+    /// list by uuid; Steel keeps it on the player and restores it from the
+    /// save, the same way the advancements above are handled.
+    stats: SyncMutex<StatsCounter>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `Player`.
@@ -524,6 +536,7 @@ impl Player {
             last_seen_inventory: SyncMutex::new(
                 vec![ItemStack::empty(); PlayerInventory::CONTAINER_SIZE].into_boxed_slice(),
             ),
+            stats: SyncMutex::new(StatsCounter::new()),
         }
     }
 
@@ -680,6 +693,7 @@ impl Player {
             triggers::world::location(self);
         }
         self.flush_dirty_advancements();
+        self.tick_time_statistics();
 
         self.connection.tick();
     }
@@ -887,9 +901,19 @@ impl Player {
         // `LivingEntity.die`. `ServerPlayer.die` does not call super, so vanilla
         // reaches it through `ServerPlayer.dieFromDamage`; either way the credit
         // is the same value the death message is written from.
+        // Vanilla parity: the statistics `ServerPlayer.die` awards around the
+        // kill credit, and the two counters it resets. `TIME_SINCE_REST` is not
+        // decoration -- vanilla's phantom spawner reads it.
         if let Some(credit) = kill_credit.as_deref() {
-            triggers::entity::award_kill_score(credit, self, source);
+            self.award_stat(Stat::new(
+                &vanilla_stat_types::KILLED_BY,
+                credit.entity_type(),
+            ));
+            kill_score::award_kill_score(credit, self, source);
         }
+        self.award_custom_stat(&vanilla_custom_stats::DEATHS);
+        self.reset_stat(Stat::custom(&vanilla_custom_stats::TIME_SINCE_DEATH));
+        self.reset_stat(Stat::custom(&vanilla_custom_stats::TIME_SINCE_REST));
         let death_message = source.localized_death_message(&world, self, kill_credit.as_deref());
 
         self.send_packet(CPlayerCombatKill {
@@ -1559,7 +1583,15 @@ impl Entity for Player {
             return false;
         }
 
-        // TODO: Award `Stats.FALL_ONE_CM` once player statistics are implemented.
+        // Vanilla parity: `Player.causeFallDamage`, which only counts a fall
+        // of two blocks or more and counts it in centimeters.
+        if fall_distance >= 2.0 {
+            let centimeters = (fall_distance * 100.0).round();
+            self.award_custom_stat_amount(
+                &vanilla_custom_stats::FALL_ONE_CM,
+                i32::try_from(centimeters as i64).unwrap_or(i32::MAX),
+            );
+        }
         LivingEntity::cause_living_fall_damage(self, fall_distance, damage_modifier, source)
     }
 
@@ -1903,7 +1935,7 @@ impl LivingEntity for Player {
 
     fn jump_from_ground(&self) {
         self.default_jump_from_ground();
-        // TODO: Award Stats.JUMP once player statistics exist.
+        self.award_custom_stat(&vanilla_custom_stats::JUMP);
         if self.is_sprinting() {
             self.cause_food_exhaustion(0.2);
         } else {

@@ -671,8 +671,14 @@ impl Player {
                     self.respawn();
                 }
             }
-            ClientCommandAction::RequestStats | ClientCommandAction::RequestGameRuleValues => {
-                // TODO: implement stats
+            ClientCommandAction::RequestStats => {
+                // Vanilla parity: the `REQUEST_STATS` arm of
+                // `handleClientCommand`, which is the statistics screen asking
+                // to be filled in.
+                self.send_dirty_statistics();
+            }
+            ClientCommandAction::RequestGameRuleValues => {
+                // TODO: send the game rule values the client asks for here.
             }
         }
     }

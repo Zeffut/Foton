@@ -4,6 +4,8 @@
 //! block breaking, including progress tracking and validation.
 
 use std::sync::Arc;
+use steel_registry::stat::Stat;
+use steel_registry::vanilla_stat_types;
 
 use steel_protocol::packets::game::CBlockUpdate;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
@@ -458,6 +460,13 @@ impl BlockBreakingManager {
                     &destroyed_with,
                     block_entity.as_ref(),
                 );
+                // Vanilla parity: the `awardStat(Stats.BLOCK_MINED.get(this))`
+                // that opens `Block.playerDestroy`, which Steel reaches through
+                // the same non-creative, correct-tool gate this branch is under.
+                player.award_stat(Stat::new(
+                    &vanilla_stat_types::MINED,
+                    adjusted_state.get_block(),
+                ));
                 behavior.player_destroy(
                     world,
                     player,

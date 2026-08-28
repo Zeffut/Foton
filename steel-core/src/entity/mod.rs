@@ -800,6 +800,7 @@ mod inside_block_effects;
 pub mod inventory_carrier;
 mod item_based_steering;
 mod item_frame;
+pub mod kill_score;
 mod living_base;
 mod living_entity;
 mod manager;

@@ -9,6 +9,8 @@ use rustc_hash::FxHashSet;
 use simdnbt::borrow::read_compound as read_borrowed_compound;
 use simdnbt::owned::NbtCompound;
 use steel_registry::item_stack::ItemStack;
+use steel_registry::stat::{Stat, StatValueRegistry};
+use steel_registry::{REGISTRY, RegistryEntry as _, RegistryExt as _};
 use steel_utils::Identifier;
 use steel_utils::types::GameType;
 
@@ -26,7 +28,7 @@ use super::{
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 10;
+pub const PLAYER_DATA_VERSION: i32 = 11;
 
 /// Persistent player data saved by Steel's storage backend.
 ///
@@ -147,6 +149,13 @@ pub struct PersistentPlayerData {
     /// inventory it was earned with.
     pub advancements: Vec<PersistentAdvancement>,
 
+    /// Statistics, keyed by the two registry keys a statistic is made of.
+    ///
+    /// The keys travel rather than the registry ids: an id is only meaningful
+    /// against the registry that produced it, and a save has to survive a
+    /// registry growing a new entry in the middle.
+    pub statistics: Vec<PersistentStatistic>,
+
     /// The half of the save every living entity has, as a written NBT compound.
     ///
     /// Vanilla parity: the `LivingEntity.addAdditionalSaveData` a player's own
@@ -179,6 +188,20 @@ pub struct PersistentCriterion {
     pub name: String,
     /// When it was met, in epoch milliseconds.
     pub obtained_epoch_millis: i64,
+}
+
+/// One statistic and its value.
+///
+/// Vanilla parity: one entry of the `stats` object `ServerStatsCounter` writes,
+/// which is likewise keyed by the two names rather than by ids.
+#[derive(Debug, Clone)]
+pub struct PersistentStatistic {
+    /// The stat type's registry key.
+    pub stat_type: String,
+    /// The value's key in the registry that stat type names.
+    pub value: String,
+    /// What the counter stands at.
+    pub count: i32,
 }
 
 /// A vanilla `RootVehicle` tree persisted with player data.
@@ -289,6 +312,7 @@ impl PersistentPlayerData {
         };
         let score = player.score();
         let advancements = Self::advancements_from_player(player);
+        let statistics = Self::statistics_from_player(player);
         let root_vehicle = Self::root_vehicle_from_player(player)
             .or_else(|| player.pending_root_vehicle_for_current_world());
         let ender_pearls = Self::ender_pearls_from_player(player);
@@ -339,6 +363,7 @@ impl PersistentPlayerData {
 
             ender_pearls,
             advancements,
+            statistics,
             living_nbt,
         }
     }
@@ -410,6 +435,45 @@ impl PersistentPlayerData {
         player.load_advancements(restored);
     }
 
+    /// Snapshots the player's statistics for persistence.
+    fn statistics_from_player(player: &Player) -> Vec<PersistentStatistic> {
+        player
+            .saved_statistics()
+            .into_iter()
+            .filter_map(|(stat, count)| {
+                let stat_type = REGISTRY.stat_types.by_id(stat.stat_type)?;
+                let value = stat_value_key(stat_type.value_registry, stat.value)?;
+                Some(PersistentStatistic {
+                    stat_type: stat_type.key.to_string(),
+                    value: value.to_string(),
+                    count,
+                })
+            })
+            .collect()
+    }
+
+    /// Restores the saved statistics.
+    ///
+    /// A statistic naming something no longer registered is dropped rather
+    /// than failing the load, which is what vanilla's codec does with an
+    /// unknown key.
+    fn apply_statistics(&self, player: &Player) {
+        let restored = self.statistics.iter().filter_map(|entry| {
+            let stat_type_key = Identifier::from_str(&entry.stat_type).ok()?;
+            let stat_type = REGISTRY.stat_types.by_key(&stat_type_key)?;
+            let value_key = Identifier::from_str(&entry.value).ok()?;
+            let value = stat_value_id(stat_type.value_registry, &value_key)?;
+            Some((
+                Stat {
+                    stat_type: stat_type.try_id()?,
+                    value,
+                },
+                entry.count,
+            ))
+        });
+        player.load_statistics(restored);
+    }
+
     /// Snapshots the player's live in-flight ender pearls for persistence.
     fn ender_pearls_from_player(player: &Player) -> Vec<PersistentEnderPearl> {
         let mut seen = FxHashSet::default();
@@ -470,11 +534,38 @@ impl Player {
         self.set_score(0);
         self.set_seen_credits(false);
         self.reset_advancements();
+        self.load_statistics([]);
         // Vanilla parity: the `this.wardenSpawnTracker.reset()` of `ServerPlayer.reset`,
         // which is what makes dying to a warden clear the way to the next one.
         let mut tracker = self.warden_spawn_tracker();
         tracker.reset();
         self.set_warden_spawn_tracker(tracker);
+    }
+}
+
+/// The registry key one statistic value stands for.
+///
+/// Vanilla dispatches on the stat type's own registry; Steel names the four
+/// registries the vanilla stat types range over, so this is that dispatch.
+fn stat_value_key(registry: StatValueRegistry, id: usize) -> Option<&'static Identifier> {
+    match registry {
+        StatValueRegistry::Block => REGISTRY.blocks.by_id(id).map(|block| &block.key),
+        StatValueRegistry::Item => REGISTRY.items.by_id(id).map(|item| &item.key),
+        StatValueRegistry::EntityType => REGISTRY
+            .entity_types
+            .by_id(id)
+            .map(|entity_type| &entity_type.key),
+        StatValueRegistry::CustomStat => REGISTRY.custom_stats.by_id(id).map(|stat| &stat.key),
+    }
+}
+
+/// The id a statistic value's key resolves to.
+fn stat_value_id(registry: StatValueRegistry, key: &Identifier) -> Option<usize> {
+    match registry {
+        StatValueRegistry::Block => REGISTRY.blocks.id_from_key(key),
+        StatValueRegistry::Item => REGISTRY.items.id_from_key(key),
+        StatValueRegistry::EntityType => REGISTRY.entity_types.id_from_key(key),
+        StatValueRegistry::CustomStat => REGISTRY.custom_stats.id_from_key(key),
     }
 }
 
@@ -642,6 +733,7 @@ impl PersistentPlayerData {
             );
         }
         self.apply_advancements(player);
+        self.apply_statistics(player);
         player.set_enchantment_seed(self.enchantment_seed);
         player.set_score(self.score);
         player.set_seen_credits(self.seen_credits);

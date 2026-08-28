@@ -27,25 +27,6 @@ fn context_for<'a>(player: &'a Player, entity: &'a dyn Entity) -> PredicateConte
     }
 }
 
-/// Credits `killer` with killing `victim`, firing whichever of the two kill
-/// triggers applies.
-///
-/// Vanilla parity: `Entity.awardKillScore` together with the `ServerPlayer`
-/// override. The override wraps the base in `victim != this`, so a player who
-/// kills themselves fires neither half -- which is why the guard is here and
-/// not in either trigger.
-pub fn award_kill_score(killer: &dyn Entity, victim: &dyn Entity, killing_blow: &DamageSource) {
-    if killer.as_player().is_some() && killer.id() == victim.id() {
-        return;
-    }
-    if let Some(victim_player) = victim.as_player() {
-        entity_killed_player(victim_player, killer, killing_blow);
-    }
-    if let Some(killer_player) = killer.as_player() {
-        player_killed_entity(killer_player, victim, killing_blow);
-    }
-}
-
 /// Vanilla parity: `CriteriaTriggers.PLAYER_KILLED_ENTITY`.
 pub fn player_killed_entity(player: &Player, victim: &dyn Entity, killing_blow: &DamageSource) {
     killed(

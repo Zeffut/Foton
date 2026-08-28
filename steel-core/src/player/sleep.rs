@@ -1,5 +1,6 @@
 use glam::DVec3;
 use steel_protocol::packets::game::{AnimateAction, CAnimate};
+use steel_registry::vanilla_custom_stats;
 use steel_registry::{
     blocks::{block_state_ext::BlockStateExt as _, properties::BlockStateProperties},
     dimension_type::BedRuleValue,
@@ -190,7 +191,7 @@ impl Player {
         }
         // Vanilla parity: the `ifRight` of `ServerPlayer.startSleepInBed`, so
         // only a sleep that actually started counts.
-        // TODO: award `Stats.SLEEP_IN_BED` here too, once Steel has one.
+        self.award_custom_stat(&vanilla_custom_stats::SLEEP_IN_BED);
         triggers::world::slept_in_bed(self);
         self.sync_entity_data();
         if !world.can_sleep_through_nights() {

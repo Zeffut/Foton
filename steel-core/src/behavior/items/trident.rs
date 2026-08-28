@@ -19,6 +19,8 @@ use crate::entity::entities::{ThrownTridentEntity, TridentPickup};
 use crate::entity::{Entity, LivingEntity};
 use crate::physics::MoverType;
 use crate::world::World;
+use steel_registry::stat::Stat;
+use steel_registry::vanilla_stat_types;
 
 /// Ticks the trident must be held before the throw is allowed.
 ///
@@ -144,7 +146,7 @@ impl ItemBehavior for TridentItem {
 
         let sound = enchantment_helper::pick_trident_sound(stack)
             .unwrap_or(&sound_events::ITEM_TRIDENT_THROW);
-        // TODO: Award `Stats.ITEM_USED` once Steel has a statistics foundation.
+        player.award_stat(Stat::new(&vanilla_stat_types::USED, stack.item));
 
         let infinite = player.has_infinite_materials();
         // Vanilla `hurtWithoutBreaking`, which is why the caller already refused

@@ -28,6 +28,7 @@ use super::PlayerRespawnConfig;
 use super::player_data::{
     PLAYER_DATA_VERSION, PersistentAbilities, PersistentAdvancement, PersistentCriterion,
     PersistentEnderPearl, PersistentPlayerData, PersistentRootVehicle, PersistentSlot,
+    PersistentStatistic,
 };
 use crate::chunk_saver::PersistentEntity;
 use crate::config::StorageSelection;
@@ -43,7 +44,7 @@ use steel_utils::{BlockPos, Identifier};
 
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
-const PLAYER_STORAGE_VERSION: u16 = 10;
+const PLAYER_STORAGE_VERSION: u16 = 11;
 const GLOBAL_STORAGE_VERSION: u16 = 1;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 1;
 
@@ -106,6 +107,8 @@ struct PlayerDataFile {
     ender_pearls: Vec<EnderPearlFile>,
     /// Advancement progress, one entry per advancement with anything to save.
     advancements: Vec<AdvancementFile>,
+    /// Statistics, keyed by name rather than by registry id.
+    statistics: Vec<StatisticFile>,
     /// Written `LivingEntity.addAdditionalSaveData` compound.
     living_nbt: Vec<u8>,
 }
@@ -120,6 +123,13 @@ struct AdvancementFile {
 struct CriterionFile {
     name: String,
     obtained_epoch_millis: i64,
+}
+
+#[derive(SchemaWrite, SchemaRead)]
+struct StatisticFile {
+    stat_type: String,
+    value: String,
+    count: i32,
 }
 
 #[derive(SchemaWrite, SchemaRead)]
@@ -697,6 +707,15 @@ impl PlayerDataFile {
                         .collect(),
                 })
                 .collect(),
+            statistics: data
+                .statistics
+                .iter()
+                .map(|statistic| StatisticFile {
+                    stat_type: statistic.stat_type.clone(),
+                    value: statistic.value.clone(),
+                    count: statistic.count,
+                })
+                .collect(),
             living_nbt: data.living_nbt.clone(),
         })
     }
@@ -727,6 +746,9 @@ impl PlayerDataFile {
                 item: item_from_nbt_bytes(&slot.item_nbt)?,
             });
         }
+
+        let advancements = into_persistent_advancements(self.advancements);
+        let statistics = into_persistent_statistics(self.statistics);
 
         Ok(PersistentPlayerData {
             pos: self.pos,
@@ -783,24 +805,41 @@ impl PlayerDataFile {
                     entity: pearl.entity,
                 })
                 .collect(),
-            advancements: self
-                .advancements
-                .into_iter()
-                .map(|advancement| PersistentAdvancement {
-                    key: advancement.key,
-                    criteria: advancement
-                        .criteria
-                        .into_iter()
-                        .map(|criterion| PersistentCriterion {
-                            name: criterion.name,
-                            obtained_epoch_millis: criterion.obtained_epoch_millis,
-                        })
-                        .collect(),
-                })
-                .collect(),
+            advancements,
+            statistics,
             living_nbt: self.living_nbt,
         })
     }
+}
+
+/// Vanilla parity: nothing -- these are only here to keep `into_persistent`
+/// short enough to read.
+fn into_persistent_advancements(advancements: Vec<AdvancementFile>) -> Vec<PersistentAdvancement> {
+    advancements
+        .into_iter()
+        .map(|advancement| PersistentAdvancement {
+            key: advancement.key,
+            criteria: advancement
+                .criteria
+                .into_iter()
+                .map(|criterion| PersistentCriterion {
+                    name: criterion.name,
+                    obtained_epoch_millis: criterion.obtained_epoch_millis,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn into_persistent_statistics(statistics: Vec<StatisticFile>) -> Vec<PersistentStatistic> {
+    statistics
+        .into_iter()
+        .map(|statistic| PersistentStatistic {
+            stat_type: statistic.stat_type,
+            value: statistic.value,
+            count: statistic.count,
+        })
+        .collect()
 }
 
 impl RespawnConfigFile {
@@ -1049,6 +1088,11 @@ mod tests {
                     name: "crafting_table".to_owned(),
                     obtained_epoch_millis: 1_234,
                 }],
+            }],
+            statistics: vec![StatisticFile {
+                stat_type: "minecraft:custom".to_owned(),
+                value: "minecraft:jump".to_owned(),
+                count: 12,
             }],
             living_nbt: Vec::new(),
         }
@@ -1432,6 +1476,13 @@ mod tests {
             decoded.advancements[0].criteria[0].obtained_epoch_millis,
             1_234
         );
+
+        // Statistics are keyed by name, not by registry id: an id only means
+        // something against the registry that handed it out.
+        assert_eq!(decoded.statistics.len(), 1);
+        assert_eq!(decoded.statistics[0].stat_type, "minecraft:custom");
+        assert_eq!(decoded.statistics[0].value, "minecraft:jump");
+        assert_eq!(decoded.statistics[0].count, 12);
     }
 
     #[test]

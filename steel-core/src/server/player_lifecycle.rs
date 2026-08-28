@@ -243,6 +243,10 @@ impl Server {
     }
 
     pub(super) fn apply_domain_player_state(player: &Arc<Player>, state: &DomainPlayerState) {
+        // Vanilla parity: the `player.getStats().markAllDirty()` of
+        // `PlayerList.placeNewPlayer`. Without it the statistics screen would
+        // only ever show what moved since this login.
+        player.mark_all_statistics_dirty();
         match &state.data {
             DomainPlayerData::SavedRestored { data } => {
                 data.apply_to_player(player);

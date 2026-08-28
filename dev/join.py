@@ -61,6 +61,7 @@ PLAY_C_MOUNT_SCREEN_OPEN = 41
 PLAY_C_MAP_ITEM_DATA = 51
 PLAY_C_SET_EQUIPMENT = 102
 PLAY_C_UPDATE_MOB_EFFECT = 132
+PLAY_C_AWARD_STATS = 3
 PLAY_C_UPDATE_ADVANCEMENTS = 130
 PLAY_C_SELECT_ADVANCEMENTS_TAB = 85
 
@@ -90,9 +91,14 @@ PLAY_S_PLAYER_LOADED = 44
 PLAY_S_PLAYER_COMMAND = 42
 PLAY_S_PLAYER_ACTION = 41
 PLAY_S_SEEN_ADVANCEMENTS = 50
+PLAY_S_CLIENT_COMMAND = 12
 
 # Vanilla parity: `ServerboundPlayerCommandPacket.Action`.
 PLAYER_COMMAND_OPEN_VEHICLE_INVENTORY = 5
+
+# Vanilla parity: `ServerboundClientCommandPacket.Action`. Only the one this
+# script sends is named.
+CLIENT_COMMAND_REQUEST_STATS = 1
 
 # Vanilla parity: `ServerboundSeenAdvancementsPacket.Action`.
 SEEN_ADVANCEMENTS_OPENED_TAB = 0
@@ -547,6 +553,8 @@ def run_play(connection, watch_seconds=0):
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
+        elif packet_id == PLAY_C_AWARD_STATS:
+            note_award_stats(payload)
         elif packet_id == PLAY_C_UPDATE_ADVANCEMENTS:
             note_advancements(payload)
         elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
@@ -670,6 +678,8 @@ def pump(connection, seconds, spawned):
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
+        elif packet_id == PLAY_C_AWARD_STATS:
+            note_award_stats(payload)
         elif packet_id == PLAY_C_UPDATE_ADVANCEMENTS:
             note_advancements(payload)
         elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
@@ -945,6 +955,8 @@ def run_directive(connection, directive):
         send_seen_advancements(connection, tab)
     elif parts[0] == "seenclose":
         send_seen_advancements(connection, None)
+    elif parts[0] == "requeststats":
+        send_request_stats(connection)
     elif parts[0] == "useentity":
         send_interact(connection, parts[1], secondary=False)
     elif parts[0] == "sneakuse":
@@ -1443,6 +1455,40 @@ def send_player_command(connection, action, data=0):
     )
 
 
+def send_request_stats(connection):
+    """Opens the statistics screen, which is what makes the server send them.
+
+    A statistic is server-side state no command reads back, so this packet and
+    the award that answers it are the only way to see one.
+    """
+    connection.send(
+        PLAY_S_CLIENT_COMMAND,
+        varint(CLIENT_COMMAND_REQUEST_STATS),
+    )
+    print("  the statistics screen was opened")
+
+
+def note_award_stats(payload):
+    """Prints the statistics the server just handed the screen.
+
+    Both halves of a statistic are registry ids: the stat type first, then the
+    value out of whichever registry that type ranges over. They are printed raw
+    because this script has no registry to resolve them against -- the test that
+    reads these lines looks the ids up in the same extracted json the server
+    generated its registry from.
+    """
+    try:
+        count, rest = read_varint(payload)
+        for _ in range(count):
+            stat_type, rest = read_varint(rest)
+            value, rest = read_varint(rest)
+            amount, rest = read_varint(rest)
+            print(f"  statistic {stat_type}:{value} = {amount}")
+        print(f"  statistics packet: {count} entries")
+    except (IndexError, ValueError, struct.error):
+        print("  a statistics packet arrived that could not be parsed")
+
+
 def send_seen_advancements(connection, tab):
     """Opens the advancements screen on `tab`, or shuts it when `tab` is None.
 
@@ -1533,6 +1579,8 @@ def watch_for_spawns(connection, seconds, spawned):
             note_equipment(payload)
         elif packet_id == PLAY_C_UPDATE_MOB_EFFECT:
             note_mob_effect(payload)
+        elif packet_id == PLAY_C_AWARD_STATS:
+            note_award_stats(payload)
         elif packet_id == PLAY_C_UPDATE_ADVANCEMENTS:
             note_advancements(payload)
         elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:

@@ -91,6 +91,7 @@ pub use registry::*;
 pub mod resolvable_profile;
 pub mod sound_event;
 pub mod spawn_data;
+pub mod stat;
 pub mod structure;
 pub use structure::processor as structure_processor;
 pub use structure::set as structure_set;
@@ -449,6 +450,16 @@ pub mod level_events;
 #[rustfmt::skip]
 #[path = "generated/vanilla_sound_events.rs"]
 pub mod sound_events;
+
+#[expect(warnings)]
+#[rustfmt::skip]
+#[path = "generated/vanilla_stat_types.rs"]
+pub mod vanilla_stat_types;
+
+#[expect(warnings)]
+#[rustfmt::skip]
+#[path = "generated/vanilla_custom_stats.rs"]
+pub mod vanilla_custom_stats;
 
 #[expect(warnings)]
 #[rustfmt::skip]

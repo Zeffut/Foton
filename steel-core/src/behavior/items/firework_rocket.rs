@@ -4,6 +4,8 @@
 //! attach a boosting rocket to the player.
 
 use std::sync::Arc;
+use steel_registry::stat::Stat;
+use steel_registry::vanilla_stat_types;
 
 use glam::DVec3;
 use steel_macros::item_behavior;
@@ -92,6 +94,7 @@ impl ItemBehavior for FireworkRocketItem {
         }
 
         let source_item = context.inv.with_item(|item| item.clone());
+        let used = source_item.item;
         let rocket = FireworkRocketEntity::attached_to_living(
             &vanilla_entities::FIREWORK_ROCKET,
             next_entity_id(),
@@ -109,7 +112,12 @@ impl ItemBehavior for FireworkRocketItem {
             );
             item.shrink(1);
         });
-        // TODO: Award `Stats.ITEM_USED` once Steel has a statistics foundation.
+        // Vanilla parity: the `awardStat(Stats.ITEM_USED.get(this))` of
+        // `FireworkRocketItem.use`, which the `useOn` placement path above
+        // deliberately does not have.
+        context
+            .player
+            .award_stat(Stat::new(&vanilla_stat_types::USED, used));
 
         InteractionResult::Success
     }

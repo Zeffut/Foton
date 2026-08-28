@@ -30,6 +30,8 @@ use crate::behavior::item_utils::{create_filled_result, player_pov_hit_source_fl
 use crate::behavior::{InteractionResult, ItemBehavior, UseItemContext};
 use crate::entity::Entity;
 use crate::world::game_event::GameEventContext;
+use steel_registry::stat::Stat;
+use steel_registry::vanilla_stat_types;
 
 /// Behavior for the empty glass bottle.
 #[item_behavior]
@@ -72,7 +74,10 @@ impl ItemBehavior for BottleItem {
 
         // Vanilla `BottleItem.turnBottleIntoItem`, which is
         // `ItemUtils.createFilledResult` plus a statistic.
-        // TODO: Award Stats.ITEM_USED once Steel has a statistics foundation.
+        let used = context.inv.with_item(|item| item.item);
+        context
+            .player
+            .award_stat(Stat::new(&vanilla_stat_types::USED, used));
         create_filled_result(context, water_bottle(), true);
         InteractionResult::Success
     }

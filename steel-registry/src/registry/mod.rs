@@ -60,6 +60,7 @@ use crate::{
     recipe::RecipeRegistry,
     sound_event::SoundEventRegistry,
     sound_events,
+    stat::{CustomStatRegistry, StatTypeRegistry},
     structure::StructureRegistry,
     structure_processor::StructureProcessorListRegistry,
     sulfur_cube_archetype::SulfurCubeArchetypeRegistry,
@@ -73,21 +74,21 @@ use crate::{
     vanilla_blocks, vanilla_cat_sound_variants, vanilla_cat_variants, vanilla_chat_types,
     vanilla_chicken_sound_variants, vanilla_chicken_variants, vanilla_configured_carvers,
     vanilla_configured_features, vanilla_cow_sound_variants, vanilla_cow_variants,
-    vanilla_damage_type_tags, vanilla_damage_types, vanilla_dialog_tags, vanilla_dialogs,
-    vanilla_dimension_types, vanilla_enchantment_tags, vanilla_enchantments, vanilla_entities,
-    vanilla_entity_type_tags, vanilla_fluid_tags, vanilla_fluids, vanilla_frog_variants,
-    vanilla_game_event_tags, vanilla_game_events, vanilla_game_rules, vanilla_instrument_tags,
-    vanilla_instruments, vanilla_item_tags, vanilla_items, vanilla_jukebox_songs,
-    vanilla_loot_tables, vanilla_map_decoration_types, vanilla_menu_types, vanilla_mob_effects,
-    vanilla_painting_variant_tags, vanilla_painting_variants, vanilla_particle_types,
-    vanilla_pig_sound_variants, vanilla_pig_variants, vanilla_placed_features,
-    vanilla_poi_type_tags, vanilla_poi_types, vanilla_position_source_types, vanilla_potion_tags,
-    vanilla_potions, vanilla_recipes, vanilla_structure_processors, vanilla_structure_tags,
-    vanilla_structures, vanilla_sulfur_cube_archetypes, vanilla_template_pools,
-    vanilla_timeline_tags, vanilla_timelines, vanilla_trim_materials, vanilla_trim_patterns,
-    vanilla_villager_professions, vanilla_villager_trades, vanilla_villager_types,
-    vanilla_wolf_sound_variants, vanilla_wolf_variants, vanilla_world_clocks,
-    vanilla_zombie_nautilus_variants,
+    vanilla_custom_stats, vanilla_damage_type_tags, vanilla_damage_types, vanilla_dialog_tags,
+    vanilla_dialogs, vanilla_dimension_types, vanilla_enchantment_tags, vanilla_enchantments,
+    vanilla_entities, vanilla_entity_type_tags, vanilla_fluid_tags, vanilla_fluids,
+    vanilla_frog_variants, vanilla_game_event_tags, vanilla_game_events, vanilla_game_rules,
+    vanilla_instrument_tags, vanilla_instruments, vanilla_item_tags, vanilla_items,
+    vanilla_jukebox_songs, vanilla_loot_tables, vanilla_map_decoration_types, vanilla_menu_types,
+    vanilla_mob_effects, vanilla_painting_variant_tags, vanilla_painting_variants,
+    vanilla_particle_types, vanilla_pig_sound_variants, vanilla_pig_variants,
+    vanilla_placed_features, vanilla_poi_type_tags, vanilla_poi_types,
+    vanilla_position_source_types, vanilla_potion_tags, vanilla_potions, vanilla_recipes,
+    vanilla_stat_types, vanilla_structure_processors, vanilla_structure_tags, vanilla_structures,
+    vanilla_sulfur_cube_archetypes, vanilla_template_pools, vanilla_timeline_tags,
+    vanilla_timelines, vanilla_trim_materials, vanilla_trim_patterns, vanilla_villager_professions,
+    vanilla_villager_trades, vanilla_villager_types, vanilla_wolf_sound_variants,
+    vanilla_wolf_variants, vanilla_world_clocks, vanilla_zombie_nautilus_variants,
     villager_profession::VillagerProfessionRegistry,
     villager_type::VillagerTypeRegistry,
     wolf_sound_variant::WolfSoundVariantRegistry,
@@ -273,6 +274,12 @@ pub struct Registry {
     pub loot_tables: LootTableRegistry,
     /// Every advancement of the built-in datapack.
     pub advancements: AdvancementRegistry,
+
+    /// Every statistic family.
+    pub stat_types: StatTypeRegistry,
+
+    /// Every value of the `minecraft:custom` statistic family.
+    pub custom_stats: CustomStatRegistry,
     pub block_entity_types: BlockEntityTypeRegistry,
     pub game_rules: GameRuleRegistry,
     pub game_events: GameEventRegistry,
@@ -391,6 +398,8 @@ impl Registry {
         );
         vanilla_loot_tables::register_loot_tables(&mut registry.loot_tables);
         vanilla_advancements::register_advancements(&mut registry.advancements);
+        vanilla_stat_types::register_stat_types(&mut registry.stat_types);
+        vanilla_custom_stats::register_custom_stats(&mut registry.custom_stats);
         vanilla_villager_trades::register_villager_trades(&mut registry.villager_trades);
         vanilla_villager_trades::register_trade_sets(&mut registry.trade_sets);
         vanilla_block_entity_types::register_block_entity_types(&mut registry.block_entity_types);
@@ -474,6 +483,8 @@ impl Registry {
         self.entity_types.freeze();
         self.loot_tables.freeze();
         self.advancements.freeze();
+        self.stat_types.freeze();
+        self.custom_stats.freeze();
         self.block_entity_types.freeze();
         self.game_rules.freeze();
         self.game_events.freeze();
@@ -734,6 +745,8 @@ impl Registry {
             entity_types: EntityTypeRegistry::new(),
             loot_tables: LootTableRegistry::new(),
             advancements: AdvancementRegistry::new(),
+            stat_types: StatTypeRegistry::new(),
+            custom_stats: CustomStatRegistry::new(),
             block_entity_types: BlockEntityTypeRegistry::new(),
             game_rules: GameRuleRegistry::new(),
             game_events: GameEventRegistry::new(),

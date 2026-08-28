@@ -8,6 +8,7 @@
 
 use std::f64::consts::{FRAC_PI_2, PI};
 use std::sync::{Arc, Weak};
+use steel_registry::vanilla_custom_stats;
 
 use glam::{DVec3, IVec2};
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
@@ -902,13 +903,13 @@ impl TurtleBreedGoal {
                 // rather than going through `finalizeSpawnChildFromBreeding`,
                 // and passes a null offspring: what a turtle leaves behind is
                 // an egg, not a hatchling.
-                // TODO: award the animals-bred stat here too, once Steel has one.
                 if let Some(cause) = animal
                     .love_cause_uuid()
                     .or_else(|| partner.love_cause_uuid())
                     && let Some(entity) = world.get_entity_by_uuid(&cause)
                     && let Some(player) = entity.as_player()
                 {
+                    player.award_custom_stat(&vanilla_custom_stats::ANIMALS_BRED);
                     triggers::entity::bred_animals(
                         player,
                         animal.as_entity_event_source(),

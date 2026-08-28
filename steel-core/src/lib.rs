@@ -31,6 +31,7 @@ pub(crate) mod portal;
 pub mod raid;
 pub mod scoreboard;
 pub mod server;
+pub mod stat;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 pub(crate) mod test_support;

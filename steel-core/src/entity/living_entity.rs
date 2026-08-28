@@ -10,6 +10,7 @@ use steel_registry::vanilla_particle_types;
 use super::*;
 use crate::advancement::triggers;
 use crate::behavior::ITEM_BEHAVIORS;
+use crate::entity::kill_score;
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
 use crate::player::player_inventory::PlayerInventory;
@@ -1320,7 +1321,7 @@ pub trait LivingEntity: Entity {
             })
             .or_else(|| self.living_base().last_hurt_by_mob());
         if let Some(credit) = kill_credit.as_deref() {
-            triggers::entity::award_kill_score(credit, self.as_entity_event_source(), source);
+            kill_score::award_kill_score(credit, self.as_entity_event_source(), source);
         }
 
         // Vanilla parity: `sourceEntity == null || sourceEntity.killedEntity(..)`
@@ -2409,7 +2410,9 @@ pub trait LivingEntity: Entity {
         if self.as_player().is_none() {
             return;
         }
-        // TODO: award `Stats.ITEM_USED` once Steel has a statistics foundation.
+        // TODO: award `Stats.ITEM_USED` here. Vanilla's `LivingEntity.hurtArmor`
+        // does, but this function is handed the slot's damage rules rather than
+        // the stack, so there is nothing to key the statistic on yet.
         let durability_damage = item_damage.apply(damage);
         if durability_damage <= 0 {
             return;

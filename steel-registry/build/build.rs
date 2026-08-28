@@ -68,6 +68,7 @@ mod potions;
 mod recipes;
 mod sound_events;
 mod sound_types;
+mod stats;
 mod structure;
 mod sulfur_cube_archetypes;
 mod timelines;
@@ -156,6 +157,8 @@ const GAME_EVENTS: &str = "game_events";
 const GAME_EVENT_TAGS: &str = "game_event_tags";
 const LEVEL_EVENTS: &str = "level_events";
 const SOUND_EVENTS: &str = "sound_events";
+const STAT_TYPES: &str = "stat_types";
+const CUSTOM_STATS: &str = "custom_stats";
 const SOUND_TYPES: &str = "sound_types";
 const STRUCTURE_SETS: &str = "structure_sets";
 const STRUCTURE_TAGS: &str = "structure_tags";
@@ -240,6 +243,8 @@ pub fn main() {
         (tags::game_event(), GAME_EVENT_TAGS),
         (level_events::build(), LEVEL_EVENTS),
         (sound_events::build(), SOUND_EVENTS),
+        (stats::stat_types(), STAT_TYPES),
+        (stats::custom_stats(), CUSTOM_STATS),
         (sound_types::build(), SOUND_TYPES),
         (world_clocks::build(), WORLD_CLOCKS),
         (trial_spawner_configs::build(), TRIAL_SPAWNER_CONFIGS),

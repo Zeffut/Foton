@@ -1,6 +1,7 @@
 //! Shared vanilla `Animal` state and hooks.
 
 use std::sync::Arc;
+use steel_registry::vanilla_custom_stats;
 
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
@@ -348,11 +349,11 @@ pub trait Animal: AgeableMob {
         // Vanilla parity: the `getLoveCause().or(partner.getLoveCause())` that
         // opens `Animal.finalizeSpawnChildFromBreeding`. Steel keeps the cause
         // as a uuid, so it is resolved here rather than held as a reference.
-        // TODO: award the animals-bred stat here too, once Steel has one.
         if let Some(cause) = self.love_cause_uuid().or_else(|| partner.love_cause_uuid())
             && let Some(entity) = world.get_entity_by_uuid(&cause)
             && let Some(player) = entity.as_player()
         {
+            player.award_custom_stat(&vanilla_custom_stats::ANIMALS_BRED);
             triggers::entity::bred_animals(
                 player,
                 self.as_entity_event_source(),

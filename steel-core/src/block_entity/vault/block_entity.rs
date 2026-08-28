@@ -28,6 +28,8 @@ use crate::block_entity::{BlockEntity, BlockEntityBase};
 use crate::entity::{Entity as _, LivingEntity as _, entity_loot_ref};
 use crate::player::Player;
 use crate::world::World;
+use steel_registry::stat::Stat;
+use steel_registry::vanilla_stat_types;
 
 /// Vanilla parity: `VaultBlockEntity.Server.UNLOCKING_DELAY_TICKS`.
 const UNLOCKING_DELAY_TICKS: i64 = 14;
@@ -184,7 +186,7 @@ impl VaultBlockEntity {
             return false;
         }
 
-        // TODO: award `Stats.ITEM_USED`; Steel has no statistics registry.
+        player.award_stat(Stat::new(&vanilla_stat_types::USED, stack_to_insert.item));
         let VaultData {
             config,
             server,
