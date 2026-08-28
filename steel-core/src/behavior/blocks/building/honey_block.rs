@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::advancement::triggers;
 use glam::DVec3;
 use steel_macros::block_behavior;
 use steel_registry::blocks::{BlockRef, block_state_ext::BlockStateExt as _, shapes::VoxelShape};
@@ -198,7 +199,14 @@ impl BlockBehavior for HoneyBlock {
         is_precise: bool,
     ) {
         if Self::is_sliding_down(pos, entity) {
-            // TODO: Award the honey-block slide advancement once advancements exist.
+            // Vanilla parity: `HoneyBlock.maybeDoSlideAchievement`, throttled to
+            // one player tick in twenty. Without the throttle a slide would fire
+            // the trigger sixty times a second for no extra effect.
+            if let Some(player) = entity.as_player()
+                && world.game_time() % 20 == 0
+            {
+                triggers::world::slide_down_block(player, state);
+            }
             Self::do_slide_movement(entity);
             Self::maybe_do_slide_effects(world, entity);
         }

@@ -164,30 +164,28 @@ pub fn started_riding(player: &Player) {
     fire(player, "minecraft:started_riding", |_| true);
 }
 
-/// Vanilla parity: `CriteriaTriggers.PLAYER_INTERACTED_WITH_ENTITY`.
-pub fn player_interacted_with_entity(player: &Player, item: &ItemStack, entity: &dyn Entity) {
-    interacted(
-        player,
-        "minecraft:player_interacted_with_entity",
-        item,
-        entity,
-    );
-}
-
 /// Vanilla parity: `CriteriaTriggers.PLAYER_SHEARED_EQUIPMENT`.
 pub fn player_sheared_equipment(player: &Player, item: &ItemStack, entity: &dyn Entity) {
     interacted(player, "minecraft:player_sheared_equipment", item, entity);
 }
 
-/// Vanilla parity: `PlayerInteractTrigger.TriggerInstance.matches`, which both
-/// of the triggers above share.
+/// Vanilla parity: `PlayerInteractTrigger.TriggerInstance.matches`.
+///
+/// Not implemented: `minecraft:player_interacted_with_entity`, the other
+/// trigger built on this instance. Vanilla hands it the used stack or an empty
+/// one depending on `InteractionResult.Success.wasItemInteraction`, and Steel's
+/// `InteractionResult` is a flat enum that does not carry that flag -- so the
+/// `item` predicate could only be answered by guessing.
 fn interacted(player: &Player, trigger_id: &'static str, item: &ItemStack, entity: &dyn Entity) {
     let context = context_for(player, entity);
     fire(player, trigger_id, |instance| {
-        let (wanted_item, wanted_entity) = match instance {
-            TriggerInstance::PlayerInteractedWithEntity { item, entity, .. }
-            | TriggerInstance::PlayerShearedEquipment { item, entity, .. } => (item, *entity),
-            _ => return false,
+        let TriggerInstance::PlayerShearedEquipment {
+            item: wanted_item,
+            entity: wanted_entity,
+            ..
+        } = instance
+        else {
+            return false;
         };
         if let Some(wanted_item) = wanted_item
             && !item_matches(wanted_item, item)

@@ -29,13 +29,12 @@ pub fn shot_crossbow(player: &Player, weapon: &ItemStack) {
     item_only(player, "minecraft:shot_crossbow", weapon);
 }
 
-/// Vanilla parity: `CriteriaTriggers.USED_TOTEM`.
-pub fn used_totem(player: &Player, totem: &ItemStack) {
-    item_only(player, "minecraft:used_totem", totem);
-}
-
-/// The five triggers above share a shape: one optional item predicate, which
+/// The four triggers above share a shape: one optional item predicate, which
 /// accepts anything when absent.
+///
+/// Not implemented: `minecraft:used_totem`. Steel has no totem of undying, so
+/// there is no `checkTotemDeathProtection` for it to fire from -- a trigger
+/// function with no call site would read as coverage it does not have.
 fn item_only(player: &Player, trigger_id: &'static str, stack: &ItemStack) {
     fire(player, trigger_id, |instance| {
         let (TriggerInstance::ConsumeItem { item: wanted, .. }

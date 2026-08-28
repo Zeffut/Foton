@@ -30,10 +30,12 @@ use steel_registry::{
 use steel_utils::locks::SyncMutex;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier};
 
+use crate::advancement::triggers;
 use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
 use glam::DVec3;
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::data_components::DataComponentMap;
+use steel_utils::WorldAabb;
 use text_components::TextComponent;
 
 use crate::entity::{Entity as _, LivingEntity as _, MobEffectInstance};
@@ -244,6 +246,19 @@ unsafe impl DowncastType for BeaconBlockEntity {
 }
 
 impl BeaconBlockEntity {
+    /// Vanilla parity: the `CriteriaTriggers.CONSTRUCT_BEACON` loop that follows
+    /// the activation sound, whose box reaches four blocks below the beacon and
+    /// is then inflated by ten on the horizontals and five vertically.
+    fn award_construct_beacon(world: &Arc<World>, pos: BlockPos, levels: i32) {
+        let (x, y, z) = (f64::from(pos.x()), f64::from(pos.y()), f64::from(pos.z()));
+        let aabb = WorldAabb::new(x - 10.0, y - 9.0, z - 10.0, x + 10.0, y + 5.0, z + 10.0);
+        for entity in world.get_entities_in_aabb(&aabb) {
+            if let Some(player) = entity.as_player() {
+                triggers::world::construct_beacon(player, levels);
+            }
+        }
+    }
+
     /// Creates a beacon block entity.
     #[must_use]
     pub fn new(level: Weak<World>, pos: BlockPos, state: BlockStateId) -> Self {
@@ -344,7 +359,10 @@ impl BlockEntity for BeaconBlockEntity {
         // `tick`. Because the level survives the beam being covered, this only
         // fires when the pyramid itself is built or broken.
         match (previous_levels > 0, levels > 0) {
-            (false, true) => play_beacon_sound(world, pos, &sound_events::BLOCK_BEACON_ACTIVATE),
+            (false, true) => {
+                play_beacon_sound(world, pos, &sound_events::BLOCK_BEACON_ACTIVATE);
+                Self::award_construct_beacon(world, pos, levels);
+            }
             (true, false) => play_beacon_sound(world, pos, &sound_events::BLOCK_BEACON_DEACTIVATE),
             _ => {}
         }

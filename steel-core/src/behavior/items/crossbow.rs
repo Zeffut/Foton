@@ -16,6 +16,8 @@
 //! needs no quiver of its own.
 
 use std::sync::Arc;
+use steel_registry::stat::Stat;
+use steel_registry::vanilla_stat_types;
 
 use std::f64::consts::FRAC_PI_2;
 
@@ -34,6 +36,7 @@ use steel_registry::{
 };
 use steel_utils::types::InteractionHand;
 
+use crate::advancement::triggers;
 use crate::behavior::context::{InteractionResult, UseItemContext};
 use crate::behavior::item::{ItemBehavior, ItemUseAnimation};
 use crate::behavior::items::arrow_entity_type_for;
@@ -586,8 +589,13 @@ fn perform_shooting(
         target_override,
     );
 
-    // TODO: fire the SHOT_CROSSBOW advancement trigger and award the ITEM_USED
-    // stat once Steel has advancements and statistics.
+    // Vanilla parity: the tail of `CrossbowItem.performShooting`. The weapon
+    // has already had its charged projectiles cleared, which is the stack
+    // vanilla hands the trigger too.
+    if let Some(player) = shooter.as_player() {
+        triggers::item::shot_crossbow(player, weapon);
+        player.award_stat(Stat::new(&vanilla_stat_types::USED, weapon.item));
+    }
 }
 
 /// Spawns each loaded projectile, fanned out by the Multishot spread.

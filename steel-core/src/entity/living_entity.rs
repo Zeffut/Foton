@@ -2284,6 +2284,11 @@ pub trait LivingEntity: Entity {
         };
 
         let mut item = self.take_item_in_hand(hand);
+        // Vanilla parity: `ServerPlayer.updateUsingItem`, which fires before the
+        // `super` call that runs the use tick below.
+        if let Some(player) = self.as_player() {
+            triggers::item::using_item(player, &item);
+        }
         let behavior = ITEM_BEHAVIORS.get_behavior(item.item());
         behavior.on_use_tick(&world, user, &mut item, active.remaining_ticks());
 

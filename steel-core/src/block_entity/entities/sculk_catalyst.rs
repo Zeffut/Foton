@@ -7,8 +7,8 @@
 //! entity ticks that spreader every tick, which is what makes the sculk creep outward over
 //! the following seconds.
 //!
-//! Not implemented: the `KILL_MOB_NEAR_SCULK_CATALYST` advancement trigger, because Steel
-//! has no advancement criteria system.
+//! It also awards the `KILL_MOB_NEAR_SCULK_CATALYST` criterion, which vanilla fires from
+//! this same listener under the name `tryAwardItSpreadsAdvancement`.
 
 use std::sync::{Arc, Weak};
 
@@ -21,15 +21,18 @@ use steel_registry::blocks::block_state_ext::BlockStateExt as _;
 use steel_registry::blocks::properties::{BlockStateProperties, BoolProperty};
 use steel_registry::particle_type::ParticleData;
 use steel_registry::{
-    REGISTRY, sound_events, vanilla_block_entity_types, vanilla_game_events, vanilla_particle_types,
+    REGISTRY, sound_events, vanilla_block_entity_types, vanilla_damage_types, vanilla_game_events,
+    vanilla_particle_types,
 };
 use steel_utils::locks::SyncMutex;
 use steel_utils::random::worldgen_random::WorldgenRandom;
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 
+use crate::advancement::triggers;
 use crate::behavior::blocks::SculkSpreader;
 use crate::block_entity::{BlockEntity, BlockEntityBase};
+use crate::entity::damage::DamageSource;
 use crate::world::World;
 use crate::world::game_event::{
     GameEventContext, GameEventDeliveryMode, GameEventListener, SharedGameEventListener,
@@ -213,6 +216,18 @@ impl GameEventListener for CatalystListener {
         }
 
         mob.skip_drop_experience();
+        // Vanilla parity: `CatalystListener.tryAwardItSpreadsAdvancement`, which
+        // credits the last mob to hurt the victim rather than whatever dealt the
+        // final blow, and falls back to a plain player attack when the victim
+        // recorded no damage source at all.
+        if let Some(hurt_by) = mob.living_base().last_hurt_by_mob()
+            && let Some(player) = hurt_by.as_player()
+        {
+            let recorded = mob.last_damage_source();
+            let fallback = DamageSource::environment(&vanilla_damage_types::PLAYER_ATTACK);
+            let damage_source = recorded.as_ref().unwrap_or(&fallback);
+            triggers::entity::kill_mob_near_sculk_catalyst(player, source, damage_source);
+        }
         self.bloom(world);
         true
     }
