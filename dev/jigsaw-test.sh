@@ -107,9 +107,11 @@ if [ $STATUS -ne 0 ]; then
   exit 1
 fi
 # Only the server's own reply counts: join.py echoes the commands it sends, and
-# the command text carries the marker too.
+# the command text carries the marker too. `-w` is not decoration: without it
+# JIGSAWKEPTBODY answers for JIGSAWKEPT, and the keep-jigsaws flag can stop
+# working while this still reports a pass.
 for marker in JIGSAWANCHORSTATE JIGSAWBODYUPPER JIGSAWBODYLOWER JIGSAWBUTTONSURVIVES JIGSAWKEPT JIGSAWKEPTBODY; do
-  if ! grep "server says" join.log | grep -q "$marker"; then
+  if ! grep "server says" join.log | grep -qw "$marker"; then
     echo "########## JIGSAW TEST FAILED ($marker missing) ##########"
     exit 1
   fi
