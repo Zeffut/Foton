@@ -1,4 +1,5 @@
 use super::*;
+use crate::advancement::triggers;
 use crate::entity::neutral_mob::NeutralMob;
 
 /// Final state accepted from a client-authored movement packet.
@@ -1458,8 +1459,15 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
             let spawn_offset = dimensions
                 .attachments
                 .get_average(EntityAttachment::Passenger, dimensions);
+            // Vanilla's `Mob.shearItem` hands the trigger the same stack it
+            // spawned, and spawning takes ownership of it here.
+            let sheared_item = item_stack.clone();
             let _ = self.spawn_at_location_with_offset(item_stack, spawn_offset);
-            // TODO: Trigger PLAYER_SHEARED_EQUIPMENT once advancement criteria exist.
+            triggers::entity::player_sheared_equipment(
+                player,
+                &sheared_item,
+                self.as_entity_event_source(),
+            );
             return true;
         }
 

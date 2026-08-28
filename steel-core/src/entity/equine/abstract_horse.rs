@@ -36,6 +36,7 @@ use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId, UuidExt as _};
 use uuid::Uuid;
 
+use crate::advancement::triggers;
 use crate::behavior::InteractionResult;
 use crate::entity::ai::targeting::TargetingConditions;
 use crate::entity::damage::DamageSource;
@@ -611,7 +612,7 @@ pub trait AbstractHorse: Animal {
     fn tame_with_name(&self, player: &Player) -> bool {
         self.set_horse_owner(Some(player.gameprofile.id));
         self.set_tamed(true);
-        // TODO: Fire the `TAME_ANIMAL` criterion trigger once advancements exist.
+        triggers::entity::tame_animal(player, self.as_entity_event_source());
         self.broadcast_entity_event(EntityStatus::TamingSucceeded);
         true
     }

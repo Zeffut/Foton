@@ -60,6 +60,7 @@ use text_components::{
 };
 use uuid::Uuid;
 
+use crate::advancement::triggers;
 use crate::behavior::{
     BLOCK_BEHAVIORS, BlockCollisionContext, BlockStateBehaviorExt as _, EntityFallOnContext,
     EntityLandingContext, FLUID_BEHAVIORS, InteractionResult,
@@ -567,6 +568,12 @@ fn apply_block_effect_segment(
                 let is_precise = moved_far || aabb.intersects_block(pos);
                 effect_collector.advance_step(iteration);
                 behavior.entity_inside(state, world, pos, entity, effect_collector, is_precise);
+                // Vanilla parity: the `this.onInsideBlock(state)` that follows
+                // `state.entityInside` in `Entity.checkInsideBlocks`, which
+                // `ServerPlayer` overrides to fire `ENTER_BLOCK`.
+                if let Some(player) = entity.as_player() {
+                    triggers::world::enter_block(player, state);
+                }
                 if entity.is_removed() {
                     return false;
                 }
@@ -979,7 +986,15 @@ pub(crate) fn start_riding_entities(
     passenger.set_pose(EntityPose::Standing);
     EntityBase::start_riding_relationship(entity_to_ride, passenger);
     entity_to_ride.on_passenger_added(passenger.as_ref());
-    // TODO: Emit ENTITY_MOUNT game event and riding advancement trigger once those foundations exist.
+    // Vanilla parity: the `sendEventAndTriggers` block of `Entity.startRiding`,
+    // which fires for every player anywhere in the vehicle's passenger tree --
+    // so boarding a boat someone is already sitting in counts for both of them.
+    // TODO: emit the ENTITY_MOUNT game event here too, once Steel has one.
+    for rider in indirect_passengers(entity_to_ride.as_ref()) {
+        if let Some(player) = rider.as_player() {
+            triggers::entity::started_riding(player);
+        }
+    }
     true
 }
 

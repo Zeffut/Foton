@@ -8,6 +8,7 @@ use steel_utils::{BlockPos, Direction};
 use text_components::{TextComponent, translation::TranslatedMessage};
 
 use super::{Player, PlayerRespawnConfig};
+use crate::advancement::triggers;
 use crate::{
     entity::{Entity, LivingEntity as _},
     level_data::RespawnData,
@@ -187,6 +188,10 @@ impl Player {
         if self.start_sleeping(pos).is_err() {
             return Err(BedSleepingProblem::OtherProblem);
         }
+        // Vanilla parity: the `ifRight` of `ServerPlayer.startSleepInBed`, so
+        // only a sleep that actually started counts.
+        // TODO: award `Stats.SLEEP_IN_BED` here too, once Steel has one.
+        triggers::world::slept_in_bed(self);
         self.sync_entity_data();
         if !world.can_sleep_through_nights() {
             self.send_overlay_message(

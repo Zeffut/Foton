@@ -19,6 +19,7 @@ use steel_registry::sound_event::SoundEventRef;
 use steel_registry::vanilla_items;
 use steel_utils::types::InteractionHand;
 
+use crate::advancement::triggers;
 use crate::behavior::InteractionResult;
 use crate::entity::{Entity, LivingEntity, Mob, RemovalReason};
 use crate::player::Player;
@@ -181,6 +182,9 @@ pub fn bucket_mob_pickup<T: Bucketable + Mob + ?Sized>(
     // Vanilla parity: `ItemUtils.createFilledResult(itemStack, player, bucket,
     // false)` -- the `false` is `limitCreativeStackSize`, so a creative player
     // still gets the filled bucket rather than nothing.
+    // The filled bucket is moved into the inventory below, and the trigger
+    // wants the same stack vanilla hands it.
+    let filled = bucket.clone();
     let overflow = {
         let mut inventory = player.inventory.lock();
         inventory.apply_filled_result(hand, bucket, player.has_infinite_materials(), false)
@@ -189,8 +193,7 @@ pub fn bucket_mob_pickup<T: Bucketable + Mob + ?Sized>(
         let _ = player.drop_item(overflow, false, false);
     }
 
-    // TODO: Award the `filled_bucket` criterion; Steel has no advancement
-    // triggers.
+    triggers::item::filled_bucket(player, &filled);
     pickup_entity.drop_leash();
     pickup_entity.set_removed(RemovalReason::Discarded);
     Some(InteractionResult::Success)

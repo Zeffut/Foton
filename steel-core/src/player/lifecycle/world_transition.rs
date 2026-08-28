@@ -1,4 +1,5 @@
 use super::*;
+use crate::advancement::triggers;
 
 impl Player {
     fn apply_post_teleport_transition(&self, post_transition: &TeleportPostTransition) {
@@ -31,6 +32,7 @@ impl Player {
     ) -> bool {
         let current_world = self.get_world();
         let new_world = Arc::clone(&teleport_transition.target_world);
+        let new_world_key = new_world.key.clone();
         if current_world.domain() != new_world.domain() {
             tracing::error!(
                 entity_id = self.id(),
@@ -84,6 +86,12 @@ impl Player {
             }
             // Vanilla: PlayerList.sendAllPlayerInfo -> inventoryMenu.sendAllDataToRemote
             self.send_inventory_to_remote();
+            // Vanilla parity: `ServerPlayer.triggerDimensionChangeTriggers`,
+            // which only runs when the level actually changed.
+            // Not implemented: the `NETHER_TRAVEL` half. It needs
+            // `enteredNetherPosition`, and Steel does not record where a player
+            // entered the nether, so the distance it measures has no origin.
+            triggers::world::changed_dimension(self, &current_world.key, &new_world_key);
         }
         self.apply_post_teleport_transition(&teleport_transition.post_transition);
         true

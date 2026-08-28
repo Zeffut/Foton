@@ -23,6 +23,7 @@ use steel_utils::{BlockPos, UuidExt};
 use text_components::translation::TranslatedMessage;
 use uuid::Uuid;
 
+use crate::advancement::triggers;
 use crate::entity::ai::path::{PathType, PathfindingContext};
 use crate::entity::ai::walk::WalkPathEvaluator;
 use crate::entity::damage::DamageSource;
@@ -221,7 +222,7 @@ pub trait TamableAnimal: Animal {
     fn tame(&self, player: &Player) {
         self.set_tame(true, true);
         self.set_owner_uuid(Some(player.gameprofile.id));
-        // TODO: Fire the `TAME_ANIMAL` criterion trigger once advancements exist.
+        triggers::entity::tame_animal(player, self.as_entity_event_source());
     }
 
     /// Returns vanilla `TamableAnimal.canAttack`.

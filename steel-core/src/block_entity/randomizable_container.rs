@@ -24,6 +24,7 @@ use steel_registry::loot_table::{LootContext, LootFillContainer, LootTableRef};
 use steel_registry::{REGISTRY, RegistryExt as _};
 use steel_utils::{Identifier, locks::SyncMutex};
 
+use crate::advancement::triggers;
 use crate::block_entity::BlockEntityBase;
 use crate::entity::{LivingEntity as _, entity_loot_ref};
 use crate::inventory::container::Container;
@@ -200,8 +201,11 @@ impl ContainerLoot {
             return false;
         };
 
-        // TODO: Trigger the vanilla `GENERATE_LOOT` criterion for `player` once
-        // Steel has advancements.
+        // Vanilla fires this before it fills, on the table it just took.
+        if let Some(player) = player {
+            triggers::world::player_generates_container_loot(player, &packed.key);
+        }
+
         if packed.seed == 0 {
             // Vanilla parity: `LootContext.Builder.withOptionalRandomSeed`
             // leaves the level's own random source in place for seed zero.

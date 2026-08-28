@@ -82,6 +82,10 @@ echo "=== First boot: earns the advancements ==="
 start_server first || exit 1
 
 CMDS='gamemode creative'
+CMDS="$CMDS;;difficulty normal"
+CMDS="$CMDS;;gamerule spawn_mobs false"
+CMDS="$CMDS;;gamerule advance_time false"
+CMDS="$CMDS;;time set midnight"
 CMDS="$CMDS;;clear @s"
 # A marker before anything is earned, so the log can be read in order.
 CMDS="$CMDS;;tellraw @s {\"text\":\"ADVMARKERONE\"}"
@@ -116,6 +120,24 @@ RELOG='!wait 2'
 RELOG="$RELOG;;tellraw @s {\"text\":\"ADVRELOG\"}"
 RELOG="$RELOG;;!seentab story/root"
 RELOG="$RELOG;;!wait 2"
+# The kill happens here rather than on the first boot for a reason that is
+# about the harness, not the server: three vanilla advancement icons carry a
+# data component patch, and join.py cannot measure one, so it stops reading a
+# packet that contains the adventure tab. Killing after the restored story tab
+# has already arrived keeps the two in separate packets, and the kill is read
+# off the chat announcement rather than the progress list.
+RELOG="$RELOG;;gamemode creative"
+RELOG="$RELOG;;difficulty normal"
+RELOG="$RELOG;;gamerule spawn_mobs false"
+RELOG="$RELOG;;time set midnight"
+RELOG="$RELOG;;summon minecraft:zombie ~ ~ ~4"
+RELOG="$RELOG;;!wait 1"
+RELOG="$RELOG;;tellraw @s {\"text\":\"ADVMARKERFIVE\"}"
+# `by @s` is what makes the zombie's death the player's doing: a kill is
+# credited through the damage source.
+RELOG="$RELOG;;damage @e[type=zombie,limit=1] 100 minecraft:generic by @s"
+RELOG="$RELOG;;!wait 2"
+RELOG="$RELOG;;tellraw @s {\"text\":\"ADVMARKERSIX\"}"
 
 JOIN_WATCH_SECONDS=3 JOIN_COMMANDS="$RELOG" python3 "$ROOT/dev/join.py" "$PORT" > join-second.log 2>&1
 RELOG_STATUS=$?
@@ -136,12 +158,15 @@ fail() { echo "########## ADVANCEMENT TEST FAILED ($1) ##########"; exit 1; }
 [ $RELOG_STATUS -eq 0 ] || { tail -20 join-second.log; fail "the client never settled after the relog"; }
 
 line_of() { grep -n -- "$1" join.log | head -1 | cut -d: -f1; }
+line_of_second() { grep -n -- "$1" join-second.log | head -1 | cut -d: -f1; }
 
 MARKER_ONE=$(line_of "server says: ADVMARKERONE")
 MARKER_TWO=$(line_of "server says: ADVMARKERTWO")
 MARKER_THREE=$(line_of "server says: ADVMARKERTHREE")
 MARKER_FOUR=$(line_of "server says: ADVMARKERFOUR")
-[ -n "$MARKER_ONE" ] && [ -n "$MARKER_TWO" ] && [ -n "$MARKER_THREE" ] && [ -n "$MARKER_FOUR" ] \
+MARKER_FIVE=$(line_of_second "server says: ADVMARKERFIVE")
+MARKER_SIX=$(line_of_second "server says: ADVMARKERSIX")
+[ -n "$MARKER_ONE" ] && [ -n "$MARKER_TWO" ] && [ -n "$MARKER_THREE" ] && [ -n "$MARKER_FOUR" ] && [ -n "$MARKER_FIVE" ] && [ -n "$MARKER_SIX" ] \
   || fail "the ordering markers never came back, so nothing below can be trusted"
 
 # 0. The tick trigger fires at login. Vanilla unlocks the crafting table recipe
@@ -195,39 +220,68 @@ SMELT_DRAWN=$(line_of "advancement minecraft:story/smelt_iron is drawn at")
 [ "$SMELT_DRAWN" -gt "$MARKER_THREE" ] \
   || fail "story/smelt_iron is three levels below story/root and must stay hidden until mine_stone is done"
 
-# 5. Nothing the player never did may be handed out.
+# 5. Killing a mob is credited to the player through the damage source, and the
+#    entity predicate picks which criterion. This one is read off the chat
+#    announcement: the adventure tab carries an icon with a data component
+#    patch, and join.py stops reading an advancements packet when it meets one,
+#    because the width of that patch is not knowable there. The announcement is
+#    the server's own statement that the advancement completed.
+#
+#    `adventure/kill_all_mobs` is the control: it names every mob type in one
+#    `any_of`, so a trigger that ignored the entity predicate would award all of
+#    its criteria in the same pass and announce it as a challenge off one zombie.
+KILL_DONE=$(line_of_second "server says:.*advancements.adventure.kill_a_mob.title")
+[ -n "$KILL_DONE" ] || fail "killing a zombie did not finish adventure/kill_a_mob"
+[ "$KILL_DONE" -gt "$MARKER_FIVE" ] \
+  || fail "adventure/kill_a_mob finished before the zombie died"
+[ "$KILL_DONE" -lt "$MARKER_SIX" ] || fail "adventure/kill_a_mob did not finish on the kill"
+grep -q "advancement minecraft:adventure/kill_a_mob is drawn at 1,6" join-second.log \
+  || fail "the finished advancement was never drawn where the layout puts it"
+grep -q "advancements.adventure.kill_all_mobs.title" join-second.log \
+  && fail "one zombie finished Monsters Hunted, so the entity predicate is not discriminating"
+
+# 6. Nothing the player never did may be handed out.
 grep -q "advancement minecraft:story/smelt_iron is complete" join.log \
   && fail "an advancement nobody earned was granted"
 grep -q "advancement minecraft:husbandry/root is complete" join.log \
   && fail "an advancement nobody earned was granted"
 
-# 6. The chat announcement is the server's job, and mine_stone is announced
+# 7. The chat announcement is the server's job, and mine_stone is announced
 #    where the roots deliberately are not.
 grep -q "server says:.*chat.type.advancement.task" join.log \
   || fail "finishing story/mine_stone was never announced in chat"
 grep -q "server says:.*advancements.story.mine_stone.title" join.log \
   || fail "the announcement did not name the advancement"
 
-# 7. The screen's tab selection round-trips.
+# 8. The screen's tab selection round-trips.
 grep -q "advancements tab selected minecraft:story/root" join.log \
   || fail "opening the story tab was not accepted"
 
-# 8. Progress that is not finished still reaches the client as progress: the
+# 9. Progress that is not finished still reaches the client as progress: the
 #    revealed child has to arrive with its criteria unmet rather than missing.
 grep -q "advancement minecraft:story/upgrade_tools criterion .* not met" join.log \
   || fail "the revealed child arrived without its unmet criteria"
 
-# 9. The progress survives a restart. The inventory was emptied before the
+# 10. The progress survives a restart. The inventory was emptied before the
 #    logout, so nothing on the second boot can re-earn either advancement --
 #    which is what makes the two checks below say "restored" rather than
 #    "earned again". The absence of a chat announcement is the same statement
 #    read from the other side: `load` grants a criterion outright where `award`
 #    would have announced it.
-grep -q "advancement minecraft:story/root is complete" join-second.log   || fail "story/root did not survive the restart"
-grep -q "advancement minecraft:story/mine_stone is complete" join-second.log   || fail "story/mine_stone did not survive the restart"
-grep -q "advancements packet: reset=true" join-second.log   || fail "the restored tree did not reach the client as a first packet"
-grep -q "advancement minecraft:story/upgrade_tools is drawn at" join-second.log   || fail "visibility was not recomputed from the restored progress"
-grep -q "server says:.*chat.type.advancement" join-second.log   && fail "a restored advancement was announced again, so it was re-earned rather than loaded"
-grep -q "advancements tab selected minecraft:story/root" join-second.log   || fail "the restored tree would not accept a tab"
+grep -q "advancement minecraft:story/root is complete" join-second.log \
+  || fail "story/root did not survive the restart"
+grep -q "advancement minecraft:story/mine_stone is complete" join-second.log \
+  || fail "story/mine_stone did not survive the restart"
+grep -q "advancements packet: reset=true" join-second.log \
+  || fail "the restored tree did not reach the client as a first packet"
+grep -q "advancement minecraft:story/upgrade_tools is drawn at" join-second.log \
+  || fail "visibility was not recomputed from the restored progress"
+# The kill on this boot announces itself, so this asks about the restored one
+# by name rather than about announcements in general.
+RESTORE_ANNOUNCED=$(line_of_second "advancements.story.mine_stone.title")
+[ -z "$RESTORE_ANNOUNCED" ] \
+  || fail "a restored advancement was announced again, so it was re-earned rather than loaded"
+grep -q "advancements tab selected minecraft:story/root" join-second.log \
+  || fail "the restored tree would not accept a tab"
 
 echo "########## ADVANCEMENT TEST PASSED ##########"

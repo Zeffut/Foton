@@ -43,7 +43,7 @@ use text_components::content::Content;
 use crate::behavior::blocks::building::campfire_block::is_smokey_pos;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::{CatEntity, LightningBoltEntity, WolfEntity};
-use crate::entity::{Entity, LivingEntity, SharedEntity};
+use crate::entity::{Entity, LivingEntity};
 use crate::player::Player;
 
 /// The seven equipment slots vanilla's `EntityEquipmentPredicate` reads, in the
@@ -77,7 +77,7 @@ pub enum Subject<'a> {
     /// The player the trigger fired for.
     Player,
     /// Some other entity the trigger handed over.
-    Entity(&'a SharedEntity),
+    Entity(&'a dyn Entity),
 }
 
 /// Vanilla parity: the `LootContext` an advancement predicate is evaluated with.
@@ -102,7 +102,7 @@ impl PredicateContext<'_> {
         match subject {
             Subject::None => None,
             Subject::Player => Some(self.player as &dyn Entity),
-            Subject::Entity(entity) => Some(entity.as_ref()),
+            Subject::Entity(entity) => Some(*entity),
         }
     }
 

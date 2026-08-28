@@ -15,7 +15,9 @@ use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, Identifier, UuidExt};
 use uuid::Uuid;
 
+use crate::advancement::triggers;
 use crate::behavior::InteractionResult;
+use crate::entity::EntityEventSource;
 use crate::entity::ai::path::PathType;
 use crate::entity::entities::ExperienceOrbEntity;
 use crate::entity::{
@@ -341,14 +343,22 @@ pub trait Animal: AgeableMob {
         &self,
         world: &Arc<World>,
         partner: &dyn Animal,
-        _offspring: Option<&dyn Animal>,
+        offspring: Option<&dyn Animal>,
     ) {
-        if self
-            .love_cause_uuid()
-            .or_else(|| partner.love_cause_uuid())
-            .is_some()
+        // Vanilla parity: the `getLoveCause().or(partner.getLoveCause())` that
+        // opens `Animal.finalizeSpawnChildFromBreeding`. Steel keeps the cause
+        // as a uuid, so it is resolved here rather than held as a reference.
+        // TODO: award the animals-bred stat here too, once Steel has one.
+        if let Some(cause) = self.love_cause_uuid().or_else(|| partner.love_cause_uuid())
+            && let Some(entity) = world.get_entity_by_uuid(&cause)
+            && let Some(player) = entity.as_player()
         {
-            // TODO: Award the animals-bred stat and advancement once those foundations exist.
+            triggers::entity::bred_animals(
+                player,
+                self.as_entity_event_source(),
+                partner.as_entity_event_source(),
+                offspring.map(EntityEventSource::as_entity_event_source),
+            );
         }
 
         self.set_age(PARENT_AGE_AFTER_BREEDING);

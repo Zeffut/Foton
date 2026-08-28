@@ -8,6 +8,7 @@ use steel_registry::particle_type::{BlockParticleOption, ParticleData};
 use steel_registry::vanilla_particle_types;
 
 use super::*;
+use crate::advancement::triggers;
 use crate::behavior::ITEM_BEHAVIORS;
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
@@ -890,6 +891,10 @@ pub trait LivingEntity: Entity {
         if damage < 0.0 {
             damage = 0.0;
         }
+        // Vanilla's `originalDamage`, taken before the shield pass below: it is
+        // what the blow was worth, where `damage` is what survived being
+        // blocked.
+        let original_damage = damage;
 
         // Vanilla parity: the item-blocking pass runs first, so what a raised
         // shield eats never reaches the freeze multiplier or the armor.
@@ -979,7 +984,47 @@ pub trait LivingEntity: Entity {
                 .record_last_damage_source(source, game_time);
         }
 
+        self.fire_hurt_triggers(world, source, original_damage, damage, blocked);
+
         success
+    }
+
+    /// Vanilla parity: the two `CriteriaTriggers` calls that close
+    /// `LivingEntity.hurtServer`, fired whether or not the hit counted.
+    ///
+    /// TODO: award `Stats.DAMAGE_BLOCKED_BY_SHIELD` alongside the first, once
+    /// Steel has a statistics foundation.
+    fn fire_hurt_triggers(
+        &self,
+        world: &World,
+        source: &DamageSource,
+        original_damage: f32,
+        damage: f32,
+        blocked: bool,
+    ) {
+        if let Some(hurt_player) = self.as_player() {
+            triggers::entity::entity_hurt_player(
+                hurt_player,
+                source,
+                original_damage,
+                damage,
+                blocked,
+            );
+        }
+        if let Some(attacker) = source
+            .causing_entity_id
+            .and_then(|id| world.get_entity_by_id(id))
+            && let Some(attacking_player) = attacker.as_player()
+        {
+            triggers::entity::player_hurt_entity(
+                attacking_player,
+                self.as_entity_event_source(),
+                source,
+                original_damage,
+                damage,
+                blocked,
+            );
+        }
     }
 
     /// Returns the sound the item this entity blocks with makes on a block.
@@ -1260,6 +1305,22 @@ pub trait LivingEntity: Entity {
         // reason the pickup is: every raider would repeat it verbatim.
         if let Some(raider) = self.as_raider() {
             raider::die_raider(raider, source);
+        }
+
+        // Vanilla parity: the `killCredit.awardKillScore(this, source)` that
+        // opens `LivingEntity.die`, and `getKillCredit` itself: the last player
+        // to hurt them wins over the last mob, so a shove into lava is still
+        // credited to whoever did the shoving.
+        let kill_credit = self
+            .living_base()
+            .last_hurt_by_player_uuid()
+            .and_then(|uuid| {
+                self.level()
+                    .and_then(|world| world.get_entity_by_uuid(&uuid))
+            })
+            .or_else(|| self.living_base().last_hurt_by_mob());
+        if let Some(credit) = kill_credit.as_deref() {
+            triggers::entity::award_kill_score(credit, self.as_entity_event_source(), source);
         }
 
         // Vanilla parity: `sourceEntity == null || sourceEntity.killedEntity(..)`

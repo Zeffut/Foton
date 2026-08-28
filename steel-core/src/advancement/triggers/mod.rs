@@ -12,7 +12,9 @@
 //! passes. The vanilla call sites Steel has not reached are marked with a
 //! `// Not implemented:` comment naming the trigger rather than granting it.
 
+pub mod entity;
 pub mod inventory;
+pub mod item;
 pub mod world;
 
 use steel_registry::advancement::TriggerInstance;

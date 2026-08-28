@@ -11,6 +11,7 @@ use steel_registry::{
 };
 use steel_utils::{BlockPos, BlockStateId, types::UpdateFlags};
 
+use crate::advancement::triggers;
 use crate::behavior::context::{BlockPlaceContext, InteractionResult, UseOnContext};
 use crate::behavior::{BLOCK_BEHAVIORS, ItemBehavior};
 use crate::entity::Entity;
@@ -98,6 +99,14 @@ impl BlockItem {
             Self::update_block_entity_components(&context, place_pos);
             let placed_behavior = BLOCK_BEHAVIORS.get_behavior(placed_state.get_block());
             placed_behavior.set_placed_by(placed_state, context.world, place_pos, context.source());
+            // Vanilla parity: the `CriteriaTriggers.PLACED_BLOCK` of
+            // `BlockItem.place`, which sits inside this same
+            // "the block that landed is the one we asked for" branch and runs
+            // before the stack is shrunk below.
+            if let Some(player) = context.player() {
+                let tool = context.with_item(Clone::clone);
+                triggers::world::placed_block(player, place_pos, placed_state, &tool);
+            }
         }
 
         // Play place sound (exclude the placing player, they hear it

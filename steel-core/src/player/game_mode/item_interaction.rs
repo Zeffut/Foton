@@ -3,6 +3,7 @@ use super::{
     InteractionResult, InventoryAccess, Player, REGISTRY, SUseItem, UseOnContext, World,
     wrap_degrees,
 };
+use crate::advancement::triggers;
 
 /// Handles using an item on a block.
 ///
@@ -23,6 +24,9 @@ pub fn use_item_on(
 ) -> InteractionResult {
     let pos = hit_result.block_pos;
     let state = world.get_block_state(pos);
+    // Vanilla takes `usedItemStack = itemStack.copy()` before the interaction,
+    // so a block use that consumed the item still reports what was used.
+    let used_item = player.inventory.lock().get_item_in_hand(hand).clone();
 
     // Spectator mode: can only open menus
     // TODO: Implement menu providers for blocks like chests
@@ -64,6 +68,7 @@ pub fn use_item_on(
         );
 
         if block_result.consumes_action() {
+            triggers::world::item_used_on_block(player, pos, state, &used_item);
             return block_result;
         }
 
@@ -111,6 +116,10 @@ pub fn use_item_on(
                     item.count = original_count;
                 }
             });
+        }
+
+        if result.consumes_action() {
+            triggers::world::item_used_on_block(player, pos, state, &used_item);
         }
 
         return result;

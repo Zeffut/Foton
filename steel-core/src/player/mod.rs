@@ -883,6 +883,13 @@ impl Player {
             .last_hurt_by_player_uuid()
             .and_then(|uuid| world.get_entity_by_uuid(&uuid))
             .or_else(|| self.living_base.last_hurt_by_mob());
+        // Vanilla parity: the `killCredit.awardKillScore(this, source)` of
+        // `LivingEntity.die`. `ServerPlayer.die` does not call super, so vanilla
+        // reaches it through `ServerPlayer.dieFromDamage`; either way the credit
+        // is the same value the death message is written from.
+        if let Some(credit) = kill_credit.as_deref() {
+            triggers::entity::award_kill_score(credit, self, source);
+        }
         let death_message = source.localized_death_message(&world, self, kill_credit.as_deref());
 
         self.send_packet(CPlayerCombatKill {

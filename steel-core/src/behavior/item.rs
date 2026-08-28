@@ -27,6 +27,7 @@ use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId};
 use text_components::TextComponent;
 
+use crate::advancement::triggers;
 use crate::behavior::items::DefaultItemBehavior;
 use crate::behavior::{InteractionResult, UseItemContext, UseOnContext};
 use crate::block_entity::entities::{SignBlockEntity, SignText};
@@ -69,6 +70,12 @@ fn apply_consume_effects(
         world.play_sound_at(sound, SoundSource::Neutral, position, 1.0, pitch, None);
     }
     // TODO: emit the consume particles once item-driven particles are supported.
+
+    // Vanilla fires this between the particles and the `ConsumableListener`
+    // dispatch, so the stack still carries its pre-consume count.
+    if let Some(player) = user.as_player() {
+        triggers::item::consume_item(player, stack);
+    }
 
     // Vanilla dispatches to every `ConsumableListener` carried by the stack.
     // `FoodProperties` is the only one Steel models today.

@@ -32,6 +32,7 @@ use steel_utils::locks::SyncMutex;
 use steel_utils::types::{InteractionHand, UpdateFlags};
 use steel_utils::{BlockPos, BlockStateId, ChunkPos, Downcast as _, DowncastType, DowncastTypeKey};
 
+use crate::advancement::triggers;
 use crate::behavior::InteractionResult;
 use crate::behavior::blocks::TurtleEggBlock;
 use crate::entity::ai::control::MoveControlOperation;
@@ -897,9 +898,24 @@ impl TurtleBreedGoal {
     fn new(speed_modifier: f64) -> Self {
         Self {
             inner: BreedGoal::with_breed_action(speed_modifier, |world, animal, partner| {
-                // TODO: Award the animals-bred stat and advancement once those
-                // foundations exist, as `Animal.finalizeSpawnChildFromBreeding`
-                // will need to as well.
+                // Vanilla's `Turtle.TurtleBreedGoal.breed` fires this itself
+                // rather than going through `finalizeSpawnChildFromBreeding`,
+                // and passes a null offspring: what a turtle leaves behind is
+                // an egg, not a hatchling.
+                // TODO: award the animals-bred stat here too, once Steel has one.
+                if let Some(cause) = animal
+                    .love_cause_uuid()
+                    .or_else(|| partner.love_cause_uuid())
+                    && let Some(entity) = world.get_entity_by_uuid(&cause)
+                    && let Some(player) = entity.as_player()
+                {
+                    triggers::entity::bred_animals(
+                        player,
+                        animal.as_entity_event_source(),
+                        partner.as_entity_event_source(),
+                        None,
+                    );
+                }
                 if let Some(turtle) = animal.downcast_ref::<TurtleEntity>() {
                     turtle.set_has_egg(true);
                 }
