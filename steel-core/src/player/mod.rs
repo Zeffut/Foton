@@ -96,7 +96,7 @@ use text_components::{
 };
 use text_components::{content::Resolvable, custom::CustomData};
 
-use crate::advancement::PlayerAdvancements;
+use crate::advancement::{PlayerAdvancements, triggers};
 use crate::behavior::{BlockStateBehaviorExt as _, InteractionResult};
 use crate::chunk::chunk_request::{ChunkRequestHandle, ChunkRequestState};
 use crate::config::RuntimeConfig;
@@ -320,6 +320,16 @@ pub struct Player {
     /// builds; Steel keeps them on the player and restores them from the save,
     /// which is the same thing through a different door.
     advancements: SyncMutex<PlayerAdvancements>,
+
+    /// The player inventory as the advancement triggers last saw it.
+    ///
+    /// Vanilla parity: `AbstractContainerMenu.lastSlots`, which is what decides
+    /// a slot changed and hands `INVENTORY_CHANGED` the stack that landed in
+    /// it. Steel keeps it on the player instead of the open menu, so opening a
+    /// container does not replay every slot; replaying only ever re-awards a
+    /// criterion that is already met, and starting empty reproduces the login
+    /// case vanilla gets from a freshly built menu.
+    last_seen_inventory: SyncMutex<Box<[ItemStack]>>,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `Player`.
@@ -511,6 +521,9 @@ impl Player {
             fishing: SyncMutex::new(None),
             raid_omen_position: SyncMutex::new(None),
             advancements: SyncMutex::new(PlayerAdvancements::new()),
+            last_seen_inventory: SyncMutex::new(
+                vec![ItemStack::empty(); PlayerInventory::CONTAINER_SIZE].into_boxed_slice(),
+            ),
         }
     }
 
@@ -592,7 +605,6 @@ impl Player {
 
             // TODO: Implement remaining player ticking logic here
             // - Managing game mode specific logic
-            // - Updating advancements
             // - Handling falling
 
             self.update_player_attributes();
@@ -617,6 +629,10 @@ impl Player {
         self.tick_open_menu();
         self.flush_inventory_resync();
         self.broadcast_inventory_changes();
+        // Vanilla fires this from the container listener that
+        // `AbstractContainerMenu.broadcastChanges` drives, which is the line
+        // above.
+        triggers::inventory::inventory_changed(self);
         self.update_pose();
 
         {
@@ -656,6 +672,13 @@ impl Player {
             self.send_packet(packet);
         }
 
+        // Vanilla parity: the `CriteriaTriggers.TICK.trigger(this)` of
+        // `ServerPlayer.tick` and the twenty-tick `CriteriaTriggers.LOCATION`
+        // of `ServerPlayer.doTick`, both of which run before the flush below.
+        triggers::world::tick(self);
+        if self.tick_count() % 20 == 0 {
+            triggers::world::location(self);
+        }
         self.flush_dirty_advancements();
 
         self.connection.tick();

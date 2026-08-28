@@ -146,9 +146,9 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # read back. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do.
 # `!seentab <id>` opens the advancements screen on that tab and `!seenclose`
-# shuts it again -- the server only keeps a player's advancement progress
-# flowing while their client says which tab it is watching, so an
-# advancement's criteria reach a scripted client no other way.
+# shuts it again, which is the only way to read back the tab the server puts
+# the screen on. The advancement updates themselves arrive without it: the
+# server flushes them every tick to every player.
 # The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,

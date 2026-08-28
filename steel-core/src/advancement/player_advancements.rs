@@ -12,6 +12,7 @@ use steel_registry::advancement::progress::{AdvancementProgress, CriterionProgre
 use steel_registry::advancement::{Advancement, AdvancementRef};
 use steel_utils::Identifier;
 
+use super::TRIGGER_INDEX;
 use super::tree::{ADVANCEMENT_TREE, AdvancementTree};
 use super::visibility;
 
@@ -176,6 +177,25 @@ impl PlayerAdvancements {
     #[must_use]
     pub fn progress(&self, node: usize) -> &AdvancementProgress {
         &self.progress[node]
+    }
+
+    /// Every criterion of `trigger_id` this player could still be awarded.
+    ///
+    /// Vanilla parity: the listener set `PlayerAdvancements.registerListeners`
+    /// and `unregisterListeners` keep in `activeTriggers`. A criterion listens
+    /// while both it and its advancement are unfinished, which is why a
+    /// finished advancement never picks up extra progress on a second
+    /// criterion of an `any_of` requirement.
+    #[must_use]
+    pub fn pending(&self, trigger_id: &str) -> Vec<CriterionRef> {
+        TRIGGER_INDEX
+            .criteria_for(trigger_id)
+            .iter()
+            .copied()
+            .filter(|&reference| {
+                !self.is_done(reference.node) && !self.is_criterion_done(reference)
+            })
+            .collect()
     }
 
     /// Whether one criterion has been met.

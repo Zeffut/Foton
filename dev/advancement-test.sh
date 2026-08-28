@@ -98,20 +98,38 @@ fail() { echo "########## ADVANCEMENT TEST FAILED ($1) ##########"; exit 1; }
 
 line_of() { grep -n -- "$1" join.log | head -1 | cut -d: -f1; }
 
+MARKER_ONE=$(line_of "server says: ADVMARKERONE")
 MARKER_TWO=$(line_of "server says: ADVMARKERTWO")
 MARKER_THREE=$(line_of "server says: ADVMARKERTHREE")
 MARKER_FOUR=$(line_of "server says: ADVMARKERFOUR")
-[ -n "$MARKER_TWO" ] && [ -n "$MARKER_THREE" ] && [ -n "$MARKER_FOUR" ] \
+[ -n "$MARKER_ONE" ] && [ -n "$MARKER_TWO" ] && [ -n "$MARKER_THREE" ] && [ -n "$MARKER_FOUR" ] \
   || fail "the ordering markers never came back, so nothing below can be trusted"
 
+# 0. The tick trigger fires at login. Vanilla unlocks the crafting table recipe
+#    through `unlock_right_away`, a `minecraft:tick` criterion with no
+#    conditions, so a player who has just spawned already has it. Nothing else
+#    in this test exercises that trigger, and it is the one every recipe the
+#    game starts you with hangs off.
+UNLOCKED=$(line_of "advancement minecraft:recipes/decorations/crafting_table criterion unlock_right_away met")
+[ -n "$UNLOCKED" ] || fail "the tick trigger never fired, so unlock_right_away stayed unmet"
+[ "$UNLOCKED" -lt "$MARKER_ONE" ] || fail "unlock_right_away was awarded late; it is a login-tick criterion"
+grep -q "advancements packet: reset=true" join.log \
+  || fail "the first packet did not tell the client to reset its tree"
+
 # 1. The crafting table finishes the story root, and that reaches the client.
+#    The window is what makes this discriminating: the `clear` before marker
+#    one emptied the inventory, so a root that was already done, or one that
+#    completes on anything else, lands outside it.
 ROOT_DONE=$(line_of "advancement minecraft:story/root is complete")
 [ -n "$ROOT_DONE" ] || fail "a crafting table did not finish story/root"
-[ "$ROOT_DONE" -gt "$MARKER_TWO" ] || fail "story/root finished before the crafting table existed"
-[ "$ROOT_DONE" -lt "$MARKER_THREE" ] || fail "story/root did not finish on the crafting table"
+[ "$ROOT_DONE" -gt "$MARKER_ONE" ] || fail "story/root finished before the crafting table existed"
+[ "$ROOT_DONE" -lt "$MARKER_TWO" ] || fail "story/root did not finish on the crafting table"
 
-# 2. The root is drawn, and somewhere other than the origin every icon would
-#    pile onto if the tree layout had been skipped.
+# 2. The root is drawn where the tree layout put it, not at the origin every
+#    icon would pile onto if the layout had been skipped, and with the tab
+#    background only a root carries.
+grep -q "advancement minecraft:story/root is drawn at 0,1.75" join.log \
+  || fail "story/root is not where TreeNodePosition puts it"
 grep -qE "advancement minecraft:story/root is drawn at .* background=minecraft:gui/advancements/backgrounds/stone" join.log \
   || fail "story/root arrived without its tab background"
 
@@ -122,11 +140,21 @@ STONE_DONE=$(line_of "advancement minecraft:story/mine_stone is complete")
   || fail "story/mine_stone finished on oak planks, so the item predicate is not discriminating"
 [ "$STONE_DONE" -lt "$MARKER_FOUR" ] || fail "story/mine_stone did not finish on the cobblestone"
 
-# 4. Visibility reaches two levels below what was finished, and no further.
-grep -q "advancement minecraft:story/upgrade_tools is drawn at" join.log \
-  || fail "finishing story/mine_stone did not reveal its child story/upgrade_tools"
-grep -q "advancement minecraft:story/smelt_iron is drawn at" join.log \
-  && fail "story/smelt_iron is three levels down and must stay hidden"
+# 4. Visibility reaches exactly two levels below what was finished. The chain is
+#    root -> mine_stone -> upgrade_tools -> smelt_iron, so finishing the root
+#    has to reveal upgrade_tools and must not reveal smelt_iron; smelt_iron
+#    only appears once mine_stone is done, three gives later. An evaluator that
+#    revealed one level fails the first check, one that revealed everything
+#    fails the second.
+UPGRADE_DRAWN=$(line_of "advancement minecraft:story/upgrade_tools is drawn at 2,1.75")
+[ -n "$UPGRADE_DRAWN" ] \
+  || fail "story/upgrade_tools was not revealed, or not at the column the layout puts it in"
+[ "$UPGRADE_DRAWN" -lt "$MARKER_TWO" ] \
+  || fail "story/upgrade_tools appeared later than the root completion that reveals it"
+SMELT_DRAWN=$(line_of "advancement minecraft:story/smelt_iron is drawn at")
+[ -n "$SMELT_DRAWN" ] || fail "finishing story/mine_stone did not reveal its grandchild story/smelt_iron"
+[ "$SMELT_DRAWN" -gt "$MARKER_THREE" ] \
+  || fail "story/smelt_iron is three levels below story/root and must stay hidden until mine_stone is done"
 
 # 5. Nothing the player never did may be handed out.
 grep -q "advancement minecraft:story/smelt_iron is complete" join.log \

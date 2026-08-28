@@ -7,6 +7,7 @@
 pub mod player_advancements;
 pub mod predicate;
 pub mod tree;
+pub mod triggers;
 
 pub mod visibility;
 

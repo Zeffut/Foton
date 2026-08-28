@@ -9,16 +9,31 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use steel_protocol::packets::game::{CSelectAdvancementsTab, CSystemChat, CUpdateAdvancements};
 use steel_registry::advancement::{AdvancementRewards, AdvancementType};
+use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_game_rules::SHOW_ADVANCEMENT_MESSAGES;
 use steel_utils::Identifier;
 use steel_utils::translations;
 use text_components::interactivity::HoverEvent;
 use text_components::{Modifier as _, TextComponent};
 
-use crate::advancement::{ADVANCEMENT_TREE, AwardOutcome, TabSelection};
+use crate::advancement::{ADVANCEMENT_TREE, AwardOutcome, CriterionRef, TabSelection};
 use crate::entity::Entity as _;
+use crate::inventory::container::Container as _;
 
 use super::Player;
+use super::player_inventory::PlayerInventory;
+
+/// The player inventory and the stacks that changed in it.
+///
+/// Vanilla parity: the two things `InventoryChangeTrigger` needs -- the whole
+/// container, for the slot counts and the multi-predicate sweep, and the stack
+/// a slot changed to, which a single-predicate criterion tests on its own.
+pub struct InventoryChange {
+    /// Every slot of the player inventory, in slot order.
+    pub items: Vec<ItemStack>,
+    /// What the slots that changed now hold.
+    pub changed: Vec<ItemStack>,
+}
 
 /// The moment an award is stamped with.
 ///
@@ -93,6 +108,42 @@ impl Player {
     #[must_use]
     pub fn has_advancement(&self, node: usize) -> bool {
         self.advancements.lock().is_done(node)
+    }
+
+    /// The criteria of `trigger_id` this player could still be awarded.
+    ///
+    /// Vanilla parity: `PlayerAdvancements.getTriggerMapForType`, whose map is
+    /// the set of criteria still listening for that trigger.
+    #[must_use]
+    pub fn pending_advancement_criteria(&self, trigger_id: &str) -> Vec<CriterionRef> {
+        self.advancements.lock().pending(trigger_id)
+    }
+
+    /// Reads the inventory and reports which slots moved since the last call.
+    ///
+    /// Vanilla parity: the `lastSlots` comparison of
+    /// `AbstractContainerMenu.triggerSlotListeners`, including its side effect
+    /// -- the snapshot is updated here, so a slot is reported once per change.
+    #[must_use]
+    pub fn take_inventory_change(&self) -> Option<InventoryChange> {
+        let inventory = self.inventory.lock();
+        let mut last = self.last_seen_inventory.lock();
+
+        let mut items = Vec::with_capacity(PlayerInventory::CONTAINER_SIZE);
+        let mut changed = Vec::new();
+        for slot in 0..PlayerInventory::CONTAINER_SIZE {
+            let item = inventory.get_item(slot).clone();
+            if !ItemStack::matches(&last[slot], &item) {
+                last[slot] = item.clone();
+                changed.push(item.clone());
+            }
+            items.push(item);
+        }
+
+        if changed.is_empty() {
+            return None;
+        }
+        Some(InventoryChange { items, changed })
     }
 
     fn complete_advancement(&self, node: usize) {
