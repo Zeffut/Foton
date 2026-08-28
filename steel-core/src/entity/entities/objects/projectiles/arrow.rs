@@ -8,6 +8,7 @@ use std::sync::{Arc, Weak};
 
 use glam::DVec3;
 use steel_macros::entity_behavior;
+use steel_protocol::packets::game::{CGameEvent, GameEventType};
 use steel_registry::entity_type::EntityTypeRef;
 use steel_registry::item_stack::ItemStack;
 use steel_registry::vanilla_entity_data::ArrowEntityData;
@@ -633,6 +634,22 @@ impl Projectile for ArrowEntity {
             }
             self.do_knockback(target, &source);
             self.do_post_hurt_effects(entity);
+
+            // Vanilla parity: the `PLAY_ARROW_HIT_SOUND` branch of
+            // `AbstractArrow.onHitEntity`. The hit marker is a client-side
+            // sound with no packet of its own -- the game event is the only
+            // thing that fires it -- so a shooter whose server knew perfectly
+            // well that the arrow landed still heard nothing.
+            if let Some(shooter) = owner.as_ref().and_then(|owner| owner.as_player())
+                && target.as_player().is_some()
+                && !self.is_silent()
+                && target.id() != shooter.id()
+            {
+                shooter.send_packet(CGameEvent {
+                    event: GameEventType::PlayArrowHitSound,
+                    data: 0.0,
+                });
+            }
         }
 
         self.play_sound(

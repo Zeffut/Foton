@@ -1040,6 +1040,16 @@ impl EntityBase {
     }
 
     fn stop_riding_relationship(&self) {
+        // The entity manager still holds this entity where it sat while
+        // riding. Refreshing that before the link goes keeps the spatial index
+        // honest for something that is about to move under its own power.
+        if let Err(error) = self.try_set_position(self.position()) {
+            log::warn!(
+                "Failed to refresh passenger {} manager position before dismounting: {error}",
+                self.id
+            );
+        }
+
         let vehicle = {
             let mut relationships = self.relationships.lock();
             let vehicle = relationships.vehicle();
@@ -1063,47 +1073,16 @@ impl EntityBase {
     }
 
     fn eject_passenger_relationships(&self) {
-        let passengers = {
-            let mut relationships = self.relationships.lock();
-            let passengers = relationships.passengers();
-            relationships.passengers.clear();
-            passengers
-        };
-
-        for passenger in passengers {
-            if passenger.base().clear_vehicle_if(self.id) {
-                passenger.base().set_boarding_cooldown(60);
-            }
+        // Vanilla parity: `Entity.setRemoved` ejects through
+        // `Entity::stopRiding`, which is virtual. That matters here rather
+        // than being a detail of style: a player's override is the only thing
+        // that tells that player's own client they are no longer aboard, and
+        // unlinking on the base instead left them seated on their own screen
+        // while the server had already put them off.
+        for passenger in self.passengers() {
+            passenger.stop_riding();
         }
-    }
-
-    fn clear_vehicle_if(&self, vehicle_id: i32) -> bool {
-        {
-            let mut relationships = self.relationships.lock();
-            let Some(vehicle) = relationships.vehicle() else {
-                return false;
-            };
-            if vehicle.id() != vehicle_id {
-                return false;
-            }
-        }
-
-        if let Err(error) = self.try_set_position(self.position()) {
-            log::warn!(
-                "Failed to refresh passenger {} manager position before clearing vehicle {vehicle_id}: {error}",
-                self.id
-            );
-        }
-
-        let mut relationships = self.relationships.lock();
-        let Some(vehicle) = relationships.vehicle() else {
-            return false;
-        };
-        if vehicle.id() != vehicle_id {
-            return false;
-        }
-        relationships.vehicle = None;
-        true
+        self.relationships.lock().passengers.clear();
     }
 
     /// Clears the removed flag and returns whether the entity had been removed.

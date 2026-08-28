@@ -1,7 +1,13 @@
 use glam::DVec3;
 
 use crate::entity::Entity as _;
-use steel_registry::vanilla_game_rules::{FIRE_SPREAD_RADIUS_AROUND_PLAYER, SPAWNER_BLOCKS_WORK};
+use steel_protocol::packets::game::{CEntityEvent, CGameEvent, GameEventType};
+use steel_registry::vanilla_game_rules::{
+    FIRE_SPREAD_RADIUS_AROUND_PLAYER, IMMEDIATE_RESPAWN, LIMITED_CRAFTING, REDUCED_DEBUG_INFO,
+    SPAWNER_BLOCKS_WORK,
+};
+use steel_utils::Identifier;
+use steel_utils::entity_events::EntityStatus;
 
 use super::{
     ADVANCE_TIME, BlockPos, CChangeDifficulty, ChunkPos, Difficulty, Digest, ErasedGameRuleRef,
@@ -185,14 +191,57 @@ impl World {
     /// WARNING: this function acquires a write lock on the level data.
     /// if you already have a read or write lock on level data, this will DEADLOCK
     pub fn set_game_rule<T: GameRuleValueType>(&self, rule: &GameRule<T>, value: T) -> bool {
+        let announced = GameRuleValue::new(value.clone());
         let updated = {
             let mut guard = self.level_data.write();
             self.set_game_rule_with_guard(rule, value, &mut guard)
         };
-        if updated && rule.key() == ADVANCE_TIME.key() {
-            self.broadcast_time_sync();
+        if updated {
+            self.publish_game_rule_change(rule.key(), &announced);
         }
         updated
+    }
+
+    /// Tells the clients the rules that only they act on.
+    ///
+    /// Vanilla parity: `MinecraftServer.onGameRuleChanged`. Three rules are
+    /// enforced entirely on the client -- whether the death screen appears,
+    /// whether the recipe book gates crafting, and how much the F3 screen
+    /// shows -- so the server changing one and saying nothing leaves every
+    /// player acting on the old value until they reconnect. Steel's rules are
+    /// per-world where vanilla's are per-server, so the announcement goes to
+    /// the world whose rule changed.
+    fn publish_game_rule_change(&self, key: &Identifier, value: &GameRuleValue) {
+        if key == ADVANCE_TIME.key() {
+            self.broadcast_time_sync();
+            return;
+        }
+        let Some(&enabled) = value.downcast_ref::<bool>() else {
+            return;
+        };
+        if key == REDUCED_DEBUG_INFO.key() {
+            let event = if enabled {
+                EntityStatus::ReducedDebugInfo
+            } else {
+                EntityStatus::FullDebugInfo
+            };
+            self.broadcast_to_all_with(|player| CEntityEvent {
+                entity_id: player.id(),
+                event,
+            });
+            return;
+        }
+        let event = if key == LIMITED_CRAFTING.key() {
+            GameEventType::LimitedCrafting
+        } else if key == IMMEDIATE_RESPAWN.key() {
+            GameEventType::ImmediateRespawn
+        } else {
+            return;
+        };
+        self.broadcast_to_all(CGameEvent {
+            event,
+            data: if enabled { 1.0 } else { 0.0 },
+        });
     }
 
     /// Sets the value of a game rule on the `LevelDataManager` guard being passed in.
@@ -211,14 +260,15 @@ impl World {
 
     /// Sets a type-erased value for a dynamically selected game rule.
     pub fn set_erased_game_rule(&self, rule: ErasedGameRuleRef, value: GameRuleValue) -> bool {
+        let announced = value.clone();
         let updated = self
             .level_data
             .write()
             .data_mut()
             .game_rules_values
             .set_erased(rule, value, &REGISTRY.game_rules);
-        if updated && rule.key() == ADVANCE_TIME.key() {
-            self.broadcast_time_sync();
+        if updated {
+            self.publish_game_rule_change(rule.key(), &announced);
         }
         updated
     }

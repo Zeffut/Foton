@@ -183,13 +183,19 @@ impl Player {
     /// Handles the player abilities packet from the client.
     /// This is sent when the player starts or stops flying.
     pub fn handle_player_abilities(&self, packet: SPlayerAbilities) {
-        let mut abilities = self.abilities.lock();
-
-        if abilities.may_fly {
-            abilities.flying = packet.is_flying();
-        } else if packet.is_flying() {
-            // Client tried to fly but isn't allowed - resync abilities
-            drop(abilities);
+        // Vanilla parity: `ServerGamePacketListenerImpl.handlePlayerAbilities`
+        // is `flying = packet.isFlying() && abilities.mayfly`, so a claim the
+        // player is not allowed to make clears the flag rather than leaving
+        // whatever was there. Keeping it left a player whose permission had
+        // been revoked mid-flight flying on the server forever.
+        let allowed = {
+            let mut abilities = self.abilities.lock();
+            abilities.flying = packet.is_flying() && abilities.may_fly;
+            abilities.may_fly
+        };
+        if !allowed && packet.is_flying() {
+            // The client asked for something it may not have, so it is told
+            // again what it may have.
             self.send_abilities();
         }
     }

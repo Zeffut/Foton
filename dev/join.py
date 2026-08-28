@@ -75,6 +75,9 @@ PLAY_C_SET_PASSENGERS = 107
 PLAY_C_SYSTEM_CHAT = 121
 PLAY_C_ANIMATE = 2
 PLAY_C_LEVEL_PARTICLES = 47
+PLAY_C_EXPLODE = 36
+PLAY_C_HURT_ANIMATION = 42
+PLAY_C_SET_ENTITY_DATA = 99
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CHAT_COMMAND = 7
 PLAY_S_SET_CARRIED_ITEM = 53
@@ -154,7 +157,16 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # client has been told about -- a critical hit leaves the server no other way;
 # and `!sawparticle <name>` / `!forgetparticles` do the same for the particles
 # the server has asked for, which is how the puff a hard landing kicks up is
-# read back. Those are the only way to reach an item's `use_on` and
+# read back. `!sawexplosion` reports the pushes
+# `ClientboundExplodePacket` handed this client and `!forgetexplosions`
+# clears them -- the server's own copy of a player's velocity is not
+# something the player feels, so that packet is the only place a blast that
+# launched the player differs from one that only moved a number;
+# `!hurtdirections` reports the angles `ClientboundHurtAnimationPacket`
+# tilted the screen by, which is the only way to tell the direction a blow
+# came from apart from the direction the player happens to be facing; and
+# `!sawabsorption` reports the golden hearts the synchronized data carried,
+# which no server-side reading can stand in for. Those are the only way to reach an item's `use_on` and
 # `use`, which no command can do.
 # `!respawn` presses the Respawn button on the death screen, which is the one
 # packet no command can stand in for, and `!alive` stops the run unless the
@@ -231,6 +243,13 @@ class Connection:
         self.health = None
         self.death_screens = 0
         self.respawns = 0
+        # How many explosion packets arrived, and the pushes they carried.
+        self.explosions = 0
+        self.explosion_knockbacks = []
+        # Every angle the server has tilted this player's screen by.
+        self.hurt_directions = []
+        # The last absorption the player's own synchronized data carried.
+        self.absorption = None
 
     def note_drop(self, reason):
         """Records that the server stopped talking, and says so once."""
@@ -593,6 +612,12 @@ def run_play(connection, watch_seconds=0):
             note_animation(connection, payload)
         elif packet_id == PLAY_C_LEVEL_PARTICLES:
             note_particles(connection, payload)
+        elif packet_id == PLAY_C_EXPLODE:
+            note_explosion(connection, payload)
+        elif packet_id == PLAY_C_HURT_ANIMATION:
+            note_hurt_animation(connection, payload)
+        elif packet_id == PLAY_C_SET_ENTITY_DATA:
+            note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -653,6 +678,123 @@ def note_particles(connection, payload):
         return
     particle_id, _rest = read_varint(payload[header:])
     connection.particles.add(PARTICLE_NAMES.get(particle_id, str(particle_id)))
+
+
+# Vanilla `Player.DATA_PLAYER_ABSORPTION_ID`, the eighteenth entry of a
+# player's synchronized data and the only place the golden hearts live.
+ABSORPTION_DATA_INDEX = 17
+
+# Vanilla `EntityDataSerializers` registration order. Only the fixed-width
+# entries are listed: a walker that guessed at a variable-width payload it does
+# not understand would misread everything after it, so it stops instead.
+FIXED_WIDTH_SERIALIZERS = {0: 1, 3: 4, 9: 12, 10: 8, 39: 12, 40: 16}
+VARINT_SERIALIZERS = {1, 12, 19, 20, 42}
+BOOLEAN_SERIALIZER = 8
+PARTICLES_SERIALIZER = 17
+
+# The particle a mob effect puts in `LivingEntity.DATA_EFFECT_PARTICLES`, and
+# how many bytes follow its id. `ColorParticleOption` is one packed ARGB int.
+# Named rather than numbered because particle ids move between versions, and a
+# stale number here would silently misread everything after the list -- which
+# includes absorption.
+EFFECT_PARTICLE_PAYLOAD_WIDTHS = {"entity_effect": 4}
+
+
+def skip_particle_list(data):
+    """Steps over a `particles` entry, or gives up rather than guess.
+
+    Every particle carries its own payload, so a list cannot be skipped without
+    knowing each one. Returning `None` for an unfamiliar particle makes the
+    walk stop and report nothing, which fails a test loudly instead of reading
+    a wrong number out of the bytes that follow.
+    """
+    count, data = read_varint(data)
+    for _ in range(count):
+        particle_id, data = read_varint(data)
+        width = EFFECT_PARTICLE_PAYLOAD_WIDTHS.get(PARTICLE_NAMES.get(particle_id))
+        if width is None or len(data) < width:
+            return None
+        data = data[width:]
+    return data
+
+
+def note_explosion(connection, payload):
+    """Records the push an explosion handed this client.
+
+    A player is authoritative over their own position, so a blast changing
+    their velocity on the server changes nothing they can feel:
+    `ClientboundExplodePacket.playerKnockback` is what
+    `ClientPacketListener.handleExplosion` hands to `addDeltaMovement`, and it
+    is the only path by which any explosion launches a player. Reading it here
+    is the only way to tell a blast that moved the player from one that only
+    moved a number.
+
+    The header is fixed width -- three doubles, a float and a plain int -- and
+    the optional knockback follows it behind one boolean.
+    """
+    header = 3 * 8 + 4 + 4
+    if len(payload) < header + 1:
+        return
+    connection.explosions += 1
+    if payload[header] == 0:
+        return
+    rest = payload[header + 1 :]
+    if len(rest) < 24:
+        return
+    connection.explosion_knockbacks.append(struct.unpack(">ddd", rest[:24]))
+
+
+def note_hurt_animation(connection, payload):
+    """Records the angle the server tilted this player's screen by.
+
+    Vanilla sends `ClientboundHurtAnimationPacket` from one place only --
+    `ServerPlayer.indicateDamage` -- and its float is `hurtDir`, the direction
+    of the blow relative to where the player is looking. A server that sent the
+    player's own yaw instead would still make the screen twitch, so only the
+    number distinguishes the two.
+    """
+    _entity_id, rest = read_varint(payload)
+    if len(rest) < 4:
+        return
+    connection.hurt_directions.append(struct.unpack(">f", rest[:4])[0])
+
+
+def note_entity_data(connection, payload):
+    """Records the absorption a player's own synchronized data carried.
+
+    This is the field the client reads to draw the golden hearts, and the
+    server having the right number somewhere else is exactly the bug this
+    reads for.
+
+    The walk stops at the first serializer whose width is not known rather than
+    guessing, so a packet it cannot follow reports nothing instead of reporting
+    a wrong number.
+    """
+    entity_id, rest = read_varint(payload)
+    if connection.player_entity_id is None or entity_id != connection.player_entity_id:
+        return
+    while rest:
+        index = rest[0]
+        if index == 0xFF:
+            return
+        serializer, rest = read_varint(rest[1:])
+        if serializer in VARINT_SERIALIZERS:
+            _value, rest = read_varint(rest)
+            continue
+        if serializer == PARTICLES_SERIALIZER:
+            rest = skip_particle_list(rest)
+            if rest is None:
+                return
+            continue
+        if serializer == BOOLEAN_SERIALIZER:
+            rest = rest[1:]
+            continue
+        width = FIXED_WIDTH_SERIALIZERS.get(serializer)
+        if width is None or len(rest) < width:
+            return
+        if index == ABSORPTION_DATA_INDEX and serializer == 3:
+            connection.absorption = struct.unpack(">f", rest[:4])[0]
+        rest = rest[width:]
 
 
 def note_animation(connection, payload):
@@ -728,6 +870,12 @@ def pump(connection, seconds, spawned):
             note_animation(connection, payload)
         elif packet_id == PLAY_C_LEVEL_PARTICLES:
             note_particles(connection, payload)
+        elif packet_id == PLAY_C_EXPLODE:
+            note_explosion(connection, payload)
+        elif packet_id == PLAY_C_HURT_ANIMATION:
+            note_hurt_animation(connection, payload)
+        elif packet_id == PLAY_C_SET_ENTITY_DATA:
+            note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
@@ -994,6 +1142,37 @@ def run_directive(connection, directive):
     elif parts[0] == "forgetparticles":
         connection.particles.clear()
         print("  forgot the particles seen so far")
+    elif parts[0] == "sawexplosion":
+        # Two separate facts, reported separately on purpose: a blast the
+        # client was told about at all, and a blast that pushed it. Steel used
+        # to do neither, and a test that only asked the first would go green
+        # again the moment the packet existed but carried nothing.
+        print(f"  the client was told about {connection.explosions} explosions")
+        for x, y, z in connection.explosion_knockbacks:
+            print(f"  the blast pushed the client by {x:.4f} {y:.4f} {z:.4f}")
+        if not connection.explosion_knockbacks:
+            print("  no explosion knockback reached the client")
+    elif parts[0] == "forgetexplosions":
+        connection.explosions = 0
+        connection.explosion_knockbacks.clear()
+        print("  forgot the explosions seen so far")
+    elif parts[0] == "hurtdirections":
+        if connection.hurt_directions:
+            angles = " ".join(f"{angle:.2f}" for angle in connection.hurt_directions)
+            print(f"  the client was tilted by {angles}")
+        else:
+            print("  no hurt animation reached the client")
+    elif parts[0] == "forgethurt":
+        connection.hurt_directions.clear()
+        print("  forgot the hurt animations seen so far")
+    elif parts[0] == "sawabsorption":
+        if connection.absorption is None:
+            print("  no absorption reached the client")
+        else:
+            print(f"  the client was given {connection.absorption:.2f} absorption")
+    elif parts[0] == "forgetabsorption":
+        connection.absorption = None
+        print("  forgot the absorption seen so far")
     elif parts[0] == "forgetanimations":
         connection.animations.clear()
         print("  forgot the animations seen so far")
@@ -1725,6 +1904,12 @@ def watch_for_spawns(connection, seconds, spawned):
             note_animation(connection, payload)
         elif packet_id == PLAY_C_LEVEL_PARTICLES:
             note_particles(connection, payload)
+        elif packet_id == PLAY_C_EXPLODE:
+            note_explosion(connection, payload)
+        elif packet_id == PLAY_C_HURT_ANIMATION:
+            note_hurt_animation(connection, payload)
+        elif packet_id == PLAY_C_SET_ENTITY_DATA:
+            note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
