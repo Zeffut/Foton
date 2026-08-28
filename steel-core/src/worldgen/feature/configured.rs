@@ -93,6 +93,7 @@ impl FeatureDecorationRunner {
             ConfiguredFeatureKind::EndSpike(_) => place_end_spike,
             ConfiguredFeatureKind::FallenTree(_) => place_fallen_tree,
             ConfiguredFeatureKind::Fossil(_) => place_fossil,
+            ConfiguredFeatureKind::FillLayer(_) => place_fill_layer,
             ConfiguredFeatureKind::FreezeTopLayer => place_freeze_top_layer,
             ConfiguredFeatureKind::Geode(_) => place_geode,
             ConfiguredFeatureKind::GlowstoneBlob => place_glowstone_blob,
@@ -916,6 +917,16 @@ fn place_monster_room<L: WorldGenLevel>(
         context.random,
         context.origin,
     )
+}
+
+fn place_fill_layer<L: WorldGenLevel>(
+    context: &mut ConfiguredFeaturePlaceContext<'_, L>,
+    kind: &ConfiguredFeatureKind,
+) -> bool {
+    let ConfiguredFeatureKind::FillLayer(config) = kind else {
+        panic!("fill_layer placer received wrong configured feature kind");
+    };
+    FeatureDecorationRunner::place_fill_layer_feature(context.region, context.origin, *config)
 }
 
 fn place_freeze_top_layer<L: WorldGenLevel>(

@@ -1,10 +1,60 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
+use steel_registry::RegistryEntry as _;
 use steel_registry::biome::BiomeRef;
-use steel_registry::feature::PlacedFeatureEntryRef;
-use steel_registry::{Registry, RegistryEntry as _, RegistryExt as _};
+use steel_registry::feature::{PlacedFeatureData, PlacedFeatureEntryRef};
+
+/// One placed feature a biome's generation settings list for a step.
+///
+/// Vanilla parity: a `Holder<PlacedFeature>`, which can be a registry reference
+/// or a direct value. The flat generator's `FILL_LAYER` layers are the only
+/// direct ones Steel builds, and they exist only for the world that built them,
+/// so they are carried here rather than registered.
+#[derive(Clone, Debug)]
+pub(crate) enum FeatureEntry {
+    /// A registered placed feature.
+    Registered(PlacedFeatureEntryRef),
+    /// A placed feature a generator built for itself, with the identity the
+    /// generator gave it.
+    Inline(usize, Arc<PlacedFeatureData>),
+}
+
+impl FeatureEntry {
+    fn identity(&self) -> FeatureIdentity {
+        match self {
+            Self::Registered(feature) => {
+                let Some(id) = feature.try_id() else {
+                    panic!("placed feature {} is not registered", feature.key);
+                };
+                FeatureIdentity::Registered(id)
+            }
+            Self::Inline(identity, _) => FeatureIdentity::Inline(*identity),
+        }
+    }
+}
+
+/// The placed features one biome contributes, step by step.
+///
+/// Vanilla parity: `BiomeGenerationSettings.features()` for that biome, after
+/// whatever the generator does to it -- the flat generator rewrites its own
+/// biome's list in `adjustGenerationSettings`.
+pub(crate) struct BiomeFeatures {
+    /// The biome these features belong to.
+    pub(crate) biome: BiomeRef,
+    /// Features per decoration step.
+    pub(crate) steps: Vec<Vec<FeatureEntry>>,
+}
+
+/// Identity of one placed feature, which is what vanilla's index lookup is
+/// built on.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum FeatureIdentity {
+    Registered(usize),
+    Inline(usize),
+}
 
 /// Cached vanilla ordering for all placed features reachable from a biome source.
 #[derive(Debug)]
@@ -14,8 +64,8 @@ pub(super) struct FeatureSorter {
 
 #[derive(Debug)]
 pub(super) struct FeatureStepData {
-    features: Box<[PlacedFeatureEntryRef]>,
-    index_by_placed_feature_id: FxHashMap<usize, usize>,
+    features: Box<[FeatureEntry]>,
+    index_by_identity: FxHashMap<FeatureIdentity, usize>,
     feature_indices_by_biome_id: FxHashMap<usize, Box<[usize]>>,
 }
 
@@ -23,16 +73,12 @@ pub(super) struct FeatureStepData {
 struct FeatureVertex {
     step: usize,
     order: usize,
-    placed_feature_id: usize,
+    identity: FeatureIdentity,
 }
 
 impl Ord for FeatureVertex {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.step, self.order, self.placed_feature_id).cmp(&(
-            other.step,
-            other.order,
-            other.placed_feature_id,
-        ))
+        (self.step, self.order, self.identity).cmp(&(other.step, other.order, other.identity))
     }
 }
 
@@ -44,38 +90,30 @@ impl PartialOrd for FeatureVertex {
 
 impl FeatureSorter {
     #[must_use]
-    pub(super) fn build(possible_biomes: &[BiomeRef], registry: &Registry) -> Self {
-        let mut feature_order_by_id = FxHashMap::default();
+    pub(super) fn build(sources: &[BiomeFeatures]) -> Self {
+        let mut feature_order_by_identity = FxHashMap::default();
         let mut next_feature_order = 0usize;
         let mut edges = BTreeMap::<FeatureVertex, BTreeSet<FeatureVertex>>::new();
 
-        for biome in possible_biomes {
+        for source in sources {
             let mut biome_features = Vec::new();
 
-            for (step, feature_stage) in biome.features.iter().enumerate() {
-                for feature_key in feature_stage {
-                    let Some(placed_feature_id) = registry.placed_features.id_from_key(feature_key)
-                    else {
-                        panic!(
-                            "biome {} references unknown placed feature {}",
-                            biome.key, feature_key
-                        );
-                    };
-
+            for (step, feature_stage) in source.steps.iter().enumerate() {
+                for entry in feature_stage {
+                    let identity = entry.identity();
                     let feature_order =
-                        if let Some(&order) = feature_order_by_id.get(&placed_feature_id) {
-                            order
-                        } else {
-                            let order = next_feature_order;
-                            next_feature_order += 1;
-                            feature_order_by_id.insert(placed_feature_id, order);
-                            order
-                        };
+                        *feature_order_by_identity
+                            .entry(identity)
+                            .or_insert_with(|| {
+                                let order = next_feature_order;
+                                next_feature_order += 1;
+                                order
+                            });
 
                     let vertex = FeatureVertex {
                         step,
                         order: feature_order,
-                        placed_feature_id,
+                        identity,
                     };
                     edges.entry(vertex).or_default();
                     biome_features.push(vertex);
@@ -91,7 +129,7 @@ impl FeatureSorter {
         }
 
         let sorted_features = Self::topological_sort(&edges);
-        Self::from_sorted_features(&sorted_features, possible_biomes, registry)
+        Self::from_sorted_features(&sorted_features, sources)
     }
 
     #[must_use]
@@ -151,69 +189,59 @@ impl FeatureSorter {
     }
 
     #[must_use]
-    fn from_sorted_features(
-        sorted_features: &[FeatureVertex],
-        possible_biomes: &[BiomeRef],
-        registry: &Registry,
-    ) -> Self {
+    fn from_sorted_features(sorted_features: &[FeatureVertex], sources: &[BiomeFeatures]) -> Self {
         let Some(max_step) = sorted_features.iter().map(|feature| feature.step).max() else {
             return Self {
                 steps: Box::new([]),
             };
         };
 
+        let entry_by_identity: FxHashMap<FeatureIdentity, FeatureEntry> = sources
+            .iter()
+            .flat_map(|source| source.steps.iter().flatten())
+            .map(|entry| (entry.identity(), entry.clone()))
+            .collect();
+
         let mut steps = Vec::with_capacity(max_step + 1);
         for step in 0..=max_step {
             let mut features = Vec::new();
-            let mut index_by_placed_feature_id = FxHashMap::default();
+            let mut index_by_identity = FxHashMap::default();
 
             for feature in sorted_features
                 .iter()
                 .filter(|feature| feature.step == step)
             {
-                let Some(placed_feature) =
-                    registry.placed_features.by_id(feature.placed_feature_id)
-                else {
-                    panic!(
-                        "feature sorter references unknown placed feature id {}",
-                        feature.placed_feature_id
-                    );
+                let Some(entry) = entry_by_identity.get(&feature.identity) else {
+                    panic!("feature sorter references a placed feature no biome listed");
                 };
                 let index = features.len();
-                features.push(placed_feature);
-                index_by_placed_feature_id.insert(feature.placed_feature_id, index);
+                features.push(entry.clone());
+                index_by_identity.insert(feature.identity, index);
             }
 
             steps.push(FeatureStepData {
                 features: features.into_boxed_slice(),
-                index_by_placed_feature_id,
+                index_by_identity,
                 feature_indices_by_biome_id: FxHashMap::default(),
             });
         }
 
-        for biome in possible_biomes {
-            let Some(biome_id) = biome.try_id() else {
-                panic!("possible biome {} is not registered", biome.key);
+        for source in sources {
+            let Some(biome_id) = source.biome.try_id() else {
+                panic!("possible biome {} is not registered", source.biome.key);
             };
 
-            for (step, feature_stage) in biome.features.iter().enumerate() {
+            for (step, feature_stage) in source.steps.iter().enumerate() {
                 let Some(step_data) = steps.get_mut(step) else {
                     continue;
                 };
 
                 let mut indices = Vec::with_capacity(feature_stage.len());
-                for feature_key in feature_stage {
-                    let Some(placed_feature_id) = registry.placed_features.id_from_key(feature_key)
-                    else {
+                for entry in feature_stage {
+                    let Some(feature_index) = step_data.feature_index(entry.identity()) else {
                         panic!(
-                            "biome {} references unknown placed feature {}",
-                            biome.key, feature_key
-                        );
-                    };
-                    let Some(feature_index) = step_data.feature_index(placed_feature_id) else {
-                        panic!(
-                            "placed feature {} from biome {} was not included in decoration step {}",
-                            feature_key, biome.key, step
+                            "a placed feature from biome {} was not included in decoration step {step}",
+                            source.biome.key
                         );
                     };
                     indices.push(feature_index);
@@ -238,14 +266,12 @@ impl FeatureSorter {
 }
 
 impl FeatureStepData {
-    pub(super) fn feature_index(&self, placed_feature_id: usize) -> Option<usize> {
-        self.index_by_placed_feature_id
-            .get(&placed_feature_id)
-            .copied()
+    fn feature_index(&self, identity: FeatureIdentity) -> Option<usize> {
+        self.index_by_identity.get(&identity).copied()
     }
 
-    pub(super) fn feature(&self, index: usize) -> Option<PlacedFeatureEntryRef> {
-        self.features.get(index).copied()
+    pub(super) fn feature(&self, index: usize) -> Option<&FeatureEntry> {
+        self.features.get(index)
     }
 
     pub(super) fn feature_indices_for_biome(&self, biome_id: usize) -> Option<&[usize]> {

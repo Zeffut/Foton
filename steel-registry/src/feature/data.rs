@@ -10,9 +10,22 @@ use crate::blocks::BlockRef;
 use crate::fluid::FluidRef;
 use glam::IVec3;
 use steel_utils::{
-    Direction, Identifier, Rotation,
+    BlockStateId, Direction, Identifier, Rotation,
     value_providers::{FloatProvider, HeightProvider, IntProvider, UniformIntProvider},
 };
+
+/// Vanilla's `LayerConfiguration`.
+///
+/// The only thing that builds one is the flat generator, out of its own layer
+/// list, so the state is an already-resolved block state rather than the
+/// build-time `BlockStateData` a datapack-decoded configuration carries.
+#[derive(Debug, Clone, Copy)]
+pub struct LayerConfiguration {
+    /// Layer index above the dimension floor.
+    pub height: i32,
+    /// State the layer is filled with.
+    pub state: BlockStateId,
+}
 
 /// A configured feature reference, either a registry entry or an inline configured feature.
 #[derive(Debug, Clone)]
@@ -69,6 +82,7 @@ pub enum ConfiguredFeatureKind {
     EndPlatform,
     EndSpike(EndSpikeConfiguration),
     FallenTree(FallenTreeConfiguration),
+    FillLayer(LayerConfiguration),
     Fossil(FossilConfiguration),
     FreezeTopLayer,
     Geode(GeodeConfiguration),

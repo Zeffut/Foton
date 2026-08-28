@@ -20,7 +20,9 @@ mod state;
 mod vanilla_collections;
 mod weather;
 
+pub(crate) use prelude::DECORATION_STEP_COUNT;
 pub(crate) use runner::FeatureDecorationRunner;
+pub(crate) use sorter::{BiomeFeatures, FeatureEntry};
 
 #[cfg(test)]
 mod tests;

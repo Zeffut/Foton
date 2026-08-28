@@ -32,6 +32,7 @@ for test in dev/join-test.sh dev/selector-test.sh dev/rcon-test.sh \
             dev/decoration-test.sh \
             dev/moss-test.sh dev/structure-block-test.sh \
             dev/jigsaw-test.sh dev/locate-biome-test.sh \
+            dev/flat-features-test.sh \
             dev/fire-test.sh dev/grass-test.sh dev/death-test.sh \
             dev/map-test.sh \
             dev/lightning-test.sh \

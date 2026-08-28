@@ -51,4 +51,4 @@ pub(super) use crate::world::{LevelAccessor, LevelReader, WorldGenLevel};
 pub(super) use crate::worldgen::generator::vanilla::fuzzed_biome_at_block;
 pub(super) use crate::worldgen::region::WorldGenRegion;
 
-pub(super) const DECORATION_STEP_COUNT: usize = 11;
+pub(crate) const DECORATION_STEP_COUNT: usize = 11;

@@ -8,7 +8,7 @@ pub mod registry;
 pub(crate) mod vanilla;
 
 pub use empty::EmptyChunkGenerator;
-pub use flat::FlatChunkGenerator;
+pub use flat::{FlatChunkGenerator, FlatDecoration};
 #[cfg(feature = "benchmark-support")]
 pub use generation_chunk::benchmark_support as generation_benchmark_support;
 pub use generation_chunk::{CarversPhase, GenerationChunk, NoisePhase, SurfacePhase};

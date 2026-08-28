@@ -5,7 +5,7 @@ use steel_registry::structure::StructureRef;
 use steel_utils::{BoundingBox, ChunkPos};
 
 use super::prelude::*;
-use super::sorter::{FeatureSorter, FeatureStepData};
+use super::sorter::{BiomeFeatures, FeatureEntry, FeatureSorter, FeatureStepData};
 use crate::worldgen::structure::piece_placer::StructurePiecePlacer;
 #[cfg(test)]
 use steel_worldgen::structure::StructureReferenceMap;
@@ -117,20 +117,38 @@ impl FeatureDecorationRunner {
         }
     }
 
+    /// The runner a generator whose biomes decorate straight out of their own
+    /// generation settings gets.
     #[must_use]
     pub(crate) fn new(possible_biomes: &[BiomeRef], registry: &Registry) -> Self {
+        let sources = possible_biomes
+            .iter()
+            .map(|&biome| BiomeFeatures {
+                biome,
+                steps: Self::registered_features(biome, registry),
+            })
+            .collect::<Vec<_>>();
+        Self::with_features(sources)
+    }
+
+    /// The runner a generator that rewrites its biomes' feature lists gets.
+    ///
+    /// Vanilla parity: `ChunkGenerator`'s `generationSettingsGetter`, which the
+    /// flat generator points at `FlatLevelGeneratorSettings.adjustGenerationSettings`.
+    #[must_use]
+    pub(crate) fn with_features(sources: Vec<BiomeFeatures>) -> Self {
         let mut source_biome_ids = FxHashSet::default();
-        let mut unique_biomes = Vec::new();
+        let mut unique_sources = Vec::new();
         let mut max_biome_id = 0;
 
-        for &biome in possible_biomes {
-            let Some(biome_id) = biome.try_id() else {
-                panic!("possible biome {} is not registered", biome.key);
+        for source in sources {
+            let Some(biome_id) = source.biome.try_id() else {
+                panic!("possible biome {} is not registered", source.biome.key);
             };
             max_biome_id = max_biome_id.max(biome_id);
 
             if source_biome_ids.insert(biome_id) {
-                unique_biomes.push(biome);
+                unique_sources.push(source);
             }
         }
 
@@ -140,9 +158,35 @@ impl FeatureDecorationRunner {
         }
 
         Self {
-            sorter: FeatureSorter::build(&unique_biomes, registry),
+            sorter: FeatureSorter::build(&unique_sources),
             source_biome_lookup,
         }
+    }
+
+    /// Resolves a biome's own placed-feature keys into registry entries.
+    #[must_use]
+    pub(crate) fn registered_features(
+        biome: BiomeRef,
+        registry: &Registry,
+    ) -> Vec<Vec<FeatureEntry>> {
+        biome
+            .features
+            .iter()
+            .map(|stage| {
+                stage
+                    .iter()
+                    .map(|key| {
+                        let Some(feature) = registry.placed_features.by_key(key) else {
+                            panic!(
+                                "biome {} references unknown placed feature {key}",
+                                biome.key
+                            );
+                        };
+                        FeatureEntry::Registered(feature)
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     pub(crate) fn decorate(
@@ -392,14 +436,33 @@ impl FeatureDecorationRunner {
                 panic!("decoration step {step} references missing feature index {feature_index}");
             };
             random.set_feature_seed(decoration_seed, feature_index_i32, step_i32);
-            Self::place_placed_feature_entry(
-                region,
-                registry,
-                random,
-                origin,
-                feature,
-                biome_zoom_seed,
-            );
+            match feature {
+                FeatureEntry::Registered(feature) => {
+                    Self::place_placed_feature_entry(
+                        region,
+                        registry,
+                        random,
+                        origin,
+                        feature,
+                        biome_zoom_seed,
+                    );
+                }
+                // A feature the generator built for itself is not in any
+                // biome's list by key, so there is no biome filter to check --
+                // and the only one Steel builds carries no placement modifiers
+                // at all.
+                FeatureEntry::Inline(_, data) => {
+                    Self::place_placed_feature_data(
+                        region,
+                        registry,
+                        random,
+                        origin,
+                        data,
+                        None,
+                        biome_zoom_seed,
+                    );
+                }
+            }
         }
     }
 }

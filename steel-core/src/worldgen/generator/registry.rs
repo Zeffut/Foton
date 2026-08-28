@@ -14,7 +14,7 @@ use toml::map::Map;
 
 use crate::worldgen::structure::{FixedStructureBiomeProvider, StructureGenerator};
 use crate::worldgen::{
-    ChunkGeneratorType, EmptyChunkGenerator, FlatChunkGenerator, VanillaGenerator,
+    ChunkGeneratorType, EmptyChunkGenerator, FlatChunkGenerator, FlatDecoration, VanillaGenerator,
 };
 use steel_worldgen::biomes::BiomeSourceKind;
 use steel_worldgen::structure::placement::load_vanilla_structure_sets;
@@ -250,13 +250,6 @@ fn validate_flat_config(config: &toml::Value) -> Result<WorldGeneratorConfigData
     if parsed.layers.is_empty() {
         return Err("minecraft:flat requires at least one layer".to_owned());
     }
-    // TODO: Implement vanilla FlatLevelGeneratorSettings::adjustGenerationSettings for these flags.
-    if parsed.features {
-        return Err("minecraft:flat features=true is not implemented yet".to_owned());
-    }
-    if parsed.lakes {
-        return Err("minecraft:flat lakes=true is not implemented yet".to_owned());
-    }
     dimension_type_by_key(&parsed.dimension_type)?;
     for layer in &parsed.layers {
         if layer.height == 0 {
@@ -408,6 +401,10 @@ fn create_flat(
             seed,
             sea_level_for_dimension_type(dimension_type),
             structure_generator,
+            FlatDecoration {
+                features: parsed.features,
+                lakes: parsed.lakes,
+            },
         )),
         is_flat: true,
         sea_level: sea_level_for_dimension_type(dimension_type),
@@ -565,22 +562,21 @@ mod tests {
         );
     }
 
+    /// Both flags used to be rejected here, and rejecting a generator config
+    /// aborts the whole server before it opens its port -- every other
+    /// dimension included.
     #[test]
-    fn rejects_unimplemented_flat_decoration_options() {
-        let features_config = toml::Value::Table(Map::from_iter([(
-            "features".to_owned(),
-            toml::Value::Boolean(true),
-        )]));
-        let features_error = validate_flat_config(&features_config)
-            .expect_err("features=true should not use non-vanilla decoration");
-        assert!(features_error.contains("features=true"));
+    fn flat_decoration_options_are_accepted() {
+        init_vanilla_registry();
+        let config = toml::Value::Table(Map::from_iter([
+            ("features".to_owned(), toml::Value::Boolean(true)),
+            ("lakes".to_owned(), toml::Value::Boolean(true)),
+        ]));
 
-        let lakes_config = toml::Value::Table(Map::from_iter([(
-            "lakes".to_owned(),
-            toml::Value::Boolean(true),
-        )]));
-        let lakes_error = validate_flat_config(&lakes_config)
-            .expect_err("lakes=true should not use non-vanilla decoration");
-        assert!(lakes_error.contains("lakes=true"));
+        let Ok(WorldGeneratorConfigData::Flat(parsed)) = validate_flat_config(&config) else {
+            panic!("features and lakes should both validate");
+        };
+        assert!(parsed.features);
+        assert!(parsed.lakes);
     }
 }
