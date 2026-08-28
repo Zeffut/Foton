@@ -1,7 +1,7 @@
 use crate::chunk::Chunk;
 use crate::worldgen::generator::{
-    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoisePhase, SurfacePhase,
-    xoroshiro_worldgen_region_random,
+    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoiseBiomeBody, NoisePhase,
+    SurfacePhase, xoroshiro_worldgen_region_random,
 };
 use crate::worldgen::region::WorldGenRegion;
 use glam::IVec3;
@@ -54,6 +54,14 @@ impl ChunkGenerator for EmptyChunkGenerator {
     }
 
     fn apply_carvers(&self, _chunk: GenerationChunk<'_, CarversPhase>) {}
+
+    fn possible_biomes(&self) -> Vec<BiomeRef> {
+        vec![&vanilla_biomes::PLAINS]
+    }
+
+    fn with_noise_biomes(&self, body: &mut NoiseBiomeBody<'_>) {
+        body(&mut |_, _, _| &vanilla_biomes::PLAINS);
+    }
 
     fn with_first_free_height(&self, min_y: i32, body: &mut FirstFreeHeightBody<'_>) {
         // Nothing is ever generated, so every column is free from the floor up.

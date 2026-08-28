@@ -29,8 +29,8 @@ use crate::worldgen::carver::{
 };
 use crate::worldgen::feature::FeatureDecorationRunner;
 use crate::worldgen::generator::{
-    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoisePhase, SurfacePhase,
-    worldgen_region_random_from_splitter,
+    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoiseBiomeBody, NoisePhase,
+    SurfacePhase, worldgen_region_random_from_splitter,
 };
 use crate::worldgen::region::WorldGenRegion;
 use crate::worldgen::structure::{StructureGenerator, create_structures};
@@ -305,6 +305,15 @@ impl<N: VanillaPostNoiseStateType> ChunkGenerator for VanillaGenerator<N> {
 
     fn structure_generator(&self) -> Option<&StructureGenerator> {
         Some(&self.structure_generator)
+    }
+
+    fn possible_biomes(&self) -> Vec<BiomeRef> {
+        self.biome_source.possible_biome_refs()
+    }
+
+    fn with_noise_biomes(&self, body: &mut NoiseBiomeBody<'_>) {
+        let mut sampler = self.biome_source.chunk_sampler();
+        body(&mut |quart_x, quart_y, quart_z| sampler.sample(quart_x, quart_y, quart_z));
     }
 
     fn with_first_free_height(&self, _min_y: i32, body: &mut FirstFreeHeightBody<'_>) {

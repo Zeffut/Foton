@@ -9,8 +9,8 @@ use steel_utils::{BlockStateId, ChunkPos, Identifier};
 
 use crate::chunk::Chunk;
 use crate::worldgen::generator::{
-    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoisePhase, SurfacePhase,
-    xoroshiro_worldgen_region_random,
+    CarversPhase, ChunkGenerator, FirstFreeHeightBody, GenerationChunk, NoiseBiomeBody, NoisePhase,
+    SurfacePhase, xoroshiro_worldgen_region_random,
 };
 use crate::worldgen::region::WorldGenRegion;
 use crate::worldgen::structure::{StructureGenerator, create_structures};
@@ -334,6 +334,15 @@ impl ChunkGenerator for FlatChunkGenerator {
     }
 
     fn apply_biome_decorations(&self, _region: &WorldGenRegion<'_>) {}
+
+    fn possible_biomes(&self) -> Vec<BiomeRef> {
+        // Vanilla parity: `FlatLevelSource` uses a `FixedBiomeSource`.
+        vec![&vanilla_biomes::PLAINS]
+    }
+
+    fn with_noise_biomes(&self, body: &mut NoiseBiomeBody<'_>) {
+        body(&mut |_, _, _| &vanilla_biomes::PLAINS);
+    }
 
     fn with_first_free_height(&self, min_y: i32, body: &mut FirstFreeHeightBody<'_>) {
         // Vanilla parity: `FlatLevelSource.getBaseHeight` reads the layer list,

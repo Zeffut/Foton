@@ -36,6 +36,12 @@ pub type FirstFreeHeight<'a> = dyn FnMut(i32, i32) -> i32 + 'a;
 /// The body [`ChunkGenerator::with_first_free_height`] runs against a height query.
 pub type FirstFreeHeightBody<'a> = dyn FnMut(&mut FirstFreeHeight<'_>) + 'a;
 
+/// A noise-biome lookup handed to the body of [`ChunkGenerator::with_noise_biomes`].
+pub type NoiseBiomeQuery<'a> = dyn FnMut(i32, i32, i32) -> BiomeRef + 'a;
+
+/// The body [`ChunkGenerator::with_noise_biomes`] runs against a biome lookup.
+pub type NoiseBiomeBody<'a> = dyn FnMut(&mut NoiseBiomeQuery<'_>) + 'a;
+
 /// A trait for generating chunks.
 #[enum_dispatch]
 pub trait ChunkGenerator: Send + Sync {
@@ -114,6 +120,19 @@ pub trait ChunkGenerator: Send + Sync {
     /// set of noise caches. `min_y` is the dimension's build floor, vanilla's
     /// `LevelHeightAccessor`.
     fn with_first_free_height(&self, min_y: i32, body: &mut FirstFreeHeightBody<'_>);
+
+    /// Every biome this generator's biome source can produce.
+    ///
+    /// Vanilla parity: `ChunkGenerator.getBiomeSource().possibleBiomes()`.
+    fn possible_biomes(&self) -> Vec<BiomeRef>;
+
+    /// Runs `body` against one reusable noise-biome lookup.
+    ///
+    /// [`Self::noise_biome`] builds a sampler per call, which is right for a
+    /// single lookup and ruinous for a scan: `/locate biome` reads a quarter of
+    /// a million positions, and vanilla holds one `Climate.Sampler` across all
+    /// of them.
+    fn with_noise_biomes(&self, body: &mut NoiseBiomeBody<'_>);
 }
 
 pub(crate) fn worldgen_region_random_from_splitter(

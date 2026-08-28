@@ -2,6 +2,7 @@
 
 use std::{sync::Arc, time::Instant};
 
+use steel_registry::biome::BiomeRef;
 use steel_utils::{BlockPos, Identifier, translations};
 use text_components::{
     Modifier, TextComponent,
@@ -12,8 +13,9 @@ use text_components::{
 use super::super::{
     brigadier::{CommandNodeBuilder, CommandSyntaxError},
     execution::{
-        CommandResultSuspension, CommandResultSuspensionPoll, CommandSource, SteelArgumentType,
-        SteelCommandContext, SteelCommandRuntime, StructureOrTagKey, argument, literal,
+        BiomeOrTag, CommandResultSuspension, CommandResultSuspensionPoll, CommandSource,
+        SteelArgumentType, SteelCommandContext, SteelCommandRuntime, StructureOrTagKey, argument,
+        literal,
     },
     registration::CommandRegistration,
 };
@@ -30,20 +32,95 @@ use crate::{
 };
 
 const MAX_STRUCTURE_SEARCH_RADIUS: i32 = 100;
+/// Vanilla parity: `LocateCommand.MAX_BIOME_SEARCH_RADIUS`.
+const MAX_BIOME_SEARCH_RADIUS: i32 = 6400;
+/// Vanilla parity: `LocateCommand.BIOME_SAMPLE_RESOLUTION_HORIZONTAL`.
+const BIOME_SAMPLE_RESOLUTION_HORIZONTAL: i32 = 32;
+/// Vanilla parity: `LocateCommand.BIOME_SAMPLE_RESOLUTION_VERTICAL`.
+const BIOME_SAMPLE_RESOLUTION_VERTICAL: i32 = 64;
 
 pub(super) fn registration() -> CommandRegistration<CommandSource> {
     CommandRegistration::new(Identifier::vanilla_static("locate"), |_| command())
 }
 
 fn command() -> CommandNodeBuilder<CommandSource, SteelCommandRuntime> {
-    literal("locate").then(
-        literal("structure").then(
-            argument("structure", SteelArgumentType::structure_or_tag_key())
-                .executes_suspended(start_structure_search),
-        ),
+    literal("locate")
+        .then(
+            literal("structure").then(
+                argument("structure", SteelArgumentType::structure_or_tag_key())
+                    .executes_suspended(start_structure_search),
+            ),
+        )
+        .then(
+            literal("biome")
+                .then(argument("biome", SteelArgumentType::biome_or_tag()).executes(locate_biome)),
+        )
+    // TODO: Add `locate poi` once Steel has a point-of-interest manager. Steel's
+    // point-of-interest layer only holds loaded chunks, while vanilla reads the
+    // point-of-interest sections of unloaded ones off disk, so the command would
+    // answer "not found" for anything outside the loaded radius.
+}
+
+/// Vanilla parity: `LocateCommand.locateBiome`.
+///
+/// Vanilla runs this on the server thread and logs how long it took, because a
+/// full scan is a quarter of a million noise samples. Nothing here waits on
+/// anything, so it stays on the thread that asked, as vanilla does.
+fn locate_biome(context: &SteelCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
+    let query = context.biome_or_tag("biome")?.clone();
+    let source = context.source();
+    let origin = BlockPos::from(source.position());
+    let started_at = Instant::now();
+
+    let Some((found_pos, found_biome)) = source.world().find_closest_biome_3d(
+        origin,
+        MAX_BIOME_SEARCH_RADIUS,
+        BIOME_SAMPLE_RESOLUTION_HORIZONTAL,
+        BIOME_SAMPLE_RESOLUTION_VERTICAL,
+        &|biome| query.matches(biome),
+    ) else {
+        return Err(biome_not_found(&query));
+    };
+
+    let name = found_biome_name(&query, found_biome);
+    let distance = distance_3d(origin, found_pos);
+    source.send_success(
+        &translations::COMMANDS_LOCATE_BIOME_SUCCESS
+            .message([
+                TextComponent::from(name.clone()),
+                locate_coordinates_component(found_pos, Some(found_pos.y())),
+                TextComponent::from(distance.to_string()),
+            ])
+            .component(),
+        false,
+    );
+    tracing::info!(
+        "Locating element {} took {} ms",
+        name,
+        started_at.elapsed().as_millis()
+    );
+    Ok(distance)
+}
+
+/// The name vanilla prints for a found biome: the biome's own key for a direct
+/// query, and the tag plus the biome it actually matched for a tag query.
+fn found_biome_name(query: &BiomeOrTag, found: BiomeRef) -> String {
+    match query {
+        BiomeOrTag::Biome(biome) => biome.key.to_string(),
+        BiomeOrTag::Tag(tag) => format!("#{tag} ({})", found.key),
+    }
+}
+
+fn biome_not_found(query: &BiomeOrTag) -> CommandSyntaxError {
+    let printable = match query {
+        BiomeOrTag::Biome(biome) => biome.key.to_string(),
+        BiomeOrTag::Tag(tag) => format!("#{tag}"),
+    };
+    CommandSyntaxError::dynamic(
+        translations::COMMANDS_LOCATE_BIOME_NOT_FOUND
+            .message([TextComponent::from(printable)])
+            .component(),
     )
-    // TODO: Add `locate biome` once Steel has an asynchronous closest-biome search.
-    // TODO: Add `locate poi` once Steel has a point-of-interest manager.
 }
 
 fn start_structure_search(
@@ -351,24 +428,37 @@ fn horizontal_distance(a: BlockPos, b: BlockPos) -> i32 {
     (f64::from(squared as f32).sqrt() as f32).floor() as i32
 }
 
+/// Vanilla parity: `Mth.floor(Mth.sqrt((float)sourcePos.distSqr(foundPos)))`,
+/// which the biome branch uses because it reports a real Y.
+fn distance_3d(a: BlockPos, b: BlockPos) -> i32 {
+    let dx = f64::from(b.0.x.wrapping_sub(a.0.x));
+    let dy = f64::from(b.0.y.wrapping_sub(a.0.y));
+    let dz = f64::from(b.0.z.wrapping_sub(a.0.z));
+    let squared = dx.mul_add(dx, dy.mul_add(dy, dz * dz));
+    (f64::from(squared as f32).sqrt() as f32).floor() as i32
+}
+
 fn locate_success_component(structure_name: String, pos: BlockPos, distance: i32) -> TextComponent {
     translations::COMMANDS_LOCATE_STRUCTURE_SUCCESS
         .message([
             TextComponent::from(structure_name),
-            locate_coordinates_component(pos),
+            locate_coordinates_component(pos, None),
             TextComponent::from(distance.to_string()),
         ])
         .component()
 }
 
-fn locate_coordinates_component(pos: BlockPos) -> TextComponent {
-    let displayed_y = "~";
+/// Vanilla parity: the coordinates `showLocateResult` wraps in brackets. Its
+/// `includeY` decides whether the Y is real or the `~` a structure search
+/// prints, and it decides it for the tooltip's teleport too.
+fn locate_coordinates_component(pos: BlockPos, y: Option<i32>) -> TextComponent {
+    let displayed_y = y.map_or_else(|| "~".to_owned(), |y| y.to_string());
     TextComponent::plain("[")
         .add_child(
             translations::CHAT_COORDINATES
                 .message([
                     TextComponent::from(pos.0.x.to_string()),
-                    TextComponent::from(displayed_y),
+                    TextComponent::from(displayed_y.clone()),
                     TextComponent::from(pos.0.z.to_string()),
                 ])
                 .component(),
@@ -411,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn locate_graph_exposes_only_the_supported_typed_structure_branch() {
+    fn locate_graph_exposes_the_two_supported_typed_branches() {
         init_vanilla_registry();
         let Ok(dispatcher) = create_dispatcher() else {
             panic!("built-in commands should register");
@@ -419,6 +509,8 @@ mod tests {
         let locate = child(&dispatcher, dispatcher.root(), "locate");
         let structure = child(&dispatcher, locate, "structure");
         let target = child(&dispatcher, structure, "structure");
+        let biome = child(&dispatcher, locate, "biome");
+        let biome_target = child(&dispatcher, biome, "biome");
 
         assert_eq!(
             dispatcher
@@ -426,17 +518,44 @@ mod tests {
                 .and_then(|node| node.argument_type()),
             Some(&SteelArgumentType::structure_or_tag_key())
         );
-        let Some(target_node) = dispatcher.node(target) else {
-            panic!("locate structure argument should exist");
+        assert_eq!(
+            dispatcher
+                .node(biome_target)
+                .and_then(|node| node.argument_type()),
+            Some(&SteelArgumentType::biome_or_tag())
+        );
+        for argument in [target, biome_target] {
+            let Some(node) = dispatcher.node(argument) else {
+                panic!("locate argument should exist");
+            };
+            assert!(node.is_executable());
+            assert!(dispatcher.children(argument).is_some_and(<[_]>::is_empty));
+        }
+        // `poi` is still missing, and this is what says so out loud.
+        assert_eq!(dispatcher.children(locate).map(<[_]>::len), Some(2));
+    }
+
+    /// A biome search reports the Y it actually found, and a structure search
+    /// reports `~` because it never looked at one. The teleport in the tooltip
+    /// has to agree with the text, or a player clicking it lands elsewhere.
+    #[test]
+    fn locate_coordinates_show_a_real_y_only_when_one_was_searched_for() {
+        let biome = locate_coordinates_component(BlockPos::new(12, 71, -34), Some(71));
+        let Some(ClickEvent::SuggestCommand { command }) = biome.interactions.click else {
+            panic!("the coordinates should suggest a teleport");
         };
-        assert!(target_node.is_executable());
-        assert!(dispatcher.children(target).is_some_and(<[_]>::is_empty));
-        assert_eq!(dispatcher.children(locate).map(<[_]>::len), Some(1));
+        assert_eq!(command.as_ref(), "/tp @s 12 71 -34");
+
+        let structure = locate_coordinates_component(BlockPos::new(12, 71, -34), None);
+        let Some(ClickEvent::SuggestCommand { command }) = structure.interactions.click else {
+            panic!("the coordinates should suggest a teleport");
+        };
+        assert_eq!(command.as_ref(), "/tp @s 12 ~ -34");
     }
 
     #[test]
     fn locate_coordinates_component_matches_vanilla_interactivity() {
-        let component = locate_coordinates_component(BlockPos::new(12, 0, -34));
+        let component = locate_coordinates_component(BlockPos::new(12, 0, -34), None);
 
         assert_eq!(component.format.color, Some(Color::Green));
         assert!(matches!(
@@ -448,6 +567,24 @@ mod tests {
             component.interactions.hover,
             Some(HoverEvent::ShowText { .. })
         ));
+    }
+
+    /// The biome branch measures in three dimensions where the structure branch
+    /// measures in two, and a search that reports a Y has to count it.
+    #[test]
+    fn distance_3d_counts_the_vertical_leg() {
+        assert_eq!(
+            distance_3d(BlockPos::new(0, 0, 0), BlockPos::new(3, 0, 4)),
+            5
+        );
+        assert_eq!(
+            distance_3d(BlockPos::new(0, 0, 0), BlockPos::new(2, 3, 6)),
+            7
+        );
+        assert_eq!(
+            horizontal_distance(BlockPos::new(0, 0, 0), BlockPos::new(2, 3, 6)),
+            6
+        );
     }
 
     #[test]
