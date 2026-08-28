@@ -12,19 +12,34 @@
 //! `mob_server_ai_step` directly and so step straight over the missing
 //! override. These tests come in through `LivingEntity::server_ai_step`
 //! instead, which is the door the tick actually uses.
+//!
+//! That door was still one short. The tick the server runs is
+//! `Entity::tick` -> `tick_living_entity` -> `ai_step` -> `default_ai_step` ->
+//! `server_ai_step`, and entering at `server_ai_step` steps over the two links
+//! above it. A creaking proved it: its `tick` called `Entity::default_tick`,
+//! which is only vanilla's `Entity.baseTick`, so nothing below it ran -- and
+//! `a_creaking_runs_its_brain` stayed green the whole time, because it came in
+//! under the break. `assert_the_tick_reaches_the_goals` closes that: it starts
+//! at `Entity::tick`, the one call the server makes, and every mob is in it.
 
 use super::*;
 use crate::entity::entities::{
-    AllayEntity, ArmadilloEntity, BlazeEntity, BoggedEntity, BreezeEntity, CamelEntity,
-    CaveSpiderEntity, CreakingEntity, CreeperEntity, DolphinEntity, DrownedEntity,
-    ElderGuardianEntity, EndermanEntity, EndermiteEntity, EvokerEntity, GhastEntity, GiantEntity,
-    GuardianEntity, HoglinEntity, HuskEntity, IllusionerEntity, IronGolemEntity, MagmaCubeEntity,
-    NautilusEntity, PandaEntity, ParchedEntity, PhantomEntity, PiglinBruteEntity, PiglinEntity,
-    PillagerEntity, PolarBearEntity, PufferfishEntity, RavagerEntity, ShulkerEntity,
-    SilverfishEntity, SkeletonEntity, SlimeEntity, SnifferEntity, SnowGolemEntity, SpiderEntity,
-    StrayEntity, SulfurCubeEntity, VexEntity, VindicatorEntity, WardenEntity, WitchEntity,
-    WitherBoss, WitherSkeletonEntity, ZoglinEntity, ZombieEntity, ZombieNautilusEntity,
-    ZombifiedPiglinEntity,
+    AllayEntity, ArmadilloEntity, AxolotlEntity, BatEntity, BeeEntity, BlazeEntity, BoggedEntity,
+    BreezeEntity, CamelEntity, CamelHuskEntity, CatEntity, CaveSpiderEntity, ChickenEntity,
+    CodEntity, CopperGolemEntity, CowEntity, CreakingEntity, CreeperEntity, DolphinEntity,
+    DonkeyEntity, DrownedEntity, ElderGuardianEntity, EndermanEntity, EndermiteEntity,
+    EvokerEntity, FoxEntity, FrogEntity, GhastEntity, GiantEntity, GlowSquidEntity, GoatEntity,
+    GuardianEntity, HappyGhastEntity, HoglinEntity, HorseEntity, HuskEntity, IllusionerEntity,
+    IronGolemEntity, LlamaEntity, MagmaCubeEntity, MuleEntity, MushroomCowEntity, NautilusEntity,
+    OcelotEntity, PandaEntity, ParchedEntity, ParrotEntity, PhantomEntity, PigEntity,
+    PiglinBruteEntity, PiglinEntity, PillagerEntity, PolarBearEntity, PufferfishEntity,
+    RabbitEntity, RavagerEntity, SalmonEntity, SheepEntity, ShulkerEntity, SilverfishEntity,
+    SkeletonEntity, SkeletonHorseEntity, SlimeEntity, SnifferEntity, SnowGolemEntity, SpiderEntity,
+    SquidEntity, StrayEntity, StriderEntity, SulfurCubeEntity, TadpoleEntity, TraderLlamaEntity,
+    TropicalFishEntity, TurtleEntity, VexEntity, VillagerEntity, VindicatorEntity,
+    WanderingTraderEntity, WardenEntity, WitchEntity, WitherBoss, WitherSkeletonEntity,
+    WolfEntity, ZoglinEntity, ZombieEntity, ZombieHorseEntity, ZombieNautilusEntity,
+    ZombieVillagerEntity, ZombifiedPiglinEntity,
 };
 use crate::entity::{Entity, LivingEntity, Mob, MobEffectInstance, next_entity_id};
 use steel_registry::{vanilla_entities, vanilla_mob_effects};
@@ -34,8 +49,9 @@ use steel_registry::{vanilla_entities, vanilla_mob_effects};
 /// `Entity::tick` defaults to `LivingEntity::tick_living_entity`, and a mob that overrides
 /// it has to call that itself -- `Entity::default_tick` is only `baseTick`, so a mob that
 /// reached for it instead lost its item use, its mob effects, its death handling and its
-/// whole `ai_step`. Nine mobs did. The witness is a mob effect's duration, because
-/// `tick_mob_effects` is near the top of the living tick and needs no world.
+/// whole `ai_step`. Nine mobs did, and then a tenth. The witness is a mob effect's
+/// duration, because `tick_mob_effects` is near the top of the living tick and needs no
+/// world.
 fn living_tick_runs(mob: &impl LivingEntity) -> bool {
     mob.add_mob_effect(MobEffectInstance::with_duration(
         vanilla_mob_effects::GLOWING,
@@ -65,7 +81,8 @@ macro_rules! assert_living_tick_runs {
 }
 
 // Only the mobs that override `Entity::tick` need this: the rest inherit the default,
-// which is `tick_living_entity` itself.
+// which is `tick_living_entity` itself. Every override belongs here, because the whole
+// point is that the override is where the link gets dropped.
 assert_living_tick_runs! {
     a_warden_runs_its_living_tick: WardenEntity, &vanilla_entities::WARDEN;
     an_allay_runs_its_living_tick: AllayEntity, &vanilla_entities::ALLAY;
@@ -80,6 +97,25 @@ assert_living_tick_runs! {
     a_zombie_nautilus_runs_its_living_tick: ZombieNautilusEntity, &vanilla_entities::ZOMBIE_NAUTILUS;
     a_vex_runs_its_living_tick: VexEntity, &vanilla_entities::VEX;
     a_shulker_runs_its_living_tick: ShulkerEntity, &vanilla_entities::SHULKER;
+    // The rest of the `Entity::tick` overrides, none of which were covered.
+    a_creaking_runs_its_living_tick: CreakingEntity, &vanilla_entities::CREAKING;
+    an_endermite_runs_its_living_tick: EndermiteEntity, &vanilla_entities::ENDERMITE;
+    a_wolf_runs_its_living_tick: WolfEntity, &vanilla_entities::WOLF;
+    a_copper_golem_runs_its_living_tick: CopperGolemEntity, &vanilla_entities::COPPER_GOLEM;
+    a_strider_runs_its_living_tick: StriderEntity, &vanilla_entities::STRIDER;
+    a_fox_runs_its_living_tick: FoxEntity, &vanilla_entities::FOX;
+    a_happy_ghast_runs_its_living_tick: HappyGhastEntity, &vanilla_entities::HAPPY_GHAST;
+    a_cat_runs_its_living_tick: CatEntity, &vanilla_entities::CAT;
+    a_parrot_runs_its_living_tick: ParrotEntity, &vanilla_entities::PARROT;
+    a_skeleton_horse_runs_its_living_tick: SkeletonHorseEntity, &vanilla_entities::SKELETON_HORSE;
+    a_llama_runs_its_living_tick: LlamaEntity, &vanilla_entities::LLAMA;
+    a_mule_runs_its_living_tick: MuleEntity, &vanilla_entities::MULE;
+    a_horse_runs_its_living_tick: HorseEntity, &vanilla_entities::HORSE;
+    a_trader_llama_runs_its_living_tick: TraderLlamaEntity, &vanilla_entities::TRADER_LLAMA;
+    a_zombie_horse_runs_its_living_tick: ZombieHorseEntity, &vanilla_entities::ZOMBIE_HORSE;
+    a_camel_husk_runs_its_living_tick: CamelHuskEntity, &vanilla_entities::CAMEL_HUSK;
+    a_donkey_runs_its_living_tick: DonkeyEntity, &vanilla_entities::DONKEY;
+    a_zombie_villager_runs_its_living_tick: ZombieVillagerEntity, &vanilla_entities::ZOMBIE_VILLAGER;
 }
 
 /// `mob_server_ai_step` bumps `no_action_time` before it does anything else,
@@ -168,4 +204,149 @@ assert_ai_runs! {
     // one that proves `server_ai_step` still reaches `Brain::tick`.
     a_nautilus_runs_its_brain: NautilusEntity, &vanilla_entities::NAUTILUS;
     a_zombie_nautilus_runs_its_brain: ZombieNautilusEntity, &vanilla_entities::ZOMBIE_NAUTILUS;
+}
+
+/// The one call the server makes, run end to end.
+///
+/// `World::tick_entities` calls `Entity::tick` and nothing else, so that is the
+/// only door worth defending. Behind it: `tick_living_entity` -> `ai_step` ->
+/// `default_ai_step` -> `server_ai_step` -> `mob_server_ai_step`. Four links,
+/// four ways to be a mob that stands still and compiles, and the two tests
+/// above only cover the first and the last. `no_action_time` is the same
+/// witness `ai_step_runs` uses; what differs is where the knock comes from.
+///
+/// Health is set first because `default_ai_step` runs the AI only for a mob
+/// that is not `isImmobile`, and vanilla's `isImmobile` is `isDeadOrDying` --
+/// a bare constructor leaves the health at zero, which no mob the server ticks
+/// ever has.
+fn the_tick_reaches_the_goals(mob: &impl Mob) -> bool {
+    mob.set_health(1.0);
+    assert!(
+        !LivingEntity::is_dead_or_dying(mob),
+        "test setup failed: this mob is still dead after `set_health`, so the \
+         assertion below would be vacuous"
+    );
+    mob.set_no_action_time(0);
+    Entity::tick(mob);
+    mob.no_action_time() > 0
+}
+
+macro_rules! assert_the_tick_reaches_the_goals {
+    ($($name:ident: $ty:ty, $entity_type:expr;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                init_vanilla_registry();
+                let mob = <$ty>::new($entity_type, next_entity_id(), DVec3::ZERO, Weak::new());
+                assert!(
+                    the_tick_reaches_the_goals(&mob),
+                    "the server's own `Entity::tick` never reaches this mob's goals. \
+                     One of four links is cut: `tick` -> `tick_living_entity`, \
+                     `tick_living_entity` -> `ai_step`, `ai_step` -> `default_ai_step`, \
+                     or `server_ai_step` -> `mob_server_ai_step`"
+                );
+            }
+        )*
+    };
+}
+
+// Every mob, without exception, save the ender dragon: vanilla's
+// `EnderDragon.aiStep` does not call `super.aiStep`, registers no goals and
+// drives itself from its phase manager instead, so it has no goal step to
+// reach. `ender_dragon/tests.rs` covers the phases.
+assert_the_tick_reaches_the_goals! {
+    a_zombie_ticks_its_goals: ZombieEntity, &vanilla_entities::ZOMBIE;
+    a_husk_ticks_its_goals: HuskEntity, &vanilla_entities::HUSK;
+    a_drowned_ticks_its_goals: DrownedEntity, &vanilla_entities::DROWNED;
+    a_zombified_piglin_ticks_its_goals: ZombifiedPiglinEntity, &vanilla_entities::ZOMBIFIED_PIGLIN;
+    a_skeleton_ticks_its_goals: SkeletonEntity, &vanilla_entities::SKELETON;
+    a_stray_ticks_its_goals: StrayEntity, &vanilla_entities::STRAY;
+    a_bogged_ticks_its_goals: BoggedEntity, &vanilla_entities::BOGGED;
+    a_parched_ticks_its_goals: ParchedEntity, &vanilla_entities::PARCHED;
+    a_giant_ticks_its_goals: GiantEntity, &vanilla_entities::GIANT;
+    a_wither_skeleton_ticks_its_goals: WitherSkeletonEntity, &vanilla_entities::WITHER_SKELETON;
+    a_creeper_ticks_its_goals: CreeperEntity, &vanilla_entities::CREEPER;
+    a_spider_ticks_its_goals: SpiderEntity, &vanilla_entities::SPIDER;
+    a_cave_spider_ticks_its_goals: CaveSpiderEntity, &vanilla_entities::CAVE_SPIDER;
+    an_enderman_ticks_its_goals: EndermanEntity, &vanilla_entities::ENDERMAN;
+    a_silverfish_ticks_its_goals: SilverfishEntity, &vanilla_entities::SILVERFISH;
+    a_witch_ticks_its_goals: WitchEntity, &vanilla_entities::WITCH;
+    a_pillager_ticks_its_goals: PillagerEntity, &vanilla_entities::PILLAGER;
+    a_vindicator_ticks_its_goals: VindicatorEntity, &vanilla_entities::VINDICATOR;
+    an_evoker_ticks_its_goals: EvokerEntity, &vanilla_entities::EVOKER;
+    an_illusioner_ticks_its_goals: IllusionerEntity, &vanilla_entities::ILLUSIONER;
+    a_ravager_ticks_its_goals: RavagerEntity, &vanilla_entities::RAVAGER;
+    a_slime_ticks_its_goals: SlimeEntity, &vanilla_entities::SLIME;
+    a_magma_cube_ticks_its_goals: MagmaCubeEntity, &vanilla_entities::MAGMA_CUBE;
+    a_sulfur_cube_ticks_its_goals: SulfurCubeEntity, &vanilla_entities::SULFUR_CUBE;
+    an_iron_golem_ticks_its_goals: IronGolemEntity, &vanilla_entities::IRON_GOLEM;
+    a_snow_golem_ticks_its_goals: SnowGolemEntity, &vanilla_entities::SNOW_GOLEM;
+    a_copper_golem_ticks_its_goals: CopperGolemEntity, &vanilla_entities::COPPER_GOLEM;
+    a_blaze_ticks_its_goals: BlazeEntity, &vanilla_entities::BLAZE;
+    a_ghast_ticks_its_goals: GhastEntity, &vanilla_entities::GHAST;
+    a_guardian_ticks_its_goals: GuardianEntity, &vanilla_entities::GUARDIAN;
+    an_elder_guardian_ticks_its_goals: ElderGuardianEntity, &vanilla_entities::ELDER_GUARDIAN;
+    an_endermite_ticks_its_goals: EndermiteEntity, &vanilla_entities::ENDERMITE;
+    a_vex_ticks_its_goals: VexEntity, &vanilla_entities::VEX;
+    a_phantom_ticks_its_goals: PhantomEntity, &vanilla_entities::PHANTOM;
+    a_shulker_ticks_its_goals: ShulkerEntity, &vanilla_entities::SHULKER;
+    a_wither_ticks_its_goals: WitherBoss, &vanilla_entities::WITHER;
+    a_piglin_ticks_its_brain: PiglinEntity, &vanilla_entities::PIGLIN;
+    a_piglin_brute_ticks_its_brain: PiglinBruteEntity, &vanilla_entities::PIGLIN_BRUTE;
+    a_hoglin_ticks_its_brain: HoglinEntity, &vanilla_entities::HOGLIN;
+    a_zoglin_ticks_its_brain: ZoglinEntity, &vanilla_entities::ZOGLIN;
+    a_breeze_ticks_its_brain: BreezeEntity, &vanilla_entities::BREEZE;
+    a_creaking_ticks_its_brain: CreakingEntity, &vanilla_entities::CREAKING;
+    a_warden_ticks_its_brain: WardenEntity, &vanilla_entities::WARDEN;
+    a_nautilus_ticks_its_brain: NautilusEntity, &vanilla_entities::NAUTILUS;
+    a_zombie_nautilus_ticks_its_brain: ZombieNautilusEntity, &vanilla_entities::ZOMBIE_NAUTILUS;
+    // Ambient, neutral and passive mobs. None of these were in either list
+    // above, and a player meets most of them before ever meeting a hostile.
+    a_bat_ticks_its_goals: BatEntity, &vanilla_entities::BAT;
+    a_wolf_ticks_its_goals: WolfEntity, &vanilla_entities::WOLF;
+    a_pig_ticks_its_goals: PigEntity, &vanilla_entities::PIG;
+    a_cow_ticks_its_goals: CowEntity, &vanilla_entities::COW;
+    a_mooshroom_ticks_its_goals: MushroomCowEntity, &vanilla_entities::MOOSHROOM;
+    a_sheep_ticks_its_goals: SheepEntity, &vanilla_entities::SHEEP;
+    a_chicken_ticks_its_goals: ChickenEntity, &vanilla_entities::CHICKEN;
+    a_rabbit_ticks_its_goals: RabbitEntity, &vanilla_entities::RABBIT;
+    a_goat_ticks_its_goals: GoatEntity, &vanilla_entities::GOAT;
+    a_polar_bear_ticks_its_goals: PolarBearEntity, &vanilla_entities::POLAR_BEAR;
+    a_panda_ticks_its_goals: PandaEntity, &vanilla_entities::PANDA;
+    a_fox_ticks_its_goals: FoxEntity, &vanilla_entities::FOX;
+    a_cat_ticks_its_goals: CatEntity, &vanilla_entities::CAT;
+    an_ocelot_ticks_its_goals: OcelotEntity, &vanilla_entities::OCELOT;
+    a_parrot_ticks_its_goals: ParrotEntity, &vanilla_entities::PARROT;
+    a_bee_ticks_its_goals: BeeEntity, &vanilla_entities::BEE;
+    a_turtle_ticks_its_goals: TurtleEntity, &vanilla_entities::TURTLE;
+    a_strider_ticks_its_goals: StriderEntity, &vanilla_entities::STRIDER;
+    a_happy_ghast_ticks_its_goals: HappyGhastEntity, &vanilla_entities::HAPPY_GHAST;
+    an_armadillo_ticks_its_goals: ArmadilloEntity, &vanilla_entities::ARMADILLO;
+    an_allay_ticks_its_brain: AllayEntity, &vanilla_entities::ALLAY;
+    a_frog_ticks_its_brain: FrogEntity, &vanilla_entities::FROG;
+    a_tadpole_ticks_its_brain: TadpoleEntity, &vanilla_entities::TADPOLE;
+    an_axolotl_ticks_its_brain: AxolotlEntity, &vanilla_entities::AXOLOTL;
+    a_sniffer_ticks_its_brain: SnifferEntity, &vanilla_entities::SNIFFER;
+    // The equines, which all override `Entity::tick` for their own reasons.
+    a_horse_ticks_its_goals: HorseEntity, &vanilla_entities::HORSE;
+    a_donkey_ticks_its_goals: DonkeyEntity, &vanilla_entities::DONKEY;
+    a_mule_ticks_its_goals: MuleEntity, &vanilla_entities::MULE;
+    a_llama_ticks_its_goals: LlamaEntity, &vanilla_entities::LLAMA;
+    a_trader_llama_ticks_its_goals: TraderLlamaEntity, &vanilla_entities::TRADER_LLAMA;
+    a_skeleton_horse_ticks_its_goals: SkeletonHorseEntity, &vanilla_entities::SKELETON_HORSE;
+    a_zombie_horse_ticks_its_goals: ZombieHorseEntity, &vanilla_entities::ZOMBIE_HORSE;
+    a_camel_ticks_its_goals: CamelEntity, &vanilla_entities::CAMEL;
+    a_camel_husk_ticks_its_goals: CamelHuskEntity, &vanilla_entities::CAMEL_HUSK;
+    // The villagers and the trader, all three brain-driven.
+    a_villager_ticks_its_brain: VillagerEntity, &vanilla_entities::VILLAGER;
+    a_wandering_trader_ticks_its_goals: WanderingTraderEntity, &vanilla_entities::WANDERING_TRADER;
+    a_zombie_villager_ticks_its_goals: ZombieVillagerEntity, &vanilla_entities::ZOMBIE_VILLAGER;
+    // The water mobs.
+    a_squid_ticks_its_goals: SquidEntity, &vanilla_entities::SQUID;
+    a_glow_squid_ticks_its_goals: GlowSquidEntity, &vanilla_entities::GLOW_SQUID;
+    a_cod_ticks_its_goals: CodEntity, &vanilla_entities::COD;
+    a_salmon_ticks_its_goals: SalmonEntity, &vanilla_entities::SALMON;
+    a_tropical_fish_ticks_its_goals: TropicalFishEntity, &vanilla_entities::TROPICAL_FISH;
+    a_pufferfish_ticks_its_goals: PufferfishEntity, &vanilla_entities::PUFFERFISH;
+    a_dolphin_ticks_its_goals: DolphinEntity, &vanilla_entities::DOLPHIN;
 }
