@@ -20,6 +20,7 @@ use steel_registry::entity_type::{EntityDimensions, EntityTypeRef};
 use steel_registry::loot_table::{EntityRef, LootContext};
 use steel_registry::sound_event::SoundEventRef;
 use steel_registry::trading::{MerchantOffers, offer_nbt};
+use steel_registry::vanilla_entities;
 use steel_registry::vanilla_entity_data::WanderingTraderEntityData;
 use steel_registry::{REGISTRY, RegistryExt as _, sound_events};
 use steel_utils::locks::SyncMutex;
@@ -29,6 +30,10 @@ use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 
 use crate::behavior::InteractionResult;
+use crate::entity::ai::goal::{
+    AvoidEntityGoal, FloatGoal, InteractGoal, LookAtPlayerGoal, MoveTowardsRestrictionGoal,
+    PanicGoal, WaterAvoidingRandomStrollGoal,
+};
 use crate::entity::callback::RemovalReason;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::mobs::npc::merchant_state::MerchantState;
@@ -79,6 +84,44 @@ unsafe impl DowncastType for WanderingTraderEntity {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("steel:entity/wandering_trader");
 }
 
+/// The seven things a wandering trader runs from, with the distance each is
+/// feared at.
+///
+/// Vanilla parity: the seven `AvoidEntityGoal`s of
+/// `WanderingTrader.registerGoals`, in their registration order.
+const AVOIDED_THREATS: &[(EntityTypeRef, f32)] = &[
+    (&vanilla_entities::ZOMBIE, 8.0),
+    (&vanilla_entities::EVOKER, 12.0),
+    (&vanilla_entities::VINDICATOR, 8.0),
+    (&vanilla_entities::VEX, 8.0),
+    (&vanilla_entities::PILLAGER, 15.0),
+    (&vanilla_entities::ILLUSIONER, 12.0),
+    (&vanilla_entities::ZOGLIN, 10.0),
+];
+
+/// Vanilla parity: the walk speed of every `AvoidEntityGoal` above.
+const FLEE_WALK_SPEED: f64 = 0.5;
+
+/// Vanilla parity: the sprint speed of every `AvoidEntityGoal` above. Vanilla
+/// passes the same number twice, so a fleeing trader never speeds up.
+const FLEE_SPRINT_SPEED: f64 = 0.5;
+
+/// Vanilla parity: the `0.5` of `new PanicGoal(this, 0.5)`.
+const PANIC_SPEED: f64 = 0.5;
+
+/// Vanilla parity: the `0.35` shared by `MoveTowardsRestrictionGoal` and
+/// `WaterAvoidingRandomStrollGoal`.
+const WANDER_SPEED: f64 = 0.35;
+
+/// Vanilla parity: the `3.0F` of `new InteractGoal(this, Player.class, 3.0F, 1.0F)`.
+const INTERACT_LOOK_DISTANCE: f64 = 3.0;
+
+/// Vanilla parity: the `1.0F` of the same goal -- it always looks.
+const INTERACT_PROBABILITY: f32 = 1.0;
+
+/// Vanilla parity: the `8.0F` of `new LookAtPlayerGoal(this, Mob.class, 8.0F)`.
+const LOOK_AT_MOB_DISTANCE: f64 = 8.0;
+
 impl WanderingTraderEntity {
     /// Creates a wandering trader at runtime.
     #[must_use]
@@ -115,6 +158,38 @@ impl WanderingTraderEntity {
         let ageable_base = AgeableMobBase::new();
         let mut entity_data = WanderingTraderEntityData::new();
         living_base.initialize_synced_data(&mut entity_data);
+
+        {
+            // Vanilla parity: the goal order of `WanderingTrader.registerGoals`.
+            //
+            // MISSING FOUNDATION: vanilla also registers, at priority 0, two
+            // `UseItemGoal`s -- the invisibility potion it drinks once the sky
+            // is dark and the milk it drinks once the sky is bright again --
+            // and at 1 a `TradeWithPlayerGoal` and a `LookAtTradingPlayerGoal`,
+            // and at 2 its own `WanderToPositionGoal`. Steel has none of those
+            // five goal types. The thirteen registered below are the rest.
+            let mut goals = mob_base.goal_selector().lock();
+            goals.add_goal(0, FloatGoal::new(&mob_base));
+            for (entity_type, distance) in AVOIDED_THREATS {
+                goals.add_goal(
+                    1,
+                    AvoidEntityGoal::with_selector(
+                        *distance,
+                        FLEE_WALK_SPEED,
+                        FLEE_SPRINT_SPEED,
+                        move |_, target, _| target.entity_type() == *entity_type,
+                    ),
+                );
+            }
+            goals.add_goal(1, PanicGoal::new(PANIC_SPEED));
+            goals.add_goal(4, MoveTowardsRestrictionGoal::new(WANDER_SPEED));
+            goals.add_goal(8, WaterAvoidingRandomStrollGoal::new(WANDER_SPEED));
+            goals.add_goal(
+                9,
+                InteractGoal::new_player(INTERACT_LOOK_DISTANCE, INTERACT_PROBABILITY),
+            );
+            goals.add_goal(10, LookAtPlayerGoal::new(LOOK_AT_MOB_DISTANCE));
+        }
 
         Self {
             base,
@@ -440,3 +515,42 @@ impl Mob for WanderingTraderEntity {
 }
 
 impl PathfinderMob for WanderingTraderEntity {}
+
+#[cfg(test)]
+mod goal_tests {
+    use std::sync::Weak;
+
+    use glam::DVec3;
+    use steel_registry::{init_vanilla_registry, vanilla_entities};
+
+    use super::*;
+    use crate::entity::next_entity_id;
+
+    /// Vanilla parity: the priorities of `WanderingTrader.registerGoals`.
+    ///
+    /// Counted rather than merely non-empty: the shared
+    /// `assert_it_has_something_to_run!` layer stays green if six of the seven
+    /// flee goals disappear, because one goal is still one goal. Dropping the
+    /// avoid list is exactly the regression worth catching -- a trader that
+    /// lets a pillager walk up to it looks fine until you watch it.
+    ///
+    /// Thirteen of vanilla's eighteen. The five absent ones need goal types
+    /// Steel does not have, and are named where they would be registered.
+    #[test]
+    fn a_wandering_trader_registers_vanillas_goal_priorities() {
+        init_vanilla_registry();
+        let trader = WanderingTraderEntity::new(
+            &vanilla_entities::WANDERING_TRADER,
+            next_entity_id(),
+            DVec3::ZERO,
+            Weak::new(),
+        );
+        let selector = trader.mob_base().goal_selector().lock();
+        assert_eq!(selector.available_goal_count(), 13);
+        assert_eq!(
+            selector.available_goal_priorities(),
+            vec![0, 1, 1, 1, 1, 1, 1, 1, 1, 4, 8, 9, 10],
+            "the trader's goal list drifted from `WanderingTrader.registerGoals`"
+        );
+    }
+}

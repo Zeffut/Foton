@@ -83,6 +83,7 @@ pub(crate) use follow_player_ridden_entity::FollowPlayerRiddenEntityGoal;
 pub(crate) use ghast_look::{GhastLookGoal, face_movement_direction};
 pub(crate) use hold_ground_attack::HoldGroundAttackGoal;
 pub(crate) use hurt_by_target::HurtByTargetGoal;
+pub(crate) use interact::InteractGoal;
 pub(crate) use land_on_owners_shoulder::LandOnOwnersShoulderGoal;
 pub(crate) use leap_at_target::LeapAtTargetGoal;
 pub(crate) use llama_follow_caravan::LlamaFollowCaravanGoal;
