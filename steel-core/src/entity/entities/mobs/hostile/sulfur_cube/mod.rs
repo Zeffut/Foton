@@ -1040,7 +1040,7 @@ impl LivingEntity for SulfurCubeEntity {
 
         if source.is(&DamageTypeTag::SULFUR_CUBE_WITH_BLOCK_IMMUNE_TO) {
             if !source.is(&DamageTypeTag::NO_KNOCKBACK) {
-                self.apply_damage_knockback(source);
+                self.apply_damage_knockback(source, false);
             }
             return true;
         }

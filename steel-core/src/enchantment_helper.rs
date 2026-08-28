@@ -987,6 +987,11 @@ fn apply_supported_post_piercing_entity_effect(
                 * *coordinate_scale
                 * f64::from(magnitude.calculate(level));
             user.push_impulse(impulse);
+            // Vanilla parity: `ApplyEntityImpulse.apply` raises `hurtMarked`
+            // next to `needsSync`, and only `hurtMarked` reaches the pushed
+            // entity's own client. Without it a Wind Burst mace launched the
+            // player on the server and left them standing on their own screen.
+            user.mark_hurt();
             user.apply_post_impulse_grace_time(10);
             false
         }

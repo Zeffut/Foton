@@ -7,9 +7,15 @@
 use std::sync::Arc;
 
 use glam::DVec3;
+use steel_protocol::packets::game::CExplode;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
 use steel_registry::game_rules::GameRule;
-use steel_registry::{vanilla_attributes, vanilla_blocks, vanilla_damage_types};
+use steel_registry::particle_type::{ExplosionParticleInfo, ParticleData};
+use steel_registry::sound_event::SoundEventRef;
+use steel_registry::{
+    sound_events, vanilla_attributes, vanilla_blocks, vanilla_damage_types, vanilla_particle_types,
+};
+use steel_utils::random::weighted_list::{Weighted, WeightedList};
 use steel_utils::types::UpdateFlags;
 use steel_utils::{BlockPos, BlockStateId, WorldAabb};
 
@@ -18,6 +24,11 @@ use crate::entity::damage::DamageSource;
 use crate::fluid::get_fluid_state;
 use crate::world::World;
 use crate::world::raycast::{ClipBlockShape, ClipFluid};
+
+/// How far a player can be from a blast and still be told about it.
+///
+/// Vanilla parity: the `distanceToSqr(center) < 4096.0` of `ServerLevel.explode`.
+const EXPLOSION_PACKET_RANGE_SQ: f64 = 4096.0;
 
 /// What an explosion does to the blocks it reaches.
 ///
@@ -100,12 +111,60 @@ pub struct ExplosionSpec {
     ///
     /// Vanilla parity: the `knockbackMultiplier` of the same calculator.
     pub knockback_multiplier: f64,
+    /// The emitter drawn at the center of a blast the client calls small.
+    ///
+    /// Vanilla parity: the `smallExplosionParticles` argument of
+    /// `Level.explode`.
+    pub small_particle: ParticleData,
+    /// The emitter drawn at the center of every other blast.
+    ///
+    /// Vanilla parity: the `largeExplosionParticles` argument.
+    pub large_particle: ParticleData,
+    /// The debris the broken blocks throw off.
+    ///
+    /// Vanilla parity: the `blockParticles` argument.
+    pub block_particles: WeightedList<ExplosionParticleInfo>,
+    /// The sound the blast makes.
+    ///
+    /// Vanilla parity: the `explosionSound` argument. It travels inside the
+    /// explosion packet rather than an ordinary sound packet, so it is the
+    /// packet or nothing.
+    pub sound: SoundEventRef,
+}
+
+/// The debris every blast but a wind charge throws off.
+///
+/// Vanilla parity: `Level.DEFAULT_EXPLOSION_BLOCK_PARTICLES`, whose builder
+/// gives each entry the default weight of one.
+#[must_use]
+fn default_explosion_block_particles() -> WeightedList<ExplosionParticleInfo> {
+    WeightedList::new(vec![
+        Weighted {
+            value: ExplosionParticleInfo::new(
+                ParticleData::simple(&vanilla_particle_types::POOF),
+                0.5,
+                1.0,
+            ),
+            weight: 1,
+        },
+        Weighted {
+            value: ExplosionParticleInfo::new(
+                ParticleData::simple(&vanilla_particle_types::SMOKE),
+                1.0,
+                1.0,
+            ),
+            weight: 1,
+        },
+    ])
 }
 
 impl ExplosionSpec {
     /// An ordinary blast: it hurts, and it shoves as hard as TNT.
+    ///
+    /// Vanilla parity: the four `Level.explode` overloads that fill in the
+    /// presentation themselves, which is every caller but the two wind charges.
     #[must_use]
-    pub const fn new(
+    pub fn new(
         direct_entity_id: Option<i32>,
         causing_entity_id: Option<i32>,
         damage_source: Option<DamageSource>,
@@ -122,6 +181,28 @@ impl ExplosionSpec {
             interaction,
             damages_entities: true,
             knockback_multiplier: 1.0,
+            small_particle: ParticleData::simple(&vanilla_particle_types::EXPLOSION),
+            large_particle: ParticleData::simple(&vanilla_particle_types::EXPLOSION_EMITTER),
+            block_particles: default_explosion_block_particles(),
+            sound: &sound_events::ENTITY_GENERIC_EXPLODE,
+        }
+    }
+
+    /// Whether the client draws the small emitter rather than the large one.
+    ///
+    /// Vanilla parity: `ServerExplosion.isSmall`.
+    #[must_use]
+    fn is_small(&self) -> bool {
+        self.radius < 2.0 || !self.interaction.destroys_blocks()
+    }
+
+    /// The emitter this blast draws at its center.
+    #[must_use]
+    fn explosion_particle(&self) -> ParticleData {
+        if self.is_small() {
+            self.small_particle.clone()
+        } else {
+            self.large_particle.clone()
         }
     }
 }
@@ -185,7 +266,7 @@ impl World {
     ) -> Vec<BlockPos> {
         let mut to_blow = self.calculate_exploded_positions(center, spec.radius);
         to_blow.retain(|pos| should_explode(*pos));
-        self.hurt_entities_from_explosion(&spec, center);
+        let hit_players = self.hurt_entities_from_explosion(&spec, center);
 
         if spec.interaction.destroys_blocks() {
             let loot_radius = spec.interaction.loot_explosion_radius(spec.radius);
@@ -209,7 +290,49 @@ impl World {
             self.create_explosion_fire(&to_blow);
         }
 
+        self.send_explosion_packets(&spec, center, to_blow.len(), &hit_players);
+
         to_blow
+    }
+
+    /// Tells every player near the blast that it happened, and each pushed one
+    /// how hard it pushed them.
+    ///
+    /// Vanilla parity: the loop at the end of `ServerLevel.explode`. This is the
+    /// only channel by which an explosion reaches a client at all -- its sound,
+    /// its emitter and its debris all ride here -- and the only one by which it
+    /// moves a player. A player is authoritative over their own position, so
+    /// the server's `set_velocity` above is a value the player never feels;
+    /// `ClientPacketListener.handleExplosion` applying `playerKnockback` to the
+    /// local player is what actually launches them.
+    fn send_explosion_packets(
+        &self,
+        spec: &ExplosionSpec,
+        center: DVec3,
+        block_count: usize,
+        hit_players: &[(i32, DVec3)],
+    ) {
+        let block_count = i32::try_from(block_count).unwrap_or(i32::MAX);
+        let particle = spec.explosion_particle();
+        self.players.iter_players(|_, player| {
+            if player.position().distance_squared(center) >= EXPLOSION_PACKET_RANGE_SQ {
+                return true;
+            }
+            let knockback = hit_players
+                .iter()
+                .find(|(entity_id, _)| *entity_id == player.id())
+                .map(|(_, knockback)| *knockback);
+            player.send_packet(CExplode::new(
+                center,
+                spec.radius,
+                block_count,
+                knockback,
+                particle.clone(),
+                spec.sound,
+                spec.block_particles.clone(),
+            ));
+            true
+        });
     }
 
     /// Casts the rays that decide which blocks the blast breaks.
@@ -293,14 +416,23 @@ impl World {
         Some(block_resistance.max(fluid_resistance))
     }
 
-    /// Damages and pushes every entity the blast reaches.
+    /// Damages and pushes every entity the blast reaches, and returns the push
+    /// each player took.
     ///
-    /// Vanilla parity: `ServerExplosion.hurtEntities`.
-    fn hurt_entities_from_explosion(self: &Arc<Self>, spec: &ExplosionSpec, center: DVec3) {
+    /// Vanilla parity: `ServerExplosion.hurtEntities`, whose `hitPlayers` map
+    /// exists for exactly one reason: a player's own client has to be handed
+    /// the push, because the server's own copy of their velocity is not
+    /// something they can feel.
+    fn hurt_entities_from_explosion(
+        self: &Arc<Self>,
+        spec: &ExplosionSpec,
+        center: DVec3,
+    ) -> Vec<(i32, DVec3)> {
+        let mut hit_players = Vec::new();
         let (direct_entity_id, causing_entity_id) = (spec.direct_entity_id, spec.causing_entity_id);
         let radius = spec.radius;
         if radius < 1.0e-5 {
-            return;
+            return hit_players;
         }
         let reach = f64::from(radius) * 2.0;
         let aabb = WorldAabb::new(
@@ -358,8 +490,20 @@ impl World {
                 let knockback = direction.normalize() * power;
                 entity.set_velocity(entity.velocity() + knockback);
                 entity.mark_velocity_sync();
+
+                // Vanilla parity: the `hitPlayers.put` branch. A spectator is
+                // not pushed at all, and neither is a player flying in
+                // creative -- their client would fight the shove.
+                if let Some(player) = entity.as_player()
+                    && !player.is_spectator()
+                    && !(player.has_infinite_materials() && player.is_flying())
+                {
+                    hit_players.push((player.id(), knockback));
+                }
             }
         }
+
+        hit_players
     }
 
     /// Returns the fraction of an entity the blast can see, from 0 to 1.

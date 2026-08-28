@@ -2,7 +2,11 @@
 //!
 //! Vanilla parity: `net.minecraft.util.random.WeightedList`.
 
+use std::io::{Result, Write};
+
+use crate::codec::VarInt;
 use crate::random::Random;
+use crate::serial::WriteTo;
 
 /// One entry and the weight it is drawn with.
 ///
@@ -147,6 +151,19 @@ impl<T: Clone> WeightedList<T> {
     #[must_use]
     pub fn get_random_cloned(&self) -> Option<T> {
         self.get_random().cloned()
+    }
+}
+
+impl<T: WriteTo> WriteTo for WeightedList<T> {
+    /// Vanilla parity: `WeightedList.streamCodec`, a length-prefixed list of
+    /// `Weighted.streamCodec` -- the value, then its weight as a `VarInt`.
+    fn write(&self, writer: &mut impl Write) -> Result<()> {
+        VarInt(self.entries.len() as i32).write(writer)?;
+        for entry in &self.entries {
+            entry.value.write(writer)?;
+            VarInt(entry.weight).write(writer)?;
+        }
+        Ok(())
     }
 }
 

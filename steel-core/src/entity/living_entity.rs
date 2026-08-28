@@ -18,6 +18,12 @@ use crate::player::player_inventory::PlayerInventory;
 /// Bit of `DATA_LIVING_ENTITY_FLAGS` that says an item is being used.
 ///
 /// Vanilla parity: the `1` of `LivingEntity.setLivingEntityFlag`.
+/// Absorption each level of the effect grants.
+///
+/// Vanilla parity: the `4 * (1 + amplifier)` of
+/// `AbsorptionMobEffect.onEffectStarted`, which is two yellow hearts a level.
+const ABSORPTION_PER_LEVEL: f32 = 4.0;
+
 const USING_ITEM_FLAG: i8 = 1;
 
 /// Bit of `DATA_LIVING_ENTITY_FLAGS` that says the off hand is the one using it.
@@ -961,9 +967,8 @@ pub trait LivingEntity: Entity {
                 && (!blocked || damage > 0.0)
             {
                 self.mark_hurt();
-                self.broadcast_hurt_animation(world);
             }
-            self.apply_damage_knockback(source);
+            self.apply_damage_knockback(source, blocked);
         }
 
         if self.is_dead_or_dying() {
@@ -1172,14 +1177,19 @@ pub trait LivingEntity: Entity {
     }
 
     /// Applies vanilla hurt knockback for a damage source.
-    fn apply_damage_knockback(&self, source: &DamageSource) {
+    ///
+    /// Vanilla parity: `LivingEntity.dealDefaultKnockback`. A hit a shield
+    /// swallowed still shoves, but it does not tilt the screen.
+    fn apply_damage_knockback(&self, source: &DamageSource, blocked: bool) {
         if source.is(&vanilla_damage_type_tags::DamageTypeTag::NO_KNOCKBACK) {
             return;
         }
 
         let (xd, zd) = self.damage_knockback_direction(source);
         self.knockback(DAMAGE_KNOCKBACK_POWER, xd, zd);
-        self.indicate_damage(xd, zd);
+        if !blocked {
+            self.indicate_damage(xd, zd);
+        }
     }
 
     /// Returns the horizontal direction used by vanilla damage knockback.
@@ -1247,7 +1257,13 @@ pub trait LivingEntity: Entity {
             .required_value(vanilla_attributes::KNOCKBACK_RESISTANCE)
     }
 
-    /// Mirrors vanilla `LivingEntity.indicateDamage`.
+    /// Tilts the hurt entity's own screen toward whatever hit it.
+    ///
+    /// Vanilla parity: `LivingEntity.indicateDamage`, a no-op whose only
+    /// override is `ServerPlayer`'s -- the tilt is a camera effect, so it has
+    /// no meaning for anything without a camera. A mob's red flash is a
+    /// different packet entirely (`broadcast_damage_event`), which is why this
+    /// one is sent to the hurt player alone and to nobody else.
     fn indicate_damage(&self, _xd: f64, _zd: f64) {}
 
     /// Returns the chunk used for vanilla nearby hurt broadcasts.
@@ -1265,19 +1281,6 @@ pub trait LivingEntity: Entity {
                 source_cause_id: source.causing_entity_id.map_or(0, |id| id + 1),
                 source_direct_id: source.direct_entity_id.map_or(0, |id| id + 1),
                 source_position: source.source_position,
-            },
-            None,
-        );
-    }
-
-    /// Broadcasts vanilla hurt animation near this entity.
-    fn broadcast_hurt_animation(&self, world: &World) {
-        let (yaw, _) = self.rotation();
-        world.broadcast_to_nearby(
-            self.hurt_broadcast_chunk(),
-            CHurtAnimation {
-                entity_id: self.id(),
-                yaw,
             },
             None,
         );
@@ -1790,7 +1793,38 @@ pub trait LivingEntity: Entity {
         if !self.can_be_affected(&effect) {
             return false;
         }
-        self.living_base().add_mob_effect(effect)
+        let started = (effect.effect(), effect.amplifier());
+        let changed = self.living_base().add_mob_effect(effect);
+        // Vanilla parity: `LivingEntity.addEffect` runs `onEffectStarted` on
+        // the way out whether or not the instance changed anything, so drinking
+        // a second golden apple tops the absorption back up.
+        self.on_effect_started(started.0, started.1);
+        changed
+    }
+
+    /// Vanilla parity: `MobEffect.onEffectStarted`, whose only override is
+    /// `AbsorptionMobEffect`'s -- and it is the whole reason absorption is
+    /// worth anything: the effect itself only watches the shield it grants
+    /// here, and ends when it is gone.
+    ///
+    /// This sits on the trait rather than on `LivingEntityBase` because
+    /// `set_absorption_amount` is where a player and a mob part ways. A mob
+    /// keeps its shield in a plain field; a player keeps it in the
+    /// synchronized data their own client reads to draw the golden hearts, and
+    /// nothing else publishes it. Called from the base, the grant landed in the
+    /// mob field of a player who has no use for it -- server-side the value was
+    /// right there and every unit test agreed, while the player saw no hearts
+    /// and took the damage in full.
+    fn on_effect_started(&self, effect: MobEffectRef, amplifier: i32) {
+        if effect != vanilla_mob_effects::ABSORPTION {
+            return;
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "the amplifier is clamped to 0..=255"
+        )]
+        let granted = ABSORPTION_PER_LEVEL * (1 + amplifier.max(0)) as f32;
+        self.set_absorption_amount(self.get_absorption_amount().max(granted));
     }
 
     /// Sets the presence of a vanilla mob effect.

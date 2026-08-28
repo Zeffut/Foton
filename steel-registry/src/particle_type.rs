@@ -158,6 +158,40 @@ impl WriteTo for ParticleData {
     }
 }
 
+/// One of the particles a blast throws off the blocks it broke.
+///
+/// Vanilla parity: `ExplosionParticleInfo`. It only ever travels inside
+/// `ClientboundExplodePacket`, as a weighted list the client draws from once
+/// per broken block.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExplosionParticleInfo {
+    /// Which particle to draw.
+    pub particle: ParticleData,
+    /// How much bigger than its usual size to draw it.
+    pub scaling: f32,
+    /// How fast to throw it.
+    pub speed: f32,
+}
+
+impl ExplosionParticleInfo {
+    #[must_use]
+    pub const fn new(particle: ParticleData, scaling: f32, speed: f32) -> Self {
+        Self {
+            particle,
+            scaling,
+            speed,
+        }
+    }
+}
+
+impl WriteTo for ExplosionParticleInfo {
+    fn write(&self, writer: &mut impl Write) -> Result<()> {
+        self.particle.write(writer)?;
+        self.scaling.write(writer)?;
+        self.speed.write(writer)
+    }
+}
+
 impl ReadFrom for ParticleData {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let id = VarInt::read(data)?.0;

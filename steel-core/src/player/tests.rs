@@ -10,11 +10,12 @@ use steel_registry::blocks::properties::{BlockStateProperties, Direction};
 use steel_registry::data_component_predicate::DataComponentMatchers;
 use steel_registry::data_components::vanilla_components::{CAN_BREAK, EQUIPPABLE};
 use steel_registry::data_components::{AdventureModePredicate, BlockPredicate};
+use steel_registry::entity_data::EntityData;
 use steel_registry::packets::play::C_REMOVE_ENTITIES;
 use steel_registry::{
     RegistryHolderSet, init_vanilla_registry, item_stack::ItemStack, vanilla_attributes,
     vanilla_blocks, vanilla_damage_types, vanilla_entities, vanilla_game_rules, vanilla_items,
-    vanilla_menu_types,
+    vanilla_menu_types, vanilla_mob_effects,
 };
 use steel_utils::codec::VarInt;
 use steel_utils::locks::{IntoShared as _, SyncMutex};
@@ -27,8 +28,8 @@ use uuid::Uuid;
 use crate::behavior::{InteractionResult, init_behaviors};
 use crate::chunk_saver::PersistentEntity;
 use crate::entity::{
-    DEFAULT_MAX_AIR_SUPPLY, Entity, EntitySyncedData, LivingEntity, SharedEntity,
-    damage::DamageSource, entities::ItemEntity, next_entity_id,
+    DEFAULT_MAX_AIR_SUPPLY, Entity, EntitySyncedData, LivingEntity, MobEffectInstance,
+    SharedEntity, damage::DamageSource, entities::ItemEntity, next_entity_id,
 };
 use crate::inventory::{
     click::{Click, DragKind, QuickCraft},
@@ -762,6 +763,58 @@ fn player_damage_applies_armor_and_absorption() {
 
     assert_eq!(player.get_health().to_bits(), 19.0_f32.to_bits());
     assert_eq!(player.get_absorption_amount().to_bits(), 0.0_f32.to_bits());
+}
+
+/// The Absorption effect has to land in the *player's* absorption, not the one
+/// every other living entity keeps. A mob holds its shield in a plain field; a
+/// player holds it in the synchronized data slot the client reads to draw the
+/// golden hearts, and nothing else publishes it. Granting it through the base
+/// wrote the mob field, which left the value correct somewhere no client and no
+/// damage calculation ever looks -- so this asserts through
+/// `get_absorption_amount`, the reader that goes to the published slot, and
+/// then reads the packed data itself to prove the slot was marked dirty.
+#[test]
+fn absorption_effect_reaches_the_slot_the_client_reads() {
+    init_vanilla_registry();
+    let world = Arc::clone(test_world());
+    let player = test_player(Arc::clone(&world));
+
+    // Clear whatever spawning left pending, so the assertion below is about
+    // the effect and not about the join.
+    let _ = player.entity_data.lock().pack_dirty();
+
+    // An enchanted golden apple's Absorption IV: four levels of two hearts.
+    assert!(player.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::ABSORPTION,
+        2400,
+        3,
+    )));
+
+    assert_eq!(
+        player.get_absorption_amount().to_bits(),
+        16.0_f32.to_bits(),
+        "Absorption IV should grant eight golden hearts"
+    );
+
+    let dirty = player
+        .entity_data
+        .lock()
+        .pack_dirty()
+        .expect("granting absorption should dirty the player's synchronized data");
+    assert!(
+        dirty.iter().any(|value| matches!(
+            value.value,
+            EntityData::Float(shield) if shield.to_bits() == 16.0_f32.to_bits()
+        )),
+        "the shield the client draws never reached the wire: {dirty:?}"
+    );
+
+    // And it has to stop the damage it is there to stop: sixteen points of
+    // shield in front of twenty health.
+    let source = DamageSource::environment(&vanilla_damage_types::FIREWORKS);
+    assert!(player.hurt(&world, &source, 10.0));
+    assert_eq!(player.get_health().to_bits(), 20.0_f32.to_bits());
+    assert_eq!(player.get_absorption_amount().to_bits(), 6.0_f32.to_bits());
 }
 
 #[test]

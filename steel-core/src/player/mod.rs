@@ -55,8 +55,9 @@ use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use sleep_state::PlayerSleepState;
 use std::sync::{Arc, Weak};
 use steel_protocol::packets::game::{
-    CEntityEvent, CPlayerCombatKill, CPlayerLookAt, CRespawn, CSetDefaultSpawnPosition, CSetHealth,
-    CSetHeldSlot, CSetPassengers, ClientCommandAction, LookAtAnchor, RelativeMovement, SoundSource,
+    CEntityEvent, CHurtAnimation, CPlayerCombatKill, CPlayerLookAt, CRespawn,
+    CSetDefaultSpawnPosition, CSetHealth, CSetHeldSlot, CSetPassengers, ClientCommandAction,
+    LookAtAnchor, RelativeMovement, SoundSource,
 };
 use steel_protocol::packets::game::{CLevelEvent, CSetEntityData, CSetExperience};
 use steel_registry::blocks::block_state_ext::BlockStateExt as _;
@@ -1898,6 +1899,29 @@ impl LivingEntity for Player {
 
     fn has_infinite_materials(&self) -> bool {
         Player::has_infinite_materials(self)
+    }
+
+    /// Tilts the player's own screen toward whatever hit them.
+    ///
+    /// Vanilla parity: `ServerPlayer.indicateDamage`, the only override of
+    /// `LivingEntity.indicateDamage` and the only sender of
+    /// `ClientboundHurtAnimationPacket` in the game. Two things about it are
+    /// easy to get wrong and were: the angle is the direction of the blow
+    /// *relative to where the player is looking*, not the player's own yaw, and
+    /// it goes to that one player rather than to everyone nearby -- a camera
+    /// tilt means nothing to anyone else's camera. The red flash every observer
+    /// does see is `broadcast_damage_event`, a different packet.
+    ///
+    /// Vanilla keeps the angle in `Player.hurtDir` because its own client
+    /// reads the field back while rendering; a server has nothing to read it
+    /// with, so it is computed here and sent.
+    fn indicate_damage(&self, xd: f64, zd: f64) {
+        let (yaw, _) = self.rotation();
+        let hurt_dir = zd.atan2(xd).to_degrees() as f32 - yaw;
+        self.send_packet(CHurtAnimation {
+            entity_id: self.id(),
+            yaw: hurt_dir,
+        });
     }
 
     fn get_absorption_amount(&self) -> f32 {

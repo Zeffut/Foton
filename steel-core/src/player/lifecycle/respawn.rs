@@ -638,6 +638,13 @@ impl Player {
         }
 
         self.set_health(self.get_max_health());
+        // Vanilla parity: `PlayerList.respawn` builds a whole new `ServerPlayer`,
+        // whose `DATA_PLAYER_ABSORPTION_ID` starts at zero. Steel reuses the
+        // player, and `LivingEntityBase::reset_for_player_respawn` only clears
+        // the mob field -- the golden hearts the client draws live in
+        // synchronized data and would otherwise survive the death that emptied
+        // them.
+        self.internal_set_absorption_amount(0.0);
         self.set_pose(EntityPose::Standing);
         self.reset_entity_state();
         self.sync_base_entity_data();

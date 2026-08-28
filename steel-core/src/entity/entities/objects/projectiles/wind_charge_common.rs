@@ -13,10 +13,11 @@ use std::sync::Arc;
 use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
-use steel_protocol::packets::game::SoundSource;
+use steel_registry::particle_type::ParticleData;
 use steel_registry::sound_event::SoundEventRef;
-use steel_registry::{vanilla_damage_types, vanilla_entities};
+use steel_registry::{vanilla_damage_types, vanilla_entities, vanilla_particle_types};
 use steel_utils::locks::SyncMutex;
+use steel_utils::random::weighted_list::WeightedList;
 
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, Projectile, RemovalReason, SharedEntity};
@@ -56,10 +57,6 @@ const PASSIVE_DEFLECTION_SCALE: f64 = 0.5;
 /// other hurting projectile returns 0.95. `getLiquidInertia` returns the same
 /// value, so water does not slow a wind charge either.
 const INERTIA: f64 = 1.0;
-
-/// Vanilla parity: the `4.0F` the client plays an explosion sound at when it
-/// receives `ClientboundExplodePacket`.
-const BURST_VOLUME: f32 = 4.0;
 
 /// The one field `AbstractWindCharge` keeps that clients never see.
 pub(super) struct AbstractWindChargeBase {
@@ -163,10 +160,10 @@ pub(super) trait AbstractWindCharge: Projectile {
     /// missing system.
     ///
     /// The `#blocks_wind_charge_explosions` immunity is moot while every block
-    /// is kept. Vanilla's burst sound and its gust particles both travel inside
-    /// `ClientboundExplodePacket`, which Steel never sends: the sound is played
-    /// directly here so the burst is at least audible, and the gust particles
-    /// are absent.
+    /// is kept. The burst sound and the gust emitter both travel inside the
+    /// explosion packet, which is why they are named here rather than played
+    /// separately: a wind charge is the one blast whose presentation is not
+    /// vanilla's default.
     fn explode(&self, world: &Arc<World>, position: DVec3) {
         world.explode_sparing(
             ExplosionSpec {
@@ -181,21 +178,15 @@ pub(super) trait AbstractWindCharge: Projectile {
                 // reaches and hurts none of it.
                 damages_entities: false,
                 knockback_multiplier: self.burst_knockback(),
+                small_particle: ParticleData::simple(&vanilla_particle_types::GUST_EMITTER_SMALL),
+                large_particle: ParticleData::simple(&vanilla_particle_types::GUST_EMITTER_LARGE),
+                // Vanilla parity: `WeightedList.of()`. A wind charge breaks
+                // nothing, so it has no debris to throw.
+                block_particles: WeightedList::empty(),
+                sound: self.burst_sound(),
             },
             position,
             &|_pos| true,
-        );
-
-        // Vanilla parity: the volume and pitch `ClientPacketListener.handleExplosion`
-        // plays the burst sound at.
-        let pitch = 0.2f32.mul_add(rand::random::<f32>() - rand::random::<f32>(), 1.0) * 0.7;
-        world.play_sound_at(
-            self.burst_sound(),
-            SoundSource::Blocks,
-            position,
-            BURST_VOLUME,
-            pitch,
-            None,
         );
     }
 

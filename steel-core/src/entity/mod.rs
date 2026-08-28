@@ -12,8 +12,8 @@ use rustc_hash::FxHashSet;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use steel_protocol::packets::game::{
-    AnimateAction, AttributeSnapshot, CAnimate, CDamageEvent, CEntityEvent, CHurtAnimation,
-    CTeleportEntity, EquipmentSlotItem, RelativeMovement, SoundSource,
+    AnimateAction, AttributeSnapshot, CAnimate, CDamageEvent, CEntityEvent, CTeleportEntity,
+    EquipmentSlotItem, RelativeMovement, SoundSource,
 };
 use steel_registry::blocks::{
     behavior::PushReaction, block_state_ext::BlockStateExt as _, properties::BlockStateProperties,
