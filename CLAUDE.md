@@ -167,9 +167,9 @@ avec les structs portant `#[block_behavior]`, `#[item_behavior]` ou
 
 | Catégorie | Couverture | Au départ du fork |
 |-----------|-----------|-------------------|
-| Blocs     | 193 / 265 (73 %) | 185 / 265 (70 %) |
-| Items     | 32 / 70 (46 %)   | 30 / 70 (43 %)   |
-| Entités   | 23 / 142 (16 %)  | 4 / 142 (3 %)    |
+| Blocs     | 255 / 265 (96 %) | 185 / 265 (70 %) |
+| Items     | 67 / 70 (96 %)   | 30 / 70 (43 %)   |
+| Entités   | 141 / 142 (99 %) | 4 / 142 (3 %)    |
 
 `dev/coverage.py --list entities` affiche le détail couvert / manquant.
 
@@ -202,17 +202,24 @@ Le piège serait de reconstruire ces systèmes faute de les avoir cherchés :
 
 ## Chemin critique restant
 
-1. **Mobs** — c'est le plus gros trou (119 classes manquantes). Chaque mob coûte
-   désormais peu : les goals, l'élevage et les effets existent. Manquent surtout
-   les navigations **volante** et **aquatique**, qui bloquent chauve-souris,
-   calmar, ghast, abeille, phantom, noyé.
-2. **Potions** — les effets sont là, il manque `PotionContents` sur les items,
-   la boisson, le jet, et l'alambic.
-3. **Conteneurs restants** — distributeur / dropper (nécessite le registre
-   `DispenseItemBehavior`), ender chest, shulker box, chest piégé.
-4. **Table d'enchantement** — les effets et l'enclume sont finis, seule
-   l'acquisition manque.
-5. **Villageois et commerce** — dépend du système de `Brain` / behaviors, absent.
+Cette section était périmée : les cinq chantiers qu'elle listait (mobs, potions,
+conteneurs restants, table d'enchantement, villageois) sont livrés. Vérifié le
+2026-08-29 — `BrewingStandBlock`, `EnchantingTableBlock`, `DispenserBlock`,
+`DropperBlock`, `EnderChestBlock`, `ShulkerBoxBlock`, `TrappedChestBlock`,
+`PotionContents`, `MerchantMenu` et le système de `Brain` existent tous.
+
+Ce que `dev/coverage.py --list` donne encore comme non couvert :
+
+- **Blocs (10)** : `AirBlock`, `Block`, `HalfTransparentBlock`,
+  `TransparentBlock` (classes de base vanilla, pas du contenu), puis
+  `CryingObsidianBlock`, `StainedGlassBlock`, `TintedGlassBlock`,
+  `StructureVoidBlock`, `TestBlock`, `TestInstanceBlock`.
+- **Items (3)** : `Item` (classe de base), `WritableBookItem`, `WrittenBookItem`.
+- **Entités (1)** : `Player` (porté hors du mécanisme `#[entity_behavior]`).
+
+La couverture par annotation ne dit rien de la *justesse* des implémentations :
+`PARITY.md` est l'inventaire qui fait foi sur ce point, et il rappelle qu'un
+système qui existe n'est pas un système qui marche.
 
 ## Workflow git
 
