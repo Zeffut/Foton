@@ -6,6 +6,10 @@ extend-glob = ["**/locale.rs"]
 check-file = false
 
 [default.extend-words]
+# Project name: Foton (not a misspelling of "photon").
+foton = "foton"
+Foton = "Foton"
+FOTON = "FOTON"
 flate = "flate"
 strat = "strat"
 axe = "axe"

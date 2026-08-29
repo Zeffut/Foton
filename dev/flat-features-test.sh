@@ -57,7 +57,7 @@ start_server() {
     "$run_dir/config/worlds.toml"
 
   cd "$run_dir" || exit 1
-  nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
   PID=$!
   for _ in $(seq 1 180); do
     ss -ltn 2>/dev/null | grep -q ":$port" && return 0

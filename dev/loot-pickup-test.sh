@@ -3,7 +3,7 @@
 # up.
 #
 # `Mob.aiStep` sweeps for item entities and hands each one to `Mob.pickUpItem`,
-# whose body equips the stack. Steel had the sweep and it had
+# whose body equips the stack. Foton had the sweep and it had
 # `equipItemIfPossible`, but nothing joined them -- so every mob that did not
 # override `pickUpItem` itself walked over your gear and left it lying there.
 #
@@ -47,7 +47,7 @@ sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups
 sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 0/' "$RUN_DIR/config/config.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null

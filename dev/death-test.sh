@@ -37,7 +37,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null

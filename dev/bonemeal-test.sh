@@ -50,7 +50,7 @@ grep -q '^command_spam_threshold_seconds' "$RUN_DIR/config/config.toml" ||
   echo 'command_spam_threshold_seconds = 0' >> "$RUN_DIR/config/config.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null

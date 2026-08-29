@@ -30,7 +30,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -49,7 +49,7 @@ if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
 fi
 
 # A jetty to stand on and a pool beside it, laid one block at a time because
-# Steel has no `/fill` yet. All of it matters: a player teleported into mid-air
+# Foton has no `/fill` yet. All of it matters: a player teleported into mid-air
 # falls out of the world, a boat with no water under it sinks slowly enough to
 # look fine for a second and then be far out of reach by the time the next
 # command lands, and water with an open side pours away into a current that

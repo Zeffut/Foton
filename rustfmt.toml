@@ -3,9 +3,9 @@ style_edition = "2024"
 newline_style = "Unix"
 
 ignore = [
-    "steel-core/src/behavior/generated",
-    "steel-core/src/entity/generated",
-    "steel-registry/src/generated",
-    "steel-utils/src/generated",
-    "steel-worldgen/src/generated",
+    "foton-core/src/behavior/generated",
+    "foton-core/src/entity/generated",
+    "foton-registry/src/generated",
+    "foton-utils/src/generated",
+    "foton-worldgen/src/generated",
 ]

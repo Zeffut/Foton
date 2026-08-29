@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Measure how much of vanilla Steel actually implements.
+"""Measure how much of vanilla Foton actually implements.
 
-Cross-references `steel-core/build/classes.json`, which maps every vanilla
+Cross-references `foton-core/build/classes.json`, which maps every vanilla
 registry entry to the Java class that backs it, against the structs carrying a
 `#[block_behavior]`, `#[item_behavior]` or `#[entity_behavior]` attribute.
 
@@ -18,8 +18,8 @@ import re
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-CLASSES = REPO / "steel-core" / "build" / "classes.json"
-SOURCES = REPO / "steel-core" / "src"
+CLASSES = REPO / "foton-core" / "build" / "classes.json"
+SOURCES = REPO / "foton-core" / "src"
 
 STRUCT = re.compile(
     r"#\[(block|item|entity)_behavior([^\]]*)\]"
@@ -32,7 +32,7 @@ SECTIONS = (("blocks", "block"), ("items", "item"), ("entities", "entity"))
 
 
 def implemented_classes():
-    """Returns the vanilla class names Steel has a behavior for, by kind."""
+    """Returns the vanilla class names Foton has a behavior for, by kind."""
     found = {"block": set(), "item": set(), "entity": set()}
     for path in SOURCES.rglob("*.rs"):
         text = path.read_text(encoding="utf-8", errors="ignore")

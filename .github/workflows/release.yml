@@ -49,21 +49,21 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: steel-linux
+          - name: foton-linux
             os: ubuntu-latest
-            artifact: steel
+            artifact: foton
             target: ""
-          - name: steel-linux-musl
+          - name: foton-linux-musl
             os: ubuntu-latest
-            artifact: steel
+            artifact: foton
             target: x86_64-unknown-linux-musl
-          - name: steel-windows
+          - name: foton-windows
             os: windows-latest
-            artifact: steel.exe
+            artifact: foton.exe
             target: ""
-          - name: steel-macos
+          - name: foton-macos
             os: macos-latest
-            artifact: steel
+            artifact: foton
             target: ""
     steps:
       - uses: actions/checkout@v4
@@ -100,10 +100,10 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          mv artifacts/steel-linux/steel release/steel-linux
-          mv artifacts/steel-linux-musl/steel release/steel-linux-musl
-          mv artifacts/steel-windows/steel.exe release/steel-windows.exe
-          mv artifacts/steel-macos/steel release/steel-macos
+          mv artifacts/foton-linux/foton release/foton-linux
+          mv artifacts/foton-linux-musl/foton release/foton-linux-musl
+          mv artifacts/foton-windows/foton.exe release/foton-windows.exe
+          mv artifacts/foton-macos/foton release/foton-macos
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -122,7 +122,7 @@ jobs:
           RELEASE_TAG: v${{ needs.version.outputs.current }}
         run: |
           gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
-            -f event_type=steel-released \
+            -f event_type=foton-released \
             -f "client_payload[tag]=${RELEASE_TAG}" \
             -f "client_payload[sha]=${GITHUB_SHA}"
 
@@ -135,4 +135,4 @@ jobs:
         with:
           token: ${{ secrets.DOCS_DISPATCH_TOKEN }}
           repository: Steel-Foundation/SteelDocs
-          event-type: steel-released
+          event-type: foton-released

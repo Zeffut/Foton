@@ -58,7 +58,7 @@ PID=
 start_server() {
   # stdin from /dev/null: the server reads console commands, and a background
   # process that reads a terminal is stopped by SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/steel" > "server-$1.log" 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > "server-$1.log" 2>&1 < /dev/null &
   PID=$!
   if ! wait_for_port; then
     echo "SERVER NEVER LISTENED ON $PORT ($1)"

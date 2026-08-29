@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "SteelWorldsConfig",
-  "description": "World and domain configuration schema for Steel",
+  "title": "FotonWorldsConfig",
+  "description": "World and domain configuration schema for Foton",
   "type": "object",
   "properties": {
     "save_path": {
@@ -61,11 +61,11 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["steel:disk", "steel:ram"]
+          "enum": ["foton:disk", "foton:ram"]
         },
         "config": {
           "type": "object",
-          "description": "Storage-specific config. steel:disk supports optional relative path; steel:ram accepts no keys.",
+          "description": "Storage-specific config. foton:disk supports optional relative path; foton:ram accepts no keys.",
           "additionalProperties": true
         }
       },
@@ -77,7 +77,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["steel:file"]
+          "enum": ["foton:file"]
         }
       },
       "required": ["type"],
@@ -140,11 +140,11 @@
         },
         "nether_portal_target": {
           "$ref": "#/definitions/world_name",
-          "description": "Same-domain world name used by Nether portals from this world. If omitted, Steel uses vanilla conventional names."
+          "description": "Same-domain world name used by Nether portals from this world. If omitted, Foton uses vanilla conventional names."
         },
         "end_portal_target": {
           "$ref": "#/definitions/world_name",
-          "description": "Same-domain world name used by End portals from this non-End world. Invalid on End-dimension worlds. If omitted, Steel uses vanilla conventional names."
+          "description": "Same-domain world name used by End portals from this non-End world. Invalid on End-dimension worlds. If omitted, Foton uses vanilla conventional names."
         },
         "config": {
           "type": "object",

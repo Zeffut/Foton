@@ -36,7 +36,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -54,7 +54,7 @@ if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
   cleanup; exit 1
 fi
 
-# A floor to stand on, laid one block at a time because Steel has no `/fill`.
+# A floor to stand on, laid one block at a time because Foton has no `/fill`.
 # Without it the camel falls out of the world before it can be clicked.
 CMDS='gamemode creative'
 for x in $(seq -2 3); do

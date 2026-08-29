@@ -1,4 +1,4 @@
-# Vanilla parity: where Steel stands, and the order of the work
+# Vanilla parity: where Foton stands, and the order of the work
 
 The goal is a server a player cannot tell from vanilla. This is the measured
 distance to that, and the order it gets closed in.
@@ -47,7 +47,7 @@ two, carrying the cartography table off the block column with them.
 Two warnings about reading this table at all. It counts classes with *no*
 behavior, so it says nothing about how complete the ones that exist are: the
 sculk sensor is off the list and still never fires. And it over-counts, because
-some vanilla classes are only collision shapes that Steel already takes from
+some vanilla classes are only collision shapes that Foton already takes from
 extracted data -- `SoulSandBlock` is one. A line disappearing is good news; it
 is not the same as the feature working.
 
@@ -77,15 +77,15 @@ Before adding anything, check whether the thing already exists and is merely
 orphaned.
 
 The loot system is the sharpest version of this so far, and it is worth reading
-as a warning about this document too. It was written down here as "Steel has no
-loot system at all". Steel had a complete one: a 2,443-line interpreter and a
+as a warning about this document too. It was written down here as "Foton has no
+loot system at all". Foton had a complete one: a 2,443-line interpreter and a
 build step compiling all 1355 vanilla tables into typed statics. What it did
 not have was correct *results*, and nothing on the outside distinguished the
 two. `match_tool` answered true when there was no tool, so 138 conditions were
 wrong. Looting read the enchantment off the tool instead of the attacker, which
 is not where it lives, so the enchantment did nothing at all. An entity
 predicate with an unmodelled key silently matched everything, which is why
-every zombie in Steel dropped a red mushroom -- vanilla gates that on riding a
+every zombie in Foton dropped a red mushroom -- vanilla gates that on riding a
 zombie horse. **A system that exists is not the same as a system that works,
 and this file has been wrong about which was which.**
 
@@ -127,7 +127,7 @@ cannot.
 
       Still open: spawner and command block carts, both blocked on the blocks
       they carry. `pushAndPickupEntities` is missing for all six -- a cart
-      passes through everything, because Steel has no entity push. A generated
+      passes through everything, because Foton has no entity push. A generated
       chest cart still opens empty, but not for the reason written here before:
       see the loot entry below.
 
@@ -179,7 +179,7 @@ cannot.
       whatever container it faces or thrown if there is none. The beacon
       counts its pyramid, checks the sky above it is clear, and hands its two
       effects to everyone in range every four seconds -- which needed the
-      `SetBeacon` packet, which Steel had a number for and nothing behind.
+      `SetBeacon` packet, which Foton had a number for and nothing behind.
       The loom stamps banners: a banner, a dye and an optional pattern item,
       with the pattern picked from whatever that item offers -- everything it
       needs was already in the registry, so the note that called it blocked
@@ -190,7 +190,7 @@ cannot.
       locks, deferring the new map to a `map_post_processing` marker so that
       hovering over a result does not burn a map id per click. Armor trims are
       the half of smithing that is not here: they need trim pattern and
-      material registries and a `TRIM` component Steel does not have, so those
+      material registries and a `TRIM` component Foton does not have, so those
       eighteen recipes are still skipped -- deliberately now, rather than by
       omission.
 - [~] **Blocks that answer the world**: the lightning rod takes a strike and
@@ -199,7 +199,7 @@ cannot.
       shrieker and the sculk block have their state, their redstone and their
       comparator readings.
 
-      Two of those are wired to nothing, deliberately. Steel has game events
+      Two of those are wired to nothing, deliberately. Foton has game events
       and a listener layer but no vibration system on top, so a sculk sensor
       never fires on its own -- `activate` is written and tested because it is
       exactly the seam a vibration system attaches to, and the vanilla
@@ -210,7 +210,7 @@ cannot.
       lifted out of `worldgen/feature/features/sculk_patch.rs` into
       `behavior/blocks/sculk/spreader.rs` and rewritten against `LevelAccessor`,
       so world generation and a live catalyst walk the same algorithm; the
-      catalyst's block entity is the first in Steel to publish a game-event
+      catalyst's block entity is the first in Foton to publish a game-event
       listener, hears `ENTITY_DIE` from eight blocks, takes the experience the
       death was about to drop and spends it as sculk. `dev/catalyst-test.sh`
       kills mobs next to one and watches the floor turn.
@@ -240,23 +240,23 @@ cannot.
       Multishot, and will fire a firework rocket. The trident throws, sticks,
       comes home on Loyalty and launches its owner on Riptide. The wind charge
       bursts without hurting what it shoves, which took teaching
-      `ExplosionSpec` to say `damages_entities: false` -- until then Steel had
+      `ExplosionSpec` to say `damages_entities: false` -- until then Foton had
       no way to express a blast that only pushes. The fishing rod casts,
       bobs, nibbles and reels a catch in -- and it uncovered a silent one:
       `gameplay/fishing` gates its treasure entry on
-      `type_specific/fishing_hook.in_open_water`, a predicate key Steel did not
+      `type_specific/fishing_hook.in_open_water`, a predicate key Foton did not
       model, and an unmodelled key makes a predicate *fail*. Shipping the hook
       alone would have given a game where treasure never appears and nothing
       says why.
 
       Two of these are honestly partial. Riptide launches the player but
-      without the spin attack: Steel has no auto-spin-attack state at all.
+      without the spin attack: Foton has no auto-spin-attack state at all.
       Channeling is left out rather than approximated, because its lightning
       needs a summon path the enchantment layer does not have.
 - [x] **Maps.** A blank map fills in as the player walks, at four zoom
       levels, and the cartography table clones, zooms and locks. Vanilla keeps
       every map in one server-wide store so a map carried to the nether still
-      reads; Steel's saved data is per world, so the store hangs off the
+      reads; Foton's saved data is per world, so the store hangs off the
       domain instead -- getting that wrong would have made a nether-made map
       reuse an overworld id.
 
@@ -265,7 +265,7 @@ cannot.
       Block map colors were already coming out of SteelExtractor; the
       checked-in `blocks.json` simply predated them.
 
-      Still open: a map in an item frame is not broadcast, because Steel's item
+      Still open: a map in an item frame is not broadcast, because Foton's item
       frame has no per-tracker pass. And `addTargetDecoration` is unwritten --
       that one function plus the structure locator already in
       `command/builtins/locate.rs` is all that stands between this and buried
@@ -289,7 +289,7 @@ cannot.
 
       The bundle works, all of it: the weight rule, partial insertion, the
       selected item and the cycling. Books can be written, signed and read,
-      which needed the `SEditBook` and `OpenBook` packets -- Steel had numbers
+      which needed the `SEditBook` and `OpenBook` packets -- Foton had numbers
       for both and nothing behind them. The debug stick cycles block states for
       an operator, fish buckets carry cod and salmon, and the powder snow
       bucket places its block.
@@ -314,7 +314,7 @@ cannot.
 
       Two honest limits. An iron golem's *village* half is absent -- no
       `MoveBackToVillage`, no `DefendVillage`, no natural village spawn --
-      because those need a POI distance tracker Steel has not got, and
+      because those need a POI distance tracker Foton has not got, and
       villagers. The copper golem's `Brain` half is done -- see the brain entry
       below -- so the limit there is the POI tracker, not the layer.
 
@@ -332,7 +332,7 @@ cannot.
       `SpellcasterIllager` layers under them, the ominous banner a patrol
       captain wears, and all five spells. The raid itself is not: `Raid`
       and `Raids` stand on villagers, an occupied village POI index, a
-      saved-data manager and a boss bar, and Steel has none of the four.
+      saved-data manager and a boss bar, and Foton has none of the four.
       Every seam that needs a live raid is written and answers from
       `Raider::current_raid_status`, which is always `None`; landing the
       raid manager means giving that one method something to read. What is
@@ -345,7 +345,7 @@ mobs that need it.
 
 - [~] **A Brain, and one mob on it.** Vanilla drives its newer mobs from a
       `Brain` -- memories, sensors, activities, a behaviour schedule -- and not
-      from goals. Steel now has one: 33 memory kinds, 6 sensors, 18 behaviors,
+      from goals. Foton now has one: 33 memory kinds, 6 sensors, 18 behaviors,
       and the copper golem running `CopperGolemAi` for real, carrying stacks
       between containers.
 
@@ -365,7 +365,7 @@ mobs that need it.
       minecart and the ominous item spawner. The 28 vanilla trial-spawner
       configs are compiled from the extracted datapack rather than transcribed.
 
-      Two things this found: Steel's strict NBT getters would have silently
+      Two things this found: Foton's strict NBT getters would have silently
       reset every saved spawner, because vanilla writes those delays as shorts
       and reads them leniently; and `simdnbt`'s `insert` appends instead of
       replacing, which was quietly giving a spawn entry two `id` keys.
@@ -379,7 +379,7 @@ mobs that need it.
       the same screen; in 26.2 a nautilus carries no cargo, so only its saddle
       and armor slots are live.
 
-      What made this the last piece of the family: a Steel menu slot sits on a
+      What made this the last piece of the family: a Foton menu slot sits on a
       `Container`, which hands out `&[ItemStack]`, while a mount's saddle and
       armor are worn equipment -- vanilla's `Mob.createEquipmentSlotContainer`
       is a view over `getItemBySlot`, not storage. `OwnedEntityEquipment` is
@@ -397,7 +397,7 @@ mobs that need it.
 
       Bone meal on a moss block places its patch for real now. That was the last
       block waiting on `WorldGenLevel`: vanilla's `BonemealableFeaturePlacerBlock`
-      runs a whole configured feature, and Steel's feature dispatcher only knew how
+      runs a whole configured feature, and Foton's feature dispatcher only knew how
       to write into a mid-generation `WorldGenRegion`. It now writes into anything
       that implements `WorldGenLevel`, which a live world does.
 
@@ -407,7 +407,7 @@ mobs that need it.
       the way vanilla does it, so dousing one stops it and lighting it starts it
       again. The nine `campfire_cooking` recipes had been sitting unread in the
       builtin datapack -- the build script's match dropped them with the recipe
-      types Steel does not model, and an empty family answers every lookup with
+      types Foton does not model, and an empty family answers every lookup with
       nothing, so this looked like a missing block rather than a missing recipe.
 
       The conduit works, which means the prismarine people build around it now

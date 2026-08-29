@@ -4,8 +4,8 @@ on:
   push:
     branches: [master]
     paths:
-      - "steel-core/build/classes.json"
-      - "steel-core/src/behavior/**"
+      - "foton-core/build/classes.json"
+      - "foton-core/src/behavior/**"
 
 jobs:
   notify:
@@ -16,4 +16,4 @@ jobs:
         with:
           token: ${{ secrets.DOCS_DISPATCH_TOKEN }}
           repository: Steel-Foundation/SteelDocs
-          event-type: steel-updated
+          event-type: foton-updated

@@ -2,16 +2,16 @@ cargo-features = ["codegen-backend"]
 [workspace]
 resolver = "2"
 members = [
-    "steel",
-    "steel-login",
-    "steel-macros",
-    "steel-protocol",
-    "steel-registry",
-    "steel-worldgen",
-    "steel-utils",
-    "steel-core",
-    "steel-crypto",
-    "steel-math",
+    "foton",
+    "foton-login",
+    "foton-macros",
+    "foton-protocol",
+    "foton-registry",
+    "foton-worldgen",
+    "foton-utils",
+    "foton-core",
+    "foton-crypto",
+    "foton-math",
 ]
 
 [workspace.package]
@@ -22,15 +22,15 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 # Internal crates
-steel-core = { path = "steel-core" }
-steel-crypto = { path = "steel-crypto" }
-steel-login = { path = "steel-login" }
-steel-macros = { path = "steel-macros" }
-steel-protocol = { path = "steel-protocol" }
-steel-registry = { path = "steel-registry" }
-steel-utils = { path = "steel-utils" }
-steel-worldgen = { path = "steel-worldgen" }
-steel-math = { path = "steel-math" }
+foton-core = { path = "foton-core" }
+foton-crypto = { path = "foton-crypto" }
+foton-login = { path = "foton-login" }
+foton-macros = { path = "foton-macros" }
+foton-protocol = { path = "foton-protocol" }
+foton-registry = { path = "foton-registry" }
+foton-utils = { path = "foton-utils" }
+foton-worldgen = { path = "foton-worldgen" }
+foton-math = { path = "foton-math" }
 
 # Async runtime
 tokio = { version = "1.53.1", features = [
@@ -164,12 +164,12 @@ debug = 0
 #codegen-backend = "cranelift"
 
 
-[profile.dev.package.steel-worldgen]
+[profile.dev.package.foton-worldgen]
 opt-level = 3
 debug-assertions = false
 overflow-checks = false
 
-[profile.dev.package.steel-math]
+[profile.dev.package.foton-math]
 opt-level = 3
 debug-assertions = false
 overflow-checks = false

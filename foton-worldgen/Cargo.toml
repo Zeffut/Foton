@@ -1,0 +1,50 @@
+[package]
+name = "foton-worldgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+build = "build/build.rs"
+
+[dependencies]
+# Internal crates
+foton-registry.workspace = true
+foton-utils.workspace = true
+foton-math.workspace = true
+
+# Data structures
+rustc-hash.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+glam.workspace = true
+wincode.workspace = true
+
+rayon.workspace = true
+
+[build-dependencies]
+foton-utils.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Proc macros
+proc-macro2.workspace = true
+quote.workspace = true
+
+# Data structures
+rustc-hash.workspace = true
+
+[dev-dependencies]
+foton-registry.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "jigsaw_assembly"
+harness = false
+
+[lints]
+workspace = true
+
+[features]
+fmt = []

@@ -54,7 +54,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -78,7 +78,7 @@ CMDS='gamemode creative'
 CMDS="$CMDS;;time set day"
 CMDS="$CMDS;;difficulty normal"
 # Mob griefing off: a dragon eats every block its head, neck and body pass
-# through, and the floor under it is not what is being tested. Steel's game
+# through, and the floor under it is not what is being tested. Foton's game
 # rules are named after their registry path, so this is `mob_griefing` and not
 # vanilla's `mobGriefing` -- the camel-case spelling is silently rejected.
 CMDS="$CMDS;;gamerule mob_griefing false"

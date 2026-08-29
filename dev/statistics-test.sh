@@ -39,10 +39,10 @@ sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 
 
 # The two registry ids a statistic is made of, out of the extracted data.
 stat_type_id() {
-  python3 -c "import json,sys; d=json.load(open('$ROOT/steel-registry/build_assets/stat_types.json')); print(next(e['id'] for e in d if e['key']=='minecraft:'+sys.argv[1]))" "$1"
+  python3 -c "import json,sys; d=json.load(open('$ROOT/foton-registry/build_assets/stat_types.json')); print(next(e['id'] for e in d if e['key']=='minecraft:'+sys.argv[1]))" "$1"
 }
 custom_stat_id() {
-  python3 -c "import json,sys; d=json.load(open('$ROOT/steel-registry/build_assets/custom_stats.json')); print(next(e['id'] for e in d if e['key']=='minecraft:'+sys.argv[1]))" "$1"
+  python3 -c "import json,sys; d=json.load(open('$ROOT/foton-registry/build_assets/custom_stats.json')); print(next(e['id'] for e in d if e['key']=='minecraft:'+sys.argv[1]))" "$1"
 }
 
 CUSTOM=$(stat_type_id custom)
@@ -53,7 +53,7 @@ DEATHS=$(custom_stat_id deaths)
 PLAY_TIME=$(custom_stat_id play_time)
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -137,7 +137,7 @@ echo "$AFTER" | grep -q "statistic $CUSTOM:$MOB_KILLS = 1$" \
   || fail "killing a zombie did not count exactly one mob kill"
 echo "$AFTER" | grep -q "statistic $CUSTOM:$DEATHS = 1$" \
   || fail "dying did not count exactly one death"
-ZOMBIE=$(python3 -c "import json;d=json.load(open('$ROOT/steel-registry/build_assets/entities.json'));print([e['id'] for e in d if e['name']=='zombie'][0])" 2>/dev/null)
+ZOMBIE=$(python3 -c "import json;d=json.load(open('$ROOT/foton-registry/build_assets/entities.json'));print([e['id'] for e in d if e['name']=='zombie'][0])" 2>/dev/null)
 if [ -n "$ZOMBIE" ]; then
   echo "$AFTER" | grep -q "statistic $KILLED:$ZOMBIE = 1$" \
     || fail "killing a zombie did not count against the zombie entity type"

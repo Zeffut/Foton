@@ -8,7 +8,7 @@ on:
       - v**
   repository_dispatch:
     types:
-      - steel-released
+      - foton-released
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_DESCRIPTION: Steel is a lightweight Rust implementation of the Minecraft server. It focuses on clean code, performance, extensibility, and ease of use.
+  IMAGE_DESCRIPTION: Foton is a lightweight Rust implementation of the Minecraft server. It focuses on clean code, performance, extensibility, and ease of use.
 
 jobs:
   docker:

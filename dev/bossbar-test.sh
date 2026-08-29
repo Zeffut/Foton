@@ -19,7 +19,7 @@ ROOT=$(pwd)
 
 PORT=25715
 RUN_DIR="$ROOT/run-bossbar"
-BAR="minecraft:steel_test"
+BAR="minecraft:foton_test"
 
 echo "=== Building ==="
 if ! cargo build 2>&1 | tail -2; then
@@ -51,7 +51,7 @@ wait_for_port() {
 
 PID=
 start_server() {
-  nohup "$ROOT/target/debug/steel" > "server-$1.log" 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > "server-$1.log" 2>&1 < /dev/null &
   PID=$!
   if ! wait_for_port; then
     echo "SERVER NEVER LISTENED ON $PORT ($1)"
@@ -91,7 +91,7 @@ CMDS="$CMDS;;execute store success entity @n[tag=bb_probe,distance=..20] data.pr
 CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;execute if entity @e[tag=bb_probe,nbt={data:{pre:0b}},distance=..20] run tellraw @s {\"text\":\"BB_PRE_UNKNOWN\"}"
 
-CMDS="$CMDS;;bossbar add $BAR {\"text\":\"Steel Test\"}"
+CMDS="$CMDS;;bossbar add $BAR {\"text\":\"Foton Test\"}"
 CMDS="$CMDS;;!wait 1"
 # A second add of the same id must fail, or a datapack would silently lose the
 # bar it already had.

@@ -1,0 +1,49 @@
+use foton_utils::Identifier;
+use rustc_hash::FxHashMap;
+
+use crate::RegistryTags;
+
+#[derive(Debug, Clone)]
+pub struct GameEvent {
+    pub key: Identifier,
+    pub notification_radius: i32,
+}
+
+pub type GameEventRef = &'static GameEvent;
+
+pub struct GameEventRegistry {
+    game_events_by_id: Vec<GameEventRef>,
+    game_events_by_key: FxHashMap<Identifier, usize>,
+    tags: RegistryTags,
+    allows_registering: bool,
+}
+
+impl GameEventRegistry {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            game_events_by_id: Vec::new(),
+            game_events_by_key: FxHashMap::default(),
+            tags: RegistryTags::default(),
+            allows_registering: true,
+        }
+    }
+}
+
+crate::impl_standard_methods!(
+    GameEventRegistry,
+    GameEventRef,
+    game_events_by_id,
+    game_events_by_key,
+    allows_registering
+);
+
+crate::impl_registry!(
+    GameEventRegistry,
+    GameEvent,
+    game_events_by_id,
+    game_events_by_key,
+    game_events
+);
+
+crate::impl_tagged_registry!(GameEventRegistry, game_events_by_key, "game event");

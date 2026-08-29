@@ -1,0 +1,11 @@
+//! Decoration entities: the ones a player places to be looked at.
+//!
+//! They are not in `objects` because that module is for non-living entities,
+//! and an armor stand is a `LivingEntity` with no AI -- the only one in Foton
+//! that is neither a mob nor a player.
+
+mod armor_stand;
+mod mannequin;
+
+pub use armor_stand::ArmorStandEntity;
+pub use mannequin::MannequinEntity;

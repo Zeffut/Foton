@@ -17,7 +17,7 @@ ROOT=$(pwd)
 
 PORT=25704
 RCON_PORT=25705
-RCON_PASSWORD=steel-rcon-test
+RCON_PASSWORD=foton-rcon-test
 RUN_DIR="$ROOT/run-rcon"
 
 echo "=== Building ==="
@@ -51,7 +51,7 @@ password = "$RCON_PASSWORD"
 TOML
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null

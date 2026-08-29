@@ -56,7 +56,7 @@ PID=
 start_server() {
   # stdin from /dev/null: the server reads console commands, and a background
   # process that reads a terminal is stopped by SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/steel" > "server-$1.log" 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > "server-$1.log" 2>&1 < /dev/null &
   PID=$!
   if ! wait_for_port; then
     echo "SERVER NEVER LISTENED ON $PORT ($1)"
@@ -121,13 +121,13 @@ CHECKS="$CHECKS$(ask es_state '{AbsorptionAmount:6.0f}' ES_ABSORPTION)"
 CHECKS="$CHECKS$(ask es_state '{active_effects:[{id:"minecraft:strength"}]}' ES_EFFECT)"
 CHECKS="$CHECKS$(ask es_state '{active_effects:[{amplifier:3b}]}' ES_EFFECT_AMPLIFIER)"
 CHECKS="$CHECKS$(ask es_state '{attributes:[{id:"minecraft:max_health",base:30.0d}]}' ES_ATTRIBUTE_BASE)"
-CHECKS="$CHECKS$(ask es_state '{attributes:[{modifiers:[{id:"steel:test_speed"}]}]}' ES_ATTRIBUTE_MODIFIER)"
+CHECKS="$CHECKS$(ask es_state '{attributes:[{modifiers:[{id:"foton:test_speed"}]}]}' ES_ATTRIBUTE_MODIFIER)"
 CHECKS="$CHECKS$(ask es_state '{equipment:{head:{id:"minecraft:diamond_helmet"}}}' ES_EQUIPMENT)"
 # The control again, on the state mob's keys: a plain zombie must answer none
 # of them.
 CHECKS="$CHECKS$(ask es_plain '{AbsorptionAmount:6.0f}' ES_PLAIN_ABSORPTION)"
 CHECKS="$CHECKS$(ask es_plain '{active_effects:[{id:"minecraft:strength"}]}' ES_PLAIN_EFFECT)"
-CHECKS="$CHECKS$(ask es_plain '{attributes:[{modifiers:[{id:"steel:test_speed"}]}]}' ES_PLAIN_MODIFIER)"
+CHECKS="$CHECKS$(ask es_plain '{attributes:[{modifiers:[{id:"foton:test_speed"}]}]}' ES_PLAIN_MODIFIER)"
 CHECKS="$CHECKS$(ask es_plain '{equipment:{head:{id:"minecraft:diamond_helmet"}}}' ES_PLAIN_EQUIPMENT)"
 
 STATE_NBT='{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Tags:["es_state"],'
@@ -135,7 +135,7 @@ STATE_NBT="$STATE_NBT"'AbsorptionAmount:6.0f,'
 STATE_NBT="$STATE_NBT"'equipment:{head:{id:"minecraft:diamond_helmet",count:1}},'
 STATE_NBT="$STATE_NBT"'active_effects:[{id:"minecraft:strength",amplifier:3b,duration:100000,show_particles:0b}],'
 STATE_NBT="$STATE_NBT"'attributes:[{id:"minecraft:max_health",base:30.0d},'
-STATE_NBT="$STATE_NBT"'{id:"minecraft:movement_speed",base:0.23d,modifiers:[{id:"steel:test_speed",amount:0.5d,operation:"add_value"}]}]}'
+STATE_NBT="$STATE_NBT"'{id:"minecraft:movement_speed",base:0.23d,modifiers:[{id:"foton:test_speed",amount:0.5d,operation:"add_value"}]}]}'
 
 # ---------------------------------------------------------------- first boot
 echo "=== First boot: hurts a mob, summons a loaded one, stops cleanly ==="

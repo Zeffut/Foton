@@ -5,7 +5,7 @@
 # the assertion. `RESPAWN_CHURN_ROUNDS` sets it.
 #
 #   421.34s [Error] Thread 'chunk-worker' has panicked at
-#                   steel-core/src/chunk/chunk_generation_task.rs:157
+#                   foton-core/src/chunk/chunk_generation_task.rs:157
 #                   The chunkholder should be created by distance manager
 #                   before the generation task is scheduled.
 #
@@ -51,7 +51,7 @@ if [ -d "$ROOT/run-offline/config" ]; then
   cp -r "$ROOT/run-offline/config/." config/
 else
   echo "=== Generating an offline config ==="
-  nohup "$ROOT/target/debug/steel" > /dev/null 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > /dev/null 2>&1 < /dev/null &
   GEN_PID=$!
   for _ in $(seq 1 120); do
     [ -f config/config.toml ] && break
@@ -80,7 +80,7 @@ if grep -q '^command_spam_threshold_seconds' config/config.toml; then
 fi
 rm -rf saves
 
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null

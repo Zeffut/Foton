@@ -59,7 +59,7 @@ sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups
 sed -i 's/^command_spam_threshold_seconds = .*/command_spam_threshold_seconds = 0/' "$RUN_DIR/config/config.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -101,25 +101,25 @@ CMDS="$CMDS;;!wait 2"
 
 # --- rig one: a killed creaking has to leave ------------------------------
 # `PersistenceRequired` so that nothing below can be explained by a despawn.
-CMDS="$CMDS;;summon minecraft:creaking 3 101 0 {Tags:[\"steeldead\"],PersistenceRequired:1b}"
+CMDS="$CMDS;;summon minecraft:creaking 3 101 0 {Tags:[\"fotondead\"],PersistenceRequired:1b}"
 CMDS="$CMDS;;!wait 2"
 # The control: asked before the kill, because an absence assertion after one
 # means nothing without it.
-CMDS="$CMDS;;execute if entity @e[type=minecraft:creaking,tag=steeldead] run tellraw @s \"DEADRIGSUMMONED\""
+CMDS="$CMDS;;execute if entity @e[type=minecraft:creaking,tag=fotondead] run tellraw @s \"DEADRIGSUMMONED\""
 # A creaking has one heart of health, so any real blow is fatal. `limit=1`
 # because `/damage` takes a single-entity argument, and a selector that could
 # match several is a parse error rather than a miss.
-CMDS="$CMDS;;damage @e[type=minecraft:creaking,tag=steeldead,limit=1] 1000 minecraft:generic"
+CMDS="$CMDS;;damage @e[type=minecraft:creaking,tag=fotondead,limit=1] 1000 minecraft:generic"
 # The control for the blow itself: a creaking that shrugged the damage off would
 # make the removal assertion below fail for the wrong reason.
-CMDS="$CMDS;;execute unless entity @e[type=minecraft:creaking,tag=steeldead,nbt={Health:1.0f}] run tellraw @s \"DEADRIGWASHURT\""
+CMDS="$CMDS;;execute unless entity @e[type=minecraft:creaking,tag=fotondead,nbt={Health:1.0f}] run tellraw @s \"DEADRIGWASHURT\""
 # `tickDeath` removes at twenty; two hundred is room to spare.
 CMDS="$CMDS;;tick sprint 200"
 CMDS="$CMDS;;!wait 4"
-CMDS="$CMDS;;execute unless entity @e[type=minecraft:creaking,tag=steeldead] run tellraw @s \"DEADRIGREMOVED\""
+CMDS="$CMDS;;execute unless entity @e[type=minecraft:creaking,tag=fotondead] run tellraw @s \"DEADRIGREMOVED\""
 
 # --- rig two: an unwatched creaking has to wander -------------------------
-CMDS="$CMDS;;summon minecraft:creaking 8 101 0 {Tags:[\"steelwander\"],PersistenceRequired:1b}"
+CMDS="$CMDS;;summon minecraft:creaking 8 101 0 {Tags:[\"fotonwander\"],PersistenceRequired:1b}"
 CMDS="$CMDS;;!wait 2"
 # The control for the selector, not for the position: a wide radius the
 # creaking cannot leave, asked at the same moment as the narrow one below. It
@@ -133,11 +133,11 @@ CMDS="$CMDS;;!wait 2"
 for _ in 1 2 3 4; do
   CMDS="$CMDS;;tick sprint 1200"
   CMDS="$CMDS;;!wait 4"
-  CMDS="$CMDS;;execute positioned 8 101 0 if entity @e[type=minecraft:creaking,tag=steelwander,distance=..48] run tellraw @s \"WANDERERINRANGE\""
-  CMDS="$CMDS;;execute positioned 8 101 0 unless entity @e[type=minecraft:creaking,tag=steelwander,distance=..2] run tellraw @s \"WANDERERMOVED\""
+  CMDS="$CMDS;;execute positioned 8 101 0 if entity @e[type=minecraft:creaking,tag=fotonwander,distance=..48] run tellraw @s \"WANDERERINRANGE\""
+  CMDS="$CMDS;;execute positioned 8 101 0 unless entity @e[type=minecraft:creaking,tag=fotonwander,distance=..2] run tellraw @s \"WANDERERMOVED\""
 done
 # It has to still be there: "moved" must not be satisfied by "gone".
-CMDS="$CMDS;;execute if entity @e[type=minecraft:creaking,tag=steelwander] run tellraw @s \"WANDERERSTILLTHERE\""
+CMDS="$CMDS;;execute if entity @e[type=minecraft:creaking,tag=fotonwander] run tellraw @s \"WANDERERSTILLTHERE\""
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_WATCH_SECONDS=3 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1

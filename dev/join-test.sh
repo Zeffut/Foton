@@ -35,7 +35,7 @@ if [ ! -f config/config.toml ]; then
   # cannot satisfy. stdin has to come from /dev/null: the server reads console
   # commands, and a background process that reads a terminal is stopped by
   # SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/steel" > /dev/null 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > /dev/null 2>&1 < /dev/null &
   GEN_PID=$!
   for _ in $(seq 1 60); do
     [ -f config/config.toml ] && break
@@ -79,7 +79,7 @@ fi
 rm -rf saves
 
 echo "=== Booting (offline, port $PORT) ==="
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 
 STATUS=1

@@ -1,0 +1,87 @@
+use crate::biome::BiomeRef;
+use crate::shared_structs::{
+    SpawnConditionEntry, insert_spawn_conditions, pick_spawn_conditioned_entry,
+};
+use foton_utils::Identifier;
+use foton_utils::random::Random;
+use rustc_hash::FxHashMap;
+use simdnbt::ToNbtTag;
+use simdnbt::owned::NbtTag;
+
+/// Represents a full zombie nautilus variant definition from a data pack JSON file.
+#[derive(Debug)]
+pub struct ZombieNautilusVariant {
+    pub key: Identifier,
+    pub asset_id: Identifier,
+    pub model: Option<&'static str>,
+    pub spawn_conditions: &'static [SpawnConditionEntry],
+}
+
+impl ToNbtTag for &ZombieNautilusVariant {
+    fn to_nbt_tag(self) -> NbtTag {
+        use simdnbt::owned::{NbtCompound, NbtTag};
+        let mut compound = NbtCompound::new();
+        let asset_id = self.asset_id.to_string();
+        compound.insert("asset_id", asset_id.as_str());
+        compound.insert("baby_asset_id", asset_id.as_str());
+        if let Some(model) = self.model {
+            compound.insert("model", model);
+        }
+        insert_spawn_conditions(&mut compound, self.spawn_conditions);
+        NbtTag::Compound(compound)
+    }
+}
+
+pub type ZombieNautilusVariantRef = &'static ZombieNautilusVariant;
+
+pub struct ZombieNautilusVariantRegistry {
+    zombie_nautilus_variants_by_id: Vec<ZombieNautilusVariantRef>,
+    zombie_nautilus_variants_by_key: FxHashMap<Identifier, usize>,
+    allows_registering: bool,
+}
+
+impl ZombieNautilusVariantRegistry {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            zombie_nautilus_variants_by_id: Vec::new(),
+            zombie_nautilus_variants_by_key: FxHashMap::default(),
+            allows_registering: true,
+        }
+    }
+
+    /// Picks the variant a zombie nautilus spawning in `biome` should wear.
+    ///
+    /// Vanilla parity: `VariantUtils.selectVariantToSpawn` over
+    /// `Registries.ZOMBIE_NAUTILUS_VARIANT`. Every variant is conditioned on
+    /// biome alone, so the shared priority pick answers it exactly.
+    #[must_use]
+    pub fn select_spawn_variant(
+        &self,
+        biome: BiomeRef,
+        random: &mut impl Random,
+    ) -> Option<ZombieNautilusVariantRef> {
+        pick_spawn_conditioned_entry(
+            self.iter().map(|(_, variant)| variant),
+            |variant| variant.spawn_conditions,
+            biome,
+            random,
+        )
+    }
+}
+
+crate::impl_standard_methods!(
+    ZombieNautilusVariantRegistry,
+    ZombieNautilusVariantRef,
+    zombie_nautilus_variants_by_id,
+    zombie_nautilus_variants_by_key,
+    allows_registering
+);
+
+crate::impl_registry!(
+    ZombieNautilusVariantRegistry,
+    ZombieNautilusVariant,
+    zombie_nautilus_variants_by_id,
+    zombie_nautilus_variants_by_key,
+    zombie_nautilus_variants
+);

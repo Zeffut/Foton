@@ -7,7 +7,7 @@ import re
 # main checkout's generated file and write the main checkout's ledger --
 # silently producing a ledger for the wrong tree.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
-GEN = ROOT + "steel-core/src/behavior/generated/parity.rs"
+GEN = ROOT + "foton-core/src/behavior/generated/parity.rs"
 LEDGER = ROOT + "dev/parity-gaps.txt"
 
 source = io.open(GEN, encoding="utf-8").read()
@@ -25,7 +25,7 @@ blocks = names("UNCLAIMED_BLOCK_CLASSES")
 items = names("UNCLAIMED_ITEM_CLASSES")
 entities = names("UNCLAIMED_ENTITY_CLASSES")
 
-HEADER = """# Vanilla classes Steel has no behavior for.
+HEADER = """# Vanilla classes Foton has no behavior for.
 #
 # Generated from `classes.json` at build time and checked by
 # `parity_ledger_matches_the_generated_gaps`. A line that disappears is a piece

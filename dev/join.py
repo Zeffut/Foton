@@ -28,7 +28,7 @@ TIMEOUT_SECONDS = 30
 # phase is where a stall shows up, so it gets its own shorter patience.
 PLAY_SILENCE_TIMEOUT_SECONDS = 20
 
-# Packet ids, mirroring steel-registry/src/generated/vanilla_packets.rs.
+# Packet ids, mirroring foton-registry/src/generated/vanilla_packets.rs.
 S_INTENTION = 0x00
 
 LOGIN_C_DISCONNECT = 0
@@ -335,7 +335,7 @@ def read_string(data):
 def client_information(skin_parts=0x7F, main_hand=1):
     """Builds the settings packet a real client sends during configuration.
 
-    Field order follows `SClientInformation` in steel-protocol.
+    Field order follows `SClientInformation` in foton-protocol.
     """
     return (
         string("en_us")
@@ -439,7 +439,7 @@ def entity_names():
     path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "..",
-        "steel-registry",
+        "foton-registry",
         "src",
         "generated",
         "vanilla_entities.rs",
@@ -469,7 +469,7 @@ def mob_effect_names():
     path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "..",
-        "steel-registry",
+        "foton-registry",
         "src",
         "generated",
         "vanilla_mob_effects.rs",
@@ -502,7 +502,7 @@ def particle_names():
     path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "..",
-        "steel-registry",
+        "foton-registry",
         "src",
         "generated",
         "vanilla_particle_types.rs",
@@ -1237,7 +1237,7 @@ def run_directive(connection, directive):
         print("  forgot the particles seen so far")
     elif parts[0] == "sawexplosion":
         # Two separate facts, reported separately on purpose: a blast the
-        # client was told about at all, and a blast that pushed it. Steel used
+        # client was told about at all, and a blast that pushed it. Foton used
         # to do neither, and a test that only asked the first would go green
         # again the moment the packet existed but carried nothing.
         print(f"  the client was told about {connection.explosions} explosions")

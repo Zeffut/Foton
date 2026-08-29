@@ -31,7 +31,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -49,7 +49,7 @@ if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
   cleanup; exit 1
 fi
 
-# The scripted client cannot click inventory slots and Steel has no `/item`
+# The scripted client cannot click inventory slots and Foton has no `/item`
 # command, so what a running server can show is the half no unit test can: that
 # right-clicking the block actually opens a container. The other half -- that
 # the contents belong to the player and survive a disconnect -- is a round trip

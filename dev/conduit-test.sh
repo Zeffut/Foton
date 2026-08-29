@@ -50,7 +50,7 @@ grep -q '^command_spam_threshold_seconds' "$RUN_DIR/config/config.toml" ||
   echo 'command_spam_threshold_seconds = 0' >> "$RUN_DIR/config/config.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -161,7 +161,7 @@ add "summon minecraft:zombie 15.5 99.0 0.5 {Tags:[\"far\"],NoAI:1b}"
 add "execute if entity @e[type=minecraft:zombie,tag=near] run tellraw @s \"NEARZOMBIEINTHEWATER\""
 add "execute if entity @e[type=minecraft:zombie,tag=far] run tellraw @s \"FARZOMBIEINTHEWATER\""
 # Four damage every two seconds against twenty health: six beats is enough with
-# room to spare, and Steel drowns nothing, so the water itself cannot do it.
+# room to spare, and Foton drowns nothing, so the water itself cannot do it.
 add "!wait 16"
 add "execute if entity @e[type=minecraft:zombie,tag=far] run tellraw @s \"FARZOMBIESURVIVED\""
 add "execute unless entity @e[type=minecraft:zombie,tag=near] run tellraw @s \"CONDUITKILLEDTHENEARZOMBIE\""

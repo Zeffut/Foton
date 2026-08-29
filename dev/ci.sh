@@ -11,11 +11,11 @@ run() {
   echo "=============================="
   shift
   START=$(date +%s)
-  if "$@" > /tmp/steel-ci.log 2>&1; then
+  if "$@" > /tmp/foton-ci.log 2>&1; then
     echo "PASS ($(($(date +%s) - START))s)"
   else
     echo "FAIL ($(($(date +%s) - START))s)"
-    tail -25 /tmp/steel-ci.log
+    tail -25 /tmp/foton-ci.log
     FAIL=1
   fi
 }

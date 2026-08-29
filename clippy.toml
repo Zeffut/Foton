@@ -18,14 +18,14 @@ disallowed-types = [
     { path = "std::collections::HashMap", reason = "Use rustc_hash::FxHashMap instead of HashMap." },
     { path = "std::collections::HashSet", reason = "Use rustc_hash::FxHashSet instead of HashSet." },
     # Use SyncMutex and SyncRwLock instead of std::sync::Mutex and std::sync::RwLock.
-    { path = "std::sync::Mutex", reason = "Use steel_utils::locks::SyncMutex instead of std::sync::Mutex." },
-    { path = "std::sync::RwLock", reason = "Use steel_utils::locks::SyncRwLock instead of std::sync::RwLock." },
+    { path = "std::sync::Mutex", reason = "Use foton_utils::locks::SyncMutex instead of std::sync::Mutex." },
+    { path = "std::sync::RwLock", reason = "Use foton_utils::locks::SyncRwLock instead of std::sync::RwLock." },
     # Use SyncMutex and SyncRwLock instead of parking_lot::Mutex and parking_lot::RwLock.
-    { path = "parking_lot::Mutex", reason = "Use steel_utils::locks::SyncMutex instead of parking_lot::Mutex." },
-    { path = "parking_lot::RwLock", reason = "Use steel_utils::locks::SyncRwLock instead of parking_lot::RwLock." },
+    { path = "parking_lot::Mutex", reason = "Use foton_utils::locks::SyncMutex instead of parking_lot::Mutex." },
+    { path = "parking_lot::RwLock", reason = "Use foton_utils::locks::SyncRwLock instead of parking_lot::RwLock." },
     # Use AsyncMutex and AsyncRwLock instead of tokio::sync::Mutex and tokio::sync::RwLock.
-    { path = "tokio::sync::Mutex", reason = "Use steel_utils::locks::AsyncMutex instead of tokio::sync::Mutex." },
-    { path = "tokio::sync::RwLock", reason = "Use steel_utils::locks::AsyncRwLock instead of tokio::sync::RwLock." },
+    { path = "tokio::sync::Mutex", reason = "Use foton_utils::locks::AsyncMutex instead of tokio::sync::Mutex." },
+    { path = "tokio::sync::RwLock", reason = "Use foton_utils::locks::AsyncRwLock instead of tokio::sync::RwLock." },
     # Use FxSmallMap instead of SmallMap
     { path = "small_map::SmallMap", reason = "Use small_map::FxSmallMap instead of small_map::SmallMap." },
 ]
@@ -34,7 +34,7 @@ disallowed-methods = [
     # Prevent people from taking ownership of the Arc inside the ArcSwap Guard
     { path = "arc_swap::Guard::into_inner", reason = "Holding a strong reference to a Chunk leads to stale data. Use the Guard directly for transient access." },
     # const_translate should only be use in generated code
-    { path = "text_components::translation::TranslatedMessage::new", reason = "New TranslatedMessages should only be use in generated code. Use steel_utils::translations::GeneratedTranslation::msg().into() instead." },
+    { path = "text_components::translation::TranslatedMessage::new", reason = "New TranslatedMessages should only be use in generated code. Use foton_utils::translations::GeneratedTranslation::msg().into() instead." },
 ]
 
 avoid-breaking-exported-api = false

@@ -1,13 +1,13 @@
 # Build/Generated
 /target
-/steel-registry/src/generated
-/steel-utils/src/generated
-/steel-core/src/behavior/generated
-/steel-core/src/entity/generated
-/steel-worldgen/src/generated
-/steel-utils/build_assets/builtin_datapacks
-/steel-utils/build_assets/.asset-extract.lock
-/steel-utils/build_assets/en_us.json
+/foton-registry/src/generated
+/foton-utils/src/generated
+/foton-core/src/behavior/generated
+/foton-core/src/entity/generated
+/foton-worldgen/src/generated
+/foton-utils/build_assets/builtin_datapacks
+/foton-utils/build_assets/.asset-extract.lock
+/foton-utils/build_assets/en_us.json
 
 # Config
 /config

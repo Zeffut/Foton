@@ -8,10 +8,10 @@ default_gamemode = "survival"
 difficulty = "normal"
 
 [storage]
-type = "steel:disk"
+type = "foton:disk"
 
 [player_storage]
-type = "steel:file"
+type = "foton:file"
 
 [domains.minecraft]
 default = true

@@ -42,12 +42,12 @@ sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups
 
 # The datapack directory sits beside the save data, the way vanilla keeps
 # <level>/datapacks. save_path comes from worlds.toml and defaults to "saves".
-PACK="$RUN_DIR/saves/datapacks/steel_test/data"
+PACK="$RUN_DIR/saves/datapacks/foton_test/data"
 FN="$PACK/test/function"
 mkdir -p "$FN/nested" "$PACK/test/tags/function" "$PACK/minecraft/tags/function" || exit 1
 
 cat > "$PACK/../pack.mcmeta" <<'EOF'
-{"pack": {"description": "steel function test", "pack_format": 96}}
+{"pack": {"description": "foton function test", "pack_format": 96}}
 EOF
 
 # A comment must stay a comment even when it looks exactly like a command.
@@ -139,12 +139,12 @@ tellraw @a {"text":"FN_RELOAD_BEFORE"}
 EOF
 
 cat > "$FN/on_load.mcfunction" <<'EOF'
-bossbar add steel_test:probe {"text":"probe"}
-bossbar set steel_test:probe max 7
+bossbar add foton_test:probe {"text":"probe"}
+bossbar set foton_test:probe max 7
 EOF
 
 cat > "$FN/on_tick.mcfunction" <<'EOF'
-bossbar set steel_test:probe max 99
+bossbar set foton_test:probe max 99
 EOF
 
 cat > "$PACK/test/tags/function/group.json" <<'EOF'
@@ -166,7 +166,7 @@ cat > "$PACK/test/tags/function/incomplete.json" <<'EOF'
 EOF
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -274,7 +274,7 @@ CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;summon minecraft:pig 0 150 3 {Tags:[\"fn_probe\"]}"
 CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;execute if entity @e[tag=fn_probe,distance=..20] run tellraw @s {\"text\":\"FN_PROBE_READY\"}"
-CMDS="$CMDS;;execute store result entity @n[tag=fn_probe,distance=..20] data.probe int 1 run bossbar get steel_test:probe max"
+CMDS="$CMDS;;execute store result entity @n[tag=fn_probe,distance=..20] data.probe int 1 run bossbar get foton_test:probe max"
 CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;execute if entity @e[tag=fn_probe,nbt={data:{probe:99}},distance=..20] run tellraw @s {\"text\":\"FN_TICK_TAG\"}"
 CMDS="$CMDS;;execute if entity @e[tag=fn_probe,nbt={data:{probe:7}},distance=..20] run tellraw @s {\"text\":\"FN_LOAD_TAG_ONLY\"}"

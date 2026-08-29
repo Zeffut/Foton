@@ -53,7 +53,7 @@ PID=
 start_server() {
   # stdin from /dev/null: the server reads console commands, and a background
   # process that reads a terminal is stopped by SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/steel" > "server-$1.log" 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > "server-$1.log" 2>&1 < /dev/null &
   PID=$!
   if ! wait_for_port; then
     echo "SERVER NEVER LISTENED ON $PORT ($1)"
@@ -106,7 +106,7 @@ start_server first || exit 1
 
 CMDS="$SETUP$BEFORE"
 CMDS="$CMDS;;damage @s 6 minecraft:generic"
-# Thrown rather than drunk: Steel has no drinking lifecycle yet, and a splash
+# Thrown rather than drunk: Foton has no drinking lifecycle yet, and a splash
 # potion at the thrower's own feet doses them at full strength. Fire resistance
 # because it neither heals nor shields, so it cannot move the health above.
 CMDS="$CMDS;;give @s minecraft:splash_potion[minecraft:potion_contents={potion:\"minecraft:long_fire_resistance\"}]"

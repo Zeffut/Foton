@@ -10,7 +10,7 @@
 #
 # Three things are checked, and each one was broken in a different way:
 #
-#   * A blast pushing a player. Steel had no explosion packet at all, and that
+#   * A blast pushing a player. Foton had no explosion packet at all, and that
 #     packet is the only channel by which an explosion moves a player --
 #     `ClientPacketListener.handleExplosion` ends with
 #     `playerKnockback.ifPresent(player::addDeltaMovement)`. Damaging blasts
@@ -25,7 +25,7 @@
 #
 #   * The direction a blow came from. `ClientboundHurtAnimationPacket` carries
 #     `hurtDir`, the angle of the blow relative to where the player is facing.
-#     Steel sent the player's own yaw, to everyone nearby rather than to the
+#     Foton sent the player's own yaw, to everyone nearby rather than to the
 #     player. The screen still twitched, so only the number tells the two
 #     apart -- which is why the check below hits the same player from two
 #     opposite sides and asks whether the two angles are half a turn apart.
@@ -50,7 +50,7 @@
 #     fields on it -- no `dataToKeep` bit reaches them, and the only packet
 #     that can is sent when a writer flags it, which a portal is not.
 #
-#   * The rules a world enforces client-side, on arrival in it. Steel keeps
+#   * The rules a world enforces client-side, on arrival in it. Foton keeps
 #     game rules per world where vanilla keeps them per server, and the client
 #     is told the three it enforces alone exactly once, in `CLogin`.
 #
@@ -90,7 +90,7 @@ else
   # a background process that reads a terminal is stopped by SIGTTIN instead of
   # running.
   echo "=== Generating an offline config ==="
-  nohup "$ROOT/target/debug/steel" > /dev/null 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > /dev/null 2>&1 < /dev/null &
   GEN_PID=$!
   for _ in $(seq 1 90); do
     [ -f config/config.toml ] && [ -f config/groups.toml ] && break
@@ -124,7 +124,7 @@ else
   sed -i "/^save_path = /a seed = \"$WORLD_SEED\"" config/worlds.toml
 fi
 rm -rf saves
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -152,7 +152,7 @@ CMDS="$CMDS;;gamerule natural_health_regeneration false"
 # player's velocity is not the blast's doing any more.
 CMDS="$CMDS;;gamerule mob_griefing false"
 
-# A floor, laid one block at a time because Steel has no `/fill`. Bedrock so
+# A floor, laid one block at a time because Foton has no `/fill`. Bedrock so
 # nothing here can open a hole under the player.
 for x in $(seq -3 3); do
   for z in $(seq -4 4); do
@@ -221,7 +221,7 @@ CMDS="$CMDS;;!hurtdirections"
 
 # --- the golden hearts ------------------------------------------------------
 #
-# Eaten, not commanded: Steel has no `/effect`, and eating is the path the
+# Eaten, not commanded: Foton has no `/effect`, and eating is the path the
 # owner took anyway. Absorption IV is sixteen points, which is eight golden
 # hearts, and an enchanted golden apple is always edible so a full stomach
 # cannot refuse it.
@@ -279,7 +279,7 @@ CMDS="$CMDS;;!sawskinparts"
 # is read back too: without it a missing experience packet would be explained
 # just as well by a teleport that never left the overworld.
 #
-# The same trip also carries the rules only the client enforces. Steel keeps
+# The same trip also carries the rules only the client enforces. Foton keeps
 # game rules per world where vanilla keeps them per server, and the client is
 # told them once, in `CLogin`, computed from the world it logged into. The rule
 # is set from inside the destination world so the announcement it makes goes to

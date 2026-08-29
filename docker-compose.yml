@@ -1,9 +1,11 @@
 services:
-  steel:
-    image: ghcr.io/steel-foundation/steelmc:nightly
+  foton:
+    # Built by .github/workflows/docker-build.yml from the GitHub repository name.
+    # Update this tag if the repository is renamed to Foton.
+    image: ghcr.io/zeffut/steelmc:nightly
     stdin_open: true
     tty: true
-    container_name: steel-mc
+    container_name: foton-mc
     ports:
       - 25565:25565
     volumes:

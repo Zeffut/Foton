@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "SteelConfig",
-  "description": "Configuration schema for Steel Minecraft server",
+  "title": "FotonConfig",
+  "description": "Configuration schema for Foton Minecraft server",
   "type": "object",
   "properties": {
     "server": {
@@ -24,7 +24,7 @@
         },
         "allow_extended_view_distance": {
           "type": "boolean",
-          "description": "Allow view_distance above vanilla's 32-chunk cap, up to Steel's 128-chunk cap",
+          "description": "Allow view_distance above vanilla's 32-chunk cap, up to Foton's 128-chunk cap",
           "default": false
         },
         "view_distance": {
@@ -81,7 +81,7 @@
         "motd": {
           "type": "string",
           "description": "Message of the day displayed in server lists",
-          "default": "A Steel Server"
+          "default": "A Foton Server"
         },
         "use_favicon": {
           "type": "boolean",

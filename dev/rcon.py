@@ -3,7 +3,7 @@
 
 Speaks the wire format a real client speaks -- little-endian length, request
 id and type, a NUL-terminated body and one more NUL -- so what this proves is
-what mcrcon or a control panel would see, not what Steel believes it sent.
+what mcrcon or a control panel would see, not what Foton believes it sent.
 
 The transcript it prints is one line per event so a shell can assert on it:
 

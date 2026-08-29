@@ -1,0 +1,2222 @@
+//! Shared fields for all living entities.
+//!
+//! Mirrors the runtime fields that vanilla defines on `LivingEntity` (and
+//! `Entity` for `invulnerableTime`). Entities that implement `LivingEntity`
+//! embed this struct and expose it via `LivingEntity::living_base()`, just like
+//! `EntityBase` is used for core `Entity` fields.
+
+use std::{array, mem, sync::Arc};
+
+use foton_protocol::packets::game::{CRemoveMobEffect, CUpdateMobEffect, MobEffectPacketFlags};
+use foton_registry::RegistryEntry;
+use foton_registry::attribute::AttributeRef;
+use foton_registry::entity_data::ParticleList;
+use foton_registry::entity_type::EntityTypeRef;
+use foton_registry::item_stack::ItemStack;
+use foton_registry::items::ItemRef;
+use foton_registry::mob_effect::MobEffectRef;
+use foton_registry::vanilla_attributes;
+use foton_registry::vanilla_entity_data::VanillaLivingEntityData;
+use foton_registry::vanilla_entity_type_tags::EntityTypeTag;
+use foton_registry::{
+    REGISTRY, RegistryExt as _, TaggedRegistryExt as _, vanilla_damage_types, vanilla_mob_effects,
+};
+use foton_utils::locks::{IntoShared, Shared, SyncMutex};
+use foton_utils::types::{Difficulty, InteractionHand};
+use foton_utils::{BlockPos, Identifier};
+use glam::DVec3;
+use rustc_hash::FxHashMap;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::{NbtCompound, NbtTag};
+use uuid::Uuid;
+
+use crate::enchantment_helper;
+use crate::entity::attribute::{AttributeMap, AttributeModifier, AttributeModifierOperation};
+use crate::entity::damage::DamageSource;
+use crate::entity::{Entity as _, LivingEntity, SharedEntity, WeakEntity};
+use crate::inventory::equipment::{EntityEquipment, EquipmentSlot, OwnedEntityEquipment};
+use crate::inventory::lock::SharedContainer;
+use crate::raid::DEFAULT_MAX_RAID_OMEN_LEVEL;
+use crate::world::World;
+
+/// Ticks of Raid Omen a Bad Omen turns into.
+///
+/// Vanilla parity: the `new MobEffectInstance(MobEffects.RAID_OMEN, 600, ..)`
+/// of `BadOmenMobEffect.applyEffectTick`. Thirty seconds of warning before the
+/// horn sounds.
+const RAID_OMEN_DURATION: i32 = 600;
+
+/// Ticks between two points of wither damage at amplifier zero.
+///
+/// Vanilla parity: the `40 >> amplification` of `WitherMobEffect`.
+const WITHER_DAMAGE_INTERVAL: i32 = 40;
+
+/// Ticks between two points of poison damage at amplifier zero.
+///
+/// Vanilla parity: `PoisonMobEffect.DAMAGE_INTERVAL`.
+const POISON_DAMAGE_INTERVAL: i32 = 25;
+
+/// Ticks between two half-hearts of regeneration at amplifier zero.
+///
+/// Vanilla parity: the `50 >> amplification` of `RegenerationMobEffect`.
+const REGENERATION_HEAL_INTERVAL: i32 = 50;
+
+/// Exhaustion Hunger I adds per tick.
+///
+/// Vanilla parity: the `0.005F * (amplification + 1)` of `HungerMobEffect`.
+const HUNGER_EXHAUSTION_PER_TICK: f32 = 0.005;
+
+/// Health Instant Health I restores.
+///
+/// Vanilla parity: the `4 << amplification` of `HealOrHarmMobEffect`.
+const HEAL_BASE: i32 = 4;
+
+/// Damage Instant Damage I deals.
+///
+/// Vanilla parity: the `6 << amplification` of `HealOrHarmMobEffect`.
+const HARM_BASE: i32 = 6;
+
+/// Duration in ticks of the death animation before entity removal.
+pub const DEATH_DURATION: i32 = 20;
+/// Vanilla default `SwingAnimation` duration in ticks.
+pub const DEFAULT_SWING_DURATION: i32 = 6;
+const INFINITE_EFFECT_DURATION: i32 = -1;
+const MIN_EFFECT_AMPLIFIER: i32 = 0;
+const MAX_EFFECT_AMPLIFIER: i32 = 255;
+const SPRINT_SPEED_MODIFIER_AMOUNT: f64 = 0.3;
+const POST_IMPULSE_GRACE_TICKS: i32 = 40;
+
+/// Runtime mob-effect state.
+///
+/// Mirrors vanilla `MobEffectInstance` state that affects server-side living
+/// physics and client synchronization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MobEffectInstance {
+    effect: MobEffectRef,
+    duration: i32,
+    amplifier: i32,
+    ambient: bool,
+    visible: bool,
+    show_icon: bool,
+    hidden_effect: Option<Box<MobEffectInstance>>,
+}
+
+/// Active mob-effect state stored on a living entity.
+pub type ActiveMobEffect = MobEffectInstance;
+
+impl MobEffectInstance {
+    /// Creates infinite active mob-effect state for internal physics tests and hooks.
+    #[must_use]
+    pub const fn new(effect: MobEffectRef, amplifier: i32) -> Self {
+        Self::with_duration(effect, INFINITE_EFFECT_DURATION, amplifier)
+    }
+
+    /// Creates active mob-effect state with vanilla default visibility flags.
+    #[must_use]
+    pub const fn with_duration(effect: MobEffectRef, duration: i32, amplifier: i32) -> Self {
+        Self {
+            effect,
+            duration,
+            amplifier: clamp_effect_amplifier(amplifier),
+            ambient: false,
+            visible: true,
+            show_icon: true,
+            hidden_effect: None,
+        }
+    }
+
+    /// Sets whether this effect is ambient.
+    #[must_use]
+    pub const fn with_ambient(mut self, ambient: bool) -> Self {
+        self.ambient = ambient;
+        self
+    }
+
+    /// Sets whether this effect should show particles.
+    #[must_use]
+    pub const fn with_visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
+        self
+    }
+
+    /// Sets whether this effect should show its inventory icon.
+    #[must_use]
+    pub const fn with_show_icon(mut self, show_icon: bool) -> Self {
+        self.show_icon = show_icon;
+        self
+    }
+
+    /// Returns the mob effect.
+    #[must_use]
+    pub const fn effect(&self) -> MobEffectRef {
+        self.effect
+    }
+
+    /// Returns vanilla `MobEffectInstance.getDuration()`.
+    #[must_use]
+    pub const fn duration(&self) -> i32 {
+        self.duration
+    }
+
+    /// Returns vanilla `MobEffectInstance.getAmplifier()`.
+    #[must_use]
+    pub const fn amplifier(&self) -> i32 {
+        self.amplifier
+    }
+
+    /// Returns vanilla `MobEffectInstance.isAmbient()`.
+    #[must_use]
+    pub const fn is_ambient(&self) -> bool {
+        self.ambient
+    }
+
+    /// Returns vanilla `MobEffectInstance.isVisible()`.
+    #[must_use]
+    pub const fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Returns vanilla `MobEffectInstance.showIcon()`.
+    #[must_use]
+    pub const fn show_icon(&self) -> bool {
+        self.show_icon
+    }
+
+    /// Returns whether this effect uses vanilla's infinite-duration sentinel.
+    #[must_use]
+    pub const fn is_infinite_duration(&self) -> bool {
+        self.duration == INFINITE_EFFECT_DURATION
+    }
+
+    /// Serializes this effect with vanilla's `MobEffectInstance.CODEC` shape.
+    #[must_use]
+    pub(crate) fn to_vanilla_nbt(&self) -> NbtCompound {
+        let mut nbt = self.details_to_vanilla_nbt();
+        nbt.insert("id", self.effect.key.to_string());
+        nbt
+    }
+
+    fn details_to_vanilla_nbt(&self) -> NbtCompound {
+        let mut nbt = NbtCompound::new();
+        if self.amplifier != 0 {
+            nbt.insert("amplifier", NbtTag::Byte(self.amplifier as i8));
+        }
+        if self.duration != 0 {
+            nbt.insert("duration", self.duration);
+        }
+        if self.ambient {
+            nbt.insert("ambient", NbtTag::Byte(1));
+        }
+        if !self.visible {
+            nbt.insert("show_particles", NbtTag::Byte(0));
+        }
+        nbt.insert("show_icon", NbtTag::Byte(i8::from(self.show_icon)));
+        if let Some(hidden_effect) = self.hidden_effect.as_deref() {
+            nbt.insert(
+                "hidden_effect",
+                NbtTag::Compound(hidden_effect.details_to_vanilla_nbt()),
+            );
+        }
+        nbt
+    }
+
+    /// Reads back what [`Self::to_vanilla_nbt`] wrote.
+    ///
+    /// Vanilla parity: `MobEffectInstance.CODEC`. Returns `None` only for an
+    /// effect id no registry entry answers to, which is the one thing the codec
+    /// cannot default its way past.
+    #[must_use]
+    pub(crate) fn from_vanilla_nbt(nbt: &BorrowedNbtCompoundView<'_, '_>) -> Option<Self> {
+        let key = nbt.string("id")?.to_str().parse::<Identifier>().ok()?;
+        let effect = REGISTRY.mob_effects.by_key(&key)?;
+        Some(Self::details_from_vanilla_nbt(effect, nbt))
+    }
+
+    /// Vanilla parity: `MobEffectInstance.Details.MAP_CODEC`, whose every field
+    /// has a default -- including `show_icon`, which falls back to whatever
+    /// `show_particles` resolved to rather than to a constant.
+    fn details_from_vanilla_nbt(
+        effect: MobEffectRef,
+        nbt: &BorrowedNbtCompoundView<'_, '_>,
+    ) -> Self {
+        // `ExtraCodecs.UNSIGNED_BYTE`: amplifier 200 is written as the byte
+        // -56, so reading it as signed would come back as a negative level.
+        let amplifier = i32::from(nbt.byte("amplifier").unwrap_or(0).cast_unsigned());
+        let visible = nbt.byte("show_particles").is_none_or(|value| value != 0);
+        Self {
+            effect,
+            duration: nbt.int("duration").unwrap_or(0),
+            amplifier,
+            ambient: nbt.byte("ambient").is_some_and(|value| value != 0),
+            visible,
+            show_icon: nbt.byte("show_icon").map_or(visible, |value| value != 0),
+            hidden_effect: nbt
+                .compound("hidden_effect")
+                .map(|hidden| Box::new(Self::details_from_vanilla_nbt(effect, &hidden))),
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn has_remaining_duration(&self) -> bool {
+        self.is_infinite_duration() || self.duration > 0
+    }
+
+    /// Returns whether this effect does something on this particular tick.
+    ///
+    /// Vanilla parity: `MobEffect.shouldApplyEffectTickThisTick` and the
+    /// overrides on the handful of effects that have one. Everything not named
+    /// here is an attribute modifier or a client-side one, and vanilla's base
+    /// implementation answers false for it.
+    #[must_use]
+    pub(crate) fn should_apply_effect_tick_this_tick(&self, entity_tick_count: i32) -> bool {
+        let tick_count = if self.is_infinite_duration() {
+            entity_tick_count
+        } else {
+            self.duration
+        };
+
+        if self.effect == vanilla_mob_effects::WITHER {
+            return self.is_on_interval(tick_count, WITHER_DAMAGE_INTERVAL);
+        }
+        // Vanilla parity: `PoisonMobEffect.shouldApplyEffectTickThisTick`.
+        if self.effect == vanilla_mob_effects::POISON {
+            return self.is_on_interval(tick_count, POISON_DAMAGE_INTERVAL);
+        }
+        // Vanilla parity: `RegenerationMobEffect.shouldApplyEffectTickThisTick`.
+        if self.effect == vanilla_mob_effects::REGENERATION {
+            return self.is_on_interval(tick_count, REGENERATION_HEAL_INTERVAL);
+        }
+        // Vanilla parity: `HungerMobEffect.shouldApplyEffectTickThisTick` and
+        // `AbsorptionMobEffect`'s, both of which are every tick.
+        if self.effect == vanilla_mob_effects::HUNGER
+            || self.effect == vanilla_mob_effects::ABSORPTION
+        {
+            return true;
+        }
+        // Vanilla parity: `InstantaneousMobEffect.shouldApplyEffectTickThisTick`,
+        // which is what makes a lingering instant effect fire on every tick it
+        // still has left rather than once.
+        if is_instantaneous(self.effect) {
+            return tick_count >= 1;
+        }
+        // Vanilla parity: `BadOmenMobEffect.shouldApplyEffectTickThisTick`,
+        // which is every tick -- the effect is watching for the moment the
+        // player steps into a village.
+        if self.effect == vanilla_mob_effects::BAD_OMEN {
+            return true;
+        }
+        // Vanilla parity: `RaidOmenMobEffect.shouldApplyEffectTickThisTick`,
+        // which fires once, on the last tick of the effect. That is what makes
+        // the raid start thirty seconds after the omen was absorbed.
+        if self.effect == vanilla_mob_effects::RAID_OMEN {
+            return !self.is_infinite_duration() && tick_count == 1;
+        }
+
+        false
+    }
+
+    /// Vanilla parity: the `interval > 0 ? tickCount % interval == 0 : true`
+    /// that every intervalled effect shares. The shift is Java's, so an
+    /// amplifier past 31 wraps back onto a long interval rather than reaching
+    /// zero.
+    const fn is_on_interval(&self, tick_count: i32, base_interval: i32) -> bool {
+        let interval = base_interval.wrapping_shr(self.amplifier as u32);
+        interval <= 0 || tick_count % interval == 0
+    }
+
+    /// Runs one tick of this effect, returning whether it stays.
+    ///
+    /// Vanilla parity: `MobEffect.applyEffectTick`. A `false` return is how a
+    /// vanilla effect removes itself from inside its own tick.
+    pub(crate) fn apply_effect_tick<E: LivingEntity + ?Sized>(
+        &self,
+        world: &World,
+        entity: &E,
+    ) -> bool {
+        if self.effect == vanilla_mob_effects::WITHER {
+            entity.hurt(
+                world,
+                &DamageSource::environment(&vanilla_damage_types::WITHER),
+                1.0,
+            );
+        }
+        // Vanilla parity: `PoisonMobEffect.applyEffectTick`. Poison stops at
+        // half a heart rather than killing, which is the whole reason a
+        // poisoned player survives and a withered one does not.
+        if self.effect == vanilla_mob_effects::POISON && entity.get_health() > 1.0 {
+            entity.hurt(
+                world,
+                &DamageSource::environment(&vanilla_damage_types::MAGIC),
+                1.0,
+            );
+        }
+        // Vanilla parity: `RegenerationMobEffect.applyEffectTick`.
+        if self.effect == vanilla_mob_effects::REGENERATION
+            && entity.get_health() < entity.get_max_health()
+        {
+            entity.heal(1.0);
+        }
+        // Vanilla parity: `HungerMobEffect.applyEffectTick`, which only drains
+        // a player -- nothing else has an exhaustion bar to drain.
+        if self.effect == vanilla_mob_effects::HUNGER
+            && let Some(player) = entity.as_player()
+        {
+            player
+                .cause_food_exhaustion(HUNGER_EXHAUSTION_PER_TICK * (self.amplifier as f32 + 1.0));
+        }
+        // Vanilla parity: `SaturationMobEffect.applyEffectTick`.
+        if self.effect == vanilla_mob_effects::SATURATION
+            && let Some(player) = entity.as_player()
+        {
+            player.food_data.lock().eat(self.amplifier + 1, 1.0);
+        }
+        if self.effect == vanilla_mob_effects::INSTANT_HEALTH {
+            apply_heal_or_harm(world, entity, self.amplifier, false);
+        }
+        if self.effect == vanilla_mob_effects::INSTANT_DAMAGE {
+            apply_heal_or_harm(world, entity, self.amplifier, true);
+        }
+        // Vanilla parity: `AbsorptionMobEffect.applyEffectTick`, the one tick
+        // that is a check rather than an action: the effect ends the moment its
+        // shield has been chewed through.
+        if self.effect == vanilla_mob_effects::ABSORPTION {
+            return entity.get_absorption_amount() > 0.0;
+        }
+        if self.effect == vanilla_mob_effects::BAD_OMEN {
+            return tick_bad_omen(world, entity, self.amplifier);
+        }
+        if self.effect == vanilla_mob_effects::RAID_OMEN {
+            return tick_raid_omen(world, entity);
+        }
+
+        // Vanilla effect ticks return whether the effect remains active.
+        // Everything above keeps itself; only the omens and absorption consume
+        // themselves.
+        true
+    }
+
+    #[must_use]
+    const fn is_shorter_duration_than(&self, other: &Self) -> bool {
+        !self.is_infinite_duration()
+            && (self.duration < other.duration || other.is_infinite_duration())
+    }
+
+    /// Merges another instance of the same effect into this instance.
+    ///
+    /// Mirrors vanilla `MobEffectInstance.update`.
+    pub fn update(&mut self, take_over: Self) -> bool {
+        let mut changed = false;
+        let take_over_ambient = take_over.ambient;
+        let take_over_visible = take_over.visible;
+        let take_over_show_icon = take_over.show_icon;
+        if take_over.amplifier > self.amplifier {
+            if take_over.is_shorter_duration_than(self) {
+                let previous_hidden_effect = self.hidden_effect.take();
+                let mut hidden = self.clone();
+                hidden.hidden_effect = previous_hidden_effect;
+                self.hidden_effect = Some(Box::new(hidden));
+            }
+
+            self.amplifier = take_over.amplifier;
+            self.duration = take_over.duration;
+            changed = true;
+        } else if self.is_shorter_duration_than(&take_over) {
+            if take_over.amplifier == self.amplifier {
+                self.duration = take_over.duration;
+                changed = true;
+            } else if let Some(hidden_effect) = &mut self.hidden_effect {
+                hidden_effect.update(take_over);
+            } else {
+                self.hidden_effect = Some(Box::new(take_over));
+            }
+        }
+
+        if (!take_over_ambient && self.ambient) || changed {
+            self.ambient = take_over_ambient;
+            changed = true;
+        }
+
+        if take_over_visible != self.visible {
+            self.visible = take_over_visible;
+            changed = true;
+        }
+
+        if take_over_show_icon != self.show_icon {
+            self.show_icon = take_over_show_icon;
+            changed = true;
+        }
+
+        changed
+    }
+
+    fn tick_duration(&mut self) -> MobEffectTickResult {
+        if !self.has_remaining_duration() {
+            return MobEffectTickResult::Expired;
+        }
+
+        self.tick_down_duration();
+        if self.downgrade_to_hidden_effect() {
+            return MobEffectTickResult::Active { downgraded: true };
+        }
+        if self.has_remaining_duration() {
+            MobEffectTickResult::Active { downgraded: false }
+        } else {
+            MobEffectTickResult::Expired
+        }
+    }
+
+    fn tick_down_duration(&mut self) {
+        if let Some(hidden_effect) = &mut self.hidden_effect {
+            hidden_effect.tick_down_duration();
+        }
+
+        if !self.is_infinite_duration() && self.duration != 0 {
+            self.duration -= 1;
+        }
+    }
+
+    fn downgrade_to_hidden_effect(&mut self) -> bool {
+        if self.duration != 0 {
+            return false;
+        }
+
+        let Some(hidden_effect) = self.hidden_effect.take() else {
+            return false;
+        };
+        let MobEffectInstance {
+            duration,
+            amplifier,
+            ambient,
+            visible,
+            show_icon,
+            hidden_effect,
+            ..
+        } = *hidden_effect;
+        self.duration = duration;
+        self.amplifier = amplifier;
+        self.ambient = ambient;
+        self.visible = visible;
+        self.show_icon = show_icon;
+        self.hidden_effect = hidden_effect;
+        true
+    }
+}
+
+const fn clamp_effect_amplifier(amplifier: i32) -> i32 {
+    if amplifier < MIN_EFFECT_AMPLIFIER {
+        MIN_EFFECT_AMPLIFIER
+    } else if amplifier > MAX_EFFECT_AMPLIFIER {
+        MAX_EFFECT_AMPLIFIER
+    } else {
+        amplifier
+    }
+}
+
+enum MobEffectTickResult {
+    Active { downgraded: bool },
+    Expired,
+}
+
+/// A queued mob-effect packet change produced by living effect state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MobEffectSyncChange {
+    /// Add or update a mob effect.
+    Update {
+        /// The active effect instance to encode.
+        effect: MobEffectInstance,
+        /// Whether the owner-client packet should use vanilla's blend flag.
+        blend_for_self: bool,
+    },
+    /// Remove a mob effect.
+    Remove {
+        /// The effect type to remove.
+        effect: MobEffectRef,
+    },
+}
+
+impl MobEffectSyncChange {
+    /// Builds the clientbound packet for a concrete recipient.
+    #[must_use]
+    pub fn packet(&self, entity_id: i32, is_self_recipient: bool) -> MobEffectSyncPacket {
+        match self {
+            Self::Update {
+                effect,
+                blend_for_self,
+            } => MobEffectSyncPacket::Update(CUpdateMobEffect::new(
+                entity_id,
+                effect.effect,
+                effect.amplifier,
+                effect.duration,
+                MobEffectPacketFlags {
+                    ambient: effect.ambient,
+                    visible: effect.visible,
+                    show_icon: effect.show_icon,
+                    blend: *blend_for_self && is_self_recipient,
+                },
+            )),
+            Self::Remove { effect } => {
+                MobEffectSyncPacket::Remove(CRemoveMobEffect::new(entity_id, effect))
+            }
+        }
+    }
+}
+
+/// Concrete mob-effect packet ready to send to a player connection.
+#[derive(Debug, Clone)]
+pub enum MobEffectSyncPacket {
+    /// Add/update mob-effect packet.
+    Update(CUpdateMobEffect),
+    /// Remove mob-effect packet.
+    Remove(CRemoveMobEffect),
+}
+
+/// Synchronized living entity-data values derived from active mob effects.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MobEffectDisplayState {
+    /// Visible effect particles for `LivingEntity.DATA_EFFECT_PARTICLES`.
+    pub particles: ParticleList,
+    /// Whether all active effects are ambient.
+    pub ambient: bool,
+    /// Whether the shared invisible flag should be set by active effects.
+    pub invisible: bool,
+    /// Whether the shared glowing flag should be set by active effects.
+    pub glowing: bool,
+}
+
+/// Movement input stored on vanilla `LivingEntity`.
+///
+/// Vanilla names these fields `xxa`, `yya`, and `zza`; Foton uses axis names
+/// so AI/pathfinding code can set intent without carrying obfuscated names.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LivingTravelInput {
+    sideways: f32,
+    vertical: f32,
+    forward: f32,
+}
+
+impl LivingTravelInput {
+    /// No travel input.
+    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
+
+    /// Creates living travel input.
+    #[must_use]
+    pub const fn new(sideways: f32, vertical: f32, forward: f32) -> Self {
+        Self {
+            sideways,
+            vertical,
+            forward,
+        }
+    }
+
+    /// Returns sideways movement input.
+    #[must_use]
+    pub const fn sideways(self) -> f32 {
+        self.sideways
+    }
+
+    /// Returns vertical movement input.
+    #[must_use]
+    pub const fn vertical(self) -> f32 {
+        self.vertical
+    }
+
+    /// Returns forward movement input.
+    #[must_use]
+    pub const fn forward(self) -> f32 {
+        self.forward
+    }
+
+    /// Returns input after vanilla `LivingEntity.applyInput()` damping.
+    #[must_use]
+    pub const fn dampened(self) -> Self {
+        Self {
+            sideways: self.sideways * 0.98,
+            vertical: self.vertical,
+            forward: self.forward * 0.98,
+        }
+    }
+}
+
+/// Vanilla living-entity body/head rotation state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LivingRotationState {
+    y_body_rot: f32,
+    y_body_rot_o: f32,
+    y_head_rot: f32,
+    y_head_rot_o: f32,
+}
+
+impl LivingRotationState {
+    /// Creates default living rotation state.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            y_body_rot: 0.0,
+            y_body_rot_o: 0.0,
+            y_head_rot: 0.0,
+            y_head_rot_o: 0.0,
+        }
+    }
+
+    /// Returns vanilla `yBodyRot`.
+    #[must_use]
+    pub const fn y_body_rot(self) -> f32 {
+        self.y_body_rot
+    }
+
+    /// Returns vanilla `yBodyRotO`.
+    #[must_use]
+    pub const fn y_body_rot_o(self) -> f32 {
+        self.y_body_rot_o
+    }
+
+    /// Returns vanilla `yHeadRot`.
+    #[must_use]
+    pub const fn y_head_rot(self) -> f32 {
+        self.y_head_rot
+    }
+
+    /// Returns vanilla `yHeadRotO`.
+    #[must_use]
+    pub const fn y_head_rot_o(self) -> f32 {
+        self.y_head_rot_o
+    }
+}
+
+impl Default for LivingRotationState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Vanilla arm-swing animation state stored on `LivingEntity`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LivingSwingState {
+    swinging: bool,
+    swinging_arm: Option<InteractionHand>,
+    swing_time: i32,
+    old_attack_anim: f32,
+    attack_anim: f32,
+}
+
+impl LivingSwingState {
+    /// Creates empty vanilla swing animation state.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            swinging: false,
+            swinging_arm: None,
+            swing_time: 0,
+            old_attack_anim: 0.0,
+            attack_anim: 0.0,
+        }
+    }
+
+    /// Returns vanilla `LivingEntity.swinging`.
+    #[must_use]
+    pub const fn swinging(self) -> bool {
+        self.swinging
+    }
+
+    /// Returns vanilla `LivingEntity.swingingArm`.
+    #[must_use]
+    pub const fn swinging_arm(self) -> Option<InteractionHand> {
+        self.swinging_arm
+    }
+
+    /// Returns vanilla `LivingEntity.swingTime`.
+    #[must_use]
+    pub const fn swing_time(self) -> i32 {
+        self.swing_time
+    }
+
+    /// Returns vanilla `LivingEntity.oAttackAnim`.
+    #[must_use]
+    pub const fn old_attack_anim(self) -> f32 {
+        self.old_attack_anim
+    }
+
+    /// Returns vanilla `LivingEntity.attackAnim`.
+    #[must_use]
+    pub const fn attack_anim(self) -> f32 {
+        self.attack_anim
+    }
+}
+
+impl Default for LivingSwingState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Vanilla active item-use state stored on `LivingEntity`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ActiveItemUseState {
+    hand: InteractionHand,
+    item: ItemRef,
+    duration: i32,
+    remaining_ticks: i32,
+}
+
+impl ActiveItemUseState {
+    /// Creates active item-use state from the hand, stack snapshot, and duration.
+    #[must_use]
+    pub const fn new(hand: InteractionHand, item: ItemRef, duration: i32) -> Self {
+        Self {
+            hand,
+            item,
+            duration,
+            remaining_ticks: duration,
+        }
+    }
+
+    /// Returns the hand being used.
+    #[must_use]
+    pub const fn hand(&self) -> InteractionHand {
+        self.hand
+    }
+
+    /// Returns the item snapshot captured when use started.
+    #[must_use]
+    pub const fn item(&self) -> ItemRef {
+        self.item
+    }
+
+    /// Returns the original use duration.
+    #[must_use]
+    pub const fn duration(&self) -> i32 {
+        self.duration
+    }
+
+    /// Returns the remaining active-use ticks.
+    #[must_use]
+    pub const fn remaining_ticks(&self) -> i32 {
+        self.remaining_ticks
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LivingEntityState {
+    effects_dirty: bool,
+    death_processed: bool,
+    invulnerable_time: i32,
+    last_hurt: f32,
+    last_hurt_by_player: Option<Uuid>,
+    last_hurt_by_player_memory_time: i32,
+    last_hurt_by_mob: Option<WeakEntity>,
+    last_hurt_by_mob_timestamp: i32,
+    last_hurt_mob: Option<WeakEntity>,
+    last_hurt_mob_timestamp: i32,
+    last_damage_source: Option<DamageSource>,
+    last_damage_stamp: i64,
+    absorption_amount: f32,
+    skip_drop_experience: bool,
+    death_time: i32,
+    remove_arrow_time: i32,
+    speed: f32,
+    current_impulse_impact_pos: Option<DVec3>,
+    current_impulse_context_reset_grace_time: i32,
+    fall_flying: bool,
+    fall_flying_ticks: i32,
+    sprinting: bool,
+    sleeping_pos: Option<BlockPos>,
+    last_climbable_pos: Option<BlockPos>,
+    discard_friction: bool,
+    jumping: bool,
+    travel_input: LivingTravelInput,
+    rotation: LivingRotationState,
+    swing: LivingSwingState,
+    active_item_use: Option<ActiveItemUseState>,
+    no_jump_delay: i32,
+    no_action_time: i32,
+}
+
+impl LivingEntityState {
+    const fn new(speed: f32) -> Self {
+        Self {
+            effects_dirty: false,
+            death_processed: false,
+            invulnerable_time: 0,
+            last_hurt: 0.0,
+            last_hurt_by_player: None,
+            last_hurt_by_player_memory_time: 0,
+            last_hurt_by_mob: None,
+            last_hurt_by_mob_timestamp: 0,
+            last_hurt_mob: None,
+            last_hurt_mob_timestamp: 0,
+            last_damage_source: None,
+            last_damage_stamp: 0,
+            absorption_amount: 0.0,
+            skip_drop_experience: false,
+            death_time: 0,
+            remove_arrow_time: 0,
+            speed,
+            current_impulse_impact_pos: None,
+            current_impulse_context_reset_grace_time: 0,
+            fall_flying: false,
+            fall_flying_ticks: 0,
+            sprinting: false,
+            sleeping_pos: None,
+            last_climbable_pos: None,
+            discard_friction: false,
+            jumping: false,
+            travel_input: LivingTravelInput::ZERO,
+            rotation: LivingRotationState::new(),
+            swing: LivingSwingState::new(),
+            active_item_use: None,
+            no_jump_delay: 0,
+            no_action_time: 0,
+        }
+    }
+
+    const fn reset_death_state(&mut self) {
+        self.death_processed = false;
+        self.death_time = 0;
+        self.invulnerable_time = 0;
+        self.last_hurt = 0.0;
+        self.absorption_amount = 0.0;
+        self.skip_drop_experience = false;
+    }
+}
+
+/// Common runtime fields shared by all living entities.
+///
+/// **Deviation from vanilla:** Vanilla calls this guard `LivingEntity.dead`,
+/// but it means death side effects have been processed, not health is zero.
+/// `ServerPlayer.die()` does NOT call `super.die()` and never sets that field.
+/// Foton uses this guard for players too because it reuses the same `Player`
+/// instance; health remains the source of truth for dead-or-dying checks such
+/// as client respawn requests.
+pub struct LivingEntityBase {
+    state: SyncMutex<LivingEntityState>,
+    attributes: SyncMutex<AttributeMap>,
+    active_mob_effects: SyncMutex<FxHashMap<MobEffectRef, ActiveMobEffect>>,
+    dirty_mob_effects: SyncMutex<Vec<MobEffectSyncChange>>,
+    equipment: Shared<dyn EntityEquipment>,
+    /// The same allocation as [`Self::equipment`], erased to the container
+    /// trait instead. A menu slot can only sit on a [`SharedContainer`], and
+    /// `Arc<Mutex<dyn A>>` cannot be re-erased to `Arc<Mutex<dyn B>>`, so the
+    /// second handle is made where the concrete type is still known.
+    equipment_container: SharedContainer,
+    last_equipment_items: SyncMutex<[ItemStack; EquipmentSlot::ALL.len()]>,
+    pending_equipment_changes: SyncMutex<[Option<ItemStack>; EquipmentSlot::ALL.len()]>,
+    equipment_attribute_modifiers:
+        SyncMutex<[Vec<EquipmentAttributeModifierKey>; EquipmentSlot::ALL.len()]>,
+}
+
+#[derive(Debug)]
+struct EquipmentAttributeModifierKey {
+    attribute: AttributeRef,
+    id: Identifier,
+}
+
+impl LivingEntityBase {
+    /// Creates living runtime state from an entity type's default attributes.
+    #[must_use]
+    pub fn new(entity_type: EntityTypeRef) -> Self {
+        Self::with_attributes(AttributeMap::new_for_entity(entity_type))
+    }
+
+    /// Creates living runtime state from an explicit attribute map.
+    #[must_use]
+    pub fn with_attributes(attributes: AttributeMap) -> Self {
+        Self::with_attributes_and_equipment(attributes, OwnedEntityEquipment::new().into_shared())
+    }
+
+    /// Creates living runtime state with an explicit canonical equipment backing.
+    #[must_use]
+    pub fn with_equipment<T: EntityEquipment + 'static>(
+        entity_type: EntityTypeRef,
+        equipment: Shared<T>,
+    ) -> Self {
+        Self::with_attributes_and_equipment(AttributeMap::new_for_entity(entity_type), equipment)
+    }
+
+    /// The concrete equipment type is still visible here, which is what lets
+    /// the one allocation be erased to both of the traits it implements.
+    fn with_attributes_and_equipment<T: EntityEquipment + 'static>(
+        attributes: AttributeMap,
+        equipment: Shared<T>,
+    ) -> Self {
+        let speed = attributes.required_value(vanilla_attributes::MOVEMENT_SPEED) as f32;
+        let equipment_container: SharedContainer = equipment.clone();
+        let equipment: Shared<dyn EntityEquipment> = equipment;
+
+        Self {
+            state: SyncMutex::new(LivingEntityState::new(speed)),
+            attributes: SyncMutex::new(attributes),
+            active_mob_effects: SyncMutex::new(FxHashMap::default()),
+            dirty_mob_effects: SyncMutex::new(Vec::new()),
+            equipment,
+            equipment_container,
+            last_equipment_items: SyncMutex::new(array::from_fn(|_| ItemStack::empty())),
+            pending_equipment_changes: SyncMutex::new(array::from_fn(|_| None)),
+            equipment_attribute_modifiers: SyncMutex::new(array::from_fn(|_| Vec::new())),
+        }
+    }
+
+    /// Returns this entity's attribute map.
+    #[inline]
+    pub const fn attributes(&self) -> &SyncMutex<AttributeMap> {
+        &self.attributes
+    }
+
+    /// Applies vanilla constructor-time synced-data mutations for living entities.
+    ///
+    /// Vanilla defines `DATA_HEALTH_ID` as `1.0F`, then `LivingEntity` constructs
+    /// its attribute map and calls `setHealth(getMaxHealth())`.
+    pub fn initialize_synced_data<T: VanillaLivingEntityData>(&self, entity_data: &mut T) {
+        let max_health = self
+            .attributes
+            .lock()
+            .required_value(vanilla_attributes::MAX_HEALTH) as f32;
+        entity_data.living_entity_mut().health.set(max_health);
+    }
+
+    /// Returns vanilla `LivingEntity.equipment` storage.
+    #[inline]
+    pub const fn equipment(&self) -> &Shared<dyn EntityEquipment> {
+        &self.equipment
+    }
+
+    /// The same storage as [`Self::equipment`], read as a container, together
+    /// with the index `slot` occupies in it.
+    ///
+    /// This is what a mount screen's saddle and body-armor slots sit on. The
+    /// index comes from the storage itself because a player keeps its worn
+    /// items among its 41 inventory slots while a mob keeps them in eight.
+    #[must_use]
+    pub fn equipment_slot_container(&self, slot: EquipmentSlot) -> (SharedContainer, usize) {
+        let index = self.equipment.lock().container_index(slot);
+        (Arc::clone(&self.equipment_container), index)
+    }
+
+    /// Collects equipment changes against Vanilla's previous-tick snapshots.
+    pub fn collect_equipment_changes(&self) -> Vec<(EquipmentSlot, ItemStack, ItemStack)> {
+        let current_items: [ItemStack; EquipmentSlot::ALL.len()] = {
+            let equipment = self.equipment.lock();
+            array::from_fn(|index| equipment.get_ref(EquipmentSlot::ALL[index]).clone())
+        };
+        let mut last_items = self.last_equipment_items.lock();
+        let mut changes = Vec::new();
+
+        for slot in EquipmentSlot::ALL {
+            let index = slot.index();
+            if ItemStack::matches(&last_items[index], &current_items[index]) {
+                continue;
+            }
+            let previous = mem::replace(&mut last_items[index], current_items[index].clone());
+            changes.push((slot, previous, current_items[index].clone()));
+        }
+        changes
+    }
+
+    /// Coalesces detected equipment changes until entity tracking sends them.
+    pub fn queue_equipment_changes(
+        &self,
+        changes: impl IntoIterator<Item = (EquipmentSlot, ItemStack)>,
+    ) {
+        let mut pending = self.pending_equipment_changes.lock();
+        for (slot, item_stack) in changes {
+            pending[slot.index()] = Some(item_stack);
+        }
+    }
+
+    /// Drains equipment changes detected by the living tick.
+    pub fn drain_equipment_changes(&self) -> Vec<(EquipmentSlot, ItemStack)> {
+        let mut pending = self.pending_equipment_changes.lock();
+        EquipmentSlot::ALL
+            .into_iter()
+            .filter_map(|slot| pending[slot.index()].take().map(|item| (slot, item)))
+            .collect()
+    }
+
+    /// Returns vanilla living body/head rotation state.
+    #[must_use]
+    pub fn rotation_state(&self) -> LivingRotationState {
+        self.state.lock().rotation
+    }
+
+    /// Returns vanilla arm-swing animation state.
+    #[must_use]
+    pub fn swing_state(&self) -> LivingSwingState {
+        self.state.lock().swing
+    }
+
+    /// Returns a snapshot of vanilla active item-use state.
+    #[must_use]
+    pub fn active_item_use(&self) -> Option<ActiveItemUseState> {
+        self.state.lock().active_item_use
+    }
+
+    /// Returns whether this living entity is actively using an item.
+    #[must_use]
+    pub fn is_using_item(&self) -> bool {
+        self.state.lock().active_item_use.is_some()
+    }
+
+    /// Starts vanilla active item use.
+    pub fn start_using_item(&self, hand: InteractionHand, item: &ItemStack, duration: i32) -> bool {
+        if item.is_empty() || duration <= 0 {
+            return false;
+        }
+
+        let mut state = self.state.lock();
+        if state.active_item_use.is_some() {
+            return false;
+        }
+        state.active_item_use = Some(ActiveItemUseState::new(hand, item.item(), duration));
+        true
+    }
+
+    /// Stops vanilla active item use without calling item hooks.
+    pub fn stop_using_item(&self) -> Option<ActiveItemUseState> {
+        self.state.lock().active_item_use.take()
+    }
+
+    /// Decrements active-use remaining ticks and returns the updated state.
+    pub fn decrement_active_item_use(&self) -> Option<ActiveItemUseState> {
+        let mut state = self.state.lock();
+        let active = state.active_item_use.as_mut()?;
+        active.remaining_ticks -= 1;
+        Some(*active)
+    }
+
+    /// Returns vanilla `yBodyRot`.
+    #[must_use]
+    pub fn y_body_rot(&self) -> f32 {
+        self.state.lock().rotation.y_body_rot
+    }
+
+    /// Sets vanilla `yBodyRot`.
+    pub fn set_y_body_rot(&self, y_body_rot: f32) {
+        self.state.lock().rotation.y_body_rot = y_body_rot;
+    }
+
+    /// Returns vanilla `yHeadRot`.
+    #[must_use]
+    pub fn y_head_rot(&self) -> f32 {
+        self.state.lock().rotation.y_head_rot
+    }
+
+    /// Sets vanilla `yHeadRot`.
+    pub fn set_y_head_rot(&self, y_head_rot: f32) {
+        self.state.lock().rotation.y_head_rot = y_head_rot;
+    }
+
+    /// Copies current living head/body rotations to their old-rotation fields.
+    pub fn advance_rotation_for_base_tick(&self) {
+        let mut state = self.state.lock();
+        state.rotation.y_head_rot_o = state.rotation.y_head_rot;
+        state.rotation.y_body_rot_o = state.rotation.y_body_rot;
+    }
+
+    /// Copies current attack animation to vanilla `oAttackAnim`.
+    pub fn advance_attack_animation_for_base_tick(&self) {
+        let mut state = self.state.lock();
+        state.swing.old_attack_anim = state.swing.attack_anim;
+    }
+
+    /// Starts vanilla `LivingEntity.swing` state if the swing gate allows it.
+    pub fn start_swing(&self, hand: InteractionHand, current_swing_duration: i32) -> bool {
+        let mut state = self.state.lock();
+        let swing = &mut state.swing;
+        if swing.swinging && swing.swing_time < current_swing_duration / 2 && swing.swing_time >= 0
+        {
+            return false;
+        }
+
+        swing.swing_time = -1;
+        swing.swinging = true;
+        swing.swinging_arm = Some(hand);
+        true
+    }
+
+    /// Updates vanilla `LivingEntity.swingTime` and `attackAnim`.
+    pub fn update_swing_time(&self, current_swing_duration: i32) {
+        let mut state = self.state.lock();
+        let swing = &mut state.swing;
+        if swing.swinging {
+            swing.swing_time += 1;
+            if swing.swing_time >= current_swing_duration {
+                swing.swing_time = 0;
+                swing.swinging = false;
+            }
+        } else {
+            swing.swing_time = 0;
+        }
+
+        swing.attack_anim = swing.swing_time as f32 / current_swing_duration as f32;
+    }
+
+    /// Returns vanilla `LivingEntity.absorptionAmount` for non-player living entities.
+    #[must_use]
+    pub fn absorption_amount(&self) -> f32 {
+        self.state.lock().absorption_amount
+    }
+
+    /// Sets vanilla `LivingEntity.absorptionAmount` for non-player living entities.
+    pub fn set_absorption_amount(&self, amount: f32) {
+        let max_absorption = self
+            .attributes
+            .lock()
+            .required_value(vanilla_attributes::MAX_ABSORPTION) as f32;
+        self.internal_set_absorption_amount(amount.clamp(0.0, max_absorption));
+    }
+
+    /// Sets vanilla `LivingEntity.absorptionAmount` without the cap.
+    ///
+    /// Vanilla parity: `LivingEntity.internalSetAbsorptionAmount`, which the
+    /// save loader uses because `max_absorption` is zero by default and the
+    /// attributes that raise it are read *after* the shield they cap.
+    pub fn internal_set_absorption_amount(&self, amount: f32) {
+        self.state.lock().absorption_amount = amount;
+    }
+
+    /// Runs vanilla `LivingEntity.skipDropExperience`.
+    pub fn skip_drop_experience(&self) {
+        self.state.lock().skip_drop_experience = true;
+    }
+
+    /// Returns vanilla `LivingEntity.wasExperienceConsumed`.
+    #[must_use]
+    pub fn was_experience_consumed(&self) -> bool {
+        self.state.lock().skip_drop_experience
+    }
+
+    /// Returns vanilla `LivingEntity.noActionTime`.
+    #[must_use]
+    pub fn no_action_time(&self) -> i32 {
+        self.state.lock().no_action_time
+    }
+
+    /// Sets vanilla `LivingEntity.noActionTime`.
+    pub fn set_no_action_time(&self, no_action_time: i32) {
+        self.state.lock().no_action_time = no_action_time;
+    }
+
+    /// Increments vanilla `LivingEntity.noActionTime` by one tick.
+    pub fn increment_no_action_time(&self) {
+        self.state.lock().no_action_time += 1;
+    }
+
+    /// Refreshes transient item attribute modifiers for an equipment slot.
+    pub fn refresh_equipment_attribute_modifiers(
+        &self,
+        slot: EquipmentSlot,
+        item_stack: &ItemStack,
+    ) {
+        let slot_index = slot.index();
+        let mut attributes = self.attributes.lock();
+        let mut installed_modifiers = self.equipment_attribute_modifiers.lock();
+
+        for key in installed_modifiers[slot_index].drain(..) {
+            attributes.remove_modifier(key.attribute, &key.id);
+        }
+
+        if item_stack.is_empty() || item_stack.is_broken() {
+            return;
+        }
+
+        let mut install = |attribute: AttributeRef, modifier: AttributeModifier| {
+            for (index, keys) in installed_modifiers.iter_mut().enumerate() {
+                if index == slot_index {
+                    continue;
+                }
+                keys.retain(|key| key.attribute.key != attribute.key || key.id != modifier.id);
+            }
+
+            attributes.remove_modifier(attribute, &modifier.id);
+            let id = modifier.id.clone();
+            if attributes.add_modifier(attribute, modifier, false) {
+                installed_modifiers[slot_index]
+                    .push(EquipmentAttributeModifierKey { attribute, id });
+            }
+        };
+
+        if let Some(modifiers) = item_stack.get_attribute_modifiers() {
+            for entry in modifiers.for_slot(slot) {
+                install(
+                    entry.attribute,
+                    AttributeModifier {
+                        id: entry.id.clone(),
+                        amount: entry.amount,
+                        operation: entry.operation,
+                    },
+                );
+            }
+        }
+
+        // Vanilla parity: `ItemStack.forEachModifier` is the item's own
+        // `attribute_modifiers` component followed by
+        // `EnchantmentHelper.forEachModifier`, both feeding one consumer. Both
+        // halves install the same way here, so an Efficiency pickaxe reaches
+        // the attribute map by the path the component already used.
+        enchantment_helper::for_each_attribute_modifier(item_stack, slot, install);
+    }
+
+    /// Returns whether this living entity has an active vanilla mob effect.
+    #[must_use]
+    pub fn has_mob_effect(&self, effect: MobEffectRef) -> bool {
+        self.active_mob_effects.lock().contains_key(&effect)
+    }
+
+    /// Returns active vanilla mob-effect state.
+    #[must_use]
+    pub fn mob_effect(&self, effect: MobEffectRef) -> Option<ActiveMobEffect> {
+        self.active_mob_effects.lock().get(&effect).cloned()
+    }
+
+    /// Returns all active vanilla mob effects.
+    #[must_use]
+    pub fn active_mob_effects(&self) -> Vec<ActiveMobEffect> {
+        self.active_mob_effects.lock().values().cloned().collect()
+    }
+
+    /// Replaces the active effects with a set read back off disk.
+    ///
+    /// Vanilla parity: the `active_effects` block of
+    /// `LivingEntity.readAdditionalSaveData`, which clears the map and puts the
+    /// saved instances straight into it. It deliberately runs neither
+    /// `onEffectAdded` nor `onEffectStarted`: vanilla applies an effect's
+    /// attribute modifiers, and grants Absorption its shield, only when the
+    /// effect is *given*. Going through [`Self::add_mob_effect`] here would
+    /// hand a reloaded mob a second set of both.
+    pub fn load_mob_effects(&self, effects: Vec<MobEffectInstance>) {
+        {
+            let mut active = self.active_mob_effects.lock();
+            active.clear();
+            for effect in effects {
+                active.insert(effect.effect, effect);
+            }
+        }
+        self.mark_effects_dirty();
+    }
+
+    /// Adds or updates active vanilla mob-effect state.
+    ///
+    /// Vanilla's `LivingEntity.addEffect` also runs `MobEffect.onEffectStarted`
+    /// on the way out. That half lives on [`crate::entity::LivingEntity`]
+    /// instead, because its one override -- Absorption granting its shield --
+    /// has to reach the concrete entity: a player keeps absorption in
+    /// synchronized data the client reads, and a base that only knows its own
+    /// fields cannot write it.
+    pub fn add_mob_effect(&self, effect: MobEffectInstance) -> bool {
+        self.insert_mob_effect(effect)
+    }
+
+    fn insert_mob_effect(&self, effect: MobEffectInstance) -> bool {
+        let effect_key = effect.effect;
+        let mut existing_effect = None;
+        let mut changed_effect = None;
+        {
+            let mut effects = self.active_mob_effects.lock();
+            if let Some(current) = effects.get_mut(&effect_key) {
+                if current.update(effect) {
+                    changed_effect = Some(current.clone());
+                }
+            } else {
+                effects.insert(effect_key, effect.clone());
+                existing_effect = Some(effect);
+            }
+        }
+
+        if let Some(effect) = existing_effect {
+            self.add_effect_attribute_modifiers(&effect);
+            self.mark_effects_dirty();
+            self.queue_mob_effect_sync(MobEffectSyncChange::Update {
+                effect,
+                blend_for_self: true,
+            });
+            return true;
+        }
+
+        if let Some(effect) = changed_effect {
+            self.refresh_effect_attribute_modifiers(&effect);
+            self.mark_effects_dirty();
+            self.queue_mob_effect_sync(MobEffectSyncChange::Update {
+                effect,
+                blend_for_self: false,
+            });
+            return true;
+        }
+
+        false
+    }
+
+    /// Sets active vanilla mob-effect state.
+    pub fn set_mob_effect(&self, effect: MobEffectRef, amplifier: i32) {
+        self.add_mob_effect(MobEffectInstance::new(effect, amplifier));
+    }
+
+    /// Sets the presence of a vanilla mob effect.
+    pub fn set_mob_effect_active(&self, effect: MobEffectRef, active: bool) {
+        if active {
+            self.set_mob_effect(effect, 0);
+        } else {
+            self.remove_mob_effect(effect);
+        }
+    }
+
+    /// Removes active vanilla mob-effect state.
+    pub fn remove_mob_effect(&self, effect: MobEffectRef) -> bool {
+        let removed = self.active_mob_effects.lock().remove(&effect);
+        let Some(removed) = removed else {
+            return false;
+        };
+
+        self.remove_effect_attribute_modifiers(removed.effect);
+        self.mark_effects_dirty();
+        self.queue_mob_effect_sync(MobEffectSyncChange::Remove { effect });
+        true
+    }
+
+    /// Ticks one active mob-effect duration after its server behavior has run.
+    pub(super) fn tick_mob_effect_duration(&self, effect_key: MobEffectRef) {
+        let (updated, removed) = {
+            let mut effects = self.active_mob_effects.lock();
+            let Some(effect) = effects.get_mut(&effect_key) else {
+                return;
+            };
+            match effect.tick_duration() {
+                MobEffectTickResult::Active { downgraded } => {
+                    let updated =
+                        (downgraded || effect.duration() % 600 == 0).then(|| effect.clone());
+                    (updated, None)
+                }
+                MobEffectTickResult::Expired => (None, effects.remove(&effect_key)),
+            }
+        };
+
+        if let Some(effect) = updated {
+            self.refresh_effect_attribute_modifiers(&effect);
+            self.mark_effects_dirty();
+            self.queue_mob_effect_sync(MobEffectSyncChange::Update {
+                effect,
+                blend_for_self: false,
+            });
+        }
+
+        if let Some(effect) = removed {
+            self.remove_effect_attribute_modifiers(effect.effect);
+            self.mark_effects_dirty();
+            self.queue_mob_effect_sync(MobEffectSyncChange::Remove {
+                effect: effect.effect,
+            });
+        }
+    }
+
+    /// Drains pending mob-effect packet changes.
+    pub fn drain_dirty_mob_effects(&self) -> Vec<MobEffectSyncChange> {
+        self.dirty_mob_effects.lock().drain(..).collect()
+    }
+
+    /// Returns whether synchronized effect entity data should be recomputed.
+    pub fn take_effects_dirty(&self) -> bool {
+        let mut state = self.state.lock();
+        let dirty = state.effects_dirty;
+        state.effects_dirty = false;
+        dirty
+    }
+
+    /// Builds the synchronized living effect particle/glow/invisibility state.
+    pub fn mob_effect_display_state(&self) -> MobEffectDisplayState {
+        let mut effects = self
+            .active_mob_effects
+            .lock()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        effects.sort_by_key(|effect| effect.effect.try_id().unwrap_or(usize::MAX));
+
+        let particles = effects
+            .iter()
+            .filter(|effect| effect.is_visible())
+            .map(|effect| effect.effect.create_particle_options(effect.ambient))
+            .collect();
+
+        MobEffectDisplayState {
+            particles: ParticleList { particles },
+            ambient: !effects.is_empty() && effects.iter().all(MobEffectInstance::is_ambient),
+            invisible: effects
+                .iter()
+                .any(|effect| effect.effect == vanilla_mob_effects::INVISIBILITY),
+            glowing: effects
+                .iter()
+                .any(|effect| effect.effect == vanilla_mob_effects::GLOWING),
+        }
+    }
+
+    fn add_effect_attribute_modifiers(&self, effect: &MobEffectInstance) {
+        let mut attributes = self.attributes.lock();
+        for modifier in effect.effect.attribute_modifiers {
+            attributes.remove_modifier(modifier.attribute, &modifier.id);
+            attributes.add_modifier(
+                modifier.attribute,
+                AttributeModifier {
+                    id: modifier.id.clone(),
+                    amount: modifier.amount * f64::from(effect.amplifier + 1),
+                    operation: modifier.operation,
+                },
+                false,
+            );
+        }
+    }
+
+    fn refresh_effect_attribute_modifiers(&self, effect: &MobEffectInstance) {
+        self.remove_effect_attribute_modifiers(effect.effect);
+        self.add_effect_attribute_modifiers(effect);
+    }
+
+    fn remove_effect_attribute_modifiers(&self, effect: MobEffectRef) {
+        let mut attributes = self.attributes.lock();
+        for modifier in effect.attribute_modifiers {
+            attributes.remove_modifier(modifier.attribute, &modifier.id);
+        }
+    }
+
+    fn queue_mob_effect_sync(&self, change: MobEffectSyncChange) {
+        self.dirty_mob_effects.lock().push(change);
+    }
+
+    /// Marks synchronized effect visibility data for recomputation.
+    pub(crate) fn mark_effects_dirty(&self) {
+        self.state.lock().effects_dirty = true;
+    }
+
+    /// Counts down vanilla `LivingEntity.removeArrowTime` and reports whether
+    /// one of the arrows stuck in this entity should now fall out.
+    ///
+    /// Vanilla parity: the `removeArrowTime` block of `LivingEntity.tick`.
+    pub fn tick_remove_arrow_time(&self, arrow_count: i32) -> bool {
+        let mut state = self.state.lock();
+        if state.remove_arrow_time <= 0 {
+            state.remove_arrow_time = 20 * (30 - arrow_count);
+        }
+        state.remove_arrow_time -= 1;
+        state.remove_arrow_time <= 0
+    }
+
+    /// Gets the cached movement speed used by living movement code.
+    #[inline]
+    pub fn speed(&self) -> f32 {
+        self.state.lock().speed
+    }
+
+    /// Sets the cached movement speed used by living movement code.
+    #[inline]
+    pub fn set_speed(&self, speed: f32) {
+        self.state.lock().speed = speed;
+    }
+
+    /// Refreshes the cached movement speed from the `MOVEMENT_SPEED` attribute.
+    pub fn refresh_speed_from_attributes(&self) {
+        if let Some(speed) = self
+            .attributes
+            .lock()
+            .get_value(vanilla_attributes::MOVEMENT_SPEED)
+        {
+            self.state.lock().speed = speed as f32;
+        }
+    }
+
+    /// Applies vanilla post-impulse movement validation grace.
+    pub fn apply_post_impulse_grace_time(&self, ticks: i32) {
+        let mut state = self.state.lock();
+        state.current_impulse_context_reset_grace_time =
+            state.current_impulse_context_reset_grace_time.max(ticks);
+    }
+
+    /// Restores the saved impulse context.
+    ///
+    /// Vanilla parity: the two `LivingEntity.readAdditionalSaveData` lines that
+    /// assign `currentImpulseContextResetGraceTime` and
+    /// `currentImpulseImpactPos` directly. The live setter below cannot do it:
+    /// it forces its own grace time and only ever sets the impact position
+    /// alongside one.
+    pub fn load_current_impulse_context(&self, grace_time: i32, impact_pos: Option<DVec3>) {
+        let mut state = self.state.lock();
+        state.current_impulse_context_reset_grace_time = grace_time;
+        state.current_impulse_impact_pos = impact_pos;
+    }
+
+    /// Mirrors vanilla `LivingEntity.setIgnoreFallDamageFromCurrentImpulse`.
+    pub fn set_ignore_fall_damage_from_current_impulse(
+        &self,
+        ignore_fall_damage: bool,
+        new_impulse_impact_pos: DVec3,
+    ) {
+        let mut state = self.state.lock();
+        if ignore_fall_damage {
+            state.current_impulse_context_reset_grace_time = state
+                .current_impulse_context_reset_grace_time
+                .max(POST_IMPULSE_GRACE_TICKS);
+            state.current_impulse_impact_pos = Some(new_impulse_impact_pos);
+        } else {
+            state.current_impulse_context_reset_grace_time = 0;
+        }
+    }
+
+    /// Returns vanilla `LivingEntity.currentImpulseImpactPos`.
+    #[must_use]
+    pub fn current_impulse_impact_pos(&self) -> Option<DVec3> {
+        self.state.lock().current_impulse_impact_pos
+    }
+
+    /// Returns vanilla `LivingEntity.currentImpulseContextResetGraceTime`.
+    #[must_use]
+    pub fn current_impulse_context_reset_grace_time(&self) -> i32 {
+        self.state.lock().current_impulse_context_reset_grace_time
+    }
+
+    /// Returns vanilla `LivingEntity.isIgnoringFallDamageFromCurrentImpulse`.
+    #[must_use]
+    pub fn is_ignoring_fall_damage_from_current_impulse(&self) -> bool {
+        self.state.lock().current_impulse_impact_pos.is_some()
+    }
+
+    /// Mirrors vanilla `LivingEntity.tryResetCurrentImpulseContext`.
+    pub fn try_reset_current_impulse_context(&self) {
+        let mut state = self.state.lock();
+        if state.current_impulse_context_reset_grace_time == 0 {
+            state.current_impulse_impact_pos = None;
+        }
+    }
+
+    /// Mirrors vanilla `LivingEntity.resetCurrentImpulseContext`.
+    pub fn reset_current_impulse_context(&self) {
+        let mut state = self.state.lock();
+        state.current_impulse_context_reset_grace_time = 0;
+        state.current_impulse_impact_pos = None;
+    }
+
+    /// Returns whether movement validation is inside post-impulse grace.
+    #[must_use]
+    pub fn is_in_post_impulse_grace_time(&self) -> bool {
+        self.state.lock().current_impulse_context_reset_grace_time > 0
+    }
+
+    /// Decrements post-impulse grace once per living-entity tick.
+    pub fn tick_post_impulse_grace_time(&self) {
+        let mut state = self.state.lock();
+        if state.current_impulse_context_reset_grace_time > 0 {
+            state.current_impulse_context_reset_grace_time -= 1;
+        }
+    }
+
+    /// Returns whether this living entity is currently fall flying.
+    #[must_use]
+    pub fn is_fall_flying(&self) -> bool {
+        self.state.lock().fall_flying
+    }
+
+    /// Sets the vanilla living-entity fall-flying state.
+    pub fn set_fall_flying(&self, fall_flying: bool) {
+        self.state.lock().fall_flying = fall_flying;
+    }
+
+    /// Returns vanilla `LivingEntity.fallFlyTicks`.
+    #[must_use]
+    pub fn fall_flying_ticks(&self) -> i32 {
+        self.state.lock().fall_flying_ticks
+    }
+
+    /// Ticks vanilla `LivingEntity.fallFlyTicks`.
+    pub fn tick_fall_flying_state(&self, fall_flying: bool) {
+        let mut state = self.state.lock();
+        if fall_flying {
+            state.fall_flying_ticks = state.fall_flying_ticks.wrapping_add(1);
+        } else {
+            state.fall_flying_ticks = 0;
+        }
+    }
+
+    /// Returns whether this living entity is sprinting.
+    #[must_use]
+    pub fn is_sprinting(&self) -> bool {
+        self.state.lock().sprinting
+    }
+
+    /// Sets the vanilla living-entity sprinting state and movement-speed modifier.
+    pub fn set_sprinting(&self, sprinting: bool) {
+        self.state.lock().sprinting = sprinting;
+
+        let mut attributes = self.attributes.lock();
+        if sprinting {
+            attributes.add_modifier(
+                vanilla_attributes::MOVEMENT_SPEED,
+                AttributeModifier {
+                    id: Identifier::vanilla_static("sprinting"),
+                    amount: SPRINT_SPEED_MODIFIER_AMOUNT,
+                    operation: AttributeModifierOperation::AddMultipliedTotal,
+                },
+                false,
+            );
+        } else {
+            attributes.remove_modifier(
+                vanilla_attributes::MOVEMENT_SPEED,
+                &Identifier::vanilla_static("sprinting"),
+            );
+        }
+    }
+
+    /// Returns the bed position that makes this living entity sleeping.
+    #[must_use]
+    pub fn sleeping_pos(&self) -> Option<BlockPos> {
+        self.state.lock().sleeping_pos
+    }
+
+    /// Sets the vanilla living-entity sleeping position.
+    pub fn set_sleeping_pos(&self, bed_position: BlockPos) {
+        self.state.lock().sleeping_pos = Some(bed_position);
+    }
+
+    /// Clears the vanilla living-entity sleeping position.
+    pub fn clear_sleeping_pos(&self) {
+        self.state.lock().sleeping_pos = None;
+    }
+
+    /// Returns whether this living entity has a sleeping position.
+    #[must_use]
+    pub fn is_sleeping(&self) -> bool {
+        self.sleeping_pos().is_some()
+    }
+
+    /// Returns the last climbable block position this living entity touched.
+    #[must_use]
+    pub fn last_climbable_pos(&self) -> Option<BlockPos> {
+        self.state.lock().last_climbable_pos
+    }
+
+    /// Records the last climbable block position this living entity touched.
+    pub fn set_last_climbable_pos(&self, pos: BlockPos) {
+        self.state.lock().last_climbable_pos = Some(pos);
+    }
+
+    /// Returns whether vanilla living travel should skip friction damping.
+    #[must_use]
+    pub fn should_discard_friction(&self) -> bool {
+        self.state.lock().discard_friction
+    }
+
+    /// Sets whether vanilla living travel should skip friction damping.
+    pub fn set_discard_friction(&self, discard_friction: bool) {
+        self.state.lock().discard_friction = discard_friction;
+    }
+
+    /// Returns whether this living entity is applying jump input.
+    #[must_use]
+    pub fn is_jumping(&self) -> bool {
+        self.state.lock().jumping
+    }
+
+    /// Sets whether this living entity is applying jump input.
+    pub fn set_jumping(&self, jumping: bool) {
+        self.state.lock().jumping = jumping;
+    }
+
+    /// Returns vanilla living travel input.
+    #[must_use]
+    pub fn travel_input(&self) -> LivingTravelInput {
+        self.state.lock().travel_input
+    }
+
+    /// Sets vanilla living travel input.
+    pub fn set_travel_input(&self, input: LivingTravelInput) {
+        self.state.lock().travel_input = input;
+    }
+
+    /// Applies vanilla `LivingEntity.applyInput()` damping to travel input.
+    pub fn dampen_travel_input(&self) {
+        let mut state = self.state.lock();
+        state.travel_input = state.travel_input.dampened();
+    }
+
+    /// Returns vanilla jump cooldown ticks.
+    #[must_use]
+    pub fn no_jump_delay(&self) -> i32 {
+        self.state.lock().no_jump_delay
+    }
+
+    /// Sets vanilla jump cooldown ticks.
+    pub fn set_no_jump_delay(&self, ticks: i32) {
+        self.state.lock().no_jump_delay = ticks;
+    }
+
+    /// Decrements vanilla jump cooldown once per living AI step.
+    pub fn tick_no_jump_delay(&self) {
+        let mut state = self.state.lock();
+        if state.no_jump_delay > 0 {
+            state.no_jump_delay -= 1;
+        }
+    }
+
+    /// Calculates the vanilla `LivingEntity.calculateFallPower` of a fall.
+    ///
+    /// Both the damage and the size of the puff a landing kicks up read this.
+    #[must_use]
+    pub fn calculate_fall_power(fall_distance: f64, safe_fall_distance: f64) -> f64 {
+        fall_distance + 1.0e-6 - safe_fall_distance
+    }
+
+    /// Calculates vanilla living-entity fall damage.
+    #[must_use]
+    pub fn calculate_fall_damage(
+        fall_distance: f64,
+        damage_modifier: f32,
+        safe_fall_distance: f64,
+        fall_damage_multiplier: f64,
+    ) -> i32 {
+        (Self::calculate_fall_power(fall_distance, safe_fall_distance)
+            * f64::from(damage_modifier)
+            * fall_damage_multiplier)
+            .floor() as i32
+    }
+
+    /// Sets vanilla `LivingEntity.invulnerableTime`.
+    ///
+    /// Vanilla writes the field directly; the skeleton trap does it to keep the
+    /// horses it spawns from being killed by the bolt that announced them.
+    pub fn set_invulnerable_time(&self, invulnerable_time: i32) {
+        self.state.lock().invulnerable_time = invulnerable_time;
+    }
+
+    /// Returns vanilla `LivingEntity.invulnerableTime`.
+    ///
+    /// Vanilla also carries `hurtTime`, the ten-tick red-flash timer, which a
+    /// few mobs read to mean "was hurt just now". Foton does not model it and
+    /// does not need to: both are written on the same hit -- twenty ticks here,
+    /// ten there -- and both decrement once a tick, so vanilla's `hurtTime > 0`
+    /// is exactly this value being above ten.
+    #[must_use]
+    pub fn invulnerable_time(&self) -> i32 {
+        self.state.lock().invulnerable_time
+    }
+
+    /// Decrements remaining invulnerability ticks by one if any are active.
+    pub fn decrement_invulnerable_time(&self) {
+        let mut state = self.state.lock();
+        if state.invulnerable_time > 0 {
+            state.invulnerable_time -= 1;
+        }
+    }
+
+    /// Applies vanilla hurt cooldown bookkeeping.
+    ///
+    /// Returns `None` when damage should be ignored because death was already
+    /// processed or the amount did not exceed the active invulnerability frame.
+    pub fn apply_damage_cooldown(
+        &self,
+        amount: f32,
+        bypasses_cooldown: bool,
+    ) -> Option<(bool, f32)> {
+        let mut state = self.state.lock();
+        if state.death_processed {
+            return None;
+        }
+
+        if state.invulnerable_time > 10 && !bypasses_cooldown {
+            if amount <= state.last_hurt {
+                return None;
+            }
+            let effective = amount - state.last_hurt;
+            state.last_hurt = amount;
+            Some((false, effective))
+        } else {
+            state.last_hurt = amount;
+            state.invulnerable_time = 20;
+            Some((true, amount))
+        }
+    }
+
+    /// Records vanilla `LivingEntity.lastDamageSource` after successful damage.
+    pub fn record_last_damage_source(&self, source: &DamageSource, game_time: i64) {
+        let mut state = self.state.lock();
+        state.last_damage_source = Some(source.clone());
+        state.last_damage_stamp = game_time;
+    }
+
+    /// Returns vanilla `LivingEntity.getLastDamageSource()`.
+    pub fn last_damage_source(&self, game_time: i64) -> Option<DamageSource> {
+        let mut state = self.state.lock();
+        if game_time - state.last_damage_stamp > 40 {
+            state.last_damage_source = None;
+        }
+        state.last_damage_source.clone()
+    }
+
+    /// Sets vanilla `LivingEntity.lastHurtByPlayer` and memory time.
+    pub fn set_last_hurt_by_player(&self, player_uuid: Uuid, time_to_remember: i32) {
+        let mut state = self.state.lock();
+        state.last_hurt_by_player = Some(player_uuid);
+        state.last_hurt_by_player_memory_time = time_to_remember;
+    }
+
+    /// Returns vanilla `LivingEntity.lastHurtByPlayerMemoryTime`.
+    #[must_use]
+    pub fn last_hurt_by_player_memory_time(&self) -> i32 {
+        self.state.lock().last_hurt_by_player_memory_time
+    }
+
+    /// Returns the remembered player UUID, if present.
+    #[must_use]
+    pub fn last_hurt_by_player_uuid(&self) -> Option<Uuid> {
+        self.state.lock().last_hurt_by_player
+    }
+
+    /// Returns vanilla `LivingEntity.lastHurtByMob`, if still resolvable.
+    #[must_use]
+    pub fn last_hurt_by_mob(&self) -> Option<SharedEntity> {
+        let mut state = self.state.lock();
+        living_entity_from_weak(&mut state.last_hurt_by_mob)
+    }
+
+    /// Returns vanilla `LivingEntity.lastHurtByMobTimestamp`.
+    #[must_use]
+    pub fn last_hurt_by_mob_timestamp(&self) -> i32 {
+        self.state.lock().last_hurt_by_mob_timestamp
+    }
+
+    /// Sets vanilla `LivingEntity.lastHurtByMob` and timestamp.
+    pub fn set_last_hurt_by_mob(&self, target: Option<&SharedEntity>, tick_count: i32) {
+        let mut state = self.state.lock();
+        state.last_hurt_by_mob = weak_living_entity(target);
+        state.last_hurt_by_mob_timestamp = tick_count;
+    }
+
+    /// Returns vanilla `LivingEntity.lastHurtMob`, if still resolvable.
+    #[must_use]
+    pub fn last_hurt_mob(&self) -> Option<SharedEntity> {
+        let mut state = self.state.lock();
+        living_entity_from_weak(&mut state.last_hurt_mob)
+    }
+
+    /// Returns vanilla `LivingEntity.lastHurtMobTimestamp`.
+    #[must_use]
+    pub fn last_hurt_mob_timestamp(&self) -> i32 {
+        self.state.lock().last_hurt_mob_timestamp
+    }
+
+    /// Sets vanilla `LivingEntity.lastHurtMob` and timestamp.
+    pub fn set_last_hurt_mob(&self, target: Option<&SharedEntity>, tick_count: i32) {
+        let mut state = self.state.lock();
+        state.last_hurt_mob = weak_living_entity(target);
+        state.last_hurt_mob_timestamp = tick_count;
+    }
+
+    /// Ticks vanilla last-hurt-by-player memory.
+    pub fn tick_last_hurt_by_player_memory(&self) {
+        let mut state = self.state.lock();
+        if state.last_hurt_by_player_memory_time > 0 {
+            state.last_hurt_by_player_memory_time -= 1;
+        } else {
+            state.last_hurt_by_player = None;
+        }
+    }
+
+    /// Ticks vanilla living combat-memory cleanup.
+    pub fn tick_living_combat_memory(&self, tick_count: i32) {
+        if self
+            .last_hurt_mob()
+            .is_some_and(|target| living_is_dead(&target))
+        {
+            self.set_last_hurt_mob(None, tick_count);
+        }
+
+        let Some(hurt_by) = self.last_hurt_by_mob() else {
+            return;
+        };
+        if living_is_dead(&hurt_by) || tick_count - self.last_hurt_by_mob_timestamp() > 100 {
+            self.set_last_hurt_by_mob(None, tick_count);
+        }
+    }
+
+    /// Marks death side effects as processed.
+    ///
+    /// Returns `false` if they were already processed.
+    pub fn mark_death_processed(&self) -> bool {
+        let mut state = self.state.lock();
+        if state.death_processed {
+            return false;
+        }
+        state.death_processed = true;
+        true
+    }
+
+    /// Increments death animation time by 1 and returns the new value.
+    #[inline]
+    pub fn increment_death_time(&self) -> i32 {
+        let mut state = self.state.lock();
+        state.death_time += 1;
+        state.death_time
+    }
+
+    /// Sets vanilla `LivingEntity.deathTime`.
+    pub fn set_death_time(&self, death_time: i32) {
+        self.state.lock().death_time = death_time;
+    }
+
+    /// Returns vanilla `LivingEntity.deathTime`.
+    #[must_use]
+    pub fn death_time(&self) -> i32 {
+        self.state.lock().death_time
+    }
+
+    /// Resets all death-related state back to alive defaults.
+    #[inline]
+    pub fn reset_death_state(&self) {
+        self.state.lock().reset_death_state();
+    }
+
+    /// Resets state that vanilla gets from constructing a fresh living player for death respawn.
+    pub fn reset_for_player_respawn(&self) {
+        self.set_sprinting(false);
+
+        // Vanilla respawns with a newly constructed `LivingEntity`, whose
+        // equipment snapshots and related runtime bookkeeping start empty.
+        // Foton reuses the same `Player`, so reset those fields explicitly.
+        *self.last_equipment_items.lock() = array::from_fn(|_| ItemStack::empty());
+        *self.pending_equipment_changes.lock() = array::from_fn(|_| None);
+        {
+            let mut attributes = self.attributes.lock();
+            let mut installed_modifiers = self.equipment_attribute_modifiers.lock();
+            for modifiers in installed_modifiers.iter_mut() {
+                for key in modifiers.drain(..) {
+                    attributes.remove_modifier(key.attribute, &key.id);
+                }
+            }
+        }
+
+        let removed_effects = {
+            let mut effects = self.active_mob_effects.lock();
+            let removed_effects = effects.keys().copied().collect::<Vec<_>>();
+            effects.clear();
+            removed_effects
+        };
+
+        for effect in removed_effects.iter().copied() {
+            self.remove_effect_attribute_modifiers(effect);
+        }
+
+        {
+            let mut dirty_effects = self.dirty_mob_effects.lock();
+            dirty_effects.clear();
+            dirty_effects.extend(
+                removed_effects
+                    .into_iter()
+                    .map(|effect| MobEffectSyncChange::Remove { effect }),
+            );
+        }
+
+        let speed = self
+            .attributes
+            .lock()
+            .required_value(vanilla_attributes::MOVEMENT_SPEED) as f32;
+
+        let mut state = self.state.lock();
+        *state = LivingEntityState::new(speed);
+        state.effects_dirty = true;
+    }
+}
+
+fn weak_living_entity(target: Option<&SharedEntity>) -> Option<WeakEntity> {
+    let target = target?;
+    target.is_living_entity().then(|| Arc::downgrade(target))
+}
+
+fn living_entity_from_weak(entity: &mut Option<WeakEntity>) -> Option<SharedEntity> {
+    let Some(upgraded) = entity.as_ref().and_then(WeakEntity::upgrade) else {
+        *entity = None;
+        return None;
+    };
+    if !upgraded.is_living_entity() {
+        *entity = None;
+        return None;
+    }
+    Some(upgraded)
+}
+
+fn living_is_dead(entity: &SharedEntity) -> bool {
+    entity
+        .as_living_entity()
+        .is_none_or(|living| !LivingEntity::is_alive(living))
+}
+
+/// Returns whether an effect is one of vanilla's `InstantaneousMobEffect`s.
+///
+/// Vanilla parity: `MobEffect.isInstantaneous`, which only `HealOrHarmMobEffect`
+/// and `SaturationMobEffect` answer true to.
+#[must_use]
+pub fn is_instantaneous(effect: MobEffectRef) -> bool {
+    effect == vanilla_mob_effects::INSTANT_HEALTH
+        || effect == vanilla_mob_effects::INSTANT_DAMAGE
+        || effect == vanilla_mob_effects::SATURATION
+}
+
+/// Applies an instantaneous effect on the spot instead of adding it.
+///
+/// Vanilla parity: `MobEffect.applyInstantaneousEffect`. Callers that dose an
+/// entity rather than afflict it -- an area effect cloud, a splash potion --
+/// take this branch, which is why a cloud of harming hurts at half strength
+/// while drinking the potion hurts at full.
+///
+/// The `source`/`owner` pair vanilla passes is dropped: Foton's cloud has no
+/// owner, so the damage is credited to nobody and the plain magic source is
+/// used rather than the indirect one.
+pub fn apply_instantaneous_mob_effect<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    effect: MobEffectRef,
+    amplifier: i32,
+    scale: f64,
+) {
+    if effect == vanilla_mob_effects::INSTANT_HEALTH {
+        apply_scaled_heal_or_harm(world, entity, amplifier, false, scale);
+        return;
+    }
+    if effect == vanilla_mob_effects::INSTANT_DAMAGE {
+        apply_scaled_heal_or_harm(world, entity, amplifier, true, scale);
+        return;
+    }
+    // Vanilla parity: the base `MobEffect.applyInstantaneousEffect`, which just
+    // runs one effect tick. Saturation is the only other instantaneous effect
+    // and it takes this path.
+    MobEffectInstance::with_duration(effect, 1, amplifier).apply_effect_tick(world, entity);
+}
+
+/// Vanilla parity: `HealOrHarmMobEffect.applyInstantaneousEffect`, whose
+/// rounding is `(int)(scale * base + 0.5)` rather than the plain shift its
+/// per-tick sibling uses.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "vanilla's own `(int)` cast, over amounts that fit in a health bar"
+)]
+fn apply_scaled_heal_or_harm<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    amplifier: i32,
+    is_harm: bool,
+    scale: f64,
+) {
+    let heals = is_harm == inverts_heal_and_harm(entity);
+    let base = heal_or_harm_base(amplifier, heals);
+    let amount = (scale * f64::from(base) + 0.5) as i32 as f32;
+    apply_heal_or_hurt(world, entity, heals, amount);
+}
+
+/// Heals or hurts by the amount `HealOrHarmMobEffect` picks.
+///
+/// Vanilla parity: `HealOrHarmMobEffect.applyEffectTick`. The two swap for
+/// anything tagged `inverted_healing_and_harm`, which is what makes a splash
+/// of healing a weapon against the undead.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "the amounts fit in a health bar many times over"
+)]
+fn apply_heal_or_harm<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    amplifier: i32,
+    is_harm: bool,
+) {
+    let heals = is_harm == inverts_heal_and_harm(entity);
+    apply_heal_or_hurt(
+        world,
+        entity,
+        heals,
+        heal_or_harm_base(amplifier, heals) as f32,
+    );
+}
+
+/// Vanilla parity: the `4 << amplification` and `6 << amplification` of
+/// `HealOrHarmMobEffect`, whose `Math.max(.., 0)` guards the heal against an
+/// amplifier that shifted the sign bit in.
+fn heal_or_harm_base(amplifier: i32, heals: bool) -> i32 {
+    let shift = amplifier.max(0) as u32;
+    if heals {
+        HEAL_BASE.wrapping_shl(shift).max(0)
+    } else {
+        HARM_BASE.wrapping_shl(shift)
+    }
+}
+
+fn apply_heal_or_hurt<E: LivingEntity + ?Sized>(
+    world: &World,
+    entity: &E,
+    heals: bool,
+    amount: f32,
+) {
+    if heals {
+        entity.heal(amount);
+    } else {
+        entity.hurt(
+            world,
+            &DamageSource::environment(&vanilla_damage_types::MAGIC),
+            amount,
+        );
+    }
+}
+
+/// Vanilla parity: `LivingEntity.isInvertedHealAndHarm`.
+fn inverts_heal_and_harm<E: LivingEntity + ?Sized>(entity: &E) -> bool {
+    REGISTRY.entity_types.is_in_tag(
+        entity.entity_type(),
+        &EntityTypeTag::INVERTED_HEALING_AND_HARM,
+    )
+}
+
+/// Turns Bad Omen into Raid Omen the moment its bearer walks into a village.
+///
+/// Vanilla parity: `BadOmenMobEffect.applyEffectTick`. Returning `false` is how
+/// a vanilla effect tick removes itself, which is what consumes the Bad Omen.
+fn tick_bad_omen<E: LivingEntity + ?Sized>(world: &World, entity: &E, amplifier: i32) -> bool {
+    let Some(player) = entity.as_player() else {
+        return true;
+    };
+    if player.is_spectator()
+        || world.difficulty() == Difficulty::Peaceful
+        || !world.is_village(player.block_position())
+    {
+        return true;
+    }
+
+    let raid = world.get_raid_at(player.block_position());
+    let room_for_more =
+        raid.is_none_or(|raid| raid.raid_omen_level() < DEFAULT_MAX_RAID_OMEN_LEVEL);
+    if !room_for_more {
+        return true;
+    }
+
+    player.add_mob_effect(MobEffectInstance::with_duration(
+        vanilla_mob_effects::RAID_OMEN,
+        RAID_OMEN_DURATION,
+        amplifier,
+    ));
+    player.set_raid_omen_position(player.block_position());
+    false
+}
+
+/// Starts the raid the moment Raid Omen runs out.
+///
+/// Vanilla parity: `RaidOmenMobEffect.applyEffectTick`.
+fn tick_raid_omen<E: LivingEntity + ?Sized>(world: &World, entity: &E) -> bool {
+    let Some(player) = entity.as_player() else {
+        return true;
+    };
+    if player.is_spectator() {
+        return true;
+    }
+    let Some(raid_omen_position) = player.raid_omen_position() else {
+        return true;
+    };
+
+    world
+        .raids()
+        .create_or_extend_raid(world, player, raid_omen_position);
+    player.clear_raid_omen_position();
+    false
+}
+
+#[cfg(test)]
+mod tests;

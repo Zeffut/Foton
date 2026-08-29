@@ -62,7 +62,7 @@ boot_and_join() {
 
   # stdin from /dev/null: the server reads console commands, and a background
   # process that reads a terminal is stopped by SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/steel" > "server-$label.log" 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > "server-$label.log" 2>&1 < /dev/null &
   local pid=$!
 
   if ! wait_for_port; then

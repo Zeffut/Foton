@@ -7,7 +7,7 @@
 # experience the death was about to drop, and hands it to a `SculkSpreader` as
 # charge cursors; the catalyst then walks those cursors a step per tick and
 # converts the stone under them into sculk. Nothing short of a running server
-# exercises that chain -- the catalyst is also the first block entity in Steel
+# exercises that chain -- the catalyst is also the first block entity in Foton
 # to publish a game-event listener at all, so this is the only test that proves
 # the chunk registry actually delivers one.
 #
@@ -47,7 +47,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -65,7 +65,7 @@ if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
   cleanup; exit 1
 fi
 
-# Steel exempts operators from command-rate spam accounting, and this test asks
+# Foton exempts operators from command-rate spam accounting, and this test asks
 # the world a few dozen questions. `default_groups` alone does not make the
 # player one: `is_operator` reads a stored permission state, which only exists
 # once somebody has been opped by name.
@@ -98,7 +98,7 @@ CMDS="$CMDS;;!wait 2"
 #
 # A blaze rather than the obvious zombie, and the reason is a bug in the mobs
 # rather than in the catalyst: vanilla's `Monster` constructor sets
-# `xpReward = 5`, and Steel's monsters never do. Fifteen hostiles -- zombie,
+# `xpReward = 5`, and Foton's monsters never do. Fifteen hostiles -- zombie,
 # skeleton, creeper, spider, husk, stray, drowned, cave spider, enderman,
 # silverfish, witch, wither skeleton, zombified piglin, and the two slimes
 # whose reward is their size -- currently reward nothing at all, so a catalyst

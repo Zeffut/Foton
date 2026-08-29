@@ -15,7 +15,7 @@ fi
 mkdir -p run && cd run || exit 1
 rm -f server.log
 echo "=== Booting ==="
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 &
 PID=$!
 
 STATUS=1

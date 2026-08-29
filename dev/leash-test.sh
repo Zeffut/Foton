@@ -50,7 +50,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -78,7 +78,7 @@ CMDS="$CMDS;;difficulty easy"
 CMDS="$CMDS;;gamerule mob_griefing false"
 
 # A strip of floor under the two mobs and the two places the player stands,
-# laid one block at a time because Steel has no `/fill` yet. The horse ends up
+# laid one block at a time because Foton has no `/fill` yet. The horse ends up
 # about a block and a half nearer the ghast than it started, so the strip has to
 # be long enough to catch it there too.
 for x in -8 -7 -6 -5 -4 -3 -2 3 4 5; do

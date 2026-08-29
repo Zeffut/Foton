@@ -1,24 +1,38 @@
-# CLAUDE.md — Serveur Minecraft en Rust (fork privé de SteelMC)
+# CLAUDE.md — Foton, serveur Minecraft en Rust
 
 ## Identité du projet
 
-Fork **privé** de [Steel-Foundation/SteelMC](https://github.com/Steel-Foundation/SteelMC) —
-serveur Minecraft Java Edition en Rust, cible **MC 26.2**.
+**Foton** — serveur Minecraft Java Edition écrit en Rust, cible **MC 26.2**.
 
-- **origin**   → `https://github.com/Zeffut/SteelMC.git` (privé, notre version)
-- **upstream** → `https://github.com/Steel-Foundation/SteelMC.git` (amont, lecture seule)
+Projet souverain et autonome. Il *dérive* de
+[Steel-Foundation/SteelMC](https://github.com/Steel-Foundation/SteelMC) (AGPL-3.0),
+dont il conserve l'attribution légale, mais l'amont n'est plus une autorité sur nos
+choix : nous décidons de l'architecture, du périmètre et du rythme.
 
-Nous développons librement ici. L'amont reste une source d'améliorations à merger,
-pas une autorité sur nos choix.
+- **origin** → `https://github.com/Zeffut/SteelMC.git` (privé)
+  Le dépôt GitHub porte encore l'ancien nom ; le renommer en `Foton` est une action
+  manuelle côté GitHub, à faire quand tu le décides.
+- Aucun remote `upstream` n'est configuré. En rajouter un reste possible
+  (`git remote add upstream https://github.com/Steel-Foundation/SteelMC.git`) pour
+  aller piocher une amélioration ponctuelle, jamais pour subir leurs contraintes.
+
+Le renommage `steel*` → `foton*` est fait (crates, namespaces `foton:`, permissions
+`foton.*`, variables `FOTON_*`, brand payload `Foton`). Restent volontairement
+intacts : l'item vanilla `flint_and_steel`, `SteelExtractor` (outil externe) et les
+URL du dépôt amont.
 
 ## Emplacement — IMPORTANT
 
-Le workspace est **`/root/SteelMC` dans WSL2 (Ubuntu 26.04)**, jamais côté Windows.
+Deux checkouts existent. Celui qui compile et qui sert aujourd'hui est **macOS** :
 
-- Compilation : toujours dans WSL. Smart App Control bloque les build scripts côté Windows.
-- Édition depuis les outils Windows : `\\wsl.localhost\Ubuntu\root\SteelMC\...`
-- Exécution : passer par un script `.sh` et `wsl -d Ubuntu -- bash /mnt/c/.../script.sh`.
-  Ne jamais inliner `$HOME` dans une commande PowerShell : l'interpolation casse la syntaxe bash.
+- **macOS** : `~/Desktop/Projets/SteelMC` — `cargo check --workspace` y passe.
+- **WSL2 (Ubuntu)** : `/root/SteelMC`, historiquement le workspace de référence.
+  Depuis Windows, ne jamais compiler côté Windows (Smart App Control bloque les
+  build scripts) ; passer par `wsl -d Ubuntu -- bash ...` et ne jamais inliner
+  `$HOME` dans une commande PowerShell (l'interpolation casse la syntaxe bash).
+
+Les chemins WSL de ce document (`/root/SteelExtractor`, JDK sous
+`/usr/lib/jvm/...`) ne valent que pour le checkout WSL.
 
 ## Commandes
 
@@ -80,8 +94,9 @@ Un serveur qui diverge de vanilla est un serveur cassé.
 
 Référence complète : `AGENTS.md` à la racine (document de l'amont, toujours valable).
 
-**Ce qu'on abandonne de l'amont** : leur interdiction du développement IA autonome, et
-l'obligation de discuter chaque changement sur leur Discord. C'est notre repo.
+**Ce qu'on abandonne de l'amont** : leur interdiction du développement IA autonome et
+l'obligation de discuter chaque changement sur leur Discord. `CONTRIBUTING.md` reflète
+déjà cette position.
 
 ## SteelExtractor — obtenir des données vanilla manquantes
 
@@ -95,8 +110,8 @@ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ```
 
 Copier **uniquement** les fichiers nécessaires vers le chemin correspondant du repo :
-`steel-registry/build_assets/`, `steel-core/build/`, `steel-core/test_assets/`,
-`steel-worldgen/build_assets/`, `steel-utils/build_assets/`.
+`foton-registry/build_assets/`, `foton-core/build/`, `foton-core/test_assets/`,
+`foton-worldgen/build_assets/`, `foton-utils/build_assets/`.
 
 Si une donnée extraite est fausse ou manquante, corriger l'extracteur et le relancer —
 ne jamais écrire la valeur à la main.
@@ -104,27 +119,27 @@ ne jamais écrire la valeur à la main.
 ## Architecture
 
 ```
-steel (binaire) → steel-login (connexion) → steel-core (logique de jeu)
-  → steel-worldgen → steel-protocol (paquets) → steel-macros
-  → steel-registry (données générées) → steel-utils / steel-math → steel-crypto
+foton (binaire) → foton-login (connexion) → foton-core (logique de jeu)
+  → foton-worldgen → foton-protocol (paquets) → foton-macros
+  → foton-registry (données générées) → foton-utils / foton-math → foton-crypto
 ```
 
 | Zone | Chemin |
 |------|--------|
-| Logique de jeu | `steel-core/src/` |
-| Behaviors blocs | `steel-core/src/behavior/blocks/` |
-| Behaviors items | `steel-core/src/behavior/items/` |
-| Entités | `steel-core/src/entity/entities/` |
-| Block entities | `steel-core/src/block_entity/` |
-| Monde / chunks | `steel-core/src/world/`, `steel-core/src/chunk/` |
-| Paquets | `steel-protocol/src/packets/game/` |
-| Handlers joueur | `steel-core/src/player/networking.rs` |
-| Build scripts | `steel-core/build/`, `steel-registry/build/`, `steel-worldgen/build/` |
+| Logique de jeu | `foton-core/src/` |
+| Behaviors blocs | `foton-core/src/behavior/blocks/` |
+| Behaviors items | `foton-core/src/behavior/items/` |
+| Entités | `foton-core/src/entity/entities/` |
+| Block entities | `foton-core/src/block_entity/` |
+| Monde / chunks | `foton-core/src/world/`, `foton-core/src/chunk/` |
+| Paquets | `foton-protocol/src/packets/game/` |
+| Handlers joueur | `foton-core/src/player/networking.rs` |
+| Build scripts | `foton-core/build/`, `foton-registry/build/`, `foton-worldgen/build/` |
 | Source vanilla | `minecraft-src/minecraft/src/net/minecraft/` |
 
 ## Mécanisme d'implémentation — le point central
 
-`steel-core/build/classes.json` associe chaque entrée vanilla à sa classe Java :
+`foton-core/build/classes.json` associe chaque entrée vanilla à sa classe Java :
 
 ```json
 { "name": "lantern", "class": "LanternBlock" }
@@ -146,7 +161,7 @@ surchargées, transposer. Le trait `BlockBehavior` documente chaque méthode par
 
 ## État de la couverture
 
-Mesuré par `python3 dev/coverage.py`, qui croise `steel-core/build/classes.json`
+Mesuré par `python3 dev/coverage.py`, qui croise `foton-core/build/classes.json`
 avec les structs portant `#[block_behavior]`, `#[item_behavior]` ou
 `#[entity_behavior]`. Relancer la commande plutôt que se fier au tableau.
 
@@ -174,7 +189,7 @@ avec les structs portant `#[block_behavior]`, `#[item_behavior]` ou
 
 Le piège serait de reconstruire ces systèmes faute de les avoir cherchés :
 
-- Loot tables : moteur générique (`steel-registry/src/loot_table/`), branché sur
+- Loot tables : moteur générique (`foton-registry/src/loot_table/`), branché sur
   les blocs, la mort des entités, la tonte et les cadeaux.
 - Dégâts, mort, respawn, expérience, sauvegarde Anvil `.mca`.
 - Redstone : pistons avec structures collées, comparateurs, rails, observateurs.
@@ -220,10 +235,11 @@ git push origin master
 
 ## Licence — AGPL-3.0
 
-Le code dérive de SteelMC sous AGPL-3.0. Conséquences :
+Foton dérive de SteelMC sous AGPL-3.0. Conséquences :
 
-- Notre version reste sous **AGPL-3.0**, relicensing propriétaire impossible.
+- Foton reste sous **AGPL-3.0**, relicensing propriétaire impossible. Le renommage
+  ne change rien : c'est une œuvre dérivée.
 - Conserver les mentions de copyright et signaler nos modifications.
 - **Clause réseau** : dès qu'un serveur tournant sous ce code est accessible à des tiers,
-  ceux-ci ont droit au code source de notre version. Développer en privé n'entraîne
+  ceux-ci ont droit au code source de Foton. Développer en privé n'entraîne
   aucune obligation ; déployer publiquement en entraîne une.

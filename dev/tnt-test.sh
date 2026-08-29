@@ -50,7 +50,7 @@ grep -q '^command_spam_threshold_seconds' "$RUN_DIR/config/config.toml" ||
   echo 'command_spam_threshold_seconds = 0' >> "$RUN_DIR/config/config.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null
@@ -111,7 +111,7 @@ add "summon minecraft:zombie 0.5 130.0 -2.5 {Tags:[\"far\"],NoAI:1b}"
 add "execute if entity @e[type=minecraft:zombie,tag=witness] run tellraw @s \"WITNESSREADY\""
 add "execute if entity @e[type=minecraft:zombie,tag=far] run tellraw @s \"CONTROLREADY\""
 
-# Flint and steel rather than redstone: it is the path a player takes and the
+# Flint and foton rather than redstone: it is the path a player takes and the
 # one the block already had, so nothing here rests on a signal reaching a block.
 add "give @s minecraft:flint_and_steel 1"
 add "!hotbar 0"

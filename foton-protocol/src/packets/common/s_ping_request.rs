@@ -1,0 +1,6 @@
+use foton_macros::{ReadFrom, ServerPacket};
+
+#[derive(ReadFrom, ServerPacket, Clone, Debug)]
+pub struct SPingRequest {
+    pub time: i64,
+}

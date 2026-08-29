@@ -37,7 +37,7 @@ else
   # having run first. stdin has to come from /dev/null: the console is a TUI and
   # a background process that reads a terminal is stopped by SIGTTIN.
   echo "=== Generating an offline config ==="
-  nohup "$ROOT/target/debug/steel" > /dev/null 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > /dev/null 2>&1 < /dev/null &
   GEN_PID=$!
   for _ in $(seq 1 120); do
     [ -f config/config.toml ] && break
@@ -66,7 +66,7 @@ if grep -q '^command_spam_threshold_seconds' config/config.toml; then
 fi
 rm -rf saves
 
-nohup "$ROOT/target/debug/steel" > server.log 2>&1 < /dev/null &
+nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null

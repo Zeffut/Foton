@@ -1,4 +1,4 @@
-# Vanilla classes Steel has no behavior for.
+# Vanilla classes Foton has no behavior for.
 #
 # Generated from `classes.json` at build time and checked by
 # `parity_ledger_matches_the_generated_gaps`. A line that disappears is a piece

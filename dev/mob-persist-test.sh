@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stop the server and start it again: the mobs have to be what they were.
 #
-# Twenty of Steel's mobs had no `save_additional` at all, or one that skipped
+# Twenty of Foton's mobs had no `save_additional` at all, or one that skipped
 # the shared `Mob` half, and `save_additional` is the *whole* of what the chunk
 # saver writes for a type. So a restart quietly reset every one of them: a
 # charged creeper came back ordinary, a size-4 slime came back tiny, a baby
@@ -61,7 +61,7 @@ PID=
 start_server() {
   # stdin from /dev/null: the server reads console commands, and a background
   # process that reads a terminal is stopped by SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/steel" > "server-$1.log" 2>&1 < /dev/null &
+  nohup "$ROOT/target/debug/foton" > "server-$1.log" 2>&1 < /dev/null &
   PID=$!
   if ! wait_for_port; then
     echo "SERVER NEVER LISTENED ON $PORT ($1)"
