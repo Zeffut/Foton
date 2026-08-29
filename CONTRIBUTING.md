@@ -39,14 +39,36 @@ bar is not *who* wrote the code but whether it holds:
 
 Work that fails any of these is rejected regardless of its author.
 
+### Documentation is generated where it can be
+
+`CONFIGURATION.md` comes out of the JSON schemas in `package-content/`.
+Change a schema, then run `python3 dev/gen-config-docs.py`. Never hand-edit the
+generated file; `dev/ci.sh` fails when it drifts.
+
+The same rule holds for `dev/parity-gaps.txt`, produced at build time from
+`classes.json`. Read the diff, then run `python3 dev/update-parity-gaps.py`.
+
 ## Checks
 
 ```bash
-cargo check --workspace --all-targets
-cargo test
-cargo fmt --all --check
-cargo clippy -r --all-targets --all-features
-typos
+bash dev/ci.sh                     # everything below, in one go
 ```
 
-The full engineering rules live in `AGENTS.md`.
+or individually:
+
+```bash
+cargo check --workspace --all-targets
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy -r --workspace --all-targets --all-features -- -D warnings
+typos
+python3 dev/gen-config-docs.py --check
+```
+
+In-world behavior needs an in-world check: `bash dev/smoke-test.sh` boots the
+server and speaks the protocol to it, `bash dev/join-test.sh` takes a real
+client from login into the world, and `bash dev/all-tests.sh` runs every
+scripted world test in sequence.
+
+The full engineering rules live in `AGENTS.md`; where the project stands against
+vanilla is in `PARITY.md`.

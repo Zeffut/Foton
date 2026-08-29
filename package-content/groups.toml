@@ -1,5 +1,5 @@
-#:schema https://raw.githubusercontent.com/Steel-Foundation/SteelMC/refs/heads/master/package-content/groups.schema.json
-# Documentation: https://steelmc.dev/configuration/permissions/
+#:schema https://raw.githubusercontent.com/Zeffut/Foton/refs/heads/master/package-content/groups.schema.json
+# Documentation: CONFIGURATION.md in the Foton repository
 
 default_groups = ["default"]
 

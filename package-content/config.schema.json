@@ -75,7 +75,7 @@
         },
         "allow_flight": {
           "type": "boolean",
-          "description": "Whether the server allows unauthorised client flight",
+          "description": "Whether the server allows unauthorized client flight",
           "default": false
         },
         "motd": {

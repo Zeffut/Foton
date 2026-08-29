@@ -1,5 +1,5 @@
-#:schema https://raw.githubusercontent.com/Steel-Foundation/SteelMC/refs/heads/master/package-content/worlds.schema.json
-# Documentation: https://steelmc.dev/configuration/world-configuration/
+#:schema https://raw.githubusercontent.com/Zeffut/Foton/refs/heads/master/package-content/worlds.schema.json
+# Documentation: CONFIGURATION.md in the Foton repository
 
 # Root defaults inherited by domains and worlds unless overridden.
 save_path = "saves"

@@ -32,9 +32,9 @@ fn temp_config_root(name: &str) -> PathBuf {
 fn packaged_configs_parse() {
     let config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
     assert!(DEFAULT_CONFIG.starts_with(concat!(
-        "#:schema https://raw.githubusercontent.com/Steel-Foundation/SteelMC/refs/heads/master/",
+        "#:schema https://raw.githubusercontent.com/Zeffut/Foton/refs/heads/master/",
         "package-content/config.schema.json\n",
-        "# Documentation: https://steelmc.dev/configuration/server-configuration/\n\n",
+        "# Documentation: CONFIGURATION.md in the Foton repository\n\n",
     )));
     assert!(!config.server.allow_flight);
     assert_eq!(config.server.chat_spam_threshold_seconds, 10);
@@ -42,9 +42,9 @@ fn packaged_configs_parse() {
     validate(&config.server).expect("default config validates");
     let worlds: WorldsConfig = toml::from_str(DEFAULT_WORLDS).expect("default worlds parses");
     assert!(DEFAULT_WORLDS.starts_with(concat!(
-        "#:schema https://raw.githubusercontent.com/Steel-Foundation/SteelMC/refs/heads/master/",
+        "#:schema https://raw.githubusercontent.com/Zeffut/Foton/refs/heads/master/",
         "package-content/worlds.schema.json\n",
-        "# Documentation: https://steelmc.dev/configuration/world-configuration/\n\n",
+        "# Documentation: CONFIGURATION.md in the Foton repository\n\n",
     )));
     assert!(!worlds.domains.is_empty());
     let groups: PermissionGroupsConfig =
@@ -111,11 +111,11 @@ async fn file_permission_group_store_round_trips_typed_config() {
     assert_eq!(
         written.lines().next(),
         Some(concat!(
-            "#:schema https://raw.githubusercontent.com/Steel-Foundation/SteelMC/refs/heads/master/",
+            "#:schema https://raw.githubusercontent.com/Zeffut/Foton/refs/heads/master/",
             "package-content/groups.schema.json"
         ))
     );
-    assert!(written.contains("# Documentation: https://steelmc.dev/configuration/permissions/"));
+    assert!(written.contains("# Documentation: CONFIGURATION.md in the Foton repository"));
     assert!(written.contains("{ key = \"plugin:max_homes{domain=survival}\", value = 5 }"));
     assert!(written.contains("{ key = \"plugin:prefix\", value = \"[Builder]\" }"));
     assert!(written.contains("{ key = \"plugin:can_claim\", value = true }"));

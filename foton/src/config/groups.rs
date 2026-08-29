@@ -14,9 +14,9 @@ use toml::ser::Error as TomlSerializeError;
 
 pub(super) const DEFAULT_GROUPS: &str = include_str!("../../../package-content/groups.toml");
 pub(super) const GROUPS_CONFIG_HEADER: &str = concat!(
-    "#:schema https://raw.githubusercontent.com/Steel-Foundation/SteelMC/refs/heads/master/",
+    "#:schema https://raw.githubusercontent.com/Zeffut/Foton/refs/heads/master/",
     "package-content/groups.schema.json\n",
-    "# Documentation: https://steelmc.dev/configuration/permissions/\n\n",
+    "# Documentation: CONFIGURATION.md in the Foton repository\n\n",
 );
 
 /// TOML-backed permission group store.

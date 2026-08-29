@@ -1,5 +1,5 @@
-#:schema https://raw.githubusercontent.com/Steel-Foundation/SteelMC/refs/heads/master/package-content/config.schema.json
-# Documentation: https://steelmc.dev/configuration/server-configuration/
+#:schema https://raw.githubusercontent.com/Zeffut/Foton/refs/heads/master/package-content/config.schema.json
+# Documentation: CONFIGURATION.md in the Foton repository
 
 [server]
 # Server port
@@ -81,8 +81,8 @@ url = "https://github.com/Zeffut/Foton/issues"
 label = "website"
 url = "https://github.com/Zeffut/Foton"
 
-# These two pointed at the upstream SteelMC Discord, which is not this
-# server's community. Re-enable them with a Foton invite when there is one.
+# Two more links used to sit here, pointing at a community that is not this
+# server's. Re-enable them with your own invite.
 # [[server.server_links.links]]
 # label = "announcements"
 # url = "..."

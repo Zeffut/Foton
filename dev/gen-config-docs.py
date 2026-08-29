@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Render CONFIGURATION.md from the shipped JSON schemas.
+
+The schemas in `package-content/` are the only description of the config
+format that is checked against the code, so the reference is generated from
+them rather than transcribed. Run this after changing a schema:
+
+    python3 dev/gen-config-docs.py
+
+`dev/ci.sh` runs this with `--check`, which fails when the committed file no
+longer matches what the schemas produce.
+"""
+
+import json
+import pathlib
+import sys
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+CONTENT = REPO / "package-content"
+OUTPUT = REPO / "CONFIGURATION.md"
+
+FILES = [
+    ("config.toml", "config.schema.json", "Server", "server settings and logging"),
+    ("worlds.toml", "worlds.schema.json", "Worlds", "dimensions, domains and storage"),
+    ("groups.toml", "groups.schema.json", "Permissions", "groups and permission rules"),
+]
+
+
+def resolve(node, root):
+    """Follows a local `$ref` until the node is a real subschema."""
+    seen = 0
+    while isinstance(node, dict) and "$ref" in node:
+        ref = node["$ref"]
+        if not ref.startswith("#/"):
+            return node
+        target = root
+        for part in ref[2:].split("/"):
+            target = target[part]
+        node = target
+        seen += 1
+        if seen > 16:
+            raise RuntimeError(f"cyclic $ref at {ref}")
+    return node
+
+
+def ref_name(node):
+    """Definition name a property points at, when it points at one."""
+    ref = node.get("$ref", "") if isinstance(node, dict) else ""
+    return ref.rsplit("/", 1)[-1] if ref.startswith("#/definitions/") else None
+
+
+def type_of(node, root):
+    """A short human type for one property."""
+    name = ref_name(node)
+    if name:
+        return f"[`{name}`](#{name.replace('_', '-')})"
+    node = resolve(node, root)
+    if "enum" in node:
+        return " \\| ".join(f"`{v}`" for v in node["enum"])
+    for key in ("oneOf", "anyOf"):
+        if key in node:
+            parts = [type_of(v, root) for v in node[key]]
+            return " or ".join(dict.fromkeys(parts))
+    kind = node.get("type", "")
+    if kind == "array":
+        inner = node.get("items")
+        return f"array of {type_of(inner, root)}" if inner else "array"
+    if kind == "object":
+        return "table"
+    return kind or "any"
+
+
+def limits(node, root):
+    """Range and format constraints, as a short phrase."""
+    node = resolve(node, root)
+    out = []
+    full_width = (node.get("minimum"), node.get("maximum")) in {
+        (-(2**31), 2**31 - 1), (-(2**63), 2**63 - 1)
+    }
+    if full_width:
+        pass
+    elif "minimum" in node and "maximum" in node:
+        out.append(f"{node['minimum']}–{node['maximum']}")
+    elif "minimum" in node:
+        out.append(f"≥ {node['minimum']}")
+    elif "maximum" in node:
+        out.append(f"≤ {node['maximum']}")
+    if node.get("format"):
+        out.append(node["format"])
+    if node.get("minItems"):
+        out.append(f"≥ {node['minItems']} item(s)")
+    if node.get("uniqueItems"):
+        out.append("unique")
+    return ", ".join(out)
+
+
+def cell(text):
+    return (text or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def default_of(node, root):
+    node = resolve(node, root)
+    if "default" not in node:
+        return ""
+    value = node["default"]
+    if isinstance(value, bool):
+        return f"`{str(value).lower()}`"
+    if isinstance(value, str) and value == "":
+        return "`\"\"`"
+    return f"`{json.dumps(value)}`"
+
+
+def table(node, root, required):
+    rows = []
+    for name, prop in (node.get("properties") or {}).items():
+        resolved = resolve(prop, root)
+        if not ref_name(prop) and resolved.get("type") == "object" and resolved.get("properties"):
+            continue  # rendered as its own section
+        mark = " *(required)*" if name in required else ""
+        rows.append(
+            f"| `{name}`{mark} | {type_of(prop, root)} | {default_of(prop, root)} "
+            f"| {cell(limits(prop, root))} | {cell(resolved.get('description'))} |"
+        )
+    if not rows:
+        return []
+    return ["| Key | Type | Default | Range | Meaning |",
+            "|---|---|---|---|---|", *rows, ""]
+
+
+def section(node, root, title, depth, lines):
+    node = resolve(node, root)
+    description = node.get("description")
+    if description and depth > 3:
+        lines.append(f"{description}\n")
+    lines.extend(table(node, root, set(node.get("required") or [])))
+    for name, prop in (node.get("properties") or {}).items():
+        resolved = resolve(prop, root)
+        if not ref_name(prop) and resolved.get("type") == "object" and resolved.get("properties"):
+            heading = f"{title}.{name}" if title else name
+            lines.append(f"{'#' * depth} `[{heading}]`\n")
+            section(prop, root, heading, depth + 1, lines)
+
+
+def render():
+    lines = [
+        "# Configuration reference",
+        "",
+        "*Generated by `python3 dev/gen-config-docs.py` from the JSON schemas in",
+        "`package-content/`. Edit the schema, not this file.*",
+        "",
+        "Foton writes its defaults on first boot into `config/` next to the server",
+        "binary, then reads them on every later start. Each file carries a `#:schema`",
+        "line so an editor with TOML schema support can complete and validate it.",
+        "",
+    ]
+    for toml_name, schema_name, title, blurb in FILES:
+        schema = json.loads((CONTENT / schema_name).read_text())
+        lines += [f"## `{toml_name}` — {title}", "", f"{schema.get('description', blurb)}.", ""]
+        body = []
+        section(schema, schema, "", 3, body)
+        lines += body
+        definitions = schema.get("definitions") or {}
+        shapes = {k: v for k, v in definitions.items()
+                  if (v.get("type") == "object" and v.get("properties"))}
+        if shapes:
+            lines += [f"### Shapes used by `{toml_name}`", ""]
+            for name, node in shapes.items():
+                lines += [f"#### `{name}`", ""]
+                inner = []
+                section(node, schema, name, 5, inner)
+                lines += inner
+        scalars = {k: v for k, v in definitions.items() if k not in shapes}
+        if scalars:
+            lines += [f"### Value types used by `{toml_name}`", "",
+                      "| Name | Accepts | Meaning |", "|---|---|---|"]
+            for name, node in scalars.items():
+                accepts = type_of(node, schema)
+                if node.get("pattern"):
+                    accepts += f" matching `{node['pattern']}`"
+                lines.append(f"| <a id=\"{name.replace('_', '-')}\"></a>`{name}` "
+                             f"| {accepts} | {cell(node.get('description'))} |")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def main():
+    text = render()
+    if "--check" in sys.argv:
+        current = OUTPUT.read_text() if OUTPUT.exists() else ""
+        if current != text:
+            print(f"{OUTPUT.relative_to(REPO)} is stale; run python3 dev/gen-config-docs.py")
+            return 1
+        print(f"{OUTPUT.relative_to(REPO)} is current")
+        return 0
+    OUTPUT.write_text(text)
+    print(f"wrote {OUTPUT.relative_to(REPO)} ({len(text.splitlines())} lines)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

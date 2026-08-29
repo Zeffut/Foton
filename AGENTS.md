@@ -1,3 +1,21 @@
+# Engineering rules
+
+The technical standard for Foton. Everything here is about *what the code must
+be*, and it holds regardless of who or what writes it.
+
+Process is a separate matter: how much to ask, when to check in, how to run a
+change through review. `CLAUDE.md` and the operator's own instructions decide
+that, and they win over the check-in wording below.
+
+**Documentation map**
+- `README.md` — what Foton is, how to run it, where it stands.
+- `CONFIGURATION.md` — every config key, generated from the JSON schemas.
+- `PARITY.md` — the vanilla parity ledger, and why raw coverage numbers lie.
+- `CONTRIBUTING.md` — the bar a change has to clear.
+- This file — the engineering rules below.
+
+---
+
 **ASK, DON'T GUESS** — Ambiguity is a stop signal. If types, error handling, vanilla behavior, generated data, or architecture is unclear, ask. No speculative coding.
 
 **HONEST BLOCKERS** — Don't hide uncertainty behind speculative changes or workarounds. State the real issue and ask the user for missing logs, paths, data, or vanilla references.
@@ -72,6 +90,7 @@ Template: *"This requires [Hack] which risks [Consequence]. Proceed or solve roo
 
 **GENERATED CODE** — Never modify generated files directly:
 - Generated Rust under these `src/generated/` paths is intentionally ignored/untracked. Commit the build script, extractor output, or source asset that produces it, not the generated Rust output.
+- `CONFIGURATION.md` is generated too: edit the schema in `package-content/`, then run `python3 dev/gen-config-docs.py`.
 - `foton-registry/src/generated/` → modify `foton-registry/build/`
 - `foton-core/src/behavior/generated/` → modify `foton-core/build/`
 - `foton-core/src/entity/generated/` → modify `foton-core/build/`
@@ -84,7 +103,8 @@ Template: *"This requires [Hack] which risks [Consequence]. Proceed or solve roo
 - To inspect generated Rust, write a disposable formatted copy outside the repo. Read/search the copy; never write formatted output back to `src/generated/` or commit it.
 - To inspect extracted JSON, pretty-print a disposable copy outside the repo. If the formatter is unavailable, state that instead of guessing from a truncated one-line view.
 
-**SteelExtractor workflow**
+**Extractor workflow**
+- Extracted vanilla data comes from SteelExtractor, an external Fabric mod checked out beside this repository (it keeps that name; it is not part of Foton).
 - Use the local SteelExtractor checkout when extracted data is needed; default output is `run/steel_extractor_output/` inside that checkout.
 - Copy only needed produced files into matching repo-relative paths like `foton-registry/build_assets/`, `foton-core/build/`, `foton-core/test_assets/`, `foton-worldgen/build_assets/`, or `foton-utils/build_assets/`.
 - If the checkout, output, or file is missing and cannot be regenerated, ask for the exact path/command/output instead of recreating data by hand.
@@ -92,16 +112,25 @@ Template: *"This requires [Hack] which risks [Consequence]. Proceed or solve roo
 ## Build Commands
 
 ```bash
-cargo build          # Build
-cargo run            # Run
-cargo check          # Fast compile check
-cargo test           # Tests
-cargo clippy -r --all-targets --all-features  # CI lint
-cargo check -p foton-core          # Fast game/worldgen check
-cargo fmt --all --check            # CI formatting
-typos                               # CI spelling
-prek run --all-files                # Full local precommit suite
+cargo run -p foton                       # Run the server
+cargo check --workspace --all-targets    # Fast compile check
+cargo check -p foton-core                # Fast game/worldgen check
+cargo test --workspace                   # Tests
+cargo fmt --all --check                  # CI formatting
+cargo clippy -r --workspace --all-targets --all-features -- -D warnings  # CI lint
+typos                                    # CI spelling
+python3 dev/gen-config-docs.py --check   # CI: config reference is current
+prek run --all-files                     # Full local precommit suite
 ```
+
+`bash dev/ci.sh` runs the whole CI suite in one go; `bash dev/doctor.sh` says
+what the environment is missing. `bash dev/smoke-test.sh` boots the server and
+speaks the protocol to it, `bash dev/join-test.sh` walks a real client from
+login to play.
+
+Coverage against vanilla comes from `python3 dev/coverage.py`, cross-checked by
+the build-time ledger `dev/parity-gaps.txt`. The two must agree; when they do
+not, the ledger is right and the script has a detection gap.
 
 Uses **nightly Rust**.
 Tooling: `ast-grep` is available for structural code search/rewrites.

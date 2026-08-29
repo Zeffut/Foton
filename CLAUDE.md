@@ -4,29 +4,31 @@
 
 **Foton** — serveur Minecraft Java Edition écrit en Rust, cible **MC 26.2**.
 
-Projet souverain et autonome. Il *dérive* de
-[Steel-Foundation/SteelMC](https://github.com/Steel-Foundation/SteelMC) (AGPL-3.0),
-dont il conserve l'attribution légale, mais l'amont n'est plus une autorité sur nos
-choix : nous décidons de l'architecture, du périmètre et du rythme.
+Projet souverain et autonome : nous décidons de l'architecture, du périmètre et du
+rythme. Le code dérive d'une base AGPL-3.0 antérieure dont l'avis de copyright est
+conservé dans `LICENSE` — c'est la seule obligation qui subsiste, et elle est
+remplie.
 
 - **origin** → `https://github.com/Zeffut/Foton.git` (privé)
-  Renommé depuis `Zeffut/SteelMC` le 2026-08-29. GitHub redirige l'ancienne URL,
-  mais tout clone existant ailleurs gagne à faire
+  Le dépôt a été renommé le 2026-08-29 ; GitHub redirige l'ancienne URL, mais tout
+  clone existant ailleurs gagne à faire
   `git remote set-url origin https://github.com/Zeffut/Foton.git`.
-- Aucun remote `upstream` n'est configuré. En rajouter un reste possible
-  (`git remote add upstream https://github.com/Steel-Foundation/SteelMC.git`) pour
-  aller piocher une amélioration ponctuelle, jamais pour subir leurs contraintes.
+- Aucun remote `upstream`. `dev/sync-upstream.sh` est un vestige qui suppose ce
+  remote : il ne fonctionne pas en l'état et n'est plus dans le circuit.
 
-Le renommage `steel*` → `foton*` est fait (crates, namespaces `foton:`, permissions
-`foton.*`, variables `FOTON_*`, brand payload `Foton`). Restent volontairement
-intacts : l'item vanilla `flint_and_steel`, `SteelExtractor` (outil externe) et les
-URL du dépôt amont.
+Le renommage `steel*` → `foton*` est terminé (crates, namespaces `foton:`,
+permissions `foton.*`, variables `FOTON_*`, brand payload `Foton`, chaînes visibles
+en jeu). Restent intacts par nécessité : l'item vanilla `flint_and_steel`,
+`SteelExtractor` (outil externe qui porte ce nom sur le disque) et l'URL de la
+dépendance `TextComponents` dans `Cargo.toml`.
 
 ## Emplacement — IMPORTANT
 
 Deux checkouts existent. Celui qui compile et qui sert aujourd'hui est **macOS** :
 
-- **macOS** : `~/Desktop/Projets/SteelMC` — `cargo check --workspace` y passe.
+- **macOS** : `~/Desktop/Projets/SteelMC` — `cargo check --workspace` y passe. Le
+  dossier porte encore l'ancien nom ; le renommer en `Foton` est un `mv` à faire
+  hors session, et ce document sera à corriger ensuite.
 - **WSL2 (Ubuntu)** : `/root/SteelMC`, historiquement le workspace de référence.
   Depuis Windows, ne jamais compiler côté Windows (Smart App Control bloque les
   build scripts) ; passer par `wsl -d Ubuntu -- bash ...` et ne jamais inliner
@@ -40,10 +42,10 @@ Les chemins WSL de ce document (`/root/SteelExtractor`, JDK sous
 ```bash
 bash dev/doctor.sh          # vérifie que l'environnement est complet et cohérent
 bash dev/ci.sh              # rejoue toute la suite de vérification (~150 s)
-bash dev/sync-upstream.sh   # récupère les avancées de l'amont, puis vérifie
 bash dev/smoke-test.sh      # démarre le serveur et lui parle en protocole Minecraft
 bash dev/join-test.sh       # fait entrer un vrai client dans le monde (login → play)
 python3 dev/coverage.py     # mesure la couverture réelle par rapport à vanilla
+python3 dev/gen-config-docs.py  # régénère CONFIGURATION.md depuis les schémas
 ```
 
 Commandes brutes :
@@ -93,7 +95,19 @@ Un serveur qui diverge de vanilla est un serveur cassé.
 7. **Tests** : seulement s'ils attrapent une régression plausible. Pas de test qui redit
    une constante ou une évidence que le compilateur garantit déjà.
 
-Référence complète : `AGENTS.md` à la racine (document de l'amont, toujours valable).
+### Carte de la documentation
+
+| Fichier | Rôle |
+|---------|------|
+| `README.md` | ce qu'est Foton, comment le lancer, où il en est |
+| `AGENTS.md` | les règles d'ingénierie (le standard technique) |
+| `CONFIGURATION.md` | chaque clé de config — **généré**, voir plus bas |
+| `PARITY.md` | le registre de parité vanilla et pourquoi les chiffres mentent |
+| `CONTRIBUTING.md` | la barre qu'un changement doit passer |
+
+`CONFIGURATION.md` est produit par `python3 dev/gen-config-docs.py` à partir
+des schémas JSON de `package-content/`. Ne jamais l'éditer à la main : modifier le
+schéma puis régénérer. `dev/ci.sh` échoue si le fichier committé est périmé.
 
 **Ce qu'on abandonne de l'amont** : leur interdiction du développement IA autonome et
 l'obligation de discuter chaque changement sur leur Discord. `CONTRIBUTING.md` reflète
@@ -166,10 +180,16 @@ Mesuré par `python3 dev/coverage.py`, qui croise `foton-core/build/classes.json
 avec les structs portant `#[block_behavior]`, `#[item_behavior]` ou
 `#[entity_behavior]`. Relancer la commande plutôt que se fier au tableau.
 
+Le registre `dev/parity-gaps.txt`, généré au build et gardé par un test, doit
+donner exactement le même résultat. En cas de désaccord, **c'est le registre qui
+a raison** : il sort du même codegen que l'enregistrement. Un désaccord réel a
+existé — le script ne reconnaissait que la forme nue `#[item_behavior]` et
+ratait les deux items livre écrits `#[foton_macros::item_behavior]`.
+
 | Catégorie | Couverture | Au départ du fork |
 |-----------|-----------|-------------------|
 | Blocs     | 255 / 265 (96 %) | 185 / 265 (70 %) |
-| Items     | 67 / 70 (96 %)   | 30 / 70 (43 %)   |
+| Items     | 69 / 70 (99 %)   | 30 / 70 (43 %)   |
 | Entités   | 141 / 142 (99 %) | 4 / 142 (3 %)    |
 
 `dev/coverage.py --list entities` affiche le détail couvert / manquant.
@@ -214,8 +234,9 @@ Ce que `dev/coverage.py --list` donne encore comme non couvert :
 - **Blocs (10)** : `AirBlock`, `Block`, `HalfTransparentBlock`,
   `TransparentBlock` (classes de base vanilla, pas du contenu), puis
   `CryingObsidianBlock`, `StainedGlassBlock`, `TintedGlassBlock`,
-  `StructureVoidBlock`, `TestBlock`, `TestInstanceBlock`.
-- **Items (3)** : `Item` (classe de base), `WritableBookItem`, `WrittenBookItem`.
+  `StructureVoidBlock` et les deux blocs de gametest `TestBlock`,
+  `TestInstanceBlock`.
+- **Items (1)** : `Item` (classe de base).
 - **Entités (1)** : `Player` (porté hors du mécanisme `#[entity_behavior]`).
 
 La couverture par annotation ne dit rien de la *justesse* des implémentations :
@@ -243,7 +264,7 @@ git push origin master
 
 ## Licence — AGPL-3.0
 
-Foton dérive de SteelMC sous AGPL-3.0. Conséquences :
+Foton dérive d'une base AGPL-3.0 antérieure. Conséquences :
 
 - Foton reste sous **AGPL-3.0**, relicensing propriétaire impossible. Le renommage
   ne change rien : c'est une œuvre dérivée.
