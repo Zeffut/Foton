@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/assets/readme/foton-logo.png" alt="Foton" width="160">
+  <img src=".github/assets/readme/foton-logo.png" alt="Foton" width="176">
 </p>
 
 <h1 align="center">Foton</h1>
@@ -156,4 +156,7 @@ World generation, lighting and performance work draws on ideas from
 [Lithium](https://github.com/CaffeineMC/lithium) and
 [Structure Layout Optimizer](https://github.com/TelepathicGrunt/StructureLayoutOptimizer).
 
-The logo was designed by **colonthreeing**.
+The mark is generated, not drawn: `python3 dev/gen-logo.py` turns a list of
+voxel coordinates into `.github/assets/readme/foton-logo.svg` and its PNG. An F
+built from isometric blocks, stone with a lit top arm — the same 2:1 projection
+and three-shades-per-material trick the game uses.
