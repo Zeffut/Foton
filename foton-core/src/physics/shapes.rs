@@ -145,7 +145,7 @@ pub fn translate_shape(shape: &BlockLocalAabb, block_pos: BlockPos) -> WorldAabb
 #[must_use]
 pub fn merged_face_occludes(shape1: VoxelShape, shape2: VoxelShape, direction: Direction) -> bool {
     // Fast path — vanilla: if EITHER shape is a full block the face is sealed.
-    // (SteelMC previously required BOTH to be full — that was wrong.)
+    // (Foton previously required BOTH to be full — that was wrong.)
     let is_s1_full = is_shape_full_block(shape1);
     let is_s2_full = is_shape_full_block(shape2);
 

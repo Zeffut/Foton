@@ -75,21 +75,21 @@ enable = true
 
 [[server.server_links.links]]
 label = "bug_report"
-url = "https://github.com/Steel-Foundation/SteelMC/issues"
+url = "https://github.com/Zeffut/SteelMC/issues"
 
 [[server.server_links.links]]
 label = "website"
-url = "https://github.com/Steel-Foundation/SteelMC"
+url = "https://github.com/Zeffut/SteelMC"
 
-# The news channel on discord
-[[server.server_links.links]]
-label = "announcements"
-url = "https://discord.com/channels/1428487339759370322/1428487584966774795"
-
-# Custom TextComponent (object label with formatting)
-[[server.server_links.links]]
-label = { text = "Visit the SteelMC Discord", color = "blue", bold = true }
-url = "https://discord.gg/suSXXNdVSf"
+# These two pointed at the upstream SteelMC Discord, which is not this
+# server's community. Re-enable them with a Foton invite when there is one.
+# [[server.server_links.links]]
+# label = "announcements"
+# url = "..."
+#
+# [[server.server_links.links]]
+# label = { text = "Visit the Foton Discord", color = "blue", bold = true }
+# url = "..."
 
 # Logging configuration
 [log]

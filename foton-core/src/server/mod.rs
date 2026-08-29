@@ -568,7 +568,7 @@ impl Server {
         let config = Arc::new(config);
         init_globals()?;
         log::info!(
-            "SteelMC is not affiliated with Mojang or Microsoft. Use is subject to the Minecraft EULA: https://aka.ms/MinecraftEULA"
+            "Foton is not affiliated with Mojang or Microsoft. Use is subject to the Minecraft EULA: https://aka.ms/MinecraftEULA"
         );
 
         // Authlib starts this fetch alongside server initialization and waits on first use.

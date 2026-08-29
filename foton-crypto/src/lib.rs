@@ -1,4 +1,4 @@
-//! Cryptographic utilities for `SteelMC`, focused on RSA signing and verification
+//! Cryptographic utilities for `Foton`, focused on RSA signing and verification
 //! for secure chat message validation.
 //!
 //! This module implements the cryptographic primitives needed for Minecraft's

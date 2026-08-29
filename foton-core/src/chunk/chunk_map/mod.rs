@@ -1388,7 +1388,7 @@ impl ChunkMap {
     /// `chunkSource.addTicketWithRadius(ENDER_PEARL, chunk, 2)`. Re-placing the
     /// same ticket resets its countdown rather than stacking duplicates.
     // TODO: vanilla's ENDER_PEARL ticket also sets FLAG_KEEP_DIMENSION_ACTIVE
-    // (`resetEmptyTime`/`shouldKeepDimensionActive`); SteelMC has no idle-dimension
+    // (`resetEmptyTime`/`shouldKeepDimensionActive`); Foton has no idle-dimension
     // unload concept yet, so that flag has no analog here.
     pub fn place_ender_pearl_ticket(&self, chunk: ChunkPos) {
         let mut timed_tickets = self.timed_chunk_tickets.lock();
