@@ -2,8 +2,13 @@ use std::sync::Weak;
 
 use steel_registry::{init_vanilla_registry, vanilla_entities};
 
+use super::goat_ai::TIME_BETWEEN_RAMS_MIN;
 use super::*;
+use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::next_entity_id;
+use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+use std::sync::Arc;
+use steel_utils::ChunkPos;
 
 fn goat() -> GoatEntity {
     init_vanilla_registry();
@@ -118,5 +123,54 @@ fn a_kid_butts_for_half_the_damage_an_adult_does() {
             .required_value(vanilla_attributes::ATTACK_DAMAGE)
             .to_bits(),
         ADULT_ATTACK_DAMAGE.to_bits()
+    );
+}
+
+/// The brain is reached by the tick a real goat gets, and it runs.
+///
+/// The shared `hostile_ai.rs` layers stop one step short of this: they prove a
+/// goat *has* a brain, and stay green when `custom_server_ai_step` no longer
+/// ticks it and when the brain is built with no activities at all. So this
+/// enters at `Entity::tick` -- the one call `World::tick_entities` makes -- and
+/// watches a counter the core activity owns actually count.
+///
+/// `RAM_COOLDOWN_TICKS` is the right witness: `GoatAi.initMemories` seeds it and
+/// the core activity's `CountDownCooldownTicks` is the only thing that moves it,
+/// so a lower number afterwards means the whole chain ran -- tick,
+/// `custom_server_ai_step`, `Brain::tick`, the core activity, the behavior.
+#[test]
+fn the_tick_a_goat_gets_runs_its_brain() {
+    init_vanilla_registry();
+    let world = fresh_test_world("goat_brain_tick");
+    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+    let goat = GoatEntity::new(
+        &vanilla_entities::GOAT,
+        next_entity_id(),
+        DVec3::new(8.5, 64.0, 8.5),
+        Arc::downgrade(&world),
+    );
+    goat.init_memories();
+
+    let brain = Mob::brain(&goat).expect("a goat is brain-driven, as in vanilla");
+    let seeded = brain
+        .get_memory(memory_module_types::RAM_COOLDOWN_TICKS)
+        .expect("`GoatAi.initMemories` seeds the ram cooldown");
+    assert!(
+        seeded >= TIME_BETWEEN_RAMS_MIN,
+        "the seeded cooldown left vanilla's range: {seeded}"
+    );
+
+    Entity::tick(&goat);
+
+    let after = brain
+        .get_memory(memory_module_types::RAM_COOLDOWN_TICKS)
+        .expect("the cooldown should still be there, one tick lighter");
+    assert_eq!(
+        after,
+        seeded - 1,
+        "the goat's brain never ran: `Entity::tick` has to reach \
+         `custom_server_ai_step`, which ticks the brain, whose core activity \
+         counts this down. A brain that is merely built passes the shared \
+         layers and still leaves the goat standing still."
     );
 }

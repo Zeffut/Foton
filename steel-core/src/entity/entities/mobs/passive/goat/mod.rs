@@ -9,11 +9,17 @@
 //! the breeding and the spawn rules. See the note on [`GoatEntity::drop_horn`]
 //! for exactly what the missing brain would have driven.
 //!
-//! MISSING FOUNDATION: `GoatAi`. Steel does have a `Brain` -- the villager, the
+//! The brain is `goat_ai`; a goat has no goals at all, exactly as in vanilla.
+//!
+//! Historical note: `GoatAi` used to be the entry below. Steel does have a
+//! `Brain` -- the villager, the
 //! piglins, the warden, the frog, the axolotl, the allay, the sniffer, the
 //! creaking, the breeze and both nautilus mobs run on it -- so what is missing
 //! is the long-jump and ram behaviors, not the layer. `hostile_ai.rs` keeps the
 //! goat out of `assert_it_has_something_to_run` until they land.
+
+mod goat_ai;
+mod ram;
 
 use std::sync::{Arc, Weak};
 
@@ -45,6 +51,7 @@ use steel_utils::types::InteractionHand;
 use steel_utils::{BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey};
 
 use crate::behavior::InteractionResult;
+use crate::entity::ai::brain::Brain;
 use crate::entity::ai::path::PathType;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
@@ -103,6 +110,7 @@ pub struct GoatEntity {
     ageable_base: AgeableMobBase,
     animal_base: AnimalBase,
     entity_data: SyncMutex<GoatEntityData>,
+    brain: Brain,
 }
 
 // SAFETY: This key is owned by Steel and uniquely identifies `GoatEntity`.
@@ -111,6 +119,13 @@ unsafe impl DowncastType for GoatEntity {
 }
 
 impl GoatEntity {
+    /// Seeds the brain the way a freshly spawned goat needs.
+    ///
+    /// Vanilla parity: `GoatAi.initMemories`.
+    pub fn init_memories(&self) {
+        goat_ai::init_memories(&self.brain);
+    }
+
     /// Creates a goat at runtime.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {
@@ -147,7 +162,7 @@ impl GoatEntity {
         living_base.initialize_synced_data(&mut entity_data);
 
         // Vanilla `Goat` registers no goals at all: `GoatAi` supplies every
-        // behavior through the mob's `Brain`, which Steel has not built yet.
+        // behavior through the mob's `Brain`.
 
         Self {
             base,
@@ -157,6 +172,7 @@ impl GoatEntity {
             ageable_base,
             animal_base,
             entity_data: SyncMutex::new(entity_data),
+            brain: goat_ai::make_brain(),
         }
     }
 
@@ -581,6 +597,21 @@ impl Mob for GoatEntity {
         &self.mob_base
     }
 
+    fn brain(&self) -> Option<&Brain> {
+        Some(&self.brain)
+    }
+
+    /// Vanilla parity: `Goat.customServerAiStep`, which is the brain tick and
+    /// the activity update, then the shared animal step.
+    fn custom_server_ai_step(&self) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        self.brain.tick(&world, self);
+        goat_ai::update_activity(&self.brain);
+        Animal::custom_server_ai_step_animal(self);
+    }
+
     fn mob_flags(&self) -> i8 {
         *self.entity_data.lock().mob().mob_flags.get()
     }
@@ -595,13 +626,6 @@ impl Mob for GoatEntity {
 
     fn tick_path_navigation(&self) {
         PathfinderMob::tick_pathfinder_path_navigation(self);
-    }
-
-    /// Vanilla parity: `Goat.customServerAiStep` ticks the goat's `Brain` and
-    /// then `GoatAi.updateActivity`. Steel has no `Brain`, so only the shared
-    /// `Animal` half runs; see the module comment.
-    fn custom_server_ai_step(&self) {
-        Animal::custom_server_ai_step_animal(self);
     }
 
     fn ambient_sound(&self) -> Option<SoundEventRef> {

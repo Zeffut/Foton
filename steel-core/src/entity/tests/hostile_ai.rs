@@ -392,19 +392,18 @@ macro_rules! assert_it_has_something_to_run {
 // goal list. There is no generic way to see a `custom_server_ai_step` override
 // from here, so they are named rather than asserted.
 //
-// The goat is wrong, and this is the ledger of it. Vanilla's goat is
-// brain-driven through `GoatAi` -- ramming, the long jump, the wandering, the
-// tempting -- and Steel builds it no brain, so a goat stands still.
-// `goat/mod.rs` says Steel has no `Brain` system, which stopped being true some
-// time ago: the villager, the piglins, the warden, the frog, the axolotl, the
-// allay, the sniffer, the creaking, the breeze and both nautilus mobs all have
-// one. It belongs in the list above the moment it has something to run.
+// The goat and the wandering trader used to be the ledger of what was wrong
+// here. Both are in the list above now.
 //
-// The wandering trader used to be here for the same reason and no longer is: it
-// now registers the twelve of vanilla's eighteen goals that Steel has goal
-// types for. The six it still lacks -- two `UseItemGoal`s, `TradeWithPlayerGoal`,
-// `LookAtTradingPlayerGoal` and `WanderToPositionGoal` -- are named where they
-// would be registered.
+// The goat is the one vanilla animal with no `registerGoals` at all: everything
+// it does lives in `GoatAi`, and Steel now builds that brain -- the core set,
+// the idle set, the long jump and the ram, with `RamTarget` and
+// `PrepareRamNearestTarget` ported beside it.
+//
+// The wandering trader registers the thirteen of vanilla's eighteen goals that
+// Steel has goal types for. The five it still lacks -- two `UseItemGoal`s,
+// `TradeWithPlayerGoal`, `LookAtTradingPlayerGoal` and `WanderToPositionGoal`
+// -- are named where they would be registered.
 assert_it_has_something_to_run! {
 
     a_zombie_registers_its_goals: ZombieEntity, &vanilla_entities::ZOMBIE;
@@ -421,6 +420,7 @@ assert_it_has_something_to_run! {
     a_cave_spider_registers_its_goals: CaveSpiderEntity, &vanilla_entities::CAVE_SPIDER;
     an_enderman_registers_its_goals: EndermanEntity, &vanilla_entities::ENDERMAN;
     a_wandering_trader_registers_its_goals: WanderingTraderEntity, &vanilla_entities::WANDERING_TRADER;
+    a_goat_registers_its_brain: GoatEntity, &vanilla_entities::GOAT;
     a_silverfish_registers_its_goals: SilverfishEntity, &vanilla_entities::SILVERFISH;
     a_witch_registers_its_goals: WitchEntity, &vanilla_entities::WITCH;
     a_pillager_registers_its_goals: PillagerEntity, &vanilla_entities::PILLAGER;
