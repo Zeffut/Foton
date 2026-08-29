@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""Draw the Foton mark and write it to .github/assets/readme/.
+"""Draw the Foton mark, for the README and for the server list.
 
 The logo is a list of voxel coordinates, not a drawing: an F built from cubes,
 projected 2:1 isometric and scan-filled onto a 64x64 pixel grid, painter-sorted
 so near blocks cover far ones. The output is SVG -- one rectangle per run of
-identical pixels -- so it is a vector file that happens to be pixel art, sharp
-at 16 pixels and at 4000.
+identical pixels -- so it is a vector file that happens to be pixel art. It is
+drawn 1:1 against the 64-pixel icon and stays exact at every integer multiple of
+that; at 32 pixels, the size Minecraft renders a server icon in the list, it is
+still pixel-crisp.
 
     python3 dev/gen-logo.py
 
-Changing the mark means changing FACE_COLORS or CELLS. Nothing is hand-drawn,
-so nothing drifts out of sync with the palette.
+It writes three files from the one definition: the SVG source, the README PNG,
+and `package-content/favicon.png` -- the 64x64 icon the server sends to clients,
+which is where most people will actually see this mark.
+
+Changing the mark means changing CELLS or the palette. Nothing is hand-drawn,
+so the three outputs cannot drift apart.
 """
 
 import pathlib
@@ -22,9 +28,11 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = REPO / ".github" / "assets" / "readme"
 
 GRID = 64  # pixel canvas the mark is drawn on
-UNIT = 8  # cube edge, in pixels
-ORIGIN = (6, 30)
+MARGIN = 2  # pixels of clear space around the mark
 PNG_SIZE = 320
+# The server list icon is 64x64, and the mark is drawn on a 64x64 grid, so one
+# source pixel lands on exactly one icon pixel.
+FAVICON_SIZE = GRID
 
 # Three shades per material, one per visible cube face: (top, left, right).
 # The same trick Minecraft uses to fake light on a block.
@@ -63,12 +71,12 @@ class Grid:
                     self.set(x, y, color)
 
 
-def cube(grid, x, y, faces):
+def cube(grid, x, y, faces, unit):
     """One voxel at grid position (x, y) on the z = 0 plane."""
-    ox, oy = ORIGIN
-    px = x * UNIT + ox
-    py = x * (UNIT // 2) - y * UNIT + oy
-    half = UNIT // 2
+    px = x * unit + unit
+    py = x * (unit // 2) - y * unit + GRID - unit
+    half = unit // 2
+    UNIT = unit
     top, left, right = faces
     grid.fill([(px, py), (px + UNIT, py - half),
                (px + 2 * UNIT, py), (px + UNIT, py + half)], top)
@@ -78,19 +86,42 @@ def cube(grid, x, y, faces):
                (px + 2 * UNIT, py + UNIT), (px + UNIT, py + half + UNIT)], right)
 
 
-def draw():
-    grid = Grid()
+def draw(unit):
+    grid = Grid(GRID * 4)  # oversized while drawing, cropped by center()
     for x, y in sorted(CELLS, key=lambda c: (c[0], c[1])):
-        cube(grid, x, y, GLOW if y == LIT_ROW else STONE)
-    return center(grid)
+        cube(grid, x, y, GLOW if y == LIT_ROW else STONE, unit)
+    return grid
 
 
-def center(grid):
+def extent(grid):
     xs = [p[0] for p in grid.px]
     ys = [p[1] for p in grid.px]
-    dx = (grid.size - (max(xs) - min(xs) + 1)) // 2 - min(xs)
-    dy = (grid.size - (max(ys) - min(ys) + 1)) // 2 - min(ys)
-    moved = Grid(grid.size)
+    return max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+
+
+def largest_fitting_unit():
+    """The biggest cube edge whose mark still clears MARGIN on a GRID canvas.
+
+    Kept an even number so `unit // 2` is exact and the isometric top faces stay
+    symmetrical, and the mark is drawn at 1:1 against the 64-pixel icon, so no
+    fractional scaling ever blurs a pixel.
+    """
+    room = GRID - 2 * MARGIN
+    best = 2
+    for unit in range(2, 33, 2):
+        width, height = extent(draw(unit))
+        if width <= room and height <= room:
+            best = unit
+    return best
+
+
+def center(grid, size=GRID):
+    """Crops and centers the drawing on a `size` x `size` canvas."""
+    xs = [p[0] for p in grid.px]
+    ys = [p[1] for p in grid.px]
+    dx = (size - (max(xs) - min(xs) + 1)) // 2 - min(xs)
+    dy = (size - (max(ys) - min(ys) + 1)) // 2 - min(ys)
+    moved = Grid(size)
     for (x, y), color in grid.px.items():
         moved.set(x + dx, y + dy, color)
     return moved
@@ -119,17 +150,22 @@ def to_svg(grid, scale=10):
 
 
 def main():
+    unit = largest_fitting_unit()
+    mark = center(draw(unit))
     svg_path = ASSETS / "foton-logo.svg"
-    png_path = ASSETS / "foton-logo.png"
-    svg_path.write_text(to_svg(draw()))
-    print(f"wrote {svg_path.relative_to(REPO)}")
+    svg_path.write_text(to_svg(mark))
+    width, height = extent(mark)
+    print(f"wrote {svg_path.relative_to(REPO)} "
+          f"(cube edge {unit}px, mark {width}x{height} on a {GRID}px grid)")
 
     if not shutil.which("rsvg-convert"):
-        print("rsvg-convert not found; the PNG was left as it was", file=sys.stderr)
+        print("rsvg-convert not found; the raster files were left as they were", file=sys.stderr)
         return 1
-    subprocess.run(["rsvg-convert", "-w", str(PNG_SIZE), "-h", str(PNG_SIZE),
-                    "-o", str(png_path), str(svg_path)], check=True)
-    print(f"wrote {png_path.relative_to(REPO)} ({PNG_SIZE}px)")
+    for path, size in ((ASSETS / "foton-logo.png", PNG_SIZE),
+                       (REPO / "package-content" / "favicon.png", FAVICON_SIZE)):
+        subprocess.run(["rsvg-convert", "-w", str(size), "-h", str(size),
+                        "-o", str(path), str(svg_path)], check=True)
+        print(f"wrote {path.relative_to(REPO)} ({size}px)")
     return 0
 
 
