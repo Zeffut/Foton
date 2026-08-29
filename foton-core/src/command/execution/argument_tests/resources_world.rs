@@ -236,7 +236,7 @@ fn storage_key_argument_parses_and_suggests_source_domain_keys() {
         Ok(&Identifier::from_foton("data"))
     );
 
-    let parse = dispatcher.parse("resource fo", TestSource::new());
+    let parse = dispatcher.parse("resource foton", TestSource::new());
     let Ok(suggestions) = dispatcher.completion_suggestions(&parse) else {
         panic!("storage key suggestions should build");
     };
