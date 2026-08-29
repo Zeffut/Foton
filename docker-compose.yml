@@ -1,8 +1,7 @@
 services:
   foton:
     # Built by .github/workflows/docker-build.yml from the GitHub repository name.
-    # Update this tag if the repository is renamed to Foton.
-    image: ghcr.io/zeffut/steelmc:nightly
+    image: ghcr.io/zeffut/foton:nightly
     stdin_open: true
     tty: true
     container_name: foton-mc

@@ -75,11 +75,11 @@ enable = true
 
 [[server.server_links.links]]
 label = "bug_report"
-url = "https://github.com/Zeffut/SteelMC/issues"
+url = "https://github.com/Zeffut/Foton/issues"
 
 [[server.server_links.links]]
 label = "website"
-url = "https://github.com/Zeffut/SteelMC"
+url = "https://github.com/Zeffut/Foton"
 
 # These two pointed at the upstream SteelMC Discord, which is not this
 # server's community. Re-enable them with a Foton invite when there is one.

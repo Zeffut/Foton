@@ -9,9 +9,10 @@ Projet souverain et autonome. Il *dérive* de
 dont il conserve l'attribution légale, mais l'amont n'est plus une autorité sur nos
 choix : nous décidons de l'architecture, du périmètre et du rythme.
 
-- **origin** → `https://github.com/Zeffut/SteelMC.git` (privé)
-  Le dépôt GitHub porte encore l'ancien nom ; le renommer en `Foton` est une action
-  manuelle côté GitHub, à faire quand tu le décides.
+- **origin** → `https://github.com/Zeffut/Foton.git` (privé)
+  Renommé depuis `Zeffut/SteelMC` le 2026-08-29. GitHub redirige l'ancienne URL,
+  mais tout clone existant ailleurs gagne à faire
+  `git remote set-url origin https://github.com/Zeffut/Foton.git`.
 - Aucun remote `upstream` n'est configuré. En rajouter un reste possible
   (`git remote add upstream https://github.com/Steel-Foundation/SteelMC.git`) pour
   aller piocher une amélioration ponctuelle, jamais pour subir leurs contraintes.
