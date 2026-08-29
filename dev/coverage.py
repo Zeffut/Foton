@@ -22,7 +22,9 @@ CLASSES = REPO / "foton-core" / "build" / "classes.json"
 SOURCES = REPO / "foton-core" / "src"
 
 STRUCT = re.compile(
-    r"#\[(block|item|entity)_behavior([^\]]*)\]"
+    # The attribute may be written bare or path-qualified
+    # (`#[foton_macros::item_behavior]`); the codegen accepts both.
+    r"#\[(?:[A-Za-z_][A-Za-z0-9_]*::)*(block|item|entity)_behavior([^\]]*)\]"
     r"\s*(?:(?://[^\n]*|///[^\n]*)\n\s*)*"
     r"(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)"
 )
