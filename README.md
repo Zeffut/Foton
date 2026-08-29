@@ -134,8 +134,21 @@ foton            binary, CLI, console, RCON
       └─ foton-crypto     RSA and session authentication
 ```
 
-Never edit anything under `src/generated/` — it is produced at build time from
-`build/` scripts and extracted data.
+## What is generated
+
+Four things in this repository are outputs, not sources. Editing one by hand
+works until the next build overwrites it, so edit what produces it instead.
+
+| Output | Produced from | By |
+|---|---|---|
+| `*/src/generated/` | extracted vanilla data | the `build/` scripts, at build time |
+| `CONFIGURATION.md` | `package-content/*.schema.json` | `dev/gen-config-docs.py` |
+| `dev/parity-gaps.txt` | `foton-core/build/classes.json` | the build, checked by a test |
+| the logo and the server icon | a list of voxel coordinates | `dev/gen-logo.py` |
+
+`dev/ci.sh` fails when the configuration reference drifts from the schemas, and
+a test fails when the parity ledger drifts from the code. Nothing in that table
+is drawn, transcribed or maintained by hand.
 
 ## License
 
@@ -156,7 +169,8 @@ World generation, lighting and performance work draws on ideas from
 [Lithium](https://github.com/CaffeineMC/lithium) and
 [Structure Layout Optimizer](https://github.com/TelepathicGrunt/StructureLayoutOptimizer).
 
-The mark is generated, not drawn: `python3 dev/gen-logo.py` turns a list of
-voxel coordinates into `.github/assets/readme/foton-logo.svg` and its PNG. An F
-built from isometric blocks, stone with a lit top arm — the same 2:1 projection
-and three-shades-per-material trick the game uses.
+The mark above is an F built from isometric blocks, slate with a lit top arm,
+drawn with the same 2:1 projection and three-shades-per-material trick the game
+uses on its own blocks. `dev/gen-logo.py` renders it from eight voxel
+coordinates into the SVG, the image at the top of this file, and the 64×64 icon
+the server sends to a client's multiplayer list.
