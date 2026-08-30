@@ -24,7 +24,7 @@ that, and they win over the check-in wording below.
 
 **CHECK-IN DISCIPLINE** — Project rules override generic "keep going" behavior. Persistence stops when the next step depends on missing project facts, vanilla references, extractor output, or architectural intent. Do not keep retrying builds/tests, invent fallbacks, or hardcode data to make progress. Ask the user a narrow question with what you verified, what is missing, why guessing risks vanilla divergence, and the exact path/log/extractor output/decision needed.
 - Stop and ask after repeated failures in the same category instead of cycling through variants.
-- If data should come from SteelExtractor, update or request the extractor/output; do not transcribe hardcoded registry, worldgen, block, item, or protocol values from memory or guesses.
+- If data should come from FotonExtractor, update or request the extractor/output; do not transcribe hardcoded registry, worldgen, block, item, or protocol values from memory or guesses.
 - If temporary hardcoded data is explicitly requested for a prototype, label it as prototype-only and keep it out of shared foundations unless the user approves the architectural debt.
 
 Template: *"I verified [sources]. The blocker is [missing data/decision]. Guessing would risk [vanilla divergence]. Please provide/confirm [exact file/path/output/decision]."*
@@ -97,15 +97,15 @@ Template: *"This requires [Hack] which risks [Consequence]. Proceed or solve roo
 - `foton-worldgen/src/generated/` → modify `foton-worldgen/build/`
 - `foton-utils/src/generated/` → modify `foton-utils/build/`
 - Block/item behavior registration is generated from `#[block_behavior]` / `#[item_behavior]`; add annotated structs under `foton-core/src/behavior/`, not manual generated registration.
-- Treat `*/build_assets/*.json` and `*/test_assets/*.json` populated by SteelExtractor as extracted data, not hand-authored source. If extracted JSON data is wrong or missing, update the relevant SteelExtractor extractor, rerun it, and copy only the produced file(s) needed for the change.
+- Treat `*/build_assets/*.json` and `*/test_assets/*.json` populated by FotonExtractor as extracted data, not hand-authored source. If extracted JSON data is wrong or missing, update the relevant FotonExtractor extractor, rerun it, and copy only the produced file(s) needed for the change.
 - If extracted JSON data is missing and the extractor path/output is not available, tell the user exactly what data is required; they can provide the extractor path.
 - Generated Rust and extracted JSON may be minified onto one very long line. Line-limited reads like `sed -n '1,160p'` or `head` are not enough to understand these files; use `rg` for the target symbol/key first, then format a temporary copy if more context is needed.
 - To inspect generated Rust, write a disposable formatted copy outside the repo. Read/search the copy; never write formatted output back to `src/generated/` or commit it.
 - To inspect extracted JSON, pretty-print a disposable copy outside the repo. If the formatter is unavailable, state that instead of guessing from a truncated one-line view.
 
 **Extractor workflow**
-- Extracted vanilla data comes from SteelExtractor, an external Fabric mod checked out beside this repository (it keeps that name; it is not part of Foton).
-- Use the local SteelExtractor checkout when extracted data is needed; default output is `run/steel_extractor_output/` inside that checkout.
+- Extracted vanilla data comes from FotonExtractor, an external Fabric mod checked out beside this repository; it is a companion tool, not a crate of this workspace.
+- Use the local FotonExtractor checkout when extracted data is needed; default output is `run/foton_extractor_output/` inside that checkout.
 - Copy only needed produced files into matching repo-relative paths like `foton-registry/build_assets/`, `foton-core/build/`, `foton-core/test_assets/`, `foton-worldgen/build_assets/`, or `foton-utils/build_assets/`.
 - If the checkout, output, or file is missing and cannot be regenerated, ask for the exact path/command/output instead of recreating data by hand.
 

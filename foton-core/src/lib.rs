@@ -3,6 +3,11 @@
 //! The core library for the Foton Minecraft server. Handles everything related to the PLAY state.
 
 #![feature(try_as_dyn)]
+// Rustdoc infers `Send`/`Sync` for private types too, and the command tree
+// behind `FunctionLibrary` nests deep enough to blow the default limit of 128
+// once the workspace unifies every feature. The compiler itself is fine; only
+// `cargo doc --all --document-private-items --all-features` needs the headroom.
+#![recursion_limit = "512"]
 
 use crate::chunk::chunk_map::ChunkMap;
 

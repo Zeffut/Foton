@@ -30,7 +30,7 @@ impl VillagerProfession {
     ///
     /// Vanilla parity: `VillagerProfession.requestedItems`, a literal
     /// `ImmutableSet` written into `VillagerProfession.bootstrap`. No datapack
-    /// can change it, no packet carries it and `SteelExtractor` emits nothing
+    /// can change it, no packet carries it and `FotonExtractor` emits nothing
     /// for it, so the vanilla source is mirrored here the way [`crate::fuel`]
     /// mirrors the equally hardcoded `FuelValues.vanillaBurnTimes`.
     #[must_use]

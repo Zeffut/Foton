@@ -190,7 +190,7 @@ impl TimedBehavior for GiveGiftToHero {
 ///
 /// Vanilla parity: `GiveGiftToHero.getLootTableToThrow` and the `GIFTS` map it
 /// reads. That map is a literal `ImmutableMap` in the behavior itself -- no
-/// datapack reaches it and `SteelExtractor` emits nothing for it -- so it is
+/// datapack reaches it and `FotonExtractor` emits nothing for it -- so it is
 /// mirrored here entry for entry. `none` and `nitwit` are the two professions
 /// vanilla leaves out of the map, and `getOrDefault` sends them to the
 /// unemployed table.

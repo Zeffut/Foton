@@ -97,7 +97,7 @@ pub trait Sensor: Send {
 ///
 /// Vanilla parity: `net.minecraft.world.entity.ai.sensing.SensorType`. Like
 /// `Activity` and `MemoryModuleType`, vanilla's registry is a hardcoded Java
-/// list that never reaches a packet or a save file, and `SteelExtractor` emits no
+/// list that never reaches a packet or a save file, and `FotonExtractor` emits no
 /// `sensor_type` asset, so the constants are mirrored as an enum. Only the
 /// sensors a Foton mob drives are here; the rest arrive with their mobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
