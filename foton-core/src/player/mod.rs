@@ -450,6 +450,10 @@ impl Player {
     }
 
     /// Creates a new player.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a player is assembled from its whole join context at once;                   `self_weak` is the `Arc::new_cyclic` handle its inventory                   menu needs so an armor slot knows who wears it"
+    )]
     pub fn new(
         gameprofile: GameProfile,
         connection: Arc<PlayerConnection>,
@@ -458,6 +462,7 @@ impl Player {
         config: Arc<RuntimeConfig>,
         entity_id: i32,
         client_information: ClientInformation,
+        self_weak: &Weak<Self>,
     ) -> Self {
         // Create a single shared inventory container used by both the player and inventory menu
         let inventory = Arc::new(SyncMutex::new(PlayerInventory::new()));
@@ -508,7 +513,7 @@ impl Player {
             ender_chest,
             inventory_sync: SyncMutex::new(PlayerInventorySyncState::new()),
             last_item_in_main_hand: SyncMutex::new(ItemStack::empty()),
-            inventory_menu: SyncMutex::new(inventory_menu(inventory)),
+            inventory_menu: SyncMutex::new(inventory_menu(inventory, self_weak.clone())),
             open_menu: SyncMutex::new(player_inventory::OpenMenuState::new()),
             container_counter: SyncMutex::new(ContainerCounter::new()),
             teleport_state: SyncMutex::new(TeleportState::new()),
@@ -656,16 +661,14 @@ impl Player {
                 (food_data.food_level, food_data.saturation_level)
             };
 
-            let saturation_zero = saturation == 0.0;
-
             let mut sync = self.health_sync.lock();
-            if sync.needs_update(health, food, saturation_zero) {
+            if sync.needs_update(health, food, saturation) {
                 self.send_packet(CSetHealth {
                     health,
                     food,
                     food_saturation: saturation,
                 });
-                sync.record_sent(health, food, saturation_zero);
+                sync.record_sent(health, food, saturation);
             }
         }
 
@@ -1572,6 +1575,27 @@ impl Entity for Player {
 
     fn is_suppressing_bounce(&self) -> bool {
         self.is_crouching()
+    }
+
+    /// Vanilla parity: `ServerPlayer.onExplosionHit`.
+    ///
+    /// This is what makes wind-charge jumping survivable. The impulse
+    /// machinery it arms was already here in full -- `current_impulse_impact_pos`,
+    /// the grace time, and the `causeFallDamage` clamp that reads them -- but
+    /// the mace was its only caller, so a blast never armed it and a player
+    /// launched by a wind charge paid the whole fall on the way down.
+    ///
+    /// Vanilla names `EntityTypes.WIND_CHARGE` alone: a breeze's charge is
+    /// deliberately not forgiving, and neither is any other explosion.
+    ///
+    /// MISSING FOUNDATION: vanilla also records `currentExplosionImpactPos`
+    /// and `currentExplosionCause` here, which `MaceItem` reads to decide a
+    /// smash attack's bonus. Foton has no equivalent pair yet, so only the
+    /// fall-damage half of the method is ported.
+    fn on_explosion_hit(&self, explosion_caused_by: Option<&SharedEntity>) {
+        let from_wind_charge = explosion_caused_by
+            .is_some_and(|source| source.entity_type() == &vanilla_entities::WIND_CHARGE);
+        self.set_ignore_fall_damage_from_current_impulse(from_wind_charge, self.position());
     }
 
     fn cause_fall_damage(

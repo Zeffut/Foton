@@ -7,12 +7,16 @@
 //! the door the server actually uses.
 
 use super::*;
-use crate::behavior::init_behaviors;
+use crate::behavior::{ITEM_BEHAVIORS, init_behaviors};
 use crate::entity::entities::{DrownedEntity, RavagerEntity};
 use crate::entity::next_entity_id;
 use crate::inventory::container::Container as _;
+use crate::player::connection::NetworkConnection;
 use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
+use foton_protocol::packet_traits::{CompressionInfo, EncodedPacket};
 use foton_registry::data_components::vanilla_components::BLOCKS_ATTACKS;
+use foton_utils::locks::SyncMutex;
+use text_components::TextComponent;
 
 /// The one spot the test world is solid ground rather than a column the fluid
 /// scan walks.
@@ -194,6 +198,348 @@ fn a_players_living_hand_follows_the_selected_hotbar_slot() {
             .get_item_in_hand(InteractionHand::MainHand)
             .is_empty(),
         "a different slot is a different hand"
+    );
+}
+
+/// Eating spends exactly one use tick per server tick, and takes all 32.
+///
+/// `Player` does not reuse `LivingEntity.tick`: it overrides
+/// `tick_living_entity` to call its own hand-rolled `Player::tick`, which
+/// carries its own copy of the countdown call. A second `updating_using_item`
+/// anywhere on that path would halve every eating time in the game and nothing
+/// else in the suite would notice, because every other test drives
+/// `updating_using_item` by hand rather than through the tick the world runs.
+#[test]
+fn eating_spends_one_use_tick_per_server_tick() {
+    let world = item_use_world("item_use_eat_rate");
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Eater", next_entity_id()).build();
+    player.base().set_position_local(SPAWN);
+    player.set_client_loaded(true);
+    player.set_item_in_hand(
+        InteractionHand::MainHand,
+        ItemStack::new(&vanilla_items::GOLDEN_APPLE),
+    );
+
+    player.start_using_item(InteractionHand::MainHand);
+    let started = player.use_item_remaining_ticks();
+    assert_eq!(
+        started, 32,
+        "vanilla's default `consume_seconds` of 1.6 is 32 ticks"
+    );
+
+    // The one call `World::tick_entities` makes.
+    Entity::tick(player.as_ref());
+
+    assert_eq!(
+        player.use_item_remaining_ticks(),
+        started - 1,
+        "one server tick must spend exactly one use tick"
+    );
+}
+
+/// A connection that remembers the id of every packet the server sent it.
+struct PacketIdRecorder {
+    ids: Arc<SyncMutex<Vec<i32>>>,
+}
+
+impl NetworkConnection for PacketIdRecorder {
+    fn compression(&self) -> Option<CompressionInfo> {
+        None
+    }
+
+    fn send_encoded(&self, packet: EncodedPacket) {
+        // Uncompressed framing: a var-int body length, then a var-int id.
+        let mut bytes: &[u8] = &packet.encoded_data;
+        let mut read = || {
+            let mut value = 0_i32;
+            for shift in 0..5 {
+                let byte = bytes[0];
+                bytes = &bytes[1..];
+                value |= i32::from(byte & 0x7F) << (shift * 7);
+                if byte & 0x80 == 0 {
+                    break;
+                }
+            }
+            value
+        };
+        let _length = read();
+        let id = read();
+        self.ids.lock().push(id);
+    }
+
+    fn send_encoded_bundle(&self, packets: Vec<EncodedPacket>) {
+        for packet in packets {
+            self.send_encoded(packet);
+        }
+    }
+
+    fn disconnect_with_reason(&self, _reason: TextComponent) {}
+
+    fn tick(&self) {}
+
+    fn latency(&self) -> i32 {
+        0
+    }
+
+    fn close(&self) {}
+
+    fn closed(&self) -> bool {
+        false
+    }
+}
+
+/// Right-clicking armour on sends the wearer the sound of it going on.
+///
+/// Foton has three ways to put armour on and they share no code: the inventory
+/// screen's `ArmorSlot`, a shift-click's `move_item_stack_to`, and this one,
+/// `Equippable.swapWithEquipmentSlot`. Vanilla routes all three through
+/// `setItemSlot` and so through `onEquipItem`; Foton's swap works straight on
+/// the inventory container, so the hook has to be run around it by hand.
+///
+/// The assertion is on what the client is sent, not on what the server holds.
+/// Every other equipment test in the suite checks the slot's contents, and the
+/// slot was always right -- it was the sound that never left the server.
+#[test]
+fn right_clicking_armour_on_sends_the_wearer_the_equip_sound() {
+    use crate::player::PlayerConnection;
+    use crate::player::ResetReason;
+    use foton_protocol::packets::game::SUseItem;
+    use foton_registry::equipment::EquipmentSlot;
+    use foton_registry::packets::play::C_SOUND;
+
+    let world = item_use_world("item_use_equip_sound");
+    let ids: Arc<SyncMutex<Vec<i32>>> = Arc::new(SyncMutex::new(Vec::new()));
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Dresser", next_entity_id())
+        .connection(Arc::new(PlayerConnection::Other(Box::new(
+            PacketIdRecorder {
+                ids: Arc::clone(&ids),
+            },
+        ))))
+        .build();
+    player.base().set_position_local(SPAWN);
+    player.set_client_loaded(true);
+    assert!(
+        world.add_player(Arc::clone(&player), ResetReason::InitialJoin),
+        "the sound is broadcast to the world's players, so the wearer has to be one"
+    );
+
+    player.set_item_in_hand(
+        InteractionHand::MainHand,
+        ItemStack::new(&vanilla_items::DIAMOND_CHESTPLATE),
+    );
+    ids.lock().clear();
+
+    player.handle_use_item(SUseItem {
+        hand: InteractionHand::MainHand,
+        sequence: 1,
+        y_rot: 0.0,
+        x_rot: 0.0,
+    });
+
+    assert!(
+        player
+            .get_item_by_slot(EquipmentSlot::Chest)
+            .is(&vanilla_items::DIAMOND_CHESTPLATE),
+        "the chestplate should be worn"
+    );
+    assert!(
+        ids.lock().contains(&C_SOUND),
+        "the wearer never heard the armour go on: vanilla's          `swapWithEquipmentSlot` writes through `setItemSlot`, whose          `onEquipItem` is what plays it"
+    );
+}
+
+/// Eating a notch apple on a half-empty hunger bar actually feeds the player.
+///
+/// The food-data arithmetic already had a test, and so did the item's own
+/// component -- both pass. Neither goes through `Consumable.onConsume`, which
+/// is the only thing the server actually runs when a player finishes eating,
+/// and which reaches the hunger bar through a different door than the mob
+/// effects an enchanted golden apple also carries. So a break there shows up
+/// to a player as "the absorption hearts work but the bar never moves".
+#[test]
+fn a_notch_apple_refills_a_half_empty_hunger_bar() {
+    let world = item_use_world("item_use_notch_apple");
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Eater", next_entity_id()).build();
+    player.base().set_position_local(SPAWN);
+    player.set_client_loaded(true);
+    {
+        let mut food = player.food_data.lock();
+        food.food_level = 10;
+        food.saturation_level = 0.0;
+    }
+
+    let mut stack = ItemStack::new(&vanilla_items::ENCHANTED_GOLDEN_APPLE);
+    let behavior = ITEM_BEHAVIORS.get_behavior(stack.item());
+    behavior.finish_using(&mut stack, &world, player.as_ref());
+
+    let food = player.food_data.lock();
+    assert_eq!(
+        food.food_level, 14,
+        "vanilla's enchanted golden apple restores 4 nutrition"
+    );
+    assert!(
+        food.saturation_level > 0.0,
+        "and 9.6 saturation with it, clamped to the food level; got {}",
+        food.saturation_level
+    );
+}
+
+/// Holding a notch apple down for its whole 1.6 seconds feeds the player.
+///
+/// The two tests above take the arithmetic and `Consumable.onConsume` apart
+/// and both pass. This is the journey between them: `start_using_item`, then
+/// the ticks the world really runs, then the `finish_using` the countdown is
+/// supposed to reach. Nothing else in the suite eats a whole item this way.
+#[test]
+fn holding_a_notch_apple_down_for_its_full_duration_feeds_the_player() {
+    let world = item_use_world("item_use_eat_end_to_end");
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Eater", next_entity_id()).build();
+    player.base().set_position_local(SPAWN);
+    player.set_client_loaded(true);
+    {
+        let mut food = player.food_data.lock();
+        food.food_level = 10;
+        food.saturation_level = 0.0;
+    }
+    player.set_item_in_hand(
+        InteractionHand::MainHand,
+        ItemStack::new(&vanilla_items::ENCHANTED_GOLDEN_APPLE),
+    );
+
+    player.start_using_item(InteractionHand::MainHand);
+    let duration = player.use_item_remaining_ticks();
+    assert_eq!(duration, 32, "vanilla eats in 1.6 seconds");
+
+    for _ in 0..duration {
+        Entity::tick(player.as_ref());
+    }
+
+    assert!(
+        !player.is_using_item(),
+        "the countdown should have run out and finished the meal"
+    );
+    let food = player.food_data.lock();
+    assert_eq!(
+        food.food_level, 14,
+        "the hunger bar has to move: a player who eats and stays hungry is the \
+         whole bug report"
+    );
+    assert!(food.saturation_level > 0.0, "and saturation with it");
+}
+
+/// Saturation gained at full health and full hunger reaches the client.
+///
+/// This is the state where nothing else moves: health is capped, the hunger
+/// bar is full, and eating changes saturation alone. Vanilla remembers only
+/// whether saturation *was zero*, so it sends nothing here and the value a
+/// client holds quietly goes stale -- which is exactly what a player sees as
+/// "I stop gaining saturation once I'm at full health", because while they are
+/// hurt the regeneration keeps health moving and the packet keeps flowing.
+///
+/// The assertion is on the packet, not on the server's own number: the server
+/// number was always right, and three separate tests already prove it.
+#[test]
+fn saturation_gained_at_full_health_reaches_the_client() {
+    use crate::player::PlayerConnection;
+    use crate::player::ResetReason;
+    use foton_registry::packets::play::C_SET_HEALTH;
+
+    let world = item_use_world("item_use_saturation_sync");
+    let ids: Arc<SyncMutex<Vec<i32>>> = Arc::new(SyncMutex::new(Vec::new()));
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Eater", next_entity_id())
+        .connection(Arc::new(PlayerConnection::Other(Box::new(
+            PacketIdRecorder {
+                ids: Arc::clone(&ids),
+            },
+        ))))
+        .build();
+    player.base().set_position_local(SPAWN);
+    player.set_client_loaded(true);
+    assert!(world.add_player(Arc::clone(&player), ResetReason::InitialJoin));
+
+    player.set_health(player.get_max_health());
+    {
+        let mut food = player.food_data.lock();
+        food.food_level = 20;
+        food.saturation_level = 5.0;
+    }
+    // Let the first sync go out, so what follows is only the change we make.
+    Entity::tick(player.as_ref());
+    ids.lock().clear();
+
+    player.food_data.lock().eat_food(4, 9.6);
+    Entity::tick(player.as_ref());
+
+    assert!(
+        ids.lock().contains(&C_SET_HEALTH),
+        "the client was never told: at full health and full hunger, saturation \
+         is the only value that moved, and it has to be enough to send"
+    );
+}
+
+/// A Wind Burst mace swung mid-fall launches the attacker.
+///
+/// Three separate things have to line up before this enchantment does
+/// anything, and each one failed silently on its own: the `minecraft:explode`
+/// effect had to exist, the `is_flying` and `fall_distance` predicate fields
+/// had to be modeled, and the blast has to reach the attacker's own client.
+/// The shape test next door proves the data parsed; only this one proves the
+/// server acts on it.
+#[test]
+fn a_wind_burst_mace_swung_mid_fall_launches_the_attacker() {
+    use crate::enchantment_helper::{
+        EnchantmentPostAttackContext, do_post_attack_effects_from_item,
+    };
+    use crate::entity::damage::DamageSource;
+    use crate::player::{PlayerConnection, ResetReason};
+    use foton_registry::data_components::vanilla_components::{ENCHANTMENTS, ItemEnchantments};
+
+    use foton_registry::packets::play::C_EXPLODE;
+    use foton_registry::vanilla_damage_types;
+    use foton_utils::Identifier;
+
+    let world = item_use_world("item_use_wind_burst");
+    let ids: Arc<SyncMutex<Vec<i32>>> = Arc::new(SyncMutex::new(Vec::new()));
+    let attacker = TestPlayerBuilder::new(Arc::clone(&world), "Smasher", next_entity_id())
+        .connection(Arc::new(PlayerConnection::Other(Box::new(
+            PacketIdRecorder {
+                ids: Arc::clone(&ids),
+            },
+        ))))
+        .build();
+    attacker.base().set_position_local(SPAWN);
+    attacker.set_client_loaded(true);
+    assert!(world.add_player(Arc::clone(&attacker), ResetReason::InitialJoin));
+
+    // Vanilla gates the burst on `fall_distance >= 1.5`: a swing at ground
+    // level is supposed to do nothing, and did nothing for a different reason.
+    attacker.set_fall_distance(3.0);
+
+    let victim = spawn_drowned_at(&world, SPAWN + DVec3::new(0.0, 0.0, 1.0));
+
+    let mut mace = ItemStack::new(&vanilla_items::MACE);
+    let mut enchantments = ItemEnchantments::empty();
+    enchantments.set(Identifier::vanilla_static("wind_burst"), 1);
+    mace.set(ENCHANTMENTS, enchantments);
+
+    let damage_source = DamageSource::environment(&vanilla_damage_types::PLAYER_ATTACK)
+        .with_causing_entity(Entity::id(attacker.as_ref()))
+        .with_direct_entity(Entity::id(attacker.as_ref()));
+    let context = EnchantmentPostAttackContext::new(
+        victim.as_ref(),
+        Some(attacker.as_ref()),
+        Some(attacker.as_ref()),
+        &damage_source,
+    );
+
+    ids.lock().clear();
+    do_post_attack_effects_from_item(&world, &mace, &context);
+
+    assert!(
+        ids.lock().contains(&C_EXPLODE),
+        "no blast reached the attacker's client: wind burst has to raise an \
+         explosion the swinging player is inside of, and it is that explosion \
+         packet's knockback that actually launches them"
     );
 }
 

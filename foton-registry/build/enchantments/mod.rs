@@ -215,6 +215,18 @@ impl<'de> Deserialize<'de> for EnchantmentTargetJson {
 #[derive(Debug)]
 enum EntityEffectJson {
     AllOf(Vec<EntityEffectJson>),
+    Explode {
+        attribute_to_user: bool,
+        damage_type: Option<Identifier>,
+        knockback_multiplier: Option<LevelBasedValueJson>,
+        offset: [f64; 3],
+        radius: LevelBasedValueJson,
+        create_fire: bool,
+        block_interaction: String,
+        small_particle: Identifier,
+        large_particle: Identifier,
+        sound: Identifier,
+    },
     ChangeItemDamage {
         amount: LevelBasedValueJson,
     },
@@ -316,8 +328,24 @@ struct EntityPredicateJson {
     entity_type: EntityTypePredicateJson,
     vehicle: EntityVehiclePredicateJson,
     flags: EntityFlagsPredicateJson,
+    movement: EntityMovementPredicateJson,
     type_specific: EntityTypeSpecificPredicateJson,
     unsupported: bool,
+}
+
+#[derive(Debug)]
+struct EntityMovementPredicateJson {
+    fall_distance: Option<(Option<f64>, Option<f64>)>,
+    unsupported: bool,
+}
+
+impl EntityMovementPredicateJson {
+    const fn any() -> Self {
+        Self {
+            fall_distance: None,
+            unsupported: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -337,6 +365,7 @@ enum EntityVehiclePredicateJson {
 #[derive(Debug)]
 struct EntityFlagsPredicateJson {
     is_fall_flying: Option<bool>,
+    is_flying: Option<bool>,
     is_in_water: Option<bool>,
     unsupported: bool,
 }
@@ -345,6 +374,7 @@ impl EntityFlagsPredicateJson {
     const fn any() -> Self {
         Self {
             is_fall_flying: None,
+            is_flying: None,
             is_in_water: None,
             unsupported: false,
         }
@@ -489,8 +519,10 @@ pub(crate) fn build() -> TokenStream {
             ConditionalDamageImmunityEffect, ConditionalEnchantmentEffect,
             CrossbowChargingSounds, DamageSourcePredicate, DamageSourceTagPredicate,
             EnchantmentAttributeEffect, EnchantmentEffectRequirements, EnchantmentEffects,
-            EnchantmentEntityEffect, EnchantmentEntityTarget, EnchantmentItemSet, EnchantmentTarget,
-            EnchantmentValueEffect, EntityFlagsPredicate, EntityPredicate,
+            EnchantmentEntityEffect, EnchantmentEntityTarget, EnchantmentExplosionInteraction,
+            EnchantmentItemSet, EnchantmentTarget,
+            DoubleBounds, EnchantmentValueEffect, EntityFlagsPredicate,
+            EntityMovementPredicate, EntityPredicate,
             EntityTypePredicate, EntityTypeSpecificPredicate, EntityVehiclePredicate,
             LevelBasedValue, MobEffectSelection, PlayerPredicate,
             TargetedConditionalEnchantmentEffect,
@@ -499,6 +531,7 @@ pub(crate) fn build() -> TokenStream {
         use crate::equipment::EquipmentSlotGroup;
         use crate::vanilla_attributes;
         use crate::vanilla_mob_effects;
+        use crate::vanilla_particle_types;
         use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
         use foton_utils::Identifier;
         use foton_utils::types::GameType;

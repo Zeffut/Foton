@@ -165,7 +165,7 @@ fn equipment_slots(mount: &WeakEntity, slot: EquipmentSlot) -> SectionKind {
     let mount = mount.clone();
     SectionKind::custom(move |container, index| {
         Box::new(MountEquipmentSlot {
-            base: ArmorSlot::new(container.clone(), index, slot),
+            base: ArmorSlot::new(container.clone(), index, slot, mount.clone()),
             mount: mount.clone(),
         })
     })

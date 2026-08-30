@@ -102,15 +102,18 @@ impl TestPlayerBuilder {
             TestPlayerContext::Detached(config) => (Weak::new(), config),
             TestPlayerContext::Server { server, config } => (server, config),
         };
-        let player = Arc::new(Player::new(
-            self.profile,
-            self.connection,
-            self.world,
-            server,
-            config,
-            self.entity_id,
-            ClientInformation::default(),
-        ));
+        let player = Arc::new_cyclic(|player_weak| {
+            Player::new(
+                self.profile,
+                self.connection,
+                self.world,
+                server,
+                config,
+                self.entity_id,
+                ClientInformation::default(),
+                player_weak,
+            )
+        });
         player.set_client_loaded(true);
         player
     }

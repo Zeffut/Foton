@@ -543,6 +543,7 @@ mod tests {
             | EnchantmentEntityEffect::PlaySound { .. }
             | EnchantmentEntityEffect::Ignite { .. }
             | EnchantmentEntityEffect::ApplyMobEffect { .. }
+            | EnchantmentEntityEffect::Explode { .. }
             | EnchantmentEntityEffect::Unsupported { .. } => false,
         }
     }
@@ -559,6 +560,7 @@ mod tests {
             | EnchantmentEntityEffect::DamageEntity { .. }
             | EnchantmentEntityEffect::Ignite { .. }
             | EnchantmentEntityEffect::ApplyMobEffect { .. }
+            | EnchantmentEntityEffect::Explode { .. }
             | EnchantmentEntityEffect::Unsupported { .. } => false,
         }
     }

@@ -17,10 +17,7 @@ use glam::{DVec3, IVec3};
 use simdnbt::owned::NbtCompound;
 
 use crate::chunk::heightmap::HeightmapType;
-use crate::entity::{
-    entities::{ItemFrameEntity, RawEntity},
-    next_entity_id,
-};
+use crate::entity::{entities::ItemFrameEntity, next_entity_id};
 use crate::fluid::FluidStateExt as _;
 use crate::worldgen::template::{
     StructureDataMarker, StructurePlaceSettings, StructureProcessorRandom, StructureTemplate,
@@ -30,7 +27,7 @@ use foton_worldgen::structure::{
     TemplatePlacementClip, TemplatePostProcess, TemplateProcessorList,
 };
 
-use super::StructurePiecePlacer;
+use super::{StructurePiecePlacer, create_structure_mob, finalize_structure_mob};
 
 impl StructurePiecePlacer {
     pub(super) fn place_template_piece(
@@ -396,15 +393,14 @@ impl StructurePiecePlacer {
             f64::from(pos.y()),
             f64::from(pos.z()) + 0.5,
         );
-        let entity = Arc::new(RawEntity::new(
-            next_entity_id(),
-            entity_pos,
-            region.weak_world(),
-            &vanilla_entities::DROWNED,
-        ));
-        entity.set_persistence_required();
-        entity.snap_to(entity_pos, 0.0, 0.0);
-        let _ = region.add_fresh_entity(entity);
+        let world = region.weak_world();
+        if let Some(entity) = create_structure_mob(&world, entity_pos, &vanilla_entities::DROWNED) {
+            if let Some(mob) = entity.as_mob() {
+                mob.set_persistence_required();
+            }
+            finalize_structure_mob(&world, &entity);
+            let _ = region.add_fresh_entity(entity);
+        }
 
         let replacement = if pos.y() > region.sea_level() {
             vanilla_blocks::AIR.default_state()
@@ -509,13 +505,13 @@ impl StructurePiecePlacer {
             f64::from(pos.y()),
             f64::from(pos.z()) + 0.5,
         );
-        let entity = Arc::new(RawEntity::new(
-            next_entity_id(),
-            entity_pos,
-            region.weak_world(),
-            &vanilla_entities::SHULKER,
-        ));
-        entity.snap_to(entity_pos, 0.0, 0.0);
+        // Vanilla parity: `EndCityPieces` gives the sentry a bare `setPos`
+        // and no `finalizeSpawn`, unlike every other structure mob.
+        let Some(entity) =
+            create_structure_mob(&region.weak_world(), entity_pos, &vanilla_entities::SHULKER)
+        else {
+            return;
+        };
         let _ = region.add_fresh_entity(entity);
     }
 
@@ -610,14 +606,14 @@ impl StructurePiecePlacer {
         entity_type: EntityTypeRef,
     ) {
         let entity_pos = DVec3::new(f64::from(pos.x()), f64::from(pos.y()), f64::from(pos.z()));
-        let entity = Arc::new(RawEntity::new(
-            next_entity_id(),
-            entity_pos,
-            region.weak_world(),
-            entity_type,
-        ));
-        entity.set_persistence_required();
-        entity.snap_to(entity_pos, 0.0, 0.0);
+        let world = region.weak_world();
+        let Some(entity) = create_structure_mob(&world, entity_pos, entity_type) else {
+            return;
+        };
+        if let Some(mob) = entity.as_mob() {
+            mob.set_persistence_required();
+        }
+        finalize_structure_mob(&world, &entity);
         let _ = region.add_fresh_entity(entity);
     }
 

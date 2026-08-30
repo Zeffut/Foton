@@ -1,4 +1,5 @@
 use crate::{
+    entity::WeakEntity,
     inventory::{
         lock::{ContainerLockGuard, ContainerRef},
         slots::{NormalSlot, Slot, SlotStorage},
@@ -15,6 +16,11 @@ use foton_utils::{DowncastType, DowncastTypeKey};
 pub struct ArmorSlot {
     base: NormalSlot,
     slot: EquipmentSlot,
+    /// Who wears what lands here.
+    ///
+    /// Vanilla parity: the `LivingEntity owner` field of `ArmorSlot`. It is
+    /// what `setByPlayer` needs to make a sound.
+    owner: WeakEntity,
 }
 
 // SAFETY: This key uniquely identifies Foton's `ArmorSlot`.
@@ -23,11 +29,17 @@ unsafe impl DowncastType for ArmorSlot {
 }
 
 impl ArmorSlot {
-    /// Creates a new armor slot.
-    pub fn new(container: impl Into<ContainerRef>, index: usize, slot: EquipmentSlot) -> Self {
+    /// Creates a new armor slot worn by `owner`.
+    pub fn new(
+        container: impl Into<ContainerRef>,
+        index: usize,
+        slot: EquipmentSlot,
+        owner: WeakEntity,
+    ) -> Self {
         Self {
             base: NormalSlot::new(container, index),
             slot,
+            owner,
         }
     }
 
@@ -61,25 +73,29 @@ impl Slot for ArmorSlot {
         self.base.set_item(guard, stack);
     }
 
-    /// MISSING FOUNDATION: vanilla's `ArmorSlot.setByPlayer` opens with
-    /// `this.owner.onEquipItem(slot, oldStack, newStack)`, which is where the
-    /// clunk of putting a helmet on comes from. Foton's `on_equip_item` exists
-    /// and the mount's own equipment slots already call it -- see
-    /// `MountEquipmentSlot::set_by_player`, which holds a `Weak` to its mount.
+    /// Vanilla parity: `ArmorSlot.setByPlayer`, which opens with
+    /// `this.owner.onEquipItem(slot, oldStack, newStack)`. That call is where
+    /// the clunk of putting a helmet on comes from, and it is what emits the
+    /// `EQUIP`/`UNEQUIP` game event.
     ///
-    /// This slot has no such handle. `Slot::set_by_player` takes no player (as
-    /// vanilla's does not), the menu is built inside `Player::new` before any
-    /// `Arc<Player>` exists to weaken, and `Slot::safe_insert` reaches this
-    /// with no player at all. Wiring it needs an owner reachable at
-    /// menu-construction time; until then armour equipped from the inventory
-    /// screen goes on in silence, and emits neither `EQUIP` nor `UNEQUIP`.
+    /// The owner arrives through the menu: the player is built inside an
+    /// `Arc::new_cyclic`, so a `Weak` to it exists while its inventory menu is
+    /// still being assembled.
     fn set_by_player(
         &self,
         guard: &mut ContainerLockGuard,
         stack: ItemStack,
         previous: &ItemStack,
     ) {
-        let _ = previous;
+        if let Some(owner) = self.owner.upgrade()
+            && let Some(living) = owner.as_living_entity()
+        {
+            let slot = self.slot;
+            let equipped = stack.clone();
+            guard.run_unlocked(|| {
+                living.on_equip_item(slot, previous, &equipped);
+            });
+        }
         self.set_item(guard, stack);
     }
 

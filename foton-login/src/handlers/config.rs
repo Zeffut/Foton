@@ -125,6 +125,7 @@ impl JavaTcpClient {
                 self.server.config.clone(),
                 entity_id,
                 client_info,
+                player_weak,
             )
         });
 

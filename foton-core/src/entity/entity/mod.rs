@@ -2660,6 +2660,13 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         }
     }
 
+    /// Told that a blast just reached this entity, and what it came out of.
+    ///
+    /// Vanilla parity: `Entity.onExplosionHit`, empty on the base and
+    /// overridden only by `ServerPlayer`. It closes the per-entity body of
+    /// `ServerExplosion.hurtEntities`.
+    fn on_explosion_hit(&self, _explosion_caused_by: Option<&SharedEntity>) {}
+
     /// Applies vanilla fall damage.
     ///
     /// Living entities use the shared `LivingEntity` damage path; base entities

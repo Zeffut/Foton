@@ -17,6 +17,10 @@ use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
 use crate::inventory::equipment::EquipmentSlot;
 use crate::world::World;
+use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
+use foton_registry::enchantment_effect::EnchantmentExplosionInteraction;
+use foton_registry::particle_type::ParticleData;
+use foton_utils::random::weighted_list::WeightedList;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct EnchantmentDamageContext<'a> {
@@ -94,15 +98,6 @@ impl<'a> EnchantmentPostAttackContext<'a> {
             direct_attacker,
             damage_source,
         }
-    }
-
-    fn damage_context(&self) -> EnchantmentDamageContext<'a> {
-        EnchantmentDamageContext::new(
-            self.victim.entity_type(),
-            self.attacker.map(Entity::entity_type),
-            self.direct_attacker.map(Entity::entity_type),
-            self.damage_source,
-        )
     }
 
     fn affected_entity(&self, target: EnchantmentTarget) -> Option<&'a dyn Entity> {
@@ -596,7 +591,6 @@ fn apply_post_attack_effects(
     let Some(enchantments) = item.get_enchantments().cloned() else {
         return false;
     };
-    let damage_context = context.damage_context();
     let mut enchanted_item_broke = false;
 
     for (key, level) in enchantments.iter() {
@@ -618,8 +612,12 @@ fn apply_post_attack_effects(
             let Some(enchanted_entity) = context.affected_entity(enchanted_target) else {
                 continue;
             };
-            let requirements_match =
-                post_attack_requirements_match(effect.requirements, &damage_context, level);
+            let requirements_match = effect.requirements.is_none_or(|requirements| {
+                matches!(
+                    post_attack_requirements_state(requirements, context, level),
+                    Some(true)
+                )
+            });
             if !requirements_match {
                 continue;
             }
@@ -823,6 +821,7 @@ fn entity_effect_is_supported(effect: &EnchantmentEntityEffect) -> bool {
         | EnchantmentEntityEffect::Unsupported { .. } => false,
         EnchantmentEntityEffect::ChangeItemDamage { .. }
         | EnchantmentEntityEffect::DamageEntity { .. }
+        | EnchantmentEntityEffect::Explode { .. }
         | EnchantmentEntityEffect::Ignite { .. } => true,
         EnchantmentEntityEffect::ApplyMobEffect { to_apply, .. } => {
             matches!(to_apply, MobEffectSelection::Single(_))
@@ -880,6 +879,10 @@ fn apply_supported_entity_effect(
         EnchantmentEntityEffect::Ignite { duration } => {
             let ticks = (duration.calculate(level) * 20.0).floor() as i32;
             entity.ignite_for_ticks(ticks);
+            false
+        }
+        EnchantmentEntityEffect::Explode { .. } => {
+            apply_explode_effect(effect, level, entity);
             false
         }
         EnchantmentEntityEffect::ApplyMobEffect {
@@ -944,6 +947,9 @@ fn post_piercing_entity_effect_is_supported(effect: &EnchantmentEntityEffect) ->
             matches!(to_apply, MobEffectSelection::Single(_))
         }
         EnchantmentEntityEffect::DamageEntity { .. }
+        // No vanilla enchantment puts an explosion on `post_piercing_attack`;
+        // wind burst is the only `minecraft:explode` and it is a `post_attack`.
+        | EnchantmentEntityEffect::Explode { .. }
         | EnchantmentEntityEffect::Unsupported { .. } => false,
     }
 }
@@ -1009,8 +1015,92 @@ fn apply_supported_post_piercing_entity_effect(
             apply_supported_entity_effect(world, effect, level, user, Some(user), &mut ignored_item)
         }
         EnchantmentEntityEffect::DamageEntity { .. }
+        | EnchantmentEntityEffect::Explode { .. }
         | EnchantmentEntityEffect::Unsupported { .. } => false,
     }
+}
+
+/// Raises the blast an enchantment asks for.
+///
+/// Vanilla parity: `ExplodeEffect.apply`. It lives apart from
+/// `apply_supported_entity_effect` only because an explosion carries twelve
+/// fields and the match arm outgrew the function.
+fn apply_explode_effect(effect: &EnchantmentEntityEffect, level: i32, entity: &dyn Entity) {
+    let EnchantmentEntityEffect::Explode {
+        attribute_to_user,
+        damage_type,
+        knockback_multiplier,
+        offset,
+        radius,
+        create_fire,
+        block_interaction,
+        small_particle,
+        large_particle,
+        sound,
+    } = effect
+    else {
+        return;
+    };
+
+    // Vanilla parity: `ExplodeEffect.apply`. Raising a blast needs the
+    // world as an `Arc`, which only the entity can hand back.
+    let Some(blast_world) = entity.level() else {
+        return;
+    };
+    let position = entity.position() + *offset;
+    // Vanilla passes `attributeToUser ? entity : null` as the source,
+    // and a null source is why wind burst shoves the very player who
+    // swung the mace: nothing is excluded from the blast.
+    let source = attribute_to_user.then(|| entity.id());
+    let damage_source = damage_type.map(|damage_type| {
+        // Vanilla parity: `ExplodeEffect.getDamageSource`.
+        let source = DamageSource::environment(damage_type);
+        if *attribute_to_user {
+            source
+                .with_causing_entity(entity.id())
+                .with_direct_entity(entity.id())
+        } else {
+            source.with_source_position(position)
+        }
+    });
+    blast_world.explode_sparing(
+        ExplosionSpec {
+            direct_entity_id: source,
+            causing_entity_id: source,
+            damage_source,
+            radius: radius.calculate(level).max(0.0),
+            fire: *create_fire,
+            interaction: match block_interaction {
+                // Vanilla parity: `NONE` and `TRIGGER` leave every
+                // block standing.
+                EnchantmentExplosionInteraction::None
+                | EnchantmentExplosionInteraction::Trigger => ExplosionBlockInteraction::Keep,
+                // MISSING FOUNDATION: vanilla routes these three
+                // through the matching `*_explosion_drop_decay` game
+                // rule, which `World::explosion_destroy_type` already
+                // models for ordinary blasts. Wind burst is the only
+                // `minecraft:explode` in the game, so nothing reaches
+                // them and they take the plain destroying form.
+                EnchantmentExplosionInteraction::Block
+                | EnchantmentExplosionInteraction::Mob
+                | EnchantmentExplosionInteraction::Tnt => ExplosionBlockInteraction::Destroy,
+            },
+            // Vanilla parity: the `damagesEntities` of the
+            // `SimpleExplosionDamageCalculator` it builds, which is
+            // `this.damageType.isPresent()`.
+            damages_entities: damage_type.is_some(),
+            knockback_multiplier: knockback_multiplier
+                .map_or(1.0, |value| f64::from(value.calculate(level))),
+            small_particle: ParticleData::simple(small_particle),
+            large_particle: ParticleData::simple(large_particle),
+            // Vanilla parity: `WeightedList.of()` -- the default of
+            // `block_particles`, which no vanilla explode effect sets.
+            block_particles: WeightedList::empty(),
+            sound,
+        },
+        position,
+        &|_pos| true,
+    );
 }
 
 fn random_between(min: f32, max: f32) -> f32 {
@@ -1032,19 +1122,81 @@ fn requirements_match(
     matches!(requirements_state(requirements, context), Some(true))
 }
 
-fn post_attack_requirements_match(
-    requirements: Option<&'static EnchantmentEffectRequirements>,
-    context: &EnchantmentDamageContext<'_>,
-    level: i32,
-) -> bool {
-    let Some(requirements) = requirements else {
-        return true;
-    };
+/// Resolves an enchantment's entity target against a post-attack context.
+///
+/// Vanilla parity: the parameters `Enchantment.damageContext` puts in the loot
+/// context. `this` is the **victim**, always -- not whoever carries the
+/// enchanted item. Bane of Arthropods is the reason that matters: it sits on
+/// the attacker's sword and asks `this` whether it is an arthropod, meaning
+/// the entity being hit.
+fn post_attack_target_entity<'a>(
+    target: EnchantmentEntityTarget,
+    context: &EnchantmentPostAttackContext<'a>,
+) -> Option<&'a dyn Entity> {
+    match target {
+        EnchantmentEntityTarget::This => Some(context.victim),
+        EnchantmentEntityTarget::Attacker => context.attacker,
+        EnchantmentEntityTarget::DirectAttacker => context.direct_attacker,
+    }
+}
 
-    matches!(
-        requirements_state_with_random(requirements, context, level),
-        Some(true)
-    )
+/// Evaluates an effect's requirements against the entities the attack involved.
+///
+/// The damage-time evaluator this replaced knows only entity *types*, because
+/// `EnchantmentDamageContext` carries nothing else. Any predicate asking how an
+/// entity is moving or what it is doing therefore failed closed there -- and
+/// Wind Burst asks exactly that, `is_flying: false` and `fall_distance >= 1.5`,
+/// so the mace stayed inert with nothing logged however well the data parsed.
+///
+/// `None` still means "cannot answer", and still fails closed at the call site.
+fn post_attack_requirements_state(
+    requirements: &'static EnchantmentEffectRequirements,
+    context: &EnchantmentPostAttackContext<'_>,
+    level: i32,
+) -> Option<bool> {
+    match requirements {
+        EnchantmentEffectRequirements::AllOf(terms) => {
+            let mut has_unknown = false;
+            for term in *terms {
+                match post_attack_requirements_state(term, context, level) {
+                    Some(true) => {}
+                    Some(false) => return Some(false),
+                    None => has_unknown = true,
+                }
+            }
+            if has_unknown { None } else { Some(true) }
+        }
+        EnchantmentEffectRequirements::AnyOf(terms) => {
+            let mut has_unknown = false;
+            for term in *terms {
+                match post_attack_requirements_state(term, context, level) {
+                    Some(true) => return Some(true),
+                    Some(false) => {}
+                    None => has_unknown = true,
+                }
+            }
+            if has_unknown { None } else { Some(false) }
+        }
+        EnchantmentEffectRequirements::Inverted(term) => {
+            post_attack_requirements_state(term, context, level).map(|matched| !matched)
+        }
+        EnchantmentEffectRequirements::EntityProperties { entity, predicate } => {
+            // A named entity that is not in this attack fails the term rather
+            // than making the whole requirement unanswerable: vanilla's loot
+            // context does the same with a missing parameter.
+            post_attack_target_entity(*entity, context).map_or(Some(false), |target| {
+                entity_predicate_matches_entity(predicate, target)
+            })
+        }
+        EnchantmentEffectRequirements::DamageSourceProperties(predicate) => Some(
+            damage_source_predicate_matches(predicate, context.damage_source),
+        ),
+        EnchantmentEffectRequirements::RandomChance { chance } => {
+            Some(rand::random::<f32>() < chance.calculate(level))
+        }
+        EnchantmentEffectRequirements::MatchTool { .. }
+        | EnchantmentEffectRequirements::Unsupported { .. } => None,
+    }
 }
 
 fn requirements_state(
@@ -1085,51 +1237,6 @@ fn requirements_state(
         ),
         EnchantmentEffectRequirements::RandomChance { .. }
         | EnchantmentEffectRequirements::MatchTool { .. }
-        | EnchantmentEffectRequirements::Unsupported { .. } => None,
-    }
-}
-
-fn requirements_state_with_random(
-    requirements: &'static EnchantmentEffectRequirements,
-    context: &EnchantmentDamageContext<'_>,
-    level: i32,
-) -> Option<bool> {
-    match requirements {
-        EnchantmentEffectRequirements::AllOf(terms) => {
-            let mut has_unknown = false;
-            for term in *terms {
-                match requirements_state_with_random(term, context, level) {
-                    Some(true) => {}
-                    Some(false) => return Some(false),
-                    None => has_unknown = true,
-                }
-            }
-            if has_unknown { None } else { Some(true) }
-        }
-        EnchantmentEffectRequirements::AnyOf(terms) => {
-            let mut has_unknown = false;
-            for term in *terms {
-                match requirements_state_with_random(term, context, level) {
-                    Some(true) => return Some(true),
-                    Some(false) => {}
-                    None => has_unknown = true,
-                }
-            }
-            if has_unknown { None } else { Some(false) }
-        }
-        EnchantmentEffectRequirements::Inverted(term) => {
-            requirements_state_with_random(term, context, level).map(|matched| !matched)
-        }
-        EnchantmentEffectRequirements::EntityProperties { entity, predicate } => context
-            .entity_type(*entity)
-            .and_then(|entity_type| entity_predicate_matches_type(predicate, entity_type)),
-        EnchantmentEffectRequirements::DamageSourceProperties(predicate) => Some(
-            damage_source_predicate_matches(predicate, context.damage_source),
-        ),
-        EnchantmentEffectRequirements::RandomChance { chance } => {
-            Some(rand::random::<f32>() < chance.calculate(level))
-        }
-        EnchantmentEffectRequirements::MatchTool { .. }
         | EnchantmentEffectRequirements::Unsupported { .. } => None,
     }
 }
@@ -1201,6 +1308,7 @@ fn entity_predicate_matches_type(
     if predicate.unsupported
         || !matches!(predicate.vehicle, EntityVehiclePredicate::Any)
         || predicate.flags.has_constraints()
+        || predicate.movement.has_constraints()
     {
         return None;
     }
@@ -1262,8 +1370,24 @@ fn entity_predicate_matches_entity(
             return Some(false);
         }
     }
+    if let Some(expected) = predicate.flags.is_flying {
+        // Vanilla parity: `EntityFlagsPredicate.isFlying`, which reads a
+        // player's `abilities.flying` and is false for anything else.
+        if entity.is_flying_player() != expected {
+            return Some(false);
+        }
+    }
     if let Some(expected) = predicate.flags.is_in_water
         && entity.is_in_water() != expected
+    {
+        return Some(false);
+    }
+
+    if predicate.movement.unsupported {
+        return None;
+    }
+    if let Some(bounds) = predicate.movement.fall_distance
+        && !bounds.matches(entity.fall_distance())
     {
         return Some(false);
     }
@@ -1653,6 +1777,65 @@ mod tests {
             &wrong_slot_victim,
             &DamageSource::environment(&vanilla_damage_types::HOT_FLOOR)
         ));
+    }
+
+    /// Wind Burst is an explosion the server can run, gated on a real fall.
+    ///
+    /// The enchantment is entirely data-driven, so two separate things have to
+    /// be modeled before it does anything: the `minecraft:explode` effect
+    /// itself, and the requirement guarding it. That requirement names
+    /// `minecraft:flags { is_flying: false }` and
+    /// `minecraft:movement { fall_distance: { min: 1.5 } }`, and one unmodeled
+    /// field in either makes the whole predicate `unsupported` -- which fails
+    /// closed. The mace then stays inert with nothing logged, which is exactly
+    /// how this shipped broken twice.
+    #[test]
+    fn wind_burst_is_an_explosion_the_server_can_run() {
+        use foton_registry::vanilla_enchantments;
+
+        init_vanilla_registry();
+
+        let post_attack = vanilla_enchantments::WIND_BURST.effects.post_attack;
+        assert_eq!(
+            post_attack.len(),
+            1,
+            "vanilla gives wind burst one post-attack effect"
+        );
+        let entry = &post_attack[0];
+
+        assert!(
+            matches!(entry.effect, EnchantmentEntityEffect::Explode { .. }),
+            "wind burst is a `minecraft:explode`; anything else means the \
+             effect type never parsed and the server silently refuses it"
+        );
+
+        let requirements = entry
+            .requirements
+            .expect("wind burst gates its burst on the attacker's fall");
+        let EnchantmentEffectRequirements::EntityProperties { predicate, .. } = requirements else {
+            panic!("vanilla gates it with `minecraft:entity_properties`");
+        };
+        assert!(
+            !predicate.unsupported,
+            "an unmodeled key anywhere in the predicate fails the whole thing closed"
+        );
+        assert!(!predicate.flags.unsupported);
+        assert_eq!(
+            predicate.flags.is_flying,
+            Some(false),
+            "a creative flight must not launch anyone"
+        );
+        assert!(!predicate.movement.unsupported);
+        let bounds = predicate
+            .movement
+            .fall_distance
+            .expect("the burst needs the attacker to actually be falling");
+        assert!(
+            !bounds.matches(0.0),
+            "a standing attacker sets nothing off, which is why hitting at \
+             ground level does nothing in vanilla either"
+        );
+        assert!(bounds.matches(2.0), "a real fall does");
     }
 
     #[test]

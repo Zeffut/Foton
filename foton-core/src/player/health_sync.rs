@@ -4,6 +4,15 @@
 //! send `CSetHealth` when something actually changes.
 //!
 //! Vanilla: `ServerPlayer.lastSentHealth`, `lastSentFood`, `lastFoodSaturationZero`.
+//!
+//! DELIBERATE DIVERGENCE: vanilla remembers only whether saturation *was zero*,
+//! so a change from 5.0 to 14.6 sends nothing. That costs vanilla nothing --
+//! its own HUD reads saturation only to decide whether the hunger bar should
+//! wobble, which is a question about zero. But it means the value a client
+//! holds is right by accident, and goes stale the moment health and food both
+//! sit still: eat at full health and full hunger and the client is never told.
+//! Foton compares the value instead. The cost is an occasional extra packet;
+//! the gain is that anything reading saturation client-side is accurate.
 
 use crate::player::Player;
 
@@ -13,8 +22,11 @@ pub struct HealthSyncState {
     pub last_health: f32,
     /// Last food level sent to the client.
     pub last_food: i32,
-    /// Whether saturation was zero last time we sent health.
-    pub saturation_zero: bool,
+    /// Last saturation value sent to the client.
+    ///
+    /// Vanilla keeps a `lastFoodSaturationZero` flag here instead -- see the
+    /// module note on why Foton keeps the value.
+    pub last_saturation: f32,
 }
 
 impl HealthSyncState {
@@ -24,7 +36,7 @@ impl HealthSyncState {
         Self {
             last_health: -1.0,
             last_food: -1,
-            saturation_zero: true,
+            last_saturation: -1.0,
         }
     }
 
@@ -34,17 +46,15 @@ impl HealthSyncState {
         reason = "intentional exact comparison: we only want to send updates when the value changes from what we last sent"
     )]
     #[must_use]
-    pub fn needs_update(&self, health: f32, food: i32, saturation_zero: bool) -> bool {
-        self.last_health != health
-            || self.last_food != food
-            || self.saturation_zero != saturation_zero
+    pub fn needs_update(&self, health: f32, food: i32, saturation: f32) -> bool {
+        self.last_health != health || self.last_food != food || self.last_saturation != saturation
     }
 
     /// Records that we just sent the given values to the client.
-    pub const fn record_sent(&mut self, health: f32, food: i32, saturation_zero: bool) {
+    pub const fn record_sent(&mut self, health: f32, food: i32, saturation: f32) {
         self.last_health = health;
         self.last_food = food;
-        self.saturation_zero = saturation_zero;
+        self.last_saturation = saturation;
     }
 
     /// Invalidates the state so the next tick will re-send.

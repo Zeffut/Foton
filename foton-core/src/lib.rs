@@ -11,6 +11,7 @@ pub mod behavior;
 pub mod block_entity;
 pub mod bootstrap;
 pub mod boss_event;
+pub mod bug_report;
 pub mod chunk;
 pub mod chunk_saver;
 pub mod command;

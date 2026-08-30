@@ -337,6 +337,50 @@ impl Player {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use foton_registry::data_components::vanilla_components::FOOD;
+    use foton_registry::vanilla_items;
+
+    /// A notch apple's saturation reaches a player who is not hungry.
+    ///
+    /// The enchanted golden apple is the food most likely to be eaten on a full
+    /// hunger bar -- `can_always_eat` exists for it -- so it is the one where a
+    /// break anywhere in the chain shows up to a player as "nothing happened".
+    /// This walks the same way the consume path does: the item's own component
+    /// first, then the `eat(FoodProperties)` overload, on a full bar.
+    #[test]
+    fn a_notch_apple_feeds_a_player_who_is_already_full() {
+        let food = vanilla_items::ENCHANTED_GOLDEN_APPLE
+            .components
+            .get_ref(FOOD)
+            .expect("the enchanted golden apple carries a food component");
+
+        // Vanilla parity: `Foods.ENCHANTED_GOLDEN_APPLE`.
+        assert_eq!(food.nutrition(), 4);
+        assert!(
+            (food.saturation() - 9.6).abs() < 1.0e-4,
+            "vanilla gives it 9.6 absolute saturation, got {}",
+            food.saturation()
+        );
+        assert!(
+            food.can_always_eat(),
+            "a notch apple is edible on a full hunger bar"
+        );
+
+        let mut data = FoodData::new();
+        data.food_level = MAX_FOOD_LEVEL;
+        data.saturation_level = 5.0;
+        data.eat_food(food.nutrition(), food.saturation());
+
+        assert_eq!(
+            data.food_level, MAX_FOOD_LEVEL,
+            "a full bar stays full rather than overflowing"
+        );
+        assert!(
+            (data.saturation_level - 14.6).abs() < 1.0e-4,
+            "eating on a full bar must still bank saturation: expected 14.6, got {}",
+            data.saturation_level
+        );
+    }
 
     /// `eat_food` must apply the saturation value as-is.
     ///

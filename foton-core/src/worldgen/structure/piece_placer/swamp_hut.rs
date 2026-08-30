@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::blocks::properties::{BlockStateProperties, StairsShape};
 use foton_registry::entity_type::EntityTypeRef;
@@ -8,12 +6,12 @@ use foton_utils::random::worldgen_random::WorldgenRandom;
 use foton_utils::{BlockStateId, BoundingBox, Direction};
 use glam::DVec3;
 
-use crate::entity::{entities::RawEntity, next_entity_id};
 use crate::world::WorldGenLevel;
 use foton_worldgen::structure::swamp_hut::SwampHutPieceData;
 
 use super::StructurePiecePlacer;
 use super::scattered_feature::ScatteredFeaturePlacer;
+use super::{create_structure_mob, finalize_structure_mob};
 
 impl StructurePiecePlacer {
     pub(super) fn place_swamp_hut_piece(
@@ -105,26 +103,19 @@ fn spawn_swamp_hut_mob(
     }
 
     *spawned = true;
-    let entity = Arc::new(RawEntity::new(
-        next_entity_id(),
-        DVec3::new(
-            f64::from(pos.x()) + 0.5,
-            f64::from(pos.y()),
-            f64::from(pos.z()) + 0.5,
-        ),
-        placer.weak_world(),
-        entity_type,
-    ));
-    entity.set_persistence_required();
-    entity.snap_to(
-        DVec3::new(
-            f64::from(pos.x()) + 0.5,
-            f64::from(pos.y()),
-            f64::from(pos.z()) + 0.5,
-        ),
-        0.0,
-        0.0,
+    let entity_pos = DVec3::new(
+        f64::from(pos.x()) + 0.5,
+        f64::from(pos.y()),
+        f64::from(pos.z()) + 0.5,
     );
+    let world = placer.weak_world();
+    let Some(entity) = create_structure_mob(&world, entity_pos, entity_type) else {
+        return;
+    };
+    if let Some(mob) = entity.as_mob() {
+        mob.set_persistence_required();
+    }
+    finalize_structure_mob(&world, &entity);
     let _ = placer.add_fresh_entity(entity);
 }
 

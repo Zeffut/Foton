@@ -5,6 +5,49 @@
 //! that pass; individual family placers must fill in exact vanilla behavior
 //! before any payload variant starts writing blocks.
 
+/// Builds the mob a structure places, the way vanilla's
+/// `EntityType.create(level, EntitySpawnReason.STRUCTURE)` does, and snaps it
+/// into position.
+///
+/// Every structure that places a mob used to raise a `RawEntity` instead. That
+/// type exists so a save file can round-trip an entity Foton cannot model yet:
+/// it carries a type, a position and its original NBT, and nothing else -- no
+/// goals, no brain, no `tick`. So every mob a structure placed stood still
+/// forever, the woodland mansion's evokers and vindicators among them.
+pub(super) fn create_structure_mob(
+    world: &Weak<World>,
+    entity_pos: DVec3,
+    entity_type: EntityTypeRef,
+) -> Option<SharedEntity> {
+    let Some(entity) = ENTITIES.create(entity_type, next_entity_id(), entity_pos, world.clone())
+    else {
+        log::warn!(
+            "a structure wanted a {} and the entity registry has no factory for it",
+            entity_type.key
+        );
+        return None;
+    };
+    // Vanilla parity: the `snapTo(position, 0.0F, 0.0F)` every caller runs.
+    let _ = entity.try_set_position(entity_pos);
+    entity.set_rotation((0.0, 0.0));
+    entity.set_old_position_to_current();
+    Some(entity)
+}
+
+/// Runs the `finalizeSpawn` a vanilla structure mob gets.
+///
+/// The end city's shulker is the one that does not: vanilla places it with a
+/// bare `setPos` and `addFreshEntity`.
+pub(super) fn finalize_structure_mob(world: &Weak<World>, entity: &SharedEntity) {
+    let Some(mob) = entity.as_mob() else {
+        return;
+    };
+    let Some(world) = world.upgrade() else {
+        return;
+    };
+    let _ = mob.finalize_spawn(&world, EntitySpawnReason::Structure, None);
+}
+
 mod buried_treasure;
 mod desert_pyramid;
 mod fortress;
@@ -19,10 +62,12 @@ mod swamp_hut;
 mod template_piece;
 mod template_processors;
 
-use crate::world::WorldGenLevel;
+use crate::entity::{ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
+use crate::world::{World, WorldGenLevel};
 use foton_registry::block_entity_type::BlockEntityTypeRef;
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::blocks::properties::BlockStateProperties;
+use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::structure::StructureRef;
 use foton_registry::{Registry, vanilla_block_entity_types, vanilla_blocks};
 use foton_utils::random::Random;
@@ -31,7 +76,9 @@ use foton_utils::{
     BlockPos, BlockStateId, BoundingBox, Direction, Identifier, PackedBlockPos, Rotation,
     types::UpdateFlags,
 };
+use glam::DVec3;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+use std::sync::Weak;
 
 use foton_worldgen::structure::{
     ProceduralPieceData, StructureMirror, StructurePiece, StructurePiecePayload,

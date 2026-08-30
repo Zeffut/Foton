@@ -1,3 +1,4 @@
+use super::super::{create_structure_mob, finalize_structure_mob};
 use super::*;
 
 pub(super) fn generate_water_box(
@@ -181,26 +182,22 @@ pub(super) fn spawn_elder(
         return;
     }
 
-    let entity = Arc::new(RawEntity::new(
-        next_entity_id(),
-        DVec3::new(
-            f64::from(pos.x()) + 0.5,
-            f64::from(pos.y()),
-            f64::from(pos.z()) + 0.5,
-        ),
-        placer.weak_world(),
-        &vanilla_entities::ELDER_GUARDIAN,
-    ));
-    entity.set_persistence_required();
-    entity.snap_to(
-        DVec3::new(
-            f64::from(pos.x()) + 0.5,
-            f64::from(pos.y()),
-            f64::from(pos.z()) + 0.5,
-        ),
-        0.0,
-        0.0,
+    let entity_pos = DVec3::new(
+        f64::from(pos.x()) + 0.5,
+        f64::from(pos.y()),
+        f64::from(pos.z()) + 0.5,
     );
+    let world = placer.weak_world();
+    let Some(entity) = create_structure_mob(&world, entity_pos, &vanilla_entities::ELDER_GUARDIAN)
+    else {
+        return;
+    };
+    // Vanilla parity: `spawnElder` heals the elder to full and, unlike every
+    // other structure mob, never marks it persistent.
+    if let Some(living) = entity.as_living_entity() {
+        living.heal(living.get_max_health());
+    }
+    finalize_structure_mob(&world, &entity);
     let _ = placer.add_fresh_entity(entity);
 }
 

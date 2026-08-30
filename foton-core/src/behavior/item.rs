@@ -566,6 +566,13 @@ pub trait ItemBehavior: Send + Sync {
             }
 
             let slot = equippable.slot;
+            // Vanilla writes the swap through `Player.setItemSlot`, and it is
+            // that method's `onEquipItem` which makes the clunk of armour
+            // going on. Foton's swap works straight on the inventory
+            // container, so the entity hook has to be run around it or
+            // right-click equipping stays silent -- the inventory screen's
+            // own `ArmorSlot` is a different path entirely.
+            let previous = context.player.get_item_by_slot(slot);
             let result = context.inv.with_inventory(|inventory| {
                 inventory.try_swap_with_equipment_slot(
                     context.hand,
@@ -576,6 +583,8 @@ pub trait ItemBehavior: Send + Sync {
 
             return match result {
                 EquipmentSwapResult::Success(overflow) => {
+                    let equipped = context.player.get_item_by_slot(slot);
+                    context.player.on_equip_item(slot, &previous, &equipped);
                     if !overflow.is_empty() {
                         let _ = context.player.drop_item(overflow, false, false);
                     }

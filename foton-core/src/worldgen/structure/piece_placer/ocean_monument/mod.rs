@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::{Registry, vanilla_blocks, vanilla_entities};
 use foton_utils::random::Random;
@@ -7,7 +5,6 @@ use foton_utils::random::worldgen_random::WorldgenRandom;
 use foton_utils::{BlockStateId, BoundingBox, Direction};
 use glam::DVec3;
 
-use crate::entity::{entities::RawEntity, next_entity_id};
 use crate::world::WorldGenLevel;
 use foton_worldgen::structure::ocean_monument::{
     OceanMonumentChildPiece, OceanMonumentChildPieceKind, OceanMonumentPieceData,

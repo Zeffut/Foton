@@ -11,6 +11,7 @@
 use foton_registry::item_stack::ItemStack;
 use foton_utils::locks::{IntoShared, Shared};
 
+use crate::entity::WeakEntity;
 use crate::inventory::container::{CraftingContainer, ResultContainer};
 use crate::inventory::prelude::*;
 use crate::inventory::slots::{ArmorSlot, CraftingHandler};
@@ -27,7 +28,7 @@ pub const INVENTORY_MENU_CONTAINER_ID: u8 = 0;
 /// - Slots 36-39: Armor (feet, legs, chest, head)
 /// - Slot 40: Offhand
 #[must_use]
-pub fn inventory_menu(inventory: Shared<PlayerInventory>) -> Menu {
+pub fn inventory_menu(inventory: Shared<PlayerInventory>, owner: WeakEntity) -> Menu {
     let crafting_container = CraftingContainer::new(2, 2).into_shared();
     let result_container = ResultContainer::new().into_shared();
 
@@ -40,11 +41,12 @@ pub fn inventory_menu(inventory: Shared<PlayerInventory>) -> Menu {
     let armor = builder.section_at(
         &inventory,
         PlayerInventory::ARMOR_TOP_DOWN,
-        SectionKind::custom(|container, index| {
+        SectionKind::custom(move |container, index| {
             Box::new(ArmorSlot::new(
                 container.clone(),
                 index,
                 armor_equipment(index),
+                owner.clone(),
             ))
         }),
     );

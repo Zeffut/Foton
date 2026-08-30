@@ -456,6 +456,11 @@ impl World {
             damage_source = damage_source.with_causing_entity(id);
         }
 
+        // Vanilla hands `onExplosionHit` the whole source entity, because
+        // `ServerPlayer` needs its type to tell a wind charge from anything
+        // else. Resolved once rather than per affected entity.
+        let source_entity = direct_entity_id.and_then(|id| self.get_entity_by_id(id));
+
         for entity in self.get_entities_in_aabb(&aabb) {
             // Vanilla parity: `hurtEntities` asks the level for everything
             // *except* the source, so a blast never hits what it came out of.
@@ -501,6 +506,11 @@ impl World {
                     hit_players.push((player.id(), knockback));
                 }
             }
+
+            // Vanilla parity: the `entity.onExplosionHit(this.source)` that
+            // closes the per-entity body of `hurtEntities`. Vanilla runs it
+            // for every entity the blast reached, whether or not it moved them.
+            entity.on_explosion_hit(source_entity.as_ref());
         }
 
         hit_players

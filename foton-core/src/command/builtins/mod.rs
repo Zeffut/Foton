@@ -1,6 +1,7 @@
 //! Foton-owned built-in command declarations.
 
 pub(crate) mod bossbar;
+mod bug;
 mod clear;
 mod damage;
 mod difficulty;
@@ -63,6 +64,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.declare_permission(perms::GROUP_ALL_PERMISSION)?;
     builder.declare_permission(perms::METADATA_PERMISSION)?;
     builder.register(bossbar::registration())?;
+    builder.register(bug::registration())?;
     builder.register(clear::registration())?;
     builder.register(operator::deop_registration())?;
     builder.register(damage::registration())?;
@@ -139,6 +141,7 @@ mod tests {
             names,
             [
                 "bossbar",
+                "bug",
                 "clear",
                 "deop",
                 "damage",

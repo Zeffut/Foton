@@ -2,6 +2,7 @@ use crate::attribute::{AttributeModifierOperation, AttributeRef};
 use crate::damage_type::DamageTypeRef;
 use crate::items::ItemRef;
 use crate::mob_effect::MobEffectRef;
+use crate::particle_type::ParticleTypeRef;
 use crate::sound_event::SoundEventRef;
 use foton_utils::Identifier;
 use foton_utils::random::Random;
@@ -228,13 +229,54 @@ pub enum EntityTypePredicate {
     Unsupported,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct EntityPredicate {
     pub entity_type: EntityTypePredicate,
     pub vehicle: EntityVehiclePredicate,
     pub flags: EntityFlagsPredicate,
+    pub movement: EntityMovementPredicate,
     pub type_specific: EntityTypeSpecificPredicate,
     pub unsupported: bool,
+}
+
+/// The window a numeric predicate accepts.
+///
+/// Vanilla parity: `MinMaxBounds.Doubles`. Either end may be left open.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DoubleBounds {
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+}
+
+impl DoubleBounds {
+    /// Whether `value` falls inside the window.
+    #[must_use]
+    pub fn matches(self, value: f64) -> bool {
+        self.min.is_none_or(|min| value >= min) && self.max.is_none_or(|max| value <= max)
+    }
+}
+
+/// How an entity has to be moving for a predicate to accept it.
+///
+/// Vanilla parity: `MovementPredicate`. Only `fall_distance` is modeled: it
+/// is the field Wind Burst reads, and the only one any vanilla enchantment
+/// asks for. Anything else raises `unsupported`, which makes the whole
+/// requirement fail closed rather than silently pass.
+#[derive(Debug, PartialEq)]
+pub struct EntityMovementPredicate {
+    pub fall_distance: Option<DoubleBounds>,
+    pub unsupported: bool,
+}
+
+impl EntityMovementPredicate {
+    /// Whether this predicate asks anything of how the entity is moving.
+    ///
+    /// A caller that only knows an entity's type cannot answer such a
+    /// question, and has to give up rather than guess.
+    #[must_use]
+    pub const fn has_constraints(&self) -> bool {
+        self.fall_distance.is_some() || self.unsupported
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +289,10 @@ pub enum EntityVehiclePredicate {
 #[derive(Debug, PartialEq, Eq)]
 pub struct EntityFlagsPredicate {
     pub is_fall_flying: Option<bool>,
+    /// Vanilla parity: the `is_flying` of `EntityFlagsPredicate`, which reads
+    /// a player's `abilities.flying`. Wind Burst names it so a creative flight
+    /// does not launch anyone.
+    pub is_flying: Option<bool>,
     pub is_in_water: Option<bool>,
     pub unsupported: bool,
 }
@@ -256,6 +302,7 @@ impl EntityFlagsPredicate {
     pub const fn any() -> Self {
         Self {
             is_fall_flying: None,
+            is_flying: None,
             is_in_water: None,
             unsupported: false,
         }
@@ -263,7 +310,10 @@ impl EntityFlagsPredicate {
 
     #[must_use]
     pub const fn has_constraints(&self) -> bool {
-        self.is_fall_flying.is_some() || self.is_in_water.is_some() || self.unsupported
+        self.is_fall_flying.is_some()
+            || self.is_flying.is_some()
+            || self.is_in_water.is_some()
+            || self.unsupported
     }
 }
 
@@ -413,6 +463,30 @@ pub enum MobEffectSelection {
 #[derive(Debug)]
 pub enum EnchantmentEntityEffect {
     AllOf(&'static [&'static EnchantmentEntityEffect]),
+    Explode {
+        /// Vanilla parity: `ExplodeEffect.attributeToUser`, which decides
+        /// whether the blast is credited to whoever swung the enchanted item.
+        attribute_to_user: bool,
+        /// Vanilla parity: `ExplodeEffect.damageType`. Leaving it out is what
+        /// makes a blast shove without hurting -- wind burst's whole point.
+        damage_type: Option<DamageTypeRef>,
+        /// Vanilla parity: `ExplodeEffect.knockbackMultiplier`.
+        knockback_multiplier: Option<&'static LevelBasedValue>,
+        /// Vanilla parity: `ExplodeEffect.offset`.
+        offset: DVec3,
+        /// Vanilla parity: `ExplodeEffect.radius`.
+        radius: &'static LevelBasedValue,
+        /// Vanilla parity: `ExplodeEffect.createFire`.
+        create_fire: bool,
+        /// Vanilla parity: `ExplodeEffect.blockInteraction`.
+        block_interaction: EnchantmentExplosionInteraction,
+        /// Vanilla parity: `ExplodeEffect.smallParticle`.
+        small_particle: ParticleTypeRef,
+        /// Vanilla parity: `ExplodeEffect.largeParticle`.
+        large_particle: ParticleTypeRef,
+        /// Vanilla parity: `ExplodeEffect.sound`.
+        sound: SoundEventRef,
+    },
     ChangeItemDamage {
         amount: &'static LevelBasedValue,
     },
@@ -447,6 +521,27 @@ pub enum EnchantmentEntityEffect {
     Unsupported {
         effect_type: Identifier,
     },
+}
+
+/// What an enchantment's explosion does to the blocks it reaches.
+///
+/// Vanilla parity: `Level.ExplosionInteraction`, as `ExplodeEffect` carries it.
+/// Foton's own `ExplosionBlockInteraction` lives in `foton-core`, which this
+/// crate cannot reach, so the raw vanilla choice travels here and is mapped
+/// where the blast is actually raised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnchantmentExplosionInteraction {
+    /// Vanilla parity: `ExplosionInteraction.NONE`.
+    None,
+    /// Vanilla parity: `ExplosionInteraction.BLOCK`.
+    Block,
+    /// Vanilla parity: `ExplosionInteraction.MOB`.
+    Mob,
+    /// Vanilla parity: `ExplosionInteraction.TNT`.
+    Tnt,
+    /// Vanilla parity: `ExplosionInteraction.TRIGGER`, which leaves blocks
+    /// standing and only nudges the ones a blast can operate.
+    Trigger,
 }
 
 #[derive(Debug)]
