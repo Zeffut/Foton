@@ -265,7 +265,7 @@ cannot.
 
       This needed `ItemBehavior::inventory_tick`, which did not exist at all --
       `compass.rs` carried a TODO saying so, and that TODO is now unblocked.
-      Block map colors were already coming out of SteelExtractor; the
+      Block map colors were already coming out of FotonExtractor; the
       checked-in `blocks.json` simply predated them.
 
       Still open: a map in an item frame is not broadcast, because Foton's item
@@ -478,7 +478,7 @@ mobs that need it.
 ### Blocked, and honestly so
 
 - **Statistics and advancements.** Both need `stat_type` and `custom_stat`
-  registries that come from SteelExtractor, an external tool not in this
+  registries that come from FotonExtractor, an external tool not in this
   repository. `AGENTS.md` forbids hand-writing extracted data, so these cannot
   be done here. Every `TODO: award stat ...` in the tree is waiting on this.
 

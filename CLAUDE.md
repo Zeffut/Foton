@@ -13,28 +13,28 @@ remplie.
   Le dépôt a été renommé le 2026-08-29 ; GitHub redirige l'ancienne URL, mais tout
   clone existant ailleurs gagne à faire
   `git remote set-url origin https://github.com/Zeffut/Foton.git`.
-- Aucun remote `upstream`. `dev/sync-upstream.sh` est un vestige qui suppose ce
-  remote : il ne fonctionne pas en l'état et n'est plus dans le circuit.
+- Aucun remote `upstream`, et aucun script de synchronisation : le lien avec le
+  dépôt d'origine est coupé.
 
-Le renommage `steel*` → `foton*` est terminé (crates, namespaces `foton:`,
-permissions `foton.*`, variables `FOTON_*`, brand payload `Foton`, chaînes visibles
-en jeu). Restent intacts par nécessité : l'item vanilla `flint_and_steel`,
-`SteelExtractor` (outil externe qui porte ce nom sur le disque) et l'URL de la
-dépendance `TextComponents` dans `Cargo.toml`.
+Le renommage est terminé partout (crates, namespaces `foton:`, permissions
+`foton.*`, variables `FOTON_*`, brand payload `Foton`, chaînes visibles en jeu,
+tags, docs publiées, `FotonExtractor`). Deux occurrences de l'ancien nom
+subsistent et sont voulues : l'item vanilla `flint_and_steel`, et l'URL de la
+dépendance `TextComponents` dans `Cargo.toml`, qui pointe encore sur le dépôt
+public d'origine.
 
 ## Emplacement — IMPORTANT
 
 Deux checkouts existent. Celui qui compile et qui sert aujourd'hui est **macOS** :
 
-- **macOS** : `~/Desktop/Projets/SteelMC` — `cargo check --workspace` y passe. Le
-  dossier porte encore l'ancien nom ; le renommer en `Foton` est un `mv` à faire
-  hors session, et ce document sera à corriger ensuite.
-- **WSL2 (Ubuntu)** : `/root/SteelMC`, historiquement le workspace de référence.
+- **macOS** : `~/Desktop/Projets/Foton` — `cargo check --workspace` y passe.
+- **WSL2 (Ubuntu)** : `/root/Foton`, historiquement le workspace de référence — le
+  dossier y porte peut-être encore l'ancien nom, à renommer hors session.
   Depuis Windows, ne jamais compiler côté Windows (Smart App Control bloque les
   build scripts) ; passer par `wsl -d Ubuntu -- bash ...` et ne jamais inliner
   `$HOME` dans une commande PowerShell (l'interpolation casse la syntaxe bash).
 
-Les chemins WSL de ce document (`/root/SteelExtractor`, JDK sous
+Les chemins WSL de ce document (`/root/FotonExtractor`, JDK sous
 `/usr/lib/jvm/...`) ne valent que pour le checkout WSL.
 
 ## Commandes
@@ -67,7 +67,7 @@ Outils : `typos`, `ast-grep` (recherche/réécriture structurelle), `prek`, `gh`
 | Usage | JDK | `JAVA_HOME` |
 |-------|-----|-------------|
 | `update-minecraft-src.sh` (GitCraft) | **25** | `/usr/lib/jvm/java-25-openjdk-amd64` |
-| SteelExtractor (Fabric Loom) | **21** | `/usr/lib/jvm/java-21-openjdk-amd64` |
+| FotonExtractor (Fabric Loom) | **21** | `/usr/lib/jvm/java-21-openjdk-amd64` |
 
 GitCraft échoue avec Java 21 (`release version 25 not supported`).
 
@@ -83,7 +83,7 @@ Un serveur qui diverge de vanilla est un serveur cassé.
    `minecraft-src/minecraft/src/net/minecraft/`. `dev/doctor.sh` vérifie qu'elles
    correspondent bien à la cible de `Cargo.toml`.
 2. **Aucune donnée inventée.** Les valeurs de registres/blocs/items/worldgen viennent de
-   SteelExtractor (`/root/SteelExtractor`), jamais d'une transcription manuelle.
+   FotonExtractor (`/root/FotonExtractor`), jamais d'une transcription manuelle.
 3. **Pas de stub dans les fondations.** `todo!()`, mocks et valeurs bidon uniquement en
    prototypage explicitement identifié.
 4. **Pas de `.unwrap()`/`.expect()` en production**, pas d'`unsafe` hors du `DowncastType`
@@ -113,14 +113,16 @@ schéma puis régénérer. `dev/ci.sh` échoue si le fichier committé est péri
 l'obligation de discuter chaque changement sur leur Discord. `CONTRIBUTING.md` reflète
 déjà cette position.
 
-## SteelExtractor — obtenir des données vanilla manquantes
+## FotonExtractor — obtenir des données vanilla manquantes
 
-Checkout : `/root/SteelExtractor` (mod Fabric Kotlin, cible MC 26.2, build validé).
+Checkout : `/root/FotonExtractor` (mod Fabric Kotlin, cible MC 26.2, build validé).
+Le checkout et son dépôt portent peut-être encore l'ancien nom : les renommer une
+bonne fois, ce document et `dev/doctor.sh` attendent `FotonExtractor`.
 
 ```bash
-cd ~/SteelExtractor
+cd ~/FotonExtractor
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-./gradlew runServer     # produit run/steel_extractor_output/
+./gradlew runServer     # produit run/foton_extractor_output/
 ./gradlew runDatagen
 ```
 
@@ -253,14 +255,6 @@ système qui existe n'est pas un système qui marche.
 - **Commits atomiques et fréquents** : un commit = un changement cohérent qui compile.
 - Vérifier avant chaque commit : `cargo check` au minimum, la suite CI avant de merger.
 - Merge dans `master` une fois la CI verte.
-
-Synchroniser l'amont régulièrement :
-
-```bash
-git fetch upstream
-git merge upstream/master     # depuis master, puis résoudre les conflits
-git push origin master
-```
 
 ## Licence — AGPL-3.0
 

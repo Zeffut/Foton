@@ -143,7 +143,7 @@ impl Bonemealable for GrassBlock {
             // from `BiomeGenerationSettings.getBoneMealFeatures`, which is the
             // biome's placed features filtered by the
             // `minecraft:can_spawn_from_bone_meal` configured-feature tag --
-            // SteelExtractor does not emit worldgen feature tags yet, so the
+            // FotonExtractor does not emit worldgen feature tags yet, so the
             // list is empty here and vanilla plants nothing for an empty list
             // either. Grass still comes out of the other seven.
             if rng.random_range(0..8) == 0 {

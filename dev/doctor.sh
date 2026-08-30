@@ -28,7 +28,6 @@ chk "java"     java -version
 echo
 echo "=== Repository ==="
 chk "origin remote"   git remote get-url origin
-chk "upstream remote" git remote get-url upstream
 chk "gh auth"         gh auth status
 
 echo
@@ -51,11 +50,11 @@ else
   KO=$((KO + 1))
 fi
 
-if [ -d "$HOME/SteelExtractor" ]; then
-  echo "  [ OK ] SteelExtractor checkout present"
+if [ -d "$HOME/FotonExtractor" ]; then
+  echo "  [ OK ] FotonExtractor checkout present"
   OK=$((OK + 1))
 else
-  echo "  [FAIL] SteelExtractor checkout missing"
+  echo "  [FAIL] FotonExtractor checkout missing"
   KO=$((KO + 1))
 fi
 

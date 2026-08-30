@@ -16,7 +16,7 @@ pub type VillagerTypeRef = &'static VillagerType;
 /// The variant a villager born or spawned in each biome wears.
 ///
 /// Vanilla parity: `VillagerType.BY_BIOME`. It is a hardcoded Java map -- no
-/// datapack writes it, nothing carries it over the wire, and `SteelExtractor`
+/// datapack writes it, nothing carries it over the wire, and `FotonExtractor`
 /// emits no asset for it -- so it is transcribed here beside the registry it
 /// answers with, the way `crate::fuel` transcribes the furnace burn times.
 ///

@@ -51,7 +51,7 @@ impl MemoryModuleId {
 /// list is hardcoded in Java: nothing can add to it, no packet carries a memory
 /// id and the save format writes the registry *key*, not its index. Foton
 /// therefore mirrors the Java constants directly (see [`memory_module_types`])
-/// rather than adding a registry, and `SteelExtractor` emits no
+/// rather than adding a registry, and `FotonExtractor` emits no
 /// `memory_module_type` asset to build one from.
 pub struct MemoryModuleType<T: MemoryValueType> {
     key: &'static str,

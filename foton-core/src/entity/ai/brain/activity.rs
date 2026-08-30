@@ -6,7 +6,7 @@
 ///
 /// Vanilla registers these into `BuiltInRegistries.ACTIVITY`, but the registry
 /// is a hardcoded Java list -- no datapack can add to it, no packet carries an
-/// activity id and nothing writes one to disk. `SteelExtractor` emits no
+/// activity id and nothing writes one to disk. `FotonExtractor` emits no
 /// `activity` asset, so mirroring the Java constants as an enum keeps the data
 /// coming from the vanilla source without inventing a registry that would only
 /// ever hold these twenty-six entries.
