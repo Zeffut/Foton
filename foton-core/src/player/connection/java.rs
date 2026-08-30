@@ -7,8 +7,8 @@ use foton_protocol::packet_reader::TCPNetworkDecoder;
 use foton_protocol::packet_traits::{ClientPacket, CompressionInfo, EncodedPacket, ServerPacket};
 use foton_protocol::packet_writer::TCPNetworkEncoder;
 use foton_protocol::packets::common::{
-    CDisconnect, CKeepAlive, CPongResponse, SClientInformation, SCustomPayload, SKeepAlive,
-    SPingRequest,
+    CDisconnect, CKeepAlive, CPongResponse, SClientInformation, SCustomClickAction, SCustomPayload,
+    SKeepAlive, SPingRequest,
 };
 use foton_protocol::packets::game::{
     CBundleDelimiter, CCommandSuggestions, ClientCommandAction, PlayerAction, PlayerCommandAction,
@@ -75,6 +75,7 @@ enum ScheduledPlayPacketKind {
     AcceptTeleportation(SAcceptTeleportation),
     Attack(SAttack),
     Interact(SInteract),
+    CustomClickAction(SCustomClickAction),
     CustomPayload(SCustomPayload),
     Chat(Box<SChat>),
     ChatAck(SChatAck),
@@ -234,6 +235,7 @@ impl ScheduledPlayPacket {
             // contract, and the unimplemented menu handlers have no auditable transaction yet.
             ScheduledPlayPacketKind::Attack(_)
             | ScheduledPlayPacketKind::Interact(_)
+            | ScheduledPlayPacketKind::CustomClickAction(_)
             | ScheduledPlayPacketKind::CustomPayload(_)
             | ScheduledPlayPacketKind::ContainerButtonClick(_)
             | ScheduledPlayPacketKind::SelectTrade(_) => ScheduledPacketExecution::Exclusive,
@@ -246,6 +248,7 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::AcceptTeleportation(_)
                 | ScheduledPlayPacketKind::ClientInformation(_)
                 | ScheduledPlayPacketKind::ClientTickEnd
+                | ScheduledPlayPacketKind::CustomClickAction(_)
                 | ScheduledPlayPacketKind::CustomPayload(_)
                 | ScheduledPlayPacketKind::ChatAck(_)
                 | ScheduledPlayPacketKind::ChatSessionUpdate(_)
@@ -326,6 +329,9 @@ impl ScheduledPlayPacket {
             }
             ScheduledPlayPacketKind::Attack(packet) => player.handle_attack(packet),
             ScheduledPlayPacketKind::Interact(packet) => player.handle_interact(packet),
+            ScheduledPlayPacketKind::CustomClickAction(packet) => {
+                player.handle_custom_click_action(&packet);
+            }
             ScheduledPlayPacketKind::CustomPayload(packet) => {
                 player.handle_custom_payload(packet);
             }
@@ -743,6 +749,9 @@ impl JavaConnection {
             }
             play::S_INTERACT => scheduled(ScheduledPlayPacketKind::Interact(
                 SInteract::read_packet(data)?,
+            )),
+            play::S_CUSTOM_CLICK_ACTION => scheduled(ScheduledPlayPacketKind::CustomClickAction(
+                SCustomClickAction::read_packet(data)?,
             )),
             play::S_CUSTOM_PAYLOAD => scheduled(ScheduledPlayPacketKind::CustomPayload(
                 SCustomPayload::read_packet(data)?,

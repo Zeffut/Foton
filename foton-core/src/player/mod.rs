@@ -156,12 +156,17 @@ use crate::inventory::container::Container;
 
 const RESPAWN_SEARCH_READY_CANDIDATE_BUDGET: usize = 8;
 
+use crate::bug_dialog;
+use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION};
 use crate::chunk::player_chunk_view::PlayerChunkView;
 use crate::player::chunk_sender::ChunkSender;
 use crate::portal::{
     PortalTicketTarget, TeleportPostAction, TeleportPostTransition, TeleportTransition,
 };
 use crate::world::World;
+use foton_protocol::packets::common::SCustomClickAction;
+use std::env::current_dir;
+use std::path::PathBuf;
 
 /// A struct representing a player.
 pub struct Player {
@@ -768,6 +773,77 @@ impl Player {
     /// Handles a custom payload packet.
     #[expect(clippy::unused_self, reason = "this is an api function")]
     pub fn handle_custom_payload(&self, _packet: SCustomPayload) {}
+
+    /// Files the report a player submitted through the `/bug` form.
+    ///
+    /// Vanilla parity: `ServerCommonPacketListenerImpl.handleCustomClickAction`,
+    /// which hands the action to whatever the server registered for it. Foton
+    /// registers one.
+    ///
+    /// Everything here comes from the client, so nothing here is trusted: an
+    /// unknown action is ignored, an unknown category falls back rather than
+    /// failing, and the description is bounded before it reaches the disk.
+    pub fn handle_custom_click_action(&self, packet: &SCustomClickAction) {
+        if packet.id != Identifier::from_foton(bug_dialog::BUG_REPORT_ACTION) {
+            return;
+        }
+
+        let description = packet
+            .payload
+            .string(bug_dialog::DESCRIPTION_KEY)
+            .unwrap_or_default();
+        let description = description.trim();
+        if description.is_empty() {
+            self.send_bug_feedback("Nothing was written, so nothing was filed.");
+            return;
+        }
+        let description: String = description.chars().take(MAX_DESCRIPTION).collect();
+
+        // A category the server does not know is a client that sent something
+        // of its own. Filing under `Other` keeps the report rather than the
+        // argument about it.
+        let category = packet
+            .payload
+            .string(bug_dialog::CATEGORY_KEY)
+            .and_then(|name| BugCategory::parse(&name))
+            .unwrap_or(BugCategory::Other);
+
+        let position = self.position();
+        let world = self.get_world();
+        let report = BugReport::now(
+            self.gameprofile.name.clone(),
+            self.gameprofile.id.to_string(),
+            world.key.to_string(),
+            [position.x, position.y, position.z],
+            category,
+            description,
+        );
+
+        let run_dir = current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        match report.append_in(&run_dir) {
+            Ok(number) => {
+                log::info!(
+                    "bug report #{number} from {} [{}]: {}",
+                    report.player,
+                    report.category.name(),
+                    report.description.lines().next().unwrap_or_default()
+                );
+                self.send_bug_feedback(&format!("Filed report #{number}. Thanks."));
+            }
+            Err(error) => {
+                log::error!("failed to write a bug report: {error}");
+                self.send_bug_feedback("The report could not be saved. Tell an operator.");
+            }
+        }
+    }
+
+    /// Answers the reporter, and only them.
+    fn send_bug_feedback(&self, message: &str) {
+        self.send_packet(CSystemChat {
+            content: TextComponent::from(message.to_owned()),
+            overlay: false,
+        });
+    }
 
     /// Handles the end of a client tick.
     pub fn handle_client_tick_end(&self) {

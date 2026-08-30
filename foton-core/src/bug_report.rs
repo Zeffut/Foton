@@ -97,6 +97,28 @@ impl BugCategory {
         }
     }
 
+    /// The name a player reads in the report form.
+    ///
+    /// Separate from [`Self::name`] on purpose: the written name is a stable
+    /// key the report file is sorted by, and must not move when the wording
+    /// shown to a tester is improved.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Blocks => "Blocks",
+            Self::Items => "Items",
+            Self::Mobs => "Mobs and AI",
+            Self::Combat => "Combat and damage",
+            Self::Redstone => "Redstone",
+            Self::Worldgen => "World generation",
+            Self::Commands => "Commands",
+            Self::Inventory => "Inventory and menus",
+            Self::Sounds => "Sounds",
+            Self::Performance => "Lag and performance",
+            Self::Other => "Something else",
+        }
+    }
+
     /// Parses a category name, case-insensitively.
     #[must_use]
     pub fn parse(raw: &str) -> Option<Self> {

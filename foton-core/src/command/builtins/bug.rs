@@ -20,6 +20,7 @@ use super::super::{
     execution::{CommandSource, FotonCommandContext, FotonCommandRuntime, argument, literal},
     registration::CommandRegistration,
 };
+use crate::bug_dialog::show_bug_dialog;
 use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION};
 
 /// How many reports `/bug list` shows.
@@ -30,7 +31,12 @@ pub(super) fn registration() -> CommandRegistration<CommandSource> {
 }
 
 fn command() -> CommandNodeBuilder<CommandSource, FotonCommandRuntime> {
-    let mut node = literal("bug").then(literal("list").executes(list_reports));
+    let mut node = literal("bug")
+        // Bare `/bug` opens the form. The typed form below stays: it is the
+        // only way to file from a console or a command block, and the only one
+        // that works if a client ever refuses the dialog.
+        .executes(open_form)
+        .then(literal("list").executes(list_reports));
     for category in BugCategory::ALL {
         node = node.then(
             literal(category.name()).then(
@@ -40,6 +46,24 @@ fn command() -> CommandNodeBuilder<CommandSource, FotonCommandRuntime> {
         );
     }
     node
+}
+
+/// Puts the report form on the caller's screen.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "Command executors share a fallible callback signature."
+)]
+fn open_form(context: &FotonCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
+    let source = context.source();
+    let Some(player) = source.player() else {
+        source.send_failure(
+            TextComponent::from("Only a player can open the form; use /bug <category> <text>.")
+                .color(Color::Red),
+        );
+        return Ok(0);
+    };
+    player.send_packet(show_bug_dialog());
+    Ok(1)
 }
 
 fn file_report(
