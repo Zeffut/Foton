@@ -341,6 +341,18 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// Mirrors vanilla `Entity.isPickable`. Base entities are not pickable unless
     /// a concrete entity type opts in.
     fn is_pickable(&self) -> bool {
+        // Vanilla parity: `Projectile.isPickable`, which answers the
+        // `redirectable_projectile` tag rather than a flat no. It is the only
+        // reason one projectile can strike another -- a fireball or a wind
+        // charge can be shot out of the air, an arrow or an ender pearl
+        // cannot. Without it a thrown pearl passes straight through a wind
+        // charge instead of stopping on it, and pearl catching is impossible.
+        if self.as_projectile().is_some() {
+            return !self.is_removed()
+                && REGISTRY
+                    .entity_types
+                    .is_in_tag(self.entity_type(), &EntityTypeTag::REDIRECTABLE_PROJECTILE);
+        }
         self.as_living_entity()
             .is_some_and(|living| !living.is_removed())
     }

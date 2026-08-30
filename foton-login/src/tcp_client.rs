@@ -435,8 +435,16 @@ impl JavaTcpClient {
                                     }
                                 }
                             }
+                            Err(PacketError::ConnectionClosed) => {
+                                // The ordinary way a client leaves. Worth a
+                                // trace and nothing louder: logged as a
+                                // failure, it buries the real errors and sends
+                                // readers hunting for a protocol bug.
+                                log::debug!("Client {id} closed the connection");
+                                cancel_token.cancel();
+                            }
                             Err(err) => {
-                                log::info!("Failed to get raw packet from client {id}: {err}");
+                                log::warn!("Failed to get raw packet from client {id}: {err}");
                                 cancel_token.cancel();
                             }
                         }

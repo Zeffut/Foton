@@ -30,6 +30,21 @@ pub enum DecryptionReader<R: AsyncRead + Unpin> {
     None(R),
 }
 
+/// Whether an I/O error means the other end simply went away.
+///
+/// These are the shapes a closed or reset TCP connection takes once it has
+/// reached a read: nothing about them says the client sent anything wrong.
+const fn is_peer_hangup(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::NotConnected
+    )
+}
+
 impl<R: AsyncRead + Unpin> DecryptionReader<R> {
     /// Upgrades the reader to decrypt data.
     ///
@@ -108,7 +123,17 @@ impl<R: AsyncRead + Unpin> TCPNetworkDecoder<R> {
     /// - If the packet fails to decompress.
     #[expect(clippy::cast_sign_loss)]
     pub async fn get_raw_packet(&mut self) -> Result<RawPacket, PacketError> {
-        let packet_len = VarInt::read_async(&mut self.reader).await? as usize;
+        // A peer that hangs up between packets fails this read partway through
+        // a `VarInt`, which is an ordinary disconnect rather than a protocol
+        // violation. Reporting it as a malformed value makes every normal
+        // quit look like a client bug in the logs.
+        let packet_len = match VarInt::read_async(&mut self.reader).await {
+            Ok(length) => length as usize,
+            Err(error) if is_peer_hangup(error.kind()) => {
+                return Err(PacketError::ConnectionClosed);
+            }
+            Err(error) => return Err(error.into()),
+        };
 
         if packet_len > MAX_PACKET_SIZE {
             Err(PacketError::OutOfBounds)?;

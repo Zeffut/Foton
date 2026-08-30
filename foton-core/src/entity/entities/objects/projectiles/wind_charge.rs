@@ -254,9 +254,55 @@ mod tests {
     };
     use super::*;
     use crate::behavior::init_behaviors;
-    use crate::entity::entities::{EndCrystalEntity, PigEntity};
+    use crate::entity::entities::{EndCrystalEntity, EnderPearlEntity, PigEntity};
     use crate::entity::next_entity_id;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    /// A wind charge can be struck out of the air; an ender pearl cannot.
+    ///
+    /// Vanilla answers this with `Projectile.isPickable`, which returns the
+    /// `redirectable_projectile` tag rather than a flat no. Foton had only
+    /// `Entity`'s default, which says yes to living entities alone -- so no
+    /// projectile was ever a valid target for another, a thrown pearl passed
+    /// straight through a wind charge, and pearl catching was impossible.
+    ///
+    /// The asymmetry is the whole point: getting this wrong in the other
+    /// direction would let arrows and pearls be shot down, which vanilla does
+    /// not allow either.
+    #[test]
+    fn a_wind_charge_can_be_struck_out_of_the_air_but_a_pearl_cannot() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("wind_charge_pickable");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let charge = charge_at(DVec3::new(8.5, 65.0, 8.5), &world);
+        assert!(
+            Entity::is_pickable(charge.as_ref()),
+            "a wind charge is in `redirectable_projectile`, so another \
+             projectile has to be able to hit it"
+        );
+
+        let pearl = Arc::new(EnderPearlEntity::new(
+            &vanilla_entities::ENDER_PEARL,
+            next_entity_id(),
+            DVec3::new(8.5, 65.0, 10.5),
+            Arc::downgrade(&world),
+        ));
+        assert!(
+            !Entity::is_pickable(pearl.as_ref()),
+            "an ender pearl is not redirectable: vanilla does not let one be \
+             shot down, and saying yes here would change PvP in the other \
+             direction"
+        );
+
+        // The pair a player actually uses: the pearl is what strikes the
+        // charge, which is why the charge has to be the pickable one.
+        assert!(
+            pearl.can_hit_entity(charge.as_ref()),
+            "the thrown pearl must be able to land on the charge"
+        );
+    }
 
     fn charge_at(position: DVec3, world: &Arc<World>) -> Arc<WindChargeEntity> {
         Arc::new(WindChargeEntity::new(
