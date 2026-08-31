@@ -5,6 +5,21 @@
   "outputDirectory": "site/dist",
   "framework": null,
   "trailingSlash": true,
+  "redirects": [
+    {
+      "source": "/",
+      "has": [
+        { "type": "header", "key": "accept-language", "value": "^fr.*" }
+      ],
+      "destination": "/fr/",
+      "statusCode": 302
+    },
+    {
+      "source": "/",
+      "destination": "/en/",
+      "statusCode": 302
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

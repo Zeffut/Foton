@@ -1,0 +1,112 @@
+<main>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <div class="eyebrow">MINECRAFT {{ mc_target }}</div>
+        <h1>Un serveur Minecraft qui refuse de deviner.</h1>
+        <p style="font-size:19px">Foton est une implémentation indépendante du serveur Java
+          Edition, écrite en Rust. Chaque valeur de registre, de bloc, d'item et de worldgen
+          sort d'un extracteur — rien n'est écrit de mémoire, rien n'est transcrit à la main.</p>
+        <div class="actions">
+          <a class="btn btn-solid" href="/fr/start/">Lancez votre premier monde</a>
+          <a class="btn btn-ghost" href="/fr/contributing/">Comment c'est construit</a>
+        </div>
+        <div class="cmd"><b>$</b> docker run -p 25565:25565 ghcr.io/zeffut/foton:nightly</div>
+      </div>
+      <div>{{ scene_island }}</div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">LA THÈSE</div>
+      <h2>La parité est la spécification, pas l'objectif.</h2>
+      <div class="cols-2">
+        <div>
+          <p>Tout ce qu'un joueur peut observer — gameplay, protocole, registres, génération du
+            monde — est écrit contre la source vanilla décompilée, qui reste dans l'arborescence
+            pendant que le code s'écrit. Quand une conception Rust plus rapide ou plus idiomatique
+            changerait le comportement observable, c'est le comportement observable qui l'emporte.</p>
+        </div>
+        <div>
+          <p>De la concurrence, mais seulement là où vanilla l'autorise. Les ticks de gameplay
+            restent synchrones, parce que la sémantique vanilla dépend de l'ordre dans lequel les
+            choses se produisent. La génération des chunks, l'éclairage, le traitement des paquets
+            et l'envoi des chunks n'en dépendent pas, et tournent hors tick.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">COMMENT C'EST CONSTRUIT</div>
+      <h2>Rien ici n'est transcrit à la main.</h2>
+      <p>Un fichier associe chaque entrée du registre vanilla à la classe Java qui se cache
+        derrière. Au moment du build, le générateur scanne les structs porteuses d'un attribut
+        de comportement, fait correspondre le nom de la struct à cette table, et écrit lui-même
+        l'enregistrement.</p>
+      <p>Implémenter un bloc revient donc à créer une struct nommée exactement comme sa classe
+        vanilla, dans le bon répertoire. Il n'y a aucune liste de registre à éditer ni aucun
+        câblage à retenir — et un comportement que le générateur ne voit pas est un comportement
+        qui n'existe pas, une erreur que le build peut attraper et qu'un humain ne peut pas.</p>
+      <pre><code>#[block_behavior]
+pub struct LanternBlock;   // le nom est l'enregistrement</code></pre>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap split">
+      <div>
+        <div class="eyebrow">ARCHITECTURE</div>
+        <h2>Une seule direction de dépendance.</h2>
+        <p>Le binaire repose sur la couche de connexion, qui repose sur la logique de jeu, elle-même
+          posée sur des feuilles qui ne se connaissent pas entre elles — worldgen, protocole, le
+          registre généré, les macros, les primitives spatiales et mathématiques, et la crypto.</p>
+        <p>Rien en dessous de la logique de jeu ne peut remonter vers elle. C'est ce qui permet au
+          registre de rester généré plutôt que maintenu à la main.</p>
+      </div>
+      <div>{{ scene_crates }}</div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">VÉRIFICATION</div>
+      <h2>Deux couches, parce qu'un test unitaire ne peut pas voir qu'un fourneau n'a aucun
+        comportement.</h2>
+      <div class="cols-2">
+        <div class="stat">
+          <b>{{ unit_tests }}</b>
+          <div class="label">TESTS QUI TOURNENT EN PROCESSUS</div>
+          <p>Ils couvrent les endroits où se tromper est silencieux : le hachage des
+            composants, le déterminisme du RNG à graine fixe, l'encodage du protocole,
+            l'évaluation des tables de loot, la résolution des permissions.</p>
+        </div>
+        <div class="stat">
+          <b>{{ inworld_scripts }}</b>
+          <div class="label">SCRIPTS EN JEU</div>
+          <p>Chacun démarre un vrai serveur sur son propre port et lui parle via le protocole
+            Minecraft. Ils attrapent ce qui compile et ne fonctionne quand même pas — c'est ainsi
+            que trois fourneaux ont été découverts sans aucun comportement.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" style="border-bottom:0">
+    <div class="wrap">
+      <div class="eyebrow">LE FAIRE TOURNER</div>
+      <h2>Une commande, puis un monde.</h2>
+      <p>Le monde se génère, s'enregistre au format Anvil utilisé par vanilla, et se recharge là où
+        vous l'avez laissé. Les conteneurs, les fourneaux, la redstone, les mobs hostiles et les
+        animaux, les villageois, RCON et les groupes de permissions fonctionnent déjà
+        aujourd'hui ; le gameplay de survie arrive encore.</p>
+      <pre><code>cargo run -p foton</code></pre>
+      <div class="actions">
+        <a class="btn btn-solid" href="/fr/start/">Installation et premier démarrage</a>
+        <a class="btn btn-ghost" href="/fr/configuration/">Référence de configuration</a>
+      </div>
+    </div>
+  </section>
+</main>

@@ -1,5 +1,14 @@
 [files]
-extend-exclude = ["**/build_assets/**", "*.json", "CLAUDE.md"]
+extend-exclude = [
+    "**/build_assets/**", "*.json", "CLAUDE.md",
+    # The French edition of the site. `typos` has no French dictionary, and a
+    # fluent French sentence is a false-positive minefield for an en-us
+    # checker ("registre", "construit", "reste", ...) -- `[type.*]` overrides
+    # can't fix this, because a file already claimed by a built-in extension
+    # type (here `html`) never falls through to a glob-based custom type, so
+    # exclusion is the only lever that reliably works.
+    "site/content/fr/**",
+]
 
 [type.locale]
 extend-glob = ["**/locale.rs"]
@@ -45,6 +54,11 @@ Travelling = "Travelling"
 # entity data mirrors as `player_mode_customisation`.
 customisation = "customisation"
 CUSTOMISATION = "CUSTOMISATION"
+# French UI strings in `dev/gen-site.py`'s STRINGS table -- real French words
+# that happen to collide with English typos ("Contribute"/"construct"/"valid").
+Contribuer = "Contribuer"
+construit = "construit"
+valide = "valide"
 
 [default]
 locale = "en-us"

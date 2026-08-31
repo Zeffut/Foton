@@ -142,3 +142,9 @@ html { scroll-behavior: smooth; }
     opacity: 1; transform: none; transition: none;
   }
 }
+
+.lang {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em;
+  color: var(--ink-3); border-bottom: 1px solid var(--rule);
+}
+.lang:hover { color: var(--ink); text-decoration: none; border-bottom-color: var(--ink); }

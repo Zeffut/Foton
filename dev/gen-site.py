@@ -4,9 +4,15 @@
     python3 dev/gen-site.py              # build into site/dist/
     python3 dev/gen-site.py --check      # build into a temp dir and verify
 
-The prose lives in `site/content/`. Every `{{ hole }}` in it is filled from
-`dev/facts.py`, and a hole with no fact behind it fails the build -- the site
-cannot ship a number nobody generated, and it cannot ship `{{ }}` either.
+The prose lives in `site/content/<lang>/`. Every `{{ hole }}` in it is filled
+from `dev/facts.py`, and a hole with no fact behind it fails the build -- the
+site cannot ship a number nobody generated, and it cannot ship `{{ }}` either.
+
+The site is bilingual. Each edition lives at its own prefix (`/en/`, `/fr/`);
+the bare root is not itself an edition, it is a 302 redirect (see
+`vercel.json`) that reads the visitor's `Accept-Language` -- see the module
+docstring for `strings()` on why a missing translation stops the build rather
+than silently falling back to English.
 """
 
 import argparse
@@ -29,25 +35,79 @@ import facts  # noqa: E402
 
 HOLE = re.compile(r"\{\{\s*([a-z0-9_]+)\s*\}\}")
 
-# slug, output path, <title>, meta description, nav label (None = not in the nav)
+# code, url prefix, the label its own switcher entry shows
+LANGUAGES = [("en", "en", "English"), ("fr", "fr", "Français")]
+
+# slug, output path within an edition, nav label key (None = not in the nav)
 PAGES = [
-    ("index", "index.html",
-     "Foton — a Minecraft server that refuses to guess",
-     "An independent Minecraft Java Edition server written in Rust, built against the decompiled vanilla source.",
-     None),
-    ("start", "start/index.html",
-     "Get started — Foton",
-     "Install Foton from a release binary, the Docker image or source, and boot your first world.",
-     "Get started"),
-    ("configuration", "configuration/index.html",
-     "Configuration — Foton",
-     "Every Foton configuration key, with its type, default and range, generated from the schemas the server validates against.",
-     "Configuration"),
-    ("contributing", "contributing/index.html",
-     "Contributing — Foton",
-     "How Foton is built: the behavior mechanism, the engineering rules, and the checks a change has to clear.",
-     "Contributing"),
+    ("index", "index.html", None),
+    ("start", "start/index.html", "nav_start"),
+    ("configuration", "configuration/index.html", "nav_configuration"),
+    ("contributing", "contributing/index.html", "nav_contributing"),
 ]
+
+STRINGS = {
+    "en": {
+        "nav_start": "Get started",
+        "nav_configuration": "Configuration",
+        "nav_contributing": "Contributing",
+        "chip": "PRE-ALPHA",
+        "switch": "Français",
+        "footer_source": "Source",
+        "title_index": "Foton — a Minecraft server that refuses to guess",
+        "desc_index": "An independent Minecraft Java Edition server written in Rust, built against the decompiled vanilla source.",
+        "title_start": "Get started — Foton",
+        "desc_start": "Install Foton from a release binary, the Docker image or source, and boot your first world.",
+        "title_configuration": "Configuration — Foton",
+        "desc_configuration": "Every Foton configuration key, with its type, default and range, generated from the schemas the server validates against.",
+        "title_contributing": "Contributing — Foton",
+        "desc_contributing": "How Foton is built: the behavior mechanism, the engineering rules, and the checks a change has to clear.",
+    },
+    "fr": {
+        "nav_start": "Démarrer",
+        "nav_configuration": "Configuration",
+        "nav_contributing": "Contribuer",
+        "chip": "PRÉ-ALPHA",
+        "switch": "English",
+        "footer_source": "Code source",
+        "title_index": "Foton — un serveur Minecraft qui refuse de deviner",
+        "desc_index": "Un serveur Minecraft Java Edition indépendant, écrit en Rust, construit contre la source vanilla décompilée.",
+        "title_start": "Démarrer — Foton",
+        "desc_start": "Installer Foton depuis un binaire, l'image Docker ou les sources, et lancer son premier monde.",
+        "title_configuration": "Configuration — Foton",
+        "desc_configuration": "Chaque clé de configuration de Foton, avec son type, sa valeur par défaut et sa plage, générée depuis les schémas contre lesquels le serveur valide.",
+        "title_contributing": "Contribuer — Foton",
+        "desc_contributing": "Comment Foton est construit : le mécanisme de comportement, les règles d'ingénierie, et la barre qu'un changement doit passer.",
+    },
+}
+
+
+def strings(lang):
+    """The string table for one language. A missing key stops the build."""
+    table = STRINGS.get(lang)
+    if table is None:
+        raise SystemExit(f"no string table for language {lang!r}")
+
+    class Table(dict):
+        def __missing__(self, key):
+            raise SystemExit(f"{lang}: no translation for {key!r}")
+
+    return Table(table)
+
+
+def url(prefix, target=""):
+    """Root-relative URL of a page within one edition, always as a directory
+    (trailing slash) to match `vercel.json`'s `trailingSlash: true`."""
+    path = "/".join(part for part in (prefix, target) if part)
+    if not path:
+        return "/"
+    if not path.endswith("/"):
+        path += "/"
+    return "/" + path
+
+
+def fragment(lang, slug):
+    return CONTENT / lang / f"{slug}.html"
 
 
 def fill(template, values, where):
@@ -74,36 +134,60 @@ def read(name):
     return path.read_text(encoding="utf-8")
 
 
-def nav_html(current_slug):
-    """The nav is derived from PAGES, so it cannot link a page the build does
-    not emit -- the link check would fail on it otherwise."""
+def nav_html(lang, prefix, current_slug):
+    """Derived from PAGES, so it cannot link a page the build does not emit,
+    and never leaves its own edition."""
+    text = strings(lang)
     parts = []
-    for slug, target, _title, _description, label in PAGES:
-        if not label:
+    for slug, target, label_key in PAGES:
+        if not label_key:
             continue
-        href = "/" + target[: -len("index.html")]
+        href = url(prefix, target[: -len("index.html")])
         mark = ' class="here"' if slug == current_slug else ""
-        parts.append(f'<a href="{href}"{mark}>{label}</a>')
+        parts.append(f'<a href="{href}"{mark}>{text[label_key]}</a>')
     return "".join(parts)
 
 
+def switcher_html(lang, target):
+    """A link to the same page in the other edition."""
+    other = [entry for entry in LANGUAGES if entry[0] != lang][0]
+    other_code, other_prefix, _label = other
+    href = url(other_prefix, target[: -len("index.html")])
+    return (f'<a class="lang" href="{href}" hreflang="{other_code}" '
+            f'lang="{other_code}">{strings(lang)["switch"]}</a>')
+
+
 def build(out_dir):
-    """Renders every page into `out_dir`. Returns what was written."""
+    """Renders every page in every language. Returns what was written."""
     out_dir.mkdir(parents=True, exist_ok=True)
     values = facts.all()
     shell = read("_shell.html")
     written = []
 
-    for slug, target, title, description, _label in PAGES:
-        body = fill(read(f"{slug}.html"), values, f"site/content/{slug}.html")
-        page = fill(shell, {**values, "body": body, "title": title,
-                            "description": description,
-                            "nav": nav_html(slug)},
-                    "site/content/_shell.html")
-        path = out_dir / target
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(page, encoding="utf-8")
-        written.append(path)
+    for lang, prefix, _label in LANGUAGES:
+        text = strings(lang)
+        for slug, target, _label_key in PAGES:
+            path_in_content = fragment(lang, slug)
+            if not path_in_content.is_file():
+                raise SystemExit(f"missing fragment: {path_in_content}")
+            body = fill(path_in_content.read_text(encoding="utf-8"), values,
+                        f"site/content/{lang}/{slug}.html")
+            page = fill(shell, {
+                **values,
+                "body": body,
+                "lang": lang,
+                "title": text[f"title_{slug}"],
+                "description": text[f"desc_{slug}"],
+                "nav": nav_html(lang, prefix, slug),
+                "switcher": switcher_html(lang, target),
+                "chip": text["chip"],
+                "footer_source": text["footer_source"],
+                "home": url(prefix),
+            }, "site/content/_shell.html")
+            path = out_dir / prefix / target
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(page, encoding="utf-8")
+            written.append(path)
 
     if STATIC.is_dir():
         for asset in STATIC.iterdir():
