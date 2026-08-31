@@ -43,20 +43,24 @@ This route is not a compromise to be embarrassed about. It is the route that
 gets Bedrock players onto a Foton server soonest, and it is the honest baseline
 every other route has to beat.
 
-Two things must be verified before claiming it works, and neither is known
-today:
+Two things had to be verified before claiming it works. **The first is now
+answered, and the answer is yes.**
 
-1. **Does Geyser support this Java protocol version?** Foton targets protocol
-   776 (Minecraft 26.2). Geyser tracks Java versions on its own schedule. If it
-   does not yet support 776, route A is unavailable until it does, no matter how
-   complete Foton is.
-2. **Does Foton implement what Geyser leans on?** Geyser is a well-behaved
-   client, but it is a demanding one: it wants the full login sequence, entity
-   metadata, chunk data, inventory transactions and tab-list handling. A gap
-   that a vanilla client tolerates may stop Geyser.
+1. ~~**Does Geyser support this Java protocol version?**~~ It does. Geyser
+   2.11.2, build 1233, carries a `MinecraftCodec` whose bytecode reads
+   `sipush 776` followed by the string `26.2` — exactly the protocol and
+   version `Cargo.toml` targets. The gate everything else waited on is open,
+   and it was checked by reading the jar rather than by trusting a release
+   note.
+2. **Does Foton implement what Geyser leans on?** Still unknown. Geyser is a
+   well-behaved client but a demanding one: it wants the full login sequence,
+   entity metadata, chunk data, inventory transactions and tab-list handling. A
+   gap a vanilla client tolerates may still stop it. Answering this needs a
+   Bedrock client actually walking in, which is the one part of the experiment
+   that cannot be done by reading files.
 
-Both are answered by an afternoon's experiment, not by reasoning. That
-experiment is the first task in this document.
+That second question is now the whole of stage 0, and it is an hour with a
+phone or a console, not a project.
 
 ### B. Translation inside Foton
 
@@ -154,12 +158,13 @@ Each stage has to be worth having on its own, because there is a real chance
 that stages 2 and later never get built — and that would be a defensible
 outcome, not a failure.
 
-**Stage 0 — find out whether route A already works.** Run Geyser in front of a
-Foton server, connect a Bedrock client, and write down what happens. If it
-works, Bedrock support exists today and the rest of this document becomes
-optional. If it fails, the failures are a precise list of Java-protocol gaps
-worth fixing regardless of Bedrock, because they are gaps a demanding client
-found. Days, not weeks. **Do this before anything else.**
+**Stage 0 — find out whether route A already works.** Half done. Geyser speaks
+Foton's protocol, so the version gate is open; what remains is putting a
+Bedrock client through it and writing down what happens. If it works, Bedrock
+support exists today and the rest of this document becomes optional. If it
+fails, the failures are a precise list of Java-protocol gaps worth fixing
+regardless of Bedrock, because they are gaps a demanding client found. An
+hour. **Do this before anything else.**
 
 **Stage 1 — move the send seam to the typed packet.** Give `NetworkConnection`
 a semantic path: the connection receives the typed packet and decides how to put
@@ -183,8 +188,13 @@ not and the reverse.
 
 ## Recommendation
 
-Do stage 0 now. Do stage 1 on its own merits, because it pays for itself in
-three other places whatever happens to Bedrock. Treat stages 2 through 4 as a
+Finish stage 0 now — it is an hour, and the expensive half of it is already
+done. Do stage 1 on its own merits, because it pays for itself in three other
+places whatever happens to Bedrock.
+
+The version gate opening makes route A more likely to be the answer, not less,
+which means stages 2 through 4 need a stronger justification than they did
+when this was written. Treat stages 2 through 4 as a
 separate project with its own decision to make later, once stage 0 has said what
 route A is actually worth — and be willing to conclude that the answer is
 "ship a Geyser container and spend the years elsewhere".
@@ -196,7 +206,8 @@ here that would be worse than not starting.
 
 ## Open questions
 
-- Does Geyser support protocol 776? Stage 0 answers it.
+- ~~Does Geyser support protocol 776?~~ Yes — 2.11.2 build 1233, verified in
+  its own bytecode.
 - Where does Bedrock block, item and entity data come from, such that it is
   generated rather than transcribed? **Unanswered, and route B is blocked on it.**
 - What identity does a Bedrock player get on a server keyed by Mojang UUID, and
