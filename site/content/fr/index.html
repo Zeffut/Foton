@@ -3,8 +3,8 @@
     <div class="hero">
       <div>
         <div class="eyebrow">MINECRAFT {{ mc_target }}</div>
-        <h1>Vanilla, reforgé en Rust.</h1>
-        <p style="font-size:19px">Un serveur Java Edition indiscernable de vanilla pour vos joueurs, et qui ne bégaie pas quand ils partent explorer.</p>
+        <h1>Le même Minecraft. Un serveur plus rapide.</h1>
+        <p style="font-size:19px">Vos joueurs retrouvent le jeu qu'ils connaissent déjà. Vous obtenez un serveur qui suit la cadence quand ils partent explorer de nouveaux territoires.</p>
         <div class="actions">
           <a class="btn btn-solid" href="/fr/start/">Démarrer</a>
           <a class="btn btn-ghost" href="https://github.com/Zeffut/Foton">Code source</a>
@@ -19,38 +19,33 @@
     <div class="wrap">
       <div class="cols">
         <div>
-          <h3>Explorer ne ralentit pas le serveur</h3>
-          <p>Générer de nouveaux terrains et calculer la lumière se déroulent en parallèle du jeu plutôt que de l'interrompre. Qu'un seul joueur s'aventure dans des chunks non chargés ne coûte pas leur fluidité aux autres joueurs.</p>
+          <h3>Explorer ne ralentit personne</h3>
+          <p>Les nouvelles zones et leur éclairage sont préparés pendant que le jeu continue de tourner, sans jamais le mettre en pause. Qu'un seul joueur parte vers l'inconnu ne coûte pas leur fluidité aux autres.</p>
         </div>
         <div>
-          <h3>Votre serveur, vos règles</h3>
-          <p>Mondes, groupes de permissions et comportement du serveur sont de simples fichiers TOML, vérifiés contre un schéma à chaque démarrage. Une faute de frappe devient une erreur au démarrage, pas un mystère trois jours plus tard.</p>
+          <h3>Tout se règle dans un fichier</h3>
+          <p>Vos mondes, qui a le droit de faire quoi, et le comportement du serveur sont de simples fichiers texte que vous pouvez ouvrir et lire. Mettez une valeur impossible et le serveur vous le dit dès qu'il démarre, au lieu de tomber en panne une semaine plus tard.</p>
         </div>
         <div>
-          <h3>Aucune surprise pour vos joueurs</h3>
-          <p>Redstone, comportement des mobs, loot et génération du monde correspondent au jeu qu'ils connaissent déjà. Rien n'est réimplémenté de mémoire.</p>
+          <h3>Vos joueurs ne verront pas la différence</h3>
+          <p>La redstone, les mobs, le loot, la façon dont le monde est construit — tout se comporte comme dans le jeu qu'ils connaissent déjà. Rien ici n'en est une approximation.</p>
         </div>
         <div>
-          <h3>Un binaire, aucun runtime</h3>
-          <p>Pas de JVM à dimensionner, pas de ramasse-miettes à régler, pas de flags à copier depuis un forum. Posez-le à côté d'un dossier de configuration et lancez-le.</p>
+          <h3>Rien d'autre à installer</h3>
+          <p>Un seul fichier à lancer. Pas de Java à configurer, pas de réglages de mémoire à deviner, et pas d'options de démarrage copiées depuis un forum.</p>
         </div>
       </div>
     </div>
   </section>
 
   <section class="band" style="border-bottom:0">
-    <div class="wrap split">
-      <div>
-        <h2>Lancé en une seule commande.</h2>
-        <p>Le monde se génère, s'enregistre au format Anvil utilisé par vanilla, et se recharge là où vous l'avez laissé. Pointez un client Minecraft {{ mc_target }} sur le port 25565 et jouez.</p>
-        <p style="font-size:15px">Foton ne fait tourner aucun plugin Bukkit, Spigot ou Fabric — c'est son propre serveur, et une API de plugins n'existe pas encore. Si votre serveur en a besoin aujourd'hui, Foton n'est pas ce serveur aujourd'hui.</p>
-        <div class="actions">
-          <a class="btn btn-solid" href="/fr/start/">Installation et premier démarrage</a>
-          <a class="btn btn-ghost" href="/fr/configuration/">Configuration</a>
-        </div>
-      </div>
-      <div>
-        <pre><code>cargo run -p foton</code></pre>
+    <div class="wrap">
+      <h2>Lancé en une seule commande.</h2>
+      <p>Le monde se construit tout seul, s'enregistre, et revient tel que vous l'avez laissé. Vos joueurs rejoignent avec le Minecraft qu'ils ont déjà, sur le port habituel.</p>
+      <p style="font-size:15px">Foton ne fait tourner aucun plugin pour l'instant — ni Bukkit, ni Spigot, ni Fabric. Si votre serveur en dépend aujourd'hui, ce n'est pas encore le bon serveur pour vous.</p>
+      <div class="actions">
+        <a class="btn btn-solid" href="/fr/start/">Installation et premiers pas</a>
+        <a class="btn btn-ghost" href="/fr/configuration/">Réglages</a>
       </div>
     </div>
   </section>
