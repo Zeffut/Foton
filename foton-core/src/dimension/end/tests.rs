@@ -174,6 +174,84 @@ fn killing_the_dragon_opens_a_gateway() {
     );
 }
 
+/// Walking into a gateway the dragon opened asks the server to move you.
+///
+/// The gateways the fight leaves behind are a different case from the ones
+/// world generation writes: they store no exit at all, so entering one has to
+/// find the outer island first, build a return gateway on it, and record the
+/// result. None of that is reachable for a gateway that already knows where it
+/// goes -- which was every gateway any test had ever used.
+///
+/// This covers the half of the chain a world can run on its own: the block
+/// under the player, its block entity, the portal processor, and the world
+/// change that comes out the far side. The other half -- chunk loading and the
+/// teleport job -- belongs to `Server`, which this harness has none of, so
+/// `drain_world_changes` is where the assertion has to stop. Asserting on the
+/// player's position instead would fail here for a reason that has nothing to
+/// do with gateways, and would say nothing about the ones that do.
+#[test]
+fn walking_into_a_gateway_the_dragon_opened_asks_the_server_to_move_you() {
+    use crate::player::ResetReason;
+    use crate::portal::{PortalKind, WorldChangeRequest};
+
+    let (world, dragon_entity) = started_end("dragon_fight_gateway_travel");
+    dragon_entity.kill(world.as_ref());
+    let gateway = find_gateway(&world).expect("killing the dragon opens a gateway");
+
+    // `started_end` only lists its player; the portal path looks the walker up
+    // through the entity manager, which is what `add_player` writes to. A
+    // player who is merely listed reaches the teleport and is not found there,
+    // and the test would fail for a reason that has nothing to do with
+    // gateways.
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Traveler", next_entity_id()).build();
+    assert!(
+        world.add_player(Arc::clone(&player), ResetReason::InitialJoin),
+        "the walker has to be a registered entity, not just a listed player"
+    );
+    let start = DVec3::new(
+        f64::from(gateway.x()) + 0.5,
+        f64::from(gateway.y()),
+        f64::from(gateway.z()) + 0.5,
+    );
+    // A block only reaches `entityInside` from a movement segment, which is
+    // what `handleMovePlayer` hands it on every packet. A player set down by
+    // hand has moved nowhere and would walk through a gateway untouched --
+    // which is a property of the test, not of the server.
+    let approach = start - DVec3::new(0.0, 0.0, 1.0);
+    player
+        .try_set_position(approach)
+        .expect("the approach is inside the loaded ring chunk");
+    // The gateway arms a forty-tick cooldown the instant it is entered, so the
+    // portal processor gets its answer a tick or two later, not on the same one.
+    for _ in 0..120 {
+        player
+            .try_set_position(start)
+            .expect("the gateway is inside the loaded ring chunk");
+        player.apply_effects_from_blocks_between(approach, start);
+        world.tick_game(1, true);
+        player.tick();
+    }
+
+    let asked = world
+        .drain_world_changes()
+        .into_iter()
+        .any(|(moved, request)| {
+            moved.id() == player.id()
+                && matches!(
+                    request,
+                    WorldChangeRequest::Portal {
+                        portal: PortalKind::EndGateway,
+                        ..
+                    }
+                )
+        });
+    assert!(
+        asked,
+        "walking into a gateway the dragon opened produced no world change, \
+         so the player would stand in it forever"
+    );
+}
+
 /// An End nobody is in runs nothing at all, which is what keeps an idle server
 /// from holding the arena loaded and respawning dragons into an empty world.
 #[test]

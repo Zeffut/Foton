@@ -1007,7 +1007,12 @@ fn apply_supported_post_piercing_entity_effect(
             pitch,
         } => {
             let index = (level - 1).clamp(0, sounds.len() as i32 - 1) as usize;
-            user.play_sound(sounds[index], *volume, *pitch);
+            // Vanilla parity: `PlaySoundEffect.apply` calls
+            // `serverLevel.playSound(null, ..)`, so the enchanted player hears
+            // their own enchantment.
+            if !user.is_silent() {
+                user.play_server_side_sound(sounds[index], *volume, *pitch);
+            }
             false
         }
         EnchantmentEntityEffect::Ignite { .. } | EnchantmentEntityEffect::ApplyMobEffect { .. } => {

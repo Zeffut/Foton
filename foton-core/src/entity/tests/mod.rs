@@ -35,6 +35,7 @@ use crate::entity::damage::DamageSource;
 use crate::entity::entities::{ChestMinecartEntity, PigEntity, VillagerEntity};
 use crate::entity::mob::Mob;
 use crate::inventory::equipment::EquipmentSlot;
+use crate::player::connection::NetworkConnection;
 use crate::portal::PortalKind;
 use crate::test_support::{
     cross_world_damage_test_world, fresh_test_world, insert_ready_full_chunk, test_world,
@@ -42,6 +43,7 @@ use crate::test_support::{
 use crate::world::game_event::GameEventContext;
 use crate::world::game_event::{GameEventListener, SharedGameEventListener};
 use crate::world::{LevelReader, World};
+use foton_protocol::packet_traits::{CompressionInfo, EncodedPacket};
 
 use super::{
     ActiveMobEffect, AttributeModifier, AttributeModifierOperation, DAMAGE_KNOCKBACK_POWER,
@@ -1178,6 +1180,57 @@ fn villager_job_site(villager: &VillagerEntity) -> Option<BlockPos> {
     Mob::brain(villager)?
         .get_memory(memory_module_types::JOB_SITE)
         .map(|global| global.pos)
+}
+
+/// A connection that remembers the id of every packet the server sent it.
+struct PacketIdRecorder {
+    ids: Arc<SyncMutex<Vec<i32>>>,
+}
+
+impl NetworkConnection for PacketIdRecorder {
+    fn compression(&self) -> Option<CompressionInfo> {
+        None
+    }
+
+    fn send_encoded(&self, packet: EncodedPacket) {
+        // Uncompressed framing: a var-int body length, then a var-int id.
+        let mut bytes: &[u8] = &packet.encoded_data;
+        let mut read = || {
+            let mut value = 0_i32;
+            for shift in 0..5 {
+                let byte = bytes[0];
+                bytes = &bytes[1..];
+                value |= i32::from(byte & 0x7F) << (shift * 7);
+                if byte & 0x80 == 0 {
+                    break;
+                }
+            }
+            value
+        };
+        let _length = read();
+        let id = read();
+        self.ids.lock().push(id);
+    }
+
+    fn send_encoded_bundle(&self, packets: Vec<EncodedPacket>) {
+        for packet in packets {
+            self.send_encoded(packet);
+        }
+    }
+
+    fn disconnect_with_reason(&self, _reason: TextComponent) {}
+
+    fn tick(&self) {}
+
+    fn latency(&self) -> i32 {
+        0
+    }
+
+    fn close(&self) {}
+
+    fn closed(&self) -> bool {
+        false
+    }
 }
 
 mod brains;

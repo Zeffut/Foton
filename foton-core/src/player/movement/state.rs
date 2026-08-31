@@ -111,6 +111,17 @@ impl MovementState {
     }
 
     /// Sets the last accepted client movement vector.
+    /// Sets the speed the client last reported, for a test that needs one.
+    ///
+    /// The real setter belongs to the movement packet and stays there. A spear
+    /// reads this value and nothing else, so a test that cannot write it can
+    /// only ever assert the standing-still case -- which is the case that
+    /// passes when the weapon does nothing at all.
+    #[cfg(test)]
+    pub(crate) const fn set_last_known_client_movement_for_test(&mut self, movement: DVec3) {
+        self.set_last_known_client_movement(movement);
+    }
+
     pub(in crate::player) const fn set_last_known_client_movement(&mut self, movement: DVec3) {
         self.client_movement
             .set_last_known_client_movement(movement);

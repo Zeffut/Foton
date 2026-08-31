@@ -11,12 +11,9 @@ use crate::behavior::{ITEM_BEHAVIORS, init_behaviors};
 use crate::entity::entities::{DrownedEntity, RavagerEntity};
 use crate::entity::next_entity_id;
 use crate::inventory::container::Container as _;
-use crate::player::connection::NetworkConnection;
 use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
-use foton_protocol::packet_traits::{CompressionInfo, EncodedPacket};
 use foton_registry::data_components::vanilla_components::BLOCKS_ATTACKS;
 use foton_utils::locks::SyncMutex;
-use text_components::TextComponent;
 
 /// The one spot the test world is solid ground rather than a column the fluid
 /// scan walks.
@@ -235,57 +232,6 @@ fn eating_spends_one_use_tick_per_server_tick() {
         started - 1,
         "one server tick must spend exactly one use tick"
     );
-}
-
-/// A connection that remembers the id of every packet the server sent it.
-struct PacketIdRecorder {
-    ids: Arc<SyncMutex<Vec<i32>>>,
-}
-
-impl NetworkConnection for PacketIdRecorder {
-    fn compression(&self) -> Option<CompressionInfo> {
-        None
-    }
-
-    fn send_encoded(&self, packet: EncodedPacket) {
-        // Uncompressed framing: a var-int body length, then a var-int id.
-        let mut bytes: &[u8] = &packet.encoded_data;
-        let mut read = || {
-            let mut value = 0_i32;
-            for shift in 0..5 {
-                let byte = bytes[0];
-                bytes = &bytes[1..];
-                value |= i32::from(byte & 0x7F) << (shift * 7);
-                if byte & 0x80 == 0 {
-                    break;
-                }
-            }
-            value
-        };
-        let _length = read();
-        let id = read();
-        self.ids.lock().push(id);
-    }
-
-    fn send_encoded_bundle(&self, packets: Vec<EncodedPacket>) {
-        for packet in packets {
-            self.send_encoded(packet);
-        }
-    }
-
-    fn disconnect_with_reason(&self, _reason: TextComponent) {}
-
-    fn tick(&self) {}
-
-    fn latency(&self) -> i32 {
-        0
-    }
-
-    fn close(&self) {}
-
-    fn closed(&self) -> bool {
-        false
-    }
 }
 
 /// Right-clicking armour on sends the wearer the sound of it going on.
@@ -706,5 +652,99 @@ fn a_drowned_with_a_trident_winds_it_up_and_throws_it() {
         tridents_in_flight(&world),
         1,
         "and the ranged attack has to actually throw one"
+    );
+}
+
+/// Charging with a spear hurts what you run through. Walking with one does not.
+///
+/// The `minecraft:kinetic_weapon` component was fully modeled before this test
+/// existed -- parsed, serialized, hashed, round-tripped -- and nothing ever
+/// ran it. `Item.use` fell through to `Pass` with a TODO where vanilla holds
+/// the spear out, so the player's charge went through the target and the
+/// target lost nothing. Every test the component had passed the whole time,
+/// because they all asked whether the data was read, never whether it was
+/// used.
+///
+/// Both halves matter. A spear is not a sword that hits harder when you move:
+/// below its `min_relative_speed` it does nothing at all, and asserting only
+/// the damage would leave a version that hurts on contact at any speed
+/// looking correct.
+#[test]
+fn a_spear_hurts_what_you_charge_through_and_nothing_you_walk_into() {
+    use crate::entity::SharedEntity;
+    use foton_protocol::packets::game::SUseItem;
+
+    /// The copper spear's `delay_ticks`. Nothing happens before it elapses.
+    const WIND_UP: i32 = 13;
+
+    fn charge_at_a_drowned(key: &'static str, speed: f64) -> f32 {
+        let world = item_use_world(key);
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "Lancer", next_entity_id()).build();
+        player.base().set_position_local(SPAWN);
+        player.set_client_loaded(true);
+        // Facing +Z, which is where the pig is put.
+        player.base().set_rotation((0.0, 0.0));
+        player.set_item_in_hand(
+            InteractionHand::MainHand,
+            ItemStack::new(&vanilla_items::COPPER_SPEAR),
+        );
+
+        let target: SharedEntity = Arc::new(DrownedEntity::new(
+            &vanilla_entities::DROWNED,
+            next_entity_id(),
+            SPAWN + DVec3::new(0.0, 0.0, 3.0),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&target))
+            .expect("the drowned should attach to the loaded test chunk");
+        let living = target
+            .as_living_entity()
+            .expect("a drowned is a living entity");
+        let health_before = living.get_health();
+
+        // The spear reads the client's reported speed, which is what makes an
+        // elytra charge different from a walk. Ticking the player would clear
+        // it, so the thrust is driven directly.
+        player
+            .movement
+            .lock()
+            .set_last_known_client_movement_for_test(DVec3::new(0.0, 0.0, speed));
+
+        player.handle_use_item(SUseItem {
+            hand: InteractionHand::MainHand,
+            sequence: 1,
+            y_rot: 0.0,
+            x_rot: 0.0,
+        });
+        assert!(
+            player.is_using_item(),
+            "vanilla's `Item.use` holds a kinetic weapon out rather than passing"
+        );
+
+        for _ in 0..=WIND_UP {
+            player
+                .movement
+                .lock()
+                .set_last_known_client_movement_for_test(DVec3::new(0.0, 0.0, speed));
+            player.updating_using_item();
+        }
+
+        health_before - living.get_health()
+    }
+
+    // 0.3 blocks a tick is 6 a second: past the copper spear's 4.6 floor.
+    let charged = charge_at_a_drowned("item_use_spear_charge", 0.3);
+    assert!(
+        charged > 0.0,
+        "a spear charge took nothing off the drowned it ran through"
+    );
+
+    // 0.1 blocks a tick is 2 a second, which is walking pace.
+    let walked = charge_at_a_drowned("item_use_spear_walk", 0.1);
+    assert!(
+        walked <= 0.0,
+        "walking into a drowned with a spear hurt it, so the speed threshold is \
+         not being read at all"
     );
 }

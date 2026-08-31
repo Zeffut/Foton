@@ -297,6 +297,12 @@ impl Server {
         runs_normally: bool,
     ) {
         if !portal_entity_still_valid(&entity, &source_world, pending_token) {
+            // The walk from the block to here crosses a tick boundary, so the
+            // entity can be gone, disconnected, or in another world by now.
+            log::warn!(
+                "end gateway at {portal_pos:?}: the entity stopped being eligible \
+                 before its teleport was queued"
+            );
             clear_pending_world_change(&entity, pending_token);
             return;
         }
@@ -308,7 +314,11 @@ impl Server {
             source_is_end,
             pending_token,
         ) else {
-            tracing::debug!("End gateway world change ignored because no destination is available");
+            // A player standing in a portal that does nothing is a
+            // report waiting to happen, so this is not a debug line.
+            log::warn!(
+                "end gateway at {portal_pos:?} resolved no destination; the entity stays put"
+            );
             clear_pending_world_change(&entity, pending_token);
             return;
         };
