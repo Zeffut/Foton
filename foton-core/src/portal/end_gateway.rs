@@ -348,12 +348,123 @@ fn block_bottom_center(pos: BlockPos) -> DVec3 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{
-        EXIT_PORTAL_SEARCH_LIMIT, chunks_for_block_square, exit_search_candidate_chunks,
-        xz_direction,
+        EXIT_PORTAL_SEARCH_LIMIT, EndGatewayChunkPreparation, calculate_transition,
+        chunks_for_block_square, exit_search_candidate_chunks, final_chunks_after_search,
+        initial_chunks, xz_direction,
     };
-    use foton_utils::{BlockPos, ChunkPos};
+    use crate::behavior::init_behaviors;
+    use crate::block_entity::entities::EndGatewayBlockEntity;
+    use crate::entity::{entities::PigEntity, next_entity_id};
+    use crate::test_support::{fresh_end_test_world, insert_ready_full_chunk};
+    use crate::world::World;
+    use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities};
+    use foton_utils::types::UpdateFlags;
+    use foton_utils::{BlockPos, ChunkPos, Downcast as _};
     use glam::DVec3;
+
+    /// Puts a gateway with no stored exit where the dragon fight puts them.
+    ///
+    /// This is the case that matters. `EnderDragonFight.spawnNewGateway` places
+    /// `END_GATEWAY_DELAYED`, whose configuration carries no exit at all, so
+    /// every gateway the fight opens has to find the outer islands from
+    /// nothing. A gateway with a stored exit skips the entire path below.
+    fn dragon_gateway(world: &Arc<World>, pos: BlockPos) {
+        insert_ready_full_chunk(world, ChunkPos::from_block_pos(pos));
+        let state = vanilla_blocks::END_GATEWAY.default_state();
+        world.set_block(pos, state, UpdateFlags::UPDATE_ALL);
+        world.set_block_entity(Arc::new(EndGatewayBlockEntity::new(
+            Arc::downgrade(world),
+            pos,
+            state,
+        )));
+    }
+
+    /// Serves exactly the chunks the teleport job would have loaded.
+    ///
+    /// The job is two chunk requests wrapped around `calculate_transition` and
+    /// nothing else, so a world holding those chunks exercises everything the
+    /// job would have reached -- without needing a `Server` to schedule them.
+    fn load_what_the_job_loads(world: &Arc<World>, gateway: BlockPos) {
+        let Some(EndGatewayChunkPreparation::SearchPath(search)) =
+            initial_chunks(world, gateway, true)
+        else {
+            panic!("a gateway with no exit, inside the End, has to ask for a search path");
+        };
+        // The job's two requests overlap, and the chunk map refuses the same
+        // chunk twice, so this keeps track of what it has already served.
+        let mut loaded = vec![ChunkPos::from_block_pos(gateway)];
+        let serve = |chunks: Vec<ChunkPos>, loaded: &mut Vec<ChunkPos>| {
+            for chunk in chunks {
+                if !loaded.contains(&chunk) {
+                    loaded.push(chunk);
+                    insert_ready_full_chunk(world, chunk);
+                }
+            }
+        };
+        serve(search, &mut loaded);
+        let final_chunks = final_chunks_after_search(world, gateway, true)
+            .expect("the search path is loaded, so the anchor has to resolve");
+        serve(final_chunks, &mut loaded);
+    }
+
+    /// A gateway the dragon opened resolves somewhere to send you.
+    ///
+    /// Everything before this is covered elsewhere: the block triggers, the
+    /// portal processor fires, the world change is queued. All the server adds
+    /// is the two chunk loads this test performs by hand -- so this is the
+    /// last stretch, and it was broken.
+    ///
+    /// `create_end_gateway_portal` writes a three-by-three-by-five box, most of
+    /// it air, into a spot on the outer island that is already air. `set_block`
+    /// answers `false` for an unchanged write, the same as vanilla's
+    /// `LevelChunk.setBlockState` returning null -- but vanilla's
+    /// `Feature.setBlock` returns `void` and never reads it. Foton read it, and
+    /// gave up on the second block of the box. Every gateway the dragon opened
+    /// was inert, every time, and nothing was logged.
+    #[test]
+    fn a_gateway_with_no_stored_exit_still_resolves_a_destination() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_end_test_world("gateway_destination_from_scratch");
+
+        // Ninety-six blocks out on the ring, which is where the fight puts them.
+        let gateway = BlockPos::new(96, 75, 0);
+        dragon_gateway(&world, gateway);
+        load_what_the_job_loads(&world, gateway);
+
+        let traveler = PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            DVec3::new(96.5, 75.0, 0.5),
+            Arc::downgrade(&world),
+        );
+
+        let transition = calculate_transition(&world, &traveler, gateway, true).expect(
+            "a gateway the dragon opened resolved nowhere to send anyone, which is \
+             exactly what an inert portal looks like from inside the game",
+        );
+        assert!(
+            transition.position.x > 512.0,
+            "the outer islands are a thousand blocks out along the gateway's bearing, \
+             so a destination near the arena means the search never left home"
+        );
+
+        // Vanilla writes the exit down, so the next traveler takes the stored
+        // path instead of searching the whole way again.
+        let stored = world.get_block_entity(gateway).and_then(|entity| {
+            entity
+                .downcast_ref::<EndGatewayBlockEntity>()
+                .and_then(EndGatewayBlockEntity::exit_portal)
+        });
+        assert!(
+            stored.is_some(),
+            "the gateway found its exit and did not record it, so every later \
+             traveler pays for the whole search again"
+        );
+    }
 
     #[test]
     fn zero_gateway_position_has_zero_search_direction() {

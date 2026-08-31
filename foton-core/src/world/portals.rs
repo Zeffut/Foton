@@ -477,6 +477,19 @@ impl World {
         is_shape_full_block(self.block_collision_shape(pos, state))
     }
 
+    /// Writes one block of a generated feature, the way vanilla's features do.
+    ///
+    /// `set_block` answers `false` for two very different things: the write
+    /// could not happen, and the write was not needed because the block was
+    /// already what you asked for. That matches vanilla, whose
+    /// `LevelChunk.setBlockState` returns null for an unchanged write -- but
+    /// vanilla's `Feature.setBlock` returns `void` and never looks. A feature
+    /// that treats "already correct" as a failure gives up on the first air it
+    /// writes into air, which for the End gateway portal is its second block.
+    fn place_feature_block(self: &Arc<Self>, pos: BlockPos, state: BlockStateId) -> bool {
+        self.get_block_state(pos) == state || self.set_block(pos, state, UpdateFlags::UPDATE_ALL)
+    }
+
     /// Mirrors vanilla `EndIslandFeature.place` for runtime End gateway island creation.
     pub(crate) fn create_end_island(self: &Arc<Self>, origin: BlockPos) -> bool {
         let end_stone = vanilla_blocks::END_STONE.default_state();
@@ -490,11 +503,7 @@ impl World {
             for x in min..=max {
                 for z in min..=max {
                     if (x * x + z * z) as f32 <= (size + 1.0) * (size + 1.0)
-                        && !self.set_block(
-                            origin.offset(x, y, z),
-                            end_stone,
-                            UpdateFlags::UPDATE_CLIENTS,
-                        )
+                        && !self.place_feature_block(origin.offset(x, y, z), end_stone)
                     {
                         return false;
                     }
@@ -532,7 +541,7 @@ impl World {
                         vanilla_blocks::AIR.default_state()
                     };
 
-                    if !self.set_block(origin.offset(dx, dy, dz), state, UpdateFlags::UPDATE_ALL) {
+                    if !self.place_feature_block(origin.offset(dx, dy, dz), state) {
                         return false;
                     }
                 }
