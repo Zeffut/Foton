@@ -150,7 +150,7 @@ That is a deliberate reversal of this document's first draft, which led with a
 pre-alpha warning band and a section listing defects by name. The reversal costs
 nothing in honesty, because the honest facts are also the strongest ones: a
 project whose whole discipline is that nothing is guessed does not need to
-apologise for what it has not reached yet, it needs to explain the discipline.
+apologize for what it has not reached yet, it needs to explain the discipline.
 
 1. **Hero.** What Foton is in one sentence, the primary call to action, and a
    copyable run command. The isometric island.
