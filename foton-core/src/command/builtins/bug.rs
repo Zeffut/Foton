@@ -21,13 +21,18 @@ use super::super::{
     registration::CommandRegistration,
 };
 use crate::bug_dialog::show_bug_dialog;
-use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION};
+use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION, forward};
 
 /// How many reports `/bug list` shows.
 const LIST_LIMIT: usize = 10;
 
 pub(super) fn registration() -> CommandRegistration<CommandSource> {
+    // A tester types the word that comes to mind. One that lands on "unknown
+    // command" rarely gets retried with a synonym -- the report is simply lost,
+    // at the moment it was easiest to write.
     CommandRegistration::new(Identifier::from_foton("bug"), |_| command())
+        .alias("report")
+        .alias("bugreport")
 }
 
 fn command() -> CommandNodeBuilder<CommandSource, FotonCommandRuntime> {
@@ -111,6 +116,9 @@ fn file_report(
     let run_dir = current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match report.append_in(&run_dir) {
         Ok(number) => {
+            if let Some(webhook) = player.config.bug_report_webhook.as_ref() {
+                forward(webhook, &report, number);
+            }
             source.send_success(
                 &TextComponent::from(format!("Filed report #{number}. Thanks."))
                     .color(Color::Green),

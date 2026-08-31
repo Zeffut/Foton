@@ -1,3 +1,4 @@
+use crate::config::server::BugReportsConfig;
 use std::{
     env,
     path::PathBuf,
@@ -161,7 +162,12 @@ fn configured_auth_server_flows_to_runtime_config() {
 
     assert_eq!(config.server.auth_server.as_deref(), Some(auth_server));
     assert_eq!(
-        config.server.into_runtime_config().auth_server.as_deref(),
+        config
+            .server
+            .into_runtime_config()
+            .expect("the test config resolves")
+            .auth_server
+            .as_deref(),
         Some(auth_server)
     );
 }
@@ -183,6 +189,7 @@ fn configured_profile_server_flows_to_runtime_config() {
         config
             .server
             .into_runtime_config()
+            .expect("the test config resolves")
             .profile_server
             .as_deref(),
         Some(profile_server)
@@ -206,6 +213,7 @@ fn configured_services_server_flows_to_runtime_config() {
         config
             .server
             .into_runtime_config()
+            .expect("the test config resolves")
             .services_server
             .as_deref(),
         Some(services_server)
@@ -228,10 +236,18 @@ fn configured_thread_counts_parse_and_flow_to_runtime_config() {
     assert_eq!(config.server.threads.chunk_generation, Some(6));
     assert_eq!(config.server.threads.chunk_encoding, Some(7));
     assert_eq!(
-        config.server.clone().into_runtime_config().packet_workers,
+        config
+            .server
+            .clone()
+            .into_runtime_config()
+            .expect("the test config resolves")
+            .packet_workers,
         Some(5)
     );
-    let runtime_config = config.server.into_runtime_config();
+    let runtime_config = config
+        .server
+        .into_runtime_config()
+        .expect("the test config resolves");
     assert_eq!(runtime_config.chunk_generation_threads, Some(6));
     assert_eq!(runtime_config.chunk_encoding_threads, Some(7));
 }
@@ -402,4 +418,93 @@ fn log_config_defaults_for_older_configs() {
     assert!(log_config.log_file);
     assert_eq!(log_config.rotation_time, RotationTimeFormat::Daily);
     assert_eq!(log_config.max_history, 50);
+}
+
+/// An unset endpoint keeps reports local rather than failing.
+///
+/// Most servers collect nothing, and a server that refused to start because it
+/// had not been told where to send bug reports would be worse than useless.
+#[test]
+fn bug_reports_stay_local_when_no_endpoint_is_configured() {
+    let config = BugReportsConfig::default();
+
+    assert!(
+        config
+            .into_webhook()
+            .expect("an absent endpoint is not an error")
+            .is_none()
+    );
+}
+
+/// A typo in the endpoint stops the server instead of being discovered later.
+///
+/// The alternative is a tester writing out a careful repro that then goes
+/// nowhere, with the mistake only visible in a log nobody is reading. Same
+/// reasoning as the blank rcon password: an operator who asked for forwarding
+/// and silently did not get it is worse off than one who is told why.
+#[test]
+fn a_bug_report_endpoint_that_cannot_work_is_refused_at_startup() {
+    for bad in [
+        "not a url",
+        "ftp://example.invalid/hook",
+        "example.invalid/hook",
+    ] {
+        let config = BugReportsConfig {
+            webhook_url: Some(bad.to_owned()),
+            webhook_token: None,
+        };
+
+        assert!(
+            config.into_webhook().is_err(),
+            "{bad} should have been refused rather than accepted and never used"
+        );
+    }
+}
+
+/// A usable endpoint carries its token through.
+#[test]
+fn a_valid_bug_report_endpoint_resolves_with_its_token() {
+    let config = BugReportsConfig {
+        webhook_url: Some("https://example.invalid/api/bug-reports".to_owned()),
+        webhook_token: Some("secret".to_owned()),
+    };
+
+    let webhook = config
+        .into_webhook()
+        .expect("an https endpoint resolves")
+        .expect("a configured endpoint is present");
+
+    assert_eq!(
+        webhook.url.as_str(),
+        "https://example.invalid/api/bug-reports"
+    );
+    assert_eq!(webhook.token.as_deref(), Some("secret"));
+}
+
+/// The debug output of a webhook never carries the token.
+///
+/// `RuntimeConfig` derives `Debug` and is printed whole in places that are
+/// hard to enumerate ahead of time. A credential that only leaks into a crash
+/// dump is still leaked.
+#[test]
+fn a_webhook_token_never_reaches_debug_output() {
+    let config = BugReportsConfig {
+        webhook_url: Some("https://example.invalid/hook".to_owned()),
+        webhook_token: Some("super-secret-token".to_owned()),
+    };
+    let webhook = config
+        .into_webhook()
+        .expect("an https endpoint resolves")
+        .expect("a configured endpoint is present");
+
+    let printed = format!("{webhook:?}");
+
+    assert!(
+        !printed.contains("super-secret-token"),
+        "the token was printed: {printed}"
+    );
+    assert!(
+        printed.contains("example.invalid"),
+        "the endpoint should still be identifiable: {printed}"
+    );
 }

@@ -142,6 +142,8 @@ mod tests {
             [
                 "bossbar",
                 "bug",
+                "report",
+                "bugreport",
                 "clear",
                 "deop",
                 "damage",

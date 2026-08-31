@@ -113,7 +113,10 @@ impl FotonServer {
                     FotonServerError::Core(format!("failed to validate groups config: {error}"))
                 },
             )?;
-        let runtime_config = foton_config.server.into_runtime_config();
+        let runtime_config = foton_config
+            .server
+            .into_runtime_config()
+            .map_err(FotonServerError::Core)?;
 
         let server = Server::new_with_commands(
             chunk_runtime,
