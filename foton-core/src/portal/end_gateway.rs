@@ -95,20 +95,39 @@ pub(crate) fn final_chunks_after_search(
     portal_pos: BlockPos,
     source_is_end: bool,
 ) -> Option<Vec<ChunkPos>> {
-    match gateway_exit_state(world, portal_pos)? {
+    let Some(state) = gateway_exit_state(world, portal_pos) else {
+        log::warn!("end gateway at {portal_pos:?} lost its block entity mid-search");
+        return None;
+    };
+    match state {
         GatewayExitState::Stored { exit, exact: true } => Some(chunks_for_block_square(exit, 0)),
         GatewayExitState::Stored { exit, exact: false } => Some(chunks_for_block_square(
             exit.offset(0, 2, 0),
             EXIT_POSITION_SEARCH_RADIUS,
         )),
         GatewayExitState::Missing { .. } if source_is_end => {
-            let anchor = find_teleport_anchor(world, portal_pos)?;
+            // The search walks chunk by chunk toward the outer islands and
+            // gives up the moment one of them is not loaded, which is the
+            // likeliest way a gateway the dragon opened ends up inert.
+            let Some(anchor) = find_teleport_anchor(world, portal_pos) else {
+                log::warn!(
+                    "end gateway at {portal_pos:?} could not read its way out to the \
+                     outer islands; a chunk along the search line is missing"
+                );
+                return None;
+            };
             Some(chunks_for_block_square(
                 anchor.pos(),
                 VALID_TELEPORT_SEARCH_RADIUS,
             ))
         }
-        GatewayExitState::Missing { .. } => None,
+        GatewayExitState::Missing { .. } => {
+            log::warn!(
+                "end gateway at {portal_pos:?} stores no exit and is not in the End, \
+                 so the search has nowhere to go"
+            );
+            None
+        }
     }
 }
 

@@ -705,11 +705,21 @@ impl ServerJob for EndGatewayTeleportJob {
                 EndGatewayTeleportPhase::LoadingReady { request } => match request.poll() {
                     ChunkRequestState::Pending { .. } => return JobPoll::Pending,
                     ChunkRequestState::Cancelled => {
+                        log::warn!(
+                            "end gateway at {portal_pos:?}: the chunks around its exit \
+                             were dropped before the teleport could run"
+                        );
                         clear_pending_world_change(&entity, pending_token);
                         return JobPoll::Finished;
                     }
                     ChunkRequestState::Ready => {
                         let Some(_ready) = request.ready_chunks() else {
+                            // Ready and then not readable is a state this job
+                            // has no answer for, and it will retry forever.
+                            log::warn!(
+                                "end gateway at {portal_pos:?}: its exit chunks read \
+                                 ready but could not be taken"
+                            );
                             return JobPoll::Pending;
                         };
                         let Some(transition) = end_gateway::calculate_transition(
@@ -733,11 +743,19 @@ impl ServerJob for EndGatewayTeleportJob {
                 EndGatewayTeleportPhase::LoadingSearchPath { request } => match request.poll() {
                     ChunkRequestState::Pending { .. } => return JobPoll::Pending,
                     ChunkRequestState::Cancelled => {
+                        log::warn!(
+                            "end gateway at {portal_pos:?}: the chunks it searches for \
+                             the outer island were dropped mid-search"
+                        );
                         clear_pending_world_change(&entity, pending_token);
                         return JobPoll::Finished;
                     }
                     ChunkRequestState::Ready => {
                         let Some(_ready) = request.ready_chunks() else {
+                            log::warn!(
+                                "end gateway at {portal_pos:?}: its search chunks read \
+                                 ready but could not be taken"
+                            );
                             return JobPoll::Pending;
                         };
                         let Some(chunks) = end_gateway::final_chunks_after_search(

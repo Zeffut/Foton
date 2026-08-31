@@ -297,6 +297,12 @@ impl Server {
         runs_normally: bool,
     ) {
         if !portal_entity_still_valid(&entity, &source_world, pending_token) {
+            // The walk from the block to here crosses a tick boundary, so the
+            // entity can be gone, disconnected, or in another world by now.
+            log::warn!(
+                "end gateway at {portal_pos:?}: the entity stopped being eligible \
+                 before its teleport was queued"
+            );
             clear_pending_world_change(&entity, pending_token);
             return;
         }
