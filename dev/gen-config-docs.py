@@ -15,83 +15,42 @@ import json
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import config_schema as cs
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
-CONTENT = REPO / "package-content"
 OUTPUT = REPO / "CONFIGURATION.md"
 
-FILES = [
-    ("config.toml", "config.schema.json", "Server", "server settings and logging"),
-    ("worlds.toml", "worlds.schema.json", "Worlds", "dimensions, domains and storage"),
-    ("groups.toml", "groups.schema.json", "Permissions", "groups and permission rules"),
-]
-
-
-def resolve(node, root):
-    """Follows a local `$ref` until the node is a real subschema."""
-    seen = 0
-    while isinstance(node, dict) and "$ref" in node:
-        ref = node["$ref"]
-        if not ref.startswith("#/"):
-            return node
-        target = root
-        for part in ref[2:].split("/"):
-            target = target[part]
-        node = target
-        seen += 1
-        if seen > 16:
-            raise RuntimeError(f"cyclic $ref at {ref}")
-    return node
-
-
-def ref_name(node):
-    """Definition name a property points at, when it points at one."""
-    ref = node.get("$ref", "") if isinstance(node, dict) else ""
-    return ref.rsplit("/", 1)[-1] if ref.startswith("#/definitions/") else None
+FILES = cs.FILES
 
 
 def type_of(node, root):
-    """A short human type for one property."""
-    name = ref_name(node)
-    if name:
-        return f"[`{name}`](#{name.replace('_', '-')})"
-    node = resolve(node, root)
-    if "enum" in node:
-        return " \\| ".join(f"`{v}`" for v in node["enum"])
-    for key in ("oneOf", "anyOf"):
-        if key in node:
-            parts = [type_of(v, root) for v in node[key]]
-            return " or ".join(dict.fromkeys(parts))
-    kind = node.get("type", "")
+    """A short human type for one property, as Markdown."""
+    kind, value = cs.type_parts(node, root)
+    if kind == "ref":
+        return f"[`{value}`](#{value.replace('_', '-')})"
+    if kind == "enum":
+        return " \\| ".join(f"`{v}`" for v in value)
+    if kind == "union":
+        return " or ".join(dict.fromkeys(_format_part(p) for p in value))
     if kind == "array":
-        inner = node.get("items")
-        return f"array of {type_of(inner, root)}" if inner else "array"
+        return f"array of {_format_part(value)}" if value else "array"
     if kind == "object":
         return "table"
-    return kind or "any"
+    return value
 
 
-def limits(node, root):
-    """Range and format constraints, as a short phrase."""
-    node = resolve(node, root)
-    out = []
-    full_width = (node.get("minimum"), node.get("maximum")) in {
-        (-(2**31), 2**31 - 1), (-(2**63), 2**63 - 1)
-    }
-    if full_width:
-        pass
-    elif "minimum" in node and "maximum" in node:
-        out.append(f"{node['minimum']}–{node['maximum']}")
-    elif "minimum" in node:
-        out.append(f"≥ {node['minimum']}")
-    elif "maximum" in node:
-        out.append(f"≤ {node['maximum']}")
-    if node.get("format"):
-        out.append(node["format"])
-    if node.get("minItems"):
-        out.append(f"≥ {node['minItems']} item(s)")
-    if node.get("uniqueItems"):
-        out.append("unique")
-    return ", ".join(out)
+def _format_part(part):
+    kind, value = part
+    if kind == "ref":
+        return f"[`{value}`](#{value.replace('_', '-')})"
+    if kind == "enum":
+        return " \\| ".join(f"`{v}`" for v in value)
+    if kind == "array":
+        return f"array of {_format_part(value)}" if value else "array"
+    if kind == "object":
+        return "table"
+    return value
 
 
 def cell(text):
@@ -99,10 +58,9 @@ def cell(text):
 
 
 def default_of(node, root):
-    node = resolve(node, root)
-    if "default" not in node:
+    value = cs.default_of(node, root)
+    if value is None:
         return ""
-    value = node["default"]
     if isinstance(value, bool):
         return f"`{str(value).lower()}`"
     if isinstance(value, str) and value == "":
@@ -110,17 +68,13 @@ def default_of(node, root):
     return f"`{json.dumps(value)}`"
 
 
-def table(node, root, required):
-    rows = []
-    for name, prop in (node.get("properties") or {}).items():
-        resolved = resolve(prop, root)
-        if not ref_name(prop) and resolved.get("type") == "object" and resolved.get("properties"):
-            continue  # rendered as its own section
-        mark = " *(required)*" if name in required else ""
-        rows.append(
-            f"| `{name}`{mark} | {type_of(prop, root)} | {default_of(prop, root)} "
-            f"| {cell(limits(prop, root))} | {cell(resolved.get('description'))} |"
-        )
+def table(node, root):
+    rows = [
+        f"| `{name}`{' *(required)*' if required else ''} | {type_of(prop, root)} "
+        f"| {default_of(prop, root)} | {cell(cs.limits(prop, root))} "
+        f"| {cell(cs.resolve(prop, root).get('description'))} |"
+        for name, prop, required in cs.rows(node, root)
+    ]
     if not rows:
         return []
     return ["| Key | Type | Default | Range | Meaning |",
@@ -128,17 +82,15 @@ def table(node, root, required):
 
 
 def section(node, root, title, depth, lines):
-    node = resolve(node, root)
+    node = cs.resolve(node, root)
     description = node.get("description")
     if description and depth > 3:
         lines.append(f"{description}\n")
-    lines.extend(table(node, root, set(node.get("required") or [])))
-    for name, prop in (node.get("properties") or {}).items():
-        resolved = resolve(prop, root)
-        if not ref_name(prop) and resolved.get("type") == "object" and resolved.get("properties"):
-            heading = f"{title}.{name}" if title else name
-            lines.append(f"{'#' * depth} `[{heading}]`\n")
-            section(prop, root, heading, depth + 1, lines)
+    lines.extend(table(node, root))
+    for name, prop in cs.subsections(node, root):
+        heading = f"{title}.{name}" if title else name
+        lines.append(f"{'#' * depth} `[{heading}]`\n")
+        section(prop, root, heading, depth + 1, lines)
 
 
 def render():
@@ -154,7 +106,7 @@ def render():
         "",
     ]
     for toml_name, schema_name, title, blurb in FILES:
-        schema = json.loads((CONTENT / schema_name).read_text())
+        schema = cs.load(schema_name)
         lines += [f"## `{toml_name}` — {title}", "", f"{schema.get('description', blurb)}.", ""]
         body = []
         section(schema, schema, "", 3, body)
