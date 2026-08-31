@@ -34,13 +34,19 @@ class Facts(unittest.TestCase):
     def test_zero_total_section_does_not_divide_by_zero(self):
         """A section reporting no classes at all (e.g. a registry section that
         stops existing) must not crash all()'s percentage -- the max(total, 1)
-        guard in facts.all() exists precisely for this."""
-        empty = {"covered": 0, "total": 0, "missing": []}
-        fake = {"blocks": empty, "items": empty, "entities": empty}
-        with mock.patch.object(facts.coverage, "counts", return_value=fake):
-            f = facts.all()
-        for kind in ("blocks", "items", "entities"):
-            self.assertEqual(f[f"{kind}_percent"], "0")
+        guard in facts.all() exists precisely for this. Driven through the
+        real coverage.counts() reading a real (edited) classes.json, not a
+        fabricated dict standing in for it: only the file changes, every
+        function in the chain -- coverage.counts(), implemented_classes(),
+        facts.all() -- runs unmodified."""
+        registry = json.loads(facts.coverage.CLASSES.read_text(encoding="utf-8"))
+        registry["blocks"] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            classes_path = pathlib.Path(tmp) / "classes.json"
+            classes_path.write_text(json.dumps(registry), encoding="utf-8")
+            with mock.patch.object(facts.coverage, "CLASSES", classes_path):
+                f = facts.all()
+        self.assertEqual(f["blocks_percent"], "0")
 
     def test_missing_blocks_are_named_not_counted(self):
         self.assertIn("Block", self.f["blocks_missing_list"])
