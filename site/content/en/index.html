@@ -3,8 +3,8 @@
     <div class="hero">
       <div>
         <div class="eyebrow">MINECRAFT {{ mc_target }}</div>
-        <h1>A Minecraft server that refuses to guess.</h1>
-        <p style="font-size:19px">An independent Java Edition server, written in Rust. It behaves like vanilla because it is written against vanilla's own source — not against someone's memory of it.</p>
+        <h1>Vanilla, rebuilt in Rust.</h1>
+        <p style="font-size:19px">A Java Edition server your players cannot tell from vanilla, with the heavy work moved off the tick where it belongs.</p>
         <div class="actions">
           <a class="btn btn-solid" href="/en/start/">Get started</a>
           <a class="btn btn-ghost" href="https://github.com/Zeffut/Foton">Source</a>
@@ -19,20 +19,20 @@
     <div class="wrap">
       <div class="cols">
         <div>
-          <h3>Vanilla, not an approximation</h3>
-          <p>Gameplay, protocol, registries and world generation are written against the decompiled source. Where a faster design would change what a player sees, the player wins.</p>
+          <h3>The tick stays free</h3>
+          <p>Chunk generation, lighting and packet handling run beside the game loop instead of inside it. What players feel as lag is work that never had to be there.</p>
         </div>
         <div>
-          <h3>Nothing transcribed by hand</h3>
-          <p>Every registry, block, item and worldgen value comes out of an extractor. A struct named after its vanilla class is its own registration — there is no list to keep in sync.</p>
+          <h3>Your server, your rules</h3>
+          <p>Worlds, permission groups and server behaviour are plain TOML, checked against a schema on every boot. A typo is a startup error, not a mystery three days later.</p>
         </div>
         <div>
-          <h3>Concurrent where vanilla allows</h3>
-          <p>Chunk generation, lighting and packet processing run off the tick. Gameplay stays synchronous, because vanilla's semantics depend on the order things happen in.</p>
+          <h3>No surprises for your players</h3>
+          <p>Redstone, mob behaviour, loot and world generation match the game they already know. Nothing is reimplemented from memory.</p>
         </div>
         <div>
-          <h3>Configured, not patched</h3>
-          <p>Worlds, permissions and server behaviour are TOML, validated against schemas the server ships with. Every key is documented, and the documentation is generated from those schemas.</p>
+          <h3>One binary, no runtime</h3>
+          <p>No JVM to size, no garbage collector to tune, no flags to copy from a forum post. Drop it next to a config folder and start it.</p>
         </div>
       </div>
     </div>
@@ -43,6 +43,7 @@
       <div>
         <h2>Running in one command.</h2>
         <p>The world generates, saves to the Anvil format vanilla uses, and reloads where you left it. Point a Minecraft {{ mc_target }} client at port 25565 and play.</p>
+        <p style="font-size:15px">Foton runs no Bukkit, Spigot or Fabric plugin — it is its own server, and a plugin API is not built yet. If your server needs one today, Foton is not that server today.</p>
         <div class="actions">
           <a class="btn btn-solid" href="/en/start/">Installation and first boot</a>
           <a class="btn btn-ghost" href="/en/configuration/">Configuration</a>
