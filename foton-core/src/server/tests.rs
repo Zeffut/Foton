@@ -70,6 +70,8 @@ use super::{
     offline_uuid, portal_entity_still_valid, validate_player_permission_group_update,
 };
 use crate::boss_event::custom::DomainCustomBossEvents;
+use crate::event::{EventBus, PlayerJoinEvent};
+use foton_utils::Identifier;
 
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,
@@ -271,6 +273,7 @@ async fn test_server_with_worlds(
         pending_player_joins: PlayerJoinQueue::new(),
         pending_player_disconnects: PlayerDisconnectQueue::new(),
         pending_world_changes: SyncMutex::new(Vec::new()),
+        events: EventBus::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
 }
@@ -2726,6 +2729,59 @@ fn command_source_and_operator_checks_use_published_subject_state() {
         drop(revoked_source);
         drop(granted_source);
         drop(player);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// A listener that silences the join announcement actually silences it.
+///
+/// The point of this test is the wiring, not the bus. The bus has its own
+/// tests and they pass whether or not anything ever fires it -- which is the
+/// exact shape of bug that let a fully modeled `kinetic_weapon` component sit
+/// in the tree for months with no call site. So this one goes through
+/// `broadcast_player_join_message`, the function the server really calls, and
+/// asserts on the packet a player would really have received.
+#[test]
+fn a_listener_can_silence_the_join_announcement() {
+    let world = Arc::clone(test_world());
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("join-message-silenced");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        let (existing_player, existing_packets) =
+            test_player_with_packets(&server, Arc::clone(&world), "ExistingPlayer", 1);
+        let (joining_player, _) = test_player_with_packets(&server, world, "NewName", 2);
+        assert!(server.online_players.insert(existing_player));
+        assert!(server.online_players.insert(Arc::clone(&joining_player)));
+
+        server
+            .events
+            .on::<PlayerJoinEvent, _>(Identifier::new_static("test", "quiet"), |event| {
+                event.set_message(None);
+            });
+
+        server.broadcast_player_join_message(&joining_player, None);
+
+        assert!(
+            existing_packets.lock().is_empty(),
+            "the listener cleared the message, so nothing should have been sent"
+        );
+
+        drop(joining_player);
         drop(server);
         if let Err(error) = fs::remove_dir_all(&storage_root).await {
             panic!("test storage should be removed: {error}");
