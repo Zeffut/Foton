@@ -8,6 +8,9 @@ extend-exclude = [
     # type (here `html`) never falls through to a glob-based custom type, so
     # exclusion is the only lever that reliably works.
     "site/content/fr/**",
+    # Players' own words, in whatever language they wrote them. This is data
+    # the site renders verbatim, not prose anyone should be correcting.
+    "dev/bug-reports.jsonl",
 ]
 
 [type.locale]

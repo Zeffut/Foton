@@ -148,3 +148,42 @@ html { scroll-behavior: smooth; }
   color: var(--ink-3); border-bottom: 1px solid var(--rule);
 }
 .lang:hover { color: var(--ink); text-decoration: none; border-bottom-color: var(--ink); }
+
+/* Player-filed reports. A card per report, its state read at a glance from the
+   left edge -- accent for what is still open, ink for what is done. The three
+   shades stay in the warm family the rest of the page is built from. */
+.reports { display: grid; gap: 14px; margin-top: 28px; }
+
+.report {
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--rule);
+  border-radius: 3px;
+  padding: 16px 18px 14px;
+}
+.report.is-open { border-left-color: var(--accent); }
+.report.is-fixed { border-left-color: var(--ink); }
+.report.is-closed { border-left-color: #c8c0af; }
+
+.report header {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em;
+  text-transform: uppercase; margin-bottom: 10px;
+}
+.report-no { color: var(--ink); font-weight: 500; }
+.report-state { color: var(--accent); }
+.report.is-fixed .report-state { color: var(--ink); }
+.report.is-closed .report-state { color: #a49b86; }
+.report-cat { color: var(--ink-3); margin-left: auto; letter-spacing: 0.08em; }
+
+.report p { margin: 0; color: var(--ink); font-size: 16px; max-width: 78ch; }
+.report footer { margin-top: 10px; font-family: var(--mono); letter-spacing: 0.04em; }
+
+/* What was actually done, so a "fixed" claim can be checked rather than trusted. */
+.report-note {
+  margin-top: 10px !important;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px !important;
+  color: var(--ink-3) !important;
+}

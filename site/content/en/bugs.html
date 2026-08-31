@@ -1,0 +1,67 @@
+<main>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <div class="eyebrow">FROM INSIDE THE GAME</div>
+        <h1>What the testers found.</h1>
+        <p style="font-size:19px">Every bug below was filed by a player standing in the world
+          where it happened, without leaving the game. Nothing here is summarized, triaged or
+          reworded — a report reads the way its author wrote it.</p>
+        <div class="cmd"><b>/</b>bug</div>
+      </div>
+      <div>
+        <div class="cols">
+          <div class="stat">
+            <b>{{ reports_total }}</b>
+            <div class="label">FILED</div>
+          </div>
+          <div class="stat">
+            <b>{{ reports_fixed }}</b>
+            <div class="label">FIXED SINCE</div>
+          </div>
+          <div class="stat">
+            <b>{{ reports_open }}</b>
+            <div class="label">STILL OPEN</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">HOW A REPORT GETS HERE</div>
+      <h2>Typing it should be easier than remembering it.</h2>
+      <div class="cols-2">
+        <div>
+          <p>A test session is worth exactly what the testers noticed, and most of that is lost
+            in the gap between noticing something and writing it down somewhere else. So
+            <code>/bug</code> opens a real form on the player's screen — a category to pick and a
+            box to describe what happened. <code>/report</code> and <code>/bugreport</code> open
+            the same one, because a tester types the word that comes to mind and a wrong guess
+            should not cost the report.</p>
+        </div>
+        <div>
+          <p>Everything that can be captured without asking is captured: who filed it, which
+            world, the exact position, and the build it was filed against. A reporter writes the
+            one thing a server cannot work out on its own — what they expected to happen
+            instead.</p>
+          <p class="rest">Categories: {{ bug_categories }}.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">THE REPORTS</div>
+      <h2>As filed.</h2>
+      <p>Reports are published as they were written, in the language their author used. A
+        report marked fixed has a line saying what was actually done, so the claim can be
+        checked against the commit history rather than taken on trust.</p>
+      {{ reports }}
+      <p class="rest">The reporter's name is shown because a report is someone's work. Their
+        account identifier is not, and never leaves the server that received it.</p>
+    </div>
+  </section>
+</main>

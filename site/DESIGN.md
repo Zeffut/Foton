@@ -300,3 +300,57 @@ constant.
 
 The design canvas still carries six directions across two pages. Once the site
 ships, it should be consolidated to the retained one.
+
+## Amendment: the reports page, and where reports live
+
+Accepted 2026-08-31, after the first public test session. It adds a fifth page
+and one serverless function, and it changes nothing above.
+
+**The problem.** Testers file bugs from inside the game with `/bug`, and the
+reports land in `reports/bugs.jsonl` on whatever machine the server runs on.
+That is the right place for them to be written and the wrong place for them to
+stay: nobody but the operator can read them, and the person who has to fix them
+has to go and fetch them.
+
+**The decision: the repository is the database.** A filed report is posted to
+`/api/report`, a Python function that appends it to `dev/bug-reports.jsonl`
+through the GitHub contents API. That commit is a push, the push rebuilds the
+site, and `gen-site.py` renders the page from the committed file — the same
+rule decision 2 already sets for every other fact. No database, no second
+service, and a report that reaches the page is a report anyone can find in the
+history.
+
+Three things follow from it, and they are why it was chosen over a database
+with a live page:
+
+- **A fix and the report it closes are one commit.** Marking a report fixed
+  means editing the same file, in the same change as the code. The claim is
+  checkable rather than asserted, which is the rule the rest of the repository
+  already runs on.
+- **The build stays offline.** The page reads a file, not an API. A deploy
+  cannot fail because a service was down, and it cannot render a report that is
+  not in the history.
+- **Nothing new is installed.** The function is standard library only, because
+  `installCommand` installs nothing and this should not be the one thing that
+  changes that.
+
+**What is published, and what is not.** The repository is public, so the data
+file is public. The reporter's name is kept — a report is someone's work and
+credit is the point. Their account identifier is dropped at the door, in the
+function, because it helps reproduce nothing. World, position, version and
+category are kept: they are what a fix starts from.
+
+**Reports are not translated.** The prose around them is written twice like
+every other page; the reports themselves render in the language their author
+used. Translating a bug report is rewriting it, and the page's whole claim is
+that it says what the tester said.
+
+**Failure is one-directional and that is deliberate.** The game server writes
+its own file first and posts second, so an intake that is down costs the site
+freshness and costs the reporter nothing. The server logs the number of any
+report it could not deliver, which is exactly what a backfill needs to know.
+
+**Risk carried.** A public data file that anyone with the token can append to.
+Mitigated by a bearer token the server holds and a size limit, not solved: a
+leaked token means junk commits. It is recoverable — the file is versioned —
+and the alternative was a database this design would rather not have.

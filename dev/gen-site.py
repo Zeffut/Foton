@@ -17,6 +17,7 @@ than silently falling back to English.
 
 import argparse
 import importlib.util
+import datetime
 import json
 import pathlib
 import re
@@ -44,6 +45,7 @@ PAGES = [
     ("start", "start/index.html", "nav_start"),
     ("configuration", "configuration/index.html", "nav_configuration"),
     ("contributing", "contributing/index.html", "nav_contributing"),
+    ("bugs", "bugs/index.html", "nav_bugs"),
 ]
 
 STRINGS = {
@@ -51,6 +53,7 @@ STRINGS = {
         "nav_start": "Get started",
         "nav_configuration": "Configuration",
         "nav_contributing": "Contributing",
+        "nav_bugs": "Reports",
         "chip": "PRE-ALPHA",
         "switch": "Français",
         "footer_source": "Source",
@@ -62,11 +65,19 @@ STRINGS = {
         "desc_configuration": "Every Foton configuration key, with its type, default and range, generated from the schemas the server validates against.",
         "title_contributing": "Contributing — Foton",
         "desc_contributing": "How Foton is built: the behavior mechanism, the engineering rules, and the checks a change has to clear.",
+        "title_bugs": "Reports — Foton",
+        "desc_bugs": "Every bug players have filed from inside the game, as they filed it, with what has been fixed since.",
+        "report_open": "open",
+        "report_fixed": "fixed",
+        "report_closed": "not a defect",
+        "report_none": "No reports yet. The first one will appear here on its own.",
+        "report_in": "in",
     },
     "fr": {
         "nav_start": "Démarrer",
         "nav_configuration": "Configuration",
         "nav_contributing": "Contribuer",
+        "nav_bugs": "Rapports",
         "chip": "PRÉ-ALPHA",
         "switch": "English",
         "footer_source": "Code source",
@@ -78,6 +89,13 @@ STRINGS = {
         "desc_configuration": "Chaque clé de configuration de Foton, avec son type, sa valeur par défaut et sa plage, générée depuis les schémas contre lesquels le serveur valide.",
         "title_contributing": "Contribuer — Foton",
         "desc_contributing": "Comment Foton est construit : le mécanisme de comportement, les règles d'ingénierie, et la barre qu'un changement doit passer.",
+        "title_bugs": "Rapports — Foton",
+        "desc_bugs": "Tous les bugs signalés par les joueurs depuis le jeu, tels qu'ils ont été déposés, et ce qui a été corrigé depuis.",
+        "report_open": "ouvert",
+        "report_fixed": "corrigé",
+        "report_closed": "pas un défaut",
+        "report_none": "Aucun rapport pour l'instant. Le premier apparaîtra ici tout seul.",
+        "report_in": "dans",
     },
 }
 
@@ -157,6 +175,57 @@ def switcher_html(lang, target):
             f'lang="{other_code}">{strings(lang)["switch"]}</a>')
 
 
+def escape(text):
+    """HTML-escapes a report's own words.
+
+    Everything on this page below the prose was typed by a player into a game
+    client, so it is untrusted input rendered into a public page. Escaping is
+    not a nicety here.
+    """
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def reports_html(text):
+    """Renders every filed report, newest first.
+
+    The report's own words are shown as they were written, in the language
+    their author used. Translating them would be rewriting them, and the point
+    of the page is that it says what the tester said.
+    """
+    reports = facts.bug_reports()
+    if not reports:
+        return f'<p class="rest">{escape(text["report_none"])}</p>'
+
+    rows = []
+    for report in reports:
+        status = report.get("status", "open")
+        label = text.get(f"report_{status}", status)
+        when = datetime.datetime.fromtimestamp(
+            report.get("at", 0), datetime.timezone.utc
+        ).strftime("%Y-%m-%d")
+        world = report.get("world", "").split(":")[-1].replace("_", " ")
+        note = report.get("note")
+        rows.append(
+            f'<article class="report is-{escape(status)}">'
+            f'<header><span class="report-no">#{escape(report.get("number", "?"))}</span>'
+            f'<span class="report-state">{escape(label)}</span>'
+            f'<span class="report-cat">{escape(report.get("category", ""))}</span></header>'
+            f"<p>{escape(report.get('description', ''))}</p>"
+            f'<footer class="rest">{escape(report.get("player", ""))} — {escape(when)}'
+            f' — {escape(world)} — {escape(text["report_in"])} '
+            f'{escape(report.get("version", ""))}</footer>'
+            + (f'<p class="report-note">{escape(note)}</p>' if note else "")
+            + "</article>"
+        )
+    return '<div class="reports">' + "".join(rows) + "</div>"
+
+
 def build(out_dir):
     """Renders every page in every language. Returns what was written."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -170,7 +239,8 @@ def build(out_dir):
             path_in_content = fragment(lang, slug)
             if not path_in_content.is_file():
                 raise SystemExit(f"missing fragment: {path_in_content}")
-            body = fill(path_in_content.read_text(encoding="utf-8"), values,
+            body = fill(path_in_content.read_text(encoding="utf-8"),
+                        {**values, "reports": reports_html(text)},
                         f"site/content/{lang}/{slug}.html")
             page = fill(shell, {
                 **values,

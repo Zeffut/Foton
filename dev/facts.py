@@ -73,6 +73,51 @@ def test_counts():
     return data
 
 
+def bug_reports():
+    """Every player-filed report the repository holds, newest first.
+
+    The file is append-only and written by the site's own ingest function, so
+    a report reaches the page by being committed -- the same rule every other
+    fact on the site follows. A malformed line stops the build rather than
+    quietly shortening the list: a report that vanishes is worse than one that
+    breaks a deploy, because nobody notices the first.
+    """
+    path = REPO / "dev" / "bug-reports.jsonl"
+    if not path.is_file():
+        return []
+    reports = []
+    for number, line in enumerate(_read(path, "the bug reports").splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            reports.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"bug-reports.jsonl line {number} is not valid JSON ({exc})") from exc
+    reports.sort(key=lambda report: report.get("at", 0), reverse=True)
+    return reports
+
+
+def bug_categories():
+    """The categories the in-game form offers, read from the server's own enum.
+
+    Typing this list into the page would let it drift from what a tester is
+    actually shown the moment a category is added or renamed.
+    """
+    source = _read(
+        REPO / "foton-core" / "src" / "bug_report.rs", "the bug report categories"
+    )
+    marker = "pub const fn label(self) -> &'static str {"
+    start = source.find(marker)
+    if start < 0:
+        raise SystemExit("cannot state the bug categories: BugCategory::label has moved")
+    end = source.find("\n    }", start)
+    labels = re.findall(r'=> "([^"]+)"', source[start:end])
+    if not labels:
+        raise SystemExit("cannot state the bug categories: BugCategory::label listed none")
+    return labels
+
+
 def _missing_list(names):
     """Comma-joins missing class names -- or says "none" outright once a
     category is fully covered, so the fact never renders an empty sentence."""
@@ -103,6 +148,11 @@ def all():
         out[f"{kind}_missing"] = str(len(entry["missing"]))
         out[f"{kind}_percent"] = str(percent)
         out[f"{kind}_missing_list"] = _missing_list(entry["missing"])
+    reports = bug_reports()
+    out["reports_total"] = str(len(reports))
+    out["reports_open"] = str(sum(1 for r in reports if r.get("status") == "open"))
+    out["reports_fixed"] = str(sum(1 for r in reports if r.get("status") == "fixed"))
+    out["bug_categories"] = ", ".join(bug_categories())
     for name, hole in (("_scene-island.svg", "scene_island"),
                        ("_scene-crates.svg", "scene_crates")):
         out[hole] = _read(REPO / "site" / "content" / name, f"the {hole} scene").strip()
