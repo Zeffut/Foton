@@ -22,6 +22,26 @@ ROOT = {
 }
 
 
+# Mirrors the real "label" property in config.schema.json: a oneOf where one
+# member is an enum (unhashable as a type_parts tuple) and the other is not.
+LABEL_LIKE_UNION = {
+    "oneOf": [
+        {"type": "string", "enum": ["bug_report", "status", "feedback"]},
+        {"type": "object", "properties": {"key": {"type": "string"}}},
+    ],
+}
+
+# Two members equal to each other -- including two identical enum parts,
+# which dict.fromkeys cannot hash -- plus one genuinely distinct member.
+DEDUP_UNION = {
+    "anyOf": [
+        {"enum": ["auto", "manual"]},
+        {"enum": ["auto", "manual"]},
+        {"type": "integer"},
+    ],
+}
+
+
 class TypeParts(unittest.TestCase):
     def test_a_ref_reports_the_definition_name(self):
         self.assertEqual(cs.type_parts(ROOT["properties"]["domain"], ROOT), ("ref", "Domain"))
@@ -37,6 +57,23 @@ class TypeParts(unittest.TestCase):
     def test_a_plain_type_reports_itself(self):
         self.assertEqual(cs.type_parts(ROOT["properties"]["seed"], ROOT),
                          ("scalar", "integer"))
+
+
+class UnionDedup(unittest.TestCase):
+    def test_a_union_member_that_is_an_enum_does_not_raise_and_keeps_its_parts(self):
+        self.assertEqual(
+            cs.type_parts(LABEL_LIKE_UNION, LABEL_LIKE_UNION),
+            ("union", [
+                ("enum", ["bug_report", "status", "feedback"]),
+                ("object", None),
+            ]),
+        )
+
+    def test_equal_union_members_collapse_to_one_including_enums(self):
+        self.assertEqual(
+            cs.type_parts(DEDUP_UNION, DEDUP_UNION),
+            ("union", [("enum", ["auto", "manual"]), ("scalar", "integer")]),
+        )
 
 
 class Limits(unittest.TestCase):
