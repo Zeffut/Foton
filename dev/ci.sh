@@ -30,6 +30,7 @@ run "config reference is current"                  python3 dev/gen-config-docs.p
 # checked the default package.
 run "cargo clippy -r --workspace --all-targets --all-features -D warnings" cargo clippy -r --workspace --all-targets --all-features -- -D warnings
 run "cargo test --workspace"                       cargo test --workspace
+run "test counts are current"                      python3 dev/count-tests.py --check
 
 echo
 if [ $FAIL -eq 0 ]; then echo "########## ALL GREEN ##########"; else echo "########## FAILURES ##########"; fi
