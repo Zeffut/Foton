@@ -102,9 +102,12 @@ Direction E, *Isometric Atlas*, from the design canvas:
 - Warm paper ground `#f0ece2`, ink `#17150f`, accent `#b0741a`.
 - Bricolage Grotesque for display, DM Mono for data and code.
 - Voxel scenes rendered by `dev/gen-logo.py`'s own scanline renderer,
-  generalised from its single wall plane to an `(i, j, k)` space. Cube edge 12
-  source pixels at scale 5 — the mark's own settings, so every pixel on the site
-  is the same size as the pixels in the logo.
+  generalised from its single wall plane to an `(i, j, k)` space. Rasterised at
+  five display pixels per source pixel, which is the mark's own scale — the PNG
+  is 320px from a 64px grid — so a pixel in a scene is the size of a pixel in
+  the logo beside it. The cube edge is 12 source pixels rather than the logo's
+  10: the mark's edge is the largest that fits a 64px icon canvas, a constraint
+  the site does not have.
 - Materials keep the three-shades-per-face trick: grass, stone, deep stone and
   glow.
 
