@@ -3,8 +3,8 @@
     <div class="hero">
       <div>
         <div class="eyebrow">MINECRAFT {{ mc_target }}</div>
-        <h1>Vanilla, rebuilt in Rust.</h1>
-        <p style="font-size:19px">A Java Edition server your players cannot tell from vanilla, with the heavy work moved off the tick where it belongs.</p>
+        <h1>The same Minecraft. A faster server.</h1>
+        <p style="font-size:19px">Your players get the game they already know. You get a server that keeps up when they wander off into new territory.</p>
         <div class="actions">
           <a class="btn btn-solid" href="/en/start/">Get started</a>
           <a class="btn btn-ghost" href="https://github.com/Zeffut/Foton">Source</a>
@@ -19,38 +19,33 @@
     <div class="wrap">
       <div class="cols">
         <div>
-          <h3>The tick stays free</h3>
-          <p>Chunk generation, lighting and packet handling run beside the game loop instead of inside it. What players feel as lag is work that never had to be there.</p>
+          <h3>Exploring doesn't slow anyone down</h3>
+          <p>New land and its lighting are worked out while the game keeps running, instead of pausing it. One player heading somewhere new doesn't cost everyone else their frame rate.</p>
         </div>
         <div>
-          <h3>Your server, your rules</h3>
-          <p>Worlds, permission groups and server behaviour are plain TOML, checked against a schema on every boot. A typo is a startup error, not a mystery three days later.</p>
+          <h3>Everything is a settings file</h3>
+          <p>Your worlds, who is allowed to do what, and how the server behaves are plain text files you can open and read. Put in a value that cannot work and the server says so when it starts, instead of breaking a week later.</p>
         </div>
         <div>
-          <h3>No surprises for your players</h3>
-          <p>Redstone, mob behaviour, loot and world generation match the game they already know. Nothing is reimplemented from memory.</p>
+          <h3>Your players won't notice the difference</h3>
+          <p>Redstone, mobs, loot, the way the world is built — all of it behaves like the game they already play. Nothing here is an approximation of it.</p>
         </div>
         <div>
-          <h3>One binary, no runtime</h3>
-          <p>No JVM to size, no garbage collector to tune, no flags to copy from a forum post. Drop it next to a config folder and start it.</p>
+          <h3>Nothing else to install</h3>
+          <p>One file to run. No Java to set up, no memory settings to guess at, and no start-up options copied off a forum post.</p>
         </div>
       </div>
     </div>
   </section>
 
   <section class="band" style="border-bottom:0">
-    <div class="wrap split">
-      <div>
-        <h2>Running in one command.</h2>
-        <p>The world generates, saves to the Anvil format vanilla uses, and reloads where you left it. Point a Minecraft {{ mc_target }} client at port 25565 and play.</p>
-        <p style="font-size:15px">Foton runs no Bukkit, Spigot or Fabric plugin — it is its own server, and a plugin API is not built yet. If your server needs one today, Foton is not that server today.</p>
-        <div class="actions">
-          <a class="btn btn-solid" href="/en/start/">Installation and first boot</a>
-          <a class="btn btn-ghost" href="/en/configuration/">Configuration</a>
-        </div>
-      </div>
-      <div>
-        <pre><code>cargo run -p foton</code></pre>
+    <div class="wrap">
+      <h2>Running in one command.</h2>
+      <p>The world builds itself, saves, and comes back the way you left it. Your players join with the Minecraft they already have, on the usual port.</p>
+      <p style="font-size:15px">Foton doesn't run plugins yet — not Bukkit, not Spigot, not Fabric. If your server depends on them today, this isn't the one for you yet.</p>
+      <div class="actions">
+        <a class="btn btn-solid" href="/en/start/">Installation and first steps</a>
+        <a class="btn btn-ghost" href="/en/configuration/">Settings</a>
       </div>
     </div>
   </section>
