@@ -66,7 +66,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 30px 0 24px; }
 .btn { font-weight: 600; padding: 14px 26px; border-radius: 3px; display: inline-block; }
 .btn-solid { background: var(--ink); color: var(--paper); }
-.btn-solid:hover { background: #000; color: var(--paper); text-decoration: none; }
+.btn-solid:hover { background: #0a0906; color: var(--paper); text-decoration: none; }
 .btn-ghost { border: 1px solid #c8c0af; color: var(--ink); }
 .btn-ghost:hover { border-color: var(--ink); text-decoration: none; }
 

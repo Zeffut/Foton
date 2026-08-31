@@ -111,7 +111,15 @@ default theme at its own address.
 
 Direction E, *Isometric Atlas*, from the design canvas:
 
-- Warm paper ground `#f0ece2`, ink `#17150f`, accent `#b0741a`.
+- Warm paper ground `#f0ece2`, ink `#17150f`, accent `#b0741a`, rule `#ddd6c7`,
+  muted ink `#5c5648` and `#6f6858`, glow `#ffe9a8`. Six shades are derived from
+  those and are as deliberate as the base: `#e9e4d8` (paper, one step down, for
+  code blocks), `#7d5210` (accent darkened, for a visited or hovered link),
+  `#dfc99a` (accent lightened, for the pre-alpha chip's border), `#c8c0af` (a
+  rule dark enough to read as a control border), `#cfc7b4` (paper tinted for
+  text sitting on ink) and `#a49b86` (ink muted far enough to sit beside a
+  large figure without competing). Every one of them stays in the warm family;
+  a neutral grey or a pure black does not belong on this page.
 - Bricolage Grotesque for display, DM Mono for data and code.
 - Voxel scenes rendered by `dev/gen-logo.py`'s own scanline renderer,
   generalized from its single wall plane to an `(i, j, k)` space. Rasterized at
