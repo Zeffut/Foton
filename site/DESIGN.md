@@ -26,13 +26,14 @@ what does.
 - A getting-started guide.
 - A generated configuration reference.
 - A contributing guide.
+- All four in English and French.
 
 ### Out of scope
 
 - A parity page. The home page carries a condensed status section instead.
 - Any visual integration of the rustdoc output. It is parked at a sub-path and
   keeps its own default theme.
-- A blog, a changelog, search, analytics, comments, i18n, dark mode.
+- A blog, a changelog, search, analytics, comments, dark mode.
 
 ## Three decisions
 
@@ -82,30 +83,58 @@ are shared.
 guards `CONFIGURATION.md`. What it can guard is different, though: the site's
 output is not committed, so there is nothing to diff. See *Verification*.
 
-### 3. The site deploys to Vercel at `foton.zeffut.fr`; `gh-pages` keeps rustdoc
+### 3. The site deploys to Vercel and rebuilds itself on every push
 
-The site gets its own host and its own domain. `gh-pages` is left to the API
-documentation alone, exactly as it is today, so `docs.yml` needs no change and
-the two never contend for the same branch.
+The site has its own host and its own domain, `foton.zeffut.fr`. `gh-pages` is
+left to the API documentation alone, exactly as it is today, so `docs.yml` needs
+no change and the two never contend for the same branch.
 
-Vercel builds the site itself, from the repository, on every push:
+Vercel is connected to the repository and builds the site itself:
 
 ```json
 { "buildCommand": "python3 dev/gen-site.py", "outputDirectory": "site/dist" }
 ```
 
-That works because of decision 2 and would not work without it. Every fact the
-site states — the version, the protocol, the coverage, the missing classes, the
-test counts, every config key — is read from a file that is committed. Nothing
-in the build needs a Rust toolchain, a compiled workspace or a decompiled
-Minecraft source tree, so a deploy image with Python and nothing else can
-produce the whole site.
+A push to `master` publishes. That works because of decision 2 and would not
+work without it: every fact the site states — the version, the protocol, the
+coverage, the remaining classes, the test counts, every config key — is read
+from a file that is committed. Nothing in the build needs a Rust toolchain, a
+compiled workspace or a decompiled Minecraft source tree, so a deploy image with
+Python and nothing else produces the whole site.
 
 Fallback if that image ever lacks Python: build in GitHub Actions and ship the
 directory with `vercel deploy --prebuilt`. Same output, one more moving part.
 
 There is no link between the two hosts' chrome. The rustdoc keeps its own
 default theme at its own address.
+
+### 4. English at the root, French under `/fr/`
+
+Every page exists in both languages. English keeps the root because the project
+is English throughout — the README, the engineering rules, the code comments,
+and the vanilla-parity community the site is written for.
+
+Two rules the implementation turns on:
+
+- **A visible switcher, and no automatic redirect.** Guessing from
+  `Accept-Language` sends people who deliberately chose the other edition back
+  to where they did not want to be. The switcher points at the same page in the
+  other language, never at its home.
+- **A missing translation stops the build.** Chrome strings, page titles and
+  meta descriptions live in one table per language, and a key absent from one of
+  them raises rather than falling back to English — a page silently half
+  translated is worse than a build that fails.
+
+Facts stay language-neutral: both editions read the same generated version,
+protocol, coverage figures and remaining-class lists.
+
+**One thing the French edition does not translate.** The configuration
+reference's key names, types, defaults and descriptions come from
+`package-content/*.schema.json`, the schemas the server validates against.
+Translating those descriptions would mean maintaining a parallel copy that could
+drift from what the server actually accepts — the practice this repository
+forbids for extracted data, applied to prose. The French page's own writing is
+French; the generated table is not, and the page says so in one sentence.
 
 ## Visual direction
 
