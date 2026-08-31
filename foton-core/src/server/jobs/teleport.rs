@@ -641,7 +641,21 @@ pub(in crate::server) struct EndGatewayTeleportJob {
     source_is_end: bool,
     pending_token: PendingWorldChangeToken,
     phase: EndGatewayTeleportPhase,
+    /// Polls spent waiting, and whether the wait has already been reported.
+    ///
+    /// A gateway whose chunks never arrive looks exactly like a dead one from
+    /// inside the game, and unlike every other way this job can fail it
+    /// produces no line at all. One warning, once, says which.
+    waited_polls: u32,
+    reported_stall: bool,
 }
+
+/// How long a gateway may wait on chunks before the wait is worth a line.
+///
+/// Ten seconds of server time. Long enough that ordinary generation never
+/// trips it, short enough that a player who walked into a gateway and gave up
+/// is still the one being talked about.
+const GATEWAY_STALL_POLLS: u32 = 200;
 
 enum EndGatewayTeleportPhase {
     LoadingReady { request: ChunkRequestHandle },
@@ -676,11 +690,29 @@ impl EndGatewayTeleportJob {
             source_is_end,
             pending_token,
             phase,
+            waited_polls: 0,
+            reported_stall: false,
         })
     }
 
     fn still_valid(&self) -> bool {
         portal_entity_still_valid(&self.entity, &self.source_world, self.pending_token)
+    }
+
+    /// Reports a wait that has gone on long enough to be a fault.
+    fn note_wait(&mut self, phase: &str, ready: usize, total: usize) {
+        self.waited_polls += 1;
+        if self.waited_polls < GATEWAY_STALL_POLLS || self.reported_stall {
+            return;
+        }
+        self.reported_stall = true;
+        let portal_pos = self.portal_pos;
+        log::warn!(
+            "end gateway at {portal_pos:?} has waited {GATEWAY_STALL_POLLS} ticks for its \
+             {phase} chunks and still has {} of {total} missing; whoever walked in is \
+             standing in a portal that will not open",
+            total - ready,
+        );
     }
 
     fn clear_pending(&self) {
@@ -703,7 +735,10 @@ impl ServerJob for EndGatewayTeleportJob {
         loop {
             match &mut self.phase {
                 EndGatewayTeleportPhase::LoadingReady { request } => match request.poll() {
-                    ChunkRequestState::Pending { .. } => return JobPoll::Pending,
+                    ChunkRequestState::Pending { ready, total } => {
+                        self.note_wait("exit", ready, total);
+                        return JobPoll::Pending;
+                    }
                     ChunkRequestState::Cancelled => {
                         log::warn!(
                             "end gateway at {portal_pos:?}: the chunks around its exit \
@@ -741,7 +776,10 @@ impl ServerJob for EndGatewayTeleportJob {
                     }
                 },
                 EndGatewayTeleportPhase::LoadingSearchPath { request } => match request.poll() {
-                    ChunkRequestState::Pending { .. } => return JobPoll::Pending,
+                    ChunkRequestState::Pending { ready, total } => {
+                        self.note_wait("search-path", ready, total);
+                        return JobPoll::Pending;
+                    }
                     ChunkRequestState::Cancelled => {
                         log::warn!(
                             "end gateway at {portal_pos:?}: the chunks it searches for \
