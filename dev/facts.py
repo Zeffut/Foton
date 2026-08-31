@@ -12,11 +12,9 @@ import importlib.util
 import json
 import pathlib
 import re
-import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 DEV = REPO / "dev"
-sys.path.insert(0, str(DEV))
 
 
 def _load_hyphenated(name, filename):
@@ -36,6 +34,16 @@ def _read(path, what):
     return path.read_text(encoding="utf-8")
 
 
+def _read_json(path, what):
+    """Reads and parses JSON, turning a truncated or empty file into the same
+    clear, non-zero-exit failure as a missing one instead of a raw traceback."""
+    text = _read(path, what)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"cannot state {what}: {path} is not valid JSON ({exc})") from exc
+
+
 def version():
     cargo = _read(REPO / "Cargo.toml", "the version")
     match = re.search(r'^version = "([^"]+)"', cargo, re.M)
@@ -45,8 +53,10 @@ def version():
 
 
 def protocol():
-    packets = json.loads(_read(
-        REPO / "foton-registry" / "build_assets" / "packets.json", "the protocol"))
+    path = REPO / "foton-registry" / "build_assets" / "packets.json"
+    packets = _read_json(path, "the protocol")
+    if "version" not in packets:
+        raise SystemExit(f"cannot state the protocol: no 'version' key in {path}")
     return str(packets["version"])
 
 
@@ -55,7 +65,18 @@ def inworld_scripts():
 
 
 def test_counts():
-    return json.loads(_read(DEV / "test-counts.json", "the test count"))
+    path = DEV / "test-counts.json"
+    data = _read_json(path, "the test count")
+    for key in ("unit_tests", "targets"):
+        if key not in data:
+            raise SystemExit(f"cannot state the test count: no {key!r} key in {path}")
+    return data
+
+
+def _missing_list(names):
+    """Comma-joins missing class names -- or says "none" outright once a
+    category is fully covered, so the fact never renders an empty sentence."""
+    return ", ".join(names) or "none"
 
 
 def all():
@@ -81,9 +102,7 @@ def all():
         out[f"{kind}_total"] = str(entry["total"])
         out[f"{kind}_missing"] = str(len(entry["missing"]))
         out[f"{kind}_percent"] = str(percent)
-        # Reads as a sentence when the gap closes, instead of rendering an
-        # empty paragraph and failing the "no empty fact" check on a success.
-        out[f"{kind}_missing_list"] = ", ".join(entry["missing"]) or "none"
+        out[f"{kind}_missing_list"] = _missing_list(entry["missing"])
     return out
 
 

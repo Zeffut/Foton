@@ -48,10 +48,15 @@ def counts():
     """Coverage per section: how many classes are covered, and which are not."""
     if not CLASSES.is_file():
         raise SystemExit(f"missing {CLASSES}")
-    registry = json.loads(CLASSES.read_text(encoding="utf-8"))
+    try:
+        registry = json.loads(CLASSES.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{CLASSES} is not valid JSON: {exc}") from exc
     found = implemented_classes()
     out = {}
     for section, kind in SECTIONS:
+        if section not in registry:
+            raise SystemExit(f"{CLASSES} is missing the {section!r} section")
         classes = {entry["class"] for entry in registry[section]}
         covered = sorted(name for name in classes if name in found[kind])
         out[section] = {
