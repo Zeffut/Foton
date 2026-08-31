@@ -334,8 +334,9 @@ with a live page:
   `installCommand` installs nothing and this should not be the one thing that
   changes that.
 
-**What is published, and what is not.** The repository is public, so the data
-file is public. The reporter's name is kept — a report is someone's work and
+**What is published, and what is not.** The repository is private; the site is
+not. Anything in the data file is rendered onto a public page, so the page is
+what the decision has to be made against. The reporter's name is kept — a report is someone's work and
 credit is the point. Their account identifier is dropped at the door, in the
 function, because it helps reproduce nothing. World, position, version and
 category are kept: they are what a fix starts from.
@@ -350,7 +351,8 @@ its own file first and posts second, so an intake that is down costs the site
 freshness and costs the reporter nothing. The server logs the number of any
 report it could not deliver, which is exactly what a backfill needs to know.
 
-**Risk carried.** A public data file that anyone with the token can append to.
+**Risk carried.** A data file anyone holding the token can append to, whose
+contents land on a public page.
 Mitigated by a bearer token the server holds and a size limit, not solved: a
 leaked token means junk commits. It is recoverable — the file is versioned —
 and the alternative was a database this design would rather not have.

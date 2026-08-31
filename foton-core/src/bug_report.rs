@@ -320,6 +320,7 @@ pub fn forward(webhook: &BugReportWebhook, report: &BugReport, number: usize) {
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
+    use std::fs::read_to_string;
     use std::process::id as process_id;
 
     use super::*;
@@ -367,6 +368,31 @@ mod tests {
             object.get("player").and_then(serde_json::Value::as_str),
             Some("Tester"),
             "the record is flattened beside the number, not nested under a key"
+        );
+    }
+
+    /// The committed category list still matches the one players are shown.
+    ///
+    /// The website cannot read this enum: its deploy image carries no Rust at
+    /// all. So the list is generated into `dev/bug-categories.json` and read
+    /// from there, which only stays honest if something notices when the two
+    /// drift. That is this test -- the same guard `dev/parity-gaps.txt` has.
+    #[test]
+    fn the_published_category_list_matches_the_form() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../dev/bug-categories.json");
+        let published: Vec<String> = serde_json::from_str(
+            &read_to_string(path).expect("dev/bug-categories.json should exist"),
+        )
+        .expect("dev/bug-categories.json should be a list of strings");
+        let offered: Vec<String> = BugCategory::ALL
+            .iter()
+            .map(|category| category.label().to_owned())
+            .collect();
+
+        assert_eq!(
+            published, offered,
+            "the site publishes a category list the form no longer offers; \
+             regenerate dev/bug-categories.json"
         );
     }
 

@@ -99,22 +99,17 @@ def bug_reports():
 
 
 def bug_categories():
-    """The categories the in-game form offers, read from the server's own enum.
+    """The categories the in-game form offers.
 
-    Typing this list into the page would let it drift from what a tester is
-    actually shown the moment a category is added or renamed.
+    Read from a committed file rather than from the enum itself: the deploy
+    image has no Rust sources at all -- `.vercelignore` drops `*.rs` -- so a
+    build that reached for one could only ever fail in production. The file is
+    generated from `BugCategory::label` and a test refuses to pass when the two
+    disagree, which is the same shape as `dev/parity-gaps.txt`.
     """
-    source = _read(
-        REPO / "foton-core" / "src" / "bug_report.rs", "the bug report categories"
-    )
-    marker = "pub const fn label(self) -> &'static str {"
-    start = source.find(marker)
-    if start < 0:
-        raise SystemExit("cannot state the bug categories: BugCategory::label has moved")
-    end = source.find("\n    }", start)
-    labels = re.findall(r'=> "([^"]+)"', source[start:end])
-    if not labels:
-        raise SystemExit("cannot state the bug categories: BugCategory::label listed none")
+    labels = _read_json(REPO / "dev" / "bug-categories.json", "the bug categories")
+    if not isinstance(labels, list) or not labels:
+        raise SystemExit("cannot state the bug categories: the list is empty")
     return labels
 
 
