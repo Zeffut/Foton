@@ -308,7 +308,11 @@ impl Server {
             source_is_end,
             pending_token,
         ) else {
-            tracing::debug!("End gateway world change ignored because no destination is available");
+            // A player standing in a portal that does nothing is a
+            // report waiting to happen, so this is not a debug line.
+            log::warn!(
+                "end gateway at {portal_pos:?} resolved no destination; the entity stays put"
+            );
             clear_pending_world_change(&entity, pending_token);
             return;
         };

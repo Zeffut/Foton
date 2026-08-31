@@ -57,7 +57,16 @@ pub(crate) fn initial_chunks(
     portal_pos: BlockPos,
     source_is_end: bool,
 ) -> Option<EndGatewayChunkPreparation> {
-    match gateway_exit_state(world, portal_pos)? {
+    let Some(state) = gateway_exit_state(world, portal_pos) else {
+        // The block is there and the player walked into it, so the block
+        // entity that holds the exit should be there too. If it is not, the
+        // gateway is inert and nothing else in the chain can say so.
+        log::warn!(
+            "end gateway at {portal_pos:?} has no gateway block entity, so it leads nowhere"
+        );
+        return None;
+    };
+    match state {
         GatewayExitState::Stored { exit, exact: true } => Some(EndGatewayChunkPreparation::Ready(
             chunks_for_block_square(exit, 0),
         )),
@@ -67,7 +76,15 @@ pub(crate) fn initial_chunks(
         GatewayExitState::Missing { .. } if source_is_end => Some(
             EndGatewayChunkPreparation::SearchPath(exit_search_candidate_chunks(portal_pos)),
         ),
-        GatewayExitState::Missing { .. } => None,
+        // Vanilla only searches for an outer island from inside the End. A
+        // gateway anywhere else with no stored exit has nowhere to send anyone.
+        GatewayExitState::Missing { .. } => {
+            log::warn!(
+                "end gateway at {portal_pos:?} stores no exit and is not in the End, \
+                 so there is nowhere to search"
+            );
+            None
+        }
     }
 }
 
@@ -103,21 +120,39 @@ pub(crate) fn calculate_transition(
     portal_pos: BlockPos,
     source_is_end: bool,
 ) -> Option<TeleportTransition> {
-    let (exit, exact) = match gateway_exit_state(world, portal_pos)? {
+    let Some(state) = gateway_exit_state(world, portal_pos) else {
+        log::warn!("end gateway at {portal_pos:?} has no block entity to read an exit from");
+        return None;
+    };
+    let (exit, exact) = match state {
         GatewayExitState::Stored { exit, exact } => (exit, exact),
+        // The gateways the dragon's death leaves behind take this path every
+        // time: they store no exit, so the outer island has to be found first.
         GatewayExitState::Missing { exact } if source_is_end => {
-            let exit = find_or_create_valid_teleport_pos(world, portal_pos)?
-                .above_n(GATEWAY_HEIGHT_ABOVE_SURFACE);
+            let Some(found) = find_or_create_valid_teleport_pos(world, portal_pos) else {
+                log::warn!(
+                    "end gateway at {portal_pos:?} found no outer-island landing spot to aim at"
+                );
+                return None;
+            };
+            let exit = found.above_n(GATEWAY_HEIGHT_ABOVE_SURFACE);
             if !world.create_end_gateway_portal(exit, portal_pos, false) {
                 log::error!("Unable to create End gateway portal at {}", world.key);
                 return None;
             }
             if !set_gateway_exit_position(world, portal_pos, exit, exact) {
+                log::warn!("end gateway at {portal_pos:?} could not record its exit at {exit:?}");
                 return None;
             }
             (exit, exact)
         }
-        GatewayExitState::Missing { .. } => return None,
+        GatewayExitState::Missing { .. } => {
+            log::warn!(
+                "end gateway at {portal_pos:?} stores no exit and is not in the End, \
+                 so there is nowhere to search"
+            );
+            return None;
+        }
     };
 
     let destination = if exact {

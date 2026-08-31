@@ -415,6 +415,24 @@ impl Player {
                 return;
             }
         }
+
+        // Vanilla parity: the `tryResetCurrentImpulseContext` that closes
+        // `handleMovePlayer`. An impulse's fall-damage exemption is meant to
+        // last exactly one flight; without this it survives every landing and
+        // keeps softening falls it has nothing to do with.
+        if packet.on_ground
+            || is_spectator
+            || is_fall_flying
+            // Vanilla asks `hasLandedInLiquid`, which is the fluid height at
+            // the landing rather than mere contact. Foton has no equivalent, so
+            // contact stands in: it errs toward clearing the exemption, which
+            // is the side that gives the player the damage vanilla would.
+            || self.is_in_water()
+            || self.on_climbable()
+        {
+            self.try_reset_current_impulse_context();
+        }
+
         world.chunk_map.update_player_status(self);
 
         if let Some((player_stands_on_something, y_dist)) = floating_check {

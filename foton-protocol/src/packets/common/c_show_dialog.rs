@@ -33,11 +33,21 @@ pub struct DialogBody(pub NbtCompound);
 
 impl WriteTo for DialogBody {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
+        // The leading type byte is not optional. `NbtCompound::write` emits the
+        // compound's *contents*; the wire carries a full tag, so the reader
+        // expects `TAG_Compound` in front of them. Without it every byte after
+        // this point is read one position early, the packet stops making sense,
+        // and the client dies rather than reporting anything -- which is what
+        // shipping this without the byte actually did.
+        writer.write_all(&[TAG_COMPOUND])?;
         let mut buf = Vec::new();
         NbtCompound::write(&self.0, &mut buf);
         writer.write_all(&buf)
     }
 }
+
+/// The NBT tag id of a compound, as the network form writes it.
+const TAG_COMPOUND: u8 = 0x0A;
 
 impl CShowDialog {
     /// Sends `dialog` as an inline holder.
@@ -47,5 +57,39 @@ impl CShowDialog {
             inline: 0,
             dialog: DialogBody(dialog),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    /// The encoded packet is a holder discriminant then a whole NBT tag.
+    ///
+    /// This is a byte-level test on purpose. The failure it guards has no
+    /// server-side symptom at all: the packet is built correctly, sent
+    /// correctly, and logged as sent, and the only thing that happens is that
+    /// the player's client dies while decoding it.
+    #[test]
+    fn the_dialog_goes_out_as_an_inline_holder_and_a_tagged_compound() {
+        let mut compound = NbtCompound::new();
+        compound.insert("type", "minecraft:notice");
+
+        let mut bytes = Vec::new();
+        CShowDialog::inline(compound)
+            .write(&mut bytes)
+            .expect("writing to a vec cannot fail");
+
+        assert_eq!(
+            bytes.first(),
+            Some(&0),
+            "a var-int zero marks the holder's inline half"
+        );
+        assert_eq!(
+            bytes.get(1),
+            Some(&TAG_COMPOUND),
+            "the dialog is a whole NBT tag, so its type byte comes first"
+        );
     }
 }
