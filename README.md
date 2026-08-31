@@ -56,9 +56,10 @@ by explaining how this very measurement used to lie.
 
 Two layers, because a unit test cannot see that a furnace has no behavior.
 
-**5,219 unit tests** across 28 targets, run by `cargo test --workspace`. They
-cover the places where being wrong is silent: component hashing, seeded RNG
-determinism, protocol encoding, loot table evaluation, permission resolution.
+**5,267 tests** across 16 targets, run by `cargo test --workspace` — unit,
+integration and doc tests together. They cover the places where being wrong is
+silent: component hashing, seeded RNG determinism, protocol encoding, loot
+table evaluation, permission resolution.
 
 **77 in-world scripts** in `dev/`, each of which boots a real server on its own
 port and talks to it over the Minecraft protocol. They are the layer that
