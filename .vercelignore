@@ -1,7 +1,13 @@
+# Vercel clones the repository, then prunes with this file. Keep it to things
+# that are genuinely large and genuinely unread by the site build.
+#
+# Do NOT exclude source by file type. An earlier version excluded `*.rs` to
+# make the upload smaller, and the deploy broke the moment a fact started
+# reading foton-core/src/bug_report.rs -- the build has no way to notice that
+# one of its inputs was pruned out from under it.
 minecraft-src/
 target/
 saves/
 config/
 .logs/
 .superpowers/
-*.rs
