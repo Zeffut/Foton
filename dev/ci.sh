@@ -32,6 +32,9 @@ run "site builds"                                  python3 dev/gen-site.py --che
 run "cargo clippy -r --workspace --all-targets --all-features -D warnings" cargo clippy -r --workspace --all-targets --all-features -- -D warnings
 run "cargo test --workspace"                       cargo test --workspace
 run "test counts are current"                      python3 dev/count-tests.py --check
+# Four test files sat in dev/ that nothing ran, which is the same shape as the
+# clippy note above: the checks existed and nobody was reading them.
+run "dev tooling tests"                            python3 -m unittest discover -s dev -p "test_*.py"
 
 echo
 if [ $FAIL -eq 0 ]; then echo "########## ALL GREEN ##########"; else echo "########## FAILURES ##########"; fi
