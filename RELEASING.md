@@ -31,7 +31,7 @@ the one that breaks. There is one, and it is the one a human can run and read.
 
 ### 2. The installer does not write configuration. The server does
 
-`install.sh` runs the freshly installed binary once, lets it write
+`install.sh` has the freshly installed binary write
 `config/config.toml`, `config/worlds.toml` and `config/groups.toml`, and only
 then edits the handful of values the person answered.
 
@@ -39,6 +39,21 @@ Writing those files itself would mean transcribing the schemas' defaults into a
 shell script, where they would drift from what the server validates against the
 first time a default changes. That is the practice `AGENTS.md` forbids for
 extracted data, and it applies here too.
+
+**This needs two flags the binary does not have.** `foton` parses no arguments
+at all today: it starts a server and runs until killed. So it gains exactly
+two, and no more:
+
+- `--generate-config` writes the configuration files and exits, which is what
+  the installer calls instead of starting a server it would then have to find
+  and kill.
+- `--version` prints the version and exits, which is what `--update` compares
+  against the latest release. Without it the installer would have to keep its
+  own record of what it installed, and a record kept beside the thing it
+  describes is a record that goes wrong.
+
+Anything else — a config path override, a port override, a subcommand tree —
+is a server feature, not an installer requirement, and stays out.
 
 ### 3. Prompts come from `/dev/tty`, never from standard input
 
