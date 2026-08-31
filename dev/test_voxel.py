@@ -30,12 +30,36 @@ class CubeGeometry(unittest.TestCase):
         self.assertGreater(voxel.bounds(right)[0], voxel.bounds(left)[0])
         self.assertEqual(voxel.bounds(right)[2], voxel.bounds(left)[2])
 
+    def test_i_and_k_each_move_the_voxel_down_from_baseline(self):
+        """Guards against a bug that drops the (i+k)*half vertical term for
+        both axes -- the symmetry test above would pass unchanged since both
+        sides would land on the same wrong value, and the logo never
+        exercises k != 0 so the byte-identity gate would not catch it either.
+        """
+        baseline, i_only, k_only = voxel.Grid(), voxel.Grid(), voxel.Grid()
+        voxel.cube(baseline, 0, 0, 0, RED, unit=8)
+        voxel.cube(i_only, 1, 0, 0, RED, unit=8)
+        voxel.cube(k_only, 0, 0, 1, RED, unit=8)
+        self.assertGreater(voxel.bounds(i_only)[2], voxel.bounds(baseline)[2])
+        self.assertGreater(voxel.bounds(k_only)[2], voxel.bounds(baseline)[2])
+
     def test_j_moves_straight_up(self):
         base, above = voxel.Grid(), voxel.Grid()
         voxel.cube(base, 0, 0, 0, RED, unit=8)
         voxel.cube(above, 0, 1, 0, RED, unit=8)
         self.assertEqual(voxel.bounds(base)[0], voxel.bounds(above)[0])
         self.assertEqual(voxel.bounds(above)[2], voxel.bounds(base)[2] - 8)
+
+
+class GridStorage(unittest.TestCase):
+    def test_set_keeps_out_of_range_coordinates(self):
+        """The shared Grid intentionally drops the old logo Grid's
+        0 <= x < size clipping -- callers bound their own runs()/bounds()
+        calls instead. Pins that .set() never re-grows that clip.
+        """
+        grid = voxel.Grid()
+        grid.set(-5, 999, "#123456")
+        self.assertEqual(grid.px.get((-5, 999)), "#123456")
 
 
 class Runs(unittest.TestCase):
