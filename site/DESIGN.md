@@ -114,7 +114,7 @@ Direction E, *Isometric Atlas*, from the design canvas:
 - Warm paper ground `#f0ece2`, ink `#17150f`, accent `#b0741a`.
 - Bricolage Grotesque for display, DM Mono for data and code.
 - Voxel scenes rendered by `dev/gen-logo.py`'s own scanline renderer,
-  generalised from its single wall plane to an `(i, j, k)` space. Rasterised at
+  generalized from its single wall plane to an `(i, j, k)` space. Rasterized at
   five display pixels per source pixel, which is the mark's own scale — the PNG
   is 320px from a 64px grid — so a pixel in a scene is the size of a pixel in
   the logo beside it. The cube edge is 12 source pixels rather than the logo's
@@ -185,7 +185,7 @@ site/
 dev/
 ├── gen-site.py       the generator
 ├── config_schema.py  schema walking, extracted (see below)
-└── voxel.py          the logo's renderer, generalised (see below)
+└── voxel.py          the logo's renderer, generalized (see below)
 ```
 
 Two extractions, both because a second consumer appears and neither script
@@ -196,7 +196,7 @@ should grow a fork of the other's logic:
   rendering and imports them. `gen-site.py` imports the same functions and
   renders HTML. One description of the schema format, two outputs.
 - **`dev/voxel.py`** — `Grid`, `cube` and the run-merging SVG emitter move out of
-  `gen-logo.py`, generalised to `(i, j, k)`. `gen-logo.py` keeps `CELLS`,
+  `gen-logo.py`, generalized to `(i, j, k)`. `gen-logo.py` keeps `CELLS`,
   `largest_fitting_unit` and `center`, and calls into it for its single plane.
 
 `dev/coverage.py` gains a `counts()` function returning the numbers its `main()`
