@@ -70,7 +70,7 @@ class Runs(unittest.TestCase):
         self.assertEqual(list(voxel.runs(grid, 0, 4, 0, 0)),
                          [(0, 0, 5, "#abcdef")])
 
-    def test_a_colour_change_breaks_the_run(self):
+    def test_a_color_change_breaks_the_run(self):
         grid = voxel.Grid()
         grid.set(0, 0, "#111111")
         grid.set(1, 0, "#222222")
