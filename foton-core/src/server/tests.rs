@@ -70,7 +70,9 @@ use super::{
     offline_uuid, portal_entity_still_valid, validate_player_permission_group_update,
 };
 use crate::boss_event::custom::DomainCustomBossEvents;
-use crate::event::{EventBus, PlayerJoinEvent};
+use crate::event::{EventBus, PlayerChatEvent, PlayerJoinEvent};
+use crate::test_support::init_test_logger;
+use foton_protocol::packets::game::SChat;
 use foton_utils::Identifier;
 
 struct TestConnection {
@@ -2734,6 +2736,138 @@ fn command_source_and_operator_checks_use_published_subject_state() {
             panic!("test storage should be removed: {error}");
         }
     });
+}
+
+/// A listener can stop a chat message from being said at all.
+///
+/// Unsigned chat, because a signed message needs a profile key and a
+/// signature chain and this is a test about the listener, not about the
+/// cryptography. The path is otherwise the real one: `handle_chat`, the
+/// function the packet handler calls.
+#[test]
+fn a_listener_can_stop_a_chat_message() {
+    // Its own world: this test registers players in one, and the shared test
+    // world is shared with every other test that does.
+    let world = fresh_test_world("chat_cancelled");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("chat-cancelled");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        let (listener, listener_packets) =
+            test_player_with_packets(&server, Arc::clone(&world), "Listener", 1);
+        let (speaker, _) = test_player_with_packets(&server, world, "Speaker", 2);
+        assert!(server.online_players.insert(Arc::clone(&listener)));
+        assert!(server.online_players.insert(Arc::clone(&speaker)));
+        // Chat goes out to the world's players, not the server's list.
+        assert!(listener.get_world().players.insert(Arc::clone(&listener)));
+
+        server
+            .events
+            .on::<PlayerChatEvent, _>(Identifier::new_static("test", "mute"), |event| {
+                event.set_cancelled(true);
+            });
+        listener_packets.lock().clear();
+
+        speaker.handle_chat(unsigned_chat("hello"), Arc::clone(&speaker));
+
+        assert!(
+            listener_packets.lock().is_empty(),
+            "the listener cancelled the message, so nobody should have heard it"
+        );
+
+        drop(speaker);
+        drop(listener);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// A chat message a listener rewrote is the one that goes out.
+#[test]
+fn a_listener_can_rewrite_a_chat_message() {
+    // Its own world: this test registers players in one, and the shared test
+    // world is shared with every other test that does.
+    let world = fresh_test_world("chat_rewritten");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        init_test_logger();
+        let storage_root = test_storage_root("chat-rewritten");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        let (listener, listener_packets) =
+            test_player_with_packets(&server, Arc::clone(&world), "Listener", 1);
+        let (speaker, _) = test_player_with_packets(&server, world, "Speaker", 2);
+        assert!(server.online_players.insert(Arc::clone(&listener)));
+        assert!(server.online_players.insert(Arc::clone(&speaker)));
+        // Chat goes out to the world's players, not the server's list.
+        assert!(listener.get_world().players.insert(Arc::clone(&listener)));
+
+        server
+            .events
+            .on::<PlayerChatEvent, _>(Identifier::new_static("test", "shout"), |event| {
+                event.set_message(event.message().to_uppercase());
+            });
+        listener_packets.lock().clear();
+
+        speaker.handle_chat(unsigned_chat("hello"), Arc::clone(&speaker));
+
+        let sent = {
+            let packets = listener_packets.lock();
+            assert_eq!(packets.len(), 1, "one message should have been sent");
+            String::from_utf8_lossy(&packets[0].encoded_data).into_owned()
+        };
+        assert!(
+            sent.contains("HELLO"),
+            "the rewritten message should be the one that went out"
+        );
+        assert!(
+            !sent.contains("hello"),
+            "the original message should not have gone out beside it"
+        );
+
+        drop(speaker);
+        drop(listener);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// An unsigned chat packet, which skips verification entirely.
+fn unsigned_chat(message: &str) -> SChat {
+    SChat {
+        message: message.to_owned(),
+        timestamp: 0,
+        salt: 0,
+        signature: None,
+        offset: 0,
+        acknowledged: [0; 3],
+        checksum: 0,
+    }
 }
 
 /// A listener that silences the join announcement actually silences it.

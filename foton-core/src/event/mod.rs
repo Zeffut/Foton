@@ -29,7 +29,7 @@ use rustc_hash::FxHashMap;
 
 pub mod player;
 
-pub use player::{PlayerJoinEvent, PlayerQuitEvent};
+pub use player::{PlayerChatEvent, PlayerJoinEvent, PlayerQuitEvent};
 
 /// Something that happened, which a listener may observe and possibly stop.
 ///

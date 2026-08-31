@@ -27,6 +27,7 @@ use text_components::TextComponent;
 use text_components::interactivity::{ClickEvent, HoverEvent};
 
 use crate::entity::Entity;
+use crate::event::{Event as _, PlayerChatEvent};
 use crate::player::Player;
 use message_chain::SignedMessageChain;
 use profile_key::RemoteChatSession;
@@ -274,6 +275,23 @@ impl Player {
             None
         };
 
+        // Anything listening gets the message before anyone hears it, and
+        // before the packet is built around it.
+        let mut event = PlayerChatEvent::new(Arc::clone(&player), chat_message);
+        self.server().events.fire(&mut event);
+        if event.is_cancelled() {
+            // The send still counts against the spam throttle. A plugin that
+            // silences a message has not un-sent it, and letting cancellation
+            // reset the throttle would make it the way to bypass one.
+            self.detect_chat_rate_spam();
+            return;
+        }
+        // The client signed the text it sent. A rewritten message is not that
+        // text, so its signature is dropped and the unsigned path carries it.
+        let rewritten = event.was_changed();
+        let chat_message = event.into_message();
+        let signature = if rewritten { None } else { signature };
+
         let sender_index = {
             let mut chat = player.chat.lock();
             let idx = chat.messages_sent;
@@ -281,34 +299,13 @@ impl Player {
             idx
         };
 
-        let registry_id = vanilla_chat_types::CHAT.id() as i32;
-
-        let chat_packet = CPlayerChat::new(
-            0,
-            player.gameprofile.id,
+        let chat_packet = self.build_chat_packet(
+            &player,
             sender_index,
             signature.clone(),
-            chat_message.clone(),
+            &chat_message,
             packet.timestamp,
             packet.salt,
-            Box::new([]),
-            Some(TextComponent::plain(chat_message.clone())),
-            FilterType::PassThrough,
-            ChatTypeBound {
-                registry_id,
-                sender_name: TextComponent::plain(player.gameprofile.name.clone())
-                    .insertion(player.gameprofile.name.clone())
-                    .click_event(ClickEvent::suggest_command(format!(
-                        "/tell {} ",
-                        player.gameprofile.name
-                    )))
-                    .hover_event(HoverEvent::show_entity(
-                        "minecraft:player",
-                        self.uuid(),
-                        Some(player.gameprofile.name.clone()),
-                    )),
-                target_name: None,
-            },
         );
 
         foton_utils::chat!(player.gameprofile.name.clone(), "{}", chat_message);
@@ -339,6 +336,46 @@ impl Player {
         }
 
         self.detect_chat_rate_spam();
+    }
+
+    /// Assembles the packet one chat message goes out as.
+    ///
+    /// Split out of `handle_chat`, which decides who may speak, lets listeners
+    /// intervene, and then broadcasts. Building the packet is none of those.
+    fn build_chat_packet(
+        &self,
+        player: &Arc<Player>,
+        sender_index: i32,
+        signature: Option<Box<[u8]>>,
+        chat_message: &str,
+        timestamp: i64,
+        salt: i64,
+    ) -> CPlayerChat {
+        let name = player.gameprofile.name.clone();
+        CPlayerChat::new(
+            0,
+            player.gameprofile.id,
+            sender_index,
+            signature,
+            chat_message.to_owned(),
+            timestamp,
+            salt,
+            Box::new([]),
+            Some(TextComponent::plain(chat_message.to_owned())),
+            FilterType::PassThrough,
+            ChatTypeBound {
+                registry_id: vanilla_chat_types::CHAT.id() as i32,
+                sender_name: TextComponent::plain(name.clone())
+                    .insertion(name.clone())
+                    .click_event(ClickEvent::suggest_command(format!("/tell {name} ")))
+                    .hover_event(HoverEvent::show_entity(
+                        "minecraft:player",
+                        self.uuid(),
+                        Some(name),
+                    )),
+                target_name: None,
+            },
+        )
     }
 
     /// Sends a system message to the player.
