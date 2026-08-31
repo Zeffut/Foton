@@ -22,11 +22,21 @@ say "Checking the tree"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 [ "$BRANCH" = "master" ] || die "releases are cut from master, not $BRANCH"
 
+# A dry run never reaches the publish step, so only a real run needs gh.
+if [ "$DRY_RUN" -eq 0 ]; then
+  command -v gh >/dev/null 2>&1 || die "gh is required to publish; install it or run with --dry-run"
+  gh auth status >/dev/null 2>&1 || die "gh is not authenticated; run: gh auth login"
+fi
+command -v docker >/dev/null 2>&1 || printf 'docker is not installed; the Linux build will be skipped\n' >&2
+
 VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
 [ -n "$VERSION" ] || die "no version in Cargo.toml"
 TAG="v$VERSION"
-if git rev-parse "$TAG" >/dev/null 2>&1; then
-  die "$TAG already exists; bump the version in Cargo.toml first"
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+    die "$TAG is already published. Bump the version in Cargo.toml, or if that release failed part-way: git push origin :refs/tags/$TAG && git tag -d $TAG"
+  fi
+  die "$TAG exists locally but was never pushed -- a previous run stopped part-way. Remove it and try again: git tag -d $TAG"
 fi
 say "Releasing $TAG"
 
@@ -38,6 +48,10 @@ rm -rf "$OUT" && mkdir -p "$OUT"
 say "Building for this machine"
 cargo build --release --locked --features stand-alone
 HOST_ARCH=$(uname -m)
+case "$HOST_ARCH" in
+  arm64) HOST_ARCH=aarch64 ;;
+  amd64) HOST_ARCH=x86_64 ;;
+esac
 case "$(uname -s)" in
   Darwin) HOST_NAME="foton-macos-$HOST_ARCH" ;;
   Linux)  HOST_NAME="foton-linux-$HOST_ARCH" ;;
@@ -72,5 +86,6 @@ git tag -a "$TAG" -m "Foton $VERSION"
 git push origin "$TAG"
 gh release create "$TAG" "$OUT"/* \
   --title "Foton $VERSION" \
-  --notes "Install: \`curl -fsSL https://foton.zeffut.fr/install.sh | sh\`"
+  --notes "Install: \`curl -fsSL https://foton.zeffut.fr/install.sh | sh\`" \
+  || die "the tag $TAG was pushed but the release was not created. Retry with: gh release create $TAG $OUT/* --title \"Foton $VERSION\""
 say "Done: $TAG"
