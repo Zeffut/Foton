@@ -44,6 +44,30 @@ def implemented_classes():
     return found
 
 
+def counts():
+    """Coverage per section: how many classes are covered, and which are not."""
+    if not CLASSES.is_file():
+        raise SystemExit(f"missing {CLASSES}")
+    try:
+        registry = json.loads(CLASSES.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{CLASSES} is not valid JSON: {exc}") from exc
+    found = implemented_classes()
+    out = {}
+    for section, kind in SECTIONS:
+        if section not in registry:
+            raise SystemExit(f"{CLASSES} is missing the {section!r} section")
+        classes = {entry["class"] for entry in registry[section]}
+        covered = sorted(name for name in classes if name in found[kind])
+        out[section] = {
+            "covered": len(covered),
+            "total": len(classes),
+            "missing": sorted(classes - set(covered)),
+            "covered_names": covered,
+        }
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -53,23 +77,17 @@ def main():
     )
     args = parser.parse_args()
 
-    if not CLASSES.is_file():
-        print(f"missing {CLASSES}", file=sys.stderr)
-        return 1
-
-    registry = json.loads(CLASSES.read_text(encoding="utf-8"))
-    found = implemented_classes()
-
-    for section, kind in SECTIONS:
-        classes = {entry["class"] for entry in registry[section]}
-        covered = sorted(name for name in classes if name in found[kind])
-        percent = 100 * len(covered) / max(len(classes), 1)
-        print(f"{section:9} {len(covered):4} / {len(classes):4} classes  ({percent:.0f} %)")
+    data = counts()
+    for section, _ in SECTIONS:
+        entry = data[section]
+        percent = 100 * entry["covered"] / max(entry["total"], 1)
+        print(f"{section:9} {entry['covered']:4} / {entry['total']:4} classes  ({percent:.0f} %)")
 
         if args.list == section:
-            missing = sorted(classes - set(covered))
-            print(f"\n  covered ({len(covered)}):\n    " + "\n    ".join(covered))
-            print(f"\n  missing ({len(missing)}):\n    " + "\n    ".join(missing))
+            print(f"\n  covered ({len(entry['covered_names'])}):\n    "
+                  + "\n    ".join(entry["covered_names"]))
+            print(f"\n  missing ({len(entry['missing'])}):\n    "
+                  + "\n    ".join(entry["missing"]))
 
     return 0
 

@@ -1,0 +1,107 @@
+<main>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <div class="eyebrow">MINECRAFT {{ mc_target }}</div>
+        <h1>A Minecraft server that refuses to guess.</h1>
+        <p style="font-size:19px">Foton is an independent implementation of the Java Edition
+          server, written in Rust. Every registry, block, item and worldgen value comes out of
+          an extractor — nothing is written from memory, nothing is transcribed by hand.</p>
+        <div class="actions">
+          <a class="btn btn-solid" href="/en/start/">Run your first world</a>
+          <a class="btn btn-ghost" href="/en/contributing/">How it is built</a>
+        </div>
+        <div class="cmd"><b>$</b> docker run -p 25565:25565 ghcr.io/zeffut/foton:nightly</div>
+      </div>
+      <div>{{ scene_island }}</div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">THE THESIS</div>
+      <h2>Parity is the specification, not the goal.</h2>
+      <div class="cols-2">
+        <div>
+          <p>Anything a player can observe — gameplay, protocol, registries, world generation
+            — is written against the decompiled vanilla source, which sits in the tree while
+            the code is written. When a faster or more idiomatic Rust design would change
+            observable behavior, the observable behavior wins.</p>
+        </div>
+        <div>
+          <p>Concurrency, but only where vanilla allows it. Gameplay ticks stay synchronous,
+            because vanilla semantics depend on the order things happen in. Chunk generation,
+            lighting, packet processing and chunk sending do not, and they run off the tick.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">HOW IT IS BUILT</div>
+      <h2>Nothing here is transcribed by hand.</h2>
+      <p>A file maps every vanilla registry entry to the Java class behind it. At build time the
+        generator scans for structs carrying a behavior attribute, matches the struct name
+        against that map, and writes the registration itself.</p>
+      <p>So implementing a block means creating a struct named exactly after its vanilla class,
+        in the right directory. There is no registry list to edit and no wiring to remember —
+        and a behavior the generator cannot see is a behavior that does not exist, which is a
+        mistake the build can catch and a human cannot.</p>
+      <pre><code>#[block_behavior]
+pub struct LanternBlock;   // the name is the registration</code></pre>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap split">
+      <div>
+        <div class="eyebrow">ARCHITECTURE</div>
+        <h2>One direction of dependency.</h2>
+        <p>The binary sits on the login layer, which sits on the game logic, which rests on
+          leaves that know nothing about each other — worldgen, protocol, the generated
+          registry, the macros, the spatial and math primitives, and the crypto.</p>
+        <p>Nothing below the game logic can reach back up into it. That is what keeps the
+          registry generated rather than hand-maintained.</p>
+      </div>
+      <div>{{ scene_crates }}</div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">VERIFICATION</div>
+      <h2>Two layers, because a unit test cannot see that a furnace has no behavior.</h2>
+      <div class="cols-2">
+        <div class="stat">
+          <b>{{ unit_tests }}</b>
+          <div class="label">TESTS THAT RUN IN PROCESS</div>
+          <p>They cover the places where being wrong is silent: component hashing, seeded RNG
+            determinism, protocol encoding, loot table evaluation, permission resolution.</p>
+        </div>
+        <div class="stat">
+          <b>{{ inworld_scripts }}</b>
+          <div class="label">IN-WORLD SCRIPTS</div>
+          <p>Each boots a real server on its own port and talks to it over the Minecraft
+            protocol. They catch what compiles and still does not work — which is how three
+            furnaces were found to have no behavior at all.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" style="border-bottom:0">
+    <div class="wrap">
+      <div class="eyebrow">GET IT RUNNING</div>
+      <h2>One command, then a world.</h2>
+      <p>The world generates, saves to the Anvil format vanilla uses, and reloads where you left
+        it. Containers, furnaces, redstone, hostile mobs and animals, villagers, RCON and
+        permission groups all work today; survival gameplay is still landing.</p>
+      <pre><code>cargo run -p foton</code></pre>
+      <div class="actions">
+        <a class="btn btn-solid" href="/en/start/">Installation and first boot</a>
+        <a class="btn btn-ghost" href="/en/configuration/">Configuration reference</a>
+      </div>
+    </div>
+  </section>
+</main>

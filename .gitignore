@@ -8,6 +8,7 @@
 /foton-utils/build_assets/builtin_datapacks
 /foton-utils/build_assets/.asset-extract.lock
 /foton-utils/build_assets/en_us.json
+/site/dist
 
 # Config
 /config
@@ -43,3 +44,4 @@ rustc-ice-*
 
 # Python bytecode from the dev scripts
 __pycache__/
+.vercel

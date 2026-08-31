@@ -1,0 +1,38 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "python3 dev/gen-site.py",
+  "installCommand": "echo 'no package dependencies'",
+  "outputDirectory": "site/dist",
+  "framework": null,
+  "trailingSlash": true,
+  "redirects": [
+    {
+      "source": "/",
+      "has": [
+        { "type": "header", "key": "accept-language", "value": "^fr.*" }
+      ],
+      "destination": "/fr/",
+      "statusCode": 302
+    },
+    {
+      "source": "/",
+      "destination": "/en/",
+      "statusCode": 302
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    },
+    {
+      "source": "/style.css",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" }
+      ]
+    }
+  ]
+}

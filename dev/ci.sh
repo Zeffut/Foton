@@ -23,6 +23,7 @@ run() {
 run "cargo fmt --all --check"                      cargo fmt --all --check
 run "typos"                                        typos
 run "config reference is current"                  python3 dev/gen-config-docs.py --check
+run "site builds"                                  python3 dev/gen-site.py --check
 # `-D warnings` is not decoration. Without it this suite stayed green while
 # `Drowned::travel_in_water` recursed into itself and eleven dead squid
 # constants sat in the tree -- clippy had been printing both the whole time
@@ -30,6 +31,7 @@ run "config reference is current"                  python3 dev/gen-config-docs.p
 # checked the default package.
 run "cargo clippy -r --workspace --all-targets --all-features -D warnings" cargo clippy -r --workspace --all-targets --all-features -- -D warnings
 run "cargo test --workspace"                       cargo test --workspace
+run "test counts are current"                      python3 dev/count-tests.py --check
 
 echo
 if [ $FAIL -eq 0 ]; then echo "########## ALL GREEN ##########"; else echo "########## FAILURES ##########"; fi
