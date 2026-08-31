@@ -61,6 +61,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 }
 
 .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; padding: 72px 0 64px; }
+.hero h1 { margin-bottom: 28px; }
 .hero .scene, .split .scene { max-width: 100%; height: auto; margin: 0 auto; display: block; }
 
 .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 30px 0 24px; }
@@ -124,4 +125,20 @@ td code { color: var(--ink); }
   color: var(--ink-3);
   margin: 12px 0 0 0;
   word-break: break-word;
+}
+
+html { scroll-behavior: smooth; }
+
+.reveal { opacity: 0; transform: translateY(14px); }
+.reveal.shown { opacity: 1; transform: none; transition: opacity .6s ease, transform .6s cubic-bezier(.2,.7,.3,1); }
+
+.btn, .lang, .bar nav a { transition: background .18s ease, color .18s ease, border-color .18s ease; }
+.scene { transition: transform .5s cubic-bezier(.2,.7,.3,1); }
+.hero:hover .scene { transform: translateY(-6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .reveal, .reveal.shown, .scene, .hero:hover .scene {
+    opacity: 1; transform: none; transition: none;
+  }
 }

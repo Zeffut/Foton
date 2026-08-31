@@ -2,7 +2,7 @@
   <div class="wrap">
     <div class="hero">
       <div>
-        <div class="eyebrow">MINECRAFT {{ mc_target }} · PROTOCOL {{ protocol }}</div>
+        <div class="eyebrow">MINECRAFT {{ mc_target }}</div>
         <h1>A Minecraft server that refuses to guess.</h1>
         <p style="font-size:19px">Foton is an independent implementation of the Java Edition
           server, written in Rust. Every registry, block, item and worldgen value comes out of
@@ -57,45 +57,14 @@ pub struct LanternBlock;   // the name is the registration</code></pre>
     <div class="wrap split">
       <div>
         <div class="eyebrow">ARCHITECTURE</div>
-        <h2>Nine crates, one direction of dependency.</h2>
+        <h2>One direction of dependency.</h2>
         <p>The binary sits on the login layer, which sits on the game logic, which rests on
-          seven leaves that know nothing about each other — worldgen, protocol, the generated
+          leaves that know nothing about each other — worldgen, protocol, the generated
           registry, the macros, the spatial and math primitives, and the crypto.</p>
         <p>Nothing below the game logic can reach back up into it. That is what keeps the
           registry generated rather than hand-maintained.</p>
       </div>
       <div>{{ scene_crates }}</div>
-    </div>
-  </section>
-
-  <section class="band">
-    <div class="wrap">
-      <div class="eyebrow">COVERAGE</div>
-      <h2>How much of vanilla behaves like vanilla.</h2>
-      <p>Measured against the vanilla behavior classes, cross-checked between the coverage
-        script and the ledger the build generates. These figures are read from that ledger when
-        this page is built, so they cannot drift from the code.</p>
-      <div class="cols">
-        <div class="stat">
-          <b>{{ blocks_percent }}<small> %</small></b>
-          <div class="label">BLOCKS · {{ blocks_covered }} / {{ blocks_total }}</div>
-          <p class="rest">Remaining: {{ blocks_missing_list }}</p>
-        </div>
-        <div class="stat">
-          <b>{{ items_percent }}<small> %</small></b>
-          <div class="label">ITEMS · {{ items_covered }} / {{ items_total }}</div>
-          <p class="rest">Remaining: {{ items_missing_list }}</p>
-        </div>
-        <div class="stat">
-          <b>{{ entities_percent }}<small> %</small></b>
-          <div class="label">ENTITIES · {{ entities_covered }} / {{ entities_total }}</div>
-          <p class="rest">Remaining: {{ entities_missing_list }}</p>
-        </div>
-      </div>
-      <p style="margin-top:36px" class="pull">A registered behavior is not the same as a correct
-        one, and the two have come apart here before. The parity ledger opens by explaining how
-        this very measurement used to lie — which is the reason to trust the number that
-        replaced it.</p>
     </div>
   </section>
 
@@ -116,28 +85,6 @@ pub struct LanternBlock;   // the name is the registration</code></pre>
           <p>Each boots a real server on its own port and talks to it over the Minecraft
             protocol. They catch what compiles and still does not work — which is how three
             furnaces were found to have no behavior at all.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="band">
-    <div class="wrap split">
-      <div>
-        <div class="eyebrow">FREE SOFTWARE</div>
-        <h2>AGPL-3.0, network clause included.</h2>
-        <p>Foton is free software, and the license has a consequence worth knowing before you
-          deploy rather than after: run this code where other people can reach it, and those
-          people are entitled to its source — including whatever you changed.</p>
-        <p>Developing privately carries no obligation. Putting a server in front of players
-          does. If you patch Foton and host it, publish the patched source.</p>
-      </div>
-      <div>
-        <div class="rows">
-          <div class="row"><div class="k">Version</div><div class="v">{{ version }}</div></div>
-          <div class="row"><div class="k">Minecraft</div><div class="v">{{ mc_target }}</div></div>
-          <div class="row"><div class="k">Protocol</div><div class="v">{{ protocol }}</div></div>
-          <div class="row"><div class="k">License</div><div class="v">AGPL-3.0-or-later</div></div>
         </div>
       </div>
     </div>

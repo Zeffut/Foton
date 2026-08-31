@@ -21,5 +21,21 @@
   <span>Foton {{ version }} — Minecraft {{ mc_target }}, protocol {{ protocol }}</span>
   <span><a href="https://github.com/Zeffut/Foton">Source</a> — AGPL-3.0-or-later</span>
 </footer>
+<script>
+  (function () {
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+    var targets = document.querySelectorAll(".band > .wrap, .hero > div");
+    if (reduce.matches || !("IntersectionObserver" in window)) { return; }
+    targets.forEach(function (el) { el.classList.add("reveal"); });
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) { return; }
+        entry.target.classList.add("shown");
+        seen.unobserve(entry.target);
+      });
+    }, { rootMargin: "0px 0px -10% 0px" });
+    targets.forEach(function (el) { seen.observe(el); });
+  })();
+</script>
 </body>
 </html>
