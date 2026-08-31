@@ -143,25 +143,42 @@ Direction E, *Isometric Atlas*, from the design canvas:
 
 ### Home
 
-1. **Hero.** The headline, one sentence of what Foton is, the primary call to
-   action, and a copyable run command. The isometric island.
-2. **Pre-alpha band.** Immediately under the hero, not in the footer. You can
-   connect, build, and come back to a saved world; survival gameplay is
-   incomplete.
-3. **What works today.** Concrete and operator-shaped: connecting, building,
-   Anvil worlds that save and reload, containers and furnaces, hostile mobs and
-   animals, redstone, world generation, RCON, permission groups, multiple
-   worlds.
-4. **What does not work yet.** The named gaps, generated. A site that opens its
-   own defects is the only version of this page that is honest.
-5. **Why it behaves like vanilla.** Three beats: written against the decompiled
-   source, values come out of an extractor, observable behavior wins over a
-   faster design.
-6. **How it is checked.** The two layers and their counts, generated.
-7. **The AGPL network clause.** For this audience this is not a legal footnote,
-   it is a deployment constraint: serve this code to third parties and they are
-   entitled to its source. The README already calls it the part that surprises
-   people. It gets a real section, not a footer line.
+The page is a presentation of what Foton is and why it is built the way it is.
+It reads as a finished product with a stated scope, not as a construction site.
+
+That is a deliberate reversal of this document's first draft, which led with a
+pre-alpha warning band and a section listing defects by name. The reversal costs
+nothing in honesty, because the honest facts are also the strongest ones: a
+project whose whole discipline is that nothing is guessed does not need to
+apologise for what it has not reached yet, it needs to explain the discipline.
+
+1. **Hero.** What Foton is in one sentence, the primary call to action, and a
+   copyable run command. The isometric island.
+2. **The thesis.** Parity is the specification, not the goal. Everything a
+   player can observe is written against the decompiled vanilla source; where a
+   faster or more idiomatic Rust design would change observable behavior, the
+   observable behavior wins. Concurrency only where vanilla allows it.
+3. **Nothing here is transcribed.** The mechanism, which is the most
+   distinctive thing in the repository: registry values come out of an
+   extractor, and implementing a block means writing a struct named after its
+   vanilla class — the build finds it and writes the registration. There is no
+   registry list to edit.
+4. **The architecture.** Nine crates, one direction of dependency, drawn as the
+   isometric ziggurat.
+5. **Coverage.** The three figures as achievements — what proportion of vanilla
+   behaves like vanilla. The remaining classes are listed beneath, in muted
+   type and generated, so the page cannot drift from the ledger; they read as a
+   scope note, not as a defect list.
+6. **How it is verified.** Two layers and their counts.
+7. **Free software.** AGPL-3.0, and the network clause stated as what it is —
+   part of the project's identity, and a fact anyone hosting it needs. Not a
+   warning, not a footnote.
+8. **Run it.** The command, the routes, and one precise line on scope: the
+   world runs and saves, survival gameplay is still landing.
+
+The status line in section 8 is the only place the project's stage is stated.
+One sentence, factual, unapologetic. Moving it to the top or expanding it into
+a section is what this design is against.
 
 ### Get started
 
