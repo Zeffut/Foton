@@ -10,8 +10,10 @@ use foton_registry::vanilla_dimension_types;
 use foton_utils::Identifier;
 use foton_utils::codec::Or;
 use foton_utils::types::{Difficulty, GameType};
+use reqwest::Url;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Deserializer, de::Error as DeError};
+use std::fmt;
 use std::{
     collections::BTreeMap,
     path::{Component, Path, PathBuf},
@@ -40,6 +42,34 @@ pub const fn validate_login_security(
         Err(ONLINE_MODE_REQUIRES_ENCRYPTION)
     } else {
         Ok(())
+    }
+}
+
+/// Where filed bug reports are sent, on top of being written to disk.
+///
+/// The URL is parsed at startup rather than at the moment a report is filed:
+/// a tester who has just written out a repro should not be the one to
+/// discover that the address was a typo.
+#[derive(Clone)]
+pub struct BugReportWebhook {
+    /// The endpoint each report is posted to.
+    pub url: Url,
+    /// Optional bearer token, sent as an `Authorization` header.
+    pub token: Option<String>,
+}
+
+impl fmt::Debug for BugReportWebhook {
+    /// Prints the endpoint and whether a token exists, never the token.
+    ///
+    /// `RuntimeConfig` derives `Debug` and is printed whole in places that are
+    /// hard to enumerate. A credential that only leaks in a crash dump is
+    /// still leaked.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("BugReportWebhook")
+            .field("url", &self.url.as_str())
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .finish()
     }
 }
 
@@ -90,6 +120,8 @@ pub struct RuntimeConfig {
     pub chunk_generation_threads: Option<usize>,
     /// Optional worker count for the Rayon chunk encoding pool.
     pub chunk_encoding_threads: Option<usize>,
+    /// Where filed bug reports are forwarded, if anywhere.
+    pub bug_report_webhook: Option<BugReportWebhook>,
 }
 
 impl RuntimeConfig {

@@ -17,7 +17,11 @@ use std::io::{BufRead, BufReader, Error as IoError, Result as IoResult, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
+use tokio::time::{Duration, sleep};
+
+use crate::config::BugReportWebhook;
 
 /// Where reports are kept, relative to the server's working directory.
 const REPORTS_DIR: &str = "reports";
@@ -234,12 +238,137 @@ fn count_lines(path: &Path) -> IoResult<usize> {
         .count())
 }
 
+/// How many times one report is offered to the webhook before it is left behind.
+const FORWARD_ATTEMPTS: usize = 3;
+
+/// How long a single delivery may take.
+const FORWARD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long to wait before offering a report again.
+const FORWARD_RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// One report as the endpoint receives it: the record plus its file number.
+///
+/// The number is what makes a delivery identifiable. Without it the receiver
+/// cannot tell a retry from a second report with the same text, and a
+/// backfill cannot know where it left off.
+#[derive(Serialize)]
+struct ForwardedReport<'report> {
+    number: usize,
+    #[serde(flatten)]
+    report: &'report BugReport,
+}
+
+/// Sends a freshly filed report to the configured endpoint, in the background.
+///
+/// Deliberately fire-and-forget: the report is already on disk before this is
+/// called, so a receiver that is down or slow costs the site some freshness
+/// and costs the reporter nothing. The final failure names the report's number
+/// so a backfill knows exactly what to replay out of `bugs.jsonl`.
+pub fn forward(webhook: &BugReportWebhook, report: &BugReport, number: usize) {
+    let Ok(body) = serde_json::to_vec(&ForwardedReport { number, report }) else {
+        log::error!("bug report #{number} could not be encoded for forwarding");
+        return;
+    };
+    let url = webhook.url.clone();
+    let token = webhook.token.clone();
+
+    drop(tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        for attempt in 1..=FORWARD_ATTEMPTS {
+            let mut request = client
+                .post(url.clone())
+                .header(CONTENT_TYPE, "application/json")
+                .timeout(FORWARD_TIMEOUT)
+                .body(body.clone());
+            if let Some(token) = &token {
+                request = request.bearer_auth(token);
+            }
+
+            match request.send().await {
+                Ok(response) if response.status().is_success() => return,
+                Ok(response) => {
+                    let status = response.status();
+                    // A refusal the receiver meant is not worth two more
+                    // rounds; only a server-side fault is likely to pass later.
+                    if !status.is_server_error() {
+                        log::warn!(
+                            "bug report #{number} was refused with {status}; it stays in \
+                             bugs.jsonl and can be backfilled"
+                        );
+                        return;
+                    }
+                    log::debug!("bug report #{number} attempt {attempt} got {status}");
+                }
+                Err(error) => {
+                    log::debug!("bug report #{number} attempt {attempt} failed: {error}");
+                }
+            }
+
+            if attempt < FORWARD_ATTEMPTS {
+                sleep(FORWARD_RETRY_DELAY).await;
+            }
+        }
+
+        log::warn!(
+            "bug report #{number} was not delivered after {FORWARD_ATTEMPTS} attempts; it is \
+             on disk and the site is behind by at least this one"
+        );
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
     use std::process::id as process_id;
 
     use super::*;
+
+    /// The payload is the record itself with its file number beside it.
+    ///
+    /// This is the contract whatever receives these reads, so it is pinned
+    /// rather than left to whatever `serde` happens to do. The number is what
+    /// makes a delivery identifiable: without it a receiver cannot tell a
+    /// retry from a second report with the same text, and a backfill has no
+    /// way to know where it left off.
+    #[test]
+    fn a_forwarded_report_carries_its_number_beside_the_record() {
+        let report = sample("the pig went through a wall");
+
+        let payload = serde_json::to_value(ForwardedReport {
+            number: 7,
+            report: &report,
+        })
+        .expect("a report encodes");
+        let object = payload.as_object().expect("the payload is one flat object");
+
+        assert_eq!(
+            object.get("number").and_then(serde_json::Value::as_u64),
+            Some(7),
+            "the number identifies the delivery"
+        );
+        for field in [
+            "at",
+            "player",
+            "uuid",
+            "world",
+            "position",
+            "category",
+            "description",
+            "version",
+        ] {
+            assert!(
+                object.contains_key(field),
+                "the record's `{field}` has to survive forwarding; the receiver has \
+                 nothing else to work from"
+            );
+        }
+        assert_eq!(
+            object.get("player").and_then(serde_json::Value::as_str),
+            Some("Tester"),
+            "the record is flattened beside the number, not nested under a key"
+        );
+    }
 
     fn sample(description: &str) -> BugReport {
         BugReport::now(

@@ -50,6 +50,14 @@ port = 25575
 # The server refuses to start with rcon enabled and this left blank.
 password = ""
 
+# Where player-filed bug reports are sent, on top of the local
+# reports/bugs.jsonl. Leave the URL unset to keep reports local.
+[server.bug_reports]
+# Endpoint each filed report is posted to; unset keeps reports local.
+# webhook_url = "https://example.invalid/api/bug-reports"
+# Optional bearer token sent with each post.
+# webhook_token = ""
+
 # Optional worker counts for server thread pools. 0 or omitted uses each pool's automatic default.
 [server.threads]
 # Worker threads for the primary Tokio runtime.

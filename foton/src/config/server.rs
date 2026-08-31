@@ -1,6 +1,8 @@
 use foton_core::{
     chunk::chunk_ticket_manager::MAX_SUPPORTED_VIEW_DISTANCE,
-    config::{CompressionInfo, RuntimeConfig, ServerLinks, validate_login_security},
+    config::{
+        BugReportWebhook, CompressionInfo, RuntimeConfig, ServerLinks, validate_login_security,
+    },
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -71,13 +73,58 @@ pub struct ServerConfig {
     /// Remote administration over the Source Rcon protocol.
     #[serde(default)]
     pub rcon: RconConfig,
+    /// Where player-filed bug reports are sent, on top of the local file.
+    #[serde(default)]
+    pub bug_reports: BugReportsConfig,
+}
+
+/// Where player-filed bug reports go once they are on disk.
+///
+/// Leaving `webhook_url` unset keeps reports local, which is the right default
+/// for a server nobody is collecting from.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BugReportsConfig {
+    /// Endpoint each filed report is posted to. Unset means reports stay local.
+    pub webhook_url: Option<String>,
+    /// Optional bearer token sent with each post.
+    pub webhook_token: Option<String>,
+}
+
+impl BugReportsConfig {
+    /// Resolves the configured endpoint, rejecting an address that cannot work.
+    ///
+    /// A typo here is otherwise invisible until a tester writes out a repro
+    /// that then goes nowhere, so it is a startup failure rather than a
+    /// warning -- the same reasoning `RconConfig` uses for a blank password.
+    pub(super) fn into_webhook(self) -> Result<Option<BugReportWebhook>, String> {
+        let Some(url) = self.webhook_url else {
+            return Ok(None);
+        };
+        let url = Url::parse(&url)
+            .map_err(|error| format!("bug_reports.webhook_url is not a valid URL: {error}"))?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(format!(
+                "bug_reports.webhook_url must be http or https, not {}",
+                url.scheme()
+            ));
+        }
+        Ok(Some(BugReportWebhook {
+            url,
+            token: self.webhook_token,
+        }))
+    }
 }
 
 impl ServerConfig {
     /// Extracts the `RuntimeConfig` from this full config.
-    #[must_use]
-    pub fn into_runtime_config(self) -> RuntimeConfig {
-        RuntimeConfig {
+    ///
+    /// # Errors
+    ///
+    /// Returns a message describing any setting that cannot be resolved.
+    pub fn into_runtime_config(self) -> Result<RuntimeConfig, String> {
+        let bug_report_webhook = self.bug_reports.into_webhook()?;
+        Ok(RuntimeConfig {
             max_players: self.max_players,
             view_distance: self.view_distance,
             simulation_distance: self.simulation_distance,
@@ -99,7 +146,8 @@ impl ServerConfig {
             packet_workers: self.threads.packet_workers,
             chunk_generation_threads: self.threads.chunk_generation,
             chunk_encoding_threads: self.threads.chunk_encoding,
-        }
+            bug_report_webhook,
+        })
     }
 }
 

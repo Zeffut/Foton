@@ -76,6 +76,15 @@ Optional worker counts for server thread pools. 0 or omitted uses each pool's au
 | `chunk_generation` | integer | `0` | ≥ 0 | Worker threads for the Rayon chunk generation pool |
 | `chunk_encoding` | integer | `0` | ≥ 0 | Worker threads for the Rayon chunk encoding pool |
 
+#### `[server.bug_reports]`
+
+Where player-filed bug reports are sent, on top of the local file
+
+| Key | Type | Default | Range | Meaning |
+|---|---|---|---|---|
+| `webhook_url` | string |  |  | Endpoint each filed report is posted to; unset keeps reports local |
+| `webhook_token` | string |  |  | Optional bearer token sent with each post |
+
 ### `[log]`
 
 Logging configuration

@@ -157,7 +157,7 @@ use crate::inventory::container::Container;
 const RESPAWN_SEARCH_READY_CANDIDATE_BUDGET: usize = 8;
 
 use crate::bug_dialog;
-use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION};
+use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION, forward};
 use crate::chunk::player_chunk_view::PlayerChunkView;
 use crate::player::chunk_sender::ChunkSender;
 use crate::portal::{
@@ -828,6 +828,9 @@ impl Player {
                     report.category.name(),
                     report.description.lines().next().unwrap_or_default()
                 );
+                if let Some(webhook) = self.config.bug_report_webhook.as_ref() {
+                    forward(webhook, &report, number);
+                }
                 self.send_bug_feedback(&format!("Filed report #{number}. Thanks."));
             }
             Err(error) => {
