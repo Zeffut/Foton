@@ -159,6 +159,7 @@ const RESPAWN_SEARCH_READY_CANDIDATE_BUDGET: usize = 8;
 use crate::bug_dialog;
 use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION, forward};
 use crate::chunk::player_chunk_view::PlayerChunkView;
+use crate::event::Event;
 use crate::player::chunk_sender::ChunkSender;
 use crate::portal::{
     PortalTicketTarget, TeleportPostAction, TeleportPostTransition, TeleportTransition,
@@ -182,6 +183,14 @@ pub struct Player {
     pub(crate) server: Weak<Server>,
     /// Runtime configuration shared with the server.
     pub(crate) config: Arc<RuntimeConfig>,
+    /// This player, as the world holds them.
+    ///
+    /// `Arc::new_cyclic` hands the weak reference out at construction and it
+    /// was already being used for the inventory menu; keeping it lets a player
+    /// produce their own shared handle. Events need that: an event is
+    /// `'static`, so it cannot borrow the player it is about, and most of the
+    /// places one fires from hold only a `&Player`.
+    shared: Weak<Self>,
 
     /// Common entity fields (id, uuid, position, rotation, removal, callback).
     base: EntityBase,
@@ -518,6 +527,7 @@ impl Player {
             ender_chest,
             inventory_sync: SyncMutex::new(PlayerInventorySyncState::new()),
             last_item_in_main_hand: SyncMutex::new(ItemStack::empty()),
+            shared: self_weak.clone(),
             inventory_menu: SyncMutex::new(inventory_menu(inventory, self_weak.clone())),
             open_menu: SyncMutex::new(player_inventory::OpenMenuState::new()),
             container_counter: SyncMutex::new(ContainerCounter::new()),
@@ -768,6 +778,15 @@ impl Player {
         self.entity_data.set_base_invisible_flag(display.invisible);
         self.entity_data
             .set_base_glowing_flag(self.has_glowing_tag() || display.glowing);
+    }
+
+    /// This player as a shared handle, or `None` once nothing holds them.
+    ///
+    /// `None` means the player has already been dropped, which a caller
+    /// reached from a live `&Player` will not normally see.
+    #[must_use]
+    pub fn shared(&self) -> Option<Arc<Self>> {
+        self.shared.upgrade()
     }
 
     /// Handles a custom payload packet.
@@ -1057,6 +1076,17 @@ impl Player {
         self.server
             .upgrade()
             .expect("player must not outlive server")
+    }
+
+    /// Fires an event on this player's server, if they have one.
+    ///
+    /// [`Self::server`] panics without one, and a player built without a
+    /// server is normal in tests. A dispatch point on a gameplay path must not
+    /// turn that into a failure of whatever the test was actually about.
+    pub(crate) fn fire_event<E: Event>(&self, event: &mut E) {
+        if let Some(server) = self.server.upgrade() {
+            server.events.fire(event);
+        }
     }
 
     /// Returns the identity of the player's current continuous domain stay.

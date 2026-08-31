@@ -27,8 +27,10 @@ use foton_utils::downcast::{Downcast as _, DowncastType, DowncastTypeKey, Erased
 use foton_utils::locks::SyncRwLock;
 use rustc_hash::FxHashMap;
 
+pub mod block;
 pub mod player;
 
+pub use block::{BlockBreakEvent, BlockPlaceEvent};
 pub use player::{PlayerChatEvent, PlayerJoinEvent, PlayerQuitEvent};
 
 /// Something that happened, which a listener may observe and possibly stop.

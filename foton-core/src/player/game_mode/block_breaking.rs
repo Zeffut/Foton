@@ -26,6 +26,7 @@ use foton_utils::{
 use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, ITEM_BEHAVIORS};
 use crate::block_entity::SharedBlockEntity;
 use crate::entity::{Entity, LivingEntity};
+use crate::event::{BlockBreakEvent, Event as _};
 use crate::fluid::fluid_state_to_block;
 use crate::player::Player;
 use crate::player::food_data::food_constants;
@@ -363,6 +364,16 @@ impl BlockBreakingManager {
         let Some(_block) = REGISTRY.blocks.by_state_id(state) else {
             return false;
         };
+
+        // Before anything touches the block, so cancelling leaves the world as
+        // it was rather than having to put it back.
+        if let Some(shared) = player.shared() {
+            let mut event = BlockBreakEvent::new(shared, pos, state);
+            player.fire_event(&mut event);
+            if event.is_cancelled() {
+                return false;
+            }
+        }
 
         // TODO: Check for GameMasterBlock (command blocks, etc.)
         // TODO: Check blockActionRestricted

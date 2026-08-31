@@ -278,7 +278,7 @@ impl Player {
         // Anything listening gets the message before anyone hears it, and
         // before the packet is built around it.
         let mut event = PlayerChatEvent::new(Arc::clone(&player), chat_message);
-        self.server().events.fire(&mut event);
+        self.fire_event(&mut event);
         if event.is_cancelled() {
             // The send still counts against the spam throttle. A plugin that
             // silences a message has not un-sent it, and letting cancellation
