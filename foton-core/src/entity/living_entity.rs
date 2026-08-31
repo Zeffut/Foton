@@ -2683,8 +2683,14 @@ pub trait LivingEntity: Entity {
         }
 
         let is_equippable = stack.get_equippable().is_some_and(|e| slot == e.slot);
-        if is_equippable && let Some(sound) = self.equip_sound(slot, stack) {
-            self.play_sound(sound, 1.0, 1.0);
+        // Vanilla parity: `onEquipItem` reaches for `playSeededSound(null, ..)`
+        // rather than `playSound`, so the wearer is sent this one -- no client
+        // plays the sound of its own armour going on.
+        if is_equippable
+            && !self.is_silent()
+            && let Some(sound) = self.equip_sound(slot, stack)
+        {
+            self.play_server_side_sound(sound, 1.0, 1.0);
         }
         if self.does_emit_equip_event(slot) {
             self.game_event(if stack.get_equippable().is_some() {
@@ -2770,8 +2776,10 @@ pub trait LivingEntity: Entity {
         };
         drop(guard);
 
+        // Vanilla routes this through `setItemSlot` and so through
+        // `onEquipItem`, whose sound goes out to everyone.
         if let Some(sound) = self.equip_sound(slot, &equipped) {
-            self.play_sound(sound, 1.0, 1.0);
+            self.play_server_side_sound(sound, 1.0, 1.0);
         }
         if let Some(mob) = self.as_mob() {
             mob.set_guaranteed_drop(slot);

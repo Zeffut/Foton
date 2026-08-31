@@ -306,7 +306,7 @@ impl Player {
         self.reset_attack_strength_ticker();
         enchantment_helper::do_post_piercing_attack_effects(&world, self);
         if hit_something {
-            self.play_sound_holder(piercing_weapon.hit_sound.as_ref());
+            self.play_hit_sound_holder(piercing_weapon.hit_sound.as_ref());
         }
         self.play_sound_holder(piercing_weapon.sound.as_ref());
         self.swing(InteractionHand::MainHand, false);
@@ -372,11 +372,27 @@ impl Player {
         true
     }
 
+    /// Vanilla parity: `PiercingWeapon.makeSound`, which excludes the attacker.
+    ///
+    /// The swing is something the attacker's own client makes, so sending it
+    /// back would be the second copy.
     fn play_sound_holder(&self, holder: Option<&SoundEventHolder>) {
         let Some(sound) = holder.and_then(sound_holder_ref) else {
             return;
         };
         self.play_sound(sound, 1.0, 1.0);
+    }
+
+    /// Vanilla parity: `PiercingWeapon.makeHitSound`, which excludes nobody.
+    ///
+    /// The two differ by one argument in vanilla and it is deliberate: a hit
+    /// is confirmation the server sends back, and an attacker who never hears
+    /// it cannot tell a landed hit from a missed one.
+    fn play_hit_sound_holder(&self, holder: Option<&SoundEventHolder>) {
+        let Some(sound) = holder.and_then(sound_holder_ref) else {
+            return;
+        };
+        self.play_server_side_sound(sound, 1.0, 1.0);
     }
 
     fn cannot_attack(&self, entity: &dyn Entity) -> bool {
@@ -434,7 +450,7 @@ impl Player {
         let full_strength_attack = attack_strength_scale > 0.9;
         let knockback_attack = self.is_sprinting() && full_strength_attack;
         if knockback_attack {
-            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_KNOCKBACK);
+            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_KNOCKBACK, 1.0, 1.0);
         }
 
         let critical_attack = full_strength_attack && self.can_critical_attack(entity);
@@ -483,21 +499,11 @@ impl Player {
             self.show_damage_indicators(entity, old_health);
             self.cause_food_exhaustion(0.1);
         } else {
-            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_NODAMAGE);
+            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_NODAMAGE, 1.0, 1.0);
         }
 
         enchantment_helper::do_post_piercing_attack_effects(&world, self);
         was_hurt
-    }
-
-    /// Plays a sound at the player's feet for every nearby client, the attacker
-    /// included.
-    ///
-    /// Vanilla parity: `Player.playServerSideSound`, which passes a null
-    /// exclusion so the attacker hears it from the server too.
-    fn play_server_side_sound(&self, sound: SoundEventRef) {
-        self.get_world()
-            .play_sound_at(sound, self.sound_source(), self.position(), 1.0, 1.0, None);
     }
 
     /// Vanilla parity: `Player.isMobilityRestricted`, which in 26.2 is
@@ -557,16 +563,20 @@ impl Player {
         magic_boost: f32,
     ) {
         if critical_attack {
-            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_CRIT);
+            self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_CRIT, 1.0, 1.0);
             self.send_attack_animation(entity, AnimateAction::CriticalHit);
         }
 
         if !critical_attack && !sweep_attack {
-            self.play_server_side_sound(if full_strength_attack {
-                &sound_events::ENTITY_PLAYER_ATTACK_STRONG
-            } else {
-                &sound_events::ENTITY_PLAYER_ATTACK_WEAK
-            });
+            self.play_server_side_sound(
+                if full_strength_attack {
+                    &sound_events::ENTITY_PLAYER_ATTACK_STRONG
+                } else {
+                    &sound_events::ENTITY_PLAYER_ATTACK_WEAK
+                },
+                1.0,
+                1.0,
+            );
         }
 
         if magic_boost > 0.0 {
@@ -592,7 +602,7 @@ impl Player {
         damage_source: &DamageSource,
         attack_strength_scale: f32,
     ) {
-        self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_SWEEP);
+        self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_SWEEP, 1.0, 1.0);
 
         let world = self.get_world();
         let sweeping_damage_ratio = self

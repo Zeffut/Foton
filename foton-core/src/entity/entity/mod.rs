@@ -3285,6 +3285,31 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         }
     }
 
+    /// Plays a sound at this entity that every nearby client is sent.
+    ///
+    /// Vanilla parity: the bare `level().playSound(null, ...)`, which
+    /// `Player.playServerSideSound` is only a name for. This is the opposite
+    /// of [`Self::play_sound`]: nothing is excluded, because no client plays
+    /// this one for itself.
+    ///
+    /// Which of the two a sound belongs to is not a detail. Pick
+    /// [`Self::play_sound`] for something a client already makes on its own --
+    /// getting hurt, landing -- and this for everything else. Choosing wrong
+    /// makes a player hear the sound twice or not at all, and nothing on the
+    /// server looks any different either way.
+    fn play_server_side_sound(&self, sound: SoundEventRef, volume: f32, pitch: f32) {
+        if let Some(world) = self.level() {
+            world.play_sound_at(
+                sound,
+                self.sound_source(),
+                self.position(),
+                volume,
+                pitch,
+                None,
+            );
+        }
+    }
+
     /// Plays vanilla's extinguished-on-fire entity sound.
     fn play_entity_on_fire_extinguished_sound(&self) {
         let pitch = 1.6 + (rand::random::<f32>() - rand::random::<f32>()) * 0.4;

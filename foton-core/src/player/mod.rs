@@ -1426,6 +1426,32 @@ impl Entity for Player {
         LivingEntity::base_tick_living_entity(self);
     }
 
+    /// Vanilla parity: `Player.playSound`, which is not `Entity.playSound`.
+    ///
+    /// The difference is the excluded listener, and it is not an
+    /// optimization. `ClientLevel.playSeededSound` plays a sound only when
+    /// its excluded listener *is* the local player, so the exclusion is how
+    /// vanilla says "this player's own client already made this noise". Every
+    /// damage event makes the receiving client run
+    /// `LivingEntity.handleDamageEvent`, which plays the hurt sound exactly
+    /// that way; sending the broadcast to the victim as well gives them a
+    /// second copy of a sound they have already heard. Against a rhythm like
+    /// burning that reads as two damage ticks landing on top of each other.
+    ///
+    /// Vanilla's override also drops the `isSilent` guard, and so does this.
+    fn play_sound(&self, sound: SoundEventRef, volume: f32, pitch: f32) {
+        if let Some(world) = self.level() {
+            world.play_sound_at(
+                sound,
+                self.sound_source(),
+                self.position(),
+                volume,
+                pitch,
+                Some(self.id()),
+            );
+        }
+    }
+
     fn scoreboard_name(&self) -> String {
         self.gameprofile.name.clone()
     }
@@ -1990,8 +2016,10 @@ impl LivingEntity for Player {
             self.inventory.lock().set_changed();
         }
 
+        // Vanilla routes this through `setItemSlot` and so through
+        // `onEquipItem`, whose sound goes out to everyone.
         if let Some(sound) = self.equip_sound(slot, &equipped) {
-            self.play_sound(sound, 1.0, 1.0);
+            self.play_server_side_sound(sound, 1.0, 1.0);
         }
         // TODO: Emit EQUIP game event once game-event dispatch is implemented.
         InteractionResult::Success

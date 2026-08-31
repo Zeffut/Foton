@@ -11,12 +11,9 @@ use crate::behavior::{ITEM_BEHAVIORS, init_behaviors};
 use crate::entity::entities::{DrownedEntity, RavagerEntity};
 use crate::entity::next_entity_id;
 use crate::inventory::container::Container as _;
-use crate::player::connection::NetworkConnection;
 use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
-use foton_protocol::packet_traits::{CompressionInfo, EncodedPacket};
 use foton_registry::data_components::vanilla_components::BLOCKS_ATTACKS;
 use foton_utils::locks::SyncMutex;
-use text_components::TextComponent;
 
 /// The one spot the test world is solid ground rather than a column the fluid
 /// scan walks.
@@ -235,57 +232,6 @@ fn eating_spends_one_use_tick_per_server_tick() {
         started - 1,
         "one server tick must spend exactly one use tick"
     );
-}
-
-/// A connection that remembers the id of every packet the server sent it.
-struct PacketIdRecorder {
-    ids: Arc<SyncMutex<Vec<i32>>>,
-}
-
-impl NetworkConnection for PacketIdRecorder {
-    fn compression(&self) -> Option<CompressionInfo> {
-        None
-    }
-
-    fn send_encoded(&self, packet: EncodedPacket) {
-        // Uncompressed framing: a var-int body length, then a var-int id.
-        let mut bytes: &[u8] = &packet.encoded_data;
-        let mut read = || {
-            let mut value = 0_i32;
-            for shift in 0..5 {
-                let byte = bytes[0];
-                bytes = &bytes[1..];
-                value |= i32::from(byte & 0x7F) << (shift * 7);
-                if byte & 0x80 == 0 {
-                    break;
-                }
-            }
-            value
-        };
-        let _length = read();
-        let id = read();
-        self.ids.lock().push(id);
-    }
-
-    fn send_encoded_bundle(&self, packets: Vec<EncodedPacket>) {
-        for packet in packets {
-            self.send_encoded(packet);
-        }
-    }
-
-    fn disconnect_with_reason(&self, _reason: TextComponent) {}
-
-    fn tick(&self) {}
-
-    fn latency(&self) -> i32 {
-        0
-    }
-
-    fn close(&self) {}
-
-    fn closed(&self) -> bool {
-        false
-    }
 }
 
 /// Right-clicking armour on sends the wearer the sound of it going on.

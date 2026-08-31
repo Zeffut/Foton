@@ -281,3 +281,83 @@ fn generic_living_hurt_scales_knockback_by_resistance() {
         ),
     );
 }
+
+/// A player is not sent the hurt sound their own client already played.
+///
+/// Vanilla has two `playSound` overloads and the difference between them is
+/// the whole of this bug. `Entity.playSound` passes `null` as the excluded
+/// listener; `Player.playSound` passes the player. That is not an
+/// optimization -- every damage event makes the *receiving* client run
+/// `LivingEntity.handleDamageEvent`, which plays the hurt sound locally, and
+/// `ClientLevel.playSeededSound` only plays a sound whose excluded listener is
+/// the local player. So a mob's hurt sound arrives once, from the broadcast,
+/// and a player's arrives once, from their own client.
+///
+/// Foton had only the `Entity` form. The victim's client played the sound
+/// *and* received the broadcast: one hit, two sounds. Against a rhythm like
+/// burning, a player hears that as two damage ticks landing on top of
+/// each other, which is exactly how it was reported.
+///
+/// The assertion is on the packets the player is sent, because the server
+/// state is identical either way -- the damage, the health and the event all
+/// behaved correctly the whole time.
+#[test]
+fn a_hurt_player_is_not_sent_the_sound_their_client_plays_itself() {
+    use crate::chunk::player_chunk_view::PlayerChunkView;
+    use crate::entity::next_entity_id;
+    use crate::player::{PlayerConnection, ResetReason};
+    use crate::test_support::TestPlayerBuilder;
+    use foton_registry::packets::play::{C_DAMAGE_EVENT, C_SOUND};
+
+    init_vanilla_registry();
+    init_behaviors();
+    let world = fresh_test_world("hurt_sound_is_not_echoed_back");
+    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+    let ids: Arc<SyncMutex<Vec<i32>>> = Arc::new(SyncMutex::new(Vec::new()));
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Burning", next_entity_id())
+        .connection(Arc::new(PlayerConnection::Other(Box::new(
+            PacketIdRecorder {
+                ids: Arc::clone(&ids),
+            },
+        ))))
+        .build();
+    player.base().set_position_local(DVec3::new(8.5, 64.0, 8.5));
+    player.set_client_loaded(true);
+    assert!(
+        world.add_player(Arc::clone(&player), ResetReason::InitialJoin),
+        "the sound goes out to the world's players, so the victim has to be one"
+    );
+    let _ = player.mark_joined_world();
+    // Both packets are broadcasts to whoever is watching the chunk, so a
+    // player who watches none receives neither and the test proves nothing.
+    player
+        .chunk_sender
+        .lock()
+        .mark_chunk_sent_for_test(ChunkPos::new(0, 0));
+    world
+        .player_area_map
+        .on_player_join(&player, &PlayerChunkView::new(ChunkPos::new(0, 0), 2));
+    ids.lock().clear();
+
+    assert!(
+        player.hurt(
+            &world,
+            &DamageSource::environment(&vanilla_damage_types::ON_FIRE),
+            1.0,
+        ),
+        "a plain player on full health takes fire damage"
+    );
+
+    let sent = ids.lock().clone();
+    assert!(
+        sent.contains(&C_DAMAGE_EVENT),
+        "the damage event is what makes the client play the sound, so it must \
+         still be sent -- without it this test proves nothing"
+    );
+    assert!(
+        !sent.contains(&C_SOUND),
+        "the victim was sent the hurt sound on top of the one their own client \
+         plays from the damage event, so they heard the hit twice"
+    );
+}
