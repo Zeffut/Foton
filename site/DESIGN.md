@@ -82,18 +82,30 @@ are shared.
 guards `CONFIGURATION.md`. What it can guard is different, though: the site's
 output is not committed, so there is nothing to diff. See *Verification*.
 
-### 3. The site takes the `gh-pages` root; rustdoc moves to `/api/`
+### 3. The site deploys to Vercel at `foton.zeffut.fr`; `gh-pages` keeps rustdoc
 
-Two workflows force-pushing `single-commit` to the same branch erase each other,
-so one deployment has to produce both. `docs.yml` gains a step that builds the
-site into the deploy root and copies `target/doc` into `api/`.
+The site gets its own host and its own domain. `gh-pages` is left to the API
+documentation alone, exactly as it is today, so `docs.yml` needs no change and
+the two never contend for the same branch.
 
-This is not integration: no shared navigation, no shared theme, no link from the
-site's chrome. The rustdoc is parked so it stops colliding.
+Vercel builds the site itself, from the repository, on every push:
 
-If a real domain is wanted later, the alternative is a separate host
-(Cloudflare Pages, Vercel) with `gh-pages` left to rustdoc alone. That is a
-deployment change, not a design change.
+```json
+{ "buildCommand": "python3 dev/gen-site.py", "outputDirectory": "site/dist" }
+```
+
+That works because of decision 2 and would not work without it. Every fact the
+site states — the version, the protocol, the coverage, the missing classes, the
+test counts, every config key — is read from a file that is committed. Nothing
+in the build needs a Rust toolchain, a compiled workspace or a decompiled
+Minecraft source tree, so a deploy image with Python and nothing else can
+produce the whole site.
+
+Fallback if that image ever lacks Python: build in GitHub Actions and ship the
+directory with `vercel deploy --prebuilt`. Same output, one more moving part.
+
+There is no link between the two hosts' chrome. The rustdoc keeps its own
+default theme at its own address.
 
 ## Visual direction
 
