@@ -7,11 +7,17 @@ use super::{
     World, WorldAabb, enchantment_helper, piercing_ray_hit_t, vanilla_attributes,
     vanilla_damage_types, vanilla_entities,
 };
+use std::sync::Arc;
+
 use foton_protocol::packets::game::{AnimateAction, CAnimate};
+use foton_registry::data_components::components::{KineticWeapon, KineticWeaponCondition};
 use foton_registry::entity_data::ParticleData;
 use foton_registry::equipment::EquipmentSlot;
 use foton_registry::vanilla_item_tags::ItemTag;
 use foton_registry::{sound_events, vanilla_mob_effects, vanilla_particle_types};
+use foton_utils::entity_events::EntityStatus;
+
+use crate::advancement::triggers;
 
 /// Returns a height `progress` of the way up an entity's hitbox.
 ///
@@ -300,6 +306,7 @@ impl Player {
                 true,
                 piercing_weapon.deals_knockback,
                 piercing_weapon.dismounts,
+                InteractionHand::MainHand,
             );
         }
 
@@ -312,6 +319,112 @@ impl Player {
         self.swing(InteractionHand::MainHand, false);
     }
 
+    /// Runs one tick of a raised kinetic weapon -- a spear.
+    ///
+    /// Vanilla parity: `KineticWeapon.damageEntities`, reached from
+    /// `ItemStack.onUseTick`. A spear does not swing: it is held out, and what
+    /// decides whether it hurts anything is how fast the two of you are
+    /// closing. The component was fully parsed, serialized, hashed and tested
+    /// before this existed and nothing ever called it, so a player charging on
+    /// an elytra passed straight through what they aimed at.
+    ///
+    /// Every threshold below is read from the item rather than assumed. A
+    /// copper spear, for instance, waits 13 ticks before it can do anything at
+    /// all and wants 4.6 blocks per second of *closing* speed to draw blood --
+    /// which is why walking into a mob with one does nothing and flying into
+    /// one does.
+    pub(crate) fn kinetic_weapon_damage_entities(
+        &self,
+        stack: &ItemStack,
+        kinetic: &KineticWeapon,
+        ticks_remaining: i32,
+        hand: InteractionHand,
+    ) {
+        let use_duration = ITEM_BEHAVIORS
+            .get_behavior(stack.item())
+            .get_use_duration(stack, self);
+        let ticks_used = use_duration - ticks_remaining - kinetic.delay_ticks();
+        if ticks_used < 0 {
+            return;
+        }
+
+        let world = self.get_world();
+        let look = self.look_angle();
+        let attacker_speed = look.dot(kinetic_motion(self, &world));
+        // Vanilla parity: `livingEntity instanceof Player ? 1.0F : 0.2F`. A mob
+        // is held to a fifth of the speed a player is, because it cannot fly.
+        // Foton only reaches this from a player, so the factor is the player's.
+        let action_factor = 1.0;
+        let base_damage = self
+            .attributes()
+            .lock()
+            .required_value(vanilla_attributes::ATTACK_DAMAGE);
+
+        let game_time = world.game_time();
+        let cooldown = kinetic.contact_cooldown_ticks();
+        let mut affected = false;
+
+        for target in self.piercing_hit_entities(stack, &world) {
+            // One thrust, one hit per target. Without this the spear would
+            // damage whatever it is inside on every tick of the charge.
+            if self
+                .living_base()
+                .was_recently_stabbed(target.id(), game_time, cooldown)
+            {
+                continue;
+            }
+            self.living_base()
+                .remember_stabbed_entity(target.id(), game_time);
+
+            let target_speed = look.dot(kinetic_motion(target.as_ref(), &world));
+            let relative_speed = (attacker_speed - target_speed).max(0.0);
+            let holds = |condition: Option<&KineticWeaponCondition>| {
+                condition.is_some_and(|condition| {
+                    ticks_used <= condition.max_duration_ticks()
+                        && attacker_speed >= f64::from(condition.min_speed()) * action_factor
+                        && relative_speed
+                            >= f64::from(condition.min_relative_speed()) * action_factor
+                })
+            };
+            let dismounts = holds(kinetic.dismount_conditions());
+            let deals_knockback = holds(kinetic.knockback_conditions());
+            let deals_damage = holds(kinetic.damage_conditions());
+            if !dismounts && !deals_knockback && !deals_damage {
+                continue;
+            }
+
+            // Vanilla floors the speed term on its own, before the attribute is
+            // added: `baseMobDamage + Mth.floor(relativeSpeed * multiplier)`.
+            let damage = base_damage as f32
+                + (relative_speed * f64::from(kinetic.damage_multiplier())).floor() as f32;
+            affected |= self.stab_attack(
+                &target,
+                damage,
+                deals_damage,
+                deals_knockback,
+                dismounts,
+                hand,
+            );
+        }
+
+        if affected {
+            // The client draws the recoil off this event; without it a landed
+            // hit looks identical to a miss.
+            self.broadcast_entity_event(EntityStatus::KineticHit);
+            let speared = self
+                .living_base()
+                .stabbed_entity_ids()
+                .into_iter()
+                .filter(|id| {
+                    world
+                        .get_entity_by_id(*id)
+                        .is_some_and(|entity| entity.as_living_entity().is_some())
+                })
+                .count();
+            triggers::item::speared_mobs(self, speared as i32);
+        }
+    }
+
     fn stab_attack(
         &self,
         target: &SharedEntity,
@@ -319,6 +432,7 @@ impl Player {
         deals_damage: bool,
         deals_knockback: bool,
         dismounts: bool,
+        hand: InteractionHand,
     ) -> bool {
         let entity = target.as_ref();
         if self.cannot_attack(entity) {
@@ -327,7 +441,7 @@ impl Player {
 
         let attacking_item = {
             let inventory = self.inventory.lock();
-            let stack = inventory.get_item_in_hand(InteractionHand::MainHand);
+            let stack = inventory.get_item_in_hand(hand);
             stack.copy_with_count(stack.count())
         };
         let damage_source = self.attack_damage_source(&attacking_item);
@@ -339,9 +453,20 @@ impl Player {
         );
         let enchanted_damage =
             enchantment_helper::modify_damage(&attacking_item, &enchantment_context, base_damage);
-        let attack_strength_scale = self.attack_strength_scale(0.5);
-        let magic_boost = attack_strength_scale * (enchanted_damage - base_damage);
-        let base_damage = base_damage * Self::base_damage_scale_factor(attack_strength_scale);
+        // Vanilla parity: `Player.stabAttack` applies the attack-strength
+        // cooldown only when the weapon is *not* the one being held up. A
+        // spear thrust is not a swing, so the cooldown has nothing to say
+        // about it -- scaling it there would make a charge at full speed land
+        // for a fraction of its damage.
+        let (base_damage, magic_boost) = if self.active_item_use_hand() == Some(hand) {
+            (base_damage, enchanted_damage - base_damage)
+        } else {
+            let attack_strength_scale = self.attack_strength_scale(0.5);
+            (
+                base_damage * Self::base_damage_scale_factor(attack_strength_scale),
+                attack_strength_scale * (enchanted_damage - base_damage),
+            )
+        };
         let damage = base_damage + magic_boost;
         let old_movement = entity.velocity();
         let mut affected = deals_knockback;
@@ -376,7 +501,7 @@ impl Player {
     ///
     /// The swing is something the attacker's own client makes, so sending it
     /// back would be the second copy.
-    fn play_sound_holder(&self, holder: Option<&SoundEventHolder>) {
+    pub(crate) fn play_sound_holder(&self, holder: Option<&SoundEventHolder>) {
         let Some(sound) = holder.and_then(sound_holder_ref) else {
             return;
         };
@@ -936,6 +1061,23 @@ impl Player {
 /// Going in through the packet is the point. Foton already had crit-shaped
 /// helpers that nothing called; a test that pokes `Player::attack` directly
 /// would pass for either version of the code.
+/// Returns how fast an entity is moving, in blocks per second.
+///
+/// Vanilla parity: `KineticWeapon.getMotion`. The scale by twenty is what
+/// turns a per-tick velocity into the units every threshold on the component
+/// is written in, and the root-vehicle step means a spear measures the horse's
+/// charge rather than the rider's shuffle on its back. A player is exempt from
+/// that step because their own reported speed already covers the whole ride.
+fn kinetic_motion(entity: &dyn Entity, world: &Arc<World>) -> DVec3 {
+    if entity.as_player().is_none()
+        && entity.is_passenger()
+        && let Some(root) = world.get_entity_by_id(entity.root_vehicle_id())
+    {
+        return root.known_speed() * 20.0;
+    }
+    entity.known_speed() * 20.0
+}
+
 #[cfg(test)]
 mod melee_tests {
     use std::io::Cursor;

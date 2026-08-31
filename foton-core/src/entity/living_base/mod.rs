@@ -827,6 +827,13 @@ struct LivingEntityState {
     rotation: LivingRotationState,
     swing: LivingSwingState,
     active_item_use: Option<ActiveItemUseState>,
+    /// Vanilla `LivingEntity.recentKineticEnemies`, by entity id.
+    ///
+    /// `None` means "not holding a kinetic weapon up": vanilla allocates the
+    /// map when the use starts and leaves it null otherwise, so
+    /// `rememberStabbedEntity` outside a spear thrust is a no-op rather than
+    /// an entry nothing will ever read.
+    recent_kinetic_enemies: Option<FxHashMap<i32, i64>>,
     no_jump_delay: i32,
     no_action_time: i32,
 }
@@ -864,6 +871,7 @@ impl LivingEntityState {
             rotation: LivingRotationState::new(),
             swing: LivingSwingState::new(),
             active_item_use: None,
+            recent_kinetic_enemies: None,
             no_jump_delay: 0,
             no_action_time: 0,
         }
@@ -1072,6 +1080,45 @@ impl LivingEntityBase {
     /// Stops vanilla active item use without calling item hooks.
     pub fn stop_using_item(&self) -> Option<ActiveItemUseState> {
         self.state.lock().active_item_use.take()
+    }
+
+    /// Opens the contact record a kinetic weapon's thrust keeps.
+    ///
+    /// Vanilla parity: the `recentKineticEnemies = new Object2LongOpenHashMap`
+    /// that closes `startUsingItem`. A fresh map per thrust is the point --
+    /// carrying entries over would let one spear charge silently skip targets
+    /// it hit during the last one.
+    pub fn begin_kinetic_contact_tracking(&self) {
+        self.state.lock().recent_kinetic_enemies = Some(FxHashMap::default());
+    }
+
+    /// Vanilla parity: `LivingEntity.wasRecentlyStabbed`.
+    #[must_use]
+    pub fn was_recently_stabbed(&self, target_id: i32, game_time: i64, allowed_time: i32) -> bool {
+        self.state
+            .lock()
+            .recent_kinetic_enemies
+            .as_ref()
+            .and_then(|seen| seen.get(&target_id).copied())
+            .is_some_and(|stamp| game_time - stamp < i64::from(allowed_time))
+    }
+
+    /// Vanilla parity: `LivingEntity.rememberStabbedEntity`.
+    pub fn remember_stabbed_entity(&self, target_id: i32, game_time: i64) {
+        if let Some(seen) = self.state.lock().recent_kinetic_enemies.as_mut() {
+            seen.insert(target_id, game_time);
+        }
+    }
+
+    /// Vanilla parity: `LivingEntity.stabbedEntities`, before its filter.
+    #[must_use]
+    pub fn stabbed_entity_ids(&self) -> Vec<i32> {
+        self.state
+            .lock()
+            .recent_kinetic_enemies
+            .as_ref()
+            .map(|seen| seen.keys().copied().collect())
+            .unwrap_or_default()
     }
 
     /// Decrements active-use remaining ticks and returns the updated state.

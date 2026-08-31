@@ -24,6 +24,20 @@ pub fn using_item(player: &Player, stack: &ItemStack) {
     item_only(player, "minecraft:using_item", stack);
 }
 
+/// Vanilla parity: `CriteriaTriggers.SPEAR_MOBS_TRIGGER`, fired once per
+/// thrust that connects, with everything that thrust has run through so far.
+///
+/// The count is a floor rather than an exact match, which is why this compares
+/// with `>=` where the neighboring triggers use bounds.
+pub fn speared_mobs(player: &Player, count: i32) {
+    fire(player, "minecraft:spear_mobs", |instance| {
+        let TriggerInstance::SpearMobs { count: wanted, .. } = instance else {
+            return false;
+        };
+        wanted.is_none_or(|wanted| count >= wanted)
+    });
+}
+
 /// Vanilla parity: `CriteriaTriggers.SHOT_CROSSBOW`.
 pub fn shot_crossbow(player: &Player, weapon: &ItemStack) {
     item_only(player, "minecraft:shot_crossbow", weapon);

@@ -601,8 +601,20 @@ pub trait ItemBehavior: Send + Sync {
             return InteractionResult::Consume;
         }
 
-        // TODO: mirror the `KINETIC_WEAPON` branch of `Item.use` once spears
-        // and the wind-up sound they make are modeled.
+        // Vanilla parity: the `KINETIC_WEAPON` branch of `Item.use`. Holding
+        // a spear out is a use like any other; the wind-up noise is the only
+        // extra, and vanilla's `makeSound` excludes the wielder because their
+        // own client makes it.
+        let wind_up = context.inv.with_item(|item| {
+            item.get(KINETIC_WEAPON)
+                .and_then(|kinetic| kinetic.sound().cloned())
+        });
+        if context.inv.with_item(|item| item.has(KINETIC_WEAPON)) {
+            context.player.start_using_item(context.hand);
+            context.player.play_sound_holder(wind_up.as_ref());
+            return InteractionResult::Consume;
+        }
+
         InteractionResult::Pass
     }
 

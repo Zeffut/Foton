@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 use foton_registry::DyeColor;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::data_components::components::ItemDamageFunction;
-use foton_registry::data_components::vanilla_components::{self, BLOCKS_ATTACKS};
+use foton_registry::data_components::vanilla_components::{self, BLOCKS_ATTACKS, KINETIC_WEAPON};
 use foton_registry::particle_type::{BlockParticleOption, ParticleData};
 use foton_registry::vanilla_particle_types;
 
@@ -2229,7 +2229,12 @@ pub trait LivingEntity: Entity {
         self.set_living_entity_flag(USING_ITEM_FLAG, true);
         self.set_living_entity_flag(OFF_HAND_ACTIVE_ITEM_FLAG, hand == InteractionHand::OffHand);
         self.cause_use_vibration(&item, &vanilla_game_events::ITEM_INTERACT_START);
-        // TODO: `KINETIC_WEAPON` recent-enemy tracking has no home yet.
+        // Vanilla parity: the last two lines of `startUsingItem`. A spear
+        // remembers what it has already run through so that one thrust cannot
+        // hit the same target on every tick of its flight.
+        if item.has(KINETIC_WEAPON) {
+            self.living_base().begin_kinetic_contact_tracking();
+        }
     }
 
     /// Emits the game event an item's use is worth, if its use is audible at all.
@@ -2324,7 +2329,24 @@ pub trait LivingEntity: Entity {
             triggers::item::using_item(player, &item);
         }
         let behavior = ITEM_BEHAVIORS.get_behavior(item.item());
-        behavior.on_use_tick(&world, user, &mut item, active.remaining_ticks());
+        // Vanilla parity: `ItemStack.onUseTick`, whose kinetic branch
+        // *replaces* the item's own hook rather than running beside it.
+        let kinetic = item.get(KINETIC_WEAPON).cloned();
+        if let Some(kinetic) = kinetic {
+            if let Some(player) = self.as_player() {
+                player.kinetic_weapon_damage_entities(
+                    &item,
+                    &kinetic,
+                    active.remaining_ticks(),
+                    hand,
+                );
+            }
+            // Not implemented: the mob side. Vanilla drives a piglin's spear
+            // from `SpearUseGoal` and `SpearAttack`, and Foton's hit sweep
+            // lives on the player, exactly as the piercing weapon's does.
+        } else {
+            behavior.on_use_tick(&world, user, &mut item, active.remaining_ticks());
+        }
 
         // A hook is allowed to stop the use or switch hands mid-tick.
         if self.active_item_use_hand() != Some(hand) {
