@@ -103,6 +103,9 @@ def all():
         out[f"{kind}_missing"] = str(len(entry["missing"]))
         out[f"{kind}_percent"] = str(percent)
         out[f"{kind}_missing_list"] = _missing_list(entry["missing"])
+    for name, hole in (("_scene-island.svg", "scene_island"),
+                       ("_scene-crates.svg", "scene_crates")):
+        out[hole] = _read(REPO / "site" / "content" / name, f"the {hole} scene").strip()
     return out
 
 

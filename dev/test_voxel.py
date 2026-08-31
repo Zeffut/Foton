@@ -84,5 +84,24 @@ class Runs(unittest.TestCase):
                          [(0, 1), (2, 1)])
 
 
+class PainterOrder(unittest.TestCase):
+    def test_the_nearer_voxel_wins_the_overlap_regardless_of_input_order(self):
+        """(i, j, k) and (i+1, j+1, k+1) project to the same screen position
+        -- shifting all three axes by the same amount moves a voxel straight
+        along the camera's line of sight without moving it on screen -- but
+        the second is three closer in painter_order's i+j+k depth key. Fed in
+        either order, the nearer one must be the last one drawn, so it must
+        win the overlapping pixel both times.
+        """
+        BLUE = ("#0000ff", "#0000cc", "#000099")
+        far = (0, 0, 0, RED)
+        near = (1, 1, 1, BLUE)
+        for voxels in ([far, near], [near, far]):
+            grid = voxel.Grid()
+            for i, j, k, faces in voxel.painter_order(voxels):
+                voxel.cube(grid, i, j, k, faces, unit=8)
+            self.assertEqual(grid.px[(0, 0)], BLUE[1])
+
+
 if __name__ == "__main__":
     unittest.main()
