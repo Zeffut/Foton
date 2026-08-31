@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<meta name="description" content="{{ description }}">
+<link rel="icon" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/"><img src="/favicon.png" alt="" width="26" height="26"><span>Foton</span></a>
+  <nav>{{ nav }}</nav>
+  <span class="chip">PRE-ALPHA</span>
+</header>
+{{ body }}
+<footer class="bar foot">
+  <span>Foton {{ version }} — Minecraft {{ mc_target }}, protocol {{ protocol }}</span>
+  <span><a href="https://github.com/Zeffut/Foton">Source</a> — AGPL-3.0-or-later</span>
+</footer>
+</body>
+</html>
