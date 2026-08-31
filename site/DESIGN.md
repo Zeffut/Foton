@@ -108,25 +108,34 @@ directory with `vercel deploy --prebuilt`. Same output, one more moving part.
 There is no link between the two hosts' chrome. The rustdoc keeps its own
 default theme at its own address.
 
-### 4. English at the root, French under `/fr/`
+### 4. Two prefixed editions, and a root that asks the browser
 
-Every page exists in both languages. English keeps the root because the project
-is English throughout — the README, the engineering rules, the code comments,
-and the vanilla-parity community the site is written for.
+Every page exists in English and French, at `/en/` and `/fr/`. The bare root is
+nothing but a redirect: it reads `Accept-Language` and sends the visitor to one
+or the other.
 
-Two rules the implementation turns on:
+Neither edition sits at the root, and that is the whole point. Detecting the
+language at `/` while English also lives at `/` builds a trap — a French visitor
+who clicks "English" lands on `/`, is detected as French, and is sent straight
+back. Giving each edition its own prefix makes the switcher's links absolute, so
+choosing a language always works.
 
-- **A visible switcher, and no automatic redirect.** Guessing from
-  `Accept-Language` sends people who deliberately chose the other edition back
-  to where they did not want to be. The switcher points at the same page in the
-  other language, never at its home.
-- **A missing translation stops the build.** Chrome strings, page titles and
-  meta descriptions live in one table per language, and a key absent from one of
-  them raises rather than falling back to English — a page silently half
-  translated is worse than a build that fails.
+Three rules the implementation turns on:
+
+- **Only `/` is ever redirected.** A deep link keeps its language, so a URL
+  someone shares opens the page they meant to share.
+- **The redirect is a 302, never a 301.** A permanent redirect would let a
+  browser cache a language the visitor never chose, with no way to take it back.
+- **The detection does not second-guess.** A header asking for French *and*
+  English gets English rather than being overridden.
+
+And one rule about the content itself: **a missing translation stops the build.**
+Chrome strings, page titles and meta descriptions live in one table per
+language, and a key absent from either raises rather than falling back to
+English. A page silently half translated is worse than a build that fails.
 
 Facts stay language-neutral: both editions read the same generated version,
-protocol, coverage figures and remaining-class lists.
+protocol and coverage figures.
 
 **One thing the French edition does not translate.** The configuration
 reference's key names, types, defaults and descriptions come from
