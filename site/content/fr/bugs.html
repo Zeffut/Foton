@@ -1,0 +1,68 @@
+<main>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <div class="eyebrow">DEPUIS LE JEU</div>
+        <h1>Ce que les testeurs ont trouvé.</h1>
+        <p style="font-size:19px">Chaque bug ci-dessous a été signalé par un joueur debout dans
+          le monde où il s'est produit, sans quitter la partie. Rien n'est résumé, trié ni
+          reformulé — un rapport se lit comme son auteur l'a écrit.</p>
+        <div class="cmd"><b>/</b>bug</div>
+      </div>
+      <div>
+        <div class="cols">
+          <div class="stat">
+            <b>{{ reports_total }}</b>
+            <div class="label">DÉPOSÉS</div>
+          </div>
+          <div class="stat">
+            <b>{{ reports_fixed }}</b>
+            <div class="label">CORRIGÉS DEPUIS</div>
+          </div>
+          <div class="stat">
+            <b>{{ reports_open }}</b>
+            <div class="label">ENCORE OUVERTS</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">COMMENT UN RAPPORT ARRIVE ICI</div>
+      <h2>L'écrire doit être plus simple que s'en souvenir.</h2>
+      <div class="cols-2">
+        <div>
+          <p>Une session de test vaut exactement ce que les testeurs ont remarqué, et l'essentiel
+            se perd entre le moment où l'on remarque quelque chose et celui où on l'écrit
+            ailleurs. Alors <code>/bug</code> ouvre un vrai formulaire à l'écran du joueur : une
+            catégorie à choisir et un champ pour décrire ce qui s'est passé. <code>/report</code>
+            et <code>/bugreport</code> ouvrent le même, parce qu'un testeur tape le mot qui lui
+            vient et qu'une mauvaise pioche ne doit pas coûter le rapport.</p>
+        </div>
+        <div>
+          <p>Tout ce qui peut être capturé sans le demander l'est : qui signale, quel monde, la
+            position exacte, et la version contre laquelle le rapport est déposé. Le testeur
+            écrit la seule chose qu'un serveur ne peut pas déduire seul — ce qu'il attendait à la
+            place.</p>
+          <p class="rest">Catégories : {{ bug_categories }}.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">LES RAPPORTS</div>
+      <h2>Tels que déposés.</h2>
+      <p>Les rapports sont publiés tels qu'ils ont été écrits, dans la langue de leur auteur. Un
+        rapport marqué corrigé porte une ligne disant ce qui a réellement été fait, pour que
+        l'affirmation se vérifie dans l'historique plutôt que sur parole.</p>
+      {{ reports }}
+      <p class="rest">Le nom du testeur est affiché parce qu'un rapport est le travail de
+        quelqu'un. Son identifiant de compte ne l'est pas, et ne quitte jamais le serveur qui l'a
+        reçu.</p>
+    </div>
+  </section>
+</main>
