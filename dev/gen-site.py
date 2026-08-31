@@ -35,6 +35,18 @@ PAGES = [
      "Foton — a Minecraft server that refuses to guess",
      "An independent Minecraft Java Edition server written in Rust, built against the decompiled vanilla source.",
      None),
+    ("start", "start/index.html",
+     "Get started — Foton",
+     "Install Foton from a release binary, the Docker image or source, and boot your first world.",
+     "Get started"),
+    ("configuration", "configuration/index.html",
+     "Configuration — Foton",
+     "Every Foton configuration key, with its type, default and range, generated from the schemas the server validates against.",
+     "Configuration"),
+    ("contributing", "contributing/index.html",
+     "Contributing — Foton",
+     "How Foton is built: the behavior mechanism, the engineering rules, and the checks a change has to clear.",
+     "Contributing"),
 ]
 
 
