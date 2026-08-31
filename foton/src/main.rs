@@ -6,10 +6,11 @@ use std::num::NonZero;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Arc;
-use std::{io, panic, thread};
+use std::{env, io, panic, process, thread};
 
 use crossterm::style::Attribute::{Bold, Dim, Reset};
 use crossterm::style::{Color, ResetColor, SetForegroundColor};
+use foton::args::{self, Action};
 use foton::config::{self, LogConfig};
 use foton::logger::CommandLogger;
 use foton::{FotonServer, SERVER, logger::LoggerLayer};
@@ -148,6 +149,29 @@ fn main() {
 fn foton_main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
+
+    match args::parse(env::args().skip(1)) {
+        Action::Run => {}
+        Action::Version => {
+            println!("foton {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Action::GenerateConfig => {
+            // load_or_create writes every file it does not find, so asking for
+            // the configuration is what creates it.
+            if let Err(error) = config::load_or_create(Path::new("config/config.toml")) {
+                eprintln!("could not write the configuration: {error}");
+                process::exit(1);
+            }
+            println!("wrote config/config.toml, config/worlds.toml and config/groups.toml");
+            return;
+        }
+        Action::Unknown(argument) => {
+            eprintln!("foton: unknown argument {argument}");
+            eprintln!("usage: foton [--version] [--generate-config]");
+            process::exit(2);
+        }
+    }
 
     // Load config once at startup
     let foton_config = match config::load_or_create(Path::new("config/config.toml")) {
