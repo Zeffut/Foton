@@ -199,6 +199,11 @@ def build(out_dir):
 
 LINK = re.compile(r'(?:href|src)="(/[^"#?]*)')
 
+# Paths the host serves at request time, which the build cannot emit and must
+# not be asked to. Kept to exact prefixes rather than a pattern, so an
+# exemption can never widen into "stop checking links".
+PLATFORM_PATHS = ("/_vercel/",)
+
 
 def check_links(out_dir, written):
     """Every root-relative link must point at something the build emitted."""
@@ -208,6 +213,8 @@ def check_links(out_dir, written):
         if path.suffix != ".html":
             continue
         for target in LINK.findall(path.read_text(encoding="utf-8")):
+            if target.startswith(PLATFORM_PATHS):
+                continue
             candidates = {target, target.rstrip("/") + "/index.html",
                           target + "index.html"}
             if not candidates & emitted:

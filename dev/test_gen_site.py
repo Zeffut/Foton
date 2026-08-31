@@ -100,5 +100,32 @@ class Bilingual(unittest.TestCase):
             self.assertEqual(gen_site.check_links(out, gen_site.build(out)), [])
 
 
+class PlatformPaths(unittest.TestCase):
+    """The /_vercel/ exemption must let the host's own paths through without
+    blunting the check that catches a genuinely dead link."""
+
+    def _page(self, tmp, href):
+        out = pathlib.Path(tmp)
+        written = gen_site.build(out)
+        page = out / "en" / "index.html"
+        page.write_text(f'<a href="{href}">x</a>', encoding="utf-8")
+        return out, written
+
+    def test_a_platform_path_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, written = self._page(tmp, "/_vercel/insights/script.js")
+            self.assertEqual(gen_site.check_links(out, written), [])
+
+    def test_a_dead_link_is_still_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, written = self._page(tmp, "/nope/")
+            self.assertEqual(len(gen_site.check_links(out, written)), 1)
+
+    def test_a_lookalike_prefix_is_not_exempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, written = self._page(tmp, "/_vercelish/x.js")
+            self.assertEqual(len(gen_site.check_links(out, written)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
