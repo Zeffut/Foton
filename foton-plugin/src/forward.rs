@@ -15,7 +15,7 @@ use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, EntityDamageByEntityEvent,
     EntityPickupItemEvent, EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerChatEvent,
-    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
+    PlayerCommandPreprocessEvent, PlayerDeathEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
     PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
@@ -130,6 +130,11 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             MoveAnswer::Redirect(destination) => event.set_to(destination),
             MoveAnswer::Accepted | MoveAnswer::Unreachable => {}
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerDeathEvent, _>(owner(), move |event| {
+        death_call(&jvm, &event.player_id().to_string());
     });
 
     let jvm = Arc::clone(&vm);
@@ -446,6 +451,12 @@ fn from_to_call(vm: &JavaVM, world: &str, block: BlockPos, to_block: BlockPos) -
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+fn death_call(vm: &JavaVM, uuid: &str) {
+    let Ok(mut env) = vm.attach_current_thread() else { return; };
+    let Ok(uuid) = env.new_string(uuid) else { return; };
+    let _ = env.call_static_method(BRIDGE, "firePlayerDeath", "(Ljava/lang/String;)V", &[JValue::Object(&uuid)]);
 }
 
 enum MoveAnswer {

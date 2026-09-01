@@ -991,6 +991,9 @@ impl Player {
             None,
         );
 
+        let mut death_event = crate::event::PlayerDeathEvent::new(self.gameprofile.id);
+        self.fire_event(&mut death_event);
+
         let show_death_messages = world.get_game_rule(&SHOW_DEATH_MESSAGES);
 
         // TODO: `CombatTracker` proper, for the fall-damage variants and the

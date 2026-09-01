@@ -41,7 +41,7 @@ pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use entity::{EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRemoveFromWorldEvent};
 pub use inventory::InventoryClickEvent;
 pub use player::{
-    PlayerChatEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
+    PlayerChatEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerInteractEvent, PlayerJoinEvent,
     PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
 };
 pub use server::ServerTickEvent;

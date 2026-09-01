@@ -228,6 +228,10 @@ public final class EventBridge {
         dispatch(event); return !event.isCancelled();
     }
 
+    public static void firePlayerDeath(String uuid) {
+        dispatch(new org.bukkit.event.entity.PlayerDeathEvent(player(uuid)));
+    }
+
     public static String fireMove(String uuid, String world,
             double fromX, double fromY, double fromZ,
             double toX, double toY, double toZ) {
