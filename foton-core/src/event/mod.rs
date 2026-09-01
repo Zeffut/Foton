@@ -31,6 +31,7 @@ pub mod block;
 pub mod command;
 pub mod player;
 pub mod inventory;
+pub mod entity;
 pub mod server;
 
 pub use block::{BlockBreakEvent, BlockPlaceEvent};
@@ -40,6 +41,7 @@ pub use player::{
     PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
 };
 pub use inventory::InventoryClickEvent;
+pub use entity::EntityDamageByEntityEvent;
 pub use server::ServerTickEvent;
 
 /// Something that happened, which a listener may observe and possibly stop.

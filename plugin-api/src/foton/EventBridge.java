@@ -162,6 +162,14 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static boolean fireEntityDamage(String damager, String entity) {
+        org.bukkit.event.entity.EntityDamageByEntityEvent event =
+            new org.bukkit.event.entity.EntityDamageByEntityEvent(
+                new FotonEntity(Native.parse(damager)), new FotonEntity(Native.parse(entity)));
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
         PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);

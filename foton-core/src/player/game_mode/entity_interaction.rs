@@ -470,10 +470,14 @@ impl Player {
         let damage = base_damage + magic_boost;
         let old_movement = entity.velocity();
         let mut affected = deals_knockback;
-        let damage_dealt = deals_damage
-            && entity
-                .level()
-                .is_some_and(|world| entity.hurt(&world, &damage_source, damage));
+        let mut damage_allowed = true;
+        if deals_damage {
+            let mut event = crate::event::EntityDamageByEntityEvent::new(self.uuid(), entity.uuid());
+            self.fire_event(&mut event);
+            damage_allowed = !event.is_cancelled();
+        }
+        let damage_dealt = deals_damage && damage_allowed
+            && entity.level().is_some_and(|world| entity.hurt(&world, &damage_source, damage));
         affected |= damage_dealt;
         if deals_knockback {
             self.cause_extra_knockback(
@@ -594,7 +598,10 @@ impl Player {
             enchantment_helper::do_post_piercing_attack_effects(&world, self);
             return false;
         };
-        let was_hurt = entity.hurt(&target_world, &damage_source, total_damage);
+        let mut event = crate::event::EntityDamageByEntityEvent::new(self.uuid(), entity.uuid());
+        self.fire_event(&mut event);
+        let damage_allowed = !event.is_cancelled();
+        let was_hurt = damage_allowed && entity.hurt(&target_world, &damage_source, total_damage);
         if was_hurt {
             let sprint_knockback = if knockback_attack { 0.5 } else { 0.0 };
             self.cause_extra_knockback(

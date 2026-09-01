@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
-    InventoryClickEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    EntityDamageByEntityEvent, InventoryClickEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
     ServerTickEvent,
 };
 use foton_core::player::Player;
@@ -58,6 +58,13 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<InventoryClickEvent, _>(owner(), move |event| {
         if !inventory_click_call(&jvm, &event.player_id().to_string()) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<EntityDamageByEntityEvent, _>(owner(), move |event| {
+        if !damage_call(&jvm, &event.damager().to_string(), &event.entity().to_string()) {
             event.set_cancelled(true);
         }
     });
@@ -278,6 +285,16 @@ fn inventory_click_call(vm: &JavaVM, player_uuid: &str) -> bool {
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+fn damage_call(vm: &JavaVM, damager: &str, entity: &str) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else { return true; };
+    let Ok(damager) = env.new_string(damager) else { return true; };
+    let Ok(entity) = env.new_string(entity) else { return true; };
+    env.call_static_method(
+        BRIDGE, "fireEntityDamage", "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&damager), JValue::Object(&entity)],
+    ).and_then(JValueGen::z).unwrap_or(true)
 }
 
 /// Calls a bridge method about a block. `true` means nothing objected.
