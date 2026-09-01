@@ -9,6 +9,10 @@
     {
       "source": "/api/bug-reports/",
       "destination": "/api/report"
+    },
+    {
+      "source": "/api/github-issues/",
+      "destination": "/api/report"
     }
   ],
   "redirects": [

@@ -15,8 +15,8 @@ Everything a player can observe is written against the decompiled vanilla
 source, and every registry, block, item and worldgen value comes out of an
 extractor rather than being transcribed by hand.
 
-**Everything about the project is on the website:** what it does, how to
-install it, every configuration key, and how to work on it.
+**The website covers operating Foton:** what it does, how to install it, and
+every configuration key.
 
 ## Install
 
@@ -38,6 +38,12 @@ The engineering rules are in [`AGENTS.md`](AGENTS.md), the bar a change has to
 clear is in [`CONTRIBUTING.md`](CONTRIBUTING.md), and
 [`PARITY.md`](PARITY.md) is the honest inventory of where vanilla parity
 actually stands — it opens by explaining how its own measurement used to lie.
+
+## Player reports
+
+Reports sent from the game become GitHub issues and their GitHub status is
+shown on the public reports page. Deployment and webhook setup are documented
+in [`REPORTING.md`](REPORTING.md).
 
 ## License
 

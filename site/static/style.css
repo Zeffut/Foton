@@ -210,6 +210,7 @@ html { scroll-behavior: smooth; }
 .report.is-fixed .report-state { color: var(--ink); }
 .report.is-closed .report-state { color: #a49b86; }
 .report-cat { color: var(--ink-3); margin-left: auto; letter-spacing: 0.08em; }
+.report-issue { color: var(--ink-3); font: inherit; margin-left: 10px; white-space: nowrap; }
 
 .report p { margin: 0; color: var(--ink); font-size: 16px; max-width: 78ch; }
 .report footer { margin-top: 10px; font-family: var(--mono); letter-spacing: 0.04em; }

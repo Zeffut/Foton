@@ -4,6 +4,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import importlib.util
@@ -41,12 +42,25 @@ class Build(unittest.TestCase):
             written = gen_site.build(pathlib.Path(tmp))
             names = {p.relative_to(tmp).as_posix() for p in written}
             self.assertIn("en/index.html", names)
+            self.assertNotIn("en/contributing/index.html", names)
 
     def test_no_output_still_contains_a_hole(self):
         with tempfile.TemporaryDirectory() as tmp:
             for path in gen_site.build(pathlib.Path(tmp)):
                 if path.suffix == ".html":
                     self.assertNotIn("{{", path.read_text(encoding="utf-8"), path.name)
+
+    def test_report_with_github_issue_links_to_the_issue(self):
+        report = {
+            "number": 1, "at": 0, "player": "Alex", "world": "overworld",
+            "category": "bug", "description": "A reproducible problem", "version": "0.1",
+            "status": "open", "issue_number": 42,
+            "issue_url": "https://github.com/Zeffut/Foton/issues/42",
+        }
+        with mock.patch.object(gen_site.facts, "bug_reports", return_value=[report]):
+            rendered = gen_site.reports_html(gen_site.strings("en"))
+        self.assertIn('href="https://github.com/Zeffut/Foton/issues/42"', rendered)
+        self.assertIn("GitHub issue #42", rendered)
 
     def test_internal_links_all_resolve(self):
         with tempfile.TemporaryDirectory() as tmp:

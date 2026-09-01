@@ -45,7 +45,6 @@ PAGES = [
     ("index", "index.html", None),
     ("start", "start/index.html", "nav_start"),
     ("configuration", "configuration/index.html", "nav_configuration"),
-    ("contributing", "contributing/index.html", "nav_contributing"),
     ("bugs", "bugs/index.html", "nav_bugs"),
 ]
 
@@ -53,7 +52,6 @@ STRINGS = {
     "en": {
         "nav_start": "Get started",
         "nav_configuration": "Configuration",
-        "nav_contributing": "Contributing",
         "nav_bugs": "Reports",
         "chip": "PRE-ALPHA",
         "switch": "Français",
@@ -65,8 +63,6 @@ STRINGS = {
         "desc_start": "Install Foton from a release binary, the Docker image or source, and boot your first world.",
         "title_configuration": "Configuration — Foton",
         "desc_configuration": "Every Foton configuration key, with its type, default and range, generated from the schemas the server validates against.",
-        "title_contributing": "Contributing — Foton",
-        "desc_contributing": "How Foton is built: the behavior mechanism, the engineering rules, and the checks a change has to clear.",
         "title_bugs": "Reports — Foton",
         "desc_bugs": "Every bug players have filed from inside the game, as they filed it, with what has been fixed since.",
         "report_open": "open",
@@ -74,6 +70,7 @@ STRINGS = {
         "report_closed": "not a defect",
         "report_none": "No reports yet. The first one will appear here on its own.",
         "report_in": "in",
+        "report_issue": "GitHub issue",
         "config_key": "Key",
         "config_type": "Type",
         "config_default": "Default",
@@ -88,7 +85,6 @@ STRINGS = {
     "fr": {
         "nav_start": "Démarrer",
         "nav_configuration": "Configuration",
-        "nav_contributing": "Contribuer",
         "nav_bugs": "Rapports",
         "chip": "PRÉ-ALPHA",
         "switch": "English",
@@ -100,8 +96,6 @@ STRINGS = {
         "desc_start": "Installer Foton depuis un binaire, l'image Docker ou les sources, et lancer son premier monde.",
         "title_configuration": "Configuration — Foton",
         "desc_configuration": "Chaque clé de configuration de Foton, avec son type, sa valeur par défaut et sa plage, générée depuis les schémas contre lesquels le serveur valide.",
-        "title_contributing": "Contribuer — Foton",
-        "desc_contributing": "Comment Foton est construit : le mécanisme de comportement, les règles d'ingénierie, et la barre qu'un changement doit passer.",
         "title_bugs": "Rapports — Foton",
         "desc_bugs": "Tous les bugs signalés par les joueurs depuis le jeu, tels qu'ils ont été déposés, et ce qui a été corrigé depuis.",
         "report_open": "ouvert",
@@ -109,6 +103,7 @@ STRINGS = {
         "report_closed": "pas un défaut",
         "report_none": "Aucun rapport pour l'instant. Le premier apparaîtra ici tout seul.",
         "report_in": "dans",
+        "report_issue": "Issue GitHub",
         "config_key": "Clé",
         "config_type": "Type",
         "config_default": "Défaut",
@@ -362,11 +357,17 @@ def reports_html(text):
         ).strftime("%Y-%m-%d")
         world = report.get("world", "").split(":")[-1].replace("_", " ")
         note = report.get("note")
+        issue_url = report.get("issue_url")
+        issue = (
+            f' <a class="report-issue" href="{escape(issue_url)}">'
+            f'{escape(text["report_issue"])} #{escape(report.get("issue_number", "?"))}</a>'
+            if issue_url else ""
+        )
         rows.append(
             f'<article class="report is-{escape(status)}">'
             f'<header><span class="report-no">#{escape(report.get("number", "?"))}</span>'
             f'<span class="report-state">{escape(label)}</span>'
-            f'<span class="report-cat">{escape(report.get("category", ""))}</span></header>'
+            f'<span class="report-cat">{escape(report.get("category", ""))}</span>{issue}</header>'
             f"<p>{escape(report.get('description', ''))}</p>"
             f'<footer class="rest">{escape(report.get("player", ""))} — {escape(when)}'
             f' — {escape(world)} — {escape(text["report_in"])} '
