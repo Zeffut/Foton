@@ -330,7 +330,10 @@ impl World {
     }
 
     pub(crate) fn on_entity_chunk_unload_finalized(&self, pos: ChunkPos) {
-        self.entity_manager.finalize_chunk_unload(pos);
+        for uuid in self.entity_manager.finalize_chunk_unload(pos) {
+            let mut event = crate::event::EntityRemoveFromWorldEvent::new(uuid);
+            self.fire_event(&mut event);
+        }
     }
 
     /// Spawns an item entity at the given position.

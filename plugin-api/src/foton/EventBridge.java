@@ -163,6 +163,10 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static void fireEntityRemove(String entity) {
+        dispatch(new org.bukkit.event.entity.EntityRemoveFromWorldEvent(new FotonEntity(Native.parse(entity))));
+    }
+
     public static boolean fireEntityPickup(String entity, String item) {
         org.bukkit.entity.LivingEntity living = new FotonLivingEntity(Native.parse(entity));
         EntityPickupItemEvent event = new EntityPickupItemEvent(living, new FotonItem(Native.parse(item)));

@@ -717,7 +717,7 @@ impl WorldEntityManager {
     }
 
     /// Finalizes an unloading chunk. Retained entities are detached and dropped.
-    pub fn finalize_chunk_unload(&self, pos: ChunkPos) {
+    pub fn finalize_chunk_unload(&self, pos: ChunkPos) -> Vec<Uuid> {
         let entries = self
             .state
             .write()
@@ -725,12 +725,13 @@ impl WorldEntityManager {
             .remove(&pos)
             .unwrap_or_default();
 
+        let mut removed = Vec::with_capacity(entries.len());
         for entry in entries {
-            entry
-                .entity
-                .set_level_callback(Arc::new(NullEntityCallback));
+            removed.push(entry.entity.uuid());
+            entry.entity.set_level_callback(Arc::new(NullEntityCallback));
             entry.entity.set_removed(RemovalReason::UnloadedToChunk);
         }
+        removed
     }
 
     /// Registers a live runtime entity.

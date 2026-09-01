@@ -30,3 +30,11 @@ impl EntityPickupItemEvent {
     pub const fn is_cancelled(&self) -> bool { self.cancelled }
     pub const fn set_cancelled(&mut self, cancelled: bool) { self.cancelled = cancelled; }
 }
+
+
+/// An entity detached from a world during unload.
+pub struct EntityRemoveFromWorldEvent { entity: Uuid }
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for EntityRemoveFromWorldEvent { const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/entity_remove_from_world"); }
+impl Event for EntityRemoveFromWorldEvent {}
+impl EntityRemoveFromWorldEvent { pub const fn new(entity: Uuid) -> Self { Self { entity } } pub const fn entity(&self) -> Uuid { self.entity } }

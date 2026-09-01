@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
-    EntityDamageByEntityEvent, EntityPickupItemEvent, InventoryClickEvent, PlayerCommandPreprocessEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerCommandPreprocessEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
     ServerTickEvent,
 };
 use foton_core::player::Player;
@@ -63,6 +63,11 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         if !inventory_click_call(&jvm, &event.player_id().to_string(), &item) {
             event.set_cancelled(true);
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<EntityRemoveFromWorldEvent, _>(owner(), move |event| {
+        remove_call(&jvm, &event.entity().to_string());
     });
 
     let jvm = Arc::clone(&vm);
@@ -306,6 +311,12 @@ fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str) -> bool {
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+fn remove_call(vm: &JavaVM, entity: &str) {
+    let Ok(mut env) = vm.attach_current_thread() else { return; };
+    let Ok(entity) = env.new_string(entity) else { return; };
+    let _ = env.call_static_method(BRIDGE, "fireEntityRemove", "(Ljava/lang/String;)V", &[JValue::Object(&entity)]);
 }
 
 fn pickup_call(vm: &JavaVM, entity: &str, item: &str) -> bool {
