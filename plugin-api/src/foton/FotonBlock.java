@@ -89,6 +89,9 @@ public final class FotonBlock implements Block {
         if (text != null && text.startsWith("minecraft:tripwire")) {
             return new SimpleTripwireData(text);
         }
+        if (text != null && text.contains("facing=")) {
+            return new org.bukkit.block.data.SimpleDirectionalData(text);
+        }
         if (text != null && text.contains("[waterlogged=")) {
             return new SimpleWaterloggedData(text);
         }

@@ -39,6 +39,26 @@ public class SimpleBlockData implements BlockData {
         return false;
     }
 
+    protected void property(String key, String value) {
+        String replacement = key + "=" + value;
+        int start = text.indexOf('[');
+        if (start < 0) {
+            text = text + "[" + replacement + "]";
+            return;
+        }
+        int end = text.lastIndexOf(']');
+        String[] entries = text.substring(start + 1, end).split(",");
+        for (int i = 0; i < entries.length; i++) {
+            String[] pair = entries[i].split("=", 2);
+            if (pair.length == 2 && pair[0].trim().equals(key)) {
+                entries[i] = replacement;
+                text = text.substring(0, start + 1) + String.join(",", entries) + text.substring(end);
+                return;
+            }
+        }
+        text = text.substring(0, end) + "," + replacement + text.substring(end);
+    }
+
     protected void property(String key, boolean value) {
         String replacement = key + "=" + value;
         int start = text.indexOf('[');
