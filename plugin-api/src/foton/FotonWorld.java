@@ -89,6 +89,16 @@ public final class FotonWorld implements World {
     @Override public int getMaxHeight() { return Native.worldMaxHeight(name); }
 
     @Override
+    public java.util.List<org.bukkit.entity.Player> getPlayers() {
+        String[] ids = Native.worldPlayerIds(name);
+        java.util.ArrayList<org.bukkit.entity.Player> players = new java.util.ArrayList<>(ids.length);
+        for (String id : ids) {
+            players.add(new FotonPlayer(UUID.fromString(id)));
+        }
+        return java.util.Collections.unmodifiableList(players);
+    }
+
+    @Override
     public Environment getEnvironment() {
         return switch (name) {
             case "minecraft:overworld" -> Environment.NORMAL;
