@@ -17,6 +17,8 @@ public class BlockPlaceEvent extends BlockEvent implements Cancellable {
 
     public Player getPlayer() { return player; }
     public Player getPlayerPlacing() { return player; }
+    /** The block whose placement this event describes. */
+    public Block getBlockPlaced() { return getBlock(); }
 
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean value) { this.cancelled = value; }
