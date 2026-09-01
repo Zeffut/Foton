@@ -61,6 +61,7 @@ public final class Native {
     public static native boolean hasPlayedBefore(String uuid);
     public static native String customName(String uuid);
     public static native void setCustomName(String uuid, String name);
+    public static native int playerFoodLevel(String uuid);
     public static native double health(String uuid);
     public static native void setHealth(String uuid, double health);
     public static native double maxHealth(String uuid);

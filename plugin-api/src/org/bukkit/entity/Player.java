@@ -25,6 +25,7 @@ public interface Player extends HumanEntity {
     /** Visibility is unrestricted until a hide-player service is registered. */
     default boolean canSee(Player other) { return other != null && other.isOnline(); }
     int getLevel();
+    default int getFoodLevel() { return 20; }
     org.bukkit.scoreboard.Scoreboard getScoreboard();
     default boolean isSneaking() { return false; }
     void openBook(org.bukkit.inventory.ItemStack book);

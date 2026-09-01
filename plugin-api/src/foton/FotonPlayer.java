@@ -255,6 +255,8 @@ public final class FotonPlayer implements Player {
         Native.setCustomName(id.toString(), name);
     }
 
+    @Override public int getFoodLevel() { return Native.playerFoodLevel(id.toString()); }
+
     @Override public double getHealth() { return Native.health(id.toString()); }
     @Override public void setHealth(double health) { Native.setHealth(id.toString(), health); }
     @Override public double getMaxHealth() { return Native.maxHealth(id.toString()); }

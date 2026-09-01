@@ -308,6 +308,10 @@ extern "system" fn set_custom_name(
 }
 
 /// `foton.Native.health`
+extern "system" fn player_food_level(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
+    player(&mut env, &uuid).map_or(20, |player| player.food_data.lock().food_level)
+}
+
 extern "system" fn health(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdouble {
     player(&mut env, &uuid).map_or(0.0, |player| f64::from(player.get_health()))
 }
@@ -1729,6 +1733,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_custom_name as *mut c_void,
         ),
+        method("playerFoodLevel", "(Ljava/lang/String;)I", player_food_level as *mut c_void),
         method("health", "(Ljava/lang/String;)D", health as *mut c_void),
         method(
             "setHealth",
