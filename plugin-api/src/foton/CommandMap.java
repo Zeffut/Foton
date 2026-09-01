@@ -7,6 +7,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.Plugin;
+import io.papermc.paper.command.brigadier.Commands;
 
 /** Every command name a plugin has claimed.
  *
@@ -17,6 +18,7 @@ import org.bukkit.plugin.Plugin;
  */
 public final class CommandMap {
     private static final Map<String, Command> byName = new LinkedHashMap<>();
+    private static final Map<Plugin, Commands> brigadierByPlugin = new java.util.IdentityHashMap<>();
 
     private CommandMap() {}
 
@@ -60,6 +62,12 @@ public final class CommandMap {
     public static void forget(Plugin plugin) {
         byName.entrySet().removeIf(entry -> entry.getValue() instanceof PluginCommand
             && ((PluginCommand) entry.getValue()).getPlugin() == plugin);
+        brigadierByPlugin.remove(plugin);
+    }
+
+    /** Retains a plugin's lifecycle Brigadier registrar for command dispatch. */
+    public static void registerBrigadier(Commands commands, Plugin plugin) {
+        brigadierByPlugin.put(plugin, commands);
     }
 
     public static void clear() {

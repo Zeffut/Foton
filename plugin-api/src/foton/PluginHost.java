@@ -74,6 +74,7 @@ public final class PluginHost {
         File dataFolder = new File(jar.getParentFile(), descriptor.getName());
         plugin.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
         plugin.onEnable();
+        FotonLifecycle.dispatchCommands(plugin);
         plugin.setEnabled(true);
         loaded.add(plugin);
         System.out.println("[host] enabled " + plugin.getDescription().getFullName());
