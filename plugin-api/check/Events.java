@@ -194,6 +194,46 @@ final class Events {
             "a cancelled repeat should settle after its body");
         foton.FotonScheduler.tick();
         Checks.same(runs[0], 1, "a cancelled Folia repeat ran again");
+
+        bukkitRunnable(owner);
+    }
+
+    private static void bukkitRunnable(org.bukkit.plugin.Plugin owner) {
+        int[] runs = {0};
+        org.bukkit.scheduler.BukkitRunnable runnable = new org.bukkit.scheduler.BukkitRunnable() {
+            @Override public void run() {
+                runs[0]++;
+            }
+        };
+        boolean unscheduledRejected = false;
+        try {
+            runnable.getTaskId();
+        } catch (IllegalStateException expected) {
+            unscheduledRejected = true;
+        }
+        Checks.expect(unscheduledRejected, "an unscheduled BukkitRunnable exposed a task id");
+
+        org.bukkit.scheduler.BukkitTask task = runnable.runTask(owner);
+        Checks.expect(task.isSync() && task.getOwner() == owner,
+            "a BukkitRunnable lost its owner or sync contract");
+        foton.FotonScheduler.tick();
+        Checks.same(runs[0], 1, "a scheduled BukkitRunnable did not run");
+
+        boolean rescheduleRejected = false;
+        try {
+            runnable.runTask(owner);
+        } catch (IllegalStateException expected) {
+            rescheduleRejected = true;
+        }
+        Checks.expect(rescheduleRejected, "a BukkitRunnable was scheduled twice");
+
+        org.bukkit.scheduler.BukkitTask async = org.bukkit.Bukkit.getScheduler()
+            .runTaskLaterAsynchronously(owner, () -> {
+                throw new AssertionError("a cancelled async task ran");
+            }, 100);
+        org.bukkit.Bukkit.getScheduler().cancelTasks(owner);
+        Checks.expect(async.isCancelled(),
+            "cancelTasks(plugin) left an asynchronous task running");
     }
 
     private static org.bukkit.plugin.Plugin owner() {
