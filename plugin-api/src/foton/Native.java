@@ -42,6 +42,9 @@ public final class Native {
     public static native String playerName(String uuid);
     public static native String customName(String uuid);
     public static native void setCustomName(String uuid, String name);
+    public static native double health(String uuid);
+    public static native void setHealth(String uuid, double health);
+    public static native double maxHealth(String uuid);
 
     /** The UUID of an online player with this name, or null. */
     public static native String playerIdByName(String name);

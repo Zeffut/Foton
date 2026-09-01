@@ -16,7 +16,7 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 
 use foton_core::boss_event::ServerBossEvent;
-use foton_core::entity::Entity;
+use foton_core::entity::{Entity, LivingEntity as _};
 use foton_core::inventory::container::Container;
 use foton_core::permission::{PermissionExpr, PermissionKey};
 use foton_core::player::Player;
@@ -200,6 +200,32 @@ extern "system" fn set_custom_name(
     };
     let name = String::from(name);
     player.set_custom_name((!name.is_empty()).then(|| TextComponent::from(name)));
+}
+
+/// `foton.Native.health`
+extern "system" fn health(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdouble {
+    player(&mut env, &uuid).map_or(0.0, |player| f64::from(player.get_health()))
+}
+
+/// `foton.Native.setHealth`
+extern "system" fn set_health(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    health: jdouble,
+) {
+    if let Some(player) = player(&mut env, &uuid) {
+        player.set_health(health as f32);
+    }
+}
+
+/// `foton.Native.maxHealth`
+extern "system" fn max_health(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jdouble {
+    player(&mut env, &uuid).map_or(20.0, |player| f64::from(player.get_max_health()))
 }
 
 /// `foton.Native.playerWorld`
@@ -1248,6 +1274,17 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setCustomName",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_custom_name as *mut c_void,
+        ),
+        method("health", "(Ljava/lang/String;)D", health as *mut c_void),
+        method(
+            "setHealth",
+            "(Ljava/lang/String;D)V",
+            set_health as *mut c_void,
+        ),
+        method(
+            "maxHealth",
+            "(Ljava/lang/String;)D",
+            max_health as *mut c_void,
         ),
         method(
             "playerWorld",
