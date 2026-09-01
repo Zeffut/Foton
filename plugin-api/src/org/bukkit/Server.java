@@ -1,14 +1,50 @@
 package org.bukkit;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.UUID;
+import java.util.logging.Logger;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.messaging.Messenger;
+import org.bukkit.scheduler.BukkitScheduler;
 
 /** What a plugin asks the server for. */
 public interface Server {
     PluginManager getPluginManager();
+
     Messenger getMessenger();
-    java.util.Collection<? extends org.bukkit.entity.Player> getOnlinePlayers();
-    org.bukkit.scheduler.BukkitScheduler getScheduler();
+
+    BukkitScheduler getScheduler();
+
+    Collection<? extends Player> getOnlinePlayers();
+
+    Player getPlayer(String name);
+
+    Player getPlayer(UUID id);
+
+    Player getPlayerExact(String name);
+
     String getName();
+
     String getVersion();
+
+    String getBukkitVersion();
+
+    boolean getOnlineMode();
+
+    int getMaxPlayers();
+
+    Logger getLogger();
+
+    CommandSender getConsoleSender();
+
+    List<World> getWorlds();
+
+    World getWorld(String name);
+
+    int broadcastMessage(String message);
+
+    boolean dispatchCommand(CommandSender sender, String command);
 }

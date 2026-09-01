@@ -1,9 +1,16 @@
 package org.bukkit.entity;
 
-public interface Player extends org.bukkit.command.CommandSender {
+import java.util.Set;
+import org.bukkit.plugin.Plugin;
+
+/** A player on the server, as a plugin sees one. */
+public interface Player extends Entity {
+    @Override
     String getName();
-    java.util.UUID getUniqueId();
-    org.bukkit.World getWorld();
-    java.util.Set<String> getListeningPluginChannels();
-    void sendPluginMessage(org.bukkit.plugin.Plugin source, String channel, byte[] message);
+
+    Set<String> getListeningPluginChannels();
+
+    void sendPluginMessage(Plugin source, String channel, byte[] message);
+
+    boolean isOnline();
 }

@@ -21,6 +21,14 @@ import org.bukkit.configuration.InvalidConfigurationException;
  */
 public class YamlConfiguration extends FileConfiguration {
     @Override
+    public YamlConfigurationOptions options() {
+        if (options == null) {
+            options = new YamlConfigurationOptions(this);
+        }
+        return (YamlConfigurationOptions) options;
+    }
+
+    @Override
     public String saveToString() {
         return foton.Yaml.dump(getValues(true));
     }

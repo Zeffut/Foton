@@ -117,7 +117,7 @@ public final class EventBridge {
     /** A player is breaking a block. Returns false when a plugin stopped it. */
     public static boolean fireBlockBreak(String uuid, int x, int y, int z, String world) {
         BlockBreakEvent event =
-            new BlockBreakEvent(new FotonBlock(x, y, z, world), player(uuid));
+            new BlockBreakEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid));
         dispatch(event);
         return !event.isCancelled();
     }
@@ -125,7 +125,7 @@ public final class EventBridge {
     /** A player is placing a block. Returns false when a plugin stopped it. */
     public static boolean fireBlockPlace(String uuid, int x, int y, int z, String world) {
         BlockPlaceEvent event =
-            new BlockPlaceEvent(new FotonBlock(x, y, z, world), player(uuid));
+            new BlockPlaceEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid));
         dispatch(event);
         return !event.isCancelled();
     }

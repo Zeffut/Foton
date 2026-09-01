@@ -13,12 +13,24 @@ import java.util.UUID;
  * stay valid for as long as a plugin kept the object, and plugins keep them for
  * a long time; a UUID that no longer resolves is a player who logged out, which
  * is a thing Bukkit's own API already has an answer for.
+ *
+ * A position crosses as five doubles in one array rather than five calls. Five
+ * calls could each see a different tick, and a plugin that read x from one tick
+ * and z from the next would get a point the player was never at.
  */
 public final class Native {
     private Native() {}
 
     public static native String serverName();
+
     public static native String serverVersion();
+
+    /** How the server describes itself, the way `/version` prints it. */
+    public static native String serverBrand();
+
+    public static native boolean onlineMode();
+
+    public static native int maxPlayers();
 
     /** The UUIDs of everyone online, in no promised order. */
     public static native String[] onlinePlayerIds();
@@ -26,14 +38,32 @@ public final class Native {
     /** A player's name, or null once they are gone. */
     public static native String playerName(String uuid);
 
+    /** The UUID of an online player with this name, or null. */
+    public static native String playerIdByName(String name);
+
     /** Sends a player a chat message. Silently does nothing once they are gone. */
     public static native void sendMessage(String uuid, String message);
+
+    /** Sends everyone a chat message, and says how many heard it. */
+    public static native int broadcast(String message);
 
     /** The name of the world a player is in, or null once they are gone. */
     public static native String playerWorld(String uuid);
 
     /** Whether a player holds a permission. */
     public static native boolean hasPermission(String uuid, String permission);
+
+    /** A player's position as {x, y, z, yaw, pitch}, or null once they are gone. */
+    public static native double[] playerPosition(String uuid);
+
+    /** Every loaded world's key, in no promised order. */
+    public static native String[] worldNames();
+
+    /** A world's spawn as {x, y, z, yaw, pitch}, or null if there is no such world. */
+    public static native double[] worldSpawn(String world);
+
+    /** A world's time of day, or -1 if there is no such world. */
+    public static native long worldTime(String world);
 
     static UUID parse(String uuid) {
         try {

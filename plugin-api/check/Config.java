@@ -70,8 +70,26 @@ final class Config {
         config.set("a.b.c", "deep");
         Checks.same(config.getString("a.b.c"), "deep", "set builds intermediate sections");
 
+        options();
         defaults();
         file();
+    }
+
+    /** The options chain, which only works if every setter narrows. */
+    private static void options() {
+        YamlConfiguration config = new YamlConfiguration();
+
+        // This exact line appears in thirty-three of the fifty-nine plugins
+        // surveyed. It compiles only because `copyDefaults` returns the type
+        // that declares `header`, which is the whole reason the options
+        // classes exist as a hierarchy rather than one class.
+        config.options().copyDefaults(true).header("written by the check").indent(4);
+
+        Checks.expect(config.options().copyDefaults(), "copyDefaults stuck");
+        Checks.same(config.options().header(), "written by the check", "header stuck");
+        Checks.same(config.options().indent(), 4, "indent stuck");
+        Checks.expect(config.options().configuration() == config,
+            "the options know their configuration");
     }
 
     /** A default answers for a path the file does not have. */

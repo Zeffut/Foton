@@ -13,12 +13,15 @@
 use std::ptr::null_mut;
 use std::sync::{Arc, OnceLock, Weak};
 
+use foton_core::entity::Entity;
 use foton_core::permission::{PermissionExpr, PermissionKey};
 use foton_core::player::Player;
 use foton_core::server::Server;
+use foton_core::world::World;
+use foton_utils::Identifier;
 use jni::JNIEnv;
-use jni::objects::{JClass, JObjectArray, JString};
-use jni::sys::{jboolean, jobjectArray, jstring};
+use jni::objects::{JClass, JDoubleArray, JObjectArray, JString};
+use jni::sys::{jboolean, jdoubleArray, jint, jlong, jobjectArray, jstring};
 use uuid::Uuid;
 
 /// The server the natives answer about.
@@ -52,6 +55,54 @@ fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
         .map_or_else(null_mut, JString::into_raw)
 }
 
+/// Returns a Java `String[]`, or null if the array could not be built.
+fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
+    let Ok(empty) = env.new_string("") else {
+        return null_mut();
+    };
+    let Ok(array) = env.new_object_array(
+        i32::try_from(values.len()).unwrap_or(0),
+        "java/lang/String",
+        &empty,
+    ) else {
+        return null_mut();
+    };
+    for (index, value) in values.iter().enumerate() {
+        let Ok(text) = env.new_string(value) else {
+            continue;
+        };
+        let _ = env.set_object_array_element(&array, i32::try_from(index).unwrap_or(0), text);
+    }
+    let array: JObjectArray<'_> = array;
+    array.into_raw()
+}
+
+/// Returns a position as `{x, y, z, yaw, pitch}`, or Java's null.
+///
+/// One array rather than five calls. Five calls could each land on a different
+/// tick, and a plugin that read x from one and z from the next would get a
+/// point nothing was ever at.
+fn to_position(env: &mut JNIEnv<'_>, at: Option<[f64; 5]>) -> jdoubleArray {
+    let Some(at) = at else {
+        return null_mut();
+    };
+    let Ok(array) = env.new_double_array(5) else {
+        return null_mut();
+    };
+    if env.set_double_array_region(&array, 0, &at).is_err() {
+        return null_mut();
+    }
+    let array: JDoubleArray<'_> = array;
+    array.into_raw()
+}
+
+/// Resolves a world by the key a plugin holds it under.
+fn world(env: &mut JNIEnv<'_>, name: &JString<'_>) -> Option<Arc<World>> {
+    let text: String = env.get_string(name).ok()?.into();
+    let key: Identifier = text.parse().ok()?;
+    server()?.worlds.get(&key).map(Arc::clone)
+}
+
 /// `foton.Native.serverName`
 extern "system" fn server_name(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstring {
     to_java(&mut env, Some("Foton".to_owned()))
@@ -72,24 +123,7 @@ extern "system" fn online_player_ids(mut env: JNIEnv<'_>, _class: JClass<'_>) ->
         });
     }
 
-    let Ok(empty) = env.new_string("") else {
-        return null_mut();
-    };
-    let Ok(array) = env.new_object_array(
-        i32::try_from(ids.len()).unwrap_or(0),
-        "java/lang/String",
-        &empty,
-    ) else {
-        return null_mut();
-    };
-    for (index, id) in ids.iter().enumerate() {
-        let Ok(value) = env.new_string(id) else {
-            continue;
-        };
-        let _ = env.set_object_array_element(&array, i32::try_from(index).unwrap_or(0), value);
-    }
-    let array: JObjectArray<'_> = array;
-    array.into_raw()
+    string_array(&mut env, &ids)
 }
 
 /// `foton.Native.playerName`
@@ -151,6 +185,128 @@ extern "system" fn has_permission(
     u8::from(player.has_permission(&PermissionExpr::key(key)))
 }
 
+/// `foton.Native.serverBrand`
+extern "system" fn server_brand(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstring {
+    let brand = format!(
+        "Foton {} (MC: {})",
+        env!("CARGO_PKG_VERSION"),
+        foton_utils::MC_VERSION
+    );
+    to_java(&mut env, Some(brand))
+}
+
+/// `foton.Native.onlineMode`
+extern "system" fn online_mode(_env: JNIEnv<'_>, _class: JClass<'_>) -> jboolean {
+    u8::from(server().is_some_and(|server| server.config.online_mode))
+}
+
+/// `foton.Native.maxPlayers`
+extern "system" fn max_players(_env: JNIEnv<'_>, _class: JClass<'_>) -> jint {
+    server().map_or(0, |server| {
+        i32::try_from(server.config.max_players).unwrap_or(i32::MAX)
+    })
+}
+
+/// `foton.Native.playerIdByName`
+extern "system" fn player_id_by_name(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jstring {
+    let Ok(wanted) = env.get_string(&name) else {
+        return null_mut();
+    };
+    let wanted: String = wanted.into();
+    let found = server().and_then(|server| {
+        let mut found = None;
+        server.online_players().iter_players(|_uuid, player| {
+            if player.gameprofile.name == wanted {
+                found = Some(player.gameprofile.id.to_string());
+                return false;
+            }
+            true
+        });
+        found
+    });
+    to_java(&mut env, found)
+}
+
+/// `foton.Native.broadcast`
+extern "system" fn broadcast(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    message: JString<'_>,
+) -> jint {
+    let Ok(text) = env.get_string(&message) else {
+        return 0;
+    };
+    let text: String = text.into();
+    let Some(server) = server() else {
+        return 0;
+    };
+    let mut reached = 0;
+    server.online_players().iter_players(|_uuid, player| {
+        player.send_message(&text.clone().into());
+        reached += 1;
+        true
+    });
+    reached
+}
+
+/// `foton.Native.playerPosition`
+extern "system" fn player_position(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jdoubleArray {
+    let at = player(&mut env, &uuid).map(|player| {
+        let position = player.position();
+        let (yaw, pitch) = player.rotation();
+        [
+            position.x,
+            position.y,
+            position.z,
+            f64::from(yaw),
+            f64::from(pitch),
+        ]
+    });
+    to_position(&mut env, at)
+}
+
+/// `foton.Native.worldNames`
+extern "system" fn world_names(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobjectArray {
+    let names = server().map_or_else(Vec::new, |server| {
+        server.worlds.keys().map(ToString::to_string).collect()
+    });
+    string_array(&mut env, &names)
+}
+
+/// `foton.Native.worldSpawn`
+extern "system" fn world_spawn(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jdoubleArray {
+    let at = world(&mut env, &name).map(|world| {
+        let spawn = world.level_data.read().data().spawn_pos();
+        // The center of the block, which is where vanilla puts a player
+        // standing on it rather than in its corner.
+        [
+            f64::from(spawn.0.x) + 0.5,
+            f64::from(spawn.0.y),
+            f64::from(spawn.0.z) + 0.5,
+            0.0,
+            0.0,
+        ]
+    });
+    to_position(&mut env, at)
+}
+
+/// `foton.Native.worldTime`
+extern "system" fn world_time(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jlong {
+    world(&mut env, &name).map_or(-1, |world| world.game_time())
+}
+
 /// Every native, with the descriptor the JVM matches it by.
 ///
 /// A descriptor that disagrees with the Java declaration is not a compile
@@ -177,6 +333,43 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "serverVersion",
             "()Ljava/lang/String;",
             server_version as *mut c_void,
+        ),
+        method(
+            "serverBrand",
+            "()Ljava/lang/String;",
+            server_brand as *mut c_void,
+        ),
+        method("onlineMode", "()Z", online_mode as *mut c_void),
+        method("maxPlayers", "()I", max_players as *mut c_void),
+        method(
+            "playerIdByName",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            player_id_by_name as *mut c_void,
+        ),
+        method(
+            "broadcast",
+            "(Ljava/lang/String;)I",
+            broadcast as *mut c_void,
+        ),
+        method(
+            "playerPosition",
+            "(Ljava/lang/String;)[D",
+            player_position as *mut c_void,
+        ),
+        method(
+            "worldNames",
+            "()[Ljava/lang/String;",
+            world_names as *mut c_void,
+        ),
+        method(
+            "worldSpawn",
+            "(Ljava/lang/String;)[D",
+            world_spawn as *mut c_void,
+        ),
+        method(
+            "worldTime",
+            "(Ljava/lang/String;)J",
+            world_time as *mut c_void,
         ),
         method(
             "onlinePlayerIds",

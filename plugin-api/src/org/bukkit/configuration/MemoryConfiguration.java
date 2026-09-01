@@ -5,7 +5,7 @@ import java.util.Map;
 /** A configuration held only in memory. */
 public class MemoryConfiguration extends MemorySection implements Configuration {
     protected Configuration defaults;
-    protected ConfigurationOptions options;
+    protected MemoryConfigurationOptions options;
 
     public MemoryConfiguration() {
         super();
@@ -36,9 +36,9 @@ public class MemoryConfiguration extends MemorySection implements Configuration 
     }
 
     @Override
-    public ConfigurationOptions options() {
+    public MemoryConfigurationOptions options() {
         if (options == null) {
-            options = new ConfigurationOptions(this);
+            options = new MemoryConfigurationOptions(this);
         }
         return options;
     }

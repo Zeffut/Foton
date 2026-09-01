@@ -80,6 +80,24 @@ public final class PluginHost {
         return true;
     }
 
+    /** The plugin with this name, or null. Case-insensitive, as Bukkit is. */
+    public static Plugin byName(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (Plugin plugin : loaded) {
+            if (plugin.getName().equalsIgnoreCase(name)) {
+                return plugin;
+            }
+        }
+        return null;
+    }
+
+    /** Everything enabled, in the order it was enabled. */
+    public static Plugin[] all() {
+        return loaded.toArray(new Plugin[0]);
+    }
+
     /** Disables everything, newest first. */
     public static void disableAll() {
         for (int i = loaded.size() - 1; i >= 0; i--) {

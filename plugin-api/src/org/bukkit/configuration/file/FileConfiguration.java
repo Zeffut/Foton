@@ -13,6 +13,14 @@ import org.bukkit.configuration.MemoryConfiguration;
 
 /** A configuration that lives in a file. */
 public abstract class FileConfiguration extends MemoryConfiguration {
+    @Override
+    public FileConfigurationOptions options() {
+        if (options == null) {
+            options = new FileConfigurationOptions(this);
+        }
+        return (FileConfigurationOptions) options;
+    }
+
     public abstract String saveToString();
 
     public abstract void loadFromString(String contents) throws InvalidConfigurationException;
