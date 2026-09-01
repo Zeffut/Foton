@@ -41,20 +41,19 @@ python3 "$REPO/dev/gen-entity-type.py" "$OUT/generated"
 SOURCES="$OUT/sources.txt"
 find "$SRC" "$OUT/generated" -name '*.java' | sort > "$SOURCES"
 echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
+LIBS=""
+if [ -d "$REPO/plugin-api/lib" ]; then
+  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
+fi
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.
-javac -Xlint:all -d "$OUT/classes" "@$SOURCES"
+javac -Xlint:all -cp "${LIBS#:}" -d "$OUT/classes" "@$SOURCES"
 
 jar --create --file "$JAR" -C "$OUT/classes" .
 echo "wrote ${JAR#"$REPO"/} ($(du -h "$JAR" | cut -f1), $(find "$OUT/classes" -name '*.class' | wc -l) classes)"
 
 if [ "${1:-}" != "--check" ]; then
   exit 0
-fi
-
-LIBS=""
-if [ -d "$REPO/plugin-api/lib" ]; then
-  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
 fi
 
 # The fixture plugin exercises the parts of the event path that are easy to get

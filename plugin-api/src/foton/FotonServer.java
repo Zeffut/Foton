@@ -163,6 +163,11 @@ public final class FotonServer implements Server {
     }
 
     @Override
+    public org.bukkit.scoreboard.ScoreboardManager getScoreboardManager() {
+        return new FotonScoreboardManager();
+    }
+
+    @Override
     public World getWorld(String name) {
         if (name == null) {
             return null;
