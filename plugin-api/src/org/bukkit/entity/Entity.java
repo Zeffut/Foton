@@ -22,6 +22,12 @@ public interface Entity extends CommandSender {
 
     default boolean teleport(Location location) { return false; }
     default boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) { return teleport(location); }
+    default java.util.concurrent.CompletableFuture<Boolean> teleportAsync(Location location) {
+        return java.util.concurrent.CompletableFuture.completedFuture(teleport(location));
+    }
+    default java.util.concurrent.CompletableFuture<Boolean> teleportAsync(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
+        return java.util.concurrent.CompletableFuture.completedFuture(teleport(location, cause));
+    }
 
     default void remove() { }
 

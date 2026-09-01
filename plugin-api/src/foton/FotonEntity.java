@@ -46,6 +46,10 @@ public class FotonEntity implements Entity {
 
     @Override public void remove() { Native.removeEntity(id.toString()); }
 
+    @Override public java.util.concurrent.CompletableFuture<Boolean> teleportAsync(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
+        return java.util.concurrent.CompletableFuture.completedFuture(teleport(location, cause));
+    }
+
     @Override public boolean isDead() { return Native.entityWorld(id.toString()) == null; }
     @Override public String getCustomName() { return Native.entityCustomName(id.toString()); }
     @Override public void setCustomName(String name) { Native.setEntityCustomName(id.toString(), name); }
