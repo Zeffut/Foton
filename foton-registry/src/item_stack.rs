@@ -28,8 +28,8 @@ use crate::{
             ENCHANTABLE, ENCHANTMENTS, EQUIPPABLE, Equippable, ITEM_NAME, ItemAttributeModifiers,
             ItemEnchantments, MAX_DAMAGE, MAX_STACK_SIZE, MINIMUM_ATTACK_CHARGE,
             OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier, PIERCING_WEAPON, PiercingWeapon,
-            REPAIRABLE, STORED_ENCHANTMENTS, TOOL, Tool, UNBREAKABLE, WEAPON, WRITTEN_BOOK_CONTENT,
-            Weapon,
+            REPAIRABLE, STORED_ENCHANTMENTS, TOOL, Tool, UNBREAKABLE, WEAPON,
+            WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT, Weapon,
         },
     },
     enchantment_effect::EnchantmentEffectComponent,
@@ -1236,13 +1236,20 @@ impl ItemStack {
     }
 
     /// Sets writable book page contents.
-    pub const fn set_writable_book_pages(
+    pub fn set_writable_book_pages(
         &mut self,
-        _pages: &[&str],
+        pages: &[&str],
         _mode: crate::loot_table::ListOperation,
     ) {
-        // TODO: Implement writable book pages setting
-        // Set WRITABLE_BOOK_CONTENT pages
+        use crate::data_components::components::{Filterable, WritableBookContent};
+        let current = self.get_or_default(WRITABLE_BOOK_CONTENT, WritableBookContent::empty());
+        let pages = pages
+            .iter()
+            .map(|page| Filterable::pass_through((*page).to_owned()))
+            .collect();
+        if let Ok(value) = current.with_pages(pages) {
+            self.set(WRITABLE_BOOK_CONTENT, value);
+        }
     }
 
     /// Runs vanilla `ToggleTooltips`: each boolean says whether the component is shown.

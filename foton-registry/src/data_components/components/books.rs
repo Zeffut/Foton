@@ -92,6 +92,10 @@ impl WritableBookContent {
         &self.pages
     }
 
+    pub fn with_pages(&self, pages: Vec<Filterable<String>>) -> Result<Self> {
+        Self::new(pages)
+    }
+
     fn to_nbt_tag_ref(&self) -> NbtTag {
         let mut compound = NbtCompound::new();
         if !self.pages.is_empty() {
