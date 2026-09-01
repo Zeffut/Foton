@@ -191,6 +191,22 @@ extern "system" fn send_message(
     player.send_message(&text.into());
 }
 
+/// `foton.Native.kickPlayer`
+extern "system" fn kick_player(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    message: JString<'_>,
+) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let Ok(message) = env.get_string(&message) else {
+        return;
+    };
+    player.disconnect(String::from(message));
+}
+
 /// `foton.Native.sendPluginMessage`
 extern "system" fn send_plugin_message(
     mut env: JNIEnv<'_>,
@@ -972,6 +988,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "sendMessage",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             send_message as *mut c_void,
+        ),
+        method(
+            "kickPlayer",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            kick_player as *mut c_void,
         ),
         method(
             "sendPluginMessage",

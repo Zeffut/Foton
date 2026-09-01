@@ -13,6 +13,7 @@ public interface Player extends Entity {
     void sendPluginMessage(Plugin source, String channel, byte[] message);
 
     boolean isOnline();
+    void kickPlayer(String message);
 
     org.bukkit.inventory.PlayerInventory getInventory();
 
