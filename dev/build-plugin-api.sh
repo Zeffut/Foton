@@ -29,11 +29,14 @@ fi
 rm -rf "$OUT/classes"
 mkdir -p "$OUT/classes"
 
-mapfile -t sources < <(find "$SRC" -name '*.java' | sort)
-echo "compiling ${#sources[@]} sources"
+# javac reads a file of sources with @, which avoids both mapfile (bash 4+,
+# and macOS ships bash 3.2) and an argument list long enough to overflow exec.
+SOURCES="$OUT/sources.txt"
+find "$SRC" -name '*.java' | sort > "$SOURCES"
+echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.
-javac -Xlint:all -d "$OUT/classes" "${sources[@]}"
+javac -Xlint:all -d "$OUT/classes" "@$SOURCES"
 
 jar --create --file "$JAR" -C "$OUT/classes" .
 echo "wrote ${JAR#"$REPO"/} ($(du -h "$JAR" | cut -f1), $(find "$OUT/classes" -name '*.class' | wc -l) classes)"
