@@ -28,10 +28,12 @@ use foton_utils::locks::SyncRwLock;
 use rustc_hash::FxHashMap;
 
 pub mod block;
+pub mod command;
 pub mod player;
 pub mod server;
 
 pub use block::{BlockBreakEvent, BlockPlaceEvent};
+pub use command::CommandEvent;
 pub use player::{PlayerChatEvent, PlayerJoinEvent, PlayerQuitEvent};
 pub use server::ServerTickEvent;
 

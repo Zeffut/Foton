@@ -1,5 +1,7 @@
 package foton;
 
+import org.bukkit.command.CommandSender;
+
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -154,4 +156,23 @@ public final class EventBridge {
             this.plugin = plugin;
         }
     }
+
+    /** Offers a typed command to the plugins. True means one owned it.
+     *
+     * False is the important answer: it has to mean "nobody claimed this",
+     * because Foton takes it as permission to go on to its own dispatcher. A
+     * handler that ran and failed still answers true.
+     */
+    public static boolean fireCommand(String uuid, String line) {
+        CommandSender sender = uuid == null || uuid.isEmpty()
+            ? ConsoleSender.INSTANCE
+            : new FotonPlayer(java.util.UUID.fromString(uuid));
+        try {
+            return CommandMap.dispatch(sender, line);
+        } catch (Throwable error) {
+            System.out.println("[command] dispatch failed: " + error);
+            return false;
+        }
+    }
+
 }

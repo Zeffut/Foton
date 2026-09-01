@@ -12,8 +12,8 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    BlockBreakEvent, BlockPlaceEvent, PlayerChatEvent, PlayerJoinEvent, PlayerQuitEvent,
-    ServerTickEvent,
+    BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerJoinEvent,
+    PlayerQuitEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -88,6 +88,17 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<BlockPlaceEvent, _>(owner(), move |event| {
         if !block_call(&jvm, "fireBlockPlace", event.player(), event.position()) {
             event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<CommandEvent, _>(owner(), move |event| {
+        let uuid = event
+            .player()
+            .map(|player| player.gameprofile.id.to_string())
+            .unwrap_or_default();
+        if command_call(&jvm, &uuid, event.command()) {
+            event.set_handled(true);
         }
     });
 
@@ -201,4 +212,27 @@ fn drain_scheduler(vm: &JavaVM) {
     // The answer is how many task bodies ran. Nothing here needs it; the
     // fixture asserts on it through the same call.
     let _ = env.call_static_method(SCHEDULER, "tick", "()I", &[]);
+}
+
+/// Offers one typed command to the plugins, and reads back who owned it.
+///
+/// A failed crossing answers "nobody owned it", so the server carries on to
+/// its own dispatcher. Answering the other way would swallow every command
+/// typed on a server whose plugin host had stopped responding.
+fn command_call(vm: &JavaVM, uuid: &str, line: &str) -> bool {
+    let reach = || -> Option<bool> {
+        let mut env = vm.attach_current_thread().ok()?;
+        let uuid = env.new_string(uuid).ok()?;
+        let line = env.new_string(line).ok()?;
+        env.call_static_method(
+            BRIDGE,
+            "fireCommand",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            &[JValue::Object(&uuid), JValue::Object(&line)],
+        )
+        .ok()?
+        .z()
+        .ok()
+    };
+    reach().unwrap_or(false)
 }

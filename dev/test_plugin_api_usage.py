@@ -6,6 +6,7 @@ files with `javac` rather than asserting against bytes typed out here. A
 fixture that was hand-written would only prove the reader agrees with whoever
 wrote the fixture.
 """
+import collections
 import pathlib
 import shutil
 import subprocess
@@ -27,6 +28,9 @@ import org.bukkit.entity.Player;
 public class ExamplePlugin {
     public void greet(Player player) {
         player.sendMessage(Bukkit.getServerName());
+        // Compiles to a reference on Player, whose class file declares no such
+        // method: java.lang.Object does. The scanner has to know that.
+        player.sendMessage(player.toString());
     }
 }
 """
@@ -50,9 +54,15 @@ STUBS = {
             public static String getServerName() { return ""; }
         }
     """,
+    "org/bukkit/command/CommandSender.java": """
+        package org.bukkit.command;
+        public interface CommandSender {
+            String getName();
+        }
+    """,
     "org/bukkit/entity/Player.java": """
         package org.bukkit.entity;
-        public interface Player {
+        public interface Player extends org.bukkit.command.CommandSender {
             void sendMessage(String message);
         }
     """,
@@ -65,8 +75,12 @@ STUBS = {
 }
 
 
-def build_jar(sources, into):
-    """Compiles sources and packs the class files into a jar. Returns its path."""
+def build_jar(sources, into, drop=None):
+    """Compiles sources and packs the class files into a jar. Returns its path.
+
+    `drop` leaves one compiled class out, which is how a jar that cannot answer
+    everything a plugin calls is built.
+    """
     root = into / "src"
     for name, body in {**STUBS, **sources}.items():
         path = root / name
@@ -84,7 +98,10 @@ def build_jar(sources, into):
     jar = into / "example.jar"
     with zipfile.ZipFile(jar, "w") as archive:
         for compiled in classes.rglob("*.class"):
-            archive.write(compiled, compiled.relative_to(classes).as_posix())
+            entry = compiled.relative_to(classes).as_posix()
+            if entry == drop:
+                continue
+            archive.write(compiled, entry)
     return jar
 
 
@@ -128,6 +145,71 @@ class Scanning(unittest.TestCase):
         _, unreadable = plugin_api_usage.scan(self.plain)
 
         self.assertEqual(unreadable, 0)
+
+
+@unittest.skipIf(shutil.which("javac") is None, "javac is needed to build the fixture")
+class Gaps(unittest.TestCase):
+    """What the built API jar can and cannot answer.
+
+    This is the number the work is steered by, so a wrong answer here would
+    send the next tranche of the API at the wrong members.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._dir = tempfile.TemporaryDirectory()
+        root = pathlib.Path(cls._dir.name)
+        cls.plugin = build_jar({"example/ExamplePlugin.java": PLUGIN}, root / "plugin")
+        # An API jar holding only what the stubs declare -- which is exactly
+        # what the plugin calls, so nothing should be missing.
+        cls.complete = build_jar({}, root / "complete")
+        # The same, minus one method the plugin calls.
+        cls.partial = build_jar({}, root / "partial", drop="org/bukkit/Bukkit.class")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._dir.cleanup()
+
+    def test_it_reads_what_a_class_declares(self):
+        with zipfile.ZipFile(self.complete) as archive:
+            name, supertypes, members = plugin_api_usage.declares(
+                archive.read("org/bukkit/Bukkit.class"))
+
+        self.assertEqual(name, "org/bukkit/Bukkit")
+        self.assertIn("getServerName", members)
+        self.assertIn("java/lang/Object", supertypes)
+
+    def test_an_inherited_member_counts_as_provided(self):
+        # A plugin calls `Child#method` and `Parent#method` interchangeably and
+        # the JVM resolves both, so a jar that only listed declared members
+        # would report a gap that does not exist.
+        have = plugin_api_usage.provided(self.complete)
+
+        self.assertIn("sendMessage", have["org/bukkit/entity/Player"])
+        self.assertIn("getName", have["org/bukkit/entity/Player"],
+                      "a member inherited from a supertype should still resolve")
+
+    def test_what_java_lang_object_gives_every_class_is_not_a_gap(self):
+        # `player.toString()` compiles to a reference on Player, and the Object
+        # class file is not in the API jar. Counting that as missing would put
+        # a phantom member near the top of the ranking.
+        corpus = self.plugin.parent
+        _, missing = plugin_api_usage.gaps(corpus, self.complete)
+
+        self.assertNotIn("org/bukkit/entity/Player#toString", missing)
+
+    def test_a_jar_that_answers_everything_leaves_no_gap(self):
+        corpus = self.plugin.parent
+        per_plugin, missing = plugin_api_usage.gaps(corpus, self.complete)
+
+        self.assertEqual(per_plugin[self.plugin.name][1], set())
+        self.assertEqual(missing, collections.Counter())
+
+    def test_a_missing_member_is_reported_against_the_plugins_that_call_it(self):
+        corpus = self.plugin.parent
+        _, missing = plugin_api_usage.gaps(corpus, self.partial)
+
+        self.assertEqual(missing["org/bukkit/Bukkit#getServerName"], 1)
 
 
 class ConstantPool(unittest.TestCase):

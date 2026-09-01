@@ -11,7 +11,7 @@ use super::{
     spawn_blocking,
 };
 use crate::command::functions::CommandFunction;
-use crate::event::ServerTickEvent;
+use crate::event::{CommandEvent, ServerTickEvent};
 
 impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
@@ -402,8 +402,20 @@ impl Server {
         owner: CommandExecutionOwner,
         command: &str,
     ) {
-        let source = CommandSource::new(owner.sender().clone(), Arc::clone(self));
         let command = command.strip_prefix('/').unwrap_or(command);
+
+        // Before the dispatcher, because a plugin's command is not in the
+        // Brigadier tree and never will be: the tree is built at startup from
+        // types the server knows. A listener that claims the name runs it
+        // itself, and the server does not go looking for a command it has
+        // never heard of only to report that it does not exist.
+        let mut event = CommandEvent::new(owner.sender().get_player().cloned(), command);
+        self.events.fire(&mut event);
+        if event.is_handled() {
+            return;
+        }
+
+        let source = CommandSource::new(owner.sender().clone(), Arc::clone(self));
         let chain = {
             let dispatcher = self.command_dispatcher.read();
             let parse = dispatcher.parse(command, source.clone());

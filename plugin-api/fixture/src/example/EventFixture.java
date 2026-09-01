@@ -1,5 +1,7 @@
 package example;
 
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -9,7 +11,11 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** Exercises the parts of the event path that are easy to get wrong. */
-public final class EventFixture extends JavaPlugin implements Listener {
+public final class EventFixture extends JavaPlugin implements Listener, org.bukkit.command.CommandExecutor {
+    /** What the last command run against this plugin saw. */
+    public static String commandLabel;
+    public static String[] commandArgs;
+    public static String commandSender;
     /** What the plugin read out of its own configuration. */
     public static String greeting;
     public static int addedLater;
@@ -36,6 +42,24 @@ public final class EventFixture extends JavaPlugin implements Listener {
         getServer().getScheduler().runTask(this, () -> immediate++);
         getServer().getScheduler().runTaskLater(this, () -> delayed++, 2);
         getServer().getScheduler().runTaskTimer(this, () -> repeating++, 0, 2);
+    }
+
+    /** The plugin is its own executor, which is how most are written.
+     *
+     * Answering false for no arguments makes the host print the usage line
+     * from plugin.yml, which is the only argument checking a great many
+     * plugins have.
+     */
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        commandLabel = label;
+        commandArgs = args;
+        commandSender = sender.getName();
+        if (args.length == 0) {
+            return false;
+        }
+        sender.sendMessage("fixture ran with " + String.join(" ", args));
+        return true;
     }
 
     /** Rewrites the announcement, which proves a change travels back. */

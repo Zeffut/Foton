@@ -8,8 +8,13 @@ public final class Checks {
     public static void main(String[] args) throws Exception {
         Events.check(args[0]);
         Config.check();
+        Commands.check();
+        foton.PluginHost.disableAll();
+        Checks.expect(foton.CommandMap.get("fixture") == null,
+            "disabling a plugin should release the names it claimed");
         YamlCheck.check();
-        System.out.println("plugin API checked: events, scheduler, YAML and configuration");
+        System.out.println(
+            "plugin API checked: events, scheduler, YAML, configuration and commands");
     }
 
     static void expect(boolean condition, String what) {

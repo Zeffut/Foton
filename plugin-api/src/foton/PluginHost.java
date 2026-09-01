@@ -72,11 +72,7 @@ public final class PluginHost {
         }
 
         File dataFolder = new File(jar.getParentFile(), descriptor.getName());
-        plugin.init(
-            org.bukkit.Bukkit.getServer(),
-            descriptor,
-            dataFolder,
-            descriptor.getCommands().keySet().toArray(new String[0]));
+        plugin.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
         plugin.onEnable();
         plugin.setEnabled(true);
         loaded.add(plugin);
@@ -89,6 +85,7 @@ public final class PluginHost {
         for (int i = loaded.size() - 1; i >= 0; i--) {
             Plugin plugin = loaded.get(i);
             try {
+                CommandMap.forget(plugin);
                 plugin.onDisable();
             } catch (Throwable error) {
                 System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);

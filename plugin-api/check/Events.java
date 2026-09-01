@@ -38,7 +38,6 @@ final class Events {
             "a cancelled break was reported as allowed");
 
         scheduler();
-        foton.PluginHost.disableAll();
     }
 
     /** The scheduler's promise is about *when*, so this checks when. */

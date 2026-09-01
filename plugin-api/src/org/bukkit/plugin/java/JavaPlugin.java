@@ -7,6 +7,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.Server;
@@ -33,15 +36,53 @@ public abstract class JavaPlugin implements Plugin {
 
     public JavaPlugin() {}
 
-    public final void init(
-        Server server, PluginDescriptionFile description, File dataFolder, String[] commandNames) {
+    public final void init(Server server, PluginDescriptionFile description, File dataFolder) {
         this.server = server;
         this.description = description;
         this.dataFolder = dataFolder;
         this.logger = Logger.getLogger(description.getName());
-        for (String name : commandNames) {
-            commands.put(name.toLowerCase(java.util.Locale.ROOT), new PluginCommand(name, this));
+
+        // A command is declared in plugin.yml with its description, usage,
+        // aliases and permission. Carrying all four across matters: the usage
+        // line is what a plugin prints when onCommand returns false, and a
+        // great many plugins have no argument checking beyond that.
+        for (Map.Entry<String, Map<String, Object>> declared
+                : description.getCommands().entrySet()) {
+            String name = declared.getKey();
+            Map<String, Object> body = declared.getValue();
+            PluginCommand command = new PluginCommand(name, this);
+            command.setDescription(string(body.get("description")));
+            command.setUsage(string(body.get("usage")));
+            command.setAliases(strings(body.get("aliases")));
+            Object permission = body.get("permission");
+            if (permission != null) {
+                command.setPermission(String.valueOf(permission));
+            }
+            Object message = body.get("permission-message");
+            if (message != null) {
+                command.setPermissionMessage(String.valueOf(message));
+            }
+            commands.put(name.toLowerCase(java.util.Locale.ROOT), command);
+            foton.CommandMap.register(command);
         }
+    }
+
+    private static String string(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    /** `aliases: one` and `aliases: [one, two]` are both written. */
+    private static List<String> strings(Object value) {
+        if (value instanceof List) {
+            List<String> out = new ArrayList<>();
+            for (Object entry : (List<?>) value) {
+                if (entry != null) {
+                    out.add(String.valueOf(entry));
+                }
+            }
+            return out;
+        }
+        return value == null ? List.of() : List.of(String.valueOf(value));
     }
 
     @Override public File getDataFolder() { return dataFolder; }
