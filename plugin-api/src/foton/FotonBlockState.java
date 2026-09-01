@@ -16,10 +16,14 @@ import org.bukkit.block.data.BlockData;
 public final class FotonBlockState implements BlockState {
     private final Block block;
     private final BlockData data;
+    private final FotonPersistentDataContainer persistentData = new FotonPersistentDataContainer();
 
     FotonBlockState(Block block, BlockData data) {
         this.block = block;
         this.data = data;
+    }
+    @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return persistentData;
     }
 
     @Override

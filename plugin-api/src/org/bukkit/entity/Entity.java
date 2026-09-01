@@ -7,6 +7,9 @@ import org.bukkit.command.CommandSender;
 
 /** Anything in a world that has a position. */
 public interface Entity extends CommandSender {
+    default org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return new foton.FotonPersistentDataContainer();
+    }
     UUID getUniqueId();
 
     Location getLocation();

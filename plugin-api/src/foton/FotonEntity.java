@@ -8,8 +8,13 @@ import org.bukkit.entity.EntityType;
 
 /** Common Bukkit entity handle backed by a persistent UUID. */
 public final class FotonEntity implements Entity {
+    private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private final UUID id;
     public FotonEntity(UUID id) { this.id = id; }
+    @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return DATA.computeIfAbsent(id, ignored -> new FotonPersistentDataContainer());
+    }
     @Override public UUID getUniqueId() { return id; }
     @Override public Location getLocation() {
         double[] p = Native.entityPosition(id.toString());

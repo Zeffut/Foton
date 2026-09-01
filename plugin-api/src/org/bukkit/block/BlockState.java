@@ -12,6 +12,9 @@ import org.bukkit.block.data.BlockData;
  * That is the contract plugins are written against, so it is the one here.
  */
 public interface BlockState {
+    default org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return new foton.FotonPersistentDataContainer();
+    }
     Material getType();
 
     BlockData getBlockData();
