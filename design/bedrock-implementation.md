@@ -24,10 +24,24 @@ silently missing.
 ### What "100 % joinable" actually required
 
 Route A as written in the analysis does not get a Bedrock player into the
-world. Geyser on its own authenticates a Bedrock player by making them **own
-and link a Java account**, and the overwhelming majority of Bedrock players —
-Switch, Xbox, PlayStation, phone — have never owned one. A server on route A as
-described is reachable and empty.
+world on any server an operator would actually run. Geyser on its own
+authenticates a Bedrock player by making them **own and link a Java account**,
+and the overwhelming majority of Bedrock players — Switch, Xbox, PlayStation,
+phone — have never owned one.
+
+Stage 0 measured what that means in practice, and the answer has two halves:
+
+- With `online_mode = true`, which is the default and the only sane public
+  setting, Geyser refuses the player itself: *"Tried to log in as a Java
+  Edition player! Is Floodgate set up correctly?"* Reachable and empty.
+- With `online_mode = false`, a Bedrock player **already joins today**, with no
+  work at all. That is not the good news it sounds like. Their identity is
+  derived from a name they chose, so it is claimable by anyone who types it —
+  the same impersonation an offline Java server has, now reachable from a
+  console.
+
+So Floodgate is not only what makes Bedrock players able to join. It is what
+makes their identity mean anything once they have.
 
 The missing piece is Floodgate: Geyser encrypts the Bedrock player's identity
 into the Java handshake with a key both sides share, and the Java server
@@ -159,8 +173,14 @@ be a guess that compiles.
 
 Expected shape, to be confirmed against that source rather than assumed:
 identity fields covering XUID, gamertag, device, language and input mode; a
-UUID derived from the XUID; and a signature that is the whole security of the
-scheme.
+UUID derived from the XUID; and an AES-GCM authentication tag that is the whole
+security of the scheme.
+
+That tag is worth naming precisely, because "signature" would overstate it.
+There is no asymmetric signing here and no public key: Geyser and Foton hold
+the same secret, and GCM's tag proves only that whoever produced the payload
+held that secret. It is sufficient — nobody else has the key — but it means the
+key file is the entire trust boundary, not one factor among several.
 
 #### The security of it, stated plainly
 
