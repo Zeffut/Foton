@@ -57,6 +57,18 @@ class ReportIdentity(unittest.TestCase):
     def test_description_limit_leaves_room_for_the_github_issue_context(self):
         self.assertLess(report_api.MAX_ISSUE_DESCRIPTION, report_api.MAX_REPORT_BODY)
 
+    def test_only_one_invocation_claims_issue_creation(self):
+        records = [{"number": 8, "report_key": "key", "status": "open"}]
+        with mock.patch.object(report_api, "_read_reports", return_value=(200, records, "sha")), \
+             mock.patch.object(report_api, "_write_reports", return_value=200):
+            status, claimed = report_api._claim_issue_creation(records[0], "token", "repo")
+        self.assertEqual(status, 201)
+        self.assertTrue(claimed["issue_claim"])
+
+        with mock.patch.object(report_api, "_read_reports", return_value=(200, records, "sha")):
+            status, _ = report_api._claim_issue_creation(records[0], "token", "repo")
+        self.assertEqual(status, 409)
+
 
 class WebhookSignature(unittest.TestCase):
     def test_only_the_exact_body_and_secret_validate(self):

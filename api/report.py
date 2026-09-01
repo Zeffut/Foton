@@ -11,6 +11,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -120,6 +121,60 @@ def _record_report(report, token, repo):
     return 409, None
 
 
+def _claim_issue_creation(record, token, repo):
+    """Atomically elect one invocation to create this report's GitHub issue."""
+    for _ in range(WRITE_ATTEMPTS):
+        status, records, sha = _read_reports(token, repo)
+        if status != 200:
+            return status, None
+        for current in records:
+            if current.get("report_key") != record["report_key"]:
+                continue
+            if current.get("issue_number"):
+                return 202, current
+            if current.get("issue_claim"):
+                return 409, current
+            current["issue_claim"] = secrets.token_urlsafe(16)
+            written = _write_reports(
+                records, sha, token, repo,
+                f"report: claim issue for #{current['number']}",
+            )
+            if written in (200, 201):
+                return 201, current
+            if written != 409:
+                return written, None
+            break
+        else:
+            return 404, None
+    return 409, None
+
+
+def _release_issue_claim(record, token, repo):
+    """Release our claim after GitHub rejects creation, without stealing another."""
+    for _ in range(WRITE_ATTEMPTS):
+        status, records, sha = _read_reports(token, repo)
+        if status != 200:
+            return status
+        for current in records:
+            if current.get("report_key") != record["report_key"]:
+                continue
+            if current.get("issue_claim") != record.get("issue_claim"):
+                return 202
+            del current["issue_claim"]
+            written = _write_reports(
+                records, sha, token, repo,
+                f"report: release issue claim for #{current['number']}",
+            )
+            if written in (200, 201):
+                return 202
+            if written != 409:
+                return written
+            break
+        else:
+            return 404
+    return 409
+
+
 def _ensure_label(label, color, token, repo):
     """Create a label if needed; GitHub returns 422 when it already exists."""
     status, _ = _github("POST", f"/repos/{repo}/labels", token, {"name": label, "color": color})
@@ -199,6 +254,7 @@ def _attach_issue(record, issue, token, repo):
                 return 202, current
             current["issue_number"] = issue.get("number")
             current["issue_url"] = issue.get("html_url")
+            current.pop("issue_claim", None)
             result = _write_reports(
                 records, sha, token, repo,
                 f"report: link #{current['number']} to issue #{current['issue_number']}",
@@ -226,8 +282,22 @@ def _file(report, token, repo):
     if status != 202:
         return status
     if not record.get("issue_number"):
-        status, issue = _open_issue(record, token, repo)
-        if status != 201:
+        status, record = _claim_issue_creation(record, token, repo)
+        if status == 202:
+            return _refresh_issue_status(record, token, repo)
+        if status == 409:
+            # The creator may have opened the issue and then lost the race to
+            # attach it.  Find-and-attach is safe; creating a second issue is
+            # not. A later retry can finish an interrupted creation.
+            status, issue = _find_existing_issue(record, token, repo)
+            if status != 200:
+                return 502
+        elif status == 201:
+            status, issue = _open_issue(record, token, repo)
+            if status != 201:
+                _release_issue_claim(record, token, repo)
+                return status
+        else:
             return status
         status, record = _attach_issue(record, issue, token, repo)
         if status != 202:
