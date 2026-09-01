@@ -32,6 +32,8 @@ public interface Player extends Entity {
 
     /** The big text in the middle of the screen. Times are in ticks. */
     void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut);
+    void sendTitle(com.destroystokyo.paper.Title title);
+    void hideTitle();
 
     void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume, float pitch);
 

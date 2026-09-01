@@ -25,8 +25,8 @@ use foton_core::world::LevelReader as _;
 use foton_core::world::World;
 use foton_protocol::packets::common::CCustomPayload;
 use foton_protocol::packets::game::{
-    BossBarColor, BossBarOverlay, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CStopSound,
-    CSystemChat, CTabList, SoundSource,
+    BossBarColor, BossBarOverlay, CClearTitles, CSetSubtitleText, CSetTitleText,
+    CSetTitlesAnimation, CStopSound, CSystemChat, CTabList, SoundSource,
 };
 use foton_registry::item_stack::ItemStack;
 use foton_registry::{REGISTRY, RegistryExt as _};
@@ -358,6 +358,14 @@ extern "system" fn send_title(
     });
     player.send_packet(CSetTitleText::new(&title, player.as_ref()));
     player.send_packet(CSetSubtitleText::new(&subtitle, player.as_ref()));
+}
+
+/// `foton.Native.clearTitle`
+extern "system" fn clear_title(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    player.send_packet(CClearTitles { reset_times: true });
 }
 
 /// `foton.Native.sendPluginMessage`
@@ -1280,6 +1288,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "sendTitle",
             "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;III)V",
             send_title as *mut c_void,
+        ),
+        method(
+            "clearTitle",
+            "(Ljava/lang/String;)V",
+            clear_title as *mut c_void,
         ),
         method(
             "sendPluginMessage",

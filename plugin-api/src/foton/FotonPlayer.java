@@ -105,6 +105,24 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void sendTitle(com.destroystokyo.paper.Title title) {
+        if (title == null) { hideTitle(); return; }
+        Native.sendTitle(id.toString(), legacy(title.getTitle()), legacy(title.getSubtitle()),
+            title.getFadeIn(), title.getStay(), title.getFadeOut());
+    }
+
+    @Override
+    public void hideTitle() { Native.clearTitle(id.toString()); }
+
+    private static String legacy(net.md_5.bungee.api.chat.BaseComponent[] components) {
+        if (components == null) return "";
+        StringBuilder text = new StringBuilder();
+        for (net.md_5.bungee.api.chat.BaseComponent component : components)
+            if (component != null) text.append(component.toLegacyText());
+        return text.toString();
+    }
+
+    @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume,
             float pitch) {
         playSound(at, sound == null ? null : sound.getKey(), volume, pitch);
