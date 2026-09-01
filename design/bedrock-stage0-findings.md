@@ -253,6 +253,14 @@ Independent of Bedrock, worth fixing regardless (per the brief):
 
 ## Contradictions with `design/bedrock-implementation.md`
 
+Both of these were real contradictions against the document as it stood at
+`ca3394e2f` (the commit this task started from). Both have since been folded
+into the spec, in `ea0b90365`, which landed after this task's own commit
+(`dc4c88e99`) — so the analysis below is left as originally written, as a
+record of what was actually observed, with a note on where each one was
+addressed. A later reader (or a later task) should not try to "fix" the design
+doc against these two again.
+
 - **The design doc's premise — "a server on route A as described is reachable
   and empty" — is only true in online mode.** In offline mode, a Bedrock
   player behind Geyser can already join Foton *today*, fully, with no Foton
@@ -267,21 +275,34 @@ Independent of Bedrock, worth fixing regardless (per the brief):
   design promises. The design doc should say plainly that Bedrock support is
   meaningless (and actively unsafe, identity-wise) without `online_mode =
   true`, and that this isn't a future state to design toward — it's true
-  right now, with zero Bedrock code written.
+  right now, with zero Bedrock code written. **Applied in `ea0b90365`** — the
+  "What '100 % joinable' actually required" section now states both halves
+  explicitly (the online-mode refusal and the offline-mode impersonation risk)
+  rather than the single "reachable and empty" line.
 - **The brief's own Step 1 baseline (offline mode) does not exercise the
   interesting case.** Everything the plan cares about — Foton failing to
   understand Floodgate, needing native decoding — only shows up with
   `online_mode = true`. Task 2 onward should keep this in mind: testing
   against `join-test.sh`'s offline baseline will not catch Floodgate
-  regressions, because offline mode doesn't look at the hostname at all.
+  regressions, because offline mode doesn't look at the hostname at all. This
+  one is a testing-methodology note rather than a claim the design doc makes,
+  so there's nothing in the spec to correct — it stays open as guidance for
+  whoever writes Task 2 onward's tests.
 - **"A signature that is the whole security of the scheme"** (Identity
   section) is better stated as "the AES-GCM authentication tag" — see Step 5.
-  There's no separate signature field in the 12-field plaintext.
+  There's no separate signature field in the 12-field plaintext, and no
+  asymmetric key at all: the shared secret is the entire trust boundary.
+  **Applied in `ea0b90365`** — the Identity section now says "an AES-GCM
+  authentication tag" and adds a paragraph on why "signature" overstates it
+  (no asymmetric signing, no public key, the key file alone is the trust
+  boundary).
 - Everything else checked out: the plan's crate boundary claims
   (`foton-plugin`/JNI reasoning, `foton-core/src/player/connection/mod.rs`
   untouched), the 12-field plaintext count, and the "Geyser generates nothing,
   the operator/Foton must supply the key" behavior all matched what was
-  observed.
+  observed. Re-checked against the current text of
+  `design/bedrock-implementation.md` (post-`ea0b90365`) while fixing this
+  section: no further contradictions found.
 
 ## Scratchpad references (never committed)
 
