@@ -55,6 +55,7 @@ public interface Player extends HumanEntity {
     default org.bukkit.Location getPotentialBedLocation() { return getBedSpawnLocation(); }
 
     org.bukkit.GameMode getGameMode();
+    default void setGameMode(org.bukkit.GameMode mode) { }
 
     boolean isOp();
 

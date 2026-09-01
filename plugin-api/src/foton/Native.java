@@ -120,6 +120,7 @@ public final class Native {
 
     /** A player's game mode, lower case, or null once they are gone. */
     public static native String gameMode(String uuid);
+    public static native boolean setGameMode(String uuid, String mode);
 
     /** One inventory slot as `minecraft:name count`, or the empty string.
      *

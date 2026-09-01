@@ -36,7 +36,7 @@ use foton_registry::item_stack::ItemStack;
 use foton_registry::{REGISTRY, RegistryExt as _, vanilla_items};
 use foton_utils::Identifier;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
-use foton_utils::types::InteractionHand;
+use foton_utils::types::{GameType, InteractionHand};
 use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId};
 use glam::DVec3;
@@ -1061,6 +1061,19 @@ extern "system" fn game_mode(
     to_java(&mut env, mode)
 }
 
+/// `foton.Native.setGameMode`
+extern "system" fn set_game_mode(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, mode: JString<'_>) -> jboolean {
+    let requested: String = match env.get_string(&mode) { Ok(value) => value.into(), Err(_) => return 0 };
+    let Some(game_mode) = (match requested.to_ascii_uppercase().as_str() {
+        "CREATIVE" => Some(GameType::Creative),
+        "SURVIVAL" => Some(GameType::Survival),
+        "ADVENTURE" => Some(GameType::Adventure),
+        "SPECTATOR" => Some(GameType::Spectator),
+        _ => None,
+    }) else { return 0 };
+    player(&mut env, &uuid).is_some_and(|player| player.set_game_mode(game_mode)) as jboolean
+}
+
 /// `foton.Native.inventorySlot`
 extern "system" fn inventory_slot(
     mut env: JNIEnv<'_>,
@@ -2046,6 +2059,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "gameMode",
             "(Ljava/lang/String;)Ljava/lang/String;",
             game_mode as *mut c_void,
+        ),
+        method(
+            "setGameMode",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            set_game_mode as *mut c_void,
         ),
         method(
             "inventorySlot",

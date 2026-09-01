@@ -92,6 +92,11 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void setGameMode(org.bukkit.GameMode mode) {
+        if (mode != null) Native.setGameMode(id.toString(), mode.name());
+    }
+
+    @Override
     public boolean isOp() {
         return Native.isOperator(id.toString());
     }
