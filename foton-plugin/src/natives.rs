@@ -318,6 +318,21 @@ extern "system" fn max_health(
     player(&mut env, &uuid).map_or(20.0, |player| f64::from(player.get_max_health()))
 }
 
+/// `foton.Native.playerRespawnWorld`
+extern "system" fn player_respawn_world(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let world = player(&mut env, &uuid).and_then(|player| player.respawn_config()).map(|config| config.respawn_data.dimension().to_string());
+    to_java(&mut env, world)
+}
+
+/// `foton.Native.playerRespawnPosition`
+extern "system" fn player_respawn_position(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdoubleArray {
+    let position = player(&mut env, &uuid).and_then(|player| player.respawn_config()).map(|config| {
+        let pos = config.respawn_data.pos();
+        [f64::from(pos.x()) + 0.5, f64::from(pos.y()), f64::from(pos.z()) + 0.5, f64::from(config.respawn_data.yaw), f64::from(config.respawn_data.pitch)]
+    });
+    to_position(&mut env, position)
+}
+
 /// `foton.Native.playerWorld`
 extern "system" fn player_world(
     mut env: JNIEnv<'_>,
@@ -1676,6 +1691,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)Ljava/lang/String;",
             player_world as *mut c_void,
         ),
+        method("playerRespawnWorld", "(Ljava/lang/String;)Ljava/lang/String;", player_respawn_world as *mut c_void),
+        method("playerRespawnPosition", "(Ljava/lang/String;)[D", player_respawn_position as *mut c_void),
         method(
             "sendMessage",
             "(Ljava/lang/String;Ljava/lang/String;)V",

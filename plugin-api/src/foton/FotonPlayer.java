@@ -60,6 +60,19 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public org.bukkit.Location getBedSpawnLocation() {
+        String world = Native.playerRespawnWorld(id.toString());
+        double[] pos = Native.playerRespawnPosition(id.toString());
+        if (world == null || pos == null || pos.length < 5) return null;
+        return new org.bukkit.Location(new FotonWorld(world), pos[0], pos[1], pos[2], (float) pos[3], (float) pos[4]);
+    }
+
+    @Override
+    public org.bukkit.Location getPotentialBedLocation() {
+        return getBedSpawnLocation();
+    }
+
+    @Override
     public org.bukkit.inventory.PlayerInventory getInventory() {
         return new FotonInventory(id.toString());
     }

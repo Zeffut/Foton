@@ -44,6 +44,9 @@ public interface Player extends HumanEntity {
 
     org.bukkit.inventory.PlayerInventory getInventory();
 
+    default org.bukkit.Location getBedSpawnLocation() { return null; }
+    default org.bukkit.Location getPotentialBedLocation() { return getBedSpawnLocation(); }
+
     org.bukkit.GameMode getGameMode();
 
     boolean isOp();

@@ -88,6 +88,8 @@ public final class Native {
 
     /** The name of the world a player is in, or null once they are gone. */
     public static native String playerWorld(String uuid);
+    public static native String playerRespawnWorld(String uuid);
+    public static native double[] playerRespawnPosition(String uuid);
     public static native String entityWorld(String uuid);
     public static native String entityType(String uuid);
     public static native double[] entityPosition(String uuid);
