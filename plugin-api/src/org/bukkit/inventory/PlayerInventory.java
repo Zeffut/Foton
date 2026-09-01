@@ -22,5 +22,9 @@ public interface PlayerInventory extends Inventory {
 
     ItemStack getBoots();
 
+    default ItemStack[] getArmorContents() {
+        return new ItemStack[] { getBoots(), getLeggings(), getChestplate(), getHelmet() };
+    }
+
     int getHeldItemSlot();
 }

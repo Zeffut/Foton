@@ -167,6 +167,11 @@ public final class FotonInventory implements PlayerInventory {
     // Armor runs boots, leggings, chestplate, helmet from slot 36 upward,
     // which is the order the protocol uses and the reverse of how it reads.
     @Override
+    public ItemStack[] getArmorContents() {
+        return new ItemStack[] { getBoots(), getLeggings(), getChestplate(), getHelmet() };
+    }
+
+    @Override
     public ItemStack getHelmet() {
         return getItem(ARMOR + 3);
     }
