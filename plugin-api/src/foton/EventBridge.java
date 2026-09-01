@@ -1,6 +1,7 @@
 package foton;
 
 import org.bukkit.command.CommandSender;
+import org.bukkit.Location;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.EventExecutor;
@@ -165,6 +167,19 @@ public final class EventBridge {
             new BlockPlaceEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid));
         dispatch(event);
         return !event.isCancelled();
+    }
+
+    public static String fireMove(String uuid, String world,
+            double fromX, double fromY, double fromZ,
+            double toX, double toY, double toZ) {
+        PlayerMoveEvent event = new PlayerMoveEvent(player(uuid),
+            new org.bukkit.Location(new FotonWorld(world), fromX, fromY, fromZ),
+            new org.bukkit.Location(new FotonWorld(world), toX, toY, toZ));
+        dispatch(event);
+        if (event.isCancelled()) return null;
+        Location to = event.getTo();
+        if (to.getX() == toX && to.getY() == toY && to.getZ() == toZ) return "";
+        return to.getX() + "," + to.getY() + "," + to.getZ();
     }
 
     /** How many handlers are registered for one event type. For diagnostics. */

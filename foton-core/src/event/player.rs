@@ -6,6 +6,7 @@
 //! Two events reach two thirds of that corpus, which is why the measurement
 //! came before the design.
 
+use glam::DVec3;
 use std::sync::Arc;
 
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
@@ -72,6 +73,61 @@ impl PlayerJoinEvent {
 pub struct PlayerQuitEvent {
     player: Arc<Player>,
     message: Option<TextComponent>,
+}
+
+/// A player movement that passed vanilla movement validation.
+pub struct PlayerMoveEvent {
+    player: Arc<Player>,
+    from: DVec3,
+    to: DVec3,
+    cancelled: bool,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for PlayerMoveEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_move");
+}
+
+impl Event for PlayerMoveEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+
+impl PlayerMoveEvent {
+    /// Creates an event for an accepted movement.
+    #[must_use]
+    pub const fn new(player: Arc<Player>, from: DVec3, to: DVec3) -> Self {
+        Self {
+            player,
+            from,
+            to,
+            cancelled: false,
+        }
+    }
+    /// Returns the moving player.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+    /// Returns the starting position.
+    #[must_use]
+    pub const fn from(&self) -> DVec3 {
+        self.from
+    }
+    /// Returns the destination selected by listeners.
+    #[must_use]
+    pub const fn to(&self) -> DVec3 {
+        self.to
+    }
+    /// Changes the destination selected by listeners.
+    pub const fn set_to(&mut self, to: DVec3) {
+        self.to = to;
+    }
+    /// Cancels or uncancels the movement.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
 }
 
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type

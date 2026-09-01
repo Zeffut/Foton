@@ -34,7 +34,9 @@ pub mod server;
 
 pub use block::{BlockBreakEvent, BlockPlaceEvent};
 pub use command::CommandEvent;
-pub use player::{PlayerChatEvent, PlayerCustomPayloadEvent, PlayerJoinEvent, PlayerQuitEvent};
+pub use player::{
+    PlayerChatEvent, PlayerCustomPayloadEvent, PlayerJoinEvent, PlayerMoveEvent, PlayerQuitEvent,
+};
 pub use server::ServerTickEvent;
 
 /// Something that happened, which a listener may observe and possibly stop.

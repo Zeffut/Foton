@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
-    PlayerJoinEvent, PlayerQuitEvent, ServerTickEvent,
+    PlayerJoinEvent, PlayerMoveEvent, PlayerQuitEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -46,6 +46,24 @@ fn owner() -> Identifier {
 /// more machinery than five events justify.
 pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let events = server.events();
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerMoveEvent, _>(owner(), move |event| {
+        let player = event.player();
+        let from = event.from();
+        let to = event.to();
+        match move_call(
+            &jvm,
+            &player.gameprofile.id.to_string(),
+            &player.get_world().key.to_string(),
+            from,
+            to,
+        ) {
+            MoveAnswer::Cancelled => event.set_cancelled(true),
+            MoveAnswer::Redirect(destination) => event.set_to(destination),
+            MoveAnswer::Accepted | MoveAnswer::Unreachable => {}
+        }
+    });
 
     let jvm = Arc::clone(&vm);
     events.on::<PlayerJoinEvent, _>(owner(), move |event| {
@@ -216,6 +234,71 @@ fn block_call(vm: &JavaVM, method: &str, player: &Arc<Player>, position: BlockPo
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+enum MoveAnswer {
+    Cancelled,
+    Accepted,
+    Redirect(glam::DVec3),
+    Unreachable,
+}
+
+fn move_call(
+    vm: &JavaVM,
+    uuid: &str,
+    world: &str,
+    from: glam::DVec3,
+    to: glam::DVec3,
+) -> MoveAnswer {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return MoveAnswer::Unreachable;
+    };
+    let Ok(uuid) = env.new_string(uuid) else {
+        return MoveAnswer::Unreachable;
+    };
+    let Ok(world) = env.new_string(world) else {
+        return MoveAnswer::Unreachable;
+    };
+    let answer = env
+        .call_static_method(
+            BRIDGE,
+            "fireMove",
+            "(Ljava/lang/String;Ljava/lang/String;DDDDDD)Ljava/lang/String;",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&world),
+                JValue::Double(from.x),
+                JValue::Double(from.y),
+                JValue::Double(from.z),
+                JValue::Double(to.x),
+                JValue::Double(to.y),
+                JValue::Double(to.z),
+            ],
+        )
+        .ok()
+        .and_then(|value| value.l().ok());
+    let Some(answer) = answer else {
+        return MoveAnswer::Unreachable;
+    };
+    if answer.is_null() {
+        return MoveAnswer::Cancelled;
+    }
+    let answer: JString<'_> = answer.into();
+    let Ok(value) = env.get_string(&answer) else {
+        return MoveAnswer::Unreachable;
+    };
+    let value: String = value.into();
+    if value.is_empty() {
+        return MoveAnswer::Accepted;
+    }
+    let mut parts = value.split(',');
+    let (Some(x), Some(y), Some(z)) = (parts.next(), parts.next(), parts.next()) else {
+        return MoveAnswer::Unreachable;
+    };
+    let (Ok(x), Ok(y), Ok(z)) = (x.parse(), y.parse(), z.parse()) else {
+        return MoveAnswer::Unreachable;
+    };
+    MoveAnswer::Redirect(glam::DVec3::new(x, y, z))
 }
 
 /// Runs whatever the plugins queued for this tick.
