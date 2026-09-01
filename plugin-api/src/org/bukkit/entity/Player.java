@@ -36,6 +36,12 @@ public interface Player extends HumanEntity {
     void setPlayerListHeaderFooter(String header, String footer);
     void sendActionBar(String message);
 
+    default void sendActionBar(net.kyori.adventure.text.Component message) {
+        sendActionBar(message == null ? "" : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message));
+    }
+
+    default void showTitle(net.kyori.adventure.title.Title title) { }
+
     org.bukkit.inventory.PlayerInventory getInventory();
 
     org.bukkit.GameMode getGameMode();

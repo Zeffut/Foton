@@ -286,6 +286,28 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void sendActionBar(net.kyori.adventure.text.Component message) {
+        Player.super.sendActionBar(message);
+    }
+
+    @Override
+    public void showTitle(net.kyori.adventure.title.Title title) {
+        if (title == null) return;
+        String main = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(title.title());
+        String sub = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(title.subtitle());
+        int fadeIn = 10, stay = 70, fadeOut = 20;
+        net.kyori.adventure.title.Title.Times t = title.times();
+        if (t != null) {
+            fadeIn = ticks(t.fadeIn()); stay = ticks(t.stay()); fadeOut = ticks(t.fadeOut());
+        }
+        sendTitle(main, sub, fadeIn, stay, fadeOut);
+    }
+
+    private static int ticks(java.time.Duration duration) {
+        return (int) Math.max(0L, duration.toMillis() / 50L);
+    }
+
+    @Override
     public void sendActionBar(String message) {
         Native.sendActionBar(id.toString(), message == null ? "" : message);
     }
