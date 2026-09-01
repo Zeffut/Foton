@@ -132,6 +132,28 @@ pub struct PlayerLoginEvent {
     kick_message: Option<String>,
 }
 
+/// A player attempted to interact with an entity.
+#[derive(Debug)]
+pub struct PlayerInteractEntityEvent {
+    player_id: Uuid,
+    entity_id: Uuid,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for PlayerInteractEntityEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_interact_entity");
+}
+impl Event for PlayerInteractEntityEvent {
+    fn is_cancelled(&self) -> bool { self.cancelled }
+}
+impl PlayerInteractEntityEvent {
+    pub const fn new(player_id: Uuid, entity_id: Uuid) -> Self { Self { player_id, entity_id, cancelled: false } }
+    pub const fn player_id(&self) -> Uuid { self.player_id }
+    pub const fn entity_id(&self) -> Uuid { self.entity_id }
+    pub const fn is_cancelled(&self) -> bool { self.cancelled }
+    pub const fn set_cancelled(&mut self, cancelled: bool) { self.cancelled = cancelled; }
+}
+
 /// A player attempted to use an item or interact with the air/block.
 pub struct PlayerInteractEvent {
     player_id: Uuid,

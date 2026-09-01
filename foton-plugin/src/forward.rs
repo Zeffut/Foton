@@ -17,7 +17,7 @@ use foton_core::event::{
     EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRegainHealthEvent,
     EntityRemoveFromWorldEvent, FoodLevelChangeEvent, InventoryClickEvent, PlayerChatEvent,
     PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
-    PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    PlayerInteractEntityEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
     PlayerRespawnEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
@@ -57,6 +57,13 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<PlayerInteractEvent, _>(owner(), move |event| {
         if !interact_call(&jvm, &event.player_id().to_string()) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerInteractEntityEvent, _>(owner(), move |event| {
+        if !interact_entity_call(&jvm, &event.player_id().to_string(), &event.entity_id().to_string()) {
             event.set_cancelled(true);
         }
     });
@@ -391,6 +398,15 @@ fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+fn interact_entity_call(vm: &JavaVM, player_uuid: &str, entity_uuid: &str) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else { return true; };
+    let Ok(player) = env.new_string(player_uuid) else { return true; };
+    let Ok(entity) = env.new_string(entity_uuid) else { return true; };
+    env.call_static_method(BRIDGE, "fireInteractEntity", "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&player), JValue::Object(&entity)])
+        .and_then(JValueGen::z).unwrap_or(true)
 }
 
 fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str, click: &str) -> bool {

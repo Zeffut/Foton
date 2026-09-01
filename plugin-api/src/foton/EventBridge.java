@@ -157,6 +157,14 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static boolean fireInteractEntity(String playerUuid, String entityUuid) {
+        org.bukkit.event.player.PlayerInteractEntityEvent event =
+            new org.bukkit.event.player.PlayerInteractEntityEvent(
+                player(playerUuid), new foton.FotonEntity(Native.parse(entityUuid)));
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     public static boolean fireInventoryClick(String uuid, String item, String click) {
         org.bukkit.event.inventory.InventoryClickEvent event =
             new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item), clickType(click));
