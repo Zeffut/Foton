@@ -103,6 +103,10 @@ final class Geometry {
 
         @Override public long getFullTime() { return 0; }
 
+        @Override public int getMinHeight() { return 0; }
+
+        @Override public int getMaxHeight() { return 0; }
+
         @Override public org.bukkit.World.Environment getEnvironment() {
             return org.bukkit.World.Environment.CUSTOM;
         }

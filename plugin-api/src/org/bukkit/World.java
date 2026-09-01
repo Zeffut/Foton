@@ -24,6 +24,9 @@ public interface World {
 
     long getFullTime();
 
+    int getMinHeight();
+    int getMaxHeight();
+
     Environment getEnvironment();
 
     enum Environment {

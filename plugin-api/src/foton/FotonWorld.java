@@ -85,6 +85,9 @@ public final class FotonWorld implements World {
         return Native.worldTime(name);
     }
 
+    @Override public int getMinHeight() { return Native.worldMinHeight(name); }
+    @Override public int getMaxHeight() { return Native.worldMaxHeight(name); }
+
     @Override
     public Environment getEnvironment() {
         return switch (name) {

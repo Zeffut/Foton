@@ -136,6 +136,8 @@ public final class Native {
 
     /** A world's time of day, or -1 if there is no such world. */
     public static native long worldTime(String world);
+    public static native int worldMinHeight(String world);
+    public static native int worldMaxHeight(String world);
 
     static UUID parse(String uuid) {
         try {

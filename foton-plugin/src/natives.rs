@@ -1076,6 +1076,22 @@ extern "system" fn world_time(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JSt
     world(&mut env, &name).map_or(-1, |world| world.game_time())
 }
 
+extern "system" fn world_min_height(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jint {
+    world(&mut env, &name).map_or(0, |world| world.get_min_y())
+}
+
+extern "system" fn world_max_height(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jint {
+    world(&mut env, &name).map_or(0, |world| world.max_build_height())
+}
+
 /// Every native, with the descriptor the JVM matches it by.
 ///
 /// A descriptor that disagrees with the Java declaration is not a compile
@@ -1144,6 +1160,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "worldTime",
             "(Ljava/lang/String;)J",
             world_time as *mut c_void,
+        ),
+        method(
+            "worldMinHeight",
+            "(Ljava/lang/String;)I",
+            world_min_height as *mut c_void,
+        ),
+        method(
+            "worldMaxHeight",
+            "(Ljava/lang/String;)I",
+            world_max_height as *mut c_void,
         ),
         method(
             "gameMode",
