@@ -164,7 +164,9 @@ public final class EventBridge {
     }
 
     public static void fireEntityRemove(String entity) {
-        dispatch(new org.bukkit.event.entity.EntityRemoveFromWorldEvent(new FotonEntity(Native.parse(entity))));
+        org.bukkit.entity.Entity handle = new FotonEntity(Native.parse(entity));
+        dispatch(new org.bukkit.event.entity.EntityRemoveFromWorldEvent(handle));
+        dispatch(new com.destroystokyo.paper.event.entity.EntityRemoveFromWorldEvent(handle));
     }
 
     public static boolean fireEntityPickup(String entity, String item) {
