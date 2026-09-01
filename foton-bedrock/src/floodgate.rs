@@ -440,11 +440,22 @@ mod tests {
 
     #[test]
     fn truncates_on_a_character_boundary() {
-        // A gamertag with multi-byte characters must not panic or split a char.
-        let data = BedrockData::parse(&sample("Ünïcödeplayername", "1")).expect("parses");
+        // 14 single-byte characters place the 2-byte "é" (U+00E9) so it
+        // straddles byte offset 15 -- exactly where `java_username(".")` cuts
+        // (room = 16 - ".".chars().count() == 15). A naive `&self.username[..15]`
+        // byte slice lands on the second byte of "é" and panics; `.chars().take(15)`
+        // must not. Built via `.repeat()`, not hand-counted, and self-checked
+        // with `is_char_boundary` so a miscount fails loudly here rather than
+        // silently passing a weaker assertion.
+        let username = format!("{}éXYZ", "A".repeat(14));
+        assert!(
+            !username.is_char_boundary(15),
+            "fixture must straddle byte offset 15 for this test to be load-bearing"
+        );
+
+        let data = BedrockData::parse(&sample(&username, "1")).expect("parses");
         let name = data.java_username(".");
-        assert!(name.starts_with(".Ünïcöde"));
-        assert!(name.chars().count() <= 16);
+        assert_eq!(name, format!(".{}é", "A".repeat(14)));
     }
 
     #[test]
