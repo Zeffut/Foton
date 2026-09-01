@@ -165,6 +165,12 @@ extern "system" fn online_player_ids(mut env: JNIEnv<'_>, _class: JClass<'_>) ->
     string_array(&mut env, &ids)
 }
 
+/// `foton.Native.playerLocale`
+extern "system" fn player_locale(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let locale = player(&mut env, &uuid).map(|player| player.client_information().language);
+    to_java(&mut env, locale)
+}
+
 /// `foton.Native.playerName`
 extern "system" fn player_name(
     mut env: JNIEnv<'_>,
@@ -1593,6 +1599,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)Ljava/lang/String;",
             player_name as *mut c_void,
         ),
+        method("playerLocale", "(Ljava/lang/String;)Ljava/lang/String;", player_locale as *mut c_void),
         method(
             "hasPlayedBefore",
             "(Ljava/lang/String;)Z",

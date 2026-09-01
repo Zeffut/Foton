@@ -50,6 +50,7 @@ public final class Native {
 
     /** A player's name, or null once they are gone. */
     public static native String playerName(String uuid);
+    public static native String playerLocale(String uuid);
     public static native boolean hasPlayedBefore(String uuid);
     public static native String customName(String uuid);
     public static native void setCustomName(String uuid, String name);

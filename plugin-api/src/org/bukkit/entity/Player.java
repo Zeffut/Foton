@@ -9,6 +9,9 @@ public interface Player extends HumanEntity {
     @Override
     String getName();
 
+    /** Returns the client locale, such as {@code en_us}. */
+    default String getLocale() { return "en_us"; }
+
     /** Returns the server hosting this player. */
     default org.bukkit.Server getServer() {
         return org.bukkit.Bukkit.getServer();

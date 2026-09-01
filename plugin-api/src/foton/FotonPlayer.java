@@ -33,6 +33,12 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public String getLocale() {
+        String locale = Native.playerLocale(id.toString());
+        return locale == null ? "en_us" : locale;
+    }
+
+    @Override
     public World getWorld() {
         String name = Native.playerWorld(id.toString());
         return name == null ? null : new FotonWorld(name);
