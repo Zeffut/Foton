@@ -1148,6 +1148,29 @@ extern "system" fn open_book(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JStr
     player.send_packet(COpenBook { hand });
 }
 
+extern "system" fn teleport(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    world_name: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    yaw: jfloat,
+    pitch: jfloat,
+) -> jboolean {
+    let Some(player) = player(&mut env, &uuid) else {
+        return 0;
+    };
+    let Ok(world_name) = env.get_string(&world_name) else {
+        return 0;
+    };
+    if player.get_world().key.to_string() != String::from(world_name) {
+        return 0;
+    }
+    u8::from(player.teleport(DVec3::new(x, y, z), yaw, pitch).is_ok())
+}
+
 /// Every native, with the descriptor the JVM matches it by.
 ///
 /// A descriptor that disagrees with the Java declaration is not a compile
@@ -1226,6 +1249,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openBook",
             "(Ljava/lang/String;)V",
             open_book as *mut c_void,
+        ),
+        method(
+            "teleport",
+            "(Ljava/lang/String;Ljava/lang/String;DDDFF)Z",
+            teleport as *mut c_void,
         ),
         method(
             "worldMinHeight",

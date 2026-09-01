@@ -16,6 +16,7 @@ public interface Player extends Damageable {
     boolean isOnline();
     default boolean isSneaking() { return false; }
     void openBook(org.bukkit.inventory.ItemStack book);
+    boolean teleport(org.bukkit.Location location);
     void kickPlayer(String message);
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);

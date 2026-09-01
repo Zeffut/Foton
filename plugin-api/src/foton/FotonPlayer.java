@@ -226,6 +226,12 @@ public final class FotonPlayer implements Player {
         if (book != null) Native.openBook(id.toString());
     }
 
+    @Override public boolean teleport(org.bukkit.Location location) {
+        if (location == null || location.getWorld() == null) return false;
+        return Native.teleport(id.toString(), location.getWorld().getName(), location.getX(),
+            location.getY(), location.getZ(), location.getYaw(), location.getPitch());
+    }
+
     @Override
     public void kickPlayer(String message) {
         Native.kickPlayer(id.toString(), message == null ? "" : message);
