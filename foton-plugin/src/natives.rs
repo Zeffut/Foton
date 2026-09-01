@@ -175,6 +175,66 @@ extern "system" fn player_name(
     to_java(&mut env, name)
 }
 
+fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, foton_core::entity::SharedEntity)> {
+    let server = server()?;
+    for world in server.worlds.values() {
+        if let Some(entity) = world.get_entity_by_uuid(uuid) {
+            return Some((Arc::clone(world), entity));
+        }
+    }
+    None
+}
+
+extern "system" fn entity_world(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
+    let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
+    to_java(&mut env, entity_by_uuid(&id).map(|(world, _)| world.key.to_string()))
+}
+
+extern "system" fn entity_type(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
+    let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
+    to_java(&mut env, entity_by_uuid(&id).map(|(_, entity)| entity.entity_type().key.path.to_string()))
+}
+
+extern "system" fn entity_position(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdoubleArray {
+    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_position(&mut env, None) };
+    let Some(id) = Uuid::parse_str(&text).ok() else { return to_position(&mut env, None); };
+    to_position(&mut env, entity_by_uuid(&id).map(|(_, entity)| { let p = entity.position(); [p.x, p.y, p.z, 0.0, 0.0] }))
+}
+
+extern "system" fn entity_id(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
+    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return -1 };
+    let Some(id) = Uuid::parse_str(&text).ok() else { return -1; };
+    entity_by_uuid(&id).map_or(-1, |(_, entity)| entity.id())
+}
+
+extern "system" fn entity_custom_name(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
+    let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
+    to_java(&mut env, entity_by_uuid(&id).and_then(|(_, entity)| entity.custom_name().map(|name| name.to_string())))
+}
+
+extern "system" fn set_entity_custom_name(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, name: JString<'_>) {
+    let Ok(uuid_text) = env.get_string(&uuid) else { return; };
+    let Ok(name_text) = env.get_string(&name) else { return; };
+    let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else { return; };
+    if let Some((_, entity)) = entity_by_uuid(&id) {
+        entity.set_custom_name(Some(text_components::TextComponent::plain(String::from(name_text))));
+    }
+}
+
+extern "system" fn entity_send_message(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, message: JString<'_>) {
+    let Ok(uuid_text) = env.get_string(&uuid) else { return; };
+    let Ok(message_text) = env.get_string(&message) else { return; };
+    let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else { return; };
+    if let Some((_, entity)) = entity_by_uuid(&id) {
+        if let Some(player) = entity.as_player() {
+            player.send_message(&text_components::TextComponent::plain(String::from(message_text)));
+        }
+    }
+}
+
 extern "system" fn has_played_before(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -1302,6 +1362,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)I",
             world_max_height as *mut c_void,
         ),
+        method("entityWorld", "(Ljava/lang/String;)Ljava/lang/String;", entity_world as *mut c_void),
+        method("entityType", "(Ljava/lang/String;)Ljava/lang/String;", entity_type as *mut c_void),
+        method("entityPosition", "(Ljava/lang/String;)[D", entity_position as *mut c_void),
+        method("entityId", "(Ljava/lang/String;)I", entity_id as *mut c_void),
+        method("entityCustomName", "(Ljava/lang/String;)Ljava/lang/String;", entity_custom_name as *mut c_void),
+        method("setEntityCustomName", "(Ljava/lang/String;Ljava/lang/String;)V", set_entity_custom_name as *mut c_void),
+        method("entitySendMessage", "(Ljava/lang/String;Ljava/lang/String;)V", entity_send_message as *mut c_void),
         method(
             "gameMode",
             "(Ljava/lang/String;)Ljava/lang/String;",

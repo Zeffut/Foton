@@ -74,6 +74,13 @@ public final class Native {
 
     /** The name of the world a player is in, or null once they are gone. */
     public static native String playerWorld(String uuid);
+    public static native String entityWorld(String uuid);
+    public static native String entityType(String uuid);
+    public static native double[] entityPosition(String uuid);
+    public static native int entityId(String uuid);
+    public static native String entityCustomName(String uuid);
+    public static native void setEntityCustomName(String uuid, String name);
+    public static native void entitySendMessage(String uuid, String message);
 
     /** Whether a player holds a permission. */
     public static native boolean hasPermission(String uuid, String permission);
