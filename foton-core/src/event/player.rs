@@ -16,6 +16,48 @@ use super::Event;
 use crate::player::Player;
 use foton_utils::Identifier;
 
+/// A player has completed protocol login and may enter the world.
+pub struct PlayerLoginEvent {
+    player: Arc<Player>,
+    kick_message: Option<String>,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for PlayerLoginEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_login");
+}
+
+impl Event for PlayerLoginEvent {
+    fn is_cancelled(&self) -> bool {
+        self.kick_message.is_some()
+    }
+}
+
+impl PlayerLoginEvent {
+    #[must_use]
+    /// Creates an allowed login event.
+    pub const fn new(player: Arc<Player>) -> Self {
+        Self {
+            player,
+            kick_message: None,
+        }
+    }
+    #[must_use]
+    /// Returns the logging-in player.
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+    #[must_use]
+    /// Returns the denial message, if admission was denied.
+    pub fn kick_message(&self) -> Option<&str> {
+        self.kick_message.as_deref()
+    }
+    /// Denies admission with a kick message.
+    pub fn deny(&mut self, message: String) {
+        self.kick_message = Some(message);
+    }
+}
+
 /// A player finished joining, and the server is about to announce it.
 ///
 /// Not cancellable, matching `org.bukkit.event.player.PlayerJoinEvent`: by the

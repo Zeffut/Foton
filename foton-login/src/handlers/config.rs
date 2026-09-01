@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use foton_core::entity::next_entity_id;
+use foton_core::event::PlayerLoginEvent;
 use foton_core::player::PlayerConnection;
 use foton_core::player::connection::JavaConnection;
 use foton_core::player::{ClientInformation, Player};
@@ -142,6 +143,13 @@ impl JavaTcpClient {
         tokio::select! {
             () = self.connection_updated.notified() => {}
             () = self.cancel_token.cancelled() => return ConnectionAction::none(),
+        }
+
+        let mut login = PlayerLoginEvent::new(Arc::clone(&player));
+        self.server.events().fire(&mut login);
+        if let Some(message) = login.kick_message() {
+            self.kick(message.to_owned().into()).await;
+            return ConnectionAction::none();
         }
         self.server.queue_player_join(player);
 

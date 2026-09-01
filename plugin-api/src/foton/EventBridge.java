@@ -19,6 +19,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
@@ -136,6 +137,12 @@ public final class EventBridge {
         PlayerJoinEvent event = new PlayerJoinEvent(player(uuid), message);
         dispatch(event);
         return event.getJoinMessage();
+    }
+
+    public static String fireLogin(String uuid) {
+        PlayerLoginEvent event = new PlayerLoginEvent(player(uuid));
+        dispatch(event);
+        return event.isCancelled() ? event.getKickMessage() : "";
     }
 
     /** A player left. Returns what to announce, or null to announce nothing. */
