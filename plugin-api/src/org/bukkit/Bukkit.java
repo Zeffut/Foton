@@ -121,6 +121,11 @@ public final class Bukkit {
         return server.dispatchCommand(sender, command);
     }
 
+    /** Reloads datapack-backed server data through Steel's existing reload job. */
+    public static void reloadData() {
+        server.dispatchCommand(server.getConsoleSender(), "reload");
+    }
+
     /** Resolves the selector forms used by server-redirect's target command. */
     public static List<org.bukkit.entity.Entity> selectEntities(
             CommandSender sender, String selector) {
