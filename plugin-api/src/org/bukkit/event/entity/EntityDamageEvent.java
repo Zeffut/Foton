@@ -15,6 +15,7 @@ public class EntityDamageEvent extends Event implements Cancellable {
     protected EntityDamageEvent(Entity entity) { this(entity, DamageCause.CUSTOM); }
     protected EntityDamageEvent(Entity entity, DamageCause cause) { this.entity = entity; this.cause = cause == null ? DamageCause.CUSTOM : cause; }
     public Entity getEntity() { return entity; }
+    public org.bukkit.entity.EntityType getEntityType() { return entity == null ? null : entity.getType(); }
     public DamageCause getCause() { return cause; }
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
