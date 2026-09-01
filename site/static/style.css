@@ -110,6 +110,12 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 .stat .label { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; color: var(--ink); margin: 10px 0 8px; }
 .stat p { font-size: 15px; margin: 0; }
 
+.reports-hero { padding: 46px 0 32px; }
+.report-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.report-summary .stat { padding-top: 9px; }
+.report-summary .stat b { font-size: clamp(34px, 4vw, 48px); }
+.report-summary .stat .label { font-size: 10px; letter-spacing: 0.1em; margin: 6px 0 0; }
+
 .rows { display: flex; flex-direction: column; }
 .row { display: flex; gap: 16px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--rule-2); }
 .row .k { flex: 0 0 170px; font-family: var(--mono); font-size: 13px; color: var(--ink); }
