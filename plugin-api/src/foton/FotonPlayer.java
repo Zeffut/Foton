@@ -114,6 +114,9 @@ public final class FotonPlayer implements Player {
     @Override
     public void hideTitle() { Native.clearTitle(id.toString()); }
 
+    @Override
+    public void resetTitle() { hideTitle(); }
+
     private static String legacy(net.md_5.bungee.api.chat.BaseComponent[] components) {
         if (components == null) return "";
         StringBuilder text = new StringBuilder();

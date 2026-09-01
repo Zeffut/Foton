@@ -34,6 +34,7 @@ public interface Player extends Entity {
     void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut);
     void sendTitle(com.destroystokyo.paper.Title title);
     void hideTitle();
+    void resetTitle();
 
     void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume, float pitch);
 
