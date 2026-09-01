@@ -1175,6 +1175,22 @@ extern "system" fn world_player_ids(
     string_array(&mut env, &ids)
 }
 
+/// `foton.Native.worldEntityIds`
+extern "system" fn world_entity_ids(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jobjectArray {
+    let ids = world(&mut env, &name).map_or_else(Vec::new, |world| {
+        world
+            .accessible_entities()
+            .into_iter()
+            .map(|entity| entity.uuid().to_string())
+            .collect()
+    });
+    string_array(&mut env, &ids)
+}
+
 /// `foton.Native.worldSpawn`
 extern "system" fn world_spawn(
     mut env: JNIEnv<'_>,
@@ -1341,6 +1357,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "worldPlayerIds",
             "(Ljava/lang/String;)[Ljava/lang/String;",
             world_player_ids as *mut c_void,
+        ),
+        method(
+            "worldEntityIds",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            world_entity_ids as *mut c_void,
         ),
         method(
             "worldSpawn",

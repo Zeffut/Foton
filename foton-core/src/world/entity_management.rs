@@ -43,6 +43,11 @@ pub(super) fn nearest_player_distance_in_range(
 }
 
 impl World {
+    /// Returns a coherent snapshot of entities currently visible to gameplay.
+    #[must_use]
+    pub fn accessible_entities(&self) -> Vec<SharedEntity> {
+        self.entity_manager.get_accessible_entities()
+    }
     /// Returns the world-global block-entity ticker owner.
     #[must_use]
     pub(crate) const fn block_entity_tickers(

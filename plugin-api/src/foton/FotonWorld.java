@@ -99,6 +99,20 @@ public final class FotonWorld implements World {
     }
 
     @Override
+    public java.util.List<org.bukkit.entity.Entity> getEntities() {
+        String[] ids = Native.worldEntityIds(name);
+        java.util.ArrayList<org.bukkit.entity.Entity> entities = new java.util.ArrayList<>(ids.length);
+        for (String id : ids) {
+            try {
+                entities.add(new FotonEntity(UUID.fromString(id)));
+            } catch (IllegalArgumentException ignored) {
+                // Native UUIDs are validated before they cross this boundary.
+            }
+        }
+        return java.util.Collections.unmodifiableList(entities);
+    }
+
+    @Override
     public Environment getEnvironment() {
         return switch (name) {
             case "minecraft:overworld" -> Environment.NORMAL;

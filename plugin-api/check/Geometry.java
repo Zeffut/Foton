@@ -111,6 +111,10 @@ final class Geometry {
             return java.util.List.of();
         }
 
+        @Override public java.util.List<org.bukkit.entity.Entity> getEntities() {
+            return java.util.List.of();
+        }
+
         @Override public org.bukkit.World.Environment getEnvironment() {
             return org.bukkit.World.Environment.CUSTOM;
         }

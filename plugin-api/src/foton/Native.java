@@ -41,6 +41,7 @@ public final class Native {
     /** The UUIDs of everyone online, in no promised order. */
     public static native String[] onlinePlayerIds();
     public static native String[] worldPlayerIds(String world);
+    public static native String[] worldEntityIds(String world);
 
     /** A player's name, or null once they are gone. */
     public static native String playerName(String uuid);

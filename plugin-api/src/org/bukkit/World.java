@@ -28,6 +28,7 @@ public interface World {
     int getMaxHeight();
 
     java.util.List<org.bukkit.entity.Player> getPlayers();
+    java.util.List<org.bukkit.entity.Entity> getEntities();
 
     Environment getEnvironment();
 
