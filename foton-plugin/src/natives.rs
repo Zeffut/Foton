@@ -1191,6 +1191,38 @@ extern "system" fn world_entity_ids(
     string_array(&mut env, &ids)
 }
 
+/// `foton.Native.scoreboardTeamEntries`
+extern "system" fn scoreboard_team_entries(
+    mut env: JNIEnv<'_>, _class: JClass<'_>, world_name: JString<'_>, team_name: JString<'_>,
+) -> jobjectArray {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else { return string_array(&mut env, &[]) };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else { return string_array(&mut env, &[]) };
+    let entries = server().and_then(|server| {
+        let key: Identifier = world_name.parse().ok()?;
+        let world = server.worlds.get(&key).map(Arc::clone)?;
+        server.scoreboards.get(world.domain()).map(|scoreboard| {
+            scoreboard.team(&team_name).map(|team| scoreboard.team_entries(&team)).unwrap_or_default()
+        })
+    }).unwrap_or_default();
+    string_array(&mut env, &entries)
+}
+
+/// `foton.Native.scoreboardEntryTeam`
+extern "system" fn scoreboard_entry_team(
+    mut env: JNIEnv<'_>, _class: JClass<'_>, world_name: JString<'_>, entry: JString<'_>,
+) -> jstring {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else { return null_mut() };
+    let Ok(entry): Result<String, _> = env.get_string(&entry).map(Into::into) else { return null_mut() };
+    let team = server().and_then(|server| {
+        let key: Identifier = world_name.parse().ok()?;
+        let world = server.worlds.get(&key).map(Arc::clone)?;
+        server.scoreboards.get(world.domain()).and_then(|scoreboard| {
+            scoreboard.holder_team_name(&foton_core::scoreboard::ScoreHolder::new(entry))
+        })
+    });
+    to_java(&mut env, team)
+}
+
 /// `foton.Native.worldSpawn`
 extern "system" fn world_spawn(
     mut env: JNIEnv<'_>,
@@ -1363,6 +1395,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             world_entity_ids as *mut c_void,
         ),
+        method("scoreboardTeamEntries", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;", scoreboard_team_entries as *mut c_void),
+        method("scoreboardEntryTeam", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", scoreboard_entry_team as *mut c_void),
         method(
             "worldSpawn",
             "(Ljava/lang/String;)[D",

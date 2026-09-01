@@ -20,6 +20,7 @@ public interface Player extends HumanEntity {
 
     boolean isOnline();
     int getLevel();
+    org.bukkit.scoreboard.Scoreboard getScoreboard();
     default boolean isSneaking() { return false; }
     void openBook(org.bukkit.inventory.ItemStack book);
     boolean teleport(org.bukkit.Location location);

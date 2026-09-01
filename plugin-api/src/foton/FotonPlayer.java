@@ -77,6 +77,12 @@ public final class FotonPlayer implements Player {
         return Native.experienceLevel(id.toString());
     }
 
+    @Override
+    public org.bukkit.scoreboard.Scoreboard getScoreboard() {
+        World world = getWorld();
+        return new FotonScoreboard(world == null ? "" : world.getName());
+    }
+
     /** The name a plugin may have changed, falling back to the real one.
      *
      * Bukkit stores this per player and Foton has nowhere to put it, so it is

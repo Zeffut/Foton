@@ -105,6 +105,10 @@ public final class Bukkit {
         return server.getWorlds();
     }
 
+    public static org.bukkit.scoreboard.ScoreboardManager getScoreboardManager() {
+        return server.getScoreboardManager();
+    }
+
     public static World getWorld(String name) {
         return server.getWorld(name);
     }

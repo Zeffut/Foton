@@ -71,6 +71,8 @@ public interface Server {
 
     List<World> getWorlds();
 
+    org.bukkit.scoreboard.ScoreboardManager getScoreboardManager();
+
     World getWorld(String name);
 
     int broadcastMessage(String message);
