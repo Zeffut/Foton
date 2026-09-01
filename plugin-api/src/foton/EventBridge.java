@@ -190,7 +190,8 @@ public final class EventBridge {
     public static boolean fireEntityDamage(String damager, String entity, String cause) {
         org.bukkit.event.entity.EntityDamageByEntityEvent event =
             new org.bukkit.event.entity.EntityDamageByEntityEvent(
-                new FotonEntity(Native.parse(damager)), new FotonEntity(Native.parse(entity)));
+                new FotonEntity(Native.parse(damager)), new FotonEntity(Native.parse(entity)),
+                damageCause(cause));
         dispatch(event);
         return !event.isCancelled();
     }
