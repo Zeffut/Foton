@@ -12,6 +12,14 @@ import org.bukkit.Material;
 public interface Inventory {
     int getSize();
 
+    default boolean isEmpty() {
+        for (int slot = 0; slot < getSize(); slot++) {
+            ItemStack item = getItem(slot);
+            if (item != null && !item.getType().isAir() && item.getAmount() > 0) return false;
+        }
+        return true;
+    }
+
     ItemStack getItem(int slot);
 
     void setItem(int slot, ItemStack item);
