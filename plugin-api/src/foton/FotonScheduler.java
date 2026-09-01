@@ -38,6 +38,83 @@ public final class FotonScheduler implements BukkitScheduler {
         return submit(plugin, task, Math.max(0, delayTicks), Math.max(1, periodTicks));
     }
 
+    /** Where async tasks run. One thread: a plugin's background work is
+     * almost always waiting on something, and a pool would mostly buy the
+     * chance for two of a plugin's own tasks to race each other. */
+    private static final java.util.concurrent.ScheduledExecutorService OFF_TICK =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "foton-plugin-async");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+    @Override
+    public BukkitTask runTaskAsynchronously(Plugin plugin, Runnable task) {
+        return offTick(plugin, task, 0, -1);
+    }
+
+    @Override
+    public BukkitTask runTaskLaterAsynchronously(Plugin plugin, Runnable task, long delayTicks) {
+        return offTick(plugin, task, Math.max(0, delayTicks), -1);
+    }
+
+    @Override
+    public BukkitTask runTaskTimerAsynchronously(
+            Plugin plugin, Runnable task, long delayTicks, long periodTicks) {
+        return offTick(plugin, task, Math.max(0, delayTicks), Math.max(1, periodTicks));
+    }
+
+    private static BukkitTask offTick(Plugin plugin, Runnable body, long delay, long period) {
+        Async task = new Async(nextId.getAndIncrement(), plugin);
+        Runnable guarded = () -> {
+            if (task.cancelled) {
+                return;
+            }
+            try {
+                body.run();
+            } catch (Throwable error) {
+                // Nothing above this catches: an exception on the executor
+                // thread would silently stop a repeating task forever.
+                System.out.println("[scheduler] " + plugin.getName()
+                    + " threw in an async task: " + error);
+            }
+        };
+        // A tick is fifty milliseconds. Bukkit measures async delays in ticks
+        // too, which reads oddly and is what plugins pass.
+        long delayMillis = delay * 50;
+        task.handle = period > 0
+            ? OFF_TICK.scheduleAtFixedRate(guarded, delayMillis, period * 50,
+                java.util.concurrent.TimeUnit.MILLISECONDS)
+            : OFF_TICK.schedule(guarded, delayMillis,
+                java.util.concurrent.TimeUnit.MILLISECONDS);
+        return task;
+    }
+
+    /** A task running off the tick, cancellable from anywhere. */
+    private static final class Async implements BukkitTask {
+        final int id;
+        final Plugin plugin;
+        volatile java.util.concurrent.ScheduledFuture<?> handle;
+        volatile boolean cancelled;
+
+        Async(int id, Plugin plugin) {
+            this.id = id;
+            this.plugin = plugin;
+        }
+
+        @Override public int getTaskId() {
+            return id;
+        }
+
+        @Override public void cancel() {
+            cancelled = true;
+            java.util.concurrent.ScheduledFuture<?> future = handle;
+            if (future != null) {
+                future.cancel(false);
+            }
+        }
+    }
+
     @Override
     public void cancelTask(int taskId) {
         for (Scheduled task : pending) {

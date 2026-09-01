@@ -10,18 +10,29 @@
 //! rather than write: a plugin changing the world from its own thread is a
 //! problem the scheduler solves, not one to solve by taking a lock harder.
 
+use std::mem;
 use std::ptr::null_mut;
 use std::sync::{Arc, OnceLock, Weak};
+use std::thread::{self, ThreadId};
 
 use foton_core::entity::Entity;
+use foton_core::inventory::container::Container;
 use foton_core::permission::{PermissionExpr, PermissionKey};
 use foton_core::player::Player;
 use foton_core::server::Server;
+use foton_core::world::LevelReader as _;
 use foton_core::world::World;
+use foton_protocol::packets::game::SoundSource;
+use foton_registry::item_stack::ItemStack;
+use foton_registry::{REGISTRY, RegistryExt as _};
 use foton_utils::Identifier;
+use foton_utils::locks::SyncMutex;
+use foton_utils::types::UpdateFlags;
+use foton_utils::{BlockPos, BlockStateId};
+use glam::DVec3;
 use jni::JNIEnv;
 use jni::objects::{JClass, JDoubleArray, JObjectArray, JString};
-use jni::sys::{jboolean, jdoubleArray, jint, jlong, jobjectArray, jstring};
+use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jint, jlong, jobjectArray, jstring};
 use uuid::Uuid;
 
 /// The server the natives answer about.
@@ -185,6 +196,243 @@ extern "system" fn has_permission(
     u8::from(player.has_permission(&PermissionExpr::key(key)))
 }
 
+/// The thread the game tick runs on, learned from the tick itself.
+///
+/// A plugin may write a block only from that thread: `World::set_block` says
+/// its callers must be inside Foton's serialized world-mutation phase, and a
+/// JVM thread is not. Knowing which thread that is means a write from an event
+/// handler or a scheduled task -- which is where nearly every write comes
+/// from -- can happen at once and read back immediately, while a write from a
+/// plugin's own thread waits for the next tick instead of racing the palette.
+static TICK_THREAD: SyncMutex<Option<ThreadId>> = SyncMutex::new(None);
+
+/// Block writes that arrived from somewhere other than the tick.
+static DEFERRED: SyncMutex<Vec<(Identifier, BlockPos, BlockStateId)>> = SyncMutex::new(Vec::new());
+
+/// Records that this is the tick thread, and runs what was waiting for it.
+pub(crate) fn begin_tick(server: &Arc<Server>) {
+    *TICK_THREAD.lock() = Some(thread::current().id());
+
+    let pending = mem::take(&mut *DEFERRED.lock());
+    for (world, pos, state) in pending {
+        if let Some(world) = server.worlds.get(&world) {
+            world.set_block(pos, state, UpdateFlags::UPDATE_ALL);
+        }
+    }
+}
+
+/// Whether the caller may write to the world right now.
+fn on_tick() -> bool {
+    *TICK_THREAD.lock() == Some(thread::current().id())
+}
+
+/// One inventory slot, written the way `foton.Native.inventorySlot` promises.
+///
+/// An empty slot is the empty string and an unreadable one is Java's null, so
+/// a plugin can tell "there is nothing here" from "this cannot be answered"
+/// rather than reading a missing armor slot as bare feet.
+fn describe_slot(stack: &ItemStack) -> String {
+    if stack.is_empty() {
+        return String::new();
+    }
+    format!("{} {}", stack.item().key, stack.count())
+}
+
+/// Reads back what `describe_slot` wrote.
+fn parse_slot(text: &str) -> Option<ItemStack> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Some(ItemStack::empty());
+    }
+    let (name, count) = text.rsplit_once(' ')?;
+    let count: i32 = count.parse().ok()?;
+    let key: Identifier = name.parse().ok()?;
+    let item = REGISTRY.items.by_key(&key)?;
+    (count > 0).then(|| ItemStack::with_count(item, count))
+}
+
+/// A block state as `minecraft:name[facing=north]`, the way `/setblock` writes it.
+fn describe_state(state: BlockStateId) -> Option<String> {
+    let block = REGISTRY.blocks.by_state_id(state)?;
+    let properties = REGISTRY.blocks.get_properties(state);
+    if properties.is_empty() {
+        return Some(block.key.to_string());
+    }
+    let listed = properties
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!("{}[{listed}]", block.key))
+}
+
+/// Reads back what `describe_state` wrote.
+fn parse_state(text: &str) -> Option<BlockStateId> {
+    let text = text.trim();
+    let (name, rest) = match text.split_once('[') {
+        Some((name, rest)) => (name, rest.strip_suffix(']')?),
+        None => (text, ""),
+    };
+    let key: Identifier = name.parse().ok()?;
+    let pairs: Vec<(&str, &str)> = if rest.is_empty() {
+        Vec::new()
+    } else {
+        rest.split(',')
+            .filter_map(|pair| pair.split_once('='))
+            .map(|(name, value)| (name.trim(), value.trim()))
+            .collect()
+    };
+    REGISTRY.blocks.state_id_from_properties(&key, &pairs)
+}
+
+/// `foton.Native.isOperator`
+extern "system" fn is_operator(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    u8::from(player(&mut env, &uuid).is_some_and(|player| player.is_operator()))
+}
+
+/// `foton.Native.blockState`
+extern "system" fn block_state(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jstring {
+    let described = world(&mut env, &name)
+        .and_then(|world| describe_state(world.get_block_state(BlockPos::new(x, y, z))));
+    to_java(&mut env, described)
+}
+
+/// `foton.Native.setBlock`
+extern "system" fn set_block(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    state: JString<'_>,
+) {
+    let Some(world) = world(&mut env, &name) else {
+        return;
+    };
+    let Ok(text) = env.get_string(&state) else {
+        return;
+    };
+    let text: String = text.into();
+    let Some(state) = parse_state(&text) else {
+        return;
+    };
+    let pos = BlockPos::new(x, y, z);
+    if on_tick() {
+        world.set_block(pos, state, UpdateFlags::UPDATE_ALL);
+    } else {
+        // Off the tick. Writing here would race the palette, so it waits.
+        DEFERRED.lock().push((world.key.clone(), pos, state));
+    }
+}
+
+/// `foton.Native.playSound`
+extern "system" fn play_sound(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    sound: JString<'_>,
+    volume: jfloat,
+    pitch: jfloat,
+) {
+    let Some(world) = world(&mut env, &name) else {
+        return;
+    };
+    let Ok(text) = env.get_string(&sound) else {
+        return;
+    };
+    let text: String = text.into();
+    let Ok(key) = text.parse::<Identifier>() else {
+        return;
+    };
+    let Some(sound) = REGISTRY.sound_events.by_key(&key) else {
+        return;
+    };
+    // Reading and broadcasting is safe from any thread: this sends packets and
+    // touches no block state.
+    world.play_sound_at(
+        sound,
+        SoundSource::Master,
+        DVec3::new(x, y, z),
+        volume,
+        pitch,
+        None,
+    );
+}
+
+/// `foton.Native.gameMode`
+extern "system" fn game_mode(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let mode = player(&mut env, &uuid).map(|player| format!("{:?}", player.game_mode()));
+    to_java(&mut env, mode)
+}
+
+/// `foton.Native.inventorySlot`
+extern "system" fn inventory_slot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    slot: jint,
+) -> jstring {
+    let described = player(&mut env, &uuid).and_then(|player| {
+        let slot = usize::try_from(slot).ok()?;
+        let inventory = player.inventory.lock();
+        (slot < inventory.get_container_size()).then(|| describe_slot(inventory.get_item(slot)))
+    });
+    to_java(&mut env, described)
+}
+
+/// `foton.Native.setInventorySlot`
+extern "system" fn set_inventory_slot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    slot: jint,
+    item: JString<'_>,
+) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let Ok(text) = env.get_string(&item) else {
+        return;
+    };
+    let text: String = text.into();
+    let Some(stack) = parse_slot(&text) else {
+        return;
+    };
+    let Ok(slot) = usize::try_from(slot) else {
+        return;
+    };
+    let mut inventory = player.inventory.lock();
+    if slot < inventory.get_container_size() {
+        inventory.set_item(slot, stack);
+    }
+}
+
+/// `foton.Native.heldSlot`
+extern "system" fn held_slot(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
+    player(&mut env, &uuid).map_or(-1, |player| {
+        jint::from(player.inventory.lock().get_selected_slot())
+    })
+}
+
 /// `foton.Native.serverBrand`
 extern "system" fn server_brand(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstring {
     let brand = format!(
@@ -312,6 +560,10 @@ extern "system" fn world_time(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JSt
 /// A descriptor that disagrees with the Java declaration is not a compile
 /// error on either side -- it is a `NoSuchMethodError` the first time a plugin
 /// calls it, which is why they sit next to each other here.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one flat list of every native and its descriptor; splitting it would               put a name and the signature it must match in different functions"
+)]
 pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     use std::ffi::c_void;
 
@@ -370,6 +622,46 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "worldTime",
             "(Ljava/lang/String;)J",
             world_time as *mut c_void,
+        ),
+        method(
+            "gameMode",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            game_mode as *mut c_void,
+        ),
+        method(
+            "inventorySlot",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            inventory_slot as *mut c_void,
+        ),
+        method(
+            "setInventorySlot",
+            "(Ljava/lang/String;ILjava/lang/String;)V",
+            set_inventory_slot as *mut c_void,
+        ),
+        method(
+            "heldSlot",
+            "(Ljava/lang/String;)I",
+            held_slot as *mut c_void,
+        ),
+        method(
+            "isOperator",
+            "(Ljava/lang/String;)Z",
+            is_operator as *mut c_void,
+        ),
+        method(
+            "blockState",
+            "(Ljava/lang/String;III)Ljava/lang/String;",
+            block_state as *mut c_void,
+        ),
+        method(
+            "setBlock",
+            "(Ljava/lang/String;IIILjava/lang/String;)V",
+            set_block as *mut c_void,
+        ),
+        method(
+            "playSound",
+            "(Ljava/lang/String;DDDLjava/lang/String;FF)V",
+            play_sound as *mut c_void,
         ),
         method(
             "onlinePlayerIds",

@@ -47,4 +47,14 @@ public interface Server {
     int broadcastMessage(String message);
 
     boolean dispatchCommand(CommandSender sender, String command);
+
+    OfflinePlayer getOfflinePlayer(String name);
+
+    OfflinePlayer getOfflinePlayer(UUID id);
+
+    io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler getGlobalRegionScheduler();
+
+    io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler();
+
+    io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler();
 }

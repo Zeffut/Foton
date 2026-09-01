@@ -175,14 +175,29 @@ def references(data):
             yield surface, f"{owner}#{member}"
 
 
-# What every class answers because java.lang.Object does. The Object class file
-# is not in the API jar and never will be, but `player.toString()` compiles to
-# a reference on the static type -- so without this, every such call would be
-# counted as a gap that does not exist.
+# What a class answers because a JDK supertype does. Those class files are not
+# in the API jar and never will be, but `player.toString()` and
+# `material.name()` both compile to references on the API type -- so without
+# this, every such call would be counted as a gap that does not exist and
+# phantom members would sit near the top of the ranking.
 FROM_OBJECT = frozenset({
     "toString", "equals", "hashCode", "getClass", "clone", "finalize",
     "notify", "notifyAll", "wait",
 })
+
+FROM_JDK = {
+    "java/lang/Object": FROM_OBJECT,
+    "java/lang/Enum": FROM_OBJECT | {
+        "name", "ordinal", "compareTo", "getDeclaringClass", "describeConstable",
+        "values", "valueOf",
+    },
+    "java/lang/Record": FROM_OBJECT,
+    "java/lang/Throwable": FROM_OBJECT | {
+        "getMessage", "getLocalizedMessage", "getCause", "printStackTrace",
+        "getStackTrace", "initCause", "addSuppressed", "getSuppressed",
+        "fillInStackTrace",
+    },
+}
 
 
 def declares(data):
@@ -246,8 +261,12 @@ def provided(api_jar):
     def walk(name, seen):
         if name in resolved:
             return resolved[name]
-        if name in seen or name not in own:
+        if name in seen:
             return set()
+        if name not in own:
+            # A supertype the jar does not hold. If the JDK provides it, what
+            # it provides is still reachable; anything else is genuinely absent.
+            return FROM_JDK.get(name, set())
         seen.add(name)
         members = set(own[name])
         for parent in parents.get(name, ()):

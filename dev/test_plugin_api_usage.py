@@ -54,6 +54,10 @@ STUBS = {
             public static String getServerName() { return ""; }
         }
     """,
+    "org/bukkit/Season.java": """
+        package org.bukkit;
+        public enum Season { SPRING, SUMMER }
+    """,
     "org/bukkit/command/CommandSender.java": """
         package org.bukkit.command;
         public interface CommandSender {
@@ -78,27 +82,49 @@ STUBS = {
 def build_jar(sources, into, drop=None):
     """Compiles sources and packs the class files into a jar. Returns its path.
 
+    The stubs stand in for the API and are compiled but not packed when there
+    are sources of their own: a real plugin jar carries its own classes and
+    finds Bukkit's on the server. Packing them would make the plugin look like
+    it referenced every member of the API it was merely compiled against.
+
     `drop` leaves one compiled class out, which is how a jar that cannot answer
     everything a plugin calls is built.
     """
     root = into / "src"
-    for name, body in {**STUBS, **sources}.items():
-        path = root / name
+    for name, body in STUBS.items():
+        path = root / "api" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    for name, body in sources.items():
+        path = root / "own" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
 
-    classes = into / "classes"
-    classes.mkdir()
+    stubs = into / "stubs"
+    stubs.mkdir()
     subprocess.run(
-        ["javac", "-nowarn", "-d", str(classes), *[str(p) for p in root.rglob("*.java")]],
+        ["javac", "-nowarn", "-d", str(stubs),
+         *[str(p) for p in (root / "api").rglob("*.java")]],
         check=True,
         capture_output=True,
     )
 
+    packed = stubs
+    if sources:
+        classes = into / "classes"
+        classes.mkdir()
+        subprocess.run(
+            ["javac", "-nowarn", "-d", str(classes), "-cp", str(stubs),
+             *[str(p) for p in (root / "own").rglob("*.java")]],
+            check=True,
+            capture_output=True,
+        )
+        packed = classes
+
     jar = into / "example.jar"
     with zipfile.ZipFile(jar, "w") as archive:
-        for compiled in classes.rglob("*.class"):
-            entry = compiled.relative_to(classes).as_posix()
+        for compiled in packed.rglob("*.class"):
+            entry = compiled.relative_to(packed).as_posix()
             if entry == drop:
                 continue
             archive.write(compiled, entry)
@@ -197,6 +223,15 @@ class Gaps(unittest.TestCase):
         _, missing = plugin_api_usage.gaps(corpus, self.complete)
 
         self.assertNotIn("org/bukkit/entity/Player#toString", missing)
+
+    def test_what_an_enum_gives_its_constants_is_not_a_gap(self):
+        # `Material.name()` comes from java.lang.Enum, whose class file is not
+        # in the API jar. Counting it missing put a member every plugin
+        # "needs" at the top of the ranking, pointing the work at nothing.
+        have = plugin_api_usage.provided(self.complete)
+
+        self.assertIn("name", have["org/bukkit/Season"])
+        self.assertIn("toString", have["org/bukkit/Season"])
 
     def test_a_jar_that_answers_everything_leaves_no_gap(self):
         corpus = self.plugin.parent

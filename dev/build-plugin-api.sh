@@ -26,13 +26,19 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 1
 fi
 
-rm -rf "$OUT/classes"
-mkdir -p "$OUT/classes"
+rm -rf "$OUT/classes" "$OUT/generated"
+mkdir -p "$OUT/classes" "$OUT/generated"
+
+# Material is sixteen hundred constants over every block and item. It is
+# generated from the same registry files the server itself is built from, so
+# the enum cannot name a block Foton does not have -- and so there is no
+# hand-written second copy to drift.
+python3 "$REPO/dev/gen-material.py" "$OUT/generated"
 
 # javac reads a file of sources with @, which avoids both mapfile (bash 4+,
 # and macOS ships bash 3.2) and an argument list long enough to overflow exec.
 SOURCES="$OUT/sources.txt"
-find "$SRC" -name '*.java' | sort > "$SOURCES"
+find "$SRC" "$OUT/generated" -name '*.java' | sort > "$SOURCES"
 echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.

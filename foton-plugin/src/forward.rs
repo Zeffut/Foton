@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerJoinEvent,
     PlayerQuitEvent, ServerTickEvent,
@@ -107,7 +108,11 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     // thread it likes, and the body runs here -- inside the tick, on the tick
     // thread, where touching the world is safe.
     let jvm = vm;
+    let ticking = Arc::clone(server);
     events.on::<ServerTickEvent, _>(owner(), move |_| {
+        // Before the plugins run: this is what tells the natives which thread
+        // may write to the world, and it runs the writes that could not.
+        natives::begin_tick(&ticking);
         drain_scheduler(&jvm);
     });
 }

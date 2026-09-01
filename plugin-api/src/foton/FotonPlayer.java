@@ -54,6 +54,59 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public org.bukkit.inventory.PlayerInventory getInventory() {
+        return new FotonInventory(id.toString());
+    }
+
+    @Override
+    public org.bukkit.GameMode getGameMode() {
+        org.bukkit.GameMode mode = org.bukkit.GameMode.byName(Native.gameMode(id.toString()));
+        // A player who has gone is not in any mode; survival is the answer
+        // that surprises a plugin least, and Bukkit's own handle to a departed
+        // player answers just as arbitrarily.
+        return mode == null ? org.bukkit.GameMode.SURVIVAL : mode;
+    }
+
+    @Override
+    public boolean isOp() {
+        return Native.isOperator(id.toString());
+    }
+
+    @Override
+    public void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume,
+            float pitch) {
+        playSound(at, sound == null ? null : sound.getKey(), volume, pitch);
+    }
+
+    @Override
+    public void playSound(org.bukkit.Location at, String sound, float volume, float pitch) {
+        org.bukkit.Location where = at == null ? getLocation() : at;
+        if (where == null || where.getWorld() == null || sound == null) {
+            return;
+        }
+        Native.playSound(where.getWorld().getName(), where.getX(), where.getY(), where.getZ(),
+            sound, volume, pitch);
+    }
+
+    @Override
+    public io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler() {
+        return FotonRegionSchedulers.forEntity();
+    }
+
+    @Override
+    public Spigot spigot() {
+        return spigot;
+    }
+
+    /** Spigot's extra surface, which for Foton is the ordinary one. */
+    private final Spigot spigot = new Spigot() {
+        @Override
+        public void sendMessage(String message) {
+            FotonPlayer.this.sendMessage(message);
+        }
+    };
+
+    @Override
     public int getEntityId() {
         // Foton does not hand out network entity ids to plugins: they are a
         // protocol detail that changes on respawn, and a plugin using one as

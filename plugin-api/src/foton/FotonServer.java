@@ -14,6 +14,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.messaging.Messenger;
+import org.bukkit.plugin.messaging.PluginMessageListener;
 import org.bukkit.scheduler.BukkitScheduler;
 
 /** The one Server, answering out of Foton. */
@@ -170,6 +171,33 @@ public final class FotonServer implements Server {
         return CommandMap.dispatch(sender, command);
     }
 
+    @Override
+    public org.bukkit.OfflinePlayer getOfflinePlayer(String name) {
+        Player online = getPlayerExact(name);
+        return new FotonOfflinePlayer(online == null ? null : online.getUniqueId(), name);
+    }
+
+    @Override
+    public org.bukkit.OfflinePlayer getOfflinePlayer(UUID id) {
+        return new FotonOfflinePlayer(id, null);
+    }
+
+    @Override
+    public io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler
+            getGlobalRegionScheduler() {
+        return FotonRegionSchedulers.GLOBAL;
+    }
+
+    @Override
+    public io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler() {
+        return FotonRegionSchedulers.REGION;
+    }
+
+    @Override
+    public io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler() {
+        return FotonRegionSchedulers.ASYNC;
+    }
+
     private static final class Plugins implements PluginManager {
         @Override public void registerEvents(Listener listener, Plugin plugin) {
             EventBridge.register(listener, plugin);
@@ -182,15 +210,51 @@ public final class FotonServer implements Server {
         @Override public Plugin[] getPlugins() {
             return PluginHost.all();
         }
+
+        @Override public void callEvent(org.bukkit.event.Event event) {
+            EventBridge.dispatch(event);
+        }
     }
 
+    /** Custom payloads.
+     *
+     * Registration is recorded and nothing is delivered yet: Foton does not
+     * hand plugin channel payloads across, so a listener registered here will
+     * not be called. The methods exist because a plugin that calls one and
+     * finds it missing fails to load at all, and a plugin whose channel is
+     * quiet still does everything else it does.
+     */
     private static final class Channels implements Messenger {
+        private final java.util.Set<String> outgoing = java.util.concurrent.ConcurrentHashMap
+            .newKeySet();
+        private final java.util.Map<String, PluginMessageListener> incoming =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
         @Override public void registerOutgoingPluginChannel(Plugin source, String channel) {
-            System.out.println("[server] " + source.getName() + " opened channel " + channel);
+            outgoing.add(channel);
         }
 
         @Override public void unregisterOutgoingPluginChannel(Plugin source, String channel) {
-            System.out.println("[server] " + source.getName() + " closed channel " + channel);
+            outgoing.remove(channel);
+        }
+
+        @Override public void registerIncomingPluginChannel(
+                Plugin source, String channel, PluginMessageListener listener) {
+            incoming.put(channel, listener);
+            System.out.println("[server] " + source.getName() + " is listening on " + channel
+                + "; Foton does not deliver plugin messages yet");
+        }
+
+        @Override public void unregisterIncomingPluginChannel(Plugin source, String channel) {
+            incoming.remove(channel);
+        }
+
+        @Override public boolean isOutgoingChannelRegistered(Plugin source, String channel) {
+            return outgoing.contains(channel);
+        }
+
+        @Override public boolean isIncomingChannelRegistered(Plugin source, String channel) {
+            return incoming.containsKey(channel);
         }
     }
 }

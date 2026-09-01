@@ -1,10 +1,19 @@
 package foton;
 
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.SimpleBlockData;
 
-/** A block, as a plugin holds one: a world and three coordinates. */
+/** A block, as a plugin holds one: a world and three coordinates.
+ *
+ * Nothing is cached. A plugin that kept one of these across a few ticks and
+ * read it again should see what is there now, which is what Bukkit's own Block
+ * does and the reason BlockState exists separately as a snapshot.
+ */
 public final class FotonBlock implements Block {
     private final World world;
     private final int x;
@@ -41,6 +50,34 @@ public final class FotonBlock implements Block {
     @Override
     public Location getLocation() {
         return new Location(world, x, y, z);
+    }
+
+    @Override
+    public Material getType() {
+        return getBlockData().getMaterial();
+    }
+
+    @Override
+    public void setType(Material type) {
+        if (world != null && type != null) {
+            Native.setBlock(world.getName(), x, y, z, "minecraft:" + type.getKeyName());
+        }
+    }
+
+    @Override
+    public BlockData getBlockData() {
+        String text = world == null ? null : Native.blockState(world.getName(), x, y, z);
+        return new SimpleBlockData(text);
+    }
+
+    @Override
+    public BlockState getState() {
+        return new FotonBlockState(this, getBlockData());
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return getType().isAir();
     }
 
     @Override

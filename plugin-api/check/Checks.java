@@ -9,13 +9,15 @@ public final class Checks {
         Events.check(args[0]);
         Config.check();
         Geometry.check();
+        Items.check();
         Commands.check();
         foton.PluginHost.disableAll();
         Checks.expect(foton.CommandMap.get("fixture") == null,
             "disabling a plugin should release the names it claimed");
         YamlCheck.check();
         System.out.println(
-            "plugin API checked: events, scheduler, YAML, configuration, geometry and commands");
+            "plugin API checked: events, scheduler, YAML, configuration, geometry,\n"
+                + "    items and commands");
     }
 
     static void expect(boolean condition, String what) {

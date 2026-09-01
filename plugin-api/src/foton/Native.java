@@ -56,6 +56,36 @@ public final class Native {
     /** A player's position as {x, y, z, yaw, pitch}, or null once they are gone. */
     public static native double[] playerPosition(String uuid);
 
+    /** A player's game mode, lower case, or null once they are gone. */
+    public static native String gameMode(String uuid);
+
+    /** One inventory slot as `minecraft:name count`, or the empty string.
+     *
+     * A string rather than an object: building a Java object from Rust means
+     * naming a constructor by signature, and a signature that drifts is a
+     * NoSuchMethodError at the worst possible moment.
+     */
+    public static native String inventorySlot(String uuid, int slot);
+
+    /** Writes one inventory slot. An empty string empties it. */
+    public static native void setInventorySlot(String uuid, int slot, String item);
+
+    /** Which hotbar slot a player is holding, or -1 once they are gone. */
+    public static native int heldSlot(String uuid);
+
+    /** Whether a player is an operator. */
+    public static native boolean isOperator(String uuid);
+
+    /** Plays a sound at a point in a world, for everyone who can hear it. */
+    public static native void playSound(
+        String world, double x, double y, double z, String sound, float volume, float pitch);
+
+    /** One block as `minecraft:name[state=value]`, or null if unreadable. */
+    public static native String blockState(String world, int x, int y, int z);
+
+    /** Writes one block from the same text. */
+    public static native void setBlock(String world, int x, int y, int z, String state);
+
     /** Every loaded world's key, in no promised order. */
     public static native String[] worldNames();
 

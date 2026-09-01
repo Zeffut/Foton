@@ -99,4 +99,25 @@ public final class Bukkit {
     public static boolean dispatchCommand(CommandSender sender, String command) {
         return server.dispatchCommand(sender, command);
     }
+
+    public static OfflinePlayer getOfflinePlayer(String name) {
+        return server.getOfflinePlayer(name);
+    }
+
+    public static OfflinePlayer getOfflinePlayer(UUID id) {
+        return server.getOfflinePlayer(id);
+    }
+
+    public static io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler
+            getGlobalRegionScheduler() {
+        return server.getGlobalRegionScheduler();
+    }
+
+    public static io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler() {
+        return server.getRegionScheduler();
+    }
+
+    public static io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler() {
+        return server.getAsyncScheduler();
+    }
 }

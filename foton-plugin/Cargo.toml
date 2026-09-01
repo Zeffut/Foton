@@ -9,7 +9,12 @@ license.workspace = true
 # that translation lives. It sits beside foton-login rather than under
 # foton-core: the game does not know plugins exist.
 foton-core = { path = "../foton-core" }
+# Item names cross as registry keys, and this is what resolves them.
+foton-protocol.workspace = true
+foton-registry.workspace = true
 foton-utils.workspace = true
+# A sound is played at a point, and the point is a glam vector.
+glam.workspace = true
 text_components.workspace = true
 uuid.workspace = true
 jni = "0.21"

@@ -76,7 +76,7 @@ impl Player {
 
     /// Returns whether the latest published subject state assigns the operator group.
     #[must_use]
-    pub(crate) fn is_operator(&self) -> bool {
+    pub fn is_operator(&self) -> bool {
         self.server
             .upgrade()
             .is_some_and(|server| server.is_operator(self.gameprofile.id))
