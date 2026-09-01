@@ -5,6 +5,8 @@ import org.bukkit.World;
 
 /** A chunk, as a plugin holds one: its coordinates and its world. */
 public final class FotonChunk implements Chunk {
+    private static final java.util.concurrent.ConcurrentHashMap<String, FotonPersistentDataContainer> DATA =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private final World world;
     private final int x;
     private final int z;
@@ -28,6 +30,12 @@ public final class FotonChunk implements Chunk {
     @Override
     public World getWorld() {
         return world;
+    }
+
+    @Override
+    public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        String key = world.getUID() + ":" + x + ":" + z;
+        return DATA.computeIfAbsent(key, ignored -> new FotonPersistentDataContainer());
     }
 
     @Override
