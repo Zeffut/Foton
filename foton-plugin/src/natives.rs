@@ -175,6 +175,21 @@ extern "system" fn player_name(
     to_java(&mut env, name)
 }
 
+extern "system" fn has_played_before(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let text: String = text.into();
+    let Ok(uuid) = Uuid::parse_str(&text) else {
+        return 0;
+    };
+    u8::from(server().is_some_and(|server| server.known_players().by_uuid(uuid).is_some()))
+}
+
 /// `foton.Native.customName`
 extern "system" fn custom_name(
     mut env: JNIEnv<'_>,
@@ -1389,6 +1404,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "playerName",
             "(Ljava/lang/String;)Ljava/lang/String;",
             player_name as *mut c_void,
+        ),
+        method(
+            "hasPlayedBefore",
+            "(Ljava/lang/String;)Z",
+            has_played_before as *mut c_void,
         ),
         method(
             "customName",

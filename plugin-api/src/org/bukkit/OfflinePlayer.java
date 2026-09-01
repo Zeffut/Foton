@@ -11,4 +11,5 @@ public interface OfflinePlayer {
     boolean isOnline();
 
     org.bukkit.entity.Player getPlayer();
+    boolean hasPlayedBefore();
 }

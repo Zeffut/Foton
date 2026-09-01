@@ -45,6 +45,10 @@ public final class FotonOfflinePlayer implements OfflinePlayer {
         return player.isOnline() ? player : null;
     }
 
+    @Override public boolean hasPlayedBefore() {
+        return id != null && Native.hasPlayedBefore(id.toString());
+    }
+
     @Override
     public boolean equals(Object other) {
         return other instanceof FotonOfflinePlayer offline
