@@ -3,6 +3,7 @@ package foton;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.InventoryHolder;
 
 /** A player's inventory, read and written across JNI.
  *
@@ -26,6 +27,15 @@ public final class FotonInventory implements PlayerInventory {
 
     FotonInventory(String owner) {
         this.owner = owner;
+    }
+
+    @Override
+    public InventoryHolder getHolder() {
+        try {
+            return new FotonPlayer(java.util.UUID.fromString(owner));
+        } catch (IllegalArgumentException error) {
+            return null;
+        }
     }
 
     @Override

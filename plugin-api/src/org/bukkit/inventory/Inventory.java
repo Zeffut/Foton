@@ -10,6 +10,7 @@ import org.bukkit.Material;
  * tick was reading it.
  */
 public interface Inventory {
+    InventoryHolder getHolder();
     int getSize();
 
     default boolean isEmpty() {
