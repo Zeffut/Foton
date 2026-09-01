@@ -7,7 +7,7 @@
   "trailingSlash": true,
   "rewrites": [
     {
-      "source": "/api/bug-reports",
+      "source": "/api/bug-reports/",
       "destination": "/api/report"
     }
   ],
