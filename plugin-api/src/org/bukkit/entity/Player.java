@@ -46,6 +46,10 @@ public interface Player extends HumanEntity {
     default void showTitle(net.kyori.adventure.title.Title title) { }
 
     org.bukkit.inventory.PlayerInventory getInventory();
+    default org.bukkit.inventory.ItemStack getItemInHand() { return getInventory().getItemInHand(); }
+    default boolean performCommand(String command) {
+        return command != null && getServer().dispatchCommand(this, command);
+    }
 
     default org.bukkit.Location getBedSpawnLocation() { return null; }
     default org.bukkit.Location getPotentialBedLocation() { return getBedSpawnLocation(); }

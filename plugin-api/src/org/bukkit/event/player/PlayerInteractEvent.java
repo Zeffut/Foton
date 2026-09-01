@@ -23,6 +23,7 @@ public class PlayerInteractEvent extends PlayerEvent implements Cancellable {
     public ItemStack getItem() { return item; }
     public Block getClickedBlock() { return clickedBlock; }
     public BlockFace getBlockFace() { return blockFace; }
+    public org.bukkit.inventory.EquipmentSlot getHand() { return org.bukkit.inventory.EquipmentSlot.HAND; }
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
     @Override public HandlerList getHandlers() { return HANDLERS; }
