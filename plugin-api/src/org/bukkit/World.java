@@ -18,6 +18,10 @@ public interface World {
 
     Chunk getChunkAt(int x, int z);
 
+    default java.util.concurrent.CompletableFuture<Chunk> getChunkAtAsync(int x, int z, boolean urgent) {
+        return java.util.concurrent.CompletableFuture.completedFuture(getChunkAt(x, z));
+    }
+
     Chunk getChunkAt(Location location);
 
     default org.bukkit.entity.Item dropItem(Location location, org.bukkit.inventory.ItemStack item) { return null; }

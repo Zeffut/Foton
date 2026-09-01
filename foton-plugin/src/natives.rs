@@ -16,6 +16,7 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 
 use foton_core::boss_event::ServerBossEvent;
+use foton_core::chunk::{chunk_request::{ChunkRequestHandle, ChunkTicketKind}, status::ChunkStatus};
 use foton_core::entity::{Entity, LivingEntity as _};
 use foton_core::inventory::container::Container;
 use foton_core::permission::{PermissionExpr, PermissionKey};
@@ -50,6 +51,9 @@ use uuid::Uuid;
 /// server cannot shut down.
 static SERVER: OnceLock<Weak<Server>> = OnceLock::new();
 
+/// Outstanding asynchronous Bukkit chunk requests, retained until Full status.
+static CHUNK_REQUESTS: OnceLock<SyncMutex<FxHashMap<Uuid, ChunkRequestHandle>>> = OnceLock::new();
+
 /// Non-persistent bars created through Bukkit, keyed by the opaque handle Java owns.
 static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = OnceLock::new();
 
@@ -64,6 +68,10 @@ pub(crate) fn bind(server: Weak<Server>) {
 /// The server, if there still is one.
 fn server() -> Option<Arc<Server>> {
     SERVER.get().and_then(Weak::upgrade)
+}
+
+fn chunk_requests() -> &'static SyncMutex<FxHashMap<Uuid, ChunkRequestHandle>> {
+    CHUNK_REQUESTS.get_or_init(|| SyncMutex::new(FxHashMap::default()))
 }
 
 fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
@@ -1197,6 +1205,30 @@ extern "system" fn world_entity_ids(
     string_array(&mut env, &ids)
 }
 
+/// `foton.Native.requestChunk`
+extern "system" fn request_chunk(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, x: jint, z: jint) -> jstring {
+    let Some(world) = world(&mut env, &name) else { return null_mut(); };
+    let pos = foton_utils::ChunkPos::new(x, z);
+    let handle = world.chunk_map.request_chunk(pos, ChunkStatus::Full, ChunkTicketKind::Command);
+    let id = Uuid::new_v4();
+    chunk_requests().lock().insert(id, handle);
+    to_java(&mut env, Some(id.to_string()))
+}
+
+/// `foton.Native.chunkRequestReady`
+extern "system" fn chunk_request_ready(mut env: JNIEnv<'_>, _class: JClass<'_>, id: JString<'_>) -> jboolean {
+    let Ok(text) = env.get_string(&id) else { return 0; };
+    let Ok(text) = text.to_str() else { return 0; };
+    let Ok(id) = Uuid::parse_str(text) else { return 0; };
+    let mut requests = chunk_requests().lock();
+    let Some(handle) = requests.get(&id) else { return 0; };
+    match handle.poll() {
+        foton_core::chunk::chunk_request::ChunkRequestState::Ready => { requests.remove(&id); 1 }
+        foton_core::chunk::chunk_request::ChunkRequestState::Cancelled => { requests.remove(&id); 0 }
+        foton_core::chunk::chunk_request::ChunkRequestState::Pending { .. } => 0,
+    }
+}
+
 /// `foton.Native.worldChunkLoaded`
 extern "system" fn world_chunk_loaded(
     mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, x: jint, z: jint,
@@ -1437,6 +1469,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             world_entity_ids as *mut c_void,
         ),
+        method("requestChunk", "(Ljava/lang/String;II)Ljava/lang/String;", request_chunk as *mut c_void),
+        method("chunkRequestReady", "(Ljava/lang/String;)Z", chunk_request_ready as *mut c_void),
         method("worldChunkLoaded", "(Ljava/lang/String;II)Z", world_chunk_loaded as *mut c_void),
         method("worldLoadedChunkCoords", "(Ljava/lang/String;)[Ljava/lang/String;", world_loaded_chunk_coords as *mut c_void),
         method("worldFolder", "(Ljava/lang/String;)Ljava/lang/String;", world_folder as *mut c_void),

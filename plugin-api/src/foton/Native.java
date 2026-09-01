@@ -42,6 +42,8 @@ public final class Native {
     public static native String[] onlinePlayerIds();
     public static native String[] worldPlayerIds(String world);
     public static native String[] worldEntityIds(String world);
+    public static native String requestChunk(String world, int x, int z);
+    public static native boolean chunkRequestReady(String request);
     public static native boolean worldChunkLoaded(String world, int x, int z);
     public static native String[] worldLoadedChunkCoords(String world);
     public static native String worldFolder(String world);
