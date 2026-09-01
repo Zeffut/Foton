@@ -141,6 +141,11 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void stopSound(String sound) {
+        stopSound(sound, null);
+    }
+
+    @Override
     public io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler() {
         return FotonRegionSchedulers.forEntity();
     }
