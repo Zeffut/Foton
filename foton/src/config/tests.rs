@@ -545,11 +545,45 @@ fn validate_rejects_bedrock_with_no_trusted_proxies() {
     );
 }
 
+#[test]
+fn validate_rejects_bedrock_on_port_zero() {
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace("port = 19132", "port = 0");
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("bedrock.port must be a real port when bedrock is enabled")
+    );
+}
+
 /// Bedrock is opt-in: a config written before the section existed, or one
 /// that never mentions it, must not suddenly start a Geyser process.
+///
+/// This parses an input that genuinely has no `[server.bedrock]` table at
+/// all -- not the packaged default, which does have the section (left at its
+/// own disabled default). Mirrors
+/// `server_config_defaults_backward_compatible_fields`'s minimal literal, so
+/// this fails to parse -- rather than silently passing for the wrong reason
+/// -- if `#[serde(default)]` were ever removed from `ServerConfig::bedrock`.
 #[test]
 fn bedrock_is_off_when_the_section_is_absent() {
-    let config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+    let input = r#"
+            [server]
+            server_port = 25565
+            max_players = 20
+            view_distance = 10
+            simulation_distance = 10
+            online_mode = true
+            encryption = true
+            motd = "A Foton Server"
+            use_favicon = false
+            favicon = "config/favicon.png"
+            enforce_secure_chat = false
+        "#;
+
+    let config: FotonConfig = toml::from_str(input).expect("config should parse");
 
     assert!(!config.server.bedrock.enable);
 }

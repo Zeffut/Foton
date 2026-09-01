@@ -304,6 +304,9 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         }
     }
     if config.bedrock.enable {
+        if config.bedrock.port == 0 {
+            return Err("bedrock.port must be a real port when bedrock is enabled");
+        }
         if config.bedrock.port == config.server_port {
             return Err("bedrock.port must differ from server_port");
         }
