@@ -53,6 +53,10 @@ public class ItemStack implements Cloneable {
         return type.getMaxStackSize();
     }
 
+    public int getEnchantmentLevel(org.bukkit.enchantments.Enchantment enchantment) {
+        return meta == null ? 0 : meta.getEnchantLevel(enchantment);
+    }
+
     public boolean hasItemMeta() {
         return meta != null;
     }
