@@ -70,6 +70,14 @@ use super::{
     offline_uuid, portal_entity_still_valid, validate_player_permission_group_update,
 };
 use crate::boss_event::custom::DomainCustomBossEvents;
+use crate::event::{BlockBreakEvent, EventBus, PlayerChatEvent, PlayerJoinEvent};
+use crate::player::game_mode::block_breaking::BlockBreakAction;
+use crate::test_support::init_test_logger;
+use foton_protocol::packets::game::SChat;
+use foton_registry::blocks::block_state_ext::BlockStateExt as _;
+use foton_registry::blocks::properties::Direction;
+use foton_utils::Identifier;
+use foton_utils::types::GameType;
 
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,
@@ -271,6 +279,7 @@ async fn test_server_with_worlds(
         pending_player_joins: PlayerJoinQueue::new(),
         pending_player_disconnects: PlayerDisconnectQueue::new(),
         pending_world_changes: SyncMutex::new(Vec::new()),
+        events: EventBus::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
 }
@@ -2726,6 +2735,324 @@ fn command_source_and_operator_checks_use_published_subject_state() {
         drop(revoked_source);
         drop(granted_source);
         drop(player);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// A listener can stop a player from breaking a block.
+///
+/// This and its neighbour are what a protection plugin is, and the reason
+/// cancellation exists in the bus at all. The assertion is on the world: the
+/// block is still there afterwards, which is the only thing a griefed server
+/// owner cares about.
+#[test]
+fn a_listener_can_stop_a_block_from_being_broken() {
+    let world = fresh_test_world("block_break_cancelled");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("block-break-cancelled");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+
+        let pos = BlockPos::new(1, 64, 0);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::STONE.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        ));
+
+        let (player, _) = test_player_with_packets(&server, Arc::clone(&world), "Breaker", 1);
+        player.base().set_position_local(DVec3::new(1.0, 64.0, 0.0));
+        // Creative breaks instantly, which is the shortest path to a real
+        // destroy_block call.
+        player.restore_game_modes(GameType::Creative, None);
+        player
+            .abilities
+            .lock()
+            .update_for_game_mode(GameType::Creative);
+
+        server.events.on::<BlockBreakEvent, _>(
+            Identifier::new_static("test", "protect"),
+            |event| {
+                event.set_cancelled(true);
+            },
+        );
+
+        player.block_breaking.lock().handle_block_break_action(
+            &player,
+            &world,
+            pos,
+            BlockBreakAction::Start,
+            Direction::Up,
+        );
+
+        assert_eq!(
+            world.get_block_state(pos),
+            vanilla_blocks::STONE.default_state(),
+            "the listener cancelled the break, so the block should still stand"
+        );
+
+        drop(player);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// The same break goes through when nothing objects.
+///
+/// Without this the test above would pass on a `handle_block_break_action`
+/// that never destroyed anything, which is the failure it would be worst at
+/// noticing.
+#[test]
+fn a_block_break_nothing_objects_to_still_happens() {
+    let world = fresh_test_world("block_break_allowed");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("block-break-allowed");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+
+        let pos = BlockPos::new(1, 64, 0);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::STONE.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        ));
+
+        let (player, _) = test_player_with_packets(&server, Arc::clone(&world), "Breaker", 1);
+        player.base().set_position_local(DVec3::new(1.0, 64.0, 0.0));
+        player.restore_game_modes(GameType::Creative, None);
+        player
+            .abilities
+            .lock()
+            .update_for_game_mode(GameType::Creative);
+
+        player.block_breaking.lock().handle_block_break_action(
+            &player,
+            &world,
+            pos,
+            BlockBreakAction::Start,
+            Direction::Up,
+        );
+
+        assert!(
+            world.get_block_state(pos).is_air(),
+            "nothing objected, so the block should be gone"
+        );
+
+        drop(player);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// A listener can stop a chat message from being said at all.
+///
+/// Unsigned chat, because a signed message needs a profile key and a
+/// signature chain and this is a test about the listener, not about the
+/// cryptography. The path is otherwise the real one: `handle_chat`, the
+/// function the packet handler calls.
+#[test]
+fn a_listener_can_stop_a_chat_message() {
+    // Its own world: this test registers players in one, and the shared test
+    // world is shared with every other test that does.
+    let world = fresh_test_world("chat_cancelled");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("chat-cancelled");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        let (listener, listener_packets) =
+            test_player_with_packets(&server, Arc::clone(&world), "Listener", 1);
+        let (speaker, _) = test_player_with_packets(&server, world, "Speaker", 2);
+        assert!(server.online_players.insert(Arc::clone(&listener)));
+        assert!(server.online_players.insert(Arc::clone(&speaker)));
+        // Chat goes out to the world's players, not the server's list.
+        assert!(listener.get_world().players.insert(Arc::clone(&listener)));
+
+        server
+            .events
+            .on::<PlayerChatEvent, _>(Identifier::new_static("test", "mute"), |event| {
+                event.set_cancelled(true);
+            });
+        listener_packets.lock().clear();
+
+        speaker.handle_chat(unsigned_chat("hello"), Arc::clone(&speaker));
+
+        assert!(
+            listener_packets.lock().is_empty(),
+            "the listener cancelled the message, so nobody should have heard it"
+        );
+
+        drop(speaker);
+        drop(listener);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// A chat message a listener rewrote is the one that goes out.
+#[test]
+fn a_listener_can_rewrite_a_chat_message() {
+    // Its own world: this test registers players in one, and the shared test
+    // world is shared with every other test that does.
+    let world = fresh_test_world("chat_rewritten");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        init_test_logger();
+        let storage_root = test_storage_root("chat-rewritten");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        let (listener, listener_packets) =
+            test_player_with_packets(&server, Arc::clone(&world), "Listener", 1);
+        let (speaker, _) = test_player_with_packets(&server, world, "Speaker", 2);
+        assert!(server.online_players.insert(Arc::clone(&listener)));
+        assert!(server.online_players.insert(Arc::clone(&speaker)));
+        // Chat goes out to the world's players, not the server's list.
+        assert!(listener.get_world().players.insert(Arc::clone(&listener)));
+
+        server
+            .events
+            .on::<PlayerChatEvent, _>(Identifier::new_static("test", "shout"), |event| {
+                event.set_message(event.message().to_uppercase());
+            });
+        listener_packets.lock().clear();
+
+        speaker.handle_chat(unsigned_chat("hello"), Arc::clone(&speaker));
+
+        let sent = {
+            let packets = listener_packets.lock();
+            assert_eq!(packets.len(), 1, "one message should have been sent");
+            String::from_utf8_lossy(&packets[0].encoded_data).into_owned()
+        };
+        assert!(
+            sent.contains("HELLO"),
+            "the rewritten message should be the one that went out"
+        );
+        assert!(
+            !sent.contains("hello"),
+            "the original message should not have gone out beside it"
+        );
+
+        drop(speaker);
+        drop(listener);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+/// An unsigned chat packet, which skips verification entirely.
+fn unsigned_chat(message: &str) -> SChat {
+    SChat {
+        message: message.to_owned(),
+        timestamp: 0,
+        salt: 0,
+        signature: None,
+        offset: 0,
+        acknowledged: [0; 3],
+        checksum: 0,
+    }
+}
+
+/// A listener that silences the join announcement actually silences it.
+///
+/// The point of this test is the wiring, not the bus. The bus has its own
+/// tests and they pass whether or not anything ever fires it -- which is the
+/// exact shape of bug that let a fully modeled `kinetic_weapon` component sit
+/// in the tree for months with no call site. So this one goes through
+/// `broadcast_player_join_message`, the function the server really calls, and
+/// asserts on the packet a player would really have received.
+#[test]
+fn a_listener_can_silence_the_join_announcement() {
+    let world = Arc::clone(test_world());
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("join-message-silenced");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        let (existing_player, existing_packets) =
+            test_player_with_packets(&server, Arc::clone(&world), "ExistingPlayer", 1);
+        let (joining_player, _) = test_player_with_packets(&server, world, "NewName", 2);
+        assert!(server.online_players.insert(existing_player));
+        assert!(server.online_players.insert(Arc::clone(&joining_player)));
+
+        server
+            .events
+            .on::<PlayerJoinEvent, _>(Identifier::new_static("test", "quiet"), |event| {
+                event.set_message(None);
+            });
+
+        server.broadcast_player_join_message(&joining_player, None);
+
+        assert!(
+            existing_packets.lock().is_empty(),
+            "the listener cleared the message, so nothing should have been sent"
+        );
+
+        drop(joining_player);
         drop(server);
         if let Err(error) = fs::remove_dir_all(&storage_root).await {
             panic!("test storage should be removed: {error}");

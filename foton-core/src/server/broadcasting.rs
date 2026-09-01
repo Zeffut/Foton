@@ -5,6 +5,8 @@ use super::{
     translations,
 };
 
+use crate::event::{PlayerJoinEvent, PlayerQuitEvent};
+
 impl Server {
     /// Logs and broadcasts a system chat message to online players.
     fn broadcast_system_chat(&self, message: &TextComponent, excluded_player: Option<Uuid>) {
@@ -81,9 +83,14 @@ impl Server {
         self.broadcast_system_chat(&message, None);
     }
 
+    /// Announces a player's arrival, after anything listening has had its say.
+    ///
+    /// The event is fired here rather than at the four call sites because this
+    /// is where the message is decided, and changing or silencing it is the
+    /// only thing a listener gets to do about a join.
     pub(super) fn broadcast_player_join_message(
         &self,
-        player: &Player,
+        player: &Arc<Player>,
         previous_name: Option<&str>,
     ) {
         let display_name = player.display_name();
@@ -98,16 +105,26 @@ impl Server {
                 .message([display_name, TextComponent::plain(old_name.to_owned())])
                 .into()
         };
-        let message = message.color(Color::Yellow);
-        self.broadcast_system_chat(&message, Some(player.gameprofile.id));
+        let mut event =
+            PlayerJoinEvent::new(Arc::clone(player), Some(message.color(Color::Yellow)));
+        self.events.fire(&mut event);
+        let uuid = player.gameprofile.id;
+        if let Some(message) = event.into_message() {
+            self.broadcast_system_chat(&message, Some(uuid));
+        }
     }
 
-    pub(super) fn broadcast_player_leave_message(&self, player: &Player) {
+    /// Announces a player's departure, after anything listening has had its say.
+    pub(super) fn broadcast_player_leave_message(&self, player: &Arc<Player>) {
         let message: TextComponent = translations::MULTIPLAYER_PLAYER_LEFT
             .message([player.display_name()])
             .into();
-        let message = message.color(Color::Yellow);
-        self.broadcast_system_chat(&message, None);
+        let mut event =
+            PlayerQuitEvent::new(Arc::clone(player), Some(message.color(Color::Yellow)));
+        self.events.fire(&mut event);
+        if let Some(message) = event.into_message() {
+            self.broadcast_system_chat(&message, None);
+        }
     }
 
     /// Broadcasts the current tick rate and frozen state to all clients.

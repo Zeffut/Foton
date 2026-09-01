@@ -26,6 +26,7 @@ pub mod dimension;
 pub(crate) mod enchantment_helper;
 pub(crate) mod enchantment_selection;
 pub mod entity;
+pub mod event;
 pub mod fluid;
 pub mod inventory;
 pub mod level_data;

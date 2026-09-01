@@ -15,6 +15,7 @@ use crate::advancement::triggers;
 use crate::behavior::context::{BlockPlaceContext, InteractionResult, UseOnContext};
 use crate::behavior::{BLOCK_BEHAVIORS, ItemBehavior};
 use crate::entity::Entity;
+use crate::event::{BlockPlaceEvent, Event as _};
 use crate::fluid::{FluidStateExt as _, get_fluid_state};
 use crate::world::game_event::GameEventContext;
 
@@ -87,6 +88,19 @@ impl BlockItem {
         let collision_shape = new_state.get_collision_shape_at(place_pos);
         if !context.world.is_unobstructed(collision_shape, place_pos) {
             return InteractionResult::Fail;
+        }
+
+        // Every vanilla check has passed by now, so a listener is only asked
+        // about placements that would otherwise have happened. A dispenser
+        // firing a block has no player and does not reach this.
+        if let Some(player) = context.player()
+            && let Some(shared) = player.shared()
+        {
+            let mut event = BlockPlaceEvent::new(shared, place_pos, new_state);
+            player.fire_event(&mut event);
+            if event.is_cancelled() {
+                return InteractionResult::Fail;
+            }
         }
 
         if !place_block(&context, new_state) {

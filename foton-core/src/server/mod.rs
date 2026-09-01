@@ -41,6 +41,7 @@ use crate::entity::{
 };
 
 use crate::chunk_saver::{ChunkStorage, PersistentEntity, registry::WorldStorageRegistry};
+use crate::event::EventBus;
 use crate::level_data::{LevelDataManager, RespawnData, WorldGenerationSettings};
 use crate::map::DomainMapData;
 use crate::permission::{
@@ -471,6 +472,12 @@ pub struct Server {
     pending_player_disconnects: PlayerDisconnectQueue,
     /// Queued world changes to process after the tick.
     pub pending_world_changes: SyncMutex<Vec<(SharedEntity, WorldChangeRequest)>>,
+    /// Who is listening for what.
+    ///
+    /// Unlike the block and item registries this is not frozen after startup:
+    /// it holds subscriptions rather than game data, and something being
+    /// enabled or disabled while the server runs is ordinary.
+    pub events: EventBus,
     /// Queued domain switches to process after world ticks.
     pending_domain_switches: SyncMutex<Vec<DomainSwitchRequest>>,
 }
@@ -754,6 +761,7 @@ impl Server {
             pending_player_joins: PlayerJoinQueue::new(),
             pending_player_disconnects: PlayerDisconnectQueue::new(),
             pending_world_changes: SyncMutex::new(vec![]),
+            events: EventBus::new(),
             pending_domain_switches: SyncMutex::new(vec![]),
         })
     }

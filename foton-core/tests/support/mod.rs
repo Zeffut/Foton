@@ -475,3 +475,22 @@ impl LevelAccessor for TestLevel {
         });
     }
 }
+
+/// Installs a logger that discards everything, once per process.
+///
+/// Anything reaching `foton_utils::chat!` or the other logging macros panics
+/// without one, because the binary crate is what normally installs it and a
+/// `foton-core` test has no binary. That makes whole code paths -- chat is the
+/// obvious one -- untestable rather than merely quiet.
+pub(crate) fn init_test_logger() {
+    use foton_utils::logger::{FOTON_LOGGER, FotonLogger, Level, LogData};
+
+    struct Discard;
+
+    impl FotonLogger for Discard {
+        fn log(&self, _level: Level, _data: LogData) {}
+    }
+
+    // Another test may have won the race; that logger discards too.
+    let _ = FOTON_LOGGER.set(Arc::new(Discard));
+}
