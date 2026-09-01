@@ -64,7 +64,7 @@ if [ -d "$FIXTURE_SRC" ]; then
   FIX="$OUT/fixture"
   rm -rf "$FIX"
   mkdir -p "$FIX/classes"
-  javac -nowarn -d "$FIX/classes" -cp "$JAR" "$FIXTURE_SRC"/example/*.java
+  javac -nowarn -d "$FIX/classes" -cp "$JAR$LIBS" "$FIXTURE_SRC"/example/*.java
   cp "$FIXTURE_SRC/plugin.yml" "$FIX/classes/"
   cp "$FIXTURE_SRC/config.yml" "$FIX/classes/"
   jar --create --file "$FIX/EventFixture.jar" -C "$FIX/classes" .

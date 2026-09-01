@@ -2,6 +2,17 @@ package org.bukkit.command;
 
 public interface CommandSender {
     void sendMessage(String message);
+    /**
+     * Adventure-compatible overload. Steel's command transport currently
+     * accepts plain text, so the component is reduced using Adventure's
+     * canonical plain-text serializer before delivery.
+     */
+    default void sendMessage(net.kyori.adventure.text.Component component) {
+        if (component != null) {
+            sendMessage(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                    .plainText().serialize(component));
+        }
+    }
     default void sendMessage(net.md_5.bungee.api.chat.BaseComponent component) {
         if (component != null) sendMessage(component.toLegacyText());
     }
