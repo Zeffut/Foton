@@ -7,6 +7,8 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.SimpleBlockData;
+import org.bukkit.block.data.SimpleWaterloggedData;
+import org.bukkit.block.data.type.SimpleTripwireData;
 
 /** A block, as a plugin holds one: a world and three coordinates.
  *
@@ -67,6 +69,12 @@ public final class FotonBlock implements Block {
     @Override
     public BlockData getBlockData() {
         String text = world == null ? null : Native.blockState(world.getName(), x, y, z);
+        if (text != null && text.startsWith("minecraft:tripwire")) {
+            return new SimpleTripwireData(text);
+        }
+        if (text != null && text.contains("[waterlogged=")) {
+            return new SimpleWaterloggedData(text);
+        }
         return new SimpleBlockData(text);
     }
 
