@@ -45,3 +45,8 @@ rustc-ice-*
 # Python bytecode from the dev scripts
 __pycache__/
 .vercel
+
+# The plugin API jar is built, and the libraries a plugin expects a
+# server to provide are other people's artifacts. Neither is source.
+plugin-api/build
+plugin-api/lib
