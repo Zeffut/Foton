@@ -15,8 +15,9 @@ use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, EntityDamageByEntityEvent,
     EntityPickupItemEvent, EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerChatEvent,
-    PlayerCommandPreprocessEvent, PlayerDeathEvent, PlayerRespawnEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
-    PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, ServerTickEvent,
+    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerInteractEvent,
+    PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent,
+    ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -138,7 +139,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<PlayerRespawnEvent, _>(owner(), move |event| {
-        death_call(&jvm, &event.player_id().to_string());
+        respawn_call(&jvm, &event.player_id().to_string());
     });
 
     let jvm = Arc::clone(&vm);
@@ -246,9 +247,18 @@ pub(crate) fn unsubscribe(server: &Arc<Server>) {
 
 /// A component as the plain text a Bukkit plugin expects a message to be.
 fn world_call(vm: &JavaVM, method: &str, world: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else { return; };
-    let Ok(world) = env.new_string(world) else { return; };
-    let _ = env.call_static_method(BRIDGE, method, "(Ljava/lang/String;)V", &[JValue::Object(&world)]);
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let Ok(world) = env.new_string(world) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        BRIDGE,
+        method,
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&world)],
+    );
 }
 
 fn plain(message: &TextComponent) -> String {
@@ -358,7 +368,11 @@ fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str, click: &str)
         BRIDGE,
         "fireInventoryClick",
         "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
-        &[JValue::Object(&uuid), JValue::Object(&item), JValue::Object(&click)],
+        &[
+            JValue::Object(&uuid),
+            JValue::Object(&item),
+            JValue::Object(&click),
+        ],
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
@@ -416,7 +430,11 @@ fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
         BRIDGE,
         "fireEntityDamage",
         "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
-        &[JValue::Object(&damager), JValue::Object(&entity), JValue::Object(&cause)],
+        &[
+            JValue::Object(&damager),
+            JValue::Object(&entity),
+            JValue::Object(&cause),
+        ],
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
@@ -478,9 +496,33 @@ fn from_to_call(vm: &JavaVM, world: &str, block: BlockPos, to_block: BlockPos) -
 }
 
 fn death_call(vm: &JavaVM, uuid: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else { return; };
-    let Ok(uuid) = env.new_string(uuid) else { return; };
-    let _ = env.call_static_method(BRIDGE, "firePlayerDeath", "(Ljava/lang/String;)V", &[JValue::Object(&uuid)]);
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let Ok(uuid) = env.new_string(uuid) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        BRIDGE,
+        "firePlayerDeath",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&uuid)],
+    );
+}
+
+fn respawn_call(vm: &JavaVM, uuid: &str) {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let Ok(uuid) = env.new_string(uuid) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        BRIDGE,
+        "firePlayerRespawn",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&uuid)],
+    );
 }
 
 enum MoveAnswer {
