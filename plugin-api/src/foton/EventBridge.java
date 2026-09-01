@@ -17,6 +17,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -220,6 +221,11 @@ public final class EventBridge {
             new BlockPlaceEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid));
         dispatch(event);
         return !event.isCancelled();
+    }
+
+    public static boolean fireBlockFromTo(String world, int x, int y, int z, int toX, int toY, int toZ) {
+        BlockFromToEvent event = new BlockFromToEvent(new FotonBlock(new FotonWorld(world), x, y, z), new FotonBlock(new FotonWorld(world), toX, toY, toZ));
+        dispatch(event); return !event.isCancelled();
     }
 
     public static String fireMove(String uuid, String world,

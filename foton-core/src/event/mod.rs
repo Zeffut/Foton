@@ -29,21 +29,21 @@ use rustc_hash::FxHashMap;
 
 pub mod block;
 pub mod command;
-pub mod player;
-pub mod inventory;
-pub mod entity;
 pub mod command_preprocess;
+pub mod entity;
+pub mod inventory;
+pub mod player;
 pub mod server;
 
-pub use block::{BlockBreakEvent, BlockPlaceEvent};
+pub use block::{BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent};
 pub use command::CommandEvent;
+pub use command_preprocess::PlayerCommandPreprocessEvent;
+pub use entity::{EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRemoveFromWorldEvent};
+pub use inventory::InventoryClickEvent;
 pub use player::{
     PlayerChatEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
     PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
 };
-pub use inventory::InventoryClickEvent;
-pub use entity::{EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRemoveFromWorldEvent};
-pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use server::ServerTickEvent;
 
 /// Something that happened, which a listener may observe and possibly stop.

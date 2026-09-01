@@ -13,9 +13,10 @@ use std::sync::Arc;
 
 use crate::natives;
 use foton_core::event::{
-    BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
-    EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerCommandPreprocessEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
-    ServerTickEvent,
+    BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, EntityDamageByEntityEvent,
+    EntityPickupItemEvent, EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerChatEvent,
+    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
+    PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -79,7 +80,11 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<EntityDamageByEntityEvent, _>(owner(), move |event| {
-        if !damage_call(&jvm, &event.damager().to_string(), &event.entity().to_string()) {
+        if !damage_call(
+            &jvm,
+            &event.damager().to_string(),
+            &event.entity().to_string(),
+        ) {
             event.set_cancelled(true);
         }
     });
@@ -87,9 +92,16 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<PlayerCommandPreprocessEvent, _>(owner(), move |event| {
         let message = format!("/{}", event.message());
-        match string_call(&jvm, "fireCommandPreprocess", &event.player_id().to_string(), Some(&message)) {
+        match string_call(
+            &jvm,
+            "fireCommandPreprocess",
+            &event.player_id().to_string(),
+            Some(&message),
+        ) {
             Answer::Nothing => event.set_cancelled(true),
-            Answer::Message(rewritten) => event.set_message(rewritten.strip_prefix('/').unwrap_or(&rewritten).to_owned()),
+            Answer::Message(rewritten) => {
+                event.set_message(rewritten.strip_prefix('/').unwrap_or(&rewritten).to_owned())
+            }
             Answer::Unreachable => {}
         }
     });
@@ -164,6 +176,13 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<BlockPlaceEvent, _>(owner(), move |event| {
         if !block_call(&jvm, "fireBlockPlace", event.player(), event.position()) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<BlockFromToEvent, _>(owner(), move |event| {
+        if !from_to_call(&jvm, event.world(), event.block(), event.to_block()) {
             event.set_cancelled(true);
         }
     });
@@ -300,9 +319,15 @@ fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
 }
 
 fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else { return true; };
-    let Ok(uuid) = env.new_string(player_uuid) else { return true; };
-    let Ok(item) = env.new_string(item) else { return true; };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(uuid) = env.new_string(player_uuid) else {
+        return true;
+    };
+    let Ok(item) = env.new_string(item) else {
+        return true;
+    };
     env.call_static_method(
         BRIDGE,
         "fireInventoryClick",
@@ -314,26 +339,58 @@ fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str) -> bool {
 }
 
 fn remove_call(vm: &JavaVM, entity: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else { return; };
-    let Ok(entity) = env.new_string(entity) else { return; };
-    let _ = env.call_static_method(BRIDGE, "fireEntityRemove", "(Ljava/lang/String;)V", &[JValue::Object(&entity)]);
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let Ok(entity) = env.new_string(entity) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        BRIDGE,
+        "fireEntityRemove",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&entity)],
+    );
 }
 
 fn pickup_call(vm: &JavaVM, entity: &str, item: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else { return true; };
-    let Ok(entity) = env.new_string(entity) else { return true; };
-    let Ok(item) = env.new_string(item) else { return true; };
-    env.call_static_method(BRIDGE, "fireEntityPickup", "(Ljava/lang/String;Ljava/lang/String;)Z", &[JValue::Object(&entity), JValue::Object(&item)]).and_then(JValueGen::z).unwrap_or(true)
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(entity) = env.new_string(entity) else {
+        return true;
+    };
+    let Ok(item) = env.new_string(item) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireEntityPickup",
+        "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&entity), JValue::Object(&item)],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
 }
 
 fn damage_call(vm: &JavaVM, damager: &str, entity: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else { return true; };
-    let Ok(damager) = env.new_string(damager) else { return true; };
-    let Ok(entity) = env.new_string(entity) else { return true; };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(damager) = env.new_string(damager) else {
+        return true;
+    };
+    let Ok(entity) = env.new_string(entity) else {
+        return true;
+    };
     env.call_static_method(
-        BRIDGE, "fireEntityDamage", "(Ljava/lang/String;Ljava/lang/String;)Z",
+        BRIDGE,
+        "fireEntityDamage",
+        "(Ljava/lang/String;Ljava/lang/String;)Z",
         &[JValue::Object(&damager), JValue::Object(&entity)],
-    ).and_then(JValueGen::z).unwrap_or(true)
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
 }
 
 /// Calls a bridge method about a block. `true` means nothing objected.
@@ -360,6 +417,31 @@ fn block_call(vm: &JavaVM, method: &str, player: &Arc<Player>, position: BlockPo
             JValue::Int(position.y()),
             JValue::Int(position.z()),
             JValue::Object(&world),
+        ],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
+}
+
+fn from_to_call(vm: &JavaVM, world: &str, block: BlockPos, to_block: BlockPos) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(world) = env.new_string(world) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireBlockFromTo",
+        "(Ljava/lang/String;IIIIII)Z",
+        &[
+            JValue::Object(&world),
+            JValue::Int(block.x()),
+            JValue::Int(block.y()),
+            JValue::Int(block.z()),
+            JValue::Int(to_block.x()),
+            JValue::Int(to_block.y()),
+            JValue::Int(to_block.z()),
         ],
     )
     .and_then(JValueGen::z)

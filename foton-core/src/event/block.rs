@@ -96,6 +96,42 @@ unsafe impl DowncastType for BlockPlaceEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_place");
 }
 
+pub struct BlockFromToEvent {
+    world: String,
+    block: BlockPos,
+    to_block: BlockPos,
+    cancelled: bool,
+}
+unsafe impl DowncastType for BlockFromToEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_from_to");
+}
+impl Event for BlockFromToEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+impl BlockFromToEvent {
+    pub fn new(world: String, block: BlockPos, to_block: BlockPos) -> Self {
+        Self {
+            world,
+            block,
+            to_block,
+            cancelled: false,
+        }
+    }
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+    pub const fn block(&self) -> BlockPos {
+        self.block
+    }
+    pub const fn to_block(&self) -> BlockPos {
+        self.to_block
+    }
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
 impl Event for BlockPlaceEvent {
     fn is_cancelled(&self) -> bool {
         self.cancelled
