@@ -5,7 +5,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.command.CommandSender;
 
 /** A player on the server, as a plugin sees one. */
-public interface Player extends Damageable {
+public interface Player extends LivingEntity {
     @Override
     String getName();
 
