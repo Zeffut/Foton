@@ -199,6 +199,11 @@ def render(materials):
         "            return null;",
         "        }",
         "    }",
+        "",
+        "    /** Legacy Bukkit alias retained for plugins that use getMaterial. */",
+        "    public static Material getMaterial(String name) {",
+        "        return matchMaterial(name);",
+        "    }",
         "}",
         "",
     ]
