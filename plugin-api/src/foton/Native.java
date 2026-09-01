@@ -129,6 +129,7 @@ public final class Native {
     public static native void openBook(String uuid);
     public static native boolean teleport(String uuid, String world, double x, double y,
             double z, float yaw, float pitch);
+    public static native boolean teleportEntity(String uuid, String world, double x, double y, double z, float yaw, float pitch);
 
     /** Creates a native boss event and returns its opaque UUID handle. */
     public static native String createBossBar(String title, int color, int style, int flags);

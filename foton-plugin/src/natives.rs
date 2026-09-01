@@ -1390,6 +1390,18 @@ extern "system" fn open_book(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JStr
     player.send_packet(COpenBook { hand });
 }
 
+extern "system" fn teleport_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, world_name: JString<'_>, x: jdouble, y: jdouble, z: jdouble, yaw: jfloat, pitch: jfloat) -> jboolean {
+    let Ok(world_name) = env.get_string(&world_name) else { return 0; };
+    let Ok(text) = env.get_string(&uuid) else { return 0; };
+    let Ok(text) = text.to_str() else { return 0; };
+    let Ok(id) = Uuid::parse_str(text) else { return 0; };
+    let Some((world, entity)) = entity_by_uuid(&id) else { return 0; };
+    if world.key.to_string() != String::from(world_name) { return 0; }
+    if entity.try_set_position(DVec3::new(x, y, z)).is_err() { return 0; }
+    entity.set_rotation((yaw, pitch));
+    1
+}
+
 extern "system" fn teleport(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -1517,6 +1529,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;Ljava/lang/String;DDDFF)Z",
             teleport as *mut c_void,
         ),
+        method("teleportEntity", "(Ljava/lang/String;Ljava/lang/String;DDDFF)Z", teleport_entity as *mut c_void),
         method(
             "worldMinHeight",
             "(Ljava/lang/String;)I",

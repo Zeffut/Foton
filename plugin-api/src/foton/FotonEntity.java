@@ -33,6 +33,11 @@ public class FotonEntity implements Entity {
         catch (IllegalArgumentException ignored) { return null; }
     }
     @Override public int getEntityId() { return Native.entityId(id.toString()); }
+    @Override public boolean teleport(Location location) {
+        if (location == null || location.getWorld() == null) return false;
+        return Native.teleportEntity(id.toString(), location.getWorld().getName(), location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
+    }
+
     @Override public boolean isDead() { return Native.entityWorld(id.toString()) == null; }
     @Override public String getCustomName() { return Native.entityCustomName(id.toString()); }
     @Override public void setCustomName(String name) { Native.setEntityCustomName(id.toString(), name); }
