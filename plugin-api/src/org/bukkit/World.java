@@ -22,6 +22,20 @@ public interface World {
         return java.util.concurrent.CompletableFuture.completedFuture(getChunkAt(x, z));
     }
 
+    default java.util.concurrent.CompletableFuture<Chunk> getChunkAtAsync(
+            int x, int z, boolean generate, boolean urgent) {
+        return getChunkAtAsync(x, z, urgent);
+    }
+
+    interface ChunkLoadCallback {
+        void onLoad(Chunk chunk);
+    }
+
+    default void getChunkAtAsync(int x, int z, ChunkLoadCallback callback) {
+        if (callback == null) return;
+        getChunkAtAsync(x, z, true).thenAccept(callback::onLoad);
+    }
+
     Chunk getChunkAt(Location location);
 
     default org.bukkit.entity.Item dropItem(Location location, org.bukkit.inventory.ItemStack item) { return null; }
