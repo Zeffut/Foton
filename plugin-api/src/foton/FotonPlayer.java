@@ -73,6 +73,11 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public org.bukkit.inventory.EntityEquipment getEquipment() {
+        return new FotonEntityEquipment(id.toString());
+    }
+
+    @Override
     public org.bukkit.inventory.PlayerInventory getInventory() {
         return new FotonInventory(id.toString());
     }
