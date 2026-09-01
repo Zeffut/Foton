@@ -19,6 +19,8 @@ public interface Player extends HumanEntity {
     void sendPluginMessage(Plugin source, String channel, byte[] message);
 
     boolean isOnline();
+    /** Visibility is unrestricted until a hide-player service is registered. */
+    default boolean canSee(Player other) { return other != null && other.isOnline(); }
     int getLevel();
     org.bukkit.scoreboard.Scoreboard getScoreboard();
     default boolean isSneaking() { return false; }
