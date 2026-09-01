@@ -23,6 +23,7 @@ use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_core::world::LevelReader as _;
 use foton_core::world::World;
+use foton_protocol::packets::common::CCustomPayload;
 use foton_protocol::packets::game::{BossBarColor, BossBarOverlay, SoundSource};
 use foton_registry::item_stack::ItemStack;
 use foton_registry::{REGISTRY, RegistryExt as _};
@@ -32,7 +33,7 @@ use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId};
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{JClass, JDoubleArray, JObjectArray, JString};
+use jni::objects::{JByteArray, JClass, JDoubleArray, JObjectArray, JString};
 use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jint, jlong, jobjectArray, jstring};
 use rustc_hash::FxHashMap;
 use text_components::TextComponent;
@@ -188,6 +189,29 @@ extern "system" fn send_message(
     };
     let text: String = text.into();
     player.send_message(&text.into());
+}
+
+/// `foton.Native.sendPluginMessage`
+extern "system" fn send_plugin_message(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    channel: JString<'_>,
+    message: JByteArray<'_>,
+) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let Ok(channel) = env.get_string(&channel).map(String::from) else {
+        return;
+    };
+    let Ok(channel) = channel.parse::<Identifier>() else {
+        return;
+    };
+    let Ok(message) = env.convert_byte_array(&message) else {
+        return;
+    };
+    player.send_packet(CCustomPayload::new(channel, message.into_boxed_slice()));
 }
 
 /// `foton.Native.hasPermission`
@@ -948,6 +972,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "sendMessage",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             send_message as *mut c_void,
+        ),
+        method(
+            "sendPluginMessage",
+            "(Ljava/lang/String;Ljava/lang/String;[B)V",
+            send_plugin_message as *mut c_void,
         ),
         method(
             "hasPermission",

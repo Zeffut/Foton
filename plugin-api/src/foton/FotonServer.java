@@ -17,13 +17,12 @@ import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.SimpleServicesManager;
 import org.bukkit.plugin.messaging.Messenger;
-import org.bukkit.plugin.messaging.PluginMessageListener;
 import org.bukkit.scheduler.BukkitScheduler;
 
 /** The one Server, answering out of Foton. */
 public final class FotonServer implements Server {
     private final PluginManager plugins = new Plugins();
-    private final Messenger channels = new Channels();
+    private final Messenger channels = new FotonMessenger();
     private final BukkitScheduler scheduler = new FotonScheduler();
     private final ServicesManager services = new SimpleServicesManager();
     private final Logger logger = Logger.getLogger("Foton");
@@ -177,6 +176,13 @@ public final class FotonServer implements Server {
     }
 
     @Override
+    public void sendPluginMessage(Plugin source, String channel, byte[] message) {
+        for (Player player : getOnlinePlayers()) {
+            player.sendPluginMessage(source, channel, message);
+        }
+    }
+
+    @Override
     public org.bukkit.boss.BossBar createBossBar(
             String title,
             org.bukkit.boss.BarColor color,
@@ -272,45 +278,4 @@ public final class FotonServer implements Server {
         }
     }
 
-    /** Custom payloads.
-     *
-     * Registration is recorded and nothing is delivered yet: Foton does not
-     * hand plugin channel payloads across, so a listener registered here will
-     * not be called. The methods exist because a plugin that calls one and
-     * finds it missing fails to load at all, and a plugin whose channel is
-     * quiet still does everything else it does.
-     */
-    private static final class Channels implements Messenger {
-        private final java.util.Set<String> outgoing = java.util.concurrent.ConcurrentHashMap
-            .newKeySet();
-        private final java.util.Map<String, PluginMessageListener> incoming =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-        @Override public void registerOutgoingPluginChannel(Plugin source, String channel) {
-            outgoing.add(channel);
-        }
-
-        @Override public void unregisterOutgoingPluginChannel(Plugin source, String channel) {
-            outgoing.remove(channel);
-        }
-
-        @Override public void registerIncomingPluginChannel(
-                Plugin source, String channel, PluginMessageListener listener) {
-            incoming.put(channel, listener);
-            System.out.println("[server] " + source.getName() + " is listening on " + channel
-                + "; Foton does not deliver plugin messages yet");
-        }
-
-        @Override public void unregisterIncomingPluginChannel(Plugin source, String channel) {
-            incoming.remove(channel);
-        }
-
-        @Override public boolean isOutgoingChannelRegistered(Plugin source, String channel) {
-            return outgoing.contains(channel);
-        }
-
-        @Override public boolean isIncomingChannelRegistered(Plugin source, String channel) {
-            return incoming.containsKey(channel);
-        }
-    }
 }

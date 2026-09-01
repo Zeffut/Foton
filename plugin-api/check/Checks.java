@@ -16,6 +16,9 @@ public final class Checks {
         foton.PluginHost.disableAll();
         Checks.expect(foton.CommandMap.get("fixture") == null,
             "disabling a plugin should release the names it claimed");
+        Checks.expect(org.bukkit.Bukkit.getMessenger().getIncomingChannels().isEmpty()
+            && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
+            "disabling a plugin should release its custom channels");
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"

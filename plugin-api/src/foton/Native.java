@@ -47,6 +47,9 @@ public final class Native {
     /** Sends a player a chat message. Silently does nothing once they are gone. */
     public static native void sendMessage(String uuid, String message);
 
+    /** Sends one custom payload packet to one online player. */
+    public static native void sendPluginMessage(String uuid, String channel, byte[] message);
+
     /** Sends everyone a chat message, and says how many heard it. */
     public static native int broadcast(String message);
 

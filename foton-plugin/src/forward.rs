@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use crate::natives;
 use foton_core::event::{
-    BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerJoinEvent,
-    PlayerQuitEvent, ServerTickEvent,
+    BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
+    PlayerJoinEvent, PlayerQuitEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -29,6 +29,9 @@ const BRIDGE: &str = "foton/EventBridge";
 
 /// Where a plugin's scheduled tasks wait until a tick can run them.
 const SCHEDULER: &str = "foton/FotonScheduler";
+
+/// The Bukkit channel registry and its listeners.
+const MESSENGER: &str = "foton/FotonMessenger";
 
 /// Who these subscriptions belong to, so unloading takes them with it.
 fn owner() -> Identifier {
@@ -101,6 +104,16 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         if command_call(&jvm, &uuid, event.command()) {
             event.set_handled(true);
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerCustomPayloadEvent, _>(owner(), move |event| {
+        plugin_message_call(
+            &jvm,
+            &event.player().gameprofile.id.to_string(),
+            &event.channel().to_string(),
+            event.payload(),
+        );
     });
 
     // The tick. Not a gameplay event: it is what makes `runTask` mean what
@@ -240,4 +253,30 @@ fn command_call(vm: &JavaVM, uuid: &str, line: &str) -> bool {
         .ok()
     };
     reach().unwrap_or(false)
+}
+
+/// Delivers one opaque client payload to the Bukkit channel registry.
+fn plugin_message_call(vm: &JavaVM, uuid: &str, channel: &str, payload: &[u8]) {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let Ok(uuid) = env.new_string(uuid) else {
+        return;
+    };
+    let Ok(channel) = env.new_string(channel) else {
+        return;
+    };
+    let Ok(payload) = env.byte_array_from_slice(payload) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        MESSENGER,
+        "dispatchFromNetwork",
+        "(Ljava/lang/String;Ljava/lang/String;[B)V",
+        &[
+            JValue::Object(&uuid),
+            JValue::Object(&channel),
+            JValue::Object(&payload),
+        ],
+    );
 }

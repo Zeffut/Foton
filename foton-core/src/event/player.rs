@@ -13,6 +13,7 @@ use text_components::TextComponent;
 
 use super::Event;
 use crate::player::Player;
+use foton_utils::Identifier;
 
 /// A player finished joining, and the server is about to announce it.
 ///
@@ -191,5 +192,54 @@ impl PlayerChatEvent {
     #[must_use]
     pub fn into_message(self) -> String {
         self.message
+    }
+}
+
+/// An opaque custom payload sent by a player.
+///
+/// Vanilla discards payload types it does not understand. Exposing the bytes
+/// here preserves that default while allowing an optional protocol extension,
+/// such as the plugin host, to subscribe without coupling it to the player.
+pub struct PlayerCustomPayloadEvent {
+    player: Arc<Player>,
+    channel: Identifier,
+    payload: Vec<u8>,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type
+// within the process.
+unsafe impl DowncastType for PlayerCustomPayloadEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_custom_payload");
+}
+
+impl Event for PlayerCustomPayloadEvent {}
+
+impl PlayerCustomPayloadEvent {
+    /// Creates an event carrying the packet's untouched channel and bytes.
+    #[must_use]
+    pub const fn new(player: Arc<Player>, channel: Identifier, payload: Vec<u8>) -> Self {
+        Self {
+            player,
+            channel,
+            payload,
+        }
+    }
+
+    /// The player who sent the payload.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+
+    /// The custom payload type identifier.
+    #[must_use]
+    pub const fn channel(&self) -> &Identifier {
+        &self.channel
+    }
+
+    /// The packet bytes after its identifier.
+    #[must_use]
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
     }
 }

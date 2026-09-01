@@ -52,6 +52,8 @@ public interface Server {
 
     int broadcastMessage(String message);
 
+    void sendPluginMessage(org.bukkit.plugin.Plugin source, String channel, byte[] message);
+
     boolean dispatchCommand(CommandSender sender, String command);
 
     OfflinePlayer getOfflinePlayer(String name);

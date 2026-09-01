@@ -65,7 +65,43 @@ final class Events {
         Checks.same(ignoredCancellation[0], 1,
             "registerEvent(ignoreCancelled=false) should receive a cancelled event");
 
+        pluginMessages(owner);
         scheduler();
+    }
+
+    private static void pluginMessages(org.bukkit.plugin.Plugin owner) {
+        org.bukkit.plugin.messaging.Messenger messenger = org.bukkit.Bukkit.getMessenger();
+        int[] heard = {0};
+        org.bukkit.plugin.messaging.PluginMessageListener listener =
+            (channel, player, message) -> {
+                Checks.same(channel, "fixture:messages", "the plugin channel changed in transit");
+                Checks.same(message[0], (byte) 7, "the plugin payload changed in transit");
+                heard[0]++;
+            };
+        org.bukkit.plugin.messaging.PluginMessageListenerRegistration registration =
+            messenger.registerIncomingPluginChannel(owner, "fixture:messages", listener);
+        Checks.expect(registration.isValid(), "a fresh plugin channel registration is invalid");
+        Checks.expect(messenger.getIncomingChannels(owner).contains("fixture:messages"),
+            "the plugin's incoming channel was not recorded");
+
+        messenger.dispatchIncomingMessage(
+            new foton.FotonPlayer(java.util.UUID.fromString(
+                "00000000-0000-0000-0000-000000000001")),
+            "fixture:messages",
+            new byte[] {7, 8});
+        Checks.same(heard[0], 1, "an incoming plugin message missed its listener");
+
+        boolean duplicateRejected = false;
+        try {
+            messenger.registerIncomingPluginChannel(owner, "fixture:messages", listener);
+        } catch (IllegalArgumentException expected) {
+            duplicateRejected = true;
+        }
+        Checks.expect(duplicateRejected, "a duplicate plugin channel listener was accepted");
+
+        messenger.registerOutgoingPluginChannel(owner, "fixture:messages");
+        Checks.expect(messenger.isOutgoingChannelRegistered(owner, "fixture:messages"),
+            "the outgoing plugin channel was not recorded");
     }
 
     /** The scheduler's promise is about *when*, so this checks when. */

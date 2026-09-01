@@ -37,6 +37,10 @@ public final class Bukkit {
         return server.getPluginManager();
     }
 
+    public static org.bukkit.plugin.messaging.Messenger getMessenger() {
+        return server.getMessenger();
+    }
+
     public static BukkitScheduler getScheduler() {
         return server.getScheduler();
     }

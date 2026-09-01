@@ -87,6 +87,8 @@ public final class PluginHost {
         }
         CommandMap.forget(plugin);
         org.bukkit.Bukkit.getServicesManager().unregisterAll(plugin);
+        org.bukkit.Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin);
+        org.bukkit.Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin);
         EventBridge.unregister(plugin);
         try {
             plugin.onDisable();

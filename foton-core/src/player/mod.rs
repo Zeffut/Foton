@@ -159,7 +159,7 @@ const RESPAWN_SEARCH_READY_CANDIDATE_BUDGET: usize = 8;
 use crate::bug_dialog;
 use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION, forward};
 use crate::chunk::player_chunk_view::PlayerChunkView;
-use crate::event::Event;
+use crate::event::{Event, PlayerCustomPayloadEvent};
 use crate::player::chunk_sender::ChunkSender;
 use crate::portal::{
     PortalTicketTarget, TeleportPostAction, TeleportPostTransition, TeleportTransition,
@@ -789,9 +789,14 @@ impl Player {
         self.shared.upgrade()
     }
 
-    /// Handles a custom payload packet.
-    #[expect(clippy::unused_self, reason = "this is an api function")]
-    pub fn handle_custom_payload(&self, _packet: SCustomPayload) {}
+    /// Offers an otherwise unknown custom payload to protocol extensions.
+    pub fn handle_custom_payload(&self, packet: SCustomPayload) {
+        let Some(player) = self.shared() else {
+            return;
+        };
+        let mut event = PlayerCustomPayloadEvent::new(player, packet.identifier, packet.payload.0);
+        self.fire_event(&mut event);
+    }
 
     /// Files the report a player submitted through the `/bug` form.
     ///

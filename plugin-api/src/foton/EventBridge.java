@@ -140,6 +140,7 @@ public final class EventBridge {
     public static String fireQuit(String uuid, String message) {
         PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);
         dispatch(event);
+        FotonMessenger.forgetPlayer(uuid);
         return event.getQuitMessage();
     }
 

@@ -179,11 +179,13 @@ public final class FotonPlayer implements Player {
 
     @Override
     public Set<String> getListeningPluginChannels() {
-        return Set.of();
+        return FotonMessenger.listening(id);
     }
 
     @Override
-    public void sendPluginMessage(Plugin source, String channel, byte[] message) {}
+    public void sendPluginMessage(Plugin source, String channel, byte[] message) {
+        FotonMessenger.send(this, source, channel, message);
+    }
 
     @Override
     public boolean equals(Object other) {
