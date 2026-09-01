@@ -45,6 +45,63 @@ if [ "${1:-}" != "--check" ]; then
   exit 0
 fi
 
+LIBS=""
+if [ -d "$REPO/plugin-api/lib" ]; then
+  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
+fi
+
+# The fixture plugin exercises the parts of the event path that are easy to get
+# wrong: a rewrite that has to travel back, a veto that has to travel back, and
+# a priority order where a later handler must not undo an earlier cancel.
+FIXTURE_SRC="$REPO/plugin-api/fixture/src"
+if [ -d "$FIXTURE_SRC" ]; then
+  FIX="$OUT/fixture"
+  rm -rf "$FIX"
+  mkdir -p "$FIX/classes"
+  javac -nowarn -d "$FIX/classes" -cp "$JAR" "$FIXTURE_SRC"/example/*.java
+  cp "$FIXTURE_SRC/plugin.yml" "$FIX/classes/"
+  jar --create --file "$FIX/EventFixture.jar" -C "$FIX/classes" .
+
+  mkdir -p "$FIX/plugins"
+  mv "$FIX/EventFixture.jar" "$FIX/plugins/"
+
+  cat > "$FIX/Events.java" <<'JAVA'
+/** Loads the fixture and checks what its handlers actually decide. */
+public final class Events {
+    public static void main(String[] args) {
+        if (foton.PluginHost.loadAll(args[0]) != 1) {
+            throw new AssertionError("the fixture plugin should have enabled");
+        }
+
+        String id = "00000000-0000-0000-0000-000000000001";
+
+        String join = foton.EventBridge.fireJoin(id, "original");
+        if (!"rewritten by the fixture".equals(join)) {
+            throw new AssertionError("a handler's rewrite did not travel back: " + join);
+        }
+
+        if (foton.EventBridge.fireChat(id, "hush now") != null) {
+            throw new AssertionError("a cancelled chat should come back as nothing");
+        }
+        if (!"hello".equals(foton.EventBridge.fireChat(id, "hello"))) {
+            throw new AssertionError("an uncancelled chat should come back unchanged");
+        }
+
+        // The LOWEST handler cancels; the HIGH one would undo it but did not
+        // ask to see cancelled events, so it must never run.
+        if (foton.EventBridge.fireBlockBreak(id, 1, 2, 3, "minecraft:overworld")) {
+            throw new AssertionError("a cancelled break was reported as allowed");
+        }
+
+        foton.PluginHost.disableAll();
+        System.out.println("event path checked: rewrite, veto and priority all hold");
+    }
+}
+JAVA
+  javac -nowarn -d "$FIX" -cp "$JAR$LIBS" "$FIX/Events.java"
+  java -cp "$FIX:$JAR$LIBS" Events "$FIX/plugins"
+fi
+
 # A jar that compiles proves nothing about whether a plugin can be loaded
 # against it. This boots one.
 FIXTURE="${FOTON_PLUGIN_FIXTURE:-}"
@@ -58,11 +115,6 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/plugins"
 cp "$FIXTURE" "$WORK/plugins/"
-
-LIBS=""
-if [ -d "$REPO/plugin-api/lib" ]; then
-  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
-fi
 
 cat > "$WORK/Boot.java" <<'JAVA'
 public final class Boot {

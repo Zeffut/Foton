@@ -42,8 +42,7 @@ public final class FotonServer implements Server {
 
     private static final class Plugins implements PluginManager {
         @Override public void registerEvents(Listener listener, Plugin plugin) {
-            System.out.println("[server] " + plugin.getName() + " registered "
-                + listener.getClass().getName());
+            EventBridge.register(listener, plugin);
         }
         @Override public Plugin getPlugin(String name) { return null; }
         @Override public Plugin[] getPlugins() { return new Plugin[0]; }

@@ -20,7 +20,7 @@ use std::ffi::{CString, NulError, c_void};
 use std::fs::read_dir;
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use foton_core::server::Server;
 use jni::objects::JString;
@@ -28,6 +28,7 @@ use jni::sys::{JNI_OK, JNI_VERSION_1_8, JavaVM as RawJavaVm, JavaVMInitArgs, Jav
 use jni::{JavaVM, errors::Error as JniError};
 use thiserror::Error;
 
+mod forward;
 mod natives;
 
 /// The class the Java side exposes to this one.
@@ -131,7 +132,7 @@ fn jars_in(directory: &Path) -> Vec<String> {
 /// one process, so tearing one down and expecting another would be a trap. Call
 /// [`Self::disable_all`] to stop the plugins.
 pub struct PluginHost {
-    vm: JavaVM,
+    vm: Arc<JavaVM>,
     /// The loaded runtime, kept alive because the VM's code lives in it.
     ///
     /// Dropping this would unmap the library the JVM is executing from.
@@ -196,10 +197,15 @@ impl PluginHost {
 
         natives::bind(server.clone());
         let host = Self {
-            vm,
+            vm: Arc::new(vm),
             _runtime: runtime,
         };
         host.register_natives()?;
+        // Foton's events reach plugins only once this is done, which is why it
+        // happens before any plugin is loaded rather than after.
+        if let Some(server) = server.upgrade() {
+            forward::subscribe(&server, Arc::clone(&host.vm));
+        }
         Ok(host)
     }
 
@@ -253,6 +259,15 @@ impl PluginHost {
             .l()?;
         let value: JString<'_> = value.into();
         Ok(env.get_string(&value)?.into())
+    }
+
+    /// Stops delivering Foton's events to plugins.
+    ///
+    /// Separate from [`Self::disable_all`] on purpose: a plugin being disabled
+    /// should stop hearing about the world before it is asked to shut down, or
+    /// its last moments are spent handling events for a server it is leaving.
+    pub fn unsubscribe(server: &Arc<Server>) {
+        forward::unsubscribe(server);
     }
 
     /// Disables every loaded plugin, newest first.

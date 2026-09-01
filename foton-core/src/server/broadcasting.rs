@@ -5,7 +5,7 @@ use super::{
     translations,
 };
 
-use crate::event::{PlayerJoinEvent, PlayerQuitEvent};
+use crate::event::{EventBus, PlayerJoinEvent, PlayerQuitEvent};
 use crate::world::PlayerMap;
 
 impl Server {
@@ -89,6 +89,15 @@ impl Server {
     /// The event is fired here rather than at the four call sites because this
     /// is where the message is decided, and changing or silencing it is the
     /// only thing a listener gets to do about a join.
+    /// What is listening for what.
+    ///
+    /// Read by the plugin host, which subscribes on behalf of every plugin
+    /// that registered a listener.
+    #[must_use]
+    pub const fn events(&self) -> &EventBus {
+        &self.events
+    }
+
     /// Everyone currently online.
     #[must_use]
     pub const fn online_players(&self) -> &PlayerMap {

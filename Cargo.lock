@@ -930,9 +930,11 @@ name = "foton-plugin"
 version = "0.15.2+mc26.2"
 dependencies = [
  "foton-core",
+ "foton-utils",
  "jni 0.21.1",
  "libloading",
  "tempfile",
+ "text_components",
  "thiserror 2.0.19",
  "uuid",
 ]
