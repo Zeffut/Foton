@@ -41,7 +41,7 @@ void volatile while
 
 
 def read():
-    """Every material, as {name: (is_block, is_item, stack_size, is_solid)}."""
+    """Every material, as {name: (is_block, is_item, stack_size, is_solid, is_occluding)}."""
     items = json.loads(ITEMS.read_text(encoding="utf-8"))["items"]
     block_data = json.loads(BLOCKS.read_text(encoding="utf-8"))
     blocks = block_data["blocks"]
@@ -56,6 +56,7 @@ def read():
     materials = {}
     for block in blocks:
         properties = block["behavior_properties"]
+        block["_is_occluding"] = bool(properties["canOcclude"])
         if properties["forceSolidOn"]:
             solid = True
         elif properties["forceSolidOff"] or properties["dynamicShape"]:
@@ -78,6 +79,7 @@ def read():
             name in stacks,
             stacks.get(name, 0),
             solids.get(name, False),
+            next((block["_is_occluding"] for block in blocks if block["name"] == name), False),
         )
     return materials
 
@@ -109,10 +111,12 @@ def render(materials):
         "public enum Material {",
     ]
 
-    for name, (is_block, is_item, stack, is_solid) in materials.items():
+    for name, (is_block, is_item, stack, is_solid, is_occluding) in materials.items():
         flags = (1 if is_block else 0) | (2 if is_item else 0)
         if is_solid:
             flags |= 4
+        if is_occluding:
+            flags |= 8
         lines.append(f'    {constant(name)}("{name}", {flags}, {stack}),')
     lines[-1] = lines[-1][:-1] + ";"
 
@@ -155,6 +159,11 @@ def render(materials):
         "    /** Whether the default block state has vanilla's legacy solid shape. */",
         "    public boolean isSolid() {",
         "        return (flags & 4) != 0;",
+        "    }",
+        "",
+        "    /** Whether the default block state occludes faces in vanilla. */",
+        "    public boolean isOccluding() {",
+        "        return (flags & 8) != 0;",
         "    }",
         "",
         "    public boolean isAir() {",
