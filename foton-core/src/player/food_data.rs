@@ -288,8 +288,15 @@ impl Player {
 
             if tick % 10 == 0 {
                 let mut food = self.food_data.lock();
+                let previous = food.food_level;
                 if food.needs_food() {
                     food.food_level += 1;
+                }
+                let changed = food.food_level != previous;
+                let current = food.food_level;
+                drop(food);
+                if changed && !self.allow_food_level_change(current) {
+                    self.food_data.lock().food_level = previous;
                 }
             }
         }
@@ -298,7 +305,15 @@ impl Player {
         let max_health = self.get_max_health();
 
         let mut food = self.food_data.lock();
+        let previous = food.food_level;
         let result = food.tick(difficulty, natural_regen, current_health, max_health);
+        let current = food.food_level;
+        drop(food);
+        if current != previous && !self.allow_food_level_change(current) {
+            self.food_data.lock().food_level = previous;
+            return;
+        }
+        let mut food = self.food_data.lock();
 
         match result {
             FoodTickResult::Heal { amount, exhaustion } => {
@@ -318,6 +333,12 @@ impl Player {
             }
             FoodTickResult::None => {}
         }
+    }
+
+    fn allow_food_level_change(&self, level: i32) -> bool {
+        let mut event = crate::event::player::FoodLevelChangeEvent::new(self.gameprofile.id, level);
+        self.fire_event(&mut event);
+        !event.is_cancelled()
     }
 
     /// Adds food exhaustion, gated by invulnerability.

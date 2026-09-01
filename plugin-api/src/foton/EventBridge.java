@@ -263,6 +263,13 @@ public final class EventBridge {
         dispatch(new org.bukkit.event.world.WorldUnloadEvent(new FotonWorld(world)));
     }
 
+    public static boolean fireFoodLevelChange(String player, int level) {
+        org.bukkit.event.player.FoodLevelChangeEvent event =
+            new org.bukkit.event.player.FoodLevelChangeEvent(player(player), level);
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     public static boolean firePlayerDropItem(String player, String item) {
         org.bukkit.event.player.PlayerDropItemEvent event =
             new org.bukkit.event.player.PlayerDropItemEvent(

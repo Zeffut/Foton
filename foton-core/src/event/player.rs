@@ -17,6 +17,43 @@ use super::Event;
 use crate::player::Player;
 use foton_utils::Identifier;
 
+/// A player's food level is about to change.
+pub struct FoodLevelChangeEvent {
+    player_id: Uuid,
+    food_level: i32,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for FoodLevelChangeEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/food_level_change");
+}
+impl Event for FoodLevelChangeEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+impl FoodLevelChangeEvent {
+    pub const fn new(player_id: Uuid, food_level: i32) -> Self {
+        Self {
+            player_id,
+            food_level,
+            cancelled: false,
+        }
+    }
+    pub const fn player_id(&self) -> Uuid {
+        self.player_id
+    }
+    pub const fn food_level(&self) -> i32 {
+        self.food_level
+    }
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// A player dropped an item entity into the world.
 pub struct PlayerDropItemEvent {
     player_id: Uuid,

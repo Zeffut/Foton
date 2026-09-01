@@ -15,10 +15,10 @@ use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, CreatureSpawnEvent,
     EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRegainHealthEvent,
-    EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerChatEvent, PlayerCommandPreprocessEvent,
-    PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent, PlayerInteractEvent,
-    PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent,
-    ServerTickEvent,
+    EntityRemoveFromWorldEvent, FoodLevelChangeEvent, InventoryClickEvent, PlayerChatEvent,
+    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
+    PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    PlayerRespawnEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -158,6 +158,13 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             MoveAnswer::Cancelled => event.set_cancelled(true),
             MoveAnswer::Redirect(destination) => event.set_to(destination),
             MoveAnswer::Accepted | MoveAnswer::Unreachable => {}
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<FoodLevelChangeEvent, _>(owner(), move |event| {
+        if !food_level_call(&jvm, &event.player_id().to_string(), event.food_level()) {
+            event.set_cancelled(true);
         }
     });
 
@@ -598,6 +605,23 @@ fn death_call(vm: &JavaVM, uuid: &str) {
         "(Ljava/lang/String;)V",
         &[JValue::Object(&uuid)],
     );
+}
+
+fn food_level_call(vm: &JavaVM, player: &str, level: i32) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(player) = env.new_string(player) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireFoodLevelChange",
+        "(Ljava/lang/String;I)Z",
+        &[JValue::Object(&player), JValue::Int(level)],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
 }
 
 fn player_drop_call(vm: &JavaVM, player: &str, item: &str) -> bool {
