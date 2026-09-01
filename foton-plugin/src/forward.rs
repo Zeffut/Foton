@@ -87,6 +87,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             &jvm,
             &event.damager().to_string(),
             &event.entity().to_string(),
+            event.cause(),
         ) {
             event.set_cancelled(true);
         }
@@ -398,7 +399,7 @@ fn pickup_call(vm: &JavaVM, entity: &str, item: &str) -> bool {
     .unwrap_or(true)
 }
 
-fn damage_call(vm: &JavaVM, damager: &str, entity: &str) -> bool {
+fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
     let Ok(mut env) = vm.attach_current_thread() else {
         return true;
     };
@@ -408,11 +409,14 @@ fn damage_call(vm: &JavaVM, damager: &str, entity: &str) -> bool {
     let Ok(entity) = env.new_string(entity) else {
         return true;
     };
+    let Ok(cause) = env.new_string(cause) else {
+        return true;
+    };
     env.call_static_method(
         BRIDGE,
         "fireEntityDamage",
-        "(Ljava/lang/String;Ljava/lang/String;)Z",
-        &[JValue::Object(&damager), JValue::Object(&entity)],
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&damager), JValue::Object(&entity), JValue::Object(&cause)],
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)

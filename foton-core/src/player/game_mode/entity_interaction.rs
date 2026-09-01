@@ -472,7 +472,7 @@ impl Player {
         let mut affected = deals_knockback;
         let mut damage_allowed = true;
         if deals_damage {
-            let mut event = crate::event::EntityDamageByEntityEvent::new(self.uuid(), entity.uuid());
+            let mut event = crate::event::EntityDamageByEntityEvent::new(self.uuid(), entity.uuid(), "ENTITY_ATTACK".to_owned());
             self.fire_event(&mut event);
             damage_allowed = !event.is_cancelled();
         }
@@ -598,7 +598,7 @@ impl Player {
             enchantment_helper::do_post_piercing_attack_effects(&world, self);
             return false;
         };
-        let mut event = crate::event::EntityDamageByEntityEvent::new(self.uuid(), entity.uuid());
+        let mut event = crate::event::EntityDamageByEntityEvent::new(self.uuid(), entity.uuid(), "ENTITY_ATTACK".to_owned());
         self.fire_event(&mut event);
         let damage_allowed = !event.is_cancelled();
         let was_hurt = damage_allowed && entity.hurt(&target_world, &damage_source, total_damage);

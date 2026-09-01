@@ -164,6 +164,11 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    private static org.bukkit.event.entity.EntityDamageEvent.DamageCause damageCause(String name) {
+        try { return org.bukkit.event.entity.EntityDamageEvent.DamageCause.valueOf(name); }
+        catch (IllegalArgumentException | NullPointerException error) { return org.bukkit.event.entity.EntityDamageEvent.DamageCause.CUSTOM; }
+    }
+
     private static org.bukkit.event.inventory.ClickType clickType(String name) {
         try { return org.bukkit.event.inventory.ClickType.valueOf(name); }
         catch (IllegalArgumentException | NullPointerException error) { return org.bukkit.event.inventory.ClickType.UNKNOWN; }
@@ -182,7 +187,7 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    public static boolean fireEntityDamage(String damager, String entity) {
+    public static boolean fireEntityDamage(String damager, String entity, String cause) {
         org.bukkit.event.entity.EntityDamageByEntityEvent event =
             new org.bukkit.event.entity.EntityDamageByEntityEvent(
                 new FotonEntity(Native.parse(damager)), new FotonEntity(Native.parse(entity)));
