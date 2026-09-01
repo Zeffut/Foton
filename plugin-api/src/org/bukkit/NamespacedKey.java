@@ -1,11 +1,22 @@
 package org.bukkit;
 
+import org.bukkit.plugin.Plugin;
+
 public final class NamespacedKey {
     private final String namespace;
     private final String key;
 
     public NamespacedKey(String namespace, String key) {
         this.namespace = namespace;
+        this.key = key;
+    }
+
+    /** Creates a key in the plugin's namespace, as Bukkit plugins commonly do. */
+    public NamespacedKey(Plugin plugin, String key) {
+        if (plugin == null) {
+            throw new IllegalArgumentException("plugin cannot be null");
+        }
+        this.namespace = plugin.getName().toLowerCase(java.util.Locale.ROOT);
         this.key = key;
     }
 
