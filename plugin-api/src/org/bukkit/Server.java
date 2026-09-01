@@ -34,6 +34,19 @@ public interface Server {
         foton.Native.shutdown();
     }
 
+    /**
+     * Region ownership collapses to the single serialized tick in Steel.
+     * A location without a world cannot belong to any region.
+     */
+    default boolean isOwnedByCurrentRegion(Location location) {
+        return location != null && location.getWorld() != null && isPrimaryThread();
+    }
+
+    /** Region ownership for a live entity on Steel's serialized tick. */
+    default boolean isOwnedByCurrentRegion(org.bukkit.entity.Entity entity) {
+        return entity != null && entity.getWorld() != null && isPrimaryThread();
+    }
+
     Collection<? extends Player> getOnlinePlayers();
 
     Player getPlayer(String name);
