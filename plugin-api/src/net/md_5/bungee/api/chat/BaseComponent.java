@@ -7,6 +7,10 @@ public class BaseComponent {
     private Boolean bold, italic, underlined, strikethrough, obfuscated;
     private String font;
     public BaseComponent() {}
+    protected BaseComponent(BaseComponent... components) {
+        if (components != null) for (BaseComponent component : components)
+            if (component != null) extra.add(component);
+    }
     public final void addExtra(BaseComponent component) { if (component != null) extra.add(component); }
     public void setColor(ChatColor value) { color = value; }
     public void setBold(Boolean value) { bold = value; }
