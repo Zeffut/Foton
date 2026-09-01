@@ -78,6 +78,16 @@ public interface Server {
 
     World getWorld(String name);
 
+    default org.bukkit.entity.Entity getEntity(java.util.UUID uuid) {
+        if (uuid == null) return null;
+        for (World world : getWorlds()) {
+            for (org.bukkit.entity.Entity entity : world.getEntities()) {
+                if (uuid.equals(entity.getUniqueId())) return entity;
+            }
+        }
+        return null;
+    }
+
     int broadcastMessage(String message);
 
     void sendPluginMessage(org.bukkit.plugin.Plugin source, String channel, byte[] message);

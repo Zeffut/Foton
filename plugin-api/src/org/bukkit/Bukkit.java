@@ -112,6 +112,13 @@ public final class Bukkit {
     public static World getWorld(String name) {
         return server.getWorld(name);
     }
+    public static World getWorld(UUID uid) {
+        if (uid == null) return null;
+        for (World world : server.getWorlds()) {
+            if (uid.equals(world.getUID())) return world;
+        }
+        return null;
+    }
 
     public static int broadcastMessage(String message) {
         return server.broadcastMessage(message);
