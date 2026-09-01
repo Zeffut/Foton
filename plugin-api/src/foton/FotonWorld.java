@@ -95,6 +95,15 @@ public final class FotonWorld implements World {
     }
 
     @Override
+    public org.bukkit.entity.Item dropItem(Location location, org.bukkit.inventory.ItemStack item) {
+        if (location == null || item == null) return null;
+        String id = Native.worldDropItem(name, location.getX(), location.getY(), location.getZ(), FotonInventory.encode(item));
+        if (id == null) return null;
+        try { return new FotonItem(UUID.fromString(id)); }
+        catch (IllegalArgumentException ignored) { return null; }
+    }
+
+    @Override
     public long getTime() {
         long full = getFullTime();
         return full < 0 ? 0 : full % 24000L;

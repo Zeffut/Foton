@@ -20,6 +20,8 @@ public interface World {
 
     Chunk getChunkAt(Location location);
 
+    default org.bukkit.entity.Item dropItem(Location location, org.bukkit.inventory.ItemStack item) { return null; }
+
     default boolean isChunkLoaded(int x, int z) { return false; }
     default java.io.File getWorldFolder() { return null; }
 

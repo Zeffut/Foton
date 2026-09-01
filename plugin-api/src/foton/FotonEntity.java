@@ -7,7 +7,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 
 /** Common Bukkit entity handle backed by a persistent UUID. */
-public final class FotonEntity implements Entity {
+public class FotonEntity implements Entity {
     private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
         new java.util.concurrent.ConcurrentHashMap<>();
     private final UUID id;

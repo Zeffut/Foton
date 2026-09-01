@@ -45,6 +45,7 @@ public final class Native {
     public static native boolean worldChunkLoaded(String world, int x, int z);
     public static native String[] worldLoadedChunkCoords(String world);
     public static native String worldFolder(String world);
+    public static native String worldDropItem(String world, double x, double y, double z, String item);
     public static native String[] scoreboardTeamEntries(String world, String team);
     public static native String scoreboardEntryTeam(String world, String entry);
 

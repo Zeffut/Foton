@@ -1215,6 +1215,16 @@ extern "system" fn world_loaded_chunk_coords(
     string_array(&mut env, &coords)
 }
 
+/// `foton.Native.worldDropItem`
+extern "system" fn world_drop_item(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, x: jdouble, y: jdouble, z: jdouble, item: JString<'_>) -> jstring {
+    let Some(world) = world(&mut env, &name) else { return null_mut(); };
+    let Ok(item) = env.get_string(&item) else { return null_mut(); };
+    let Ok(item) = item.to_str() else { return null_mut(); };
+    let Some(stack) = parse_slot(item) else { return null_mut(); };
+    let Some(entity) = world.spawn_item(glam::DVec3::new(x, y, z), stack) else { return null_mut(); };
+    to_java(&mut env, Some(entity.uuid().to_string()))
+}
+
 /// `foton.Native.worldFolder`
 extern "system" fn world_folder(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jstring {
     let Some(path) = world(&mut env, &name).and_then(|world| world.world_folder()) else { return null_mut(); };
@@ -1430,6 +1440,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         method("worldChunkLoaded", "(Ljava/lang/String;II)Z", world_chunk_loaded as *mut c_void),
         method("worldLoadedChunkCoords", "(Ljava/lang/String;)[Ljava/lang/String;", world_loaded_chunk_coords as *mut c_void),
         method("worldFolder", "(Ljava/lang/String;)Ljava/lang/String;", world_folder as *mut c_void),
+        method("worldDropItem", "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;", world_drop_item as *mut c_void),
         method("scoreboardTeamEntries", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;", scoreboard_team_entries as *mut c_void),
         method("scoreboardEntryTeam", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", scoreboard_entry_team as *mut c_void),
         method(
