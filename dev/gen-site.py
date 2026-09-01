@@ -113,7 +113,7 @@ STRINGS = {
         "config_shapes": "Structures",
         "config_value_types": "Types de valeur",
         "config_name": "Nom",
-        "config_accepts": "Accepte",
+        "config_accepts": "Options",
     },
 }
 

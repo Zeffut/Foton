@@ -357,8 +357,8 @@ site, but every new report now also creates a GitHub issue. Its card links to
 that issue once the link is committed.
 
 GitHub's signed `issues` webhook is the only way an issue changes the public
-report state. Open and reopened issues map to `open`; a closed issue labelled
-`fixed` maps to `fixed`; one labelled `not-a-bug` maps to `closed`. A closure
+report state. Open and reopened issues map to `open`; a closed issue labeled
+`fixed` maps to `fixed`; one labeled `not-a-bug` maps to `closed`. A closure
 with neither, or both, labels is not guessed at and therefore remains open on
 the site until the maintainer classifies it. The webhook only accepts issues
 carrying `foton-report`, so ordinary project issues are outside this system.

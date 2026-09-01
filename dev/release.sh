@@ -4,9 +4,8 @@
 #   bash dev/release.sh            build, check and publish
 #   bash dev/release.sh --dry-run  everything except the tag and the upload
 #
-# This is the procedure, not a convenience wrapper around it. CI calls this
-# same script, so there is one way to make a release rather than two that
-# drift apart.
+# This is the manual publishing procedure. GitHub Actions builds the platform
+# matrix itself and runs the same dev/ci.sh gate before publishing artifacts.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
 

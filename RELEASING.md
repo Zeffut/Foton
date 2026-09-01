@@ -22,12 +22,12 @@ healthy.
 
 ### 1. One script makes a release, whoever runs it
 
-`dev/release.sh` is the procedure. It runs on a laptop today and CI calls the
-same script when Actions works again.
+`dev/release.sh` is the manual publishing procedure. GitHub Actions builds the
+platform matrix itself, but it runs the same full `dev/ci.sh` gate before
+building or publishing any release artifact.
 
-The alternative — a workflow that knows how to build and a script that also
-knows how to build — is two procedures that drift, and the one nobody runs is
-the one that breaks. There is one, and it is the one a human can run and read.
+The shared verification gate prevents a release workflow and the documented
+manual path from disagreeing about whether a commit is publishable.
 
 ### 2. The installer does not write configuration. The server does
 

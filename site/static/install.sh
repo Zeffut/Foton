@@ -77,9 +77,10 @@ esac
 
 TMP_META=$(mktemp)
 TMP=""
+STAGED=""
 # One trap for the whole script: a second `trap ... EXIT` would replace this
 # one rather than run alongside it, and the first temporary file would leak.
-trap 'rm -f "$TMP_META"; [ -n "$TMP" ] && rm -rf "$TMP"' EXIT
+trap 'rm -f "$TMP_META"; [ -n "$TMP" ] && rm -rf "$TMP"; [ -n "$STAGED" ] && rm -f "$STAGED"' EXIT
 
 bold "Foton installer"
 printf 'Looking up the latest release...\n'
@@ -136,11 +137,20 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
   die "checksum mismatch -- the download does not match the published release"
 fi
 
-# chmod is meaningless on a Windows filesystem but harmless there, so it runs
-# unconditionally rather than behind an OS check.
-[ -f "$DIR/$BIN" ] && mv "$DIR/$BIN" "$DIR/$BIN.previous"
-mv "$TMP/$BIN" "$DIR/$BIN"
-chmod +x "$DIR/$BIN"
+# Stage in the destination directory before replacing anything.  A download
+# under /tmp can be on another filesystem, so moving it directly to $DIR can
+# fail half-way through a cross-filesystem copy.
+STAGED="$DIR/$BIN.new"
+mv "$TMP/$BIN" "$STAGED"
+chmod +x "$STAGED"
+if [ -f "$DIR/$BIN" ]; then
+  mv -f "$DIR/$BIN" "$DIR/$BIN.previous"
+fi
+if ! mv -f "$STAGED" "$DIR/$BIN"; then
+  [ -f "$DIR/$BIN.previous" ] && mv -f "$DIR/$BIN.previous" "$DIR/$BIN"
+  die "could not replace the existing binary; the previous binary was restored"
+fi
+STAGED=""
 bold "Installed $TAG to ./$BIN"
 
 if [ "$UPDATE" -eq 1 ]; then
@@ -163,6 +173,21 @@ ONLINE=$(ask "Require a Mojang account to join?" "yes")
 DIFFICULTY=$(ask "Difficulty (peaceful, easy, normal, hard)" "normal")
 
 case "$ONLINE" in n|N|no|No) ONLINE_VALUE=false ;; *) ONLINE_VALUE=true ;; esac
+
+# These values are written into TOML, not passed to a shell.  Keep the small
+# interactive surface strict so malformed input cannot leave a server that
+# immediately fails to start.  The forbidden punctuation would also be
+# significant to sed's replacement syntax below.
+newline='
+'
+case "$NAME" in
+  ''|*'"'*|*'\\'*|*'&'*|*'|'*|*"$newline"*) die 'server name cannot contain quotes, backslashes, &, |, or line breaks' ;;
+esac
+case "$PORT" in ''|*[!0-9]*) die 'port must be a number from 1 to 65000' ;; esac
+[ "${#PORT}" -le 5 ] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65000 ] || die 'port must be a number from 1 to 65000'
+case "$PLAYERS" in ''|*[!0-9]*) die 'maximum players must be a number from 1 to 2147483647' ;; esac
+[ "${#PLAYERS}" -le 10 ] && [ "$PLAYERS" -ge 1 ] && [ "$PLAYERS" -le 2147483647 ] || die 'maximum players must be a number from 1 to 2147483647'
+case "$DIFFICULTY" in peaceful|easy|normal|hard) ;; *) die 'difficulty must be peaceful, easy, normal, or hard' ;; esac
 
 set_key() {  # set_key <file> <key> <value>
   if grep -q "^$2 *=" "$1"; then

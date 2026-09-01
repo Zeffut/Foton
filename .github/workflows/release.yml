@@ -10,6 +10,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-23
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: crate-ci/typos@v1.48.0
+      - name: Verify the full release candidate
+        run: bash dev/ci.sh
+
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -43,7 +56,9 @@ jobs:
           fi
 
   build:
-    needs: version
+    needs:
+      - ci
+      - version
     if: needs.version.outputs.changed == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
@@ -87,7 +102,7 @@ jobs:
         if: matrix.target == 'x86_64-apple-darwin'
         run: rustup target add ${{ matrix.target }}
       - name: Build portable release binary
-        run: cargo build --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --features stand-alone,deadlock_detection --verbose
+        run: cargo build --locked --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --features stand-alone,deadlock_detection --verbose
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}

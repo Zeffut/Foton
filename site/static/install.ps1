@@ -210,11 +210,23 @@ try {
     }
 
     $finalBin = Join-Path $Dir $Bin
-    if (Test-Path $finalBin) {
-        $previousBin = Join-Path $Dir "$Bin.previous"
-        Move-Item -Force $finalBin $previousBin
+    $stagedBin = Join-Path $Dir "$Bin.new"
+    $previousBin = Join-Path $Dir "$Bin.previous"
+    # Stage in the target directory first. A temporary directory may be on a
+    # different volume, where Move-Item is a copy that can fail mid-operation.
+    Move-Item -Force $tempBin $stagedBin
+    try {
+        if (Test-Path $finalBin) {
+            Move-Item -Force $finalBin $previousBin
+        }
+        Move-Item -Force $stagedBin $finalBin
+    } catch {
+        if (-not (Test-Path $finalBin) -and (Test-Path $previousBin)) {
+            Move-Item -Force $previousBin $finalBin
+        }
+        Remove-Item -Force $stagedBin -ErrorAction SilentlyContinue
+        throw 'could not replace the existing binary; the previous binary was restored'
     }
-    Move-Item -Force $tempBin $finalBin
     Write-Bold "Installed $Tag to .\$Bin"
 
     if ($Update) {
@@ -243,6 +255,21 @@ try {
     $difficulty = Read-Answer 'Difficulty (peaceful, easy, normal, hard)' 'normal'
 
     if ($online -match '^(n|no)$') { $onlineValue = 'false' } else { $onlineValue = 'true' }
+
+    if ([string]::IsNullOrWhiteSpace($name) -or $name -match '["\\\r\n]') {
+        Die 'server name cannot be empty or contain quotes, backslashes, or line breaks'
+    }
+    $portNumber = 0
+    if (-not [int]::TryParse($port, [ref]$portNumber) -or $portNumber -lt 1 -or $portNumber -gt 65000) {
+        Die 'port must be a number from 1 to 65000'
+    }
+    $playerNumber = 0
+    if (-not [int]::TryParse($players, [ref]$playerNumber) -or $playerNumber -lt 1) {
+        Die 'maximum players must be a number from 1 to 2147483647'
+    }
+    if ($difficulty -notin @('peaceful', 'easy', 'normal', 'hard')) {
+        Die 'difficulty must be peaceful, easy, normal, or hard'
+    }
 
     Set-TomlKey (Join-Path $Dir 'config\config.toml') 'motd' ('"' + $name + '"')
     Set-TomlKey (Join-Path $Dir 'config\config.toml') 'server_port' $port

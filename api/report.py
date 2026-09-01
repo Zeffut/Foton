@@ -20,6 +20,10 @@ API = "https://api.github.com"
 DATA_PATH = "dev/bug-reports.jsonl"
 BRANCH = "master"
 MAX_REPORT_BODY = 64 * 1024
+# GitHub accepts an issue body smaller than the intake envelope.  Reserve room
+# for the marker and context generated below so a committed report can always
+# become an issue.
+MAX_ISSUE_DESCRIPTION = 60 * 1024
 MAX_WEBHOOK_BODY = 256 * 1024
 WRITE_ATTEMPTS = 3
 KEEP = ("at", "player", "world", "position", "category", "description", "version")
@@ -143,15 +147,21 @@ def _issue_body(record):
 
 
 def _find_existing_issue(record, token, repo):
-    query = urllib.parse.urlencode({"state": "all", "labels": REPORT_LABEL, "per_page": 100})
-    status, issues = _github("GET", f"/repos/{repo}/issues?{query}", token)
-    if status != 200 or not isinstance(issues, list):
-        return status, None
     marker = _issue_marker(record)
-    for issue in issues:
-        if marker in str(issue.get("body") or ""):
-            return 200, issue
-    return 404, None
+    page = 1
+    while True:
+        query = urllib.parse.urlencode({
+            "state": "all", "labels": REPORT_LABEL, "per_page": 100, "page": page,
+        })
+        status, issues = _github("GET", f"/repos/{repo}/issues?{query}", token)
+        if status != 200 or not isinstance(issues, list):
+            return status, None
+        for issue in issues:
+            if marker in str(issue.get("body") or ""):
+                return 200, issue
+        if len(issues) < 100:
+            return 404, None
+        page += 1
 
 
 def _open_issue(record, token, repo):
@@ -251,8 +261,21 @@ def _sync_status(issue, token, repo):
         if result != 200:
             return result
         for record in records:
-            if record.get("issue_number") == issue_number:
-                if record.get("status") == status:
+            # Reports #1–#10 predate the issue integration. Their manually
+            # created GitHub issues use the same numbers; once a webhook sees
+            # one, persist the normal durable mapping alongside its status.
+            legacy_match = (
+                "report_key" not in record
+                and record.get("issue_number") is None
+                and record.get("number") == issue_number
+            )
+            if record.get("issue_number") == issue_number or legacy_match:
+                changed = record.get("status") != status
+                if legacy_match:
+                    record["issue_number"] = issue_number
+                    record["issue_url"] = issue.get("html_url")
+                    changed = True
+                if not changed:
                     return 202
                 record["status"] = status
                 written = _write_reports(records, sha, token, repo, f"report: sync issue #{issue_number} as {status}")
@@ -339,6 +362,9 @@ class handler(BaseHTTPRequestHandler):
             return
         if not isinstance(report, dict) or not str(report.get("description", "")).strip():
             self._reply(422, "a report needs a description")
+            return
+        if len(str(report["description"]).encode("utf-8")) > MAX_ISSUE_DESCRIPTION:
+            self._reply(422, "report description is too long")
             return
         result = _file(report, github_token, repo)
         self._reply(202 if result == 202 else 502, "filed" if result == 202 else "could not file")
