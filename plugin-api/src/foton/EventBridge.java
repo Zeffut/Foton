@@ -149,7 +149,7 @@ public final class EventBridge {
     public static boolean fireInteract(String uuid) {
         org.bukkit.event.player.PlayerInteractEvent event =
             new org.bukkit.event.player.PlayerInteractEvent(player(uuid),
-                org.bukkit.event.player.PlayerInteractEvent.Action.RIGHT_CLICK_AIR,
+                org.bukkit.event.block.Action.RIGHT_CLICK_AIR,
                 null, null, null);
         dispatch(event);
         return !event.isCancelled();
