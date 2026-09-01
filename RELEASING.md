@@ -117,7 +117,22 @@ Release" workflow (`workflow_dispatch` or a push to `master`) for all five.
 curl -fsSL https://foton.zeffut.fr/install.sh | sh
 ```
 
-The script:
+Covers macOS and Linux natively, and Windows too but only inside a POSIX
+shell -- Git Bash, MSYS2, Cygwin or WSL -- because it is a `sh` script. For
+Windows PowerShell, which is what most Windows users actually have, there is
+a second installer:
+
+```powershell
+irm https://foton.zeffut.fr/install.ps1 | iex
+```
+
+The two ask the same six questions with the same defaults and write the same
+two config files; `install.ps1` exists only because requiring a POSIX shell
+to install a Minecraft server would rule out most Windows users. See
+`site/static/install.ps1`'s header comment for how to pass `-Update` through
+`irm | iex`, since piping to `iex` leaves no normal place for arguments.
+
+The `sh` script:
 
 1. Detects the operating system and CPU, and picks the matching asset. An
    unsupported pair stops with the list of what exists, not a failed download.
@@ -143,7 +158,13 @@ refuses to overwrite an existing installation without being told to.
 curl -fsSL https://foton.zeffut.fr/install.sh | sh -s -- --update
 ```
 
-Run inside an existing installation, `--update` replaces the binary and leaves
+On Windows PowerShell, the equivalent is `-Update`:
+
+```powershell
+iex "& { $(irm https://foton.zeffut.fr/install.ps1) } -Update"
+```
+
+Run inside an existing installation, `--update` (`-Update` on Windows) replaces the binary and leaves
 `config/` and `saves/` untouched. It checks the installed version against the
 latest release first and does nothing when they match.
 
