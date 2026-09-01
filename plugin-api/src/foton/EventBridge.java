@@ -263,6 +263,14 @@ public final class EventBridge {
         dispatch(new org.bukkit.event.world.WorldUnloadEvent(new FotonWorld(world)));
     }
 
+    public static boolean firePlayerDropItem(String player, String item) {
+        org.bukkit.event.player.PlayerDropItemEvent event =
+            new org.bukkit.event.player.PlayerDropItemEvent(
+                player(player), new foton.FotonItem(Native.parse(item)));
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     public static void firePlayerRespawn(String uuid) {
         dispatch(new org.bukkit.event.player.PlayerRespawnEvent(player(uuid)));
     }

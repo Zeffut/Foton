@@ -16,8 +16,9 @@ use foton_core::event::{
     BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, CreatureSpawnEvent,
     EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRegainHealthEvent,
     EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerChatEvent, PlayerCommandPreprocessEvent,
-    PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerInteractEvent, PlayerJoinEvent,
-    PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent, ServerTickEvent,
+    PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent, PlayerInteractEvent,
+    PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent,
+    ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -157,6 +158,17 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             MoveAnswer::Cancelled => event.set_cancelled(true),
             MoveAnswer::Redirect(destination) => event.set_to(destination),
             MoveAnswer::Accepted | MoveAnswer::Unreachable => {}
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerDropItemEvent, _>(owner(), move |event| {
+        if !player_drop_call(
+            &jvm,
+            &event.player_id().to_string(),
+            &event.item_id().to_string(),
+        ) {
+            event.set_cancelled(true);
         }
     });
 
@@ -586,6 +598,26 @@ fn death_call(vm: &JavaVM, uuid: &str) {
         "(Ljava/lang/String;)V",
         &[JValue::Object(&uuid)],
     );
+}
+
+fn player_drop_call(vm: &JavaVM, player: &str, item: &str) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(player) = env.new_string(player) else {
+        return true;
+    };
+    let Ok(item) = env.new_string(item) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "firePlayerDropItem",
+        "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&player), JValue::Object(&item)],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
 }
 
 fn respawn_call(vm: &JavaVM, uuid: &str) {

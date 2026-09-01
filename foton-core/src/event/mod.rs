@@ -44,8 +44,9 @@ pub use entity::{
 };
 pub use inventory::InventoryClickEvent;
 pub use player::{
-    PlayerChatEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerInteractEvent,
-    PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent,
+    PlayerChatEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
+    PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    PlayerRespawnEvent,
 };
 pub use server::ServerTickEvent;
 

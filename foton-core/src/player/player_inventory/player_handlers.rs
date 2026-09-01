@@ -438,7 +438,10 @@ impl Player {
         if let Some(click) = click {
             let current_item = click.slot().and_then(|slot| {
                 let guard = menu.behavior().lock_all_containers();
-                menu.behavior().slots().get(slot).map(|view| view.get_item(&guard).clone())
+                menu.behavior()
+                    .slots()
+                    .get(slot)
+                    .map(|view| view.get_item(&guard).clone())
             });
             let click_name = match (packet.click_type, packet.button_num) {
                 (ClickType::Pickup, 0) => "LEFT",
@@ -462,7 +465,8 @@ impl Player {
             self.fire_event(&mut inventory_click);
             if inventory_click.is_cancelled() {
                 menu.behavior_mut().resume_remote_updates();
-                menu.behavior_mut().send_all_data_to_remote(&self.connection);
+                menu.behavior_mut()
+                    .send_all_data_to_remote(&self.connection);
                 return;
             }
             menu.clicked(click, self);
@@ -1239,6 +1243,13 @@ impl Player {
         entity.set_pickup_delay(40);
         if thrown_from_hand {
             entity.set_thrower(self.gameprofile.id);
+        }
+        let world = self.get_world();
+        let mut event = crate::event::PlayerDropItemEvent::new(self.gameprofile.id, entity.uuid());
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            let _ = world.remove_entity(entity.id());
+            return None;
         }
         Some(entity)
     }
