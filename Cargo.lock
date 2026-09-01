@@ -866,6 +866,8 @@ version = "0.15.2+mc26.2"
 dependencies = [
  "aes-gcm",
  "base64 0.23.0",
+ "rand 0.10.2",
+ "tempfile",
  "thiserror 2.0.19",
  "uuid",
 ]
