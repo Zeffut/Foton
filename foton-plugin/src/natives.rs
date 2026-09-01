@@ -1092,6 +1092,14 @@ extern "system" fn world_max_height(
     world(&mut env, &name).map_or(0, |world| world.max_build_height())
 }
 
+extern "system" fn is_sneaking(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.is_crouching()))
+}
+
 /// Every native, with the descriptor the JVM matches it by.
 ///
 /// A descriptor that disagrees with the Java declaration is not a compile
@@ -1160,6 +1168,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "worldTime",
             "(Ljava/lang/String;)J",
             world_time as *mut c_void,
+        ),
+        method(
+            "isSneaking",
+            "(Ljava/lang/String;)Z",
+            is_sneaking as *mut c_void,
         ),
         method(
             "worldMinHeight",

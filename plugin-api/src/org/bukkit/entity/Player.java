@@ -14,6 +14,7 @@ public interface Player extends Damageable {
     void sendPluginMessage(Plugin source, String channel, byte[] message);
 
     boolean isOnline();
+    default boolean isSneaking() { return false; }
     void kickPlayer(String message);
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);
