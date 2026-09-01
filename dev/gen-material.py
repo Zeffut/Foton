@@ -41,16 +41,20 @@ void volatile while
 
 
 def read():
-    """Every material, as {name: (is_block, is_item, stack_size, is_solid, is_occluding)}."""
+    """Every material, as {name: (is_block, is_item, stack_size, max_damage, is_solid, is_occluding)}."""
     items = json.loads(ITEMS.read_text(encoding="utf-8"))["items"]
     block_data = json.loads(BLOCKS.read_text(encoding="utf-8"))
     blocks = block_data["blocks"]
     shapes = block_data["shapes"]
 
     stacks = {}
+    damages = {}
     for item in items:
-        size = item.get("components", {}).get("minecraft:max_stack_size", 64)
+        components = item.get("components", {})
+        size = components.get("minecraft:max_stack_size", 64)
         stacks[item["name"]] = size if isinstance(size, int) else 64
+        damage = components.get("minecraft:max_damage", 0)
+        damages[item["name"]] = damage if isinstance(damage, int) else 0
 
     block_names = {block["name"] for block in blocks}
     materials = {}
@@ -78,6 +82,7 @@ def read():
             name in block_names,
             name in stacks,
             stacks.get(name, 0),
+            damages.get(name, 0),
             solids.get(name, False),
             next((block["_is_occluding"] for block in blocks if block["name"] == name), False),
         )
@@ -111,13 +116,13 @@ def render(materials):
         "public enum Material {",
     ]
 
-    for name, (is_block, is_item, stack, is_solid, is_occluding) in materials.items():
+    for name, (is_block, is_item, stack, damage, is_solid, is_occluding) in materials.items():
         flags = (1 if is_block else 0) | (2 if is_item else 0)
         if is_solid:
             flags |= 4
         if is_occluding:
             flags |= 8
-        lines.append(f'    {constant(name)}("{name}", {flags}, {stack}),')
+        lines.append(f'    {constant(name)}("{name}", {flags}, {stack}, {damage}),')
     lines[-1] = lines[-1][:-1] + ";"
 
     lines += [
@@ -134,11 +139,13 @@ def render(materials):
         "    private final String key;",
         "    private final int flags;",
         "    private final int stackSize;",
+        "    private final int maxDamage;",
         "",
-        "    Material(String key, int flags, int stackSize) {",
+        "    Material(String key, int flags, int stackSize, int maxDamage) {",
         "        this.key = key;",
         "        this.flags = flags;",
         "        this.stackSize = stackSize;",
+        "        this.maxDamage = maxDamage;",
         "    }",
         "",
         "    /** Whether this can be placed in the world. */",
@@ -173,6 +180,11 @@ def render(materials):
         "    /** How many fit in one stack. Zero for a block that is not an item. */",
         "    public int getMaxStackSize() {",
         "        return stackSize;",
+        "    }",
+        "",
+        "    /** Maximum durability for damageable items, zero otherwise. */",
+        "    public short getMaxDurability() {",
+        "        return (short) maxDamage;",
         "    }",
         "",
         "    public NamespacedKey getKey() {",
