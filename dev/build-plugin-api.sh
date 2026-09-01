@@ -35,6 +35,7 @@ mkdir -p "$OUT/classes" "$OUT/generated"
 # hand-written second copy to drift.
 python3 "$REPO/dev/gen-material.py" "$OUT/generated"
 python3 "$REPO/dev/gen-entity-type.py" "$OUT/generated"
+python3 "$REPO/dev/gen-enchantment.py" "$OUT/generated"
 
 # javac reads a file of sources with @, which avoids both mapfile (bash 4+,
 # and macOS ships bash 3.2) and an argument list long enough to overflow exec.
