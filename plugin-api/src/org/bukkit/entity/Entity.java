@@ -16,6 +16,7 @@ public interface Entity extends CommandSender {
 
     World getWorld();
     EntityType getType();
+    default Entity getVehicle() { return null; }
     default SpawnCategory getSpawnCategory() { return SpawnCategory.MISC; }
 
     int getEntityId();

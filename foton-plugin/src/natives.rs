@@ -212,6 +212,14 @@ extern "system" fn entity_world(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: J
     to_java(&mut env, entity_by_uuid(&id).map(|(world, _)| world.key.to_string()))
 }
 
+extern "system" fn entity_vehicle(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let Ok(text) = env.get_string(&uuid) else { return std::ptr::null_mut(); };
+    let Ok(id) = text.to_str().ok().and_then(|value| value.parse::<Uuid>().ok()).ok_or(()) else { return std::ptr::null_mut(); };
+    let vehicle = entity_by_uuid(&id)
+        .and_then(|(_, entity)| entity.vehicle())
+        .map(|vehicle| vehicle.uuid().to_string());
+    to_java(&mut env, vehicle)
+}
 extern "system" fn entity_type(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
     let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
     let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
@@ -1586,6 +1594,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         method("entityWorld", "(Ljava/lang/String;)Ljava/lang/String;", entity_world as *mut c_void),
         method("removeEntity", "(Ljava/lang/String;)V", remove_entity as *mut c_void),
         method("entityType", "(Ljava/lang/String;)Ljava/lang/String;", entity_type as *mut c_void),
+        method("entityVehicle", "(Ljava/lang/String;)Ljava/lang/String;", entity_vehicle as *mut c_void),
         method("entitySpawnCategory", "(Ljava/lang/String;)Ljava/lang/String;", entity_spawn_category as *mut c_void),
         method("entityPosition", "(Ljava/lang/String;)[D", entity_position as *mut c_void),
         method("entityId", "(Ljava/lang/String;)I", entity_id as *mut c_void),

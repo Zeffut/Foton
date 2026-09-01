@@ -26,6 +26,12 @@ public class FotonEntity implements Entity {
         String world = Native.entityWorld(id.toString());
         return world == null ? null : new FotonWorld(world);
     }
+    @Override public Entity getVehicle() {
+        String vehicle = Native.entityVehicle(id.toString());
+        try { return vehicle == null ? null : new FotonEntity(UUID.fromString(vehicle)); }
+        catch (IllegalArgumentException error) { return null; }
+    }
+
     @Override public EntityType getType() {
         String type = Native.entityType(id.toString());
         if (type == null) return null;
