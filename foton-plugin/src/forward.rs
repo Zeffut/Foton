@@ -14,7 +14,8 @@ use std::sync::Arc;
 use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
-    PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, ServerTickEvent,
+    PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -46,6 +47,13 @@ fn owner() -> Identifier {
 /// more machinery than five events justify.
 pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let events = server.events();
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerInteractEvent, _>(owner(), move |event| {
+        if !interact_call(&jvm, &event.player_id().to_string()) {
+            event.set_cancelled(true);
+        }
+    });
 
     let jvm = Arc::clone(&vm);
     events.on::<PlayerLoginEvent, _>(owner(), move |event| {
@@ -233,6 +241,23 @@ fn login_call(vm: &JavaVM, uuid: &str) -> Option<String> {
     let answer: JString<'_> = answer.into();
     let message: String = env.get_string(&answer).ok()?.into();
     (!message.is_empty()).then_some(message)
+}
+
+fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(uuid) = env.new_string(player_uuid) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireInteract",
+        "(Ljava/lang/String;)Z",
+        &[JValue::Object(&uuid)],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
 }
 
 /// Calls a bridge method about a block. `true` means nothing objected.

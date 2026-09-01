@@ -1,4 +1,5 @@
 use super::{block_breaking::BlockBreakAction, *};
+use crate::event::PlayerInteractEvent;
 
 impl Player {
     /// Sends block update packets for a position and its neighbor.
@@ -81,6 +82,12 @@ impl Player {
             return;
         }
 
+        let mut interaction = PlayerInteractEvent::new(self.gameprofile.id);
+        self.fire_event(&mut interaction);
+        if interaction.cancelled() {
+            self.send_block_updates(pos, direction);
+            return;
+        }
         let result = use_item_on(self, &world, packet.hand, &packet.block_hit);
 
         if result.should_swing_server() {

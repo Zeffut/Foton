@@ -145,6 +145,16 @@ public final class EventBridge {
         return event.isCancelled() ? event.getKickMessage() : "";
     }
 
+    /** A player is attempting an item interaction. */
+    public static boolean fireInteract(String uuid) {
+        org.bukkit.event.player.PlayerInteractEvent event =
+            new org.bukkit.event.player.PlayerInteractEvent(player(uuid),
+                org.bukkit.event.player.PlayerInteractEvent.Action.RIGHT_CLICK_AIR,
+                null, null, null);
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
         PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);

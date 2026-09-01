@@ -8,6 +8,7 @@
 
 use glam::DVec3;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use text_components::TextComponent;
@@ -20,6 +21,48 @@ use foton_utils::Identifier;
 pub struct PlayerLoginEvent {
     player: Arc<Player>,
     kick_message: Option<String>,
+}
+
+/// A player attempted to use an item or interact with the air/block.
+pub struct PlayerInteractEvent {
+    player_id: Uuid,
+    cancelled: bool,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for PlayerInteractEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_interact");
+}
+
+impl Event for PlayerInteractEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+
+impl PlayerInteractEvent {
+    #[must_use]
+    /// Creates an uncancelled interaction event.
+    pub const fn new(player_id: Uuid) -> Self {
+        Self {
+            player_id,
+            cancelled: false,
+        }
+    }
+    #[must_use]
+    /// Returns the player's UUID.
+    pub const fn player_id(&self) -> Uuid {
+        self.player_id
+    }
+    #[must_use]
+    /// Returns whether the interaction was cancelled.
+    pub const fn cancelled(&self) -> bool {
+        self.cancelled
+    }
+    /// Cancels or uncancels the interaction.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
 }
 
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
