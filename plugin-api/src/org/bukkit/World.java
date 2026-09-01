@@ -20,6 +20,12 @@ public interface World {
 
     Chunk getChunkAt(Location location);
 
+    default boolean isChunkLoaded(int x, int z) { return false; }
+
+    default Chunk[] getLoadedChunks() {
+        return new Chunk[0];
+    }
+
     long getTime();
 
     long getFullTime();

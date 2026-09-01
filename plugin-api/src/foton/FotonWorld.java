@@ -74,6 +74,22 @@ public final class FotonWorld implements World {
         return getChunkAt(location.getBlockX() >> 4, location.getBlockZ() >> 4);
     }
 
+    @Override public boolean isChunkLoaded(int x, int z) {
+        return Native.worldChunkLoaded(name, x, z);
+    }
+
+    @Override public Chunk[] getLoadedChunks() {
+        String[] coordinates = Native.worldLoadedChunkCoords(name);
+        java.util.ArrayList<Chunk> chunks = new java.util.ArrayList<>(coordinates.length);
+        for (String coordinate : coordinates) {
+            String[] parts = coordinate.split(",", -1);
+            try {
+                chunks.add(getChunkAt(Integer.parseInt(parts[0]), Integer.parseInt(parts[1])));
+            } catch (RuntimeException ignored) { }
+        }
+        return chunks.toArray(new Chunk[0]);
+    }
+
     @Override
     public long getTime() {
         long full = getFullTime();

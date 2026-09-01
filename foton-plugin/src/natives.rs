@@ -1191,6 +1191,24 @@ extern "system" fn world_entity_ids(
     string_array(&mut env, &ids)
 }
 
+/// `foton.Native.worldChunkLoaded`
+extern "system" fn world_chunk_loaded(
+    mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, x: jint, z: jint,
+) -> jboolean {
+    world(&mut env, &name).is_some_and(|world| world.is_chunk_loaded(x, z)) as jboolean
+}
+
+/// `foton.Native.worldLoadedChunkCoords`
+extern "system" fn world_loaded_chunk_coords(
+    mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>,
+) -> jobjectArray {
+    let coords = world(&mut env, &name).map_or_else(Vec::new, |world| {
+        world.loaded_chunk_positions().into_iter()
+            .map(|pos| format!("{},{}", pos.0.x, pos.0.y)).collect()
+    });
+    string_array(&mut env, &coords)
+}
+
 /// `foton.Native.scoreboardTeamEntries`
 extern "system" fn scoreboard_team_entries(
     mut env: JNIEnv<'_>, _class: JClass<'_>, world_name: JString<'_>, team_name: JString<'_>,
@@ -1395,6 +1413,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             world_entity_ids as *mut c_void,
         ),
+        method("worldChunkLoaded", "(Ljava/lang/String;II)Z", world_chunk_loaded as *mut c_void),
+        method("worldLoadedChunkCoords", "(Ljava/lang/String;)[Ljava/lang/String;", world_loaded_chunk_coords as *mut c_void),
         method("scoreboardTeamEntries", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;", scoreboard_team_entries as *mut c_void),
         method("scoreboardEntryTeam", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", scoreboard_entry_team as *mut c_void),
         method(

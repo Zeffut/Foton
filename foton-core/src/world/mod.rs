@@ -369,6 +369,28 @@ pub struct World {
 }
 
 impl World {
+    /// Returns chunk coordinates whose holders have reached vanilla Full status.
+    #[must_use]
+    pub fn loaded_chunk_positions(&self) -> Vec<ChunkPos> {
+        let mut positions = Vec::new();
+        self.chunk_map.chunks.iter_sync(|pos, holder| {
+            if !holder.is_status_disallowed(ChunkStatus::Full)
+                && holder.try_chunk(ChunkStatus::Full).is_some()
+            {
+                positions.push(*pos);
+            }
+            true
+        });
+        positions
+    }
+
+    /// Returns whether the requested chunk has an active Full-status holder.
+    #[must_use]
+    pub fn is_chunk_loaded(&self, x: i32, z: i32) -> bool {
+        self.loaded_chunk_positions()
+            .iter()
+            .any(|pos| pos.0.x == x && pos.0.y == z)
+    }
     /// Creates a new world with custom configuration.
     ///
     /// This allows specifying storage backend (disk or RAM-only) and other options.

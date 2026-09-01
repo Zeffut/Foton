@@ -42,6 +42,8 @@ public final class Native {
     public static native String[] onlinePlayerIds();
     public static native String[] worldPlayerIds(String world);
     public static native String[] worldEntityIds(String world);
+    public static native boolean worldChunkLoaded(String world, int x, int z);
+    public static native String[] worldLoadedChunkCoords(String world);
     public static native String[] scoreboardTeamEntries(String world, String team);
     public static native String scoreboardEntryTeam(String world, String entry);
 
