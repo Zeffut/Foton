@@ -107,6 +107,10 @@ final class Geometry {
 
         @Override public int getMaxHeight() { return 0; }
 
+        @Override public java.util.List<org.bukkit.entity.Player> getPlayers() {
+            return java.util.List.of();
+        }
+
         @Override public org.bukkit.World.Environment getEnvironment() {
             return org.bukkit.World.Environment.CUSTOM;
         }
