@@ -78,6 +78,15 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void kick(net.kyori.adventure.text.Component message) {
+        String text = message == null
+            ? ""
+            : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
+                .serialize(message);
+        kickPlayer(text);
+    }
+
+    @Override
     public org.bukkit.scoreboard.Scoreboard getScoreboard() {
         World world = getWorld();
         return new FotonScoreboard(world == null ? "" : world.getName());

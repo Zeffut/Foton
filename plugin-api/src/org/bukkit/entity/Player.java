@@ -25,6 +25,7 @@ public interface Player extends HumanEntity {
     void openBook(org.bukkit.inventory.ItemStack book);
     boolean teleport(org.bukkit.Location location);
     void kickPlayer(String message);
+    void kick(net.kyori.adventure.text.Component message);
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);
     void setPlayerListHeaderFooter(String header, String footer);
