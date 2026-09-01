@@ -507,29 +507,23 @@ impl LevelDataManager {
         self.dirty = true;
     }
 
+    /// Prepares dirty level data for an asynchronous disk write.
+    pub fn prepare_save(&mut self) -> io::Result<Option<(PathBuf, String)>> {
+        if !self.dirty { return Ok(None); }
+        let Some(path) = &self.path else { self.dirty = false; return Ok(None); };
+        self.data.save_game_rules();
+        let content = toml::to_string_pretty(&self.data)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.dirty = false;
+        Ok(Some((path.clone(), content)))
+    }
+
     /// Saves the level data to disk if it has been modified.
     pub async fn save(&mut self) -> io::Result<()> {
-        if !self.dirty {
-            return Ok(());
-        }
-
-        let Some(world_path) = &self.path else {
-            self.dirty = false;
-            return Ok(());
-        };
-        if let Some(parent) = world_path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
-
-        // Export runtime game rules to serializable format before saving
-        self.data.save_game_rules();
-
-        let content = toml::to_string_pretty(&self.data)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(world_path, content).await?;
-        self.dirty = false;
-
-        log::debug!("Saved level data to {}", world_path.display());
+        let Some((path, content)) = self.prepare_save()? else { return Ok(()); };
+        if let Some(parent) = path.parent() { fs::create_dir_all(parent).await?; }
+        fs::write(&path, content).await?;
+        log::debug!("Saved level data to {}", path.display());
         Ok(())
     }
 

@@ -1280,6 +1280,21 @@ extern "system" fn world_drop_item(mut env: JNIEnv<'_>, _class: JClass<'_>, name
     to_java(&mut env, Some(entity.uuid().to_string()))
 }
 
+/// `foton.Native.worldAutoSave`
+extern "system" fn world_auto_save(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jboolean {
+    world(&mut env, &name).is_some_and(|world| world.is_auto_save()) as jboolean
+}
+
+/// `foton.Native.setWorldAutoSave`
+extern "system" fn set_world_auto_save(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, value: jboolean) {
+    if let Some(world) = world(&mut env, &name) { world.set_auto_save(value != 0); }
+}
+
+/// `foton.Native.saveWorld`
+extern "system" fn save_world(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) {
+    if let Some(world) = world(&mut env, &name) { world.request_save(); }
+}
+
 /// `foton.Native.worldFolder`
 extern "system" fn world_folder(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jstring {
     let Some(path) = world(&mut env, &name).and_then(|world| world.world_folder()) else { return null_mut(); };
@@ -1509,6 +1524,9 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         method("worldChunkLoaded", "(Ljava/lang/String;II)Z", world_chunk_loaded as *mut c_void),
         method("worldLoadedChunkCoords", "(Ljava/lang/String;)[Ljava/lang/String;", world_loaded_chunk_coords as *mut c_void),
         method("worldFolder", "(Ljava/lang/String;)Ljava/lang/String;", world_folder as *mut c_void),
+        method("worldAutoSave", "(Ljava/lang/String;)Z", world_auto_save as *mut c_void),
+        method("setWorldAutoSave", "(Ljava/lang/String;Z)V", set_world_auto_save as *mut c_void),
+        method("saveWorld", "(Ljava/lang/String;)V", save_world as *mut c_void),
         method("worldDropItem", "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;", world_drop_item as *mut c_void),
         method("scoreboardTeamEntries", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;", scoreboard_team_entries as *mut c_void),
         method("scoreboardEntryTeam", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", scoreboard_entry_team as *mut c_void),

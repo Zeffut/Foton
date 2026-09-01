@@ -77,6 +77,10 @@ public final class FotonWorld implements World {
     @Override public boolean isChunkLoaded(int x, int z) {
         return Native.worldChunkLoaded(name, x, z);
     }
+    @Override public boolean isAutoSave() { return Native.worldAutoSave(name); }
+    @Override public void setAutoSave(boolean value) { Native.setWorldAutoSave(name, value); }
+    @Override public void save() { Native.saveWorld(name); }
+
     @Override public java.io.File getWorldFolder() {
         String path = Native.worldFolder(name);
         return path == null ? null : new java.io.File(path);

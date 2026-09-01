@@ -28,6 +28,9 @@ public interface World {
 
     default boolean isChunkLoaded(int x, int z) { return false; }
     default java.io.File getWorldFolder() { return null; }
+    default boolean isAutoSave() { return true; }
+    default void setAutoSave(boolean value) { }
+    default void save() { }
 
     default Chunk[] getLoadedChunks() {
         return new Chunk[0];

@@ -309,6 +309,7 @@ pub struct World {
     /// Whether the tick rate is running normally (not frozen/paused).
     /// When false, movement validation checks are skipped.
     tick_runs_normally: AtomicBool,
+    auto_save: AtomicBool,
     /// Whether vanilla's scheduled/chunk/block-event tick phase is active.
     handling_tick: AtomicBool,
     /// Ordered, duplicate-suppressing server block events awaiting execution.
@@ -529,6 +530,7 @@ impl World {
                 sea_level,
                 default_gamemode,
                 tick_runs_normally: AtomicBool::new(true),
+                auto_save: AtomicBool::new(true),
                 handling_tick: AtomicBool::new(false),
                 block_events: SyncMutex::new(BlockEventQueue::default()),
                 neighbor_updater: CollectingNeighborUpdater::new(max_chained_neighbor_updates),
@@ -811,6 +813,39 @@ impl World {
             chunk_map: chunk_map_timings,
             entity_tick,
         }
+    }
+
+    /// Returns whether this world participates in automatic saves.
+    #[must_use]
+    pub fn is_auto_save(&self) -> bool { self.auto_save.load(Ordering::Acquire) }
+
+    /// Enables or disables automatic saves for this world.
+    pub fn set_auto_save(&self, value: bool) { self.auto_save.store(value, Ordering::Release); }
+
+    /// Queues a non-blocking save of level data and dirty chunks.
+    pub fn request_save(self: &std::sync::Arc<Self>) {
+        let prepared = self.level_data.write().prepare_save();
+        let world = std::sync::Arc::clone(self);
+        self.chunk_map.chunk_runtime.handle().spawn(async move {
+            match prepared {
+                Ok(Some((path, content))) => {
+                    if let Some(parent) = path.parent() {
+                        if let Err(error) = tokio::fs::create_dir_all(parent).await {
+                            tracing::error!(%error, "World level-data directory save failed");
+                            return;
+                        }
+                    }
+                    if let Err(error) = tokio::fs::write(&path, content).await {
+                        tracing::error!(%error, "World level-data save failed");
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => tracing::error!(%error, "World level-data serialization failed"),
+            }
+            if let Err(error) = world.save_all_chunks().await {
+                tracing::error!(%error, "World chunk save failed");
+            }
+        });
     }
 
     /// Saves all dirty chunks in this world to disk.
