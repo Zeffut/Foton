@@ -72,6 +72,11 @@ public final class FotonPlayer implements Player {
         return Native.isOperator(id.toString());
     }
 
+    @Override
+    public int getLevel() {
+        return Native.experienceLevel(id.toString());
+    }
+
     /** The name a plugin may have changed, falling back to the real one.
      *
      * Bukkit stores this per player and Foton has nowhere to put it, so it is

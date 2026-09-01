@@ -50,6 +50,7 @@ public final class Native {
     public static native double health(String uuid);
     public static native void setHealth(String uuid, double health);
     public static native double maxHealth(String uuid);
+    public static native int experienceLevel(String uuid);
 
     /** The UUID of an online player with this name, or null. */
     public static native String playerIdByName(String name);

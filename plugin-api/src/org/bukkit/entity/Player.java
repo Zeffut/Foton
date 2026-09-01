@@ -14,6 +14,7 @@ public interface Player extends HumanEntity {
     void sendPluginMessage(Plugin source, String channel, byte[] message);
 
     boolean isOnline();
+    int getLevel();
     default boolean isSneaking() { return false; }
     void openBook(org.bukkit.inventory.ItemStack book);
     boolean teleport(org.bukkit.Location location);
