@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.UUID;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
-import org.bukkit.event.EventExecutor;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -21,6 +20,7 @@ import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.EventExecutor;
 
 /** Where a plugin's annotated handlers meet Foton's events.
  *
@@ -79,8 +79,15 @@ public final class EventBridge {
     public static void register(
             Listener listener, Class<?> event, EventPriority priority, EventExecutor executor,
             Plugin plugin) {
+        register(listener, event, priority, executor, plugin, false);
+    }
+
+    /** Registers one hand-built handler with its cancellation policy. */
+    public static void register(
+            Listener listener, Class<?> event, EventPriority priority, EventExecutor executor,
+            Plugin plugin, boolean ignoreCancelled) {
         handlers.computeIfAbsent(event, key -> new ArrayList<>())
-            .add(new Handler(listener, null, executor, priority, false, plugin));
+            .add(new Handler(listener, null, executor, priority, ignoreCancelled, plugin));
         handlers.get(event).sort(Comparator.comparing(handler -> handler.priority));
     }
 
@@ -98,7 +105,7 @@ public final class EventBridge {
         }
         boolean cancellable = event instanceof Cancellable;
         for (Handler handler : List.copyOf(list)) {
-            if (cancellable && ((Cancellable) event).isCancelled() && !handler.ignoreCancelled) {
+            if (cancellable && ((Cancellable) event).isCancelled() && handler.ignoreCancelled) {
                 continue;
             }
             try {

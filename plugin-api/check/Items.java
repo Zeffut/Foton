@@ -2,6 +2,7 @@ import java.util.List;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.BookMeta;
 
 /** Material, ItemStack, and the string one inventory slot crosses as. */
 final class Items {
@@ -75,6 +76,21 @@ final class Items {
             "equals does not");
         Checks.expect(!sword.isSimilar(new ItemStack(Material.DIAMOND_SWORD)),
             "a named sword is not a plain one");
+
+        BookMeta book = (BookMeta) new ItemStack(Material.WRITTEN_BOOK).getItemMeta();
+        Checks.expect(book.setTitle("A precise title"), "a short book title should fit");
+        book.setAuthor("Ada");
+        book.addPage("one", "two");
+        Checks.same(book.getTitle(), "A precise title", "a book keeps its title");
+        Checks.same(book.getAuthor(), "Ada", "a book keeps its author");
+        Checks.same(book.getPage(2), "two", "book pages are numbered from one");
+        Checks.expect(!book.setTitle("x".repeat(33)),
+            "a title longer than Bukkit's limit should be refused");
+        BookMeta bookCopy = book.clone();
+        bookCopy.setPage(1, "changed");
+        Checks.same(book.getPage(1), "one", "a cloned book has its own page list");
+        Checks.expect(!new ItemStack(Material.STONE).setItemMeta(book),
+            "book metadata should not attach to a stone");
     }
 
     /** One slot crosses JNI as a string, so the string has to survive. */

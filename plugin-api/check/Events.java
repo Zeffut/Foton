@@ -37,6 +37,34 @@ final class Events {
         Checks.expect(!foton.EventBridge.fireBlockBreak(id, 1, 2, 3, "minecraft:overworld"),
             "a cancelled break was reported as allowed");
 
+        int[] ignoredCancellation = {0};
+        org.bukkit.event.Listener listener = new org.bukkit.event.Listener() {};
+        org.bukkit.plugin.Plugin owner = foton.PluginHost.all()[0];
+        org.bukkit.Bukkit.getPluginManager().registerEvent(
+            org.bukkit.event.player.AsyncPlayerChatEvent.class,
+            listener,
+            org.bukkit.event.EventPriority.NORMAL,
+            (registered, event) -> ignoredCancellation[0]++,
+            owner,
+            true);
+        org.bukkit.event.player.AsyncPlayerChatEvent cancelled =
+            new org.bukkit.event.player.AsyncPlayerChatEvent(null, "cancelled");
+        cancelled.setCancelled(true);
+        org.bukkit.Bukkit.getPluginManager().callEvent(cancelled);
+        Checks.same(ignoredCancellation[0], 0,
+            "registerEvent(ignoreCancelled=true) should ignore a cancelled event");
+
+        org.bukkit.Bukkit.getPluginManager().registerEvent(
+            org.bukkit.event.player.AsyncPlayerChatEvent.class,
+            listener,
+            org.bukkit.event.EventPriority.NORMAL,
+            (registered, event) -> ignoredCancellation[0]++,
+            owner,
+            false);
+        org.bukkit.Bukkit.getPluginManager().callEvent(cancelled);
+        Checks.same(ignoredCancellation[0], 1,
+            "registerEvent(ignoreCancelled=false) should receive a cancelled event");
+
         scheduler();
     }
 

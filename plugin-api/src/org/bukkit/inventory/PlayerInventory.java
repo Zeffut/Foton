@@ -6,6 +6,10 @@ public interface PlayerInventory extends Inventory {
 
     void setItemInMainHand(ItemStack item);
 
+    ItemStack getItemInHand();
+
+    void setItemInHand(ItemStack item);
+
     ItemStack getItemInOffHand();
 
     void setItemInOffHand(ItemStack item);

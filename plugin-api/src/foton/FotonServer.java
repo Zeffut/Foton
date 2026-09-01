@@ -9,6 +9,7 @@ import java.util.logging.Logger;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.Plugin;
@@ -144,7 +145,7 @@ public final class FotonServer implements Server {
     }
 
     @Override
-    public CommandSender getConsoleSender() {
+    public ConsoleCommandSender getConsoleSender() {
         return ConsoleSender.INSTANCE;
     }
 
@@ -245,9 +246,20 @@ public final class FotonServer implements Server {
                 Class<? extends org.bukkit.event.Event> event,
                 Listener listener,
                 org.bukkit.event.EventPriority priority,
-                org.bukkit.event.EventExecutor executor,
+                org.bukkit.plugin.EventExecutor executor,
                 Plugin plugin) {
             EventBridge.register(listener, event, priority, executor, plugin);
+        }
+
+        @Override public void registerEvent(
+                Class<? extends org.bukkit.event.Event> event,
+                Listener listener,
+                org.bukkit.event.EventPriority priority,
+                org.bukkit.plugin.EventExecutor executor,
+                Plugin plugin,
+                boolean ignoreCancelled) {
+            EventBridge.register(
+                listener, event, priority, executor, plugin, ignoreCancelled);
         }
     }
 

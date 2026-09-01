@@ -22,6 +22,14 @@ public interface PluginManager {
         Class<? extends org.bukkit.event.Event> event,
         org.bukkit.event.Listener listener,
         org.bukkit.event.EventPriority priority,
-        org.bukkit.event.EventExecutor executor,
+        EventExecutor executor,
         Plugin plugin);
+
+    void registerEvent(
+        Class<? extends org.bukkit.event.Event> event,
+        org.bukkit.event.Listener listener,
+        org.bukkit.event.EventPriority priority,
+        EventExecutor executor,
+        Plugin plugin,
+        boolean ignoreCancelled);
 }

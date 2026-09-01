@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.logging.Logger;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.ServicesManager;
@@ -43,7 +44,7 @@ public interface Server {
 
     Logger getLogger();
 
-    CommandSender getConsoleSender();
+    ConsoleCommandSender getConsoleSender();
 
     List<World> getWorlds();
 

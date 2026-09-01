@@ -49,27 +49,24 @@ public class Location implements Cloneable {
         return x;
     }
 
-    public Location setX(double value) {
+    public void setX(double value) {
         this.x = value;
-        return this;
     }
 
     public double getY() {
         return y;
     }
 
-    public Location setY(double value) {
+    public void setY(double value) {
         this.y = value;
-        return this;
     }
 
     public double getZ() {
         return z;
     }
 
-    public Location setZ(double value) {
+    public void setZ(double value) {
         this.z = value;
-        return this;
     }
 
     /** The block containing this point. Floor, not truncation: -0.5 is in
@@ -91,18 +88,26 @@ public class Location implements Cloneable {
         return yaw;
     }
 
-    public Location setYaw(float value) {
+    public void setYaw(float value) {
         this.yaw = value;
-        return this;
     }
 
     public float getPitch() {
         return pitch;
     }
 
-    public Location setPitch(float value) {
+    public void setPitch(float value) {
         this.pitch = value;
-        return this;
+    }
+
+    /** A unit vector pointing where this location faces. */
+    public Vector getDirection() {
+        double pitchRadians = Math.toRadians(pitch);
+        double horizontal = Math.cos(pitchRadians);
+        return new Vector(
+            -horizontal * Math.sin(Math.toRadians(yaw)),
+            -Math.sin(pitchRadians),
+            horizontal * Math.cos(Math.toRadians(yaw)));
     }
 
     public Location add(double dx, double dy, double dz) {

@@ -73,17 +73,18 @@ public class SimpleItemMeta implements ItemMeta {
 
     @Override
     public SimpleItemMeta clone() {
-        SimpleItemMeta copy = new SimpleItemMeta();
-        copy.displayName = displayName;
-        copy.lore = lore == null ? null : new ArrayList<>(lore);
-        copy.customModelData = customModelData;
-        copy.unbreakable = unbreakable;
-        return copy;
+        try {
+            SimpleItemMeta copy = (SimpleItemMeta) super.clone();
+            copy.lore = lore == null ? null : new ArrayList<>(lore);
+            return copy;
+        } catch (CloneNotSupportedException impossible) {
+            throw new AssertionError(impossible);
+        }
     }
 
     @Override
     public boolean equals(Object other) {
-        if (!(other instanceof SimpleItemMeta)) {
+        if (other == null || getClass() != other.getClass()) {
             return false;
         }
         SimpleItemMeta meta = (SimpleItemMeta) other;

@@ -23,4 +23,23 @@ public interface World {
     long getTime();
 
     long getFullTime();
+
+    Environment getEnvironment();
+
+    enum Environment {
+        NETHER(-1),
+        NORMAL(0),
+        THE_END(1),
+        CUSTOM(Integer.MIN_VALUE);
+
+        private final int id;
+
+        Environment(int id) {
+            this.id = id;
+        }
+
+        public int getId() {
+            return id;
+        }
+    }
 }

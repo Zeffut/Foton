@@ -65,12 +65,25 @@ public class ItemStack implements Cloneable {
      * make plugins written against it silently wrong instead.
      */
     public ItemMeta getItemMeta() {
-        return meta == null ? new SimpleItemMeta() : meta.clone();
+        return meta == null ? emptyMeta() : meta.clone();
     }
 
     public boolean setItemMeta(ItemMeta value) {
+        if (value instanceof org.bukkit.inventory.meta.BookMeta && !isBook()) {
+            return false;
+        }
         this.meta = value == null ? null : value.clone();
         return true;
+    }
+
+    private ItemMeta emptyMeta() {
+        return isBook()
+            ? new org.bukkit.inventory.meta.SimpleBookMeta()
+            : new SimpleItemMeta();
+    }
+
+    private boolean isBook() {
+        return type == Material.WRITABLE_BOOK || type == Material.WRITTEN_BOOK;
     }
 
     /** Whether two stacks are the same item, ignoring how many. */

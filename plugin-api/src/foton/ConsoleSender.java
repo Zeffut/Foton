@@ -1,9 +1,9 @@
 package foton;
 
-import org.bukkit.command.CommandSender;
+import org.bukkit.command.ConsoleCommandSender;
 
 /** The console, as a plugin's command handler sees it. */
-public final class ConsoleSender implements CommandSender {
+public final class ConsoleSender implements ConsoleCommandSender {
     public static final ConsoleSender INSTANCE = new ConsoleSender();
 
     private ConsoleSender() {}

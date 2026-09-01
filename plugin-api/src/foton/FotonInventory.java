@@ -101,6 +101,16 @@ public final class FotonInventory implements PlayerInventory {
     }
 
     @Override
+    public ItemStack getItemInHand() {
+        return getItemInMainHand();
+    }
+
+    @Override
+    public void setItemInHand(ItemStack item) {
+        setItemInMainHand(item);
+    }
+
+    @Override
     public ItemStack getItemInOffHand() {
         return getItem(OFFHAND);
     }

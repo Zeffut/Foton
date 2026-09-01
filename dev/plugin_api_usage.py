@@ -53,6 +53,11 @@ SURFACES = {
     "org/bukkit/craftbukkit/": "internal",
 }
 
+# A specific implementation package must win over its public-package parent.
+# `org/bukkit/craftbukkit` starts with `org/bukkit`, so insertion order would
+# otherwise classify the implementation internals as API.
+SURFACE_PREFIXES = sorted(SURFACES.items(), key=lambda entry: len(entry[0]), reverse=True)
+
 # Constant pool tags, from the JVM specification, table 4.4-B.
 TAG_UTF8 = 1
 TAG_CLASS = 7
@@ -161,7 +166,7 @@ def references(data):
         if not owner:
             continue
         surface = next(
-            (kind for prefix, kind in SURFACES.items() if owner.startswith(prefix)),
+            (kind for prefix, kind in SURFACE_PREFIXES if owner.startswith(prefix)),
             None,
         )
         if surface is None:
@@ -169,10 +174,11 @@ def references(data):
         entry = pool.get(name_and_type_index)
         if not entry or entry[0] != TAG_NAME_AND_TYPE:
             continue
-        name_index = struct.unpack(">HH", entry[1])[0]
+        name_index, descriptor_index = struct.unpack(">HH", entry[1])
         member = _utf8(pool, name_index)
-        if member:
-            yield surface, f"{owner}#{member}"
+        descriptor = _utf8(pool, descriptor_index)
+        if member and descriptor:
+            yield surface, f"{owner}#{member}{descriptor}"
 
 
 # What a class answers because a JDK supertype does. Those class files are not
@@ -181,21 +187,41 @@ def references(data):
 # this, every such call would be counted as a gap that does not exist and
 # phantom members would sit near the top of the ranking.
 FROM_OBJECT = frozenset({
-    "toString", "equals", "hashCode", "getClass", "clone", "finalize",
-    "notify", "notifyAll", "wait",
+    "toString()Ljava/lang/String;",
+    "equals(Ljava/lang/Object;)Z",
+    "hashCode()I",
+    "getClass()Ljava/lang/Class;",
+    "clone()Ljava/lang/Object;",
+    "finalize()V",
+    "notify()V",
+    "notifyAll()V",
+    "wait()V",
+    "wait(J)V",
+    "wait(JI)V",
 })
 
 FROM_JDK = {
     "java/lang/Object": FROM_OBJECT,
     "java/lang/Enum": FROM_OBJECT | {
-        "name", "ordinal", "compareTo", "getDeclaringClass", "describeConstable",
-        "values", "valueOf",
+        "name()Ljava/lang/String;",
+        "ordinal()I",
+        "compareTo(Ljava/lang/Enum;)I",
+        "getDeclaringClass()Ljava/lang/Class;",
+        "describeConstable()Ljava/util/Optional;",
     },
     "java/lang/Record": FROM_OBJECT,
     "java/lang/Throwable": FROM_OBJECT | {
-        "getMessage", "getLocalizedMessage", "getCause", "printStackTrace",
-        "getStackTrace", "initCause", "addSuppressed", "getSuppressed",
-        "fillInStackTrace",
+        "getMessage()Ljava/lang/String;",
+        "getLocalizedMessage()Ljava/lang/String;",
+        "getCause()Ljava/lang/Throwable;",
+        "printStackTrace()V",
+        "printStackTrace(Ljava/io/PrintStream;)V",
+        "printStackTrace(Ljava/io/PrintWriter;)V",
+        "getStackTrace()[Ljava/lang/StackTraceElement;",
+        "initCause(Ljava/lang/Throwable;)Ljava/lang/Throwable;",
+        "addSuppressed(Ljava/lang/Throwable;)V",
+        "getSuppressed()[Ljava/lang/Throwable;",
+        "fillInStackTrace()Ljava/lang/Throwable;",
     },
 }
 
@@ -224,8 +250,9 @@ def declares(data):
         offset += 2
         for _ in range(count):
             name = _utf8(pool, struct.unpack_from(">H", data, offset + 2)[0])
-            if name:
-                members.add(name)
+            descriptor = _utf8(pool, struct.unpack_from(">H", data, offset + 4)[0])
+            if name and descriptor:
+                members.add(f"{name}{descriptor}")
             offset += 6
             attributes = struct.unpack_from(">H", data, offset)[0]
             offset += 2
@@ -291,13 +318,15 @@ def gaps(corpus, api_jar):
     missing_audience = collections.Counter()
     for jar in sorted(corpus.glob("*.jar")):
         found, _ = scan(jar)
+        if found["internal"]:
+            continue
         wanted = found["api"]
         if not wanted:
             continue
         missing = set()
         for member in wanted:
-            owner, name = member.split("#", 1)
-            if name not in FROM_OBJECT and name not in have.get(owner, ()):
+            owner, signature = member.split("#", 1)
+            if signature not in FROM_OBJECT and signature not in have.get(owner, ()):
                 missing.add(member)
         per_plugin[jar.name] = (len(wanted), missing)
         for member in missing:

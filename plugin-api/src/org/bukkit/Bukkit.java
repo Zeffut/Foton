@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.logging.Logger;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.scheduler.BukkitScheduler;
@@ -88,7 +89,7 @@ public final class Bukkit {
         return server.getLogger();
     }
 
-    public static CommandSender getConsoleSender() {
+    public static ConsoleCommandSender getConsoleSender() {
         return server.getConsoleSender();
     }
 

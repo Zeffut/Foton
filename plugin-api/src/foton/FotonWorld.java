@@ -86,6 +86,16 @@ public final class FotonWorld implements World {
     }
 
     @Override
+    public Environment getEnvironment() {
+        return switch (name) {
+            case "minecraft:overworld" -> Environment.NORMAL;
+            case "minecraft:the_nether" -> Environment.NETHER;
+            case "minecraft:the_end" -> Environment.THE_END;
+            default -> Environment.CUSTOM;
+        };
+    }
+
+    @Override
     public boolean equals(Object other) {
         return other instanceof FotonWorld world && name.equals(world.name);
     }

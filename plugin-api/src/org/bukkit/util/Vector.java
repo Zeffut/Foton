@@ -84,6 +84,18 @@ public class Vector implements Cloneable {
         return this;
     }
 
+    public Vector multiply(int factor) {
+        return multiply((double) factor);
+    }
+
+    public org.bukkit.Location toLocation(org.bukkit.World world) {
+        return new org.bukkit.Location(world, x, y, z);
+    }
+
+    public org.bukkit.Location toLocation(org.bukkit.World world, float yaw, float pitch) {
+        return new org.bukkit.Location(world, x, y, z, yaw, pitch);
+    }
+
     public double length() {
         return Math.sqrt(lengthSquared());
     }
