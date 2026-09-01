@@ -6,6 +6,7 @@ use super::{
 };
 
 use crate::event::{PlayerJoinEvent, PlayerQuitEvent};
+use crate::world::PlayerMap;
 
 impl Server {
     /// Logs and broadcasts a system chat message to online players.
@@ -88,6 +89,12 @@ impl Server {
     /// The event is fired here rather than at the four call sites because this
     /// is where the message is decided, and changing or silencing it is the
     /// only thing a listener gets to do about a join.
+    /// Everyone currently online.
+    #[must_use]
+    pub const fn online_players(&self) -> &PlayerMap {
+        &self.online_players
+    }
+
     pub(super) fn broadcast_player_join_message(
         &self,
         player: &Arc<Player>,

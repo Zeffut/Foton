@@ -12,6 +12,7 @@
 use std::env::{args_os, var_os};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Weak;
 
 use foton_plugin::{PluginHost, PluginHostConfig};
 
@@ -35,7 +36,9 @@ fn main() -> ExitCode {
         plugin_directory: plugins.clone(),
     };
 
-    let host = match PluginHost::start(&config) {
+    // No server: the natives answer as they would for one that has
+    // shut down, which is what this example is for.
+    let host = match PluginHost::start(&config, &Weak::new()) {
         Ok(host) => host,
         Err(error) => {
             eprintln!("the plugin host did not start: {error}");

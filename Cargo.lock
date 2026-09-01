@@ -929,10 +929,12 @@ version = "0.15.2+mc26.2"
 name = "foton-plugin"
 version = "0.15.2+mc26.2"
 dependencies = [
+ "foton-core",
  "jni 0.21.1",
  "libloading",
  "tempfile",
  "thiserror 2.0.19",
+ "uuid",
 ]
 
 [[package]]
