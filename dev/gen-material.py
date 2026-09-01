@@ -41,9 +41,11 @@ void volatile while
 
 
 def read():
-    """Every material, as {name: (is_block, is_item, stack_size)}."""
+    """Every material, as {name: (is_block, is_item, stack_size, is_solid)}."""
     items = json.loads(ITEMS.read_text(encoding="utf-8"))["items"]
-    blocks = json.loads(BLOCKS.read_text(encoding="utf-8"))["blocks"]
+    block_data = json.loads(BLOCKS.read_text(encoding="utf-8"))
+    blocks = block_data["blocks"]
+    shapes = block_data["shapes"]
 
     stacks = {}
     for item in items:
@@ -52,8 +54,31 @@ def read():
 
     block_names = {block["name"] for block in blocks}
     materials = {}
+    for block in blocks:
+        properties = block["behavior_properties"]
+        if properties["forceSolidOn"]:
+            solid = True
+        elif properties["forceSolidOff"] or properties["dynamicShape"]:
+            solid = False
+        else:
+            boxes = [shapes[index] for index in block["collision_shapes"]["default"]]
+            if not boxes:
+                solid = False
+            else:
+                minimum = [min(box["min"][axis] for box in boxes) for axis in range(3)]
+                maximum = [max(box["max"][axis] for box in boxes) for axis in range(3)]
+                size = sum(maximum[axis] - minimum[axis] for axis in range(3)) / 3.0
+                solid = size >= 0.7291666666666666 or maximum[1] - minimum[1] >= 1.0
+        block["_is_solid"] = solid
+
+    solids = {block["name"]: block["_is_solid"] for block in blocks}
     for name in sorted(block_names | set(stacks)):
-        materials[name] = (name in block_names, name in stacks, stacks.get(name, 0))
+        materials[name] = (
+            name in block_names,
+            name in stacks,
+            stacks.get(name, 0),
+            solids.get(name, False),
+        )
     return materials
 
 
@@ -84,8 +109,10 @@ def render(materials):
         "public enum Material {",
     ]
 
-    for name, (is_block, is_item, stack) in materials.items():
+    for name, (is_block, is_item, stack, is_solid) in materials.items():
         flags = (1 if is_block else 0) | (2 if is_item else 0)
+        if is_solid:
+            flags |= 4
         lines.append(f'    {constant(name)}("{name}", {flags}, {stack}),')
     lines[-1] = lines[-1][:-1] + ";"
 
@@ -123,6 +150,11 @@ def render(materials):
         "     */",
         "    public boolean isItem() {",
         "        return (flags & 2) != 0;",
+        "    }",
+        "",
+        "    /** Whether the default block state has vanilla's legacy solid shape. */",
+        "    public boolean isSolid() {",
+        "        return (flags & 4) != 0;",
         "    }",
         "",
         "    public boolean isAir() {",
