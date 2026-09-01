@@ -14,6 +14,8 @@ use foton_login::{JavaTcpClient, ServerConnectionSession};
 use tokio::{net::TcpListener, runtime::Runtime, select};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
+/// Command-line arguments.
+pub mod args;
 /// Server configuration module.
 pub mod config;
 /// A module for logging utilities.
