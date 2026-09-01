@@ -81,6 +81,24 @@ public final class FotonBlock implements Block {
     }
 
     @Override
+    public Block getRelative(org.bukkit.block.BlockFace face) {
+        return getRelative(face, 1);
+    }
+
+    @Override
+    public Block getRelative(org.bukkit.block.BlockFace face, int distance) {
+        return face == null
+            ? this
+            : getRelative(face.getModX() * distance, face.getModY() * distance,
+                face.getModZ() * distance);
+    }
+
+    @Override
+    public Block getRelative(int dx, int dy, int dz) {
+        return new FotonBlock(world, x + dx, y + dy, z + dz);
+    }
+
+    @Override
     public boolean equals(Object other) {
         return other instanceof FotonBlock block
             && x == block.x && y == block.y && z == block.z

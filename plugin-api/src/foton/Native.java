@@ -76,6 +76,7 @@ public final class Native {
     /** Whether a player is an operator. */
     public static native boolean isOperator(String uuid);
 
+
     /** Plays a sound at a point in a world, for everyone who can hear it. */
     public static native void playSound(
         String world, double x, double y, double z, String sound, float volume, float pitch);

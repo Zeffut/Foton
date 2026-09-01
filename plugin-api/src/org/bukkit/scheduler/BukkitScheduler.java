@@ -19,6 +19,15 @@ public interface BukkitScheduler {
     BukkitTask runTaskTimerAsynchronously(
         Plugin plugin, Runnable task, long delayTicks, long periodTicks);
 
+    /** Bukkit's oldest scheduling call, still written by plugins that have
+     * been maintained for a decade. It is runTaskLater with an int for a
+     * handle instead of a task. */
+    int scheduleSyncDelayedTask(Plugin plugin, Runnable task, long delayTicks);
+
+    int scheduleSyncDelayedTask(Plugin plugin, Runnable task);
+
+    int scheduleSyncRepeatingTask(Plugin plugin, Runnable task, long delayTicks, long periodTicks);
+
     void cancelTask(int taskId);
     void cancelTasks(Plugin plugin);
 }

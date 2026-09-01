@@ -26,4 +26,10 @@ public interface Block {
     BlockState getState();
 
     boolean isEmpty();
+
+    Block getRelative(BlockFace face);
+
+    Block getRelative(BlockFace face, int distance);
+
+    Block getRelative(int x, int y, int z);
 }

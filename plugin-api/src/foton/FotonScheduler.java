@@ -116,6 +116,22 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     @Override
+    public int scheduleSyncDelayedTask(Plugin plugin, Runnable task, long delayTicks) {
+        return runTaskLater(plugin, task, delayTicks).getTaskId();
+    }
+
+    @Override
+    public int scheduleSyncDelayedTask(Plugin plugin, Runnable task) {
+        return runTask(plugin, task).getTaskId();
+    }
+
+    @Override
+    public int scheduleSyncRepeatingTask(
+            Plugin plugin, Runnable task, long delayTicks, long periodTicks) {
+        return runTaskTimer(plugin, task, delayTicks, periodTicks).getTaskId();
+    }
+
+    @Override
     public void cancelTask(int taskId) {
         for (Scheduled task : pending) {
             if (task.id == taskId) {

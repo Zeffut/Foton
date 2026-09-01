@@ -214,6 +214,28 @@ public final class FotonServer implements Server {
         @Override public void callEvent(org.bukkit.event.Event event) {
             EventBridge.dispatch(event);
         }
+
+        @Override public boolean isPluginEnabled(String name) {
+            Plugin plugin = PluginHost.byName(name);
+            return plugin != null && plugin.isEnabled();
+        }
+
+        @Override public boolean isPluginEnabled(Plugin plugin) {
+            return plugin != null && plugin.isEnabled();
+        }
+
+        @Override public void disablePlugin(Plugin plugin) {
+            PluginHost.disable(plugin);
+        }
+
+        @Override public void registerEvent(
+                Class<? extends org.bukkit.event.Event> event,
+                Listener listener,
+                org.bukkit.event.EventPriority priority,
+                org.bukkit.event.EventExecutor executor,
+                Plugin plugin) {
+            EventBridge.register(listener, event, priority, executor, plugin);
+        }
     }
 
     /** Custom payloads.

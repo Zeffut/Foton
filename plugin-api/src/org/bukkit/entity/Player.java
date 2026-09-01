@@ -20,6 +20,13 @@ public interface Player extends Entity {
 
     boolean isOp();
 
+    String getDisplayName();
+
+    void setDisplayName(String name);
+
+    /** The big text in the middle of the screen. Times are in ticks. */
+    void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut);
+
     void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume, float pitch);
 
     void playSound(org.bukkit.Location at, String sound, float volume, float pitch);

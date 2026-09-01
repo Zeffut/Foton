@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Cancellable;
+import org.bukkit.event.EventExecutor;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -61,7 +62,28 @@ public final class EventBridge {
         }
     }
 
-    /** Runs every handler for one event, in priority order. */
+    /** Forgets everything one listener object registered. */
+    public static void unregister(Listener listener) {
+        for (List<Handler> list : handlers.values()) {
+            list.removeIf(handler -> handler.listener == listener);
+        }
+    }
+
+    /** Forgets every handler on the server. */
+    public static void unregisterAll() {
+        handlers.clear();
+    }
+
+    /** Registers one handler by hand, for a plugin that builds its listeners
+     * at runtime rather than annotating them. */
+    public static void register(
+            Listener listener, Class<?> event, EventPriority priority, EventExecutor executor,
+            Plugin plugin) {
+        handlers.computeIfAbsent(event, key -> new ArrayList<>())
+            .add(new Handler(listener, null, executor, priority, false, plugin));
+        handlers.get(event).sort(Comparator.comparing(handler -> handler.priority));
+    }
+
     /** Runs every handler registered for an event's type, in priority order.
      *
      * Public because a plugin can fire its own events through
@@ -80,13 +102,13 @@ public final class EventBridge {
                 continue;
             }
             try {
-                handler.method.invoke(handler.listener, event);
+                handler.call(event);
             } catch (Throwable error) {
                 // One plugin throwing must not stop the others, and must not
                 // reach Foton: an exception crossing JNI is a crash, not an
                 // error message.
                 System.out.println("[events] " + handler.plugin.getName() + " threw in "
-                    + handler.method.getName() + ": " + rootOf(error));
+                    + handler.name() + ": " + rootOf(error));
             }
         }
     }
@@ -147,20 +169,45 @@ public final class EventBridge {
         return 0;
     }
 
+    /** One handler, however the plugin gave it to us.
+     *
+     * An annotated method and a hand-registered executor are the same thing to
+     * everyone downstream, so they are the same thing here: `call` is what
+     * dispatch uses and `name` is what a log line says.
+     */
     private static final class Handler {
         final Listener listener;
         final Method method;
+        final EventExecutor executor;
         final EventPriority priority;
         final boolean ignoreCancelled;
         final Plugin plugin;
 
         Handler(Listener listener, Method method, EventPriority priority,
                 boolean ignoreCancelled, Plugin plugin) {
+            this(listener, method, null, priority, ignoreCancelled, plugin);
+        }
+
+        Handler(Listener listener, Method method, EventExecutor executor, EventPriority priority,
+                boolean ignoreCancelled, Plugin plugin) {
             this.listener = listener;
             this.method = method;
+            this.executor = executor;
             this.priority = priority;
             this.ignoreCancelled = ignoreCancelled;
             this.plugin = plugin;
+        }
+
+        void call(Object event) throws Throwable {
+            if (executor != null) {
+                executor.execute(listener, (org.bukkit.event.Event) event);
+            } else {
+                method.invoke(listener, event);
+            }
+        }
+
+        String name() {
+            return method == null ? "a registered handler" : method.getName();
         }
     }
 

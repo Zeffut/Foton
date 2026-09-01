@@ -72,6 +72,49 @@ public final class FotonPlayer implements Player {
         return Native.isOperator(id.toString());
     }
 
+    /** The name a plugin may have changed, falling back to the real one.
+     *
+     * Bukkit stores this per player and Foton has nowhere to put it, so it is
+     * kept beside the handle. A plugin that sets it on one handle and reads it
+     * from another gets the real name back -- which is wrong, and is the
+     * honest consequence of a handle that is only a UUID. Foton needs a place
+     * to store it before this can be right.
+     */
+    @Override
+    public String getDisplayName() {
+        String chosen = DISPLAY_NAMES.get(id);
+        return chosen == null ? getName() : chosen;
+    }
+
+    @Override
+    public void setDisplayName(String name) {
+        if (name == null) {
+            DISPLAY_NAMES.remove(id);
+        } else {
+            DISPLAY_NAMES.put(id, name);
+        }
+    }
+
+    private static final java.util.Map<UUID, String> DISPLAY_NAMES =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Shows nothing, and says so once.
+     *
+     * Foton has no title packet -- not an unwired one, none at all -- so there
+     * is nothing to send. The method exists because fifteen of the fifty-nine
+     * plugins surveyed call it, and a plugin that calls a method the API does
+     * not have fails to load at all rather than losing one message.
+     */
+    @Override
+    public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        if (TITLES_WARNED.compareAndSet(false, true)) {
+            System.out.println("[player] sendTitle does nothing: Foton has no title packet yet");
+        }
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean TITLES_WARNED =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
     @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume,
             float pitch) {

@@ -80,6 +80,24 @@ public final class PluginHost {
         return true;
     }
 
+    /** Disables one plugin, and lets go of what it claimed. */
+    public static void disable(Plugin plugin) {
+        if (plugin == null || !loaded.remove(plugin)) {
+            return;
+        }
+        CommandMap.forget(plugin);
+        EventBridge.unregister(plugin);
+        try {
+            plugin.onDisable();
+        } catch (Throwable error) {
+            System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);
+        }
+        if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
+            java.setEnabled(false);
+        }
+        EventBridge.dispatch(new org.bukkit.event.server.PluginDisableEvent(plugin));
+    }
+
     /** The plugin with this name, or null. Case-insensitive, as Bukkit is. */
     public static Plugin byName(String name) {
         if (name == null) {

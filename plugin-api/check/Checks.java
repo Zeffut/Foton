@@ -10,6 +10,7 @@ public final class Checks {
         Config.check();
         Geometry.check();
         Items.check();
+        Colors.check();
         Commands.check();
         foton.PluginHost.disableAll();
         Checks.expect(foton.CommandMap.get("fixture") == null,
@@ -17,7 +18,7 @@ public final class Checks {
         YamlCheck.check();
         System.out.println(
             "plugin API checked: events, scheduler, YAML, configuration, geometry,\n"
-                + "    items and commands");
+                + "    items, colors and commands");
     }
 
     static void expect(boolean condition, String what) {
