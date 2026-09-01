@@ -24,6 +24,8 @@ public interface Inventory {
 
     void setItem(int slot, ItemStack item);
 
+    java.util.HashMap<Integer, ItemStack> addItem(ItemStack... items);
+
     ItemStack[] getContents();
 
     void setContents(ItemStack[] items);

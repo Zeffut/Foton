@@ -44,6 +44,40 @@ public final class FotonInventory implements PlayerInventory {
     }
 
     @Override
+    public java.util.HashMap<Integer, ItemStack> addItem(ItemStack... items) {
+        java.util.HashMap<Integer, ItemStack> leftovers = new java.util.HashMap<>();
+        if (items == null) return leftovers;
+        for (int index = 0; index < items.length; index++) {
+            ItemStack incoming = items[index] == null ? null : items[index].clone();
+            if (incoming == null || incoming.getType().isAir() || incoming.getAmount() <= 0) continue;
+            for (int slot = 0; slot < getSize() && incoming.getAmount() > 0; slot++) {
+                ItemStack current = getItem(slot);
+                if (current != null && current.isSimilar(incoming)) {
+                    int space = current.getMaxStackSize() - current.getAmount();
+                    if (space > 0) {
+                        int moved = Math.min(space, incoming.getAmount());
+                        current.setAmount(current.getAmount() + moved);
+                        incoming.setAmount(incoming.getAmount() - moved);
+                        setItem(slot, current);
+                    }
+                }
+            }
+            for (int slot = 0; slot < getSize() && incoming.getAmount() > 0; slot++) {
+                ItemStack current = getItem(slot);
+                if (current == null || current.getType().isAir() || current.getAmount() <= 0) {
+                    int moved = Math.min(incoming.getMaxStackSize(), incoming.getAmount());
+                    ItemStack placed = incoming.clone();
+                    placed.setAmount(moved);
+                    setItem(slot, placed);
+                    incoming.setAmount(incoming.getAmount() - moved);
+                }
+            }
+            if (incoming.getAmount() > 0) leftovers.put(index, incoming);
+        }
+        return leftovers;
+    }
+
+    @Override
     public ItemStack[] getContents() {
         ItemStack[] contents = new ItemStack[SIZE];
         for (int slot = 0; slot < SIZE; slot++) {
