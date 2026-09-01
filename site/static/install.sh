@@ -18,8 +18,13 @@ red() { printf '\033[31m%s\033[0m\n' "$1" >&2; }
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 die() { red "error: $1"; exit 1; }
 
+# /dev/tty can exist and still not be openable -- a detached session, a cron
+# job, a container without a terminal. `[ -r /dev/tty ]` says yes there and
+# the open then fails, so the test is an actual open, not a permission check.
 have_tty=0
-[ -r /dev/tty ] && have_tty=1
+if (exec 3< /dev/tty) 2>/dev/null; then
+  have_tty=1
+fi
 
 # ask <prompt> <default> -- echoes the answer
 ask() {
@@ -27,8 +32,13 @@ ask() {
     printf '%s' "$2"
     return
   fi
-  printf '%s [%s]: ' "$1" "$2" > /dev/tty
-  read -r reply < /dev/tty || reply=""
+  printf '%s [%s]: ' "$1" "$2" > /dev/tty 2>/dev/null || {
+    printf '%s' "$2"
+    return
+  }
+  # A read that fails mid-run must fall back rather than kill the install.
+  reply=""
+  read -r reply < /dev/tty 2>/dev/null || reply=""
   [ -n "$reply" ] && printf '%s' "$reply" || printf '%s' "$2"
 }
 
