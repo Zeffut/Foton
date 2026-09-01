@@ -13,6 +13,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicesManager;
+import org.bukkit.plugin.SimpleServicesManager;
 import org.bukkit.plugin.messaging.Messenger;
 import org.bukkit.plugin.messaging.PluginMessageListener;
 import org.bukkit.scheduler.BukkitScheduler;
@@ -22,6 +24,7 @@ public final class FotonServer implements Server {
     private final PluginManager plugins = new Plugins();
     private final Messenger channels = new Channels();
     private final BukkitScheduler scheduler = new FotonScheduler();
+    private final ServicesManager services = new SimpleServicesManager();
     private final Logger logger = Logger.getLogger("Foton");
 
     @Override
@@ -37,6 +40,16 @@ public final class FotonServer implements Server {
     @Override
     public BukkitScheduler getScheduler() {
         return scheduler;
+    }
+
+    @Override
+    public ServicesManager getServicesManager() {
+        return services;
+    }
+
+    @Override
+    public boolean isPrimaryThread() {
+        return Native.isPrimaryThread();
     }
 
     @Override

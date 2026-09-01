@@ -86,6 +86,7 @@ public final class PluginHost {
             return;
         }
         CommandMap.forget(plugin);
+        org.bukkit.Bukkit.getServicesManager().unregisterAll(plugin);
         EventBridge.unregister(plugin);
         try {
             plugin.onDisable();
@@ -118,15 +119,8 @@ public final class PluginHost {
 
     /** Disables everything, newest first. */
     public static void disableAll() {
-        for (int i = loaded.size() - 1; i >= 0; i--) {
-            Plugin plugin = loaded.get(i);
-            try {
-                CommandMap.forget(plugin);
-                plugin.onDisable();
-            } catch (Throwable error) {
-                System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);
-            }
+        while (!loaded.isEmpty()) {
+            disable(loaded.get(loaded.size() - 1));
         }
-        loaded.clear();
     }
 }

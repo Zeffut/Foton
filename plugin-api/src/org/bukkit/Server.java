@@ -7,6 +7,7 @@ import java.util.logging.Logger;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.messaging.Messenger;
 import org.bukkit.scheduler.BukkitScheduler;
 
@@ -17,6 +18,10 @@ public interface Server {
     Messenger getMessenger();
 
     BukkitScheduler getScheduler();
+
+    ServicesManager getServicesManager();
+
+    boolean isPrimaryThread();
 
     Collection<? extends Player> getOnlinePlayers();
 

@@ -261,6 +261,18 @@ impl PluginHost {
         Ok(env.get_string(&value)?.into())
     }
 
+    /// Asks the Java API whether this caller is on Foton's game-tick thread.
+    ///
+    /// This small diagnostic crosses the same native boundary plugins use, so
+    /// its integration test catches a Java declaration and JNI descriptor
+    /// drifting apart.
+    pub fn is_primary_thread_from_java(&self) -> Result<bool, PluginHostError> {
+        let mut env = self.vm.attach_current_thread()?;
+        Ok(env
+            .call_static_method(NATIVE_CLASS, "isPrimaryThread", "()Z", &[])?
+            .z()?)
+    }
+
     /// Stops delivering Foton's events to plugins.
     ///
     /// Separate from [`Self::disable_all`] on purpose: a plugin being disabled

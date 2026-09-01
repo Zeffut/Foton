@@ -40,6 +40,14 @@ public final class Bukkit {
         return server.getScheduler();
     }
 
+    public static org.bukkit.plugin.ServicesManager getServicesManager() {
+        return server.getServicesManager();
+    }
+
+    public static boolean isPrimaryThread() {
+        return server.isPrimaryThread();
+    }
+
     public static Collection<? extends Player> getOnlinePlayers() {
         return server.getOnlinePlayers();
     }

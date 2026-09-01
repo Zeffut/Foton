@@ -226,6 +226,11 @@ fn on_tick() -> bool {
     *TICK_THREAD.lock() == Some(thread::current().id())
 }
 
+/// `foton.Native.isPrimaryThread`
+extern "system" fn is_primary_thread(_env: JNIEnv<'_>, _class: JClass<'_>) -> jboolean {
+    u8::from(on_tick())
+}
+
 /// One inventory slot, written the way `foton.Native.inventorySlot` promises.
 ///
 /// An empty slot is the empty string and an unreadable one is Java's null, so
@@ -593,6 +598,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method("onlineMode", "()Z", online_mode as *mut c_void),
         method("maxPlayers", "()I", max_players as *mut c_void),
+        method("isPrimaryThread", "()Z", is_primary_thread as *mut c_void),
         method(
             "playerIdByName",
             "(Ljava/lang/String;)Ljava/lang/String;",

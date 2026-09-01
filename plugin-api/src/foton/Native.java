@@ -32,6 +32,9 @@ public final class Native {
 
     public static native int maxPlayers();
 
+    /** Whether this call is running on Foton's serialized game-tick thread. */
+    public static native boolean isPrimaryThread();
+
     /** The UUIDs of everyone online, in no promised order. */
     public static native String[] onlinePlayerIds();
 
