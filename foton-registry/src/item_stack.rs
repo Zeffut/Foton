@@ -1205,24 +1205,34 @@ impl ItemStack {
     }
 
     /// Sets book cover (title/author for written books).
-    pub const fn set_book_cover(
+    pub fn set_book_cover(
         &mut self,
-        _title: Option<&str>,
-        _author: Option<&str>,
-        _generation: Option<i32>,
+        title: Option<&str>,
+        author: Option<&str>,
+        generation: Option<i32>,
     ) {
-        // TODO: Implement book cover setting
-        // Set WRITTEN_BOOK_CONTENT component fields
+        use crate::data_components::components::WrittenBookContent;
+        let current = self.get_or_default(WRITTEN_BOOK_CONTENT, WrittenBookContent::empty());
+        if let Ok(value) = current.with_cover(title, author, generation) {
+            self.set(WRITTEN_BOOK_CONTENT, value);
+        }
     }
 
     /// Sets written book page contents.
-    pub const fn set_written_book_pages(
+    pub fn set_written_book_pages(
         &mut self,
-        _pages: &[&str],
+        pages: &[&str],
         _mode: crate::loot_table::ListOperation,
     ) {
-        // TODO: Implement written book pages setting
-        // Set WRITTEN_BOOK_CONTENT pages
+        use crate::data_components::components::{Filterable, WrittenBookContent};
+        let current = self.get_or_default(WRITTEN_BOOK_CONTENT, WrittenBookContent::empty());
+        let pages = pages
+            .iter()
+            .map(|page| Filterable::pass_through(TextComponent::from((*page).to_owned())))
+            .collect();
+        if let Ok(value) = current.with_pages(pages) {
+            self.set(WRITTEN_BOOK_CONTENT, value);
+        }
     }
 
     /// Sets writable book page contents.

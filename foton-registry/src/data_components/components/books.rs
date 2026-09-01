@@ -252,6 +252,31 @@ impl WrittenBookContent {
         self.resolved
     }
 
+    pub fn with_cover(
+        &self,
+        title: Option<&str>,
+        author: Option<&str>,
+        generation: Option<i32>,
+    ) -> Result<Self> {
+        Self::new(
+            Filterable::pass_through(title.unwrap_or(self.title.raw()).to_owned()),
+            author.unwrap_or(&self.author).to_owned(),
+            generation.unwrap_or(self.generation),
+            self.pages.clone(),
+            self.resolved,
+        )
+    }
+
+    pub fn with_pages(&self, pages: Vec<Filterable<TextComponent>>) -> Result<Self> {
+        Self::new(
+            self.title.clone(),
+            self.author.clone(),
+            self.generation,
+            pages,
+            self.resolved,
+        )
+    }
+
     fn to_nbt_tag_ref(&self) -> NbtTag {
         let mut compound = NbtCompound::new();
         compound.insert(
