@@ -264,8 +264,8 @@ public final class EventBridge {
     }
 
     public static boolean fireFoodLevelChange(String player, int level) {
-        org.bukkit.event.player.FoodLevelChangeEvent event =
-            new org.bukkit.event.player.FoodLevelChangeEvent(player(player), level);
+        org.bukkit.event.entity.FoodLevelChangeEvent event =
+            new org.bukkit.event.entity.FoodLevelChangeEvent(player(player), level);
         dispatch(event);
         return !event.isCancelled();
     }
