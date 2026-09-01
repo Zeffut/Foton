@@ -17,6 +17,7 @@ public interface Player extends Entity {
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);
     void setPlayerListHeaderFooter(String header, String footer);
+    void sendActionBar(String message);
 
     org.bukkit.inventory.PlayerInventory getInventory();
 

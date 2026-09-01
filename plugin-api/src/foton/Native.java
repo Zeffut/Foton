@@ -54,6 +54,8 @@ public final class Native {
     public static native void setPlayerListFooter(String uuid, String footer);
     public static native void setPlayerListHeaderFooter(String uuid, String header, String footer);
 
+    public static native void sendActionBar(String uuid, String message);
+
     /** Sends one custom payload packet to one online player. */
     public static native void sendPluginMessage(String uuid, String channel, byte[] message);
 

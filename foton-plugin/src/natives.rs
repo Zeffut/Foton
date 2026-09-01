@@ -24,7 +24,9 @@ use foton_core::server::Server;
 use foton_core::world::LevelReader as _;
 use foton_core::world::World;
 use foton_protocol::packets::common::CCustomPayload;
-use foton_protocol::packets::game::{BossBarColor, BossBarOverlay, CTabList, SoundSource};
+use foton_protocol::packets::game::{
+    BossBarColor, BossBarOverlay, CSystemChat, CTabList, SoundSource,
+};
 use foton_registry::item_stack::ItemStack;
 use foton_registry::{REGISTRY, RegistryExt as _};
 use foton_utils::Identifier;
@@ -279,6 +281,23 @@ extern "system" fn set_player_list_header_footer(
     footer: JString<'_>,
 ) {
     set_player_tab_list(&mut env, &uuid, Some(header), Some(footer));
+}
+
+/// `foton.Native.sendActionBar`
+extern "system" fn send_action_bar(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    message: JString<'_>,
+) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let Ok(message) = env.get_string(&message) else {
+        return;
+    };
+    let message: TextComponent = String::from(message).into();
+    player.send_packet(CSystemChat::new(&message, true, player.as_ref()));
 }
 
 /// `foton.Native.sendPluginMessage`
@@ -1082,6 +1101,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setPlayerListHeaderFooter",
             "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
             set_player_list_header_footer as *mut c_void,
+        ),
+        method(
+            "sendActionBar",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            send_action_bar as *mut c_void,
         ),
         method(
             "sendPluginMessage",

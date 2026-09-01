@@ -189,6 +189,11 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void sendActionBar(String message) {
+        Native.sendActionBar(id.toString(), message == null ? "" : message);
+    }
+
+    @Override
     public void sendMessage(String message) {
         Native.sendMessage(id.toString(), message);
     }
