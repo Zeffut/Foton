@@ -25,6 +25,8 @@ public interface Block {
 
     BlockState getState();
 
+    default BlockState getState(boolean useSnapshot) { return getState(); }
+
     boolean isEmpty();
 
     Block getRelative(BlockFace face);
