@@ -22,6 +22,7 @@ lines = [
 for name, key in entries:
     lines.append(f'    public static final Enchantment {name} = new Enchantment("{key}");')
 lines += [
+    "    public static final Enchantment DURABILITY = UNBREAKING;",
     "    private static final Enchantment[] VALUES = {" + ", ".join(name for name, _ in entries) + "};",
     "    public static Enchantment getByKey(NamespacedKey key) {",
     "        if (key == null) return null;",

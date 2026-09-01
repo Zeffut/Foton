@@ -36,6 +36,8 @@ public interface ItemMeta extends Cloneable {
     void setUnbreakable(boolean unbreakable);
 
     boolean addEnchant(org.bukkit.enchantments.Enchantment enchantment, int level, boolean ignoreLevelRestriction);
+    default int getEnchantLevel(org.bukkit.enchantments.Enchantment enchantment) { return 0; }
+    default boolean hasItemFlag(org.bukkit.inventory.ItemFlag flag) { return false; }
 
     ItemMeta clone();
 }

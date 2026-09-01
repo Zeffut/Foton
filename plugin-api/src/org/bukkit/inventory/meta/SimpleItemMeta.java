@@ -74,6 +74,11 @@ public class SimpleItemMeta implements ItemMeta {
     }
 
     @Override
+    public int getEnchantLevel(org.bukkit.enchantments.Enchantment enchantment) {
+        return enchantments.getOrDefault(enchantment, 0);
+    }
+
+    @Override
     public boolean addEnchant(org.bukkit.enchantments.Enchantment enchantment, int level, boolean ignoreLevelRestriction) {
         if (enchantment == null || level <= 0) return false;
         Integer previous = enchantments.put(enchantment, level);
