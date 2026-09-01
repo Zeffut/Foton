@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
-    EntityDamageByEntityEvent, InventoryClickEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    EntityDamageByEntityEvent, InventoryClickEvent, PlayerCommandPreprocessEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
     ServerTickEvent,
 };
 use foton_core::player::Player;
@@ -66,6 +66,16 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<EntityDamageByEntityEvent, _>(owner(), move |event| {
         if !damage_call(&jvm, &event.damager().to_string(), &event.entity().to_string()) {
             event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerCommandPreprocessEvent, _>(owner(), move |event| {
+        let message = format!("/{}", event.message());
+        match string_call(&jvm, "fireCommandPreprocess", &event.player_id().to_string(), Some(&message)) {
+            Answer::Nothing => event.set_cancelled(true),
+            Answer::Message(rewritten) => event.set_message(rewritten.strip_prefix('/').unwrap_or(&rewritten).to_owned()),
+            Answer::Unreachable => {}
         }
     });
 

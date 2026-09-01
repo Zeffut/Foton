@@ -32,6 +32,7 @@ pub mod command;
 pub mod player;
 pub mod inventory;
 pub mod entity;
+pub mod command_preprocess;
 pub mod server;
 
 pub use block::{BlockBreakEvent, BlockPlaceEvent};
@@ -42,6 +43,7 @@ pub use player::{
 };
 pub use inventory::InventoryClickEvent;
 pub use entity::EntityDamageByEntityEvent;
+pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use server::ServerTickEvent;
 
 /// Something that happened, which a listener may observe and possibly stop.

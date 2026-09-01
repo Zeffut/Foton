@@ -170,6 +170,13 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static String fireCommandPreprocess(String uuid, String message) {
+        org.bukkit.event.player.PlayerCommandPreprocessEvent event =
+            new org.bukkit.event.player.PlayerCommandPreprocessEvent(player(uuid), message);
+        dispatch(event);
+        return event.isCancelled() ? null : event.getMessage();
+    }
+
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
         PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);

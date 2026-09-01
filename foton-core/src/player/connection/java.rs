@@ -354,8 +354,15 @@ impl ScheduledPlayPacket {
                 }
             }
             ScheduledPlayPacketKind::ChatCommand(packet) => {
+                let mut preprocess = crate::event::PlayerCommandPreprocessEvent::new(
+                    player.gameprofile.id, packet.command.clone());
+                player.fire_event(&mut preprocess);
+                if preprocess.is_cancelled() {
+                    player.detect_command_rate_spam();
+                    return;
+                }
                 if server
-                    .submit_command(CommandSender::Player(Arc::clone(&player)), packet.command)
+                    .submit_command(CommandSender::Player(Arc::clone(&player)), preprocess.message().to_owned())
                     .is_err()
                 {
                     player.send_message(
