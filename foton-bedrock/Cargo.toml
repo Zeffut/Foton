@@ -1,0 +1,17 @@
+[package]
+name = "foton-bedrock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Floodgate's identity payload is AES-128-GCM with a base64 topping, so the
+# cipher and the encoding are the whole dependency list of the pure half.
+aes-gcm = "0.11.1"
+base64.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
