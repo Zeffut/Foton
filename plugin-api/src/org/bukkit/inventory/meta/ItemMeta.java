@@ -10,6 +10,9 @@ import java.util.List;
  * BookMeta gets nothing rather than a stub that quietly loses its pages.
  */
 public interface ItemMeta extends Cloneable {
+    default org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return new foton.FotonPersistentDataContainer();
+    }
     boolean hasDisplayName();
 
     String getDisplayName();

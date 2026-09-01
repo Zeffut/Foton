@@ -5,6 +5,7 @@ import java.util.List;
 
 /** The meta an ItemStack carries when nothing more specific is needed. */
 public class SimpleItemMeta implements ItemMeta {
+    private foton.FotonPersistentDataContainer persistentData = new foton.FotonPersistentDataContainer();
     private String displayName;
     private List<String> lore;
     private Integer customModelData;
@@ -71,11 +72,16 @@ public class SimpleItemMeta implements ItemMeta {
         this.unbreakable = unbreakable;
     }
 
+    @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return persistentData;
+    }
+
     @Override
     public SimpleItemMeta clone() {
         try {
             SimpleItemMeta copy = (SimpleItemMeta) super.clone();
             copy.lore = lore == null ? null : new ArrayList<>(lore);
+            copy.persistentData = persistentData.copy();
             return copy;
         } catch (CloneNotSupportedException impossible) {
             throw new AssertionError(impossible);
@@ -91,11 +97,12 @@ public class SimpleItemMeta implements ItemMeta {
         return java.util.Objects.equals(displayName, meta.displayName)
             && java.util.Objects.equals(lore, meta.lore)
             && java.util.Objects.equals(customModelData, meta.customModelData)
+            && java.util.Objects.equals(persistentData, meta.persistentData)
             && unbreakable == meta.unbreakable;
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(displayName, lore, customModelData, unbreakable);
+        return java.util.Objects.hash(displayName, lore, customModelData, unbreakable, persistentData);
     }
 }
