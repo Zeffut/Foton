@@ -228,6 +228,12 @@ public final class FotonPlayer implements Player {
 
     @Override public boolean teleport(org.bukkit.Location location) {
         if (location == null || location.getWorld() == null) return false;
+        org.bukkit.event.player.PlayerTeleportEvent event =
+            new org.bukkit.event.player.PlayerTeleportEvent(this, getLocation(), location,
+                org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+        EventBridge.dispatch(event);
+        if (event.isCancelled() || event.getTo() == null || event.getTo().getWorld() == null) return false;
+        location = event.getTo();
         return Native.teleport(id.toString(), location.getWorld().getName(), location.getX(),
             location.getY(), location.getZ(), location.getYaw(), location.getPitch());
     }
