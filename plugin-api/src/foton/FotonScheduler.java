@@ -73,6 +73,7 @@ public final class FotonScheduler implements BukkitScheduler {
             if (task.cancelled) {
                 return;
             }
+            task.running = true;
             try {
                 body.run();
             } catch (Throwable error) {
@@ -81,6 +82,7 @@ public final class FotonScheduler implements BukkitScheduler {
                 System.out.println("[scheduler] " + plugin.getName()
                     + " threw in an async task: " + error);
             } finally {
+                task.running = false;
                 if (!task.repeating) {
                     active.remove(task.id, task);
                 }
@@ -105,6 +107,7 @@ public final class FotonScheduler implements BukkitScheduler {
         final boolean repeating;
         volatile java.util.concurrent.ScheduledFuture<?> handle;
         volatile boolean cancelled;
+        volatile boolean running;
 
         Async(int id, Plugin plugin, boolean repeating) {
             this.id = id;
@@ -170,6 +173,13 @@ public final class FotonScheduler implements BukkitScheduler {
         }
     }
 
+    @Override
+    public boolean isCurrentlyRunning(int taskId) {
+        BukkitTask task = active.get(taskId);
+        return task instanceof Async async ? async.running
+            : task instanceof Scheduled scheduled && scheduled.running;
+    }
+
     private static Scheduled submit(Plugin plugin, Runnable body, long delay, long period) {
         Scheduled task = new Scheduled(nextId.getAndIncrement(), plugin, body, delay, period);
         active.put(task.id, task);
@@ -214,6 +224,7 @@ public final class FotonScheduler implements BukkitScheduler {
                 continue;
             }
             try {
+                ready.running = true;
                 ready.body.run();
                 ran++;
             } catch (Throwable error) {
@@ -222,6 +233,7 @@ public final class FotonScheduler implements BukkitScheduler {
                 System.out.println("[scheduler] " + ready.plugin.getName()
                     + " threw in a task: " + error);
             } finally {
+                ready.running = false;
                 if (ready.period <= 0) {
                     active.remove(ready.id, ready);
                 }
@@ -246,6 +258,7 @@ public final class FotonScheduler implements BukkitScheduler {
         final long period;
         long remaining;
         volatile boolean cancelled;
+        volatile boolean running;
 
         Scheduled(int id, Plugin plugin, Runnable body, long delay, long period) {
             this.id = id;

@@ -30,4 +30,6 @@ public interface BukkitScheduler {
 
     void cancelTask(int taskId);
     void cancelTasks(Plugin plugin);
+
+    boolean isCurrentlyRunning(int taskId);
 }
