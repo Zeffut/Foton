@@ -10863,6 +10863,63 @@
    "plugins": 1
   }
  ],
+ "coverage_curve": [
+  {
+   "members": 100,
+   "plugins_fully_covered": 1,
+   "median_plugin_covered_percent": 37
+  },
+  {
+   "members": 250,
+   "plugins_fully_covered": 1,
+   "median_plugin_covered_percent": 58
+  },
+  {
+   "members": 500,
+   "plugins_fully_covered": 1,
+   "median_plugin_covered_percent": 76
+  },
+  {
+   "members": 1000,
+   "plugins_fully_covered": 4,
+   "median_plugin_covered_percent": 86
+  },
+  {
+   "members": 1500,
+   "plugins_fully_covered": 4,
+   "median_plugin_covered_percent": 88
+  },
+  {
+   "members": 2000,
+   "plugins_fully_covered": 13,
+   "median_plugin_covered_percent": 95
+  },
+  {
+   "members": 2500,
+   "plugins_fully_covered": 13,
+   "median_plugin_covered_percent": 95
+  },
+  {
+   "members": 3000,
+   "plugins_fully_covered": 17,
+   "median_plugin_covered_percent": 97
+  },
+  {
+   "members": 3500,
+   "plugins_fully_covered": 33,
+   "median_plugin_covered_percent": 100
+  },
+  {
+   "members": 4000,
+   "plugins_fully_covered": 40,
+   "median_plugin_covered_percent": 100
+  },
+  {
+   "members": 4547,
+   "plugins_fully_covered": 41,
+   "median_plugin_covered_percent": 100
+  }
+ ],
  "events": [
   {
    "event": "org/bukkit/event/player/PlayerJoinEvent",

@@ -226,6 +226,41 @@ def event_reach(events):
     return sorted(best.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
+def coverage_curve(reachable, ranked):
+    """What implementing the top `k` members buys, at several values of `k`.
+
+    Two bounds, because either alone would mislead.
+
+    The low one counts plugins whose *every* referenced member exists. It is
+    pessimistic: the JVM resolves lazily, so a missing method breaks the line
+    that calls it rather than the plugin that ships it, and much of what a
+    plugin references sits on paths a given server never runs.
+
+    The high one is the share of the median plugin's references that exist. It
+    is optimistic for the mirror reason: covering most of a plugin is not the
+    same as it working.
+
+    The truth is between them and nobody can place it without running the
+    plugins. The gap is the useful part -- it says whether effort buys breadth
+    or depth.
+    """
+    rows = []
+    for k in (100, 250, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, len(ranked)):
+        if k > len(ranked):
+            continue
+        have = set(ranked[:k])
+        whole = sum(1 for members in reachable.values() if members <= have)
+        shares = sorted(len(members & have) / len(members) for members in reachable.values())
+        rows.append(
+            {
+                "members": k,
+                "plugins_fully_covered": whole,
+                "median_plugin_covered_percent": round(100 * shares[len(shares) // 2]),
+            }
+        )
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", type=pathlib.Path, help="directory of plugin jars")
@@ -241,6 +276,10 @@ def main():
     surface_of = {}
     reaches_internal = []
     failed = []
+    # What each plugin that could ever run needs, which is what the curve is
+    # computed from. A plugin reaching internals is excluded: no amount of API
+    # would make it work, and leaving it in would flatter every number.
+    needs = {}
 
     for jar in jars:
         try:
@@ -252,6 +291,8 @@ def main():
             failed.append((jar.name, f"{unreadable} unreadable class files"))
         if found["internal"]:
             reaches_internal.append(jar.name)
+        elif found["api"]:
+            needs[jar.stem] = found["api"]
         for kind, members in found.items():
             for member in members:
                 plugins_per_member[member] += 1
@@ -286,6 +327,24 @@ def main():
     for member, count in event_reach(events)[:18]:
         print(f"  {count:4}  {member}")
 
+    # Ranked among the plugins that could ever run. A member only the
+    # internals-reaching ones want is work that serves nobody, and letting it
+    # weigh here would raise it up the queue and flatten the curve.
+    among_reachable = collections.Counter()
+    for members in needs.values():
+        for member in members:
+            among_reachable[member] += 1
+    ranked = [member for member, _ in among_reachable.most_common()]
+    curve = coverage_curve(needs, ranked)
+    print("\nwhat implementing the top members buys:")
+    print("  members   plugins fully covered   median plugin covered")
+    for row in curve:
+        share = 100 * row["plugins_fully_covered"] // max(scanned, 1)
+        print(
+            f'  {row["members"]:>6}   {row["plugins_fully_covered"]:>3} / {scanned}'
+            f' ({share:>2}%)            {row["median_plugin_covered_percent"]:>3}%'
+        )
+
     if args.write:
         LEDGER.write_text(
             json.dumps(
@@ -301,6 +360,7 @@ def main():
                         {"package": p, "plugins": n}
                         for p, n in reach_by(api, plugins_per_member, package_of)
                     ],
+                    "coverage_curve": curve,
                     "events": [
                         {"event": e, "plugins": n}
                         for e, n in event_reach(

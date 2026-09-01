@@ -207,14 +207,51 @@ registration window before `init_behaviors()`.
 **Stage 4 — the JVM bridge and `org.bukkit`, in measured rank order.** Handles,
 thread affinity, and then the API surface, publishing coverage as it goes.
 
-## What this costs, honestly
+## What this costs, measured
 
-Stage 1 is weeks — fewer now that the corpus has narrowed it. Stage 2 took an
-afternoon. Stage 3 is months. Stage 4 has no end — it is
-a permanent surface that tracks two upstreams — and the useful question is not
-when it finishes but when it crosses the line where a real server's real plugin
-list runs. The corpus analysis is what makes that line visible in advance
-instead of after two years of work.
+The question "how much of the ecosystem runs" now has a curve rather than an
+opinion. `dev/plugin_api_usage.py --write` computes it and
+`dev/plugin-api-usage.json` carries it.
+
+| API members implemented | Plugins that run whole | Median plugin covered |
+|---|---|---|
+| 100 | 1 / 59 | 37 % |
+| 500 | 1 / 59 | 76 % |
+| 1 000 | 4 / 59 | 86 % |
+| 2 000 | 13 / 59 | 95 % |
+| 3 000 | 17 / 59 | 97 % |
+| **3 500** | **33 / 59 (55 %)** | 100 % |
+| 4 000 | 40 / 59 (67 %) | 100 % |
+| 4 547 (all) | 41 / 59 (69 %) | 100 % |
+
+Read the two columns together, because either alone lies. The left counts
+plugins whose *every* referenced member exists, which is pessimistic: the JVM
+resolves lazily, so a missing method breaks the line that calls it rather than
+the plugin that ships it. The right is how much of the median plugin is
+covered, which is optimistic for the mirror reason — covering most of a plugin
+is not the same as it working. The truth is between them, and nobody can place
+it without running the plugins.
+
+Three things follow.
+
+**Getting past half the ecosystem costs about 3 500 API members.** Not a
+category and not a milestone: a countable list, already ranked, sitting in
+`dev/plugin-api-usage.json`. Sixty-nine percent is the ceiling, and 3 500 buys
+most of the way there because the curve is nearly vertical at the end.
+
+**The curve is flat for a long time and that is not a reason to stop.** One
+plugin runs whole at five hundred members while the median plugin is already
+three quarters covered. That gap is the shape of the problem: plugins need
+roughly ninety members each and they are not the same ninety. Almost nothing
+looks like progress until quite late, and almost everything is.
+
+**The ranking has to be computed over plugins that could run.** A member only
+the internals-reaching plugins want is work that serves nobody; counting them
+raises dead work up the queue and flattens the curve. Which is exactly what the
+first run of this did, before it was corrected.
+
+Stage 1 is weeks. Stage 2 took an afternoon. Stage 3 is months. Stage 4 is
+3 500 members, tracked against a number that says where it stands at any point.
 
 ## Risks
 
