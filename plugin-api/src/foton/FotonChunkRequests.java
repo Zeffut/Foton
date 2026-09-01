@@ -8,9 +8,13 @@ final class FotonChunkRequests {
         });
     private FotonChunkRequests() {}
     static void watch(String request, Runnable ready) {
-        EXECUTOR.scheduleWithFixedDelay(() -> {
+        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.ScheduledFuture<?>> task =
+            new java.util.concurrent.atomic.AtomicReference<>();
+        task.set(EXECUTOR.scheduleWithFixedDelay(() -> {
             if (!Native.chunkRequestReady(request)) return;
+            java.util.concurrent.ScheduledFuture<?> current = task.get();
+            if (current != null) current.cancel(false);
             ready.run();
-        }, 0L, 10L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }, 0L, 10L, java.util.concurrent.TimeUnit.MILLISECONDS));
     }
 }
