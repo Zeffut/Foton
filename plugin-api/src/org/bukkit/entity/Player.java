@@ -34,6 +34,8 @@ public interface Player extends HumanEntity {
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);
     void setPlayerListHeaderFooter(String header, String footer);
+    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, Object data) { }
+
     void sendActionBar(String message);
 
     default void sendActionBar(net.kyori.adventure.text.Component message) {
