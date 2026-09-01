@@ -60,46 +60,17 @@ if [ -d "$FIXTURE_SRC" ]; then
   mkdir -p "$FIX/classes"
   javac -nowarn -d "$FIX/classes" -cp "$JAR" "$FIXTURE_SRC"/example/*.java
   cp "$FIXTURE_SRC/plugin.yml" "$FIX/classes/"
+  cp "$FIXTURE_SRC/config.yml" "$FIX/classes/"
   jar --create --file "$FIX/EventFixture.jar" -C "$FIX/classes" .
 
   mkdir -p "$FIX/plugins"
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
 
-  cat > "$FIX/Events.java" <<'JAVA'
-/** Loads the fixture and checks what its handlers actually decide. */
-public final class Events {
-    public static void main(String[] args) {
-        if (foton.PluginHost.loadAll(args[0]) != 1) {
-            throw new AssertionError("the fixture plugin should have enabled");
-        }
-
-        String id = "00000000-0000-0000-0000-000000000001";
-
-        String join = foton.EventBridge.fireJoin(id, "original");
-        if (!"rewritten by the fixture".equals(join)) {
-            throw new AssertionError("a handler's rewrite did not travel back: " + join);
-        }
-
-        if (foton.EventBridge.fireChat(id, "hush now") != null) {
-            throw new AssertionError("a cancelled chat should come back as nothing");
-        }
-        if (!"hello".equals(foton.EventBridge.fireChat(id, "hello"))) {
-            throw new AssertionError("an uncancelled chat should come back unchanged");
-        }
-
-        // The LOWEST handler cancels; the HIGH one would undo it but did not
-        // ask to see cancelled events, so it must never run.
-        if (foton.EventBridge.fireBlockBreak(id, 1, 2, 3, "minecraft:overworld")) {
-            throw new AssertionError("a cancelled break was reported as allowed");
-        }
-
-        foton.PluginHost.disableAll();
-        System.out.println("event path checked: rewrite, veto and priority all hold");
-    }
-}
-JAVA
-  javac -nowarn -d "$FIX" -cp "$JAR$LIBS" "$FIX/Events.java"
-  java -cp "$FIX:$JAR$LIBS" Events "$FIX/plugins"
+  # The checks read the fixture's counters, so they compile against its
+  # classes. The jar in plugins/ is still what gets loaded; this is only so
+  # the names resolve.
+  javac -nowarn -d "$FIX" -cp "$JAR$LIBS:$FIX/classes" "$REPO"/plugin-api/check/*.java
+  java -cp "$FIX:$JAR$LIBS:$FIX/classes" Checks "$FIX/plugins"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

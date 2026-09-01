@@ -29,9 +29,11 @@ use rustc_hash::FxHashMap;
 
 pub mod block;
 pub mod player;
+pub mod server;
 
 pub use block::{BlockBreakEvent, BlockPlaceEvent};
 pub use player::{PlayerChatEvent, PlayerJoinEvent, PlayerQuitEvent};
+pub use server::ServerTickEvent;
 
 /// Something that happened, which a listener may observe and possibly stop.
 ///

@@ -11,6 +11,7 @@ use super::{
     spawn_blocking,
 };
 use crate::command::functions::CommandFunction;
+use crate::event::ServerTickEvent;
 
 impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
@@ -196,6 +197,10 @@ impl Server {
                 let mut tick_manager = self.tick_rate_manager.write();
                 tick_manager.end_tick_work();
             }
+
+            // Last, so that anything listening sees a tick that has already
+            // done its own work rather than one still in the middle of it.
+            self.events.fire(&mut ServerTickEvent::new(tick_count));
 
             self.packet_processor.open_after_tick();
             if should_sprint_this_tick || Instant::now() >= next_tick_time {

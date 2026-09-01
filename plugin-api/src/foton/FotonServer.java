@@ -20,7 +20,7 @@ import org.bukkit.scheduler.BukkitTask;
 public final class FotonServer implements Server {
     private final PluginManager plugins = new Plugins();
     private final Messenger messenger = new Channels();
-    private final BukkitScheduler scheduler = new Scheduler();
+    private final BukkitScheduler scheduler = new FotonScheduler();
 
     @Override public PluginManager getPluginManager() { return plugins; }
     @Override public Messenger getMessenger() { return messenger; }
@@ -55,20 +55,5 @@ public final class FotonServer implements Server {
         @Override public void unregisterOutgoingPluginChannel(Plugin source, String channel) {
             System.out.println("[server] " + source.getName() + " closed channel " + channel);
         }
-    }
-
-    private static final class Scheduler implements BukkitScheduler {
-        @Override public BukkitTask runTask(Plugin plugin, Runnable task) {
-            task.run();
-            return new Task();
-        }
-        @Override public BukkitTask runTaskLater(Plugin plugin, Runnable task, long delayTicks) {
-            return new Task();
-        }
-    }
-
-    private static final class Task implements BukkitTask {
-        @Override public int getTaskId() { return 0; }
-        @Override public void cancel() {}
     }
 }

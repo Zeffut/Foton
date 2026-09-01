@@ -1,0 +1,7 @@
+# What the fixture ships inside its jar. An operator's own file sits on top
+# of this one, so a key added here in an update is still readable from a
+# config file written before it existed.
+greeting: from the jar
+added-later: 42
+nested:
+  value: deep

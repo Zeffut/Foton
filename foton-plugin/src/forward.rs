@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, PlayerChatEvent, PlayerJoinEvent, PlayerQuitEvent,
+    ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -24,6 +25,9 @@ use text_components::TextComponent;
 
 /// The Java class that owns the handler lists.
 const BRIDGE: &str = "foton/EventBridge";
+
+/// Where a plugin's scheduled tasks wait until a tick can run them.
+const SCHEDULER: &str = "foton/FotonScheduler";
 
 /// Who these subscriptions belong to, so unloading takes them with it.
 fn owner() -> Identifier {
@@ -80,11 +84,20 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         }
     });
 
-    let jvm = vm;
+    let jvm = Arc::clone(&vm);
     events.on::<BlockPlaceEvent, _>(owner(), move |event| {
         if !block_call(&jvm, "fireBlockPlace", event.player(), event.position()) {
             event.set_cancelled(true);
         }
+    });
+
+    // The tick. Not a gameplay event: it is what makes `runTask` mean what
+    // Bukkit says it means. A plugin hands over a Runnable from whatever
+    // thread it likes, and the body runs here -- inside the tick, on the tick
+    // thread, where touching the world is safe.
+    let jvm = vm;
+    events.on::<ServerTickEvent, _>(owner(), move |_| {
+        drain_scheduler(&jvm);
     });
 }
 
@@ -174,4 +187,18 @@ fn block_call(vm: &JavaVM, method: &str, player: &Arc<Player>, position: BlockPo
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+/// Runs whatever the plugins queued for this tick.
+///
+/// A failed crossing is not worth a log line here -- the same message twenty
+/// times a second helps nobody -- so it runs nothing this tick and tries again
+/// on the next.
+fn drain_scheduler(vm: &JavaVM) {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    // The answer is how many task bodies ran. Nothing here needs it; the
+    // fixture asserts on it through the same call.
+    let _ = env.call_static_method(SCHEDULER, "tick", "()I", &[]);
 }
