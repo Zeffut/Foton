@@ -3,10 +3,7 @@
     <div class="hero">
       <div>
         <div class="eyebrow">FROM INSIDE THE GAME</div>
-        <h1>What the testers found.</h1>
-        <p style="font-size:19px">Every bug below was filed by a player standing in the world
-          where it happened, without leaving the game. Nothing here is summarized, triaged or
-          reworded — a report reads the way its author wrote it.</p>
+        <h1>Reports.</h1>
         <div class="cmd"><b>/</b>bug</div>
       </div>
       <div>
@@ -16,28 +13,18 @@
             <div class="label">FILED</div>
           </div>
           <div class="stat">
-            <b>{{ reports_fixed }}</b>
-            <div class="label">FIXED SINCE</div>
-          </div>
-          <div class="stat">
             <b>{{ reports_open }}</b>
-            <div class="label">STILL OPEN</div>
+            <div class="label">OPEN</div>
           </div>
+        </div>
         </div>
       </div>
     </div>
   </div>
 
-    <section class="band">
+  <section class="band" style="border-bottom:0">
     <div class="wrap">
-      <div class="eyebrow">THE REPORTS</div>
-      <h2>As filed.</h2>
-      <p>Reports are published as they were written, in the language their author used. A
-        report marked fixed has a line saying what was actually done, so the claim can be
-        checked against the commit history rather than taken on trust.</p>
       {{ reports }}
-      <p class="rest">The reporter's name is shown because a report is someone's work. Their
-        account identifier is not, and never leaves the server that received it.</p>
     </div>
   </section>
 </main>
