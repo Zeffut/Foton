@@ -16,7 +16,7 @@ import java.util.Map;
  * for the author list in an /about command, and for the command map they were
  * declared with -- so this holds the file rather than three fields from it.
  */
-public final class PluginDescriptionFile {
+public final class PluginDescriptionFile implements io.papermc.paper.plugin.configuration.PluginMeta {
     private final String name;
     private final String version;
     private final String main;
@@ -127,7 +127,7 @@ public final class PluginDescriptionFile {
 
     public String getName() { return name; }
 
-    public String getVersion() { return version; }
+    @Override public String getVersion() { return version; }
 
     public String getMain() { return main; }
 

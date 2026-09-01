@@ -96,6 +96,7 @@ public abstract class JavaPlugin implements Plugin {
 
     @Override public File getDataFolder() { return dataFolder; }
     @Override public PluginDescriptionFile getDescription() { return description; }
+    public io.papermc.paper.plugin.configuration.PluginMeta getPluginMeta() { return description; }
     @Override public Server getServer() { return server; }
     @Override public Logger getLogger() { return logger; }
     @Override public String getName() { return description.getName(); }
