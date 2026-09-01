@@ -199,6 +199,13 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, foton_core::entity::Shared
     None
 }
 
+extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
+    let Ok(text) = env.get_string(&uuid) else { return; };
+    let Ok(id) = text.to_str().ok().and_then(|value| value.parse::<Uuid>().ok()).ok_or(()) else { return; };
+    let Some((world, entity)) = entity_by_uuid(&id) else { return; };
+    let _ = world.remove_entity(entity.id());
+}
+
 extern "system" fn entity_world(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
     let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
     let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
@@ -1573,6 +1580,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             world_max_height as *mut c_void,
         ),
         method("entityWorld", "(Ljava/lang/String;)Ljava/lang/String;", entity_world as *mut c_void),
+        method("removeEntity", "(Ljava/lang/String;)V", remove_entity as *mut c_void),
         method("entityType", "(Ljava/lang/String;)Ljava/lang/String;", entity_type as *mut c_void),
         method("entitySpawnCategory", "(Ljava/lang/String;)Ljava/lang/String;", entity_spawn_category as *mut c_void),
         method("entityPosition", "(Ljava/lang/String;)[D", entity_position as *mut c_void),

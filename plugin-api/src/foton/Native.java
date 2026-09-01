@@ -95,6 +95,7 @@ public final class Native {
     public static native String playerRespawnWorld(String uuid);
     public static native double[] playerRespawnPosition(String uuid);
     public static native String entityWorld(String uuid);
+    public static native void removeEntity(String uuid);
     public static native String entityType(String uuid);
     public static native String entitySpawnCategory(String uuid);
     public static native double[] entityPosition(String uuid);

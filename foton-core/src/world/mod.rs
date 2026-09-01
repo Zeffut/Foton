@@ -398,6 +398,14 @@ impl World {
 
     /// Returns whether the requested chunk has an active Full-status holder.
     #[must_use]
+    /// Removes a live entity as an explicit plugin discard.
+    pub fn remove_entity(&self, entity_id: i32) -> bool {
+        self.entity_manager().remove_live_entity(
+            entity_id,
+            crate::entity::RemovalReason::Discarded,
+        ).is_some()
+    }
+
     pub fn is_chunk_loaded(&self, x: i32, z: i32) -> bool {
         self.loaded_chunk_positions()
             .iter()

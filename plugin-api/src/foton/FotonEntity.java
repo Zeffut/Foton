@@ -44,6 +44,8 @@ public class FotonEntity implements Entity {
         return Native.teleportEntity(id.toString(), location.getWorld().getName(), location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
     }
 
+    @Override public void remove() { Native.removeEntity(id.toString()); }
+
     @Override public boolean isDead() { return Native.entityWorld(id.toString()) == null; }
     @Override public String getCustomName() { return Native.entityCustomName(id.toString()); }
     @Override public void setCustomName(String name) { Native.setEntityCustomName(id.toString(), name); }

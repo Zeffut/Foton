@@ -23,6 +23,8 @@ public interface Entity extends CommandSender {
     default boolean teleport(Location location) { return false; }
     default boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) { return teleport(location); }
 
+    default void remove() { }
+
     boolean isDead();
     String getCustomName();
     void setCustomName(String name);
