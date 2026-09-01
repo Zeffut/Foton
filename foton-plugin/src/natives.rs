@@ -1051,6 +1051,13 @@ extern "system" fn stop_sound(
     player.send_packet(CStopSound { sound, source });
 }
 
+/// `foton.Native.updateInventory`
+extern "system" fn update_inventory(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
+    if let Some(player) = player(&mut env, &uuid) {
+        player.broadcast_inventory_changes();
+    }
+}
+
 /// `foton.Native.gameMode`
 extern "system" fn game_mode(
     mut env: JNIEnv<'_>,
@@ -2054,6 +2061,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "entitySendMessage",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             entity_send_message as *mut c_void,
+        ),
+        method(
+            "updateInventory",
+            "(Ljava/lang/String;)V",
+            update_inventory as *mut c_void,
         ),
         method(
             "gameMode",

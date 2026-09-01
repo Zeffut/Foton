@@ -83,6 +83,11 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void updateInventory() {
+        Native.updateInventory(id.toString());
+    }
+
+    @Override
     public org.bukkit.GameMode getGameMode() {
         org.bukkit.GameMode mode = org.bukkit.GameMode.byName(Native.gameMode(id.toString()));
         // A player who has gone is not in any mode; survival is the answer
