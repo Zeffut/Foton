@@ -16,6 +16,8 @@ public interface Entity extends CommandSender {
     int getEntityId();
 
     boolean isDead();
+    String getCustomName();
+    void setCustomName(String name);
 
     /** The scheduler for work that follows this entity. */
     io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler();

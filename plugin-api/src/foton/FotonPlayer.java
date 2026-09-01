@@ -167,6 +167,16 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public String getCustomName() {
+        return Native.customName(id.toString());
+    }
+
+    @Override
+    public void setCustomName(String name) {
+        Native.setCustomName(id.toString(), name);
+    }
+
+    @Override
     public boolean isOnline() {
         return Native.playerName(id.toString()) != null;
     }

@@ -174,6 +174,34 @@ extern "system" fn player_name(
     to_java(&mut env, name)
 }
 
+/// `foton.Native.customName`
+extern "system" fn custom_name(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let name = player(&mut env, &uuid)
+        .and_then(|player| player.custom_name().map(|name| name.to_string()));
+    to_java(&mut env, name)
+}
+
+/// `foton.Native.setCustomName`
+extern "system" fn set_custom_name(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    name: JString<'_>,
+) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let Ok(name) = env.get_string(&name) else {
+        return;
+    };
+    let name = String::from(name);
+    player.set_custom_name((!name.is_empty()).then(|| TextComponent::from(name)));
+}
+
 /// `foton.Native.playerWorld`
 extern "system" fn player_world(
     mut env: JNIEnv<'_>,
@@ -1156,6 +1184,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "playerName",
             "(Ljava/lang/String;)Ljava/lang/String;",
             player_name as *mut c_void,
+        ),
+        method(
+            "customName",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            custom_name as *mut c_void,
+        ),
+        method(
+            "setCustomName",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_custom_name as *mut c_void,
         ),
         method(
             "playerWorld",
