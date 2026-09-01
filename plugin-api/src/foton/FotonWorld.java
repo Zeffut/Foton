@@ -77,6 +77,10 @@ public final class FotonWorld implements World {
     @Override public boolean isChunkLoaded(int x, int z) {
         return Native.worldChunkLoaded(name, x, z);
     }
+    @Override public java.io.File getWorldFolder() {
+        String path = Native.worldFolder(name);
+        return path == null ? null : new java.io.File(path);
+    }
 
     @Override public Chunk[] getLoadedChunks() {
         String[] coordinates = Native.worldLoadedChunkCoords(name);

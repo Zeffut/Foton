@@ -369,6 +369,11 @@ pub struct World {
 }
 
 impl World {
+    /// Returns the persistent world directory, or `None` for RAM-only worlds.
+    #[must_use]
+    pub fn world_folder(&self) -> Option<std::path::PathBuf> {
+        self.level_data.read().world_dir().map(std::path::Path::to_path_buf)
+    }
     /// Returns chunk coordinates whose holders have reached vanilla Full status.
     #[must_use]
     pub fn loaded_chunk_positions(&self) -> Vec<ChunkPos> {

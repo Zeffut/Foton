@@ -409,6 +409,11 @@ pub struct LevelDataManager {
 }
 
 impl LevelDataManager {
+    /// Returns the configured world directory, if this world is persistent.
+    #[must_use]
+    pub fn world_dir(&self) -> Option<&Path> {
+        self.path.as_deref().and_then(Path::parent)
+    }
     /// Creates a new level data manager for the given world directory.
     ///
     /// If `level.toml` exists, it will be loaded (the provided seed is ignored).

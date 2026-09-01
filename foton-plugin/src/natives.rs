@@ -1209,6 +1209,14 @@ extern "system" fn world_loaded_chunk_coords(
     string_array(&mut env, &coords)
 }
 
+/// `foton.Native.worldFolder`
+extern "system" fn world_folder(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jstring {
+    let Some(path) = world(&mut env, &name).and_then(|world| world.world_folder()) else { return null_mut(); };
+    let value = path.to_string_lossy();
+    let Ok(value) = env.new_string(value.as_ref()) else { return null_mut(); };
+    value.into_raw()
+}
+
 /// `foton.Native.scoreboardTeamEntries`
 extern "system" fn scoreboard_team_entries(
     mut env: JNIEnv<'_>, _class: JClass<'_>, world_name: JString<'_>, team_name: JString<'_>,
@@ -1415,6 +1423,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method("worldChunkLoaded", "(Ljava/lang/String;II)Z", world_chunk_loaded as *mut c_void),
         method("worldLoadedChunkCoords", "(Ljava/lang/String;)[Ljava/lang/String;", world_loaded_chunk_coords as *mut c_void),
+        method("worldFolder", "(Ljava/lang/String;)Ljava/lang/String;", world_folder as *mut c_void),
         method("scoreboardTeamEntries", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;", scoreboard_team_entries as *mut c_void),
         method("scoreboardEntryTeam", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", scoreboard_entry_team as *mut c_void),
         method(
