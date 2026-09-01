@@ -77,6 +77,24 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 }
 .cmd b { color: var(--accent); font-weight: 400; }
 
+.cmd-switch { display: flex; gap: 6px; margin-bottom: 10px; }
+.cmd-tab {
+  font: inherit; font-size: 12px; color: var(--ink-3); background: transparent;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+.cmd-tab:hover { color: var(--ink); border-color: #c8c0af; }
+.cmd-tab.is-active { color: var(--ink); border-color: var(--accent); }
+
+.cmd-line { display: flex; align-items: center; gap: 10px; }
+.cmd-line.cmd-hidden { display: none; }
+.cmd-code { flex: 1 1 auto; min-width: 0; overflow-x: auto; white-space: nowrap; }
+.cmd-copy {
+  font: inherit; font-size: 12px; color: var(--ink-3); background: transparent;
+  border: 1px solid var(--rule); border-radius: 3px; padding: 5px 12px;
+  cursor: pointer; flex: 0 0 auto;
+}
+.cmd-copy:hover { color: var(--ink); border-color: var(--ink); }
+
 .warn { background: var(--ink); color: #cfc7b4; }
 .warn .wrap { padding-top: 26px; padding-bottom: 26px; }
 .warn strong { color: var(--glow); font-weight: 600; }

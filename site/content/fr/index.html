@@ -9,7 +9,20 @@
           <a class="btn btn-solid" href="/fr/start/">Démarrer</a>
           <a class="btn btn-ghost" href="https://github.com/Zeffut/Foton">Code source</a>
         </div>
-        <div class="cmd"><b>$</b> curl -fsSL https://foton.zeffut.fr/install.sh | sh</div>
+        <div class="cmd">
+          <div class="cmd-switch">
+            <button type="button" class="cmd-tab is-active" data-os="unix" aria-pressed="true">macOS / Linux</button>
+            <button type="button" class="cmd-tab" data-os="win" aria-pressed="false">Windows</button>
+          </div>
+          <div class="cmd-line" data-os="unix">
+            <div class="cmd-code"><code><b>$</b> <span class="cmd-text">curl -fsSL https://foton.zeffut.fr/install.sh | sh</span></code></div>
+            <button type="button" class="cmd-copy" aria-label="Copier" data-label-copy="Copier" data-label-copied="Copié" data-label-failed="Échec de copie">Copier</button>
+          </div>
+          <div class="cmd-line cmd-hidden" data-os="win">
+            <div class="cmd-code"><code><b>&gt;</b> <span class="cmd-text">irm https://foton.zeffut.fr/install.ps1 | iex</span></code></div>
+            <button type="button" class="cmd-copy" aria-label="Copier" data-label-copy="Copier" data-label-copied="Copié" data-label-failed="Échec de copie">Copier</button>
+          </div>
+        </div>
       </div>
       <div>{{ scene_island }}</div>
     </div>
