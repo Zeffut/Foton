@@ -26,7 +26,7 @@ run "config reference is current"                  python3 dev/gen-config-docs.p
 run "site builds"                                  python3 dev/gen-site.py --check
 # A plugin is a JVM artifact: the classes it extends have to compile
 # before anything else about plugin support can be true.
-run "plugin api builds"                            bash dev/build-plugin-api.sh
+run "plugin api builds"                            bash dev/build-plugin-api.sh --check
 # `-D warnings` is not decoration. Without it this suite stayed green while
 # `Drowned::travel_in_water` recursed into itself and eleven dead squid
 # constants sat in the tree -- clippy had been printing both the whole time

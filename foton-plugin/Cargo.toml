@@ -5,6 +5,13 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# The Bukkit API is implemented in terms of Foton, so this is where
+# that translation lives. It sits beside foton-login rather than under
+# foton-core: the game does not know plugins exist.
+foton-core = { path = "../foton-core" }
+foton-utils.workspace = true
+text_components.workspace = true
+uuid.workspace = true
 jni = "0.21"
 libloading = "0.8"
 thiserror.workspace = true

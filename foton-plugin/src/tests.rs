@@ -6,6 +6,7 @@
 
 use std::fs::write;
 use std::path::PathBuf;
+use std::sync::Weak;
 
 use super::{PluginHostConfig, PluginHostError};
 
@@ -26,7 +27,7 @@ fn config() -> PluginHostConfig {
 /// available way to learn that.
 #[test]
 fn a_missing_api_jar_is_reported_before_anything_starts() {
-    let Err(error) = PluginHost::start(&config()) else {
+    let Err(error) = PluginHost::start(&config(), &Weak::new()) else {
         panic!("nothing is at /nowhere, so nothing should have started");
     };
 

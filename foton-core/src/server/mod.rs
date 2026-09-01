@@ -421,6 +421,8 @@ pub struct Server {
     pub worlds: WorldMap,
     /// Players currently connected to the server, independent of world membership.
     online_players: PlayerMap,
+    // Read by the plugin host, which lives outside this crate: a plugin asking
+    // who is online is the single most common thing a plugin does.
     /// UUIDs reserved by a join or disconnect/save lifecycle transition.
     player_admissions: SyncMutex<FxHashMap<Uuid, PlayerAdmissionState>>,
     /// The tick rate manager for the server.

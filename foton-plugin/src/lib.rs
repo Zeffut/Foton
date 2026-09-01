@@ -20,13 +20,22 @@ use std::ffi::{CString, NulError, c_void};
 use std::fs::read_dir;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::{Arc, Weak};
 
+use foton_core::server::Server;
+use jni::objects::JString;
 use jni::sys::{JNI_OK, JNI_VERSION_1_8, JavaVM as RawJavaVm, JavaVMInitArgs, JavaVMOption};
 use jni::{JavaVM, errors::Error as JniError};
 use thiserror::Error;
 
+mod forward;
+mod natives;
+
 /// The class the Java side exposes to this one.
 const HOST_CLASS: &str = "foton/PluginHost";
+
+/// The class whose methods Foton answers.
+const NATIVE_CLASS: &str = "foton/Native";
 
 /// Why a plugin host could not start, or could not do its job.
 #[derive(Debug, Error)]
@@ -123,7 +132,7 @@ fn jars_in(directory: &Path) -> Vec<String> {
 /// one process, so tearing one down and expecting another would be a trap. Call
 /// [`Self::disable_all`] to stop the plugins.
 pub struct PluginHost {
-    vm: JavaVM,
+    vm: Arc<JavaVM>,
     /// The loaded runtime, kept alive because the VM's code lives in it.
     ///
     /// Dropping this would unmap the library the JVM is executing from.
@@ -141,7 +150,10 @@ impl PluginHost {
     ///
     /// Returns an error when no runtime is where the configuration said, when
     /// the API jar has not been built, or when the runtime refuses to start.
-    pub fn start(config: &PluginHostConfig) -> Result<Self, PluginHostError> {
+    pub fn start(
+        config: &PluginHostConfig,
+        server: &Weak<Server>,
+    ) -> Result<Self, PluginHostError> {
         let class_path = config.class_path()?;
         let library = config.runtime_library();
 
@@ -183,10 +195,30 @@ impl PluginHost {
             (vm, runtime)
         };
 
-        Ok(Self {
-            vm,
+        natives::bind(server.clone());
+        let host = Self {
+            vm: Arc::new(vm),
             _runtime: runtime,
-        })
+        };
+        host.register_natives()?;
+        // Foton's events reach plugins only once this is done, which is why it
+        // happens before any plugin is loaded rather than after.
+        if let Some(server) = server.upgrade() {
+            forward::subscribe(&server, Arc::clone(&host.vm));
+        }
+        Ok(host)
+    }
+
+    /// Tells the runtime which Rust function answers each declared native.
+    ///
+    /// Done once, at start. A plugin that reaches Foton before this would get a
+    /// `atalError` from the JVM rather than a wrong answer, which is the right
+    /// way round but not a thing to rely on.
+    fn register_natives(&self) -> Result<(), PluginHostError> {
+        let mut env = self.vm.attach_current_thread()?;
+        let class = env.find_class(NATIVE_CLASS)?;
+        env.register_native_methods(&class, &natives::bindings())?;
+        Ok(())
     }
 
     /// Loads and enables every plugin in the configured directory.
@@ -209,6 +241,33 @@ impl PluginHost {
             )?
             .i()?;
         Ok(enabled)
+    }
+
+    /// Asks the Java side what it thinks the server is called.
+    ///
+    /// Exists for the bridge test and for a first-run diagnostic: it is the
+    /// shortest round trip through the seam, so an answer of anything but
+    /// Foton's own name means the seam is wrong rather than the plugin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Java side cannot be reached at all.
+    pub fn server_name_from_java(&self) -> Result<String, PluginHostError> {
+        let mut env = self.vm.attach_current_thread()?;
+        let value = env
+            .call_static_method(NATIVE_CLASS, "serverName", "()Ljava/lang/String;", &[])?
+            .l()?;
+        let value: JString<'_> = value.into();
+        Ok(env.get_string(&value)?.into())
+    }
+
+    /// Stops delivering Foton's events to plugins.
+    ///
+    /// Separate from [`Self::disable_all`] on purpose: a plugin being disabled
+    /// should stop hearing about the world before it is asked to shut down, or
+    /// its last moments are spent handling events for a server it is leaving.
+    pub fn unsubscribe(server: &Arc<Server>) {
+        forward::unsubscribe(server);
     }
 
     /// Disables every loaded plugin, newest first.

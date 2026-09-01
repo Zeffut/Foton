@@ -25,14 +25,24 @@ public final class FotonServer implements Server {
     @Override public PluginManager getPluginManager() { return plugins; }
     @Override public Messenger getMessenger() { return messenger; }
     @Override public BukkitScheduler getScheduler() { return scheduler; }
-    @Override public Collection<? extends Player> getOnlinePlayers() { return List.of(); }
-    @Override public String getName() { return "Foton"; }
-    @Override public String getVersion() { return "0.15.2+mc26.2"; }
+    @Override public Collection<? extends Player> getOnlinePlayers() {
+        String[] ids = Native.onlinePlayerIds();
+        List<Player> players = new java.util.ArrayList<>(ids.length);
+        for (String id : ids) {
+            java.util.UUID parsed = Native.parse(id);
+            if (parsed != null) {
+                players.add(new FotonPlayer(parsed));
+            }
+        }
+        return java.util.Collections.unmodifiableList(players);
+    }
+
+    @Override public String getName() { return Native.serverName(); }
+    @Override public String getVersion() { return Native.serverVersion(); }
 
     private static final class Plugins implements PluginManager {
         @Override public void registerEvents(Listener listener, Plugin plugin) {
-            System.out.println("[server] " + plugin.getName() + " registered "
-                + listener.getClass().getName());
+            EventBridge.register(listener, plugin);
         }
         @Override public Plugin getPlugin(String name) { return null; }
         @Override public Plugin[] getPlugins() { return new Plugin[0]; }
