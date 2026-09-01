@@ -17,11 +17,11 @@ use super::Event;
 use crate::player::Player;
 use foton_utils::Identifier;
 
-/// A player has completed protocol login and may enter the world.
 /// A player has died, before the death drops are processed.
 pub struct PlayerDeathEvent {
     player_id: Uuid,
 }
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
 unsafe impl DowncastType for PlayerDeathEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_death");
 }
@@ -31,6 +31,7 @@ impl PlayerDeathEvent {
     pub const fn player_id(&self) -> Uuid { self.player_id }
 }
 
+/// A player has completed protocol login and may enter the world.
 pub struct PlayerLoginEvent {
     player: Arc<Player>,
     kick_message: Option<String>,
