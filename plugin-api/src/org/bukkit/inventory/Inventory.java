@@ -11,6 +11,9 @@ import org.bukkit.Material;
  */
 public interface Inventory {
     InventoryHolder getHolder();
+
+    /** Returns the holder, optionally allowing a null result for snapshots. */
+    default InventoryHolder getHolder(boolean useSnapshot) { return getHolder(); }
     int getSize();
 
     default boolean isEmpty() {
