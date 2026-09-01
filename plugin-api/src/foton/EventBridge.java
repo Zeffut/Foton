@@ -155,9 +155,9 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    public static boolean fireInventoryClick(String uuid) {
+    public static boolean fireInventoryClick(String uuid, String item) {
         org.bukkit.event.inventory.InventoryClickEvent event =
-            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid));
+            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item));
         dispatch(event);
         return !event.isCancelled();
     }

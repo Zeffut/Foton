@@ -92,7 +92,7 @@ public final class Native {
     /** Whether a player holds a permission. */
     public static native boolean hasPermission(String uuid, String permission);
     public static native boolean isPermissionSet(String uuid, String permission);
-    public static native boolean fireInventoryClick(String uuid);
+    public static native boolean fireInventoryClick(String uuid, String item);
 
     /** A player's position as {x, y, z, yaw, pitch}, or null once they are gone. */
     public static native double[] playerPosition(String uuid);
