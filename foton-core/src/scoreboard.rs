@@ -277,6 +277,20 @@ impl Scoreboard {
         self.state.read().teams.iter().cloned().collect()
     }
 
+    /// Returns score holders currently assigned to a team in stable order.
+    #[must_use]
+    pub fn team_entries(&self, team: &ScoreboardTeam) -> Vec<String> {
+        let state = self.state.read();
+        if !state.teams.contains(team.name()) {
+            return Vec::new();
+        }
+        state
+            .holder_teams
+            .iter()
+            .filter_map(|(holder, assigned)| (assigned == team.name()).then(|| holder.to_owned()))
+            .collect()
+    }
+
     /// Returns the current team name for a score holder.
     #[must_use]
     pub fn holder_team_name(&self, holder: &ScoreHolder) -> Option<String> {
