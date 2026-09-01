@@ -228,6 +228,13 @@ public final class EventBridge {
         dispatch(event); return !event.isCancelled();
     }
 
+    public static void fireWorldLoad(String world) {
+        dispatch(new org.bukkit.event.world.WorldLoadEvent(new FotonWorld(world)));
+    }
+    public static void fireWorldUnload(String world) {
+        dispatch(new org.bukkit.event.world.WorldUnloadEvent(new FotonWorld(world)));
+    }
+
     public static void firePlayerRespawn(String uuid) {
         dispatch(new org.bukkit.event.player.PlayerRespawnEvent(player(uuid)));
     }

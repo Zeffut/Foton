@@ -48,6 +48,9 @@ fn owner() -> Identifier {
 /// more machinery than five events justify.
 pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let events = server.events();
+    for world in server.worlds.values() {
+        world_call(&vm, "fireWorldLoad", &world.key.to_string());
+    }
 
     let jvm = Arc::clone(&vm);
     events.on::<PlayerInteractEvent, _>(owner(), move |event| {
@@ -234,10 +237,19 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
 /// Drops every subscription the plugin host made.
 pub(crate) fn unsubscribe(server: &Arc<Server>) {
+    // Plugins receive unload notifications while the JVM is still alive.
+    // World instances are not removed from Steel here, so this is the lifecycle boundary.
+    // The host calls this before tearing down the JVM.
     server.events().forget(&owner());
 }
 
 /// A component as the plain text a Bukkit plugin expects a message to be.
+fn world_call(vm: &JavaVM, method: &str, world: &str) {
+    let Ok(mut env) = vm.attach_current_thread() else { return; };
+    let Ok(world) = env.new_string(world) else { return; };
+    let _ = env.call_static_method(BRIDGE, method, "(Ljava/lang/String;)V", &[JValue::Object(&world)]);
+}
+
 fn plain(message: &TextComponent) -> String {
     message.to_plain(&DisplayResolutor)
 }
