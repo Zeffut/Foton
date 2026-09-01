@@ -121,6 +121,28 @@ public final class Bukkit {
         return server.dispatchCommand(sender, command);
     }
 
+    /** Resolves the selector forms used by server-redirect's target command. */
+    public static List<org.bukkit.entity.Entity> selectEntities(
+            CommandSender sender, String selector) {
+        if (selector == null || selector.length() < 2 || selector.charAt(0) != '@') {
+            return List.of();
+        }
+        char kind = selector.charAt(1);
+        List<org.bukkit.entity.Entity> all = new java.util.ArrayList<>();
+        for (World world : getWorlds()) {
+            all.addAll(world.getEntities());
+        }
+        if (kind == 'a') {
+            all.removeIf(entity -> !(entity instanceof Player));
+        } else if (kind == 's') {
+            if (sender instanceof org.bukkit.entity.Entity entity) return List.of(entity);
+            return List.of();
+        } else if (kind != 'e') {
+            return List.of();
+        }
+        return java.util.Collections.unmodifiableList(all);
+    }
+
     public static OfflinePlayer getOfflinePlayer(String name) {
         return server.getOfflinePlayer(name);
     }
