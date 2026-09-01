@@ -24,6 +24,11 @@ public interface Server {
 
     boolean isPrimaryThread();
 
+    /** Steel has one global tick thread; it is the Bukkit primary thread. */
+    default boolean isGlobalTickThread() {
+        return isPrimaryThread();
+    }
+
     Collection<? extends Player> getOnlinePlayers();
 
     Player getPlayer(String name);
