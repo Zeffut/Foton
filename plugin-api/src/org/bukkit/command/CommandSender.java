@@ -9,6 +9,7 @@ public interface CommandSender {
         if (components != null) spigot().sendMessage(components);
     }
     boolean hasPermission(String permission);
+    default boolean isOp() { return false; }
     default boolean isPermissionSet(String permission) { return false; }
     String getName();
     default Spigot spigot() { return new Spigot(this); }

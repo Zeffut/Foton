@@ -20,6 +20,9 @@ public final class ConsoleSender implements ConsoleCommandSender {
     }
 
     @Override
+    public boolean isOp() { return true; }
+
+    @Override
     public String getName() {
         return "CONSOLE";
     }
