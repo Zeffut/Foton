@@ -33,7 +33,15 @@ VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
 [ -n "$VERSION" ] || die "no version in Cargo.toml"
 TAG="v$VERSION"
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-  if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+  # ls-remote exits non-zero both for "no such tag" and for "could not reach
+  # the remote", and telling someone to delete a tag that is in fact published
+  # is worse advice than admitting we do not know. So the three cases are kept
+  # apart: found, absent, and unreachable.
+  REMOTE_TAGS=$(git ls-remote --tags origin "$TAG" 2>/dev/null) && REMOTE_QUERY=ok || REMOTE_QUERY=failed
+  if [ "$REMOTE_QUERY" = failed ]; then
+    die "$TAG exists locally and the remote could not be reached, so whether it was already published is unknown. Check the network, then rerun."
+  fi
+  if [ -n "$REMOTE_TAGS" ]; then
     die "$TAG is already published. Bump the version in Cargo.toml, or if that release failed part-way: git push origin :refs/tags/$TAG && git tag -d $TAG"
   fi
   die "$TAG exists locally but was never pushed -- a previous run stopped part-way. Remove it and try again: git tag -d $TAG"
@@ -83,7 +91,8 @@ fi
 
 say "Publishing $TAG"
 git tag -a "$TAG" -m "Foton $VERSION"
-git push origin "$TAG"
+git push origin "$TAG" \
+  || die "the tag $TAG was created locally but could not be pushed. Remove it and try again: git tag -d $TAG"
 gh release create "$TAG" "$OUT"/* \
   --title "Foton $VERSION" \
   --notes "Install: \`curl -fsSL https://foton.zeffut.fr/install.sh | sh\`" \
