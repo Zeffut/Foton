@@ -110,12 +110,11 @@ if [ "$UPDATE" -eq 1 ]; then
   printf 'Updating from %s to %s\n' "$CURRENT" "$TAG"
   DIR=.
 else
-  DIR=$(ask "Where should Foton live?" "./foton")
+  DIR=.
   if [ -e "$DIR/$BIN" ]; then
-    OVERWRITE=$(ask "$DIR already has Foton in it. Replace the binary?" "no")
+    OVERWRITE=$(ask "This directory already has Foton. Replace the binary?" "no")
     case "$OVERWRITE" in y|Y|yes|Yes) ;; *) die "stopping, nothing was changed" ;; esac
   fi
-  mkdir -p "$DIR"
 fi
 
 TMP=$(mktemp -d)
@@ -142,7 +141,7 @@ fi
 [ -f "$DIR/$BIN" ] && mv "$DIR/$BIN" "$DIR/$BIN.previous"
 mv "$TMP/$BIN" "$DIR/$BIN"
 chmod +x "$DIR/$BIN"
-bold "Installed $TAG to $DIR/$BIN"
+bold "Installed $TAG to ./$BIN"
 
 if [ "$UPDATE" -eq 1 ]; then
   bold "Updated. Your config/ and saves/ were left alone."
@@ -153,7 +152,7 @@ printf 'Writing the default configuration...\n'
 ( cd "$DIR" && "./$BIN" --generate-config ) || die "could not generate the configuration"
 
 if [ "$have_tty" -eq 0 ]; then
-  bold "No terminal here, so the defaults were kept. Edit $DIR/config/ to change them."
+  bold "No terminal here, so the defaults were kept. Edit ./config/ to change them."
   exit 0
 fi
 
@@ -177,7 +176,7 @@ set_key "$DIR/config/config.toml" online_mode "$ONLINE_VALUE"
 set_key "$DIR/config/worlds.toml" difficulty "\"$DIFFICULTY\""
 
 bold "Done."
-printf 'Start it with:  cd %s && ./%s\n' "$DIR" "$BIN"
+printf 'Start it with:  ./%s\n' "$BIN"
 START=$(ask "Start it now?" "yes")
 # The server reads its console from standard input, which under `curl | sh`
 # is the pipe curl is writing into -- already at end of file. Handing it the

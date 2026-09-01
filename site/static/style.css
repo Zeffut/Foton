@@ -120,6 +120,8 @@ pre {
   padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 14px;
   line-height: 1.7; color: var(--ink);
 }
+pre, .cmd-code { -ms-overflow-style: none; scrollbar-width: none; }
+pre::-webkit-scrollbar, .cmd-code::-webkit-scrollbar { display: none; }
 pre code { font-size: inherit; }
 
 table { width: 100%; border-collapse: collapse; font-size: 15px; }

@@ -163,14 +163,13 @@ try {
         Write-Host "Updating from $current to $Tag"
         $Dir = '.'
     } else {
-        $Dir = Read-Answer 'Where should Foton live?' '.\foton'
+        $Dir = '.'
         if (Test-Path (Join-Path $Dir $Bin)) {
-            $overwrite = Read-Answer "$Dir already has Foton in it. Replace the binary?" 'no'
+            $overwrite = Read-Answer 'This directory already has Foton. Replace the binary?' 'no'
             if ($overwrite -notmatch '^(y|yes)$') {
                 Die 'stopping, nothing was changed'
             }
         }
-        New-Item -ItemType Directory -Force -Path $Dir | Out-Null
     }
 
     $TempDir = Join-Path $env:TEMP ('foton-install-' + [Guid]::NewGuid().ToString('N'))
@@ -216,7 +215,7 @@ try {
         Move-Item -Force $finalBin $previousBin
     }
     Move-Item -Force $tempBin $finalBin
-    Write-Bold "Installed $Tag to $finalBin"
+    Write-Bold "Installed $Tag to .\$Bin"
 
     if ($Update) {
         Write-Bold 'Updated. Your config\ and saves\ were left alone.'
@@ -233,7 +232,7 @@ try {
     }
 
     if (-not $script:Interactive) {
-        Write-Bold "No terminal here, so the defaults were kept. Edit $Dir\config\ to change them."
+        Write-Bold 'No terminal here, so the defaults were kept. Edit .\config\ to change them.'
         exit 0
     }
 
@@ -252,7 +251,7 @@ try {
     Set-TomlKey (Join-Path $Dir 'config\worlds.toml') 'difficulty' ('"' + $difficulty + '"')
 
     Write-Bold 'Done.'
-    Write-Host "Start it with:  cd $Dir; .\$Bin"
+    Write-Host "Start it with:  .\$Bin"
     $start = Read-Answer 'Start it now?' 'yes'
     if ($start -match '^(y|yes)$') {
         Set-Location $Dir

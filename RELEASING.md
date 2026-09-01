@@ -126,7 +126,7 @@ a second installer:
 irm https://foton.zeffut.fr/install.ps1 | iex
 ```
 
-The two ask the same six questions with the same defaults and write the same
+The two ask the same five questions with the same defaults and write the same
 two config files; `install.ps1` exists only because requiring a POSIX shell
 to install a Minecraft server would rule out most Windows users. See
 `site/static/install.ps1`'s header comment for how to pass `-Update` through
@@ -142,9 +142,9 @@ The `sh` script:
    so no token is involved.
 3. Downloads the binary **and `SHA256SUMS`**, and verifies the binary against it
    before making it executable. A mismatch deletes the download and stops.
-4. Asks six questions on `/dev/tty`: where to install, the server name, the
-   port, the maximum number of players, whether to use Mojang authentication,
-   and the difficulty.
+4. Installs in the current directory, then asks five questions on `/dev/tty`:
+   the server name, the port, the maximum number of players, whether to use
+   Mojang authentication, and the difficulty.
 5. Runs the binary once so it writes its own configuration, then applies the
    answers to `config/config.toml` and `config/worlds.toml`.
 6. Offers to start the server.
