@@ -16,4 +16,16 @@ public final class Commands implements Registrar {
         result.add(node);
         return result;
     }
+
+    /** Executes a line against this plugin's registered Brigadier tree. */
+    public boolean dispatch(org.bukkit.command.CommandSender sender, String line) {
+        try {
+            dispatcher.execute(line, new CommandSourceStack(sender,
+                sender instanceof org.bukkit.entity.Entity entity ? entity.getLocation() : null));
+            return true;
+        } catch (com.mojang.brigadier.exceptions.CommandSyntaxException error) {
+            sender.sendMessage(error.getMessage());
+            return false;
+        }
+    }
 }

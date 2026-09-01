@@ -96,6 +96,9 @@ public final class CommandMap {
         String[] parts = trimmed.split("\\s+");
         Command command = get(parts[0]);
         if (command == null) {
+            for (Commands brigadier : brigadierByPlugin.values()) {
+                if (brigadier.dispatch(sender, trimmed)) return true;
+            }
             return false;
         }
         String[] args = new String[parts.length - 1];
