@@ -38,11 +38,14 @@ pub mod server;
 pub use block::{BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent};
 pub use command::CommandEvent;
 pub use command_preprocess::PlayerCommandPreprocessEvent;
-pub use entity::{EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRemoveFromWorldEvent};
+pub use entity::{
+    EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRegainHealthEvent,
+    EntityRemoveFromWorldEvent,
+};
 pub use inventory::InventoryClickEvent;
 pub use player::{
-    PlayerChatEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerInteractEvent, PlayerJoinEvent,
-    PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent,
+    PlayerChatEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerInteractEvent,
+    PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent,
 };
 pub use server::ServerTickEvent;
 

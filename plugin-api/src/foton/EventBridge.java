@@ -187,6 +187,13 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static boolean fireEntityRegainHealth(String entity, float amount) {
+        org.bukkit.event.entity.EntityRegainHealthEvent event =
+            new org.bukkit.event.entity.EntityRegainHealthEvent(new FotonLivingEntity(Native.parse(entity)), amount);
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     public static boolean fireEntityDamage(String damager, String entity, String cause) {
         org.bukkit.event.entity.EntityDamageByEntityEvent event =
             new org.bukkit.event.entity.EntityDamageByEntityEvent(

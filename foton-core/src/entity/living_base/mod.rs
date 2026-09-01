@@ -2195,7 +2195,11 @@ fn apply_heal_or_hurt<E: LivingEntity + ?Sized>(
     amount: f32,
 ) {
     if heals {
-        entity.heal(amount);
+        let mut event = crate::event::EntityRegainHealthEvent::new(entity.uuid(), amount);
+        world.fire_event(&mut event);
+        if !event.is_cancelled() {
+            entity.heal(event.amount());
+        }
     } else {
         entity.hurt(
             world,
