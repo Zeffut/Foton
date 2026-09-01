@@ -17,6 +17,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
@@ -158,6 +159,13 @@ public final class EventBridge {
     public static boolean fireInventoryClick(String uuid, String item) {
         org.bukkit.event.inventory.InventoryClickEvent event =
             new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item));
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
+    public static boolean fireEntityPickup(String entity, String item) {
+        org.bukkit.entity.LivingEntity living = new FotonLivingEntity(Native.parse(entity));
+        EntityPickupItemEvent event = new EntityPickupItemEvent(living, new FotonItem(Native.parse(item)));
         dispatch(event);
         return !event.isCancelled();
     }

@@ -2202,7 +2202,11 @@ pub trait Mob: LivingEntity + MobSource {
         });
 
         for item in items {
-            self.pick_up_item(&world, &item);
+            let mut event = crate::event::EntityPickupItemEvent::new(self.uuid(), item.uuid());
+            world.fire_event(&mut event);
+            if !event.is_cancelled() {
+                self.pick_up_item(&world, &item);
+            }
         }
     }
 

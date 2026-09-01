@@ -369,6 +369,12 @@ pub struct World {
 }
 
 impl World {
+    /// Fires a plugin event when this world is attached to a server.
+    pub(crate) fn fire_event<E: crate::event::Event>(&self, event: &mut E) {
+        if let Some(server) = self.server.get().and_then(Weak::upgrade) {
+            server.events.fire(event);
+        }
+    }
     /// Returns the persistent world directory, or `None` for RAM-only worlds.
     #[must_use]
     pub fn world_folder(&self) -> Option<std::path::PathBuf> {

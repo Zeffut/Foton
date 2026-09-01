@@ -42,7 +42,7 @@ pub use player::{
     PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
 };
 pub use inventory::InventoryClickEvent;
-pub use entity::EntityDamageByEntityEvent;
+pub use entity::{EntityDamageByEntityEvent, EntityPickupItemEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use server::ServerTickEvent;
 
