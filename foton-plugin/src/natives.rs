@@ -242,6 +242,20 @@ extern "system" fn entity_world(
     )
 }
 
+extern "system" fn entity_eject(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else { return false as jboolean; };
+    let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else { return false as jboolean; };
+    let Some((_world, entity)) = entity_by_uuid(&id) else { return false as jboolean; };
+    let passengers = entity.passengers();
+    if passengers.is_empty() { return false as jboolean; }
+    for passenger in passengers { passenger.stop_riding(); }
+    true as jboolean
+}
+
 extern "system" fn entity_vehicle(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -2026,6 +2040,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "entityType",
             "(Ljava/lang/String;)Ljava/lang/String;",
             entity_type as *mut c_void,
+        ),
+        method(
+            "entityEject",
+            "(Ljava/lang/String;)Z",
+            entity_eject as *mut c_void,
         ),
         method(
             "entityVehicle",

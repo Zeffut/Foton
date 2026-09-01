@@ -102,6 +102,7 @@ public final class Native {
     public static native void setWorldBorderCenter(String world, double x, double z);
     public static native void setWorldBorderSize(String world, double size);
     public static native boolean entityIsLiving(String uuid);
+    public static native boolean entityEject(String uuid);
     public static native String entityVehicle(String uuid);
     public static native String entitySpawnCategory(String uuid);
     public static native double[] entityPosition(String uuid);
