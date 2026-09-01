@@ -32,6 +32,12 @@ public class FotonEntity implements Entity {
         try { return EntityType.valueOf(type.toUpperCase(java.util.Locale.ROOT)); }
         catch (IllegalArgumentException ignored) { return null; }
     }
+    @Override public org.bukkit.entity.SpawnCategory getSpawnCategory() {
+        String category = Native.entitySpawnCategory(id.toString());
+        if (category == null) return org.bukkit.entity.SpawnCategory.MISC;
+        try { return org.bukkit.entity.SpawnCategory.valueOf(category.toUpperCase(java.util.Locale.ROOT)); }
+        catch (IllegalArgumentException ignored) { return org.bukkit.entity.SpawnCategory.MISC; }
+    }
     @Override public int getEntityId() { return Native.entityId(id.toString()); }
     @Override public boolean teleport(Location location) {
         if (location == null || location.getWorld() == null) return false;

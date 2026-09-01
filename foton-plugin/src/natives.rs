@@ -211,6 +211,14 @@ extern "system" fn entity_type(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JS
     to_java(&mut env, entity_by_uuid(&id).map(|(_, entity)| entity.entity_type().key.path.to_string()))
 }
 
+extern "system" fn entity_spawn_category(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let Ok(text) = env.get_string(&uuid) else { return null_mut(); };
+    let Ok(id) = Uuid::parse_str(match text.to_str() { Ok(value) => value, Err(_) => return null_mut() }) else { return null_mut(); };
+    let Some((_world, entity)) = entity_by_uuid(&id) else { return null_mut(); };
+    let category = format!("{:?}", entity.entity_type().mob_category);
+    to_java(&mut env, Some(category))
+}
+
 extern "system" fn entity_position(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdoubleArray {
     let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_position(&mut env, None) };
     let Some(id) = Uuid::parse_str(&text).ok() else { return to_position(&mut env, None); };
@@ -1542,6 +1550,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method("entityWorld", "(Ljava/lang/String;)Ljava/lang/String;", entity_world as *mut c_void),
         method("entityType", "(Ljava/lang/String;)Ljava/lang/String;", entity_type as *mut c_void),
+        method("entitySpawnCategory", "(Ljava/lang/String;)Ljava/lang/String;", entity_spawn_category as *mut c_void),
         method("entityPosition", "(Ljava/lang/String;)[D", entity_position as *mut c_void),
         method("entityId", "(Ljava/lang/String;)I", entity_id as *mut c_void),
         method("entityCustomName", "(Ljava/lang/String;)Ljava/lang/String;", entity_custom_name as *mut c_void),
