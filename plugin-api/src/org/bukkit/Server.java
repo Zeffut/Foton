@@ -29,6 +29,11 @@ public interface Server {
         return isPrimaryThread();
     }
 
+    /** Requests a graceful server shutdown. */
+    default void shutdown() {
+        foton.Native.shutdown();
+    }
+
     Collection<? extends Player> getOnlinePlayers();
 
     Player getPlayer(String name);

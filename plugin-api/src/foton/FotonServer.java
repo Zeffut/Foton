@@ -53,6 +53,11 @@ public final class FotonServer implements Server {
     }
 
     @Override
+    public void shutdown() {
+        Native.shutdown();
+    }
+
+    @Override
     public Collection<? extends Player> getOnlinePlayers() {
         List<Player> online = new ArrayList<>();
         for (String id : Native.onlinePlayerIds()) {

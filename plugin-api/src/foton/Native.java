@@ -35,6 +35,9 @@ public final class Native {
     /** Whether this call is running on Foton's serialized game-tick thread. */
     public static native boolean isPrimaryThread();
 
+    /** Requests the server's normal graceful shutdown sequence. */
+    public static native void shutdown();
+
     /** The UUIDs of everyone online, in no promised order. */
     public static native String[] onlinePlayerIds();
     public static native String[] worldPlayerIds(String world);
