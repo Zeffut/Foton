@@ -16,7 +16,10 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 
 use foton_core::boss_event::ServerBossEvent;
-use foton_core::chunk::{chunk_request::{ChunkRequestHandle, ChunkTicketKind}, status::ChunkStatus};
+use foton_core::chunk::{
+    chunk_request::{ChunkRequestHandle, ChunkTicketKind},
+    status::ChunkStatus,
+};
 use foton_core::entity::{Entity, LivingEntity as _};
 use foton_core::inventory::container::Container;
 use foton_core::permission::{PermissionExpr, PermissionKey};
@@ -174,7 +177,11 @@ extern "system" fn online_player_ids(mut env: JNIEnv<'_>, _class: JClass<'_>) ->
 }
 
 /// `foton.Native.playerLocale`
-extern "system" fn player_locale(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+extern "system" fn player_locale(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
     let locale = player(&mut env, &uuid).map(|player| player.client_information().language);
     to_java(&mut env, locale)
 }
@@ -200,74 +207,208 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, foton_core::entity::Shared
 }
 
 extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
-    let Ok(text) = env.get_string(&uuid) else { return; };
-    let Ok(id) = text.to_str().ok().and_then(|value| value.parse::<Uuid>().ok()).ok_or(()) else { return; };
-    let Some((world, entity)) = entity_by_uuid(&id) else { return; };
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Ok(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| value.parse::<Uuid>().ok())
+        .ok_or(())
+    else {
+        return;
+    };
+    let Some((world, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
     let _ = world.remove_entity(entity.id());
 }
 
-extern "system" fn entity_world(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
-    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
-    let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
-    to_java(&mut env, entity_by_uuid(&id).map(|(world, _)| world.key.to_string()))
+extern "system" fn entity_world(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let text: String = match env.get_string(&uuid) {
+        Ok(v) => v.into(),
+        Err(_) => return to_java(&mut env, None),
+    };
+    let Some(id) = Uuid::parse_str(&text).ok() else {
+        return to_java(&mut env, None);
+    };
+    to_java(
+        &mut env,
+        entity_by_uuid(&id).map(|(world, _)| world.key.to_string()),
+    )
 }
 
-extern "system" fn entity_vehicle(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else { return std::ptr::null_mut(); };
-    let Ok(id) = text.to_str().ok().and_then(|value| value.parse::<Uuid>().ok()).ok_or(()) else { return std::ptr::null_mut(); };
+extern "system" fn entity_vehicle(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text) = env.get_string(&uuid) else {
+        return std::ptr::null_mut();
+    };
+    let Ok(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| value.parse::<Uuid>().ok())
+        .ok_or(())
+    else {
+        return std::ptr::null_mut();
+    };
     let vehicle = entity_by_uuid(&id)
         .and_then(|(_, entity)| entity.vehicle())
         .map(|vehicle| vehicle.uuid().to_string());
     to_java(&mut env, vehicle)
 }
-extern "system" fn entity_type(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
-    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
-    let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
-    to_java(&mut env, entity_by_uuid(&id).map(|(_, entity)| entity.entity_type().key.path.to_string()))
+extern "system" fn entity_is_living(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return false as jboolean;
+    };
+    let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
+        return false as jboolean;
+    };
+    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.as_living_entity().is_some()) as jboolean
 }
 
-extern "system" fn entity_spawn_category(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else { return null_mut(); };
-    let Ok(id) = Uuid::parse_str(match text.to_str() { Ok(value) => value, Err(_) => return null_mut() }) else { return null_mut(); };
-    let Some((_world, entity)) = entity_by_uuid(&id) else { return null_mut(); };
+extern "system" fn entity_type(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let text: String = match env.get_string(&uuid) {
+        Ok(v) => v.into(),
+        Err(_) => return to_java(&mut env, None),
+    };
+    let Some(id) = Uuid::parse_str(&text).ok() else {
+        return to_java(&mut env, None);
+    };
+    to_java(
+        &mut env,
+        entity_by_uuid(&id).map(|(_, entity)| entity.entity_type().key.path.to_string()),
+    )
+}
+
+extern "system" fn entity_spawn_category(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text) = env.get_string(&uuid) else {
+        return null_mut();
+    };
+    let Ok(id) = Uuid::parse_str(match text.to_str() {
+        Ok(value) => value,
+        Err(_) => return null_mut(),
+    }) else {
+        return null_mut();
+    };
+    let Some((_world, entity)) = entity_by_uuid(&id) else {
+        return null_mut();
+    };
     let category = format!("{:?}", entity.entity_type().mob_category);
     to_java(&mut env, Some(category))
 }
 
-extern "system" fn entity_position(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdoubleArray {
-    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_position(&mut env, None) };
-    let Some(id) = Uuid::parse_str(&text).ok() else { return to_position(&mut env, None); };
-    to_position(&mut env, entity_by_uuid(&id).map(|(_, entity)| { let p = entity.position(); [p.x, p.y, p.z, 0.0, 0.0] }))
+extern "system" fn entity_position(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jdoubleArray {
+    let text: String = match env.get_string(&uuid) {
+        Ok(v) => v.into(),
+        Err(_) => return to_position(&mut env, None),
+    };
+    let Some(id) = Uuid::parse_str(&text).ok() else {
+        return to_position(&mut env, None);
+    };
+    to_position(
+        &mut env,
+        entity_by_uuid(&id).map(|(_, entity)| {
+            let p = entity.position();
+            [p.x, p.y, p.z, 0.0, 0.0]
+        }),
+    )
 }
 
 extern "system" fn entity_id(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
-    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return -1 };
-    let Some(id) = Uuid::parse_str(&text).ok() else { return -1; };
+    let text: String = match env.get_string(&uuid) {
+        Ok(v) => v.into(),
+        Err(_) => return -1,
+    };
+    let Some(id) = Uuid::parse_str(&text).ok() else {
+        return -1;
+    };
     entity_by_uuid(&id).map_or(-1, |(_, entity)| entity.id())
 }
 
-extern "system" fn entity_custom_name(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
-    let text: String = match env.get_string(&uuid) { Ok(v) => v.into(), Err(_) => return to_java(&mut env, None) };
-    let Some(id) = Uuid::parse_str(&text).ok() else { return to_java(&mut env, None); };
-    to_java(&mut env, entity_by_uuid(&id).and_then(|(_, entity)| entity.custom_name().map(|name| name.to_string())))
+extern "system" fn entity_custom_name(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let text: String = match env.get_string(&uuid) {
+        Ok(v) => v.into(),
+        Err(_) => return to_java(&mut env, None),
+    };
+    let Some(id) = Uuid::parse_str(&text).ok() else {
+        return to_java(&mut env, None);
+    };
+    to_java(
+        &mut env,
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| entity.custom_name().map(|name| name.to_string())),
+    )
 }
 
-extern "system" fn set_entity_custom_name(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, name: JString<'_>) {
-    let Ok(uuid_text) = env.get_string(&uuid) else { return; };
-    let Ok(name_text) = env.get_string(&name) else { return; };
-    let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else { return; };
+extern "system" fn set_entity_custom_name(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    name: JString<'_>,
+) {
+    let Ok(uuid_text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Ok(name_text) = env.get_string(&name) else {
+        return;
+    };
+    let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else {
+        return;
+    };
     if let Some((_, entity)) = entity_by_uuid(&id) {
-        entity.set_custom_name(Some(text_components::TextComponent::plain(String::from(name_text))));
+        entity.set_custom_name(Some(text_components::TextComponent::plain(String::from(
+            name_text,
+        ))));
     }
 }
 
-extern "system" fn entity_send_message(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, message: JString<'_>) {
-    let Ok(uuid_text) = env.get_string(&uuid) else { return; };
-    let Ok(message_text) = env.get_string(&message) else { return; };
-    let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else { return; };
+extern "system" fn entity_send_message(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    message: JString<'_>,
+) {
+    let Ok(uuid_text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Ok(message_text) = env.get_string(&message) else {
+        return;
+    };
+    let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else {
+        return;
+    };
     if let Some((_, entity)) = entity_by_uuid(&id) {
         if let Some(player) = entity.as_player() {
-            player.send_message(&text_components::TextComponent::plain(String::from(message_text)));
+            player.send_message(&text_components::TextComponent::plain(String::from(
+                message_text,
+            )));
         }
     }
 }
@@ -316,7 +457,11 @@ extern "system" fn set_custom_name(
 }
 
 /// `foton.Native.health`
-extern "system" fn player_food_level(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
+extern "system" fn player_food_level(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jint {
     player(&mut env, &uuid).map_or(20, |player| player.food_data.lock().food_level)
 }
 
@@ -346,17 +491,35 @@ extern "system" fn max_health(
 }
 
 /// `foton.Native.playerRespawnWorld`
-extern "system" fn player_respawn_world(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
-    let world = player(&mut env, &uuid).and_then(|player| player.respawn_config()).map(|config| config.respawn_data.dimension().to_string());
+extern "system" fn player_respawn_world(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let world = player(&mut env, &uuid)
+        .and_then(|player| player.respawn_config())
+        .map(|config| config.respawn_data.dimension().to_string());
     to_java(&mut env, world)
 }
 
 /// `foton.Native.playerRespawnPosition`
-extern "system" fn player_respawn_position(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdoubleArray {
-    let position = player(&mut env, &uuid).and_then(|player| player.respawn_config()).map(|config| {
-        let pos = config.respawn_data.pos();
-        [f64::from(pos.x()) + 0.5, f64::from(pos.y()), f64::from(pos.z()) + 0.5, f64::from(config.respawn_data.yaw), f64::from(config.respawn_data.pitch)]
-    });
+extern "system" fn player_respawn_position(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jdoubleArray {
+    let position = player(&mut env, &uuid)
+        .and_then(|player| player.respawn_config())
+        .map(|config| {
+            let pos = config.respawn_data.pos();
+            [
+                f64::from(pos.x()) + 0.5,
+                f64::from(pos.y()),
+                f64::from(pos.z()) + 0.5,
+                f64::from(config.respawn_data.yaw),
+                f64::from(config.respawn_data.pitch),
+            ]
+        });
     to_position(&mut env, position)
 }
 
@@ -607,14 +770,22 @@ extern "system" fn is_primary_thread(_env: JNIEnv<'_>, _class: JClass<'_>) -> jb
 }
 
 /// `foton.Native.experienceLevel`
-extern "system" fn experience_level(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
-    let Some(player) = player(&mut env, &uuid) else { return 0 };
+extern "system" fn experience_level(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jint {
+    let Some(player) = player(&mut env, &uuid) else {
+        return 0;
+    };
     player.experience.lock().level()
 }
 
 /// `foton.Native.savePlayers`
 extern "system" fn save_players(_env: JNIEnv<'_>, _class: JClass<'_>) {
-    if let Some(server) = server() { server.request_save_players(); }
+    if let Some(server) = server() {
+        server.request_save_players();
+    }
 }
 
 /// `foton.Native.shutdown`
@@ -1253,108 +1424,206 @@ extern "system" fn world_entity_ids(
 }
 
 /// `foton.Native.requestChunk`
-extern "system" fn request_chunk(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, x: jint, z: jint) -> jstring {
-    let Some(world) = world(&mut env, &name) else { return null_mut(); };
+extern "system" fn request_chunk(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    z: jint,
+) -> jstring {
+    let Some(world) = world(&mut env, &name) else {
+        return null_mut();
+    };
     let pos = foton_utils::ChunkPos::new(x, z);
-    let handle = world.chunk_map.request_chunk(pos, ChunkStatus::Full, ChunkTicketKind::Command);
+    let handle = world
+        .chunk_map
+        .request_chunk(pos, ChunkStatus::Full, ChunkTicketKind::Command);
     let id = Uuid::new_v4();
     chunk_requests().lock().insert(id, handle);
     to_java(&mut env, Some(id.to_string()))
 }
 
 /// `foton.Native.chunkRequestReady`
-extern "system" fn chunk_request_ready(mut env: JNIEnv<'_>, _class: JClass<'_>, id: JString<'_>) -> jboolean {
-    let Ok(text) = env.get_string(&id) else { return 0; };
-    let Ok(text) = text.to_str() else { return 0; };
-    let Ok(id) = Uuid::parse_str(text) else { return 0; };
+extern "system" fn chunk_request_ready(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&id) else {
+        return 0;
+    };
+    let Ok(text) = text.to_str() else {
+        return 0;
+    };
+    let Ok(id) = Uuid::parse_str(text) else {
+        return 0;
+    };
     let mut requests = chunk_requests().lock();
-    let Some(handle) = requests.get(&id) else { return 0; };
+    let Some(handle) = requests.get(&id) else {
+        return 0;
+    };
     match handle.poll() {
-        foton_core::chunk::chunk_request::ChunkRequestState::Ready => { requests.remove(&id); 1 }
-        foton_core::chunk::chunk_request::ChunkRequestState::Cancelled => { requests.remove(&id); 0 }
+        foton_core::chunk::chunk_request::ChunkRequestState::Ready => {
+            requests.remove(&id);
+            1
+        }
+        foton_core::chunk::chunk_request::ChunkRequestState::Cancelled => {
+            requests.remove(&id);
+            0
+        }
         foton_core::chunk::chunk_request::ChunkRequestState::Pending { .. } => 0,
     }
 }
 
 /// `foton.Native.worldChunkLoaded`
 extern "system" fn world_chunk_loaded(
-    mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, x: jint, z: jint,
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    z: jint,
 ) -> jboolean {
     world(&mut env, &name).is_some_and(|world| world.is_chunk_loaded(x, z)) as jboolean
 }
 
 /// `foton.Native.worldLoadedChunkCoords`
 extern "system" fn world_loaded_chunk_coords(
-    mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>,
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
 ) -> jobjectArray {
     let coords = world(&mut env, &name).map_or_else(Vec::new, |world| {
-        world.loaded_chunk_positions().into_iter()
-            .map(|pos| format!("{},{}", pos.0.x, pos.0.y)).collect()
+        world
+            .loaded_chunk_positions()
+            .into_iter()
+            .map(|pos| format!("{},{}", pos.0.x, pos.0.y))
+            .collect()
     });
     string_array(&mut env, &coords)
 }
 
 /// `foton.Native.worldDropItem`
-extern "system" fn world_drop_item(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, x: jdouble, y: jdouble, z: jdouble, item: JString<'_>) -> jstring {
-    let Some(world) = world(&mut env, &name) else { return null_mut(); };
-    let Ok(item) = env.get_string(&item) else { return null_mut(); };
-    let Ok(item) = item.to_str() else { return null_mut(); };
-    let Some(stack) = parse_slot(item) else { return null_mut(); };
-    let Some(entity) = world.spawn_item(glam::DVec3::new(x, y, z), stack) else { return null_mut(); };
+extern "system" fn world_drop_item(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    item: JString<'_>,
+) -> jstring {
+    let Some(world) = world(&mut env, &name) else {
+        return null_mut();
+    };
+    let Ok(item) = env.get_string(&item) else {
+        return null_mut();
+    };
+    let Ok(item) = item.to_str() else {
+        return null_mut();
+    };
+    let Some(stack) = parse_slot(item) else {
+        return null_mut();
+    };
+    let Some(entity) = world.spawn_item(glam::DVec3::new(x, y, z), stack) else {
+        return null_mut();
+    };
     to_java(&mut env, Some(entity.uuid().to_string()))
 }
 
 /// `foton.Native.worldAutoSave`
-extern "system" fn world_auto_save(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jboolean {
+extern "system" fn world_auto_save(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jboolean {
     world(&mut env, &name).is_some_and(|world| world.is_auto_save()) as jboolean
 }
 
 /// `foton.Native.setWorldAutoSave`
-extern "system" fn set_world_auto_save(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>, value: jboolean) {
-    if let Some(world) = world(&mut env, &name) { world.set_auto_save(value != 0); }
+extern "system" fn set_world_auto_save(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    value: jboolean,
+) {
+    if let Some(world) = world(&mut env, &name) {
+        world.set_auto_save(value != 0);
+    }
 }
 
 /// `foton.Native.saveWorld`
 extern "system" fn save_world(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) {
-    if let Some(world) = world(&mut env, &name) { world.request_save(); }
+    if let Some(world) = world(&mut env, &name) {
+        world.request_save();
+    }
 }
 
 /// `foton.Native.worldFolder`
-extern "system" fn world_folder(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jstring {
-    let Some(path) = world(&mut env, &name).and_then(|world| world.world_folder()) else { return null_mut(); };
+extern "system" fn world_folder(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jstring {
+    let Some(path) = world(&mut env, &name).and_then(|world| world.world_folder()) else {
+        return null_mut();
+    };
     let value = path.to_string_lossy();
-    let Ok(value) = env.new_string(value.as_ref()) else { return null_mut(); };
+    let Ok(value) = env.new_string(value.as_ref()) else {
+        return null_mut();
+    };
     value.into_raw()
 }
 
 /// `foton.Native.scoreboardTeamEntries`
 extern "system" fn scoreboard_team_entries(
-    mut env: JNIEnv<'_>, _class: JClass<'_>, world_name: JString<'_>, team_name: JString<'_>,
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
 ) -> jobjectArray {
-    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else { return string_array(&mut env, &[]) };
-    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else { return string_array(&mut env, &[]) };
-    let entries = server().and_then(|server| {
-        let key: Identifier = world_name.parse().ok()?;
-        let world = server.worlds.get(&key).map(Arc::clone)?;
-        server.scoreboards.get(world.domain()).map(|scoreboard| {
-            scoreboard.team(&team_name).map(|team| scoreboard.team_entries(&team)).unwrap_or_default()
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return string_array(&mut env, &[]);
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return string_array(&mut env, &[]);
+    };
+    let entries = server()
+        .and_then(|server| {
+            let key: Identifier = world_name.parse().ok()?;
+            let world = server.worlds.get(&key).map(Arc::clone)?;
+            server.scoreboards.get(world.domain()).map(|scoreboard| {
+                scoreboard
+                    .team(&team_name)
+                    .map(|team| scoreboard.team_entries(&team))
+                    .unwrap_or_default()
+            })
         })
-    }).unwrap_or_default();
+        .unwrap_or_default();
     string_array(&mut env, &entries)
 }
 
 /// `foton.Native.scoreboardEntryTeam`
 extern "system" fn scoreboard_entry_team(
-    mut env: JNIEnv<'_>, _class: JClass<'_>, world_name: JString<'_>, entry: JString<'_>,
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    entry: JString<'_>,
 ) -> jstring {
-    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else { return null_mut() };
-    let Ok(entry): Result<String, _> = env.get_string(&entry).map(Into::into) else { return null_mut() };
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(entry): Result<String, _> = env.get_string(&entry).map(Into::into) else {
+        return null_mut();
+    };
     let team = server().and_then(|server| {
         let key: Identifier = world_name.parse().ok()?;
         let world = server.worlds.get(&key).map(Arc::clone)?;
-        server.scoreboards.get(world.domain()).and_then(|scoreboard| {
-            scoreboard.holder_team_name(&foton_core::scoreboard::ScoreHolder::new(entry))
-        })
+        server
+            .scoreboards
+            .get(world.domain())
+            .and_then(|scoreboard| {
+                scoreboard.holder_team_name(&foton_core::scoreboard::ScoreHolder::new(entry))
+            })
     });
     to_java(&mut env, team)
 }
@@ -1437,14 +1706,38 @@ extern "system" fn open_book(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JStr
     player.send_packet(COpenBook { hand });
 }
 
-extern "system" fn teleport_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, world_name: JString<'_>, x: jdouble, y: jdouble, z: jdouble, yaw: jfloat, pitch: jfloat) -> jboolean {
-    let Ok(world_name) = env.get_string(&world_name) else { return 0; };
-    let Ok(text) = env.get_string(&uuid) else { return 0; };
-    let Ok(text) = text.to_str() else { return 0; };
-    let Ok(id) = Uuid::parse_str(text) else { return 0; };
-    let Some((world, entity)) = entity_by_uuid(&id) else { return 0; };
-    if world.key.to_string() != String::from(world_name) { return 0; }
-    if entity.try_set_position(DVec3::new(x, y, z)).is_err() { return 0; }
+extern "system" fn teleport_entity(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    world_name: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    yaw: jfloat,
+    pitch: jfloat,
+) -> jboolean {
+    let Ok(world_name) = env.get_string(&world_name) else {
+        return 0;
+    };
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Ok(text) = text.to_str() else {
+        return 0;
+    };
+    let Ok(id) = Uuid::parse_str(text) else {
+        return 0;
+    };
+    let Some((world, entity)) = entity_by_uuid(&id) else {
+        return 0;
+    };
+    if world.key.to_string() != String::from(world_name) {
+        return 0;
+    }
+    if entity.try_set_position(DVec3::new(x, y, z)).is_err() {
+        return 0;
+    }
     entity.set_rotation((yaw, pitch));
     1
 }
@@ -1513,7 +1806,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         method("isPrimaryThread", "()Z", is_primary_thread as *mut c_void),
         method("shutdown", "()V", shutdown as *mut c_void),
         method("savePlayers", "()V", save_players as *mut c_void),
-        method("experienceLevel", "(Ljava/lang/String;)I", experience_level as *mut c_void),
+        method(
+            "experienceLevel",
+            "(Ljava/lang/String;)I",
+            experience_level as *mut c_void,
+        ),
         method(
             "playerIdByName",
             "(Ljava/lang/String;)Ljava/lang/String;",
@@ -1544,17 +1841,61 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             world_entity_ids as *mut c_void,
         ),
-        method("requestChunk", "(Ljava/lang/String;II)Ljava/lang/String;", request_chunk as *mut c_void),
-        method("chunkRequestReady", "(Ljava/lang/String;)Z", chunk_request_ready as *mut c_void),
-        method("worldChunkLoaded", "(Ljava/lang/String;II)Z", world_chunk_loaded as *mut c_void),
-        method("worldLoadedChunkCoords", "(Ljava/lang/String;)[Ljava/lang/String;", world_loaded_chunk_coords as *mut c_void),
-        method("worldFolder", "(Ljava/lang/String;)Ljava/lang/String;", world_folder as *mut c_void),
-        method("worldAutoSave", "(Ljava/lang/String;)Z", world_auto_save as *mut c_void),
-        method("setWorldAutoSave", "(Ljava/lang/String;Z)V", set_world_auto_save as *mut c_void),
-        method("saveWorld", "(Ljava/lang/String;)V", save_world as *mut c_void),
-        method("worldDropItem", "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;", world_drop_item as *mut c_void),
-        method("scoreboardTeamEntries", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;", scoreboard_team_entries as *mut c_void),
-        method("scoreboardEntryTeam", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", scoreboard_entry_team as *mut c_void),
+        method(
+            "requestChunk",
+            "(Ljava/lang/String;II)Ljava/lang/String;",
+            request_chunk as *mut c_void,
+        ),
+        method(
+            "chunkRequestReady",
+            "(Ljava/lang/String;)Z",
+            chunk_request_ready as *mut c_void,
+        ),
+        method(
+            "worldChunkLoaded",
+            "(Ljava/lang/String;II)Z",
+            world_chunk_loaded as *mut c_void,
+        ),
+        method(
+            "worldLoadedChunkCoords",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            world_loaded_chunk_coords as *mut c_void,
+        ),
+        method(
+            "worldFolder",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            world_folder as *mut c_void,
+        ),
+        method(
+            "worldAutoSave",
+            "(Ljava/lang/String;)Z",
+            world_auto_save as *mut c_void,
+        ),
+        method(
+            "setWorldAutoSave",
+            "(Ljava/lang/String;Z)V",
+            set_world_auto_save as *mut c_void,
+        ),
+        method(
+            "saveWorld",
+            "(Ljava/lang/String;)V",
+            save_world as *mut c_void,
+        ),
+        method(
+            "worldDropItem",
+            "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
+            world_drop_item as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamEntries",
+            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+            scoreboard_team_entries as *mut c_void,
+        ),
+        method(
+            "scoreboardEntryTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            scoreboard_entry_team as *mut c_void,
+        ),
         method(
             "worldSpawn",
             "(Ljava/lang/String;)[D",
@@ -1580,7 +1921,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;Ljava/lang/String;DDDFF)Z",
             teleport as *mut c_void,
         ),
-        method("teleportEntity", "(Ljava/lang/String;Ljava/lang/String;DDDFF)Z", teleport_entity as *mut c_void),
+        method(
+            "teleportEntity",
+            "(Ljava/lang/String;Ljava/lang/String;DDDFF)Z",
+            teleport_entity as *mut c_void,
+        ),
         method(
             "worldMinHeight",
             "(Ljava/lang/String;)I",
@@ -1591,16 +1936,61 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)I",
             world_max_height as *mut c_void,
         ),
-        method("entityWorld", "(Ljava/lang/String;)Ljava/lang/String;", entity_world as *mut c_void),
-        method("removeEntity", "(Ljava/lang/String;)V", remove_entity as *mut c_void),
-        method("entityType", "(Ljava/lang/String;)Ljava/lang/String;", entity_type as *mut c_void),
-        method("entityVehicle", "(Ljava/lang/String;)Ljava/lang/String;", entity_vehicle as *mut c_void),
-        method("entitySpawnCategory", "(Ljava/lang/String;)Ljava/lang/String;", entity_spawn_category as *mut c_void),
-        method("entityPosition", "(Ljava/lang/String;)[D", entity_position as *mut c_void),
-        method("entityId", "(Ljava/lang/String;)I", entity_id as *mut c_void),
-        method("entityCustomName", "(Ljava/lang/String;)Ljava/lang/String;", entity_custom_name as *mut c_void),
-        method("setEntityCustomName", "(Ljava/lang/String;Ljava/lang/String;)V", set_entity_custom_name as *mut c_void),
-        method("entitySendMessage", "(Ljava/lang/String;Ljava/lang/String;)V", entity_send_message as *mut c_void),
+        method(
+            "entityWorld",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            entity_world as *mut c_void,
+        ),
+        method(
+            "removeEntity",
+            "(Ljava/lang/String;)V",
+            remove_entity as *mut c_void,
+        ),
+        method(
+            "entityIsLiving",
+            "(Ljava/lang/String;)Z",
+            entity_is_living as *mut c_void,
+        ),
+        method(
+            "entityType",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            entity_type as *mut c_void,
+        ),
+        method(
+            "entityVehicle",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            entity_vehicle as *mut c_void,
+        ),
+        method(
+            "entitySpawnCategory",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            entity_spawn_category as *mut c_void,
+        ),
+        method(
+            "entityPosition",
+            "(Ljava/lang/String;)[D",
+            entity_position as *mut c_void,
+        ),
+        method(
+            "entityId",
+            "(Ljava/lang/String;)I",
+            entity_id as *mut c_void,
+        ),
+        method(
+            "entityCustomName",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            entity_custom_name as *mut c_void,
+        ),
+        method(
+            "setEntityCustomName",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_entity_custom_name as *mut c_void,
+        ),
+        method(
+            "entitySendMessage",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            entity_send_message as *mut c_void,
+        ),
         method(
             "gameMode",
             "(Ljava/lang/String;)Ljava/lang/String;",
@@ -1726,7 +2116,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)Ljava/lang/String;",
             player_name as *mut c_void,
         ),
-        method("playerLocale", "(Ljava/lang/String;)Ljava/lang/String;", player_locale as *mut c_void),
+        method(
+            "playerLocale",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            player_locale as *mut c_void,
+        ),
         method(
             "hasPlayedBefore",
             "(Ljava/lang/String;)Z",
@@ -1742,7 +2136,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_custom_name as *mut c_void,
         ),
-        method("playerFoodLevel", "(Ljava/lang/String;)I", player_food_level as *mut c_void),
+        method(
+            "playerFoodLevel",
+            "(Ljava/lang/String;)I",
+            player_food_level as *mut c_void,
+        ),
         method("health", "(Ljava/lang/String;)D", health as *mut c_void),
         method(
             "setHealth",
@@ -1759,8 +2157,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)Ljava/lang/String;",
             player_world as *mut c_void,
         ),
-        method("playerRespawnWorld", "(Ljava/lang/String;)Ljava/lang/String;", player_respawn_world as *mut c_void),
-        method("playerRespawnPosition", "(Ljava/lang/String;)[D", player_respawn_position as *mut c_void),
+        method(
+            "playerRespawnWorld",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            player_respawn_world as *mut c_void,
+        ),
+        method(
+            "playerRespawnPosition",
+            "(Ljava/lang/String;)[D",
+            player_respawn_position as *mut c_void,
+        ),
         method(
             "sendMessage",
             "(Ljava/lang/String;Ljava/lang/String;)V",

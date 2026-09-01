@@ -137,7 +137,8 @@ public final class FotonWorld implements World {
         java.util.ArrayList<org.bukkit.entity.Entity> entities = new java.util.ArrayList<>(ids.length);
         for (String id : ids) {
             try {
-                entities.add(new FotonEntity(UUID.fromString(id)));
+                UUID uuid = UUID.fromString(id);
+                entities.add(Native.entityIsLiving(id) ? new FotonLivingEntity(uuid) : new FotonEntity(uuid));
             } catch (IllegalArgumentException ignored) {
                 // Native UUIDs are validated before they cross this boundary.
             }

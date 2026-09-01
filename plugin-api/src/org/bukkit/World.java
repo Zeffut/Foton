@@ -60,6 +60,17 @@ public interface World {
     java.util.List<org.bukkit.entity.Player> getPlayers();
     java.util.List<org.bukkit.entity.Entity> getEntities();
 
+    default java.util.Collection<org.bukkit.entity.Entity> getEntitiesByClasses(Class<?>... classes) {
+        java.util.ArrayList<org.bukkit.entity.Entity> result = new java.util.ArrayList<>();
+        if (classes == null) return result;
+        for (org.bukkit.entity.Entity entity : getEntities()) {
+            for (Class<?> type : classes) {
+                if (type != null && type.isInstance(entity)) { result.add(entity); break; }
+            }
+        }
+        return result;
+    }
+
     Environment getEnvironment();
 
     enum Environment {
