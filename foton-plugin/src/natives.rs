@@ -542,6 +542,25 @@ extern "system" fn is_operator(
     u8::from(player(&mut env, &uuid).is_some_and(|player| player.is_operator()))
 }
 
+extern "system" fn is_permission_set(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    permission: JString<'_>,
+) -> jboolean {
+    let Some(player) = player(&mut env, &uuid) else {
+        return 0;
+    };
+    let Ok(permission) = env.get_string(&permission) else {
+        return 0;
+    };
+    let permission: String = permission.into();
+    let Ok(key) = PermissionKey::parse(permission) else {
+        return 0;
+    };
+    u8::from(player.permission_state(&PermissionExpr::key(key)).is_some())
+}
+
 /// `foton.Native.blockState`
 extern "system" fn block_state(
     mut env: JNIEnv<'_>,
@@ -1208,6 +1227,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "isOperator",
             "(Ljava/lang/String;)Z",
             is_operator as *mut c_void,
+        ),
+        method(
+            "isPermissionSet",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            is_permission_set as *mut c_void,
         ),
         method(
             "createBossBar",

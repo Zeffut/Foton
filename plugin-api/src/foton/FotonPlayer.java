@@ -258,6 +258,10 @@ public final class FotonPlayer implements Player {
         return Native.hasPermission(id.toString(), permission);
     }
 
+    @Override public boolean isPermissionSet(String permission) {
+        return Native.isPermissionSet(id.toString(), permission);
+    }
+
     @Override
     public Set<String> getListeningPluginChannels() {
         return FotonMessenger.listening(id);
