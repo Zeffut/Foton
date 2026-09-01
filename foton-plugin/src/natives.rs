@@ -593,6 +593,11 @@ extern "system" fn experience_level(mut env: JNIEnv<'_>, _class: JClass<'_>, uui
     player.experience.lock().level()
 }
 
+/// `foton.Native.savePlayers`
+extern "system" fn save_players(_env: JNIEnv<'_>, _class: JClass<'_>) {
+    if let Some(server) = server() { server.request_save_players(); }
+}
+
 /// `foton.Native.shutdown`
 extern "system" fn shutdown(_env: JNIEnv<'_>, _class: JClass<'_>) {
     if let Some(server) = server() {
@@ -1488,6 +1493,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         method("maxPlayers", "()I", max_players as *mut c_void),
         method("isPrimaryThread", "()Z", is_primary_thread as *mut c_void),
         method("shutdown", "()V", shutdown as *mut c_void),
+        method("savePlayers", "()V", save_players as *mut c_void),
         method("experienceLevel", "(Ljava/lang/String;)I", experience_level as *mut c_void),
         method(
             "playerIdByName",

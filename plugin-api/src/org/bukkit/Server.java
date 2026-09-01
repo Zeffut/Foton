@@ -29,6 +29,9 @@ public interface Server {
         return isPrimaryThread();
     }
 
+    /** Saves all connected players asynchronously. */
+    default void savePlayers() { }
+
     /** Requests a graceful server shutdown. */
     default void shutdown() {
         foton.Native.shutdown();

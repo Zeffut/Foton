@@ -53,6 +53,9 @@ public final class FotonServer implements Server {
     }
 
     @Override
+    public void savePlayers() { Native.savePlayers(); }
+
+    @Override
     public void shutdown() {
         Native.shutdown();
     }

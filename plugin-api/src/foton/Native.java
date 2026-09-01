@@ -37,6 +37,7 @@ public final class Native {
 
     /** Requests the server's normal graceful shutdown sequence. */
     public static native void shutdown();
+    public static native void savePlayers();
 
     /** The UUIDs of everyone online, in no promised order. */
     public static native String[] onlinePlayerIds();

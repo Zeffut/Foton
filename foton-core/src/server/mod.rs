@@ -506,6 +506,20 @@ impl Drop for GameTickTaskGuard {
 }
 
 impl Server {
+    /// Queues asynchronous saves for every currently connected player.
+    pub fn request_save_players(self: &Arc<Self>) {
+        let Some(runtime) = self.worlds.values().next().map(|world| Arc::clone(&world.chunk_map.chunk_runtime)) else { return; };
+        let mut players = Vec::new();
+        self.online_players.iter_players(|_, player| { players.push(Arc::clone(player)); true });
+        let server = Arc::clone(self);
+        runtime.handle().spawn(async move {
+            for player in players {
+                if let Err(error) = server.player_data_storage.save(&player).await {
+                    log::error!("Failed to save player {}: {error}", player.gameprofile.id);
+                }
+            }
+        });
+    }
     pub(crate) fn permission_rule_suggestions(&self) -> Vec<String> {
         let mut suggestions = self
             .command_permission_keys
