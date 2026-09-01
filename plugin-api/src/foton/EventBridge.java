@@ -228,6 +228,10 @@ public final class EventBridge {
         dispatch(event); return !event.isCancelled();
     }
 
+    public static void firePlayerRespawn(String uuid) {
+        dispatch(new org.bukkit.event.player.PlayerRespawnEvent(player(uuid)));
+    }
+
     public static void firePlayerDeath(String uuid) {
         dispatch(new org.bukkit.event.entity.PlayerDeathEvent(player(uuid)));
     }

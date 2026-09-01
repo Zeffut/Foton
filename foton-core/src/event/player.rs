@@ -17,6 +17,19 @@ use super::Event;
 use crate::player::Player;
 use foton_utils::Identifier;
 
+/// A player has completed a death respawn.
+pub struct PlayerRespawnEvent {
+    player_id: Uuid,
+}
+unsafe impl DowncastType for PlayerRespawnEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_respawn");
+}
+impl Event for PlayerRespawnEvent {}
+impl PlayerRespawnEvent {
+    pub const fn new(player_id: Uuid) -> Self { Self { player_id } }
+    pub const fn player_id(&self) -> Uuid { self.player_id }
+}
+
 /// A player has died, before the death drops are processed.
 pub struct PlayerDeathEvent {
     player_id: Uuid,

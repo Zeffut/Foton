@@ -522,6 +522,9 @@ impl Player {
             experience.dirty = true;
         }
 
+        let mut respawn_event = crate::event::PlayerRespawnEvent::new(self.gameprofile.id);
+        target_world.fire_event(&mut respawn_event);
+
         // TODO: send mob effect packets once effects are implemented
 
         // Shared spawn (teleport, abilities, weather, time, chunk tracking reset)

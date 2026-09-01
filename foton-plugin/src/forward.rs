@@ -15,7 +15,7 @@ use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, EntityDamageByEntityEvent,
     EntityPickupItemEvent, EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerChatEvent,
-    PlayerCommandPreprocessEvent, PlayerDeathEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
+    PlayerCommandPreprocessEvent, PlayerDeathEvent, PlayerRespawnEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
     PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
@@ -130,6 +130,11 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             MoveAnswer::Redirect(destination) => event.set_to(destination),
             MoveAnswer::Accepted | MoveAnswer::Unreachable => {}
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerRespawnEvent, _>(owner(), move |event| {
+        death_call(&jvm, &event.player_id().to_string());
     });
 
     let jvm = Arc::clone(&vm);
