@@ -35,4 +35,5 @@ public interface BlockState {
     boolean update();
 
     boolean update(boolean force);
+    default boolean isPlaced() { return true; }
 }

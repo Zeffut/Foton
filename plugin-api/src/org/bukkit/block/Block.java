@@ -15,6 +15,10 @@ public interface Block {
 
     World getWorld();
 
+    default org.bukkit.Chunk getChunk() {
+        return getWorld().getChunkAt(getX() >> 4, getZ() >> 4);
+    }
+
     Location getLocation();
 
     Material getType();
