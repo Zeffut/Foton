@@ -38,6 +38,9 @@ public interface ItemMeta extends Cloneable {
     boolean addEnchant(org.bukkit.enchantments.Enchantment enchantment, int level, boolean ignoreLevelRestriction);
     default int getEnchantLevel(org.bukkit.enchantments.Enchantment enchantment) { return 0; }
     default boolean hasItemFlag(org.bukkit.inventory.ItemFlag flag) { return false; }
+    default void addItemFlags(org.bukkit.inventory.ItemFlag... flags) { }
+    default void removeItemFlags(org.bukkit.inventory.ItemFlag... flags) { }
+    default java.util.Set<org.bukkit.inventory.ItemFlag> getItemFlags() { return java.util.Collections.emptySet(); }
 
     ItemMeta clone();
 }

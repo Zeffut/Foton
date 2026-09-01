@@ -11,6 +11,7 @@ public class SimpleItemMeta implements ItemMeta {
     private Integer customModelData;
     private boolean unbreakable;
     private java.util.Map<org.bukkit.enchantments.Enchantment, Integer> enchantments = new java.util.HashMap<>();
+    private java.util.Set<org.bukkit.inventory.ItemFlag> itemFlags = new java.util.HashSet<>();
 
     @Override
     public boolean hasDisplayName() {
@@ -85,6 +86,17 @@ public class SimpleItemMeta implements ItemMeta {
         return previous == null || previous != level;
     }
 
+    @Override public void addItemFlags(org.bukkit.inventory.ItemFlag... flags) {
+        if (flags != null) for (org.bukkit.inventory.ItemFlag flag : flags) if (flag != null) itemFlags.add(flag);
+    }
+
+    @Override public void removeItemFlags(org.bukkit.inventory.ItemFlag... flags) {
+        if (flags != null) for (org.bukkit.inventory.ItemFlag flag : flags) if (flag != null) itemFlags.remove(flag);
+    }
+
+    @Override public boolean hasItemFlag(org.bukkit.inventory.ItemFlag flag) { return itemFlags.contains(flag); }
+    @Override public java.util.Set<org.bukkit.inventory.ItemFlag> getItemFlags() { return java.util.Collections.unmodifiableSet(itemFlags); }
+
     @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
         return persistentData;
     }
@@ -96,6 +108,7 @@ public class SimpleItemMeta implements ItemMeta {
             copy.lore = lore == null ? null : new ArrayList<>(lore);
             copy.persistentData = persistentData.copy();
             copy.enchantments = new java.util.HashMap<>(enchantments);
+            copy.itemFlags = new java.util.HashSet<>(itemFlags);
             return copy;
         } catch (CloneNotSupportedException impossible) {
             throw new AssertionError(impossible);
@@ -113,7 +126,8 @@ public class SimpleItemMeta implements ItemMeta {
             && java.util.Objects.equals(customModelData, meta.customModelData)
             && java.util.Objects.equals(persistentData, meta.persistentData)
             && unbreakable == meta.unbreakable
-            && java.util.Objects.equals(enchantments, meta.enchantments);
+            && java.util.Objects.equals(enchantments, meta.enchantments)
+            && java.util.Objects.equals(itemFlags, meta.itemFlags);
     }
 
     @Override
