@@ -57,6 +57,15 @@ public interface World {
     int getMinHeight();
     int getMaxHeight();
 
+    default int getLogicalHeight() { return getMaxHeight() - getMinHeight(); }
+    default int getSeaLevel() { return 63; }
+    default int getHighestBlockYAt(int x, int z) {
+        for (int y = getMaxHeight() - 1; y >= getMinHeight(); y--) {
+            if (!getBlockAt(x, y, z).isEmpty()) return y;
+        }
+        return getMinHeight();
+    }
+
     java.util.List<org.bukkit.entity.Player> getPlayers();
     java.util.List<org.bukkit.entity.Entity> getEntities();
 
