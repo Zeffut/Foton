@@ -205,3 +205,8 @@ html { scroll-behavior: smooth; }
   font-size: 14px !important;
   color: var(--ink-3) !important;
 }
+
+/* The fork credit: an obligation and a courtesy, but not a headline. */
+.footer-origin { color: var(--rule); }
+.footer-origin a { color: var(--ink-3); }
+.footer-origin a:hover { color: var(--accent); }

@@ -57,6 +57,7 @@ STRINGS = {
         "chip": "PRE-ALPHA",
         "switch": "Français",
         "footer_source": "Source",
+        "footer_fork": "Forked from",
         "title_index": "Foton — the same Minecraft, a faster server",
         "desc_index": "A Minecraft Java Edition server that keeps up when your players explore, settings you can read, and nothing else to install.",
         "title_start": "Get started — Foton",
@@ -81,6 +82,7 @@ STRINGS = {
         "chip": "PRÉ-ALPHA",
         "switch": "English",
         "footer_source": "Code source",
+        "footer_fork": "Fork de",
         "title_index": "Foton — le même Minecraft, un serveur plus rapide",
         "desc_index": "Un serveur Minecraft Java Edition qui suit la cadence quand vos joueurs explorent, des réglages lisibles, et rien d'autre à installer.",
         "title_start": "Démarrer — Foton",
@@ -255,6 +257,7 @@ def build(out_dir):
                 "switcher": switcher_html(lang, target),
                 "chip": text["chip"],
                 "footer_source": text["footer_source"],
+                "footer_fork": text["footer_fork"],
                 "home": url(prefix),
             }, "site/content/_shell.html")
             path = out_dir / prefix / target

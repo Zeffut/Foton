@@ -167,11 +167,11 @@ foton            binary, CLI, console, RCON
 Foton is free software under the
 [GNU Affero General Public License v3.0 or later](LICENSE).
 
-It derives from an existing AGPL-3.0 codebase and has been modified
-substantially since August 2026; the original copyright notice is preserved in
-[`LICENSE`](LICENSE). The **network clause** is the part that surprises people:
-run this code where other people can reach it, and they are entitled to its
-source.
+It began as a fork of [SteelMC](https://github.com/Steel-Foundation/SteelMC)
+and has been modified substantially since August 2026; the original copyright
+notice is preserved in [`LICENSE`](LICENSE). The **network clause** is the part
+that surprises people: run this code where other people can reach it, and they
+are entitled to its source.
 
 ## Prior art
 
