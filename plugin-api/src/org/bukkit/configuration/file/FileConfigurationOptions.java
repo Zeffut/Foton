@@ -39,6 +39,10 @@ public class FileConfigurationOptions extends MemoryConfigurationOptions {
         return header;
     }
 
+    public FileConfigurationOptions setHeader(java.util.List<String> lines) {
+        return header(lines == null ? null : String.join("\n", lines));
+    }
+
     public FileConfigurationOptions header(String value) {
         this.header = value;
         return this;
