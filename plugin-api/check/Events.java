@@ -95,5 +95,72 @@ final class Events {
             "a one-shot task ran again");
         // Five ticks, a period of two: runs on 1, 3 and 5.
         Checks.same(example.EventFixture.repeating, 3, "the repeat lost its period");
+
+        foliaTaskState(owner());
+    }
+
+    /** Folia exposes the lifecycle and the outcome of cancellation to plugins. */
+    private static void foliaTaskState(org.bukkit.plugin.Plugin owner) {
+        io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler scheduler =
+            org.bukkit.Bukkit.getGlobalRegionScheduler();
+
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask cancelled =
+            scheduler.runDelayed(owner, ignored -> {
+                throw new AssertionError("a cancelled Folia task ran");
+            }, 2);
+        Checks.same(cancelled.getExecutionState(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.IDLE,
+            "a queued Folia task should be idle");
+        Checks.same(cancelled.cancel(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState
+                .CANCELLED_BY_CALLER,
+            "the first cancellation should cancel an idle task");
+        Checks.expect(cancelled.isCancelled(), "a cancelled Folia task should say so");
+        Checks.same(cancelled.cancel(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState
+                .CANCELLED_ALREADY,
+            "a second cancellation should report the existing cancellation");
+
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask[] observed = {null};
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask once = scheduler.run(owner, task -> {
+            observed[0] = task;
+            Checks.same(task.getExecutionState(),
+                io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.RUNNING,
+                "a Folia task body should observe itself running");
+        });
+        Checks.expect(!once.isRepeatingTask(), "a one-shot Folia task reported as repeating");
+        foton.FotonScheduler.tick();
+        Checks.expect(observed[0] == once, "the Folia body received a different task handle");
+        Checks.same(once.getExecutionState(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.FINISHED,
+            "a one-shot Folia task should finish after its body");
+        Checks.same(once.cancel(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState.ALREADY_EXECUTED,
+            "a finished Folia task cannot be cancelled retroactively");
+
+        int[] runs = {0};
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask repeating =
+            scheduler.runAtFixedRate(owner, task -> {
+                runs[0]++;
+                Checks.same(task.cancel(),
+                    io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState
+                        .NEXT_RUNS_CANCELLED,
+                    "cancelling a running repeat should cancel its next runs");
+                Checks.same(task.getExecutionState(),
+                    io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState
+                        .CANCELLED_RUNNING,
+                    "a running repeat should expose its pending cancellation");
+            }, 0, 1);
+        Checks.expect(repeating.isRepeatingTask(), "a repeating Folia task reported as one-shot");
+        foton.FotonScheduler.tick();
+        Checks.same(repeating.getExecutionState(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.CANCELLED,
+            "a cancelled repeat should settle after its body");
+        foton.FotonScheduler.tick();
+        Checks.same(runs[0], 1, "a cancelled Folia repeat ran again");
+    }
+
+    private static org.bukkit.plugin.Plugin owner() {
+        return foton.PluginHost.all()[0];
     }
 }
