@@ -121,6 +121,7 @@ public final class Native {
 
     /** A player's game mode, lower case, or null once they are gone. */
     public static native int openMenuSlotCount(String uuid);
+    public static native String openMenuSlot(String uuid, int slot);
     public static native String openMenuType(String uuid);
     public static native void updateInventory(String uuid);
     public static native String gameMode(String uuid);

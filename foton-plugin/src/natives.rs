@@ -1073,6 +1073,12 @@ extern "system" fn open_menu_slot_count(mut env: JNIEnv<'_>, _class: JClass<'_>,
         .unwrap_or(-1)
 }
 
+/// `foton.Native.openMenuSlot`
+extern "system" fn open_menu_slot(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>, slot: jint) -> jstring {
+    let item = usize::try_from(slot).ok().and_then(|slot| player(&mut env, &uuid).and_then(|player| player.open_container_item(slot)));
+    to_java(&mut env, item.map(|stack| describe_slot(&stack)))
+}
+
 /// `foton.Native.openMenuType`
 extern "system" fn open_menu_type(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
     let menu_type = player(&mut env, &uuid).and_then(|player| player.open_container_menu_type());
@@ -2099,6 +2105,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openMenuSlotCount",
             "(Ljava/lang/String;)I",
             open_menu_slot_count as *mut c_void,
+        ),
+        method(
+            "openMenuSlot",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            open_menu_slot as *mut c_void,
         ),
         method(
             "openMenuType",

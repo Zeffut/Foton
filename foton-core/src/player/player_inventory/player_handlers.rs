@@ -1026,6 +1026,16 @@ impl Player {
             .map(|menu_type| menu_type.key.to_string())
     }
 
+    /// Returns a copy of one slot from the currently open external menu.
+    #[must_use]
+    pub fn open_container_item(&self, index: usize) -> Option<ItemStack> {
+        let open_menu = self.open_menu.lock();
+        let menu = open_menu.menu.as_ref()?;
+        let slot = menu.behavior().slots().get(index)?;
+        let guard = menu.behavior().lock_all_containers();
+        Some(slot.get_item(&guard).clone())
+    }
+
     /// Runs the open menu's per-tick hook, if an external menu is open.
     ///
     /// Scoped to the opened menu; the base inventory menu is not ticked. Called
