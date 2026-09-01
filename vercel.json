@@ -5,11 +5,6 @@
   "outputDirectory": "site/dist",
   "framework": null,
   "trailingSlash": true,
-  "functions": {
-    "api/report.py": {
-      "runtime": "python@3.12"
-    }
-  },
   "rewrites": [
     {
       "source": "/api/bug-reports",
