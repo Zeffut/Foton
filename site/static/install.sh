@@ -53,9 +53,24 @@ else
   ASSET="foton-macos-$ARCH"
 fi
 
+TMP_META=$(mktemp)
+TMP=""
+# One trap for the whole script: a second `trap ... EXIT` would replace this
+# one rather than run alongside it, and the first temporary file would leak.
+trap 'rm -f "$TMP_META"; [ -n "$TMP" ] && rm -rf "$TMP"' EXIT
+
 bold "Foton installer"
 printf 'Looking up the latest release...\n'
-META=$(curl -fsSL "$API") || die "could not reach the GitHub API"
+# 404 here means the project has no release yet, which is a different
+# problem from a network failure and deserves a different sentence.
+HTTP=$(curl -sSL -o "$TMP_META" -w '%{http_code}' "$API" 2>/dev/null) || HTTP=000
+case "$HTTP" in
+  200) ;;
+  404) die "Foton has no published release yet. Build from source instead: https://github.com/$REPO" ;;
+  000) die "could not reach the GitHub API -- check the network and try again" ;;
+  *)   die "the GitHub API answered $HTTP; try again in a moment" ;;
+esac
+META=$(cat "$TMP_META")
 TAG=$(printf '%s' "$META" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$TAG" ] || die "no published release yet"
 BASE="https://github.com/$REPO/releases/download/$TAG"
@@ -82,7 +97,6 @@ else
 fi
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
 
 printf 'Downloading...\n'
 curl -fsSL "$BASE/$ASSET" -o "$TMP/foton" || die "could not download $ASSET from $TAG"
