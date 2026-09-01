@@ -9,4 +9,7 @@ public interface Plugin {
     boolean isEnabled();
     void onEnable();
     void onDisable();
+    default io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager getLifecycleManager() {
+        return new io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager();
+    }
 }

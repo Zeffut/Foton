@@ -33,6 +33,8 @@ public abstract class JavaPlugin implements Plugin {
     private boolean enabled;
     private FileConfiguration config;
     private final java.util.Map<String, PluginCommand> commands = new java.util.HashMap<>();
+    private final io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager lifecycleManager =
+        new io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager();
 
     public JavaPlugin() {}
 
@@ -101,6 +103,9 @@ public abstract class JavaPlugin implements Plugin {
     @Override public Logger getLogger() { return logger; }
     @Override public String getName() { return description.getName(); }
     @Override public boolean isEnabled() { return enabled; }
+    @Override public io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager getLifecycleManager() {
+        return lifecycleManager;
+    }
 
     public final void setEnabled(boolean value) { this.enabled = value; }
 
