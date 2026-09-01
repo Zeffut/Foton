@@ -10,6 +10,7 @@ public class SimpleItemMeta implements ItemMeta {
     private List<String> lore;
     private Integer customModelData;
     private boolean unbreakable;
+    private java.util.Map<org.bukkit.enchantments.Enchantment, Integer> enchantments = new java.util.HashMap<>();
 
     @Override
     public boolean hasDisplayName() {
@@ -72,6 +73,13 @@ public class SimpleItemMeta implements ItemMeta {
         this.unbreakable = unbreakable;
     }
 
+    @Override
+    public boolean addEnchant(org.bukkit.enchantments.Enchantment enchantment, int level, boolean ignoreLevelRestriction) {
+        if (enchantment == null || level <= 0) return false;
+        Integer previous = enchantments.put(enchantment, level);
+        return previous == null || previous != level;
+    }
+
     @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
         return persistentData;
     }
@@ -82,6 +90,7 @@ public class SimpleItemMeta implements ItemMeta {
             SimpleItemMeta copy = (SimpleItemMeta) super.clone();
             copy.lore = lore == null ? null : new ArrayList<>(lore);
             copy.persistentData = persistentData.copy();
+            copy.enchantments = new java.util.HashMap<>(enchantments);
             return copy;
         } catch (CloneNotSupportedException impossible) {
             throw new AssertionError(impossible);
@@ -98,7 +107,8 @@ public class SimpleItemMeta implements ItemMeta {
             && java.util.Objects.equals(lore, meta.lore)
             && java.util.Objects.equals(customModelData, meta.customModelData)
             && java.util.Objects.equals(persistentData, meta.persistentData)
-            && unbreakable == meta.unbreakable;
+            && unbreakable == meta.unbreakable
+            && java.util.Objects.equals(enchantments, meta.enchantments);
     }
 
     @Override
