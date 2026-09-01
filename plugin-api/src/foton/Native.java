@@ -79,6 +79,21 @@ public final class Native {
     /** Whether a player is an operator. */
     public static native boolean isOperator(String uuid);
 
+    /** Creates a native boss event and returns its opaque UUID handle. */
+    public static native String createBossBar(String title, int color, int style, int flags);
+
+    public static native void releaseBossBar(String id);
+    public static native void bossBarSetTitle(String id, String title);
+    public static native void bossBarSetColor(String id, int color);
+    public static native void bossBarSetStyle(String id, int style);
+    public static native void bossBarSetFlags(String id, int flags);
+    public static native void bossBarSetProgress(String id, double progress);
+    public static native void bossBarAddPlayer(String id, String player);
+    public static native void bossBarRemovePlayer(String id, String player);
+    public static native void bossBarRemoveAll(String id);
+    public static native String[] bossBarPlayerIds(String id);
+    public static native void bossBarSetVisible(String id, boolean visible);
+
 
     /** Plays a sound at a point in a world, for everyone who can hear it. */
     public static native void playSound(

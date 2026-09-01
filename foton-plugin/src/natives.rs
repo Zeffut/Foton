@@ -15,6 +15,7 @@ use std::ptr::null_mut;
 use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 
+use foton_core::boss_event::ServerBossEvent;
 use foton_core::entity::Entity;
 use foton_core::inventory::container::Container;
 use foton_core::permission::{PermissionExpr, PermissionKey};
@@ -22,17 +23,19 @@ use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_core::world::LevelReader as _;
 use foton_core::world::World;
-use foton_protocol::packets::game::SoundSource;
+use foton_protocol::packets::game::{BossBarColor, BossBarOverlay, SoundSource};
 use foton_registry::item_stack::ItemStack;
 use foton_registry::{REGISTRY, RegistryExt as _};
 use foton_utils::Identifier;
-use foton_utils::locks::SyncMutex;
+use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId};
 use glam::DVec3;
 use jni::JNIEnv;
 use jni::objects::{JClass, JDoubleArray, JObjectArray, JString};
 use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jint, jlong, jobjectArray, jstring};
+use rustc_hash::FxHashMap;
+use text_components::TextComponent;
 use uuid::Uuid;
 
 /// The server the natives answer about.
@@ -42,6 +45,9 @@ use uuid::Uuid;
 /// server cannot shut down.
 static SERVER: OnceLock<Weak<Server>> = OnceLock::new();
 
+/// Non-persistent bars created through Bukkit, keyed by the opaque handle Java owns.
+static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = OnceLock::new();
+
 /// Points the natives at a server. The first call wins.
 pub(crate) fn bind(server: Weak<Server>) {
     let _ = SERVER.set(server);
@@ -50,6 +56,16 @@ pub(crate) fn bind(server: Weak<Server>) {
 /// The server, if there still is one.
 fn server() -> Option<Arc<Server>> {
     SERVER.get().and_then(Weak::upgrade)
+}
+
+fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
+    BOSS_BARS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
+}
+
+fn boss_bar(env: &mut JNIEnv<'_>, id: &JString<'_>) -> Option<Arc<ServerBossEvent>> {
+    let text: String = env.get_string(id).ok()?.into();
+    let id = Uuid::parse_str(&text).ok()?;
+    boss_bars().read().get(&id).map(Arc::clone)
 }
 
 /// Resolves a Java-side handle back to a player who is still online.
@@ -438,6 +454,190 @@ extern "system" fn held_slot(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JStr
     })
 }
 
+/// `foton.Native.createBossBar`
+extern "system" fn create_boss_bar(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    title: JString<'_>,
+    color: jint,
+    style: jint,
+    flags: jint,
+) -> jstring {
+    let Ok(title) = env.get_string(&title).map(String::from) else {
+        return null_mut();
+    };
+    let Some(color) = usize::try_from(color)
+        .ok()
+        .and_then(|index| BossBarColor::VALUES.get(index).copied())
+    else {
+        return null_mut();
+    };
+    let Some(style) = usize::try_from(style)
+        .ok()
+        .and_then(|index| BossBarOverlay::VALUES.get(index).copied())
+    else {
+        return null_mut();
+    };
+    let bar = Arc::new(ServerBossEvent::with_random_id(
+        TextComponent::from(title),
+        color,
+        style,
+    ));
+    bar.set_darken_screen(flags & 1 != 0);
+    bar.set_play_boss_music(flags & 2 != 0);
+    bar.set_create_world_fog(flags & 4 != 0);
+    let id = bar.id();
+    boss_bars().write().insert(id, bar);
+    to_java(&mut env, Some(id.to_string()))
+}
+
+extern "system" fn release_boss_bar(mut env: JNIEnv<'_>, _class: JClass<'_>, id: JString<'_>) {
+    let Ok(text) = env.get_string(&id).map(String::from) else {
+        return;
+    };
+    let Ok(id) = Uuid::parse_str(&text) else {
+        return;
+    };
+    if let Some(bar) = boss_bars().write().remove(&id) {
+        bar.remove_all_players();
+    }
+}
+
+extern "system" fn boss_bar_set_title(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    title: JString<'_>,
+) {
+    let Some(bar) = boss_bar(&mut env, &id) else {
+        return;
+    };
+    let Ok(title) = env.get_string(&title).map(String::from) else {
+        return;
+    };
+    bar.set_name(TextComponent::from(title));
+}
+
+extern "system" fn boss_bar_set_color(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    color: jint,
+) {
+    let Some(bar) = boss_bar(&mut env, &id) else {
+        return;
+    };
+    let Some(color) = usize::try_from(color)
+        .ok()
+        .and_then(|index| BossBarColor::VALUES.get(index).copied())
+    else {
+        return;
+    };
+    bar.set_color(color);
+}
+
+extern "system" fn boss_bar_set_style(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    style: jint,
+) {
+    let Some(bar) = boss_bar(&mut env, &id) else {
+        return;
+    };
+    let Some(style) = usize::try_from(style)
+        .ok()
+        .and_then(|index| BossBarOverlay::VALUES.get(index).copied())
+    else {
+        return;
+    };
+    bar.set_overlay(style);
+}
+
+extern "system" fn boss_bar_set_flags(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    flags: jint,
+) {
+    let Some(bar) = boss_bar(&mut env, &id) else {
+        return;
+    };
+    bar.set_darken_screen(flags & 1 != 0);
+    bar.set_play_boss_music(flags & 2 != 0);
+    bar.set_create_world_fog(flags & 4 != 0);
+}
+
+extern "system" fn boss_bar_set_progress(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    progress: jdouble,
+) {
+    if let Some(bar) = boss_bar(&mut env, &id) {
+        bar.set_progress(progress as f32);
+    }
+}
+
+extern "system" fn boss_bar_add_player(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    player_id: JString<'_>,
+) {
+    let Some(bar) = boss_bar(&mut env, &id) else {
+        return;
+    };
+    if let Some(player) = player(&mut env, &player_id) {
+        bar.add_player(&player);
+    }
+}
+
+extern "system" fn boss_bar_remove_player(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    player_id: JString<'_>,
+) {
+    let Some(bar) = boss_bar(&mut env, &id) else {
+        return;
+    };
+    if let Some(player) = player(&mut env, &player_id) {
+        bar.remove_player(&player);
+    }
+}
+
+extern "system" fn boss_bar_remove_all(mut env: JNIEnv<'_>, _class: JClass<'_>, id: JString<'_>) {
+    if let Some(bar) = boss_bar(&mut env, &id) {
+        bar.remove_all_players();
+    }
+}
+
+extern "system" fn boss_bar_player_ids(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+) -> jobjectArray {
+    let ids = boss_bar(&mut env, &id).map_or_else(Vec::new, |bar| {
+        bar.players()
+            .into_iter()
+            .map(|player| player.uuid().to_string())
+            .collect()
+    });
+    string_array(&mut env, &ids)
+}
+
+extern "system" fn boss_bar_set_visible(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+    visible: jboolean,
+) {
+    if let Some(bar) = boss_bar(&mut env, &id) {
+        bar.set_visible(visible != 0);
+    }
+}
+
 /// `foton.Native.serverBrand`
 extern "system" fn server_brand(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstring {
     let brand = format!(
@@ -653,6 +853,66 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "isOperator",
             "(Ljava/lang/String;)Z",
             is_operator as *mut c_void,
+        ),
+        method(
+            "createBossBar",
+            "(Ljava/lang/String;III)Ljava/lang/String;",
+            create_boss_bar as *mut c_void,
+        ),
+        method(
+            "releaseBossBar",
+            "(Ljava/lang/String;)V",
+            release_boss_bar as *mut c_void,
+        ),
+        method(
+            "bossBarSetTitle",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            boss_bar_set_title as *mut c_void,
+        ),
+        method(
+            "bossBarSetColor",
+            "(Ljava/lang/String;I)V",
+            boss_bar_set_color as *mut c_void,
+        ),
+        method(
+            "bossBarSetStyle",
+            "(Ljava/lang/String;I)V",
+            boss_bar_set_style as *mut c_void,
+        ),
+        method(
+            "bossBarSetFlags",
+            "(Ljava/lang/String;I)V",
+            boss_bar_set_flags as *mut c_void,
+        ),
+        method(
+            "bossBarSetProgress",
+            "(Ljava/lang/String;D)V",
+            boss_bar_set_progress as *mut c_void,
+        ),
+        method(
+            "bossBarAddPlayer",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            boss_bar_add_player as *mut c_void,
+        ),
+        method(
+            "bossBarRemovePlayer",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            boss_bar_remove_player as *mut c_void,
+        ),
+        method(
+            "bossBarRemoveAll",
+            "(Ljava/lang/String;)V",
+            boss_bar_remove_all as *mut c_void,
+        ),
+        method(
+            "bossBarPlayerIds",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            boss_bar_player_ids as *mut c_void,
+        ),
+        method(
+            "bossBarSetVisible",
+            "(Ljava/lang/String;Z)V",
+            boss_bar_set_visible as *mut c_void,
         ),
         method(
             "blockState",

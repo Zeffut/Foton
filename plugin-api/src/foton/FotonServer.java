@@ -176,6 +176,15 @@ public final class FotonServer implements Server {
         return Native.broadcast(message);
     }
 
+    @Override
+    public org.bukkit.boss.BossBar createBossBar(
+            String title,
+            org.bukkit.boss.BarColor color,
+            org.bukkit.boss.BarStyle style,
+            org.bukkit.boss.BarFlag... flags) {
+        return new FotonBossBar(title, color, style, flags);
+    }
+
     /** Runs a command as somebody. Only plugin commands: Foton's own
      * dispatcher runs on the tick thread and this can be called from anywhere,
      * so reaching into it from here would be the race the scheduler exists to

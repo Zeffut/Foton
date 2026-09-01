@@ -58,6 +58,12 @@ public interface Server {
 
     OfflinePlayer getOfflinePlayer(UUID id);
 
+    org.bukkit.boss.BossBar createBossBar(
+        String title,
+        org.bukkit.boss.BarColor color,
+        org.bukkit.boss.BarStyle style,
+        org.bukkit.boss.BarFlag... flags);
+
     io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler getGlobalRegionScheduler();
 
     io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler();

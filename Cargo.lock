@@ -936,6 +936,7 @@ dependencies = [
  "glam",
  "jni 0.21.1",
  "libloading",
+ "rustc-hash 2.1.3",
  "tempfile",
  "text_components",
  "thiserror 2.0.19",

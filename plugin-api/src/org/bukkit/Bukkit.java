@@ -117,6 +117,14 @@ public final class Bukkit {
         return server.getOfflinePlayer(id);
     }
 
+    public static org.bukkit.boss.BossBar createBossBar(
+            String title,
+            org.bukkit.boss.BarColor color,
+            org.bukkit.boss.BarStyle style,
+            org.bukkit.boss.BarFlag... flags) {
+        return server.createBossBar(title, color, style, flags);
+    }
+
     public static io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler
             getGlobalRegionScheduler() {
         return server.getGlobalRegionScheduler();
