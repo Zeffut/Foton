@@ -9,6 +9,11 @@ public interface Player extends HumanEntity {
     @Override
     String getName();
 
+    /** Returns the server hosting this player. */
+    default org.bukkit.Server getServer() {
+        return org.bukkit.Bukkit.getServer();
+    }
+
     Set<String> getListeningPluginChannels();
 
     void sendPluginMessage(Plugin source, String channel, byte[] message);
