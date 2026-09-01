@@ -179,4 +179,13 @@ set_key "$DIR/config/worlds.toml" difficulty "\"$DIFFICULTY\""
 bold "Done."
 printf 'Start it with:  cd %s && ./%s\n' "$DIR" "$BIN"
 START=$(ask "Start it now?" "yes")
-case "$START" in y|Y|yes|Yes) cd "$DIR" && exec "./$BIN" ;; esac
+# The server reads its console from standard input, which under `curl | sh`
+# is the pipe curl is writing into -- already at end of file. Handing it the
+# terminal is what makes the console usable; without this the server starts
+# and ignores every command typed at it.
+case "$START" in
+  y|Y|yes|Yes)
+    cd "$DIR" || exit 1
+    exec "./$BIN" < /dev/tty
+    ;;
+esac
