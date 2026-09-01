@@ -116,6 +116,7 @@ public final class Native {
         String world, double x, double y, double z, String sound, float volume, float pitch);
     public static native void playSoundCategory(
         String world, double x, double y, double z, String sound, String category, float volume, float pitch);
+    public static native void stopSound(String uuid, String sound, String category);
 
     /** One block as `minecraft:name[state=value]`, or null if unreadable. */
     public static native String blockState(String world, int x, int y, int z);

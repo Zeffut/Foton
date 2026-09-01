@@ -136,6 +136,11 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void stopSound(String sound, org.bukkit.SoundCategory category) {
+        Native.stopSound(id.toString(), sound == null ? "" : sound, category == null ? "" : category.name());
+    }
+
+    @Override
     public io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler() {
         return FotonRegionSchedulers.forEntity();
     }

@@ -25,7 +25,7 @@ use foton_core::world::LevelReader as _;
 use foton_core::world::World;
 use foton_protocol::packets::common::CCustomPayload;
 use foton_protocol::packets::game::{
-    BossBarColor, BossBarOverlay, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation,
+    BossBarColor, BossBarOverlay, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CStopSound,
     CSystemChat, CTabList, SoundSource,
 };
 use foton_registry::item_stack::ItemStack;
@@ -636,6 +636,47 @@ extern "system" fn play_sound_category(
     world.play_sound_at(sound, source, DVec3::new(x, y, z), volume, pitch, None);
 }
 
+/// `foton.Native.stopSound`
+extern "system" fn stop_sound(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    sound: JString<'_>,
+    category: JString<'_>,
+) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let Ok(sound) = env.get_string(&sound) else {
+        return;
+    };
+    let Ok(category) = env.get_string(&category) else {
+        return;
+    };
+    let sound: String = sound.into();
+    let sound = if sound.is_empty() {
+        None
+    } else {
+        sound.parse::<Identifier>().ok()
+    };
+    let source = match category.to_str().ok() {
+        Some("MASTER") => Some(SoundSource::Master),
+        Some("MUSIC") => Some(SoundSource::Music),
+        Some("RECORDS") => Some(SoundSource::Records),
+        Some("WEATHER") => Some(SoundSource::Weather),
+        Some("BLOCKS") => Some(SoundSource::Blocks),
+        Some("HOSTILE") => Some(SoundSource::Hostile),
+        Some("NEUTRAL") => Some(SoundSource::Neutral),
+        Some("PLAYERS") => Some(SoundSource::Players),
+        Some("AMBIENT") => Some(SoundSource::Ambient),
+        Some("VOICE") => Some(SoundSource::Voice),
+        Some("UI") => Some(SoundSource::Ui),
+        Some("") => None,
+        _ => return,
+    };
+    player.send_packet(CStopSound { sound, source });
+}
+
 /// `foton.Native.gameMode`
 extern "system" fn game_mode(
     mut env: JNIEnv<'_>,
@@ -1174,6 +1215,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "playSoundCategory",
             "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;FF)V",
             play_sound_category as *mut c_void,
+        ),
+        method(
+            "stopSound",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+            stop_sound as *mut c_void,
         ),
         method(
             "onlinePlayerIds",

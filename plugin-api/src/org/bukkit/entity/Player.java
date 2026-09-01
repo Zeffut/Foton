@@ -38,6 +38,7 @@ public interface Player extends Entity {
     void playSound(org.bukkit.Location at, String sound, float volume, float pitch);
     void playSound(org.bukkit.Location at, org.bukkit.Sound sound, org.bukkit.SoundCategory category, float volume, float pitch);
     void playSound(org.bukkit.Location at, String sound, org.bukkit.SoundCategory category, float volume, float pitch);
+    void stopSound(String sound, org.bukkit.SoundCategory category);
 
     /** The scheduler for work that follows this player. */
     io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler();
