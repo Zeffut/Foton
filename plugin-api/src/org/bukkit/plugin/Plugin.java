@@ -12,4 +12,7 @@ public interface Plugin {
     default io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager getLifecycleManager() {
         return new io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager();
     }
+    default PluginLoader getPluginLoader() {
+        return plugin -> getServer().getPluginManager().disablePlugin(plugin);
+    }
 }
