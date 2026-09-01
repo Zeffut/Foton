@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::natives;
 use foton_core::event::{
     BlockBreakEvent, BlockPlaceEvent, CommandEvent, PlayerChatEvent, PlayerCustomPayloadEvent,
-    PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
+    InventoryClickEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
     ServerTickEvent,
 };
 use foton_core::player::Player;
@@ -51,6 +51,13 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<PlayerInteractEvent, _>(owner(), move |event| {
         if !interact_call(&jvm, &event.player_id().to_string()) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<InventoryClickEvent, _>(owner(), move |event| {
+        if !inventory_click_call(&jvm, &event.player_id().to_string()) {
             event.set_cancelled(true);
         }
     });
@@ -253,6 +260,19 @@ fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
     env.call_static_method(
         BRIDGE,
         "fireInteract",
+        "(Ljava/lang/String;)Z",
+        &[JValue::Object(&uuid)],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
+}
+
+fn inventory_click_call(vm: &JavaVM, player_uuid: &str) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else { return true; };
+    let Ok(uuid) = env.new_string(player_uuid) else { return true; };
+    env.call_static_method(
+        BRIDGE,
+        "fireInventoryClick",
         "(Ljava/lang/String;)Z",
         &[JValue::Object(&uuid)],
     )

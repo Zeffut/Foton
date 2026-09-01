@@ -155,6 +155,13 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static boolean fireInventoryClick(String uuid) {
+        org.bukkit.event.inventory.InventoryClickEvent event =
+            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid));
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
         PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);

@@ -30,6 +30,7 @@ use rustc_hash::FxHashMap;
 pub mod block;
 pub mod command;
 pub mod player;
+pub mod inventory;
 pub mod server;
 
 pub use block::{BlockBreakEvent, BlockPlaceEvent};
@@ -38,6 +39,7 @@ pub use player::{
     PlayerChatEvent, PlayerCustomPayloadEvent, PlayerInteractEvent, PlayerJoinEvent,
     PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent,
 };
+pub use inventory::InventoryClickEvent;
 pub use server::ServerTickEvent;
 
 /// Something that happened, which a listener may observe and possibly stop.

@@ -436,6 +436,13 @@ impl Player {
         menu.behavior_mut().suppress_remote_updates();
 
         if let Some(click) = click {
+            let mut inventory_click = crate::event::InventoryClickEvent::new(self.gameprofile.id);
+            self.fire_event(&mut inventory_click);
+            if inventory_click.is_cancelled() {
+                menu.behavior_mut().resume_remote_updates();
+                menu.behavior_mut().send_all_data_to_remote(&self.connection);
+                return;
+            }
             menu.clicked(click, self);
         }
 
