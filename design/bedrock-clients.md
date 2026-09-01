@@ -3,6 +3,13 @@
 Where Foton stands on letting Bedrock Edition players connect, and what each
 route actually costs. Written 2026-08-31. Nothing here is built yet.
 
+> **A route has since been chosen.** See `bedrock-implementation.md`
+> (2026-09-01): route A, with Foton supervising Geyser as a child process and
+> speaking Floodgate natively. That document also names the piece this one
+> missed — route A as described here reaches the port but leaves the server
+> empty, because Geyser alone requires every Bedrock player to own and link a
+> Java account. This document stands as the analysis of the three routes.
+
 Design notes live in `design/` because they describe work that has not
 happened. Everything in the repository root — `README.md`, `PARITY.md`,
 `CONFIGURATION.md` — describes what is true today, and a proposal filed beside
