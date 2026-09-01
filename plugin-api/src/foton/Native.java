@@ -120,6 +120,8 @@ public final class Native {
     public static native double[] playerPosition(String uuid);
 
     /** A player's game mode, lower case, or null once they are gone. */
+    public static native int openMenuSlotCount(String uuid);
+    public static native String openMenuType(String uuid);
     public static native void updateInventory(String uuid);
     public static native String gameMode(String uuid);
     public static native boolean setGameMode(String uuid, String mode);

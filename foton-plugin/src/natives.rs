@@ -1065,6 +1065,20 @@ extern "system" fn stop_sound(
     player.send_packet(CStopSound { sound, source });
 }
 
+/// `foton.Native.openMenuSlotCount`
+extern "system" fn open_menu_slot_count(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
+    player(&mut env, &uuid)
+        .and_then(|player| player.open_container_slot_count())
+        .and_then(|count| jint::try_from(count).ok())
+        .unwrap_or(-1)
+}
+
+/// `foton.Native.openMenuType`
+extern "system" fn open_menu_type(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jstring {
+    let menu_type = player(&mut env, &uuid).and_then(|player| player.open_container_menu_type());
+    to_java(&mut env, menu_type)
+}
+
 /// `foton.Native.updateInventory`
 extern "system" fn update_inventory(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
     if let Some(player) = player(&mut env, &uuid) {
@@ -2080,6 +2094,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "entitySendMessage",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             entity_send_message as *mut c_void,
+        ),
+        method(
+            "openMenuSlotCount",
+            "(Ljava/lang/String;)I",
+            open_menu_slot_count as *mut c_void,
+        ),
+        method(
+            "openMenuType",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            open_menu_type as *mut c_void,
         ),
         method(
             "updateInventory",
