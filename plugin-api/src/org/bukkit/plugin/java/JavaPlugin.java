@@ -36,6 +36,15 @@ public abstract class JavaPlugin implements Plugin {
 
     public JavaPlugin() {}
 
+    /** Returns the loaded plugin whose class matches the requested type. */
+    public static <T extends JavaPlugin> T getPlugin(Class<T> clazz) {
+        if (clazz == null) throw new IllegalArgumentException("clazz");
+        for (Plugin plugin : org.bukkit.Bukkit.getPluginManager().getPlugins()) {
+            if (clazz.isInstance(plugin)) return clazz.cast(plugin);
+        }
+        throw new IllegalArgumentException("Plugin class is not loaded: " + clazz.getName());
+    }
+
     public final void init(Server server, PluginDescriptionFile description, File dataFolder) {
         this.server = server;
         this.description = description;
