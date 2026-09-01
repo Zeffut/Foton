@@ -120,8 +120,8 @@ pre {
   padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 14px;
   line-height: 1.7; color: var(--ink);
 }
-pre, .cmd-code { -ms-overflow-style: none; scrollbar-width: none; }
-pre::-webkit-scrollbar, .cmd-code::-webkit-scrollbar { display: none; }
+pre, .cmd-code, .tablewrap { -ms-overflow-style: none; scrollbar-width: none; }
+pre::-webkit-scrollbar, .cmd-code::-webkit-scrollbar, .tablewrap::-webkit-scrollbar { display: none; }
 pre code { font-size: inherit; }
 
 table { width: 100%; border-collapse: collapse; font-size: 15px; }
@@ -129,6 +129,15 @@ th, td { text-align: left; padding: 10px 14px 10px 0; border-bottom: 1px solid v
 th { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; color: var(--ink-3); font-weight: 400; }
 td code { color: var(--ink); }
 .tablewrap { overflow-x: auto; }
+
+.config-file { padding: 52px 0; border-bottom: 1px solid var(--rule); }
+.config-file:first-of-type { padding-top: 30px; }
+.config-file:last-child { border-bottom: 0; padding-bottom: 0; }
+.config-file h2 code, .config-file h3 code, .config-file h4 code { font: inherit; }
+.config-file h3 { margin: 34px 0 10px; }
+.config-file h4 { color: var(--ink); font-size: 17px; margin: 26px 0 8px; }
+.config-file td { min-width: 110px; }
+.required { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: .08em; }
 
 .pull { font-size: clamp(21px, 2.4vw, 28px); line-height: 1.45; color: var(--ink); max-width: 60ch; }
 

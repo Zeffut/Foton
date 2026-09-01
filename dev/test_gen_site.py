@@ -31,6 +31,11 @@ class Filling(unittest.TestCase):
 
 
 class Build(unittest.TestCase):
+    def test_configuration_reference_covers_every_shipped_schema(self):
+        reference = gen_site.configuration_reference_html(gen_site.strings("en"))
+        for toml_name, _, _, _ in gen_site.cs.FILES:
+            self.assertIn(f"<code>{toml_name}</code>", reference)
+
     def test_the_build_writes_a_page_per_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             written = gen_site.build(pathlib.Path(tmp))

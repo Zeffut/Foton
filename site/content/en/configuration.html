@@ -1,1 +1,23 @@
-<main class="wrap"><section class="band" style="border-bottom:0"><h1>Configuration</h1></section></main>
+<main>
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">SETTINGS</div>
+      <h1>Configuration</h1>
+      <p class="pull">Edit the files in <code>config/</code>, then restart Foton.</p>
+    </div>
+  </section>
+  <section class="band">
+    <div class="wrap">
+      <div class="cols">
+        <div><h3><code>config.toml</code></h3><p>Server, network, logging and performance.</p></div>
+        <div><h3><code>worlds.toml</code></h3><p>Worlds, seeds and difficulty.</p></div>
+        <div><h3><code>groups.toml</code></h3><p>Groups and permissions.</p></div>
+      </div>
+    </div>
+  </section>
+  <section class="band" style="border-bottom:0">
+    <div class="wrap config-reference">
+      {{ configuration_reference }}
+    </div>
+  </section>
+</main>

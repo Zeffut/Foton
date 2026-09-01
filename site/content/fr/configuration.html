@@ -1,1 +1,24 @@
-<main class="wrap"><section class="band" style="border-bottom:0"><h1>Configuration</h1></section></main>
+<main>
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">RÉGLAGES</div>
+      <h1>Configuration</h1>
+      <p class="pull">Modifiez les fichiers dans <code>config/</code>, puis redémarrez Foton.</p>
+    </div>
+  </section>
+  <section class="band">
+    <div class="wrap">
+      <div class="cols">
+        <div><h3><code>config.toml</code></h3><p>Serveur, réseau, journalisation et performances.</p></div>
+        <div><h3><code>worlds.toml</code></h3><p>Mondes, graines et difficulté.</p></div>
+        <div><h3><code>groups.toml</code></h3><p>Groupes et permissions.</p></div>
+      </div>
+    </div>
+  </section>
+  <section class="band" style="border-bottom:0">
+    <div class="wrap config-reference">
+      <p class="rest">Cette référence est générée depuis les schémas validés par le serveur. Les descriptions techniques restent en anglais pour ne pas diverger de ces schémas.</p>
+      {{ configuration_reference }}
+    </div>
+  </section>
+</main>

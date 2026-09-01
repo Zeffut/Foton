@@ -33,6 +33,7 @@ DIST = REPO / "site" / "dist"
 
 sys.path.insert(0, str(DEV))
 import facts  # noqa: E402
+import config_schema as cs  # noqa: E402
 
 HOLE = re.compile(r"\{\{\s*([a-z0-9_]+)\s*\}\}")
 
@@ -73,6 +74,16 @@ STRINGS = {
         "report_closed": "not a defect",
         "report_none": "No reports yet. The first one will appear here on its own.",
         "report_in": "in",
+        "config_key": "Key",
+        "config_type": "Type",
+        "config_default": "Default",
+        "config_limits": "Limits",
+        "config_meaning": "Meaning",
+        "config_required": "required",
+        "config_shapes": "Structures",
+        "config_value_types": "Value types",
+        "config_name": "Name",
+        "config_accepts": "Accepts",
     },
     "fr": {
         "nav_start": "Démarrer",
@@ -98,6 +109,16 @@ STRINGS = {
         "report_closed": "pas un défaut",
         "report_none": "Aucun rapport pour l'instant. Le premier apparaîtra ici tout seul.",
         "report_in": "dans",
+        "config_key": "Clé",
+        "config_type": "Type",
+        "config_default": "Défaut",
+        "config_limits": "Limites",
+        "config_meaning": "Rôle",
+        "config_required": "requis",
+        "config_shapes": "Structures",
+        "config_value_types": "Types de valeur",
+        "config_name": "Nom",
+        "config_accepts": "Accepte",
     },
 }
 
@@ -193,6 +214,131 @@ def escape(text):
     )
 
 
+def config_part_html(part):
+    """One nested configuration type part, as safe HTML."""
+    kind, value = part
+    if kind == "ref":
+        return f"<code>{escape(value)}</code>"
+    if kind == "enum":
+        return " | ".join(f"<code>{escape(item)}</code>" for item in value)
+    if kind == "array":
+        return f"array of {config_part_html(value)}" if value else "array"
+    if kind == "object":
+        return "table"
+    return escape(value)
+
+
+def config_type_html(node, root):
+    """The schema type for one configuration key, as safe HTML."""
+    kind, value = cs.type_parts(node, root)
+    if kind == "union":
+        return " or ".join(dict.fromkeys(config_part_html(part) for part in value))
+    return config_part_html((kind, value))
+
+
+def config_default_html(node, root):
+    """The declared schema default, without inventing a value when absent."""
+    value = cs.default_of(node, root)
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        rendered = str(value).lower()
+    elif isinstance(value, str) and value == "":
+        rendered = '""'
+    else:
+        rendered = json.dumps(value)
+    return f"<code>{escape(rendered)}</code>"
+
+
+def config_table_html(node, root, text):
+    """A table of direct keys in one schema object."""
+    rows = []
+    for name, prop, required in cs.rows(node, root):
+        description = cs.resolve(prop, root).get("description") or ""
+        required_html = f' <span class="required">{text["config_required"]}</span>' if required else ""
+        rows.append(
+            "<tr>"
+            f"<td><code>{escape(name)}</code>{required_html}</td>"
+            f"<td>{config_type_html(prop, root)}</td>"
+            f"<td>{config_default_html(prop, root)}</td>"
+            f"<td>{escape(cs.limits(prop, root))}</td>"
+            f"<td>{escape(description)}</td>"
+            "</tr>"
+        )
+    if not rows:
+        return ""
+    header = "".join(f"<th>{text[key]}</th>" for key in (
+        "config_key", "config_type", "config_default", "config_limits", "config_meaning"
+    ))
+    return f'<div class="tablewrap"><table><thead><tr>{header}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+
+
+def config_sections_html(node, root, title, depth, text):
+    """Tables and nested TOML sections for one schema object."""
+    out = [config_table_html(node, root, text)]
+    for name, prop in cs.subsections(node, root):
+        heading = f"{title}.{name}" if title else name
+        description = cs.resolve(prop, root).get("description")
+        out.append(f'<h{depth}><code>[{escape(heading)}]</code></h{depth}>')
+        if description:
+            out.append(f"<p>{escape(description)}</p>")
+        out.append(config_sections_html(prop, root, heading, min(depth + 1, 6), text))
+    return "".join(out)
+
+
+def config_definitions_html(schema, text):
+    """Named schema structures and scalar types referenced by configuration keys."""
+    definitions = schema.get("definitions") or {}
+    shapes = {
+        name: node for name, node in definitions.items()
+        if node.get("type") == "object" and node.get("properties")
+    }
+    out = []
+    if shapes:
+        out.append(f'<h3>{text["config_shapes"]}</h3>')
+        for name, node in shapes.items():
+            out.append(f"<h4><code>{escape(name)}</code></h4>")
+            out.append(config_sections_html(node, schema, name, 5, text))
+    scalars = {name: node for name, node in definitions.items() if name not in shapes}
+    if scalars:
+        rows = []
+        for name, node in scalars.items():
+            accepts = config_type_html(node, schema)
+            if node.get("pattern"):
+                accepts += f" {escape(node['pattern'])}"
+            description = node.get("description") or ""
+            rows.append(
+                "<tr>"
+                f"<td><code>{escape(name)}</code></td>"
+                f"<td>{accepts}</td>"
+                f"<td>{escape(description)}</td>"
+                "</tr>"
+            )
+        header = "".join(f"<th>{text[key]}</th>" for key in (
+            "config_name", "config_accepts", "config_meaning"
+        ))
+        out.append(f'<h3>{text["config_value_types"]}</h3>')
+        out.append(f'<div class="tablewrap"><table><thead><tr>{header}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+    return "".join(out)
+
+
+def configuration_reference_html(text):
+    """The configuration reference rendered from the shipped JSON schemas."""
+    files = []
+    for toml_name, schema_name, title, blurb in cs.FILES:
+        schema = cs.load(schema_name)
+        description = schema.get("description", blurb)
+        files.append(
+            '<section class="config-file">'
+            f"<h2><code>{escape(toml_name)}</code></h2>"
+            f"<p>{escape(description)}.</p>"
+            f"{config_sections_html(schema, schema, '', 3, text)}"
+            f"{config_definitions_html(schema, text)}"
+            "</section>"
+        )
+    return "".join(files)
+
+
 def reports_html(text):
     """Renders every filed report, newest first.
 
@@ -245,7 +391,8 @@ def build(out_dir):
             if not path_in_content.is_file():
                 raise SystemExit(f"missing fragment: {path_in_content}")
             body = fill(path_in_content.read_text(encoding="utf-8"),
-                        {**values, "reports": reports_html(text)},
+                        {**values, "reports": reports_html(text),
+                         "configuration_reference": configuration_reference_html(text)},
                         f"site/content/{lang}/{slug}.html")
             page = fill(shell, {
                 **values,
