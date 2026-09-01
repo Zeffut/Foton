@@ -198,7 +198,10 @@ def reports_html(text):
     their author used. Translating them would be rewriting them, and the point
     of the page is that it says what the tester said.
     """
-    reports = facts.bug_reports()
+    # A fixed report is a closed subject: the count says how many there were,
+    # and the page keeps its length for what still needs attention.
+    reports = [r for r in facts.bug_reports()
+               if r.get("status") not in ("fixed", "closed")]
     if not reports:
         return f'<p class="rest">{escape(text["report_none"])}</p>'
 

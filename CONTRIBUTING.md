@@ -1,6 +1,6 @@
 # Contributing to Foton
 
-Foton is a private, sovereign project. There is no external approval process and no
+Foton is a sovereign project. There is no external approval process and no
 mandatory discussion channel: decide, build, verify, merge.
 
 ## Before You Start

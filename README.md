@@ -56,7 +56,7 @@ by explaining how this very measurement used to lie.
 
 Two layers, because a unit test cannot see that a furnace has no behavior.
 
-**5,267 tests** across 16 targets, run by `cargo test --workspace` — unit,
+**5,287 tests** across 18 targets, run by `cargo test --workspace` — unit,
 integration and doc tests together. They cover the places where being wrong is
 silent: component hashing, seeded RNG determinism, protocol encoding, loot
 table evaluation, permission resolution.
