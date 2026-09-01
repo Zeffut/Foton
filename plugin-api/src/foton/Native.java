@@ -50,6 +50,10 @@ public final class Native {
     /** Disconnects an online player with the supplied message. */
     public static native void kickPlayer(String uuid, String message);
 
+    public static native void setPlayerListHeader(String uuid, String header);
+    public static native void setPlayerListFooter(String uuid, String footer);
+    public static native void setPlayerListHeaderFooter(String uuid, String header, String footer);
+
     /** Sends one custom payload packet to one online player. */
     public static native void sendPluginMessage(String uuid, String channel, byte[] message);
 

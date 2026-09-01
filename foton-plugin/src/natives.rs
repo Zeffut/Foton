@@ -24,7 +24,7 @@ use foton_core::server::Server;
 use foton_core::world::LevelReader as _;
 use foton_core::world::World;
 use foton_protocol::packets::common::CCustomPayload;
-use foton_protocol::packets::game::{BossBarColor, BossBarOverlay, SoundSource};
+use foton_protocol::packets::game::{BossBarColor, BossBarOverlay, CTabList, SoundSource};
 use foton_registry::item_stack::ItemStack;
 use foton_registry::{REGISTRY, RegistryExt as _};
 use foton_utils::Identifier;
@@ -49,6 +49,9 @@ static SERVER: OnceLock<Weak<Server>> = OnceLock::new();
 /// Non-persistent bars created through Bukkit, keyed by the opaque handle Java owns.
 static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = OnceLock::new();
 
+/// Bukkit updates header and footer independently, while the protocol packet carries both.
+static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (String, String)>>> = OnceLock::new();
+
 /// Points the natives at a server. The first call wins.
 pub(crate) fn bind(server: Weak<Server>) {
     let _ = SERVER.set(server);
@@ -61,6 +64,10 @@ fn server() -> Option<Arc<Server>> {
 
 fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
     BOSS_BARS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
+}
+
+fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (String, String)>> {
+    PLAYER_TAB_LISTS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
 fn boss_bar(env: &mut JNIEnv<'_>, id: &JString<'_>) -> Option<Arc<ServerBossEvent>> {
@@ -205,6 +212,73 @@ extern "system" fn kick_player(
         return;
     };
     player.disconnect(String::from(message));
+}
+
+fn set_player_tab_list(
+    env: &mut JNIEnv<'_>,
+    uuid: &JString<'_>,
+    header: Option<JString<'_>>,
+    footer: Option<JString<'_>>,
+) {
+    let Ok(id_text) = env.get_string(uuid) else {
+        return;
+    };
+    let Ok(id) = String::from(id_text).parse::<Uuid>() else {
+        return;
+    };
+    let Some(player) = player(env, uuid) else {
+        return;
+    };
+    let mut lists = player_tab_lists().write();
+    let entry = lists
+        .entry(id)
+        .or_insert_with(|| (String::new(), String::new()));
+    if let Some(header) = header {
+        let Ok(value) = env.get_string(&header) else {
+            return;
+        };
+        entry.0 = String::from(value);
+    }
+    if let Some(footer) = footer {
+        let Ok(value) = env.get_string(&footer) else {
+            return;
+        };
+        entry.1 = String::from(value);
+    }
+    let header: TextComponent = entry.0.clone().into();
+    let footer: TextComponent = entry.1.clone().into();
+    player.send_packet(CTabList::new(&header, &footer, player.as_ref()));
+}
+
+/// `foton.Native.setPlayerListHeader`
+extern "system" fn set_player_list_header(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    header: JString<'_>,
+) {
+    set_player_tab_list(&mut env, &uuid, Some(header), None);
+}
+
+/// `foton.Native.setPlayerListFooter`
+extern "system" fn set_player_list_footer(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    footer: JString<'_>,
+) {
+    set_player_tab_list(&mut env, &uuid, None, Some(footer));
+}
+
+/// `foton.Native.setPlayerListHeaderFooter`
+extern "system" fn set_player_list_header_footer(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    header: JString<'_>,
+    footer: JString<'_>,
+) {
+    set_player_tab_list(&mut env, &uuid, Some(header), Some(footer));
 }
 
 /// `foton.Native.sendPluginMessage`
@@ -993,6 +1067,21 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "kickPlayer",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             kick_player as *mut c_void,
+        ),
+        method(
+            "setPlayerListHeader",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_player_list_header as *mut c_void,
+        ),
+        method(
+            "setPlayerListFooter",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_player_list_footer as *mut c_void,
+        ),
+        method(
+            "setPlayerListHeaderFooter",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+            set_player_list_header_footer as *mut c_void,
         ),
         method(
             "sendPluginMessage",

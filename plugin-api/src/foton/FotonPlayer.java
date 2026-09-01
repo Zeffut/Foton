@@ -173,6 +173,22 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void setPlayerListHeader(String header) {
+        Native.setPlayerListHeader(id.toString(), header == null ? "" : header);
+    }
+
+    @Override
+    public void setPlayerListFooter(String footer) {
+        Native.setPlayerListFooter(id.toString(), footer == null ? "" : footer);
+    }
+
+    @Override
+    public void setPlayerListHeaderFooter(String header, String footer) {
+        Native.setPlayerListHeaderFooter(id.toString(), header == null ? "" : header,
+            footer == null ? "" : footer);
+    }
+
+    @Override
     public void sendMessage(String message) {
         Native.sendMessage(id.toString(), message);
     }

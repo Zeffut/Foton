@@ -14,6 +14,9 @@ public interface Player extends Entity {
 
     boolean isOnline();
     void kickPlayer(String message);
+    void setPlayerListHeader(String header);
+    void setPlayerListFooter(String footer);
+    void setPlayerListHeaderFooter(String header, String footer);
 
     org.bukkit.inventory.PlayerInventory getInventory();
 
