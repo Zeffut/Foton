@@ -110,6 +110,8 @@ public final class Native {
     /** Plays a sound at a point in a world, for everyone who can hear it. */
     public static native void playSound(
         String world, double x, double y, double z, String sound, float volume, float pitch);
+    public static native void playSoundCategory(
+        String world, double x, double y, double z, String sound, String category, float volume, float pitch);
 
     /** One block as `minecraft:name[state=value]`, or null if unreadable. */
     public static native String blockState(String world, int x, int y, int z);

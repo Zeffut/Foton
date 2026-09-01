@@ -132,6 +132,21 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void playSound(org.bukkit.Location at, org.bukkit.Sound sound,
+            org.bukkit.SoundCategory category, float volume, float pitch) {
+        playSound(at, sound == null ? null : sound.getKey(), category, volume, pitch);
+    }
+
+    @Override
+    public void playSound(org.bukkit.Location at, String sound, org.bukkit.SoundCategory category,
+            float volume, float pitch) {
+        org.bukkit.Location where = at == null ? getLocation() : at;
+        if (where == null || where.getWorld() == null || sound == null || category == null) return;
+        Native.playSoundCategory(where.getWorld().getName(), where.getX(), where.getY(),
+            where.getZ(), sound, category.name(), volume, pitch);
+    }
+
+    @Override
     public io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler() {
         return FotonRegionSchedulers.forEntity();
     }

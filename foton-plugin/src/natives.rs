@@ -528,6 +528,54 @@ extern "system" fn play_sound(
     );
 }
 
+/// `foton.Native.playSoundCategory`
+extern "system" fn play_sound_category(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    sound: JString<'_>,
+    category: JString<'_>,
+    volume: jfloat,
+    pitch: jfloat,
+) {
+    let Some(world) = world(&mut env, &name) else {
+        return;
+    };
+    let Ok(sound) = env.get_string(&sound) else {
+        return;
+    };
+    let Ok(category) = env.get_string(&category) else {
+        return;
+    };
+    let Ok(key) = String::from(sound).parse::<Identifier>() else {
+        return;
+    };
+    let Some(sound) = REGISTRY.sound_events.by_key(&key) else {
+        return;
+    };
+    let Ok(category) = category.to_str() else {
+        return;
+    };
+    let source = match category {
+        "MASTER" => SoundSource::Master,
+        "MUSIC" => SoundSource::Music,
+        "RECORDS" => SoundSource::Records,
+        "WEATHER" => SoundSource::Weather,
+        "BLOCKS" => SoundSource::Blocks,
+        "HOSTILE" => SoundSource::Hostile,
+        "NEUTRAL" => SoundSource::Neutral,
+        "PLAYERS" => SoundSource::Players,
+        "AMBIENT" => SoundSource::Ambient,
+        "VOICE" => SoundSource::Voice,
+        "UI" => SoundSource::Ui,
+        _ => return,
+    };
+    world.play_sound_at(sound, source, DVec3::new(x, y, z), volume, pitch, None);
+}
+
 /// `foton.Native.gameMode`
 extern "system" fn game_mode(
     mut env: JNIEnv<'_>,
@@ -1061,6 +1109,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "playSound",
             "(Ljava/lang/String;DDDLjava/lang/String;FF)V",
             play_sound as *mut c_void,
+        ),
+        method(
+            "playSoundCategory",
+            "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;FF)V",
+            play_sound_category as *mut c_void,
         ),
         method(
             "onlinePlayerIds",
