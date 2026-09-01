@@ -37,6 +37,10 @@ public final class Bukkit {
         return server.getPluginManager();
     }
 
+    public static UnsafeValues getUnsafe() {
+        return new foton.FotonUnsafeValues();
+    }
+
     public static org.bukkit.plugin.messaging.Messenger getMessenger() {
         return server.getMessenger();
     }
