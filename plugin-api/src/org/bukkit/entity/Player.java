@@ -2,6 +2,7 @@ package org.bukkit.entity;
 
 import java.util.Set;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.command.CommandSender;
 
 /** A player on the server, as a plugin sees one. */
 public interface Player extends Entity {
@@ -47,7 +48,12 @@ public interface Player extends Entity {
     Spigot spigot();
 
     /** What `player.spigot()` answers. */
-    abstract class Spigot {
+    abstract class Spigot extends CommandSender.Spigot {
+        protected Spigot(Player player) { super(player); }
         public void sendMessage(String message) {}
+        public void sendMessage(net.md_5.bungee.api.ChatMessageType position,
+                net.md_5.bungee.api.chat.BaseComponent... components) {
+            super.sendMessage(components);
+        }
     }
 }

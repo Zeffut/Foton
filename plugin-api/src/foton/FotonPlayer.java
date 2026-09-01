@@ -146,7 +146,7 @@ public final class FotonPlayer implements Player {
     }
 
     /** Spigot's extra surface, which for Foton is the ordinary one. */
-    private final Spigot spigot = new Spigot() {
+    private final Spigot spigot = new Spigot(this) {
         @Override
         public void sendMessage(String message) {
             FotonPlayer.this.sendMessage(message);
