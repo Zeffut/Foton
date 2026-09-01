@@ -64,7 +64,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         let item = event.current_item().map_or(String::new(), |stack| {
             format!("{} {}", stack.item().key, stack.count())
         });
-        if !inventory_click_call(&jvm, &event.player_id().to_string(), &item) {
+        if !inventory_click_call(&jvm, &event.player_id().to_string(), &item, event.click()) {
             event.set_cancelled(true);
         }
     });
@@ -340,7 +340,7 @@ fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
     .unwrap_or(true)
 }
 
-fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str) -> bool {
+fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str, click: &str) -> bool {
     let Ok(mut env) = vm.attach_current_thread() else {
         return true;
     };
@@ -350,11 +350,14 @@ fn inventory_click_call(vm: &JavaVM, player_uuid: &str, item: &str) -> bool {
     let Ok(item) = env.new_string(item) else {
         return true;
     };
+    let Ok(click) = env.new_string(click) else {
+        return true;
+    };
     env.call_static_method(
         BRIDGE,
         "fireInventoryClick",
-        "(Ljava/lang/String;Ljava/lang/String;)Z",
-        &[JValue::Object(&uuid), JValue::Object(&item)],
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&uuid), JValue::Object(&item), JValue::Object(&click)],
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)

@@ -9,18 +9,22 @@ import org.bukkit.event.HandlerList;
 public final class InventoryClickEvent extends Event implements Cancellable {
     private final HumanEntity whoClicked;
     private final org.bukkit.inventory.ItemStack currentItem;
+    private final ClickType click;
     private boolean cancelled;
     private static final HandlerList HANDLERS = new HandlerList();
 
     public InventoryClickEvent(HumanEntity whoClicked) { this(whoClicked, null); }
-    public InventoryClickEvent(HumanEntity whoClicked, org.bukkit.inventory.ItemStack currentItem) {
+    public InventoryClickEvent(HumanEntity whoClicked, org.bukkit.inventory.ItemStack currentItem) { this(whoClicked, currentItem, ClickType.UNKNOWN); }
+    public InventoryClickEvent(HumanEntity whoClicked, org.bukkit.inventory.ItemStack currentItem, ClickType click) {
         this.whoClicked = whoClicked;
         this.currentItem = currentItem == null ? null : currentItem.clone();
+        this.click = click == null ? ClickType.UNKNOWN : click;
     }
     public HumanEntity getWhoClicked() { return whoClicked; }
     public org.bukkit.inventory.ItemStack getCurrentItem() {
         return currentItem == null ? null : currentItem.clone();
     }
+    public ClickType getClick() { return click; }
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
     @Override public HandlerList getHandlers() { return HANDLERS; }

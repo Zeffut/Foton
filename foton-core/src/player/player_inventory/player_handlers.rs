@@ -440,9 +440,24 @@ impl Player {
                 let guard = menu.behavior().lock_all_containers();
                 menu.behavior().slots().get(slot).map(|view| view.get_item(&guard).clone())
             });
+            let click_name = match (packet.click_type, packet.button_num) {
+                (ClickType::Pickup, 0) => "LEFT",
+                (ClickType::Pickup, 1) => "RIGHT",
+                (ClickType::QuickMove, 0) => "SHIFT_LEFT",
+                (ClickType::QuickMove, 1) => "SHIFT_RIGHT",
+                (ClickType::Swap, _) => "NUMBER_KEY",
+                (ClickType::Clone, _) => "MIDDLE",
+                (ClickType::Throw, 0) => "DROP",
+                (ClickType::Throw, 1) => "CONTROL_DROP",
+                (ClickType::PickupAll, _) => "DOUBLE_CLICK",
+                (ClickType::QuickCraft, 0) => "LEFT",
+                (ClickType::QuickCraft, 1) => "RIGHT",
+                _ => "UNKNOWN",
+            };
             let mut inventory_click = crate::event::InventoryClickEvent::new(
                 self.gameprofile.id,
                 current_item,
+                click_name.to_owned(),
             );
             self.fire_event(&mut inventory_click);
             if inventory_click.is_cancelled() {

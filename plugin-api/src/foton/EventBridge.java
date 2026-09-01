@@ -157,11 +157,16 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    public static boolean fireInventoryClick(String uuid, String item) {
+    public static boolean fireInventoryClick(String uuid, String item, String click) {
         org.bukkit.event.inventory.InventoryClickEvent event =
-            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item));
+            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item), clickType(click));
         dispatch(event);
         return !event.isCancelled();
+    }
+
+    private static org.bukkit.event.inventory.ClickType clickType(String name) {
+        try { return org.bukkit.event.inventory.ClickType.valueOf(name); }
+        catch (IllegalArgumentException | NullPointerException error) { return org.bukkit.event.inventory.ClickType.UNKNOWN; }
     }
 
     public static void fireEntityRemove(String entity) {
