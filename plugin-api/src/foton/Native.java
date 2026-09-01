@@ -98,6 +98,9 @@ public final class Native {
     public static native String entityWorld(String uuid);
     public static native void removeEntity(String uuid);
     public static native String entityType(String uuid);
+    public static native double[] worldBorder(String world);
+    public static native void setWorldBorderCenter(String world, double x, double z);
+    public static native void setWorldBorderSize(String world, double size);
     public static native boolean entityIsLiving(String uuid);
     public static native String entityVehicle(String uuid);
     public static native String entitySpawnCategory(String uuid);

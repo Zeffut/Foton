@@ -57,6 +57,7 @@ public interface World {
     int getMinHeight();
     int getMaxHeight();
 
+    default WorldBorder getWorldBorder() { return null; }
     default int getLogicalHeight() { return getMaxHeight() - getMinHeight(); }
     default int getSeaLevel() { return 63; }
     default int getHighestBlockYAt(int x, int z) {

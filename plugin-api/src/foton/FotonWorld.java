@@ -74,6 +74,10 @@ public final class FotonWorld implements World {
         return getChunkAt(location.getBlockX() >> 4, location.getBlockZ() >> 4);
     }
 
+    @Override public org.bukkit.WorldBorder getWorldBorder() {
+        return new FotonWorldBorder(this);
+    }
+
     @Override public boolean isChunkLoaded(int x, int z) {
         return Native.worldChunkLoaded(name, x, z);
     }

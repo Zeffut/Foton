@@ -466,6 +466,10 @@ impl World {
     pub(crate) fn world_border_snapshot(&self) -> WorldBorderSnapshot {
         self.world_border.lock().snapshot()
     }
+    pub fn world_border_center_size(&self) -> (f64, f64, f64) {
+        let border = self.world_border_snapshot();
+        (border.center_x, border.center_z, border.new_size)
+    }
 
     /// Returns whether a block position is inside this world's vanilla world border.
     #[must_use]

@@ -1650,6 +1650,42 @@ extern "system" fn world_spawn(
 }
 
 /// `foton.Native.worldTime`
+extern "system" fn world_border(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) -> jdoubleArray {
+    let Some(world) = world(&mut env, &name) else {
+        return std::ptr::null_mut();
+    };
+    let (x, z, size) = world.world_border_center_size();
+    let Ok(array) = env.new_double_array(3) else {
+        return std::ptr::null_mut();
+    };
+    let _ = env.set_double_array_region(&array, 0, &[x, z, size]);
+    array.into_raw()
+}
+extern "system" fn set_world_border_center(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jdouble,
+    z: jdouble,
+) {
+    if let Some(world) = world(&mut env, &name) {
+        let _ = world.set_world_border_center(x, z);
+    }
+}
+extern "system" fn set_world_border_size(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    size: jdouble,
+) {
+    if let Some(world) = world(&mut env, &name) {
+        let _ = world.set_world_border_size(size);
+    }
+}
 extern "system" fn world_time(mut env: JNIEnv<'_>, _class: JClass<'_>, name: JString<'_>) -> jlong {
     world(&mut env, &name).map_or(-1, |world| world.game_time())
 }
@@ -1900,6 +1936,21 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "worldSpawn",
             "(Ljava/lang/String;)[D",
             world_spawn as *mut c_void,
+        ),
+        method(
+            "worldBorder",
+            "(Ljava/lang/String;)[D",
+            world_border as *mut c_void,
+        ),
+        method(
+            "setWorldBorderCenter",
+            "(Ljava/lang/String;DD)V",
+            set_world_border_center as *mut c_void,
+        ),
+        method(
+            "setWorldBorderSize",
+            "(Ljava/lang/String;D)V",
+            set_world_border_size as *mut c_void,
         ),
         method(
             "worldTime",
