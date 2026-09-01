@@ -14,6 +14,10 @@ API="https://api.github.com/repos/$REPO/releases/latest"
 UPDATE=0
 [ "${1:-}" = "--update" ] && UPDATE=1
 
+# The installed binary's name -- foton.exe on Windows, foton everywhere else.
+# Every reference to it below goes through this variable.
+BIN=foton
+
 red() { printf '\033[31m%s\033[0m\n' "$1" >&2; }
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 die() { red "error: $1"; exit 1; }
@@ -45,10 +49,15 @@ ask() {
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required and was not found"; }
 need curl
 
+# Windows has no native POSIX shell, so this script only ever runs there
+# inside Git Bash, MSYS2 or Cygwin, which report one of these uname strings.
+# WSL reports plain "Linux" and needs no special case: the Linux binary is
+# correct there too.
 case "$(uname -s)" in
   Darwin) OS=macos ;;
   Linux)  OS=linux ;;
-  *) die "unsupported system: $(uname -s). Foton publishes macOS and Linux builds." ;;
+  MINGW*|MSYS*|CYGWIN*) OS=windows ;;
+  *) die "unsupported system: $(uname -s). Foton publishes macOS, Linux and Windows builds." ;;
 esac
 case "$(uname -m)" in
   arm64|aarch64) ARCH=aarch64 ;;
@@ -56,12 +65,15 @@ case "$(uname -m)" in
   *) die "unsupported processor: $(uname -m)" ;;
 esac
 
-if [ "$OS" = linux ]; then
-  ASSET="foton-linux-x86_64-musl"
-  [ "$ARCH" = x86_64 ] || die "Linux builds are x86_64 only for now; yours is $ARCH"
-else
-  ASSET="foton-macos-$ARCH"
-fi
+case "$OS" in
+  linux)   ASSET="foton-linux-$ARCH-musl" ;;
+  windows)
+    [ "$ARCH" = x86_64 ] || die "Windows builds are x86_64 only for now; yours is $ARCH"
+    ASSET="foton-windows-x86_64.exe"
+    BIN=foton.exe
+    ;;
+  *) ASSET="foton-macos-$ARCH" ;;
+esac
 
 TMP_META=$(mktemp)
 TMP=""
@@ -89,8 +101,8 @@ printf 'Latest release: %s\n' "$TAG"
 printf 'Asset for this machine: %s\n' "$ASSET"
 
 if [ "$UPDATE" -eq 1 ]; then
-  [ -x ./foton ] || die "--update must run inside an existing installation"
-  CURRENT=$(./foton --version 2>/dev/null | awk '{print $2}')
+  [ -x "./$BIN" ] || die "--update must run inside an existing installation"
+  CURRENT=$("./$BIN" --version 2>/dev/null | awk '{print $2}')
   if [ "v$CURRENT" = "$TAG" ]; then
     bold "Already on $TAG. Nothing to do."
     exit 0
@@ -99,7 +111,7 @@ if [ "$UPDATE" -eq 1 ]; then
   DIR=.
 else
   DIR=$(ask "Where should Foton live?" "./foton")
-  if [ -e "$DIR/foton" ]; then
+  if [ -e "$DIR/$BIN" ]; then
     OVERWRITE=$(ask "$DIR already has Foton in it. Replace the binary?" "no")
     case "$OVERWRITE" in y|Y|yes|Yes) ;; *) die "stopping, nothing was changed" ;; esac
   fi
@@ -109,26 +121,28 @@ fi
 TMP=$(mktemp -d)
 
 printf 'Downloading...\n'
-curl -fsSL "$BASE/$ASSET" -o "$TMP/foton" || die "could not download $ASSET from $TAG"
+curl -fsSL "$BASE/$ASSET" -o "$TMP/$BIN" || die "could not download $ASSET from $TAG"
 curl -fsSL "$BASE/SHA256SUMS" -o "$TMP/SHA256SUMS" || die "could not download SHA256SUMS"
 
 printf 'Verifying...\n'
 EXPECTED=$(grep " $ASSET\$" "$TMP/SHA256SUMS" | awk '{print $1}')
 [ -n "$EXPECTED" ] || die "$ASSET is not listed in SHA256SUMS"
 if command -v shasum >/dev/null 2>&1; then
-  ACTUAL=$(shasum -a 256 "$TMP/foton" | awk '{print $1}')
+  ACTUAL=$(shasum -a 256 "$TMP/$BIN" | awk '{print $1}')
 else
-  ACTUAL=$(sha256sum "$TMP/foton" | awk '{print $1}')
+  ACTUAL=$(sha256sum "$TMP/$BIN" | awk '{print $1}')
 fi
 if [ "$EXPECTED" != "$ACTUAL" ]; then
-  rm -f "$TMP/foton"
+  rm -f "$TMP/$BIN"
   die "checksum mismatch -- the download does not match the published release"
 fi
 
-[ -f "$DIR/foton" ] && mv "$DIR/foton" "$DIR/foton.previous"
-mv "$TMP/foton" "$DIR/foton"
-chmod +x "$DIR/foton"
-bold "Installed $TAG to $DIR/foton"
+# chmod is meaningless on a Windows filesystem but harmless there, so it runs
+# unconditionally rather than behind an OS check.
+[ -f "$DIR/$BIN" ] && mv "$DIR/$BIN" "$DIR/$BIN.previous"
+mv "$TMP/$BIN" "$DIR/$BIN"
+chmod +x "$DIR/$BIN"
+bold "Installed $TAG to $DIR/$BIN"
 
 if [ "$UPDATE" -eq 1 ]; then
   bold "Updated. Your config/ and saves/ were left alone."
@@ -136,7 +150,7 @@ if [ "$UPDATE" -eq 1 ]; then
 fi
 
 printf 'Writing the default configuration...\n'
-( cd "$DIR" && ./foton --generate-config ) || die "could not generate the configuration"
+( cd "$DIR" && "./$BIN" --generate-config ) || die "could not generate the configuration"
 
 if [ "$have_tty" -eq 0 ]; then
   bold "No terminal here, so the defaults were kept. Edit $DIR/config/ to change them."
@@ -163,6 +177,6 @@ set_key "$DIR/config/config.toml" online_mode "$ONLINE_VALUE"
 set_key "$DIR/config/worlds.toml" difficulty "\"$DIFFICULTY\""
 
 bold "Done."
-printf 'Start it with:  cd %s && ./foton\n' "$DIR"
+printf 'Start it with:  cd %s && ./%s\n' "$DIR" "$BIN"
 START=$(ask "Start it now?" "yes")
-case "$START" in y|Y|yes|Yes) cd "$DIR" && exec ./foton ;; esac
+case "$START" in y|Y|yes|Yes) cd "$DIR" && exec "./$BIN" ;; esac

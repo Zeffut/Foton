@@ -87,13 +87,29 @@ What it does, in order, stopping at the first failure:
    runs on any distribution without a runtime. This is why a laptop can produce
    a Linux artifact at all.
 6. **Writes `SHA256SUMS`** over every artifact.
-7. **Creates the tag and the GitHub release** and attaches the binaries and the
+7. **Prints platform coverage**: which of the five release assets (below) it
+   is about to publish and which are missing, so a partial release is never
+   mistaken for a complete one.
+8. **Creates the tag and the GitHub release** and attaches the binaries and the
    checksum file.
 
-Platforms a laptop can produce: `foton-macos-aarch64` natively, and
-`foton-linux-x86_64-musl` through the container. Windows needs CI; the release
-is published without it and the installer says so rather than offering a
-download that does not exist.
+A full release has exactly five assets:
+
+| Asset | Platform | Built by |
+|-------|----------|----------|
+| `foton-linux-x86_64-musl` | Linux, Intel/AMD | a laptop (Docker) or CI |
+| `foton-linux-aarch64-musl` | Linux, ARM | CI only (`ubuntu-24.04-arm` runner) |
+| `foton-macos-aarch64` | macOS, Apple Silicon | a laptop (native) or CI |
+| `foton-macos-x86_64` | macOS, Intel | CI only (cross-compiled from `macos-latest`) |
+| `foton-windows-x86_64.exe` | Windows, Intel/AMD | CI only |
+
+A laptop can produce two of the five: `foton-macos-aarch64` natively, and
+`foton-linux-x86_64-musl` through the container -- and only if it happens to be
+an Apple Silicon Mac, since the host binary is built for whatever the laptop
+is. The other three need GitHub Actions. `dev/release.sh` prints which of the
+five it is about to publish and which are missing before it publishes anything,
+so a laptop release is never mistaken for a complete one. Run the "Build
+Release" workflow (`workflow_dispatch` or a push to `master`) for all five.
 
 ## Installing
 
@@ -105,6 +121,8 @@ The script:
 
 1. Detects the operating system and CPU, and picks the matching asset. An
    unsupported pair stops with the list of what exists, not a failed download.
+   The script is POSIX `sh`, so on Windows it needs Git Bash, MSYS2, Cygwin or
+   WSL -- there is no native `sh` to run it under otherwise.
 2. Fetches the release metadata from the GitHub API — the repository is public,
    so no token is involved.
 3. Downloads the binary **and `SHA256SUMS`**, and verifies the binary against it

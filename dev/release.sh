@@ -83,6 +83,24 @@ fi
 say "Checksums"
 ( cd "$OUT" && shasum -a 256 foton-* > SHA256SUMS && cat SHA256SUMS )
 
+say "Platform coverage"
+# A laptop cannot cross-compile to Windows or to the other Mac architecture --
+# say so plainly rather than publishing a partial release that looks complete.
+ALL_ASSETS=(foton-linux-x86_64-musl foton-linux-aarch64-musl foton-macos-aarch64 foton-macos-x86_64 foton-windows-x86_64.exe)
+MISSING=0
+for asset in "${ALL_ASSETS[@]}"; do
+  if [ -f "$OUT/$asset" ]; then
+    printf '  present  %s\n' "$asset"
+  else
+    printf '  missing  %s\n' "$asset"
+    MISSING=1
+  fi
+done
+if [ "$MISSING" -eq 1 ]; then
+  printf '\nThis is a partial release. A full release with all five assets comes\n'
+  printf 'from the "Build Release" GitHub Actions workflow, not from this script.\n'
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   say "Dry run: stopping before the tag and the upload"
   printf 'artifacts are in %s\n' "$OUT"
