@@ -1005,6 +1005,27 @@ impl Player {
         open_menu.menu.is_some() || open_menu.dispatch.is_some()
     }
 
+    /// Returns the number of slots in the currently open external menu.
+    #[must_use]
+    pub fn open_container_slot_count(&self) -> Option<usize> {
+        self.open_menu
+            .lock()
+            .menu
+            .as_ref()
+            .map(|menu| menu.behavior().slots().len())
+    }
+
+    /// Returns the registry key of the currently open external menu type.
+    #[must_use]
+    pub fn open_container_menu_type(&self) -> Option<String> {
+        self.open_menu
+            .lock()
+            .menu
+            .as_ref()
+            .and_then(|menu| menu.menu_type())
+            .map(|menu_type| menu_type.key.to_string())
+    }
+
     /// Runs the open menu's per-tick hook, if an external menu is open.
     ///
     /// Scoped to the opened menu; the base inventory menu is not ticked. Called
