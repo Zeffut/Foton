@@ -197,6 +197,10 @@ public final class FotonPlayer implements Player {
         return false;
     }
 
+    @Override public org.bukkit.entity.EntityType getType() {
+        return org.bukkit.entity.EntityType.PLAYER;
+    }
+
     @Override
     public String getCustomName() {
         return Native.customName(id.toString());

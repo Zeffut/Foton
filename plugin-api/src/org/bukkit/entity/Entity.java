@@ -12,6 +12,7 @@ public interface Entity extends CommandSender {
     Location getLocation();
 
     World getWorld();
+    EntityType getType();
 
     int getEntityId();
 
