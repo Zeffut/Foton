@@ -25,13 +25,14 @@ use foton_core::world::LevelReader as _;
 use foton_core::world::World;
 use foton_protocol::packets::common::CCustomPayload;
 use foton_protocol::packets::game::{
-    BossBarColor, BossBarOverlay, CClearTitles, CSetSubtitleText, CSetTitleText,
+    BossBarColor, BossBarOverlay, CClearTitles, COpenBook, CSetSubtitleText, CSetTitleText,
     CSetTitlesAnimation, CStopSound, CSystemChat, CTabList, SoundSource,
 };
 use foton_registry::item_stack::ItemStack;
-use foton_registry::{REGISTRY, RegistryExt as _};
+use foton_registry::{REGISTRY, RegistryExt as _, vanilla_items};
 use foton_utils::Identifier;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
+use foton_utils::types::InteractionHand;
 use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId};
 use glam::DVec3;
@@ -1119,6 +1120,34 @@ extern "system" fn is_sneaking(
     jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.is_crouching()))
 }
 
+extern "system" fn open_book(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let inventory = player.inventory.lock();
+    let hand = if inventory
+        .get_item_in_hand(InteractionHand::MainHand)
+        .is(&vanilla_items::WRITTEN_BOOK)
+        || inventory
+            .get_item_in_hand(InteractionHand::MainHand)
+            .is(&vanilla_items::WRITABLE_BOOK)
+    {
+        InteractionHand::MainHand
+    } else if inventory
+        .get_item_in_hand(InteractionHand::OffHand)
+        .is(&vanilla_items::WRITTEN_BOOK)
+        || inventory
+            .get_item_in_hand(InteractionHand::OffHand)
+            .is(&vanilla_items::WRITABLE_BOOK)
+    {
+        InteractionHand::OffHand
+    } else {
+        return;
+    };
+    drop(inventory);
+    player.send_packet(COpenBook { hand });
+}
+
 /// Every native, with the descriptor the JVM matches it by.
 ///
 /// A descriptor that disagrees with the Java declaration is not a compile
@@ -1192,6 +1221,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "isSneaking",
             "(Ljava/lang/String;)Z",
             is_sneaking as *mut c_void,
+        ),
+        method(
+            "openBook",
+            "(Ljava/lang/String;)V",
+            open_book as *mut c_void,
         ),
         method(
             "worldMinHeight",

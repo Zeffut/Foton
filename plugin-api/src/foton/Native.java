@@ -100,6 +100,7 @@ public final class Native {
     /** Whether a player is an operator. */
     public static native boolean isOperator(String uuid);
     public static native boolean isSneaking(String uuid);
+    public static native void openBook(String uuid);
 
     /** Creates a native boss event and returns its opaque UUID handle. */
     public static native String createBossBar(String title, int color, int style, int flags);

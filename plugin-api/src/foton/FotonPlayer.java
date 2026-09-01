@@ -222,6 +222,10 @@ public final class FotonPlayer implements Player {
 
     @Override public boolean isSneaking() { return Native.isSneaking(id.toString()); }
 
+    @Override public void openBook(org.bukkit.inventory.ItemStack book) {
+        if (book != null) Native.openBook(id.toString());
+    }
+
     @Override
     public void kickPlayer(String message) {
         Native.kickPlayer(id.toString(), message == null ? "" : message);
