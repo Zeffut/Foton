@@ -25,7 +25,8 @@ use foton_core::world::LevelReader as _;
 use foton_core::world::World;
 use foton_protocol::packets::common::CCustomPayload;
 use foton_protocol::packets::game::{
-    BossBarColor, BossBarOverlay, CSystemChat, CTabList, SoundSource,
+    BossBarColor, BossBarOverlay, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation,
+    CSystemChat, CTabList, SoundSource,
 };
 use foton_registry::item_stack::ItemStack;
 use foton_registry::{REGISTRY, RegistryExt as _};
@@ -298,6 +299,37 @@ extern "system" fn send_action_bar(
     };
     let message: TextComponent = String::from(message).into();
     player.send_packet(CSystemChat::new(&message, true, player.as_ref()));
+}
+
+/// `foton.Native.sendTitle`
+extern "system" fn send_title(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    title: JString<'_>,
+    subtitle: JString<'_>,
+    fade_in: jint,
+    stay: jint,
+    fade_out: jint,
+) {
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let Ok(title) = env.get_string(&title) else {
+        return;
+    };
+    let Ok(subtitle) = env.get_string(&subtitle) else {
+        return;
+    };
+    let title: TextComponent = String::from(title).into();
+    let subtitle: TextComponent = String::from(subtitle).into();
+    player.send_packet(CSetTitlesAnimation {
+        fade_in,
+        stay,
+        fade_out,
+    });
+    player.send_packet(CSetTitleText::new(&title, player.as_ref()));
+    player.send_packet(CSetSubtitleText::new(&subtitle, player.as_ref()));
 }
 
 /// `foton.Native.sendPluginMessage`
@@ -1159,6 +1191,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "sendActionBar",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             send_action_bar as *mut c_void,
+        ),
+        method(
+            "sendTitle",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;III)V",
+            send_title as *mut c_void,
         ),
         method(
             "sendPluginMessage",
