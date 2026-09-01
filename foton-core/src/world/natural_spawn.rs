@@ -215,6 +215,19 @@ impl World {
         // than a pack, so there is no group data to thread from a previous mob.
         let _ = mob.finalize_spawn(self, EntitySpawnReason::Natural, None);
 
+        let mut spawn_event = crate::event::CreatureSpawnEvent::new(
+            entity.uuid(),
+            self.key.to_string(),
+            entity.position().x,
+            entity.position().y,
+            entity.position().z,
+            "Natural".to_owned(),
+        );
+        self.fire_event(&mut spawn_event);
+        if spawn_event.is_cancelled() {
+            return;
+        }
+
         if let Err(error) = self.try_add_entity(entity) {
             log::debug!("natural spawn rejected: {error}");
         }

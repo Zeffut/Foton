@@ -81,6 +81,57 @@ impl EntityPickupItemEvent {
     }
 }
 
+/// A living entity is about to be inserted into a world by a spawn system.
+pub struct CreatureSpawnEvent {
+    entity: Uuid,
+    world: String,
+    x: f64,
+    y: f64,
+    z: f64,
+    reason: String,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for CreatureSpawnEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/creature_spawn");
+}
+impl Event for CreatureSpawnEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+impl CreatureSpawnEvent {
+    pub fn new(entity: Uuid, world: String, x: f64, y: f64, z: f64, reason: String) -> Self {
+        Self {
+            entity,
+            world,
+            x,
+            y,
+            z,
+            reason,
+            cancelled: false,
+        }
+    }
+    pub const fn entity(&self) -> Uuid {
+        self.entity
+    }
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+    pub const fn position(&self) -> (f64, f64, f64) {
+        (self.x, self.y, self.z)
+    }
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// A living entity is about to regain health.
 pub struct EntityRegainHealthEvent {
     entity: Uuid,

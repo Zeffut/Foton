@@ -342,6 +342,19 @@ impl BaseSpawner {
             }
         }
 
+        let mut spawn_event = crate::event::CreatureSpawnEvent::new(
+            entity.uuid(),
+            world.key.to_string(),
+            entity.position().x,
+            entity.position().y,
+            entity.position().z,
+            "Spawner".to_owned(),
+        );
+        world.fire_event(&mut spawn_event);
+        if spawn_event.is_cancelled() {
+            return SpawnAttempt::Skipped;
+        }
+
         if world.try_add_entity(Arc::clone(&entity)).is_err() {
             return SpawnAttempt::GiveUp;
         }

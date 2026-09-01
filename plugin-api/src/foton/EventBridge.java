@@ -187,6 +187,16 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static boolean fireCreatureSpawn(String entity, String world, double x, double y, double z, String reason) {
+        org.bukkit.entity.LivingEntity living = new FotonLivingEntity(Native.parse(entity));
+        org.bukkit.event.entity.CreatureSpawnEvent event =
+            new org.bukkit.event.entity.CreatureSpawnEvent(
+                living, new org.bukkit.Location(new FotonWorld(world), x, y, z),
+                org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.valueOf(reason));
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     public static boolean fireEntityRegainHealth(String entity, float amount) {
         org.bukkit.event.entity.EntityRegainHealthEvent event =
             new org.bukkit.event.entity.EntityRegainHealthEvent(new FotonLivingEntity(Native.parse(entity)), amount);

@@ -13,11 +13,11 @@ use std::sync::Arc;
 
 use crate::natives;
 use foton_core::event::{
-    BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, EntityDamageByEntityEvent,
-    EntityPickupItemEvent, EntityRegainHealthEvent, EntityRemoveFromWorldEvent,
-    InventoryClickEvent, PlayerChatEvent, PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent,
-    PlayerDeathEvent, PlayerInteractEvent, PlayerJoinEvent, PlayerLoginEvent, PlayerMoveEvent,
-    PlayerQuitEvent, PlayerRespawnEvent, ServerTickEvent,
+    BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent, CommandEvent, CreatureSpawnEvent,
+    EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRegainHealthEvent,
+    EntityRemoveFromWorldEvent, InventoryClickEvent, PlayerChatEvent, PlayerCommandPreprocessEvent,
+    PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerInteractEvent, PlayerJoinEvent,
+    PlayerLoginEvent, PlayerMoveEvent, PlayerQuitEvent, PlayerRespawnEvent, ServerTickEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -78,6 +78,22 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<EntityPickupItemEvent, _>(owner(), move |event| {
         if !pickup_call(&jvm, &event.entity().to_string(), &event.item().to_string()) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<CreatureSpawnEvent, _>(owner(), move |event| {
+        let (x, y, z) = event.position();
+        if !creature_spawn_call(
+            &jvm,
+            &event.entity().to_string(),
+            event.world(),
+            x,
+            y,
+            z,
+            event.reason(),
+        ) {
             event.set_cancelled(true);
         }
     });
@@ -415,6 +431,44 @@ fn pickup_call(vm: &JavaVM, entity: &str, item: &str) -> bool {
         "fireEntityPickup",
         "(Ljava/lang/String;Ljava/lang/String;)Z",
         &[JValue::Object(&entity), JValue::Object(&item)],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
+}
+
+fn creature_spawn_call(
+    vm: &JavaVM,
+    entity: &str,
+    world: &str,
+    x: f64,
+    y: f64,
+    z: f64,
+    reason: &str,
+) -> bool {
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
+    };
+    let Ok(entity) = env.new_string(entity) else {
+        return true;
+    };
+    let Ok(world) = env.new_string(world) else {
+        return true;
+    };
+    let Ok(reason) = env.new_string(reason) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireCreatureSpawn",
+        "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;)Z",
+        &[
+            JValue::Object(&entity),
+            JValue::Object(&world),
+            JValue::Double(x),
+            JValue::Double(y),
+            JValue::Double(z),
+            JValue::Object(&reason),
+        ],
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)

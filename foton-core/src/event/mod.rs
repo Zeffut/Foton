@@ -39,7 +39,7 @@ pub use block::{BlockBreakEvent, BlockFromToEvent, BlockPlaceEvent};
 pub use command::CommandEvent;
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use entity::{
-    EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRegainHealthEvent,
+    CreatureSpawnEvent, EntityDamageByEntityEvent, EntityPickupItemEvent, EntityRegainHealthEvent,
     EntityRemoveFromWorldEvent,
 };
 pub use inventory::InventoryClickEvent;
