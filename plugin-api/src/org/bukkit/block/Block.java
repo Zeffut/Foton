@@ -20,6 +20,11 @@ public interface Block {
     Material getType();
 
     void setType(Material type);
+    default void setType(Material type, boolean applyPhysics) { setType(type); }
+    default void setBlockData(BlockData data) {
+        if (data != null) setType(data.getMaterial());
+    }
+    default void setBlockData(BlockData data, boolean applyPhysics) { setBlockData(data); }
 
     BlockData getBlockData();
 

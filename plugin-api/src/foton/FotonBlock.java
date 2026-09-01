@@ -67,6 +67,23 @@ public final class FotonBlock implements Block {
     }
 
     @Override
+    public void setBlockData(BlockData data, boolean applyPhysics) {
+        if (world != null && data != null) {
+            Native.setBlock(world.getName(), x, y, z, data.getAsString());
+        }
+    }
+
+    @Override
+    public void setBlockData(BlockData data) {
+        setBlockData(data, true);
+    }
+
+    @Override
+    public void setType(Material type, boolean applyPhysics) {
+        setType(type);
+    }
+
+    @Override
     public BlockData getBlockData() {
         String text = world == null ? null : Native.blockState(world.getName(), x, y, z);
         if (text != null && text.startsWith("minecraft:tripwire")) {
