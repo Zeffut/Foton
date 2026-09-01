@@ -73,6 +73,9 @@ pub struct ServerConfig {
     /// Remote administration over the Source Rcon protocol.
     #[serde(default)]
     pub rcon: RconConfig,
+    /// Letting Bedrock Edition players in.
+    #[serde(default)]
+    pub bedrock: BedrockConfig,
     /// Where player-filed bug reports are sent, on top of the local file.
     #[serde(default)]
     pub bug_reports: BugReportsConfig,
@@ -179,6 +182,49 @@ impl Default for RconConfig {
     }
 }
 
+/// Letting Bedrock Edition players in, through a Geyser this server runs.
+///
+/// Off by default: enabling it starts a Java process, and nothing should pay
+/// for a feature it did not ask for.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BedrockConfig {
+    /// Whether Geyser is started and the Bedrock port opened at all.
+    pub enable: bool,
+    /// The UDP port Bedrock clients connect to.
+    pub port: u16,
+    /// What Bedrock clients see in the server list; empty reuses the server MOTD.
+    pub motd: String,
+    /// Prepended to a Bedrock player's gamertag so it cannot collide with a
+    /// Java player's name. Empty means no prefix, and collisions become possible.
+    pub username_prefix: String,
+    /// Addresses a Floodgate handshake is accepted from.
+    ///
+    /// Foton starts Geyser locally, so loopback is the whole list by default. A
+    /// handshake claiming Floodgate from anywhere else is refused, because the
+    /// alternative is that anyone who can reach the Java port becomes anyone.
+    pub trusted_proxies: Vec<String>,
+    /// A JDK or JRE for Geyser; empty means `JAVA_HOME`, then `java` on the path.
+    pub java_home: String,
+    /// An operator-supplied Geyser jar; empty means fetch the pinned build.
+    pub jar_path: String,
+}
+
+impl Default for BedrockConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            // Bedrock's default port.
+            port: 19132,
+            motd: String::new(),
+            username_prefix: ".".to_owned(),
+            trusted_proxies: vec!["127.0.0.1".to_owned(), "::1".to_owned()],
+            java_home: String::new(),
+            jar_path: String::new(),
+        }
+    }
+}
+
 /// Optional worker counts for server thread pools.
 ///
 /// A value of `0` or an omitted field uses the pool's automatic default.
@@ -255,6 +301,17 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         }
         if config.rcon.port == config.server_port {
             return Err("rcon.port must differ from server_port");
+        }
+    }
+    if config.bedrock.enable {
+        if config.bedrock.port == config.server_port {
+            return Err("bedrock.port must differ from server_port");
+        }
+        if config.bedrock.trusted_proxies.is_empty() {
+            return Err("bedrock.trusted_proxies must list at least one address");
+        }
+        if config.bedrock.username_prefix.chars().count() >= 16 {
+            return Err("bedrock.username_prefix leaves no room for a username");
         }
     }
     if config.enforce_secure_chat {

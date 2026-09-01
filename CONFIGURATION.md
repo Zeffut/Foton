@@ -64,6 +64,20 @@ Remote administration over the Source Rcon protocol
 | `port` | integer | `25575` | 1–65535 | Port rcon listens on |
 | `password` | string | `""` |  | Password every rcon client must send before it may run a command |
 
+#### `[server.bedrock]`
+
+Letting Bedrock Edition players in, through a Geyser this server runs
+
+| Key | Type | Default | Range | Meaning |
+|---|---|---|---|---|
+| `enable` | boolean | `false` |  | Whether Geyser is started and the Bedrock port opened at all |
+| `port` | integer | `19132` | 1–65535 | UDP port Bedrock clients connect to |
+| `motd` | string | `""` |  | What Bedrock clients see in the server list; empty reuses the server MOTD |
+| `username_prefix` | string | `"."` |  | Prepended to a Bedrock player's gamertag so it cannot collide with a Java player's name |
+| `trusted_proxies` | array of string | `["127.0.0.1", "::1"]` |  | Addresses a Floodgate identity handshake is accepted from |
+| `java_home` | string | `""` |  | A JDK or JRE for Geyser; empty means JAVA_HOME, then java on the path |
+| `jar_path` | string | `""` |  | An operator-supplied Geyser jar; empty means fetch the pinned build |
+
 #### `[server.threads]`
 
 Optional worker counts for server thread pools. 0 or omitted uses each pool's automatic default.

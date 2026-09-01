@@ -12,6 +12,11 @@ aes-gcm = "0.11.1"
 base64.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+# The shared key is generated from OS randomness.
+rand.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

@@ -508,3 +508,48 @@ fn a_webhook_token_never_reaches_debug_output() {
         "the endpoint should still be identifiable: {printed}"
     );
 }
+
+/// The comment is part of the anchor so the replace cannot also match rcon's
+/// own `enable = false`, which reads identically once the comment is dropped.
+const BEDROCK_DISABLED: &str =
+    "# Whether Geyser is started and the Bedrock port opened at all.\nenable = false";
+const BEDROCK_ENABLED: &str =
+    "# Whether Geyser is started and the Bedrock port opened at all.\nenable = true";
+
+#[test]
+fn validate_rejects_bedrock_sharing_the_java_port() {
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace("port = 19132", "port = 25565");
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("bedrock.port must differ from server_port")
+    );
+}
+
+#[test]
+fn validate_rejects_bedrock_with_no_trusted_proxies() {
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace(
+            r#"trusted_proxies = ["127.0.0.1", "::1"]"#,
+            "trusted_proxies = []",
+        );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("bedrock.trusted_proxies must list at least one address")
+    );
+}
+
+/// Bedrock is opt-in: a config written before the section existed, or one
+/// that never mentions it, must not suddenly start a Geyser process.
+#[test]
+fn bedrock_is_off_when_the_section_is_absent() {
+    let config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+
+    assert!(!config.server.bedrock.enable);
+}
