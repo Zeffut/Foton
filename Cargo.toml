@@ -12,6 +12,7 @@ members = [
     "foton-core",
     "foton-crypto",
     "foton-math",
+    "foton-plugin",
 ]
 
 [workspace.package]
