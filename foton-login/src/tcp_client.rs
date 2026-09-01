@@ -53,6 +53,8 @@ use tokio::{
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
 
+use crate::floodgate::BedrockLoginConfig;
+
 use crate::pre_play_state::{PacketSequenceError, PrePlayPacket, PrePlayState};
 
 /// Represents updates to the connection state.
@@ -161,6 +163,17 @@ pub struct JavaTcpClient {
     pub connection_updated: Arc<Notify>,
 
     pub(crate) pre_play_state: SyncMutex<PrePlayState>,
+    /// The hostname the client's handshake declared, captured so the login
+    /// handler can check it for an encrypted Floodgate payload.
+    pub(crate) hostname: SyncMutex<String>,
+    /// Bedrock login policy for this connection.
+    ///
+    /// Defaults to disabled: nothing wires the real `[server.bedrock]`
+    /// config into this field yet, so no hostname is treated as a Floodgate
+    /// handshake until that lands. Off is the safe default -- a feature
+    /// nobody asked for should not silently start accepting a new kind of
+    /// login.
+    pub(crate) bedrock: BedrockLoginConfig,
     task_tracker: TaskTracker,
 }
 
@@ -202,6 +215,8 @@ impl JavaTcpClient {
             connection_updates,
             connection_updated: Arc::new(Notify::new()),
             pre_play_state: SyncMutex::new(PrePlayState::new()),
+            hostname: SyncMutex::new(String::new()),
+            bedrock: BedrockLoginConfig::default(),
             task_tracker,
         };
 
@@ -505,6 +520,9 @@ impl JavaTcpClient {
         match packet.id {
             handshake::S_INTENTION => {
                 let packet = SClientIntention::read_packet(data)?;
+                // Captured here so the login handler can check it for an
+                // encrypted Floodgate payload once the client reaches login.
+                self.hostname.lock().clone_from(&packet.hostname);
                 let intent = match packet.intention {
                     ClientIntent::Status => ConnectionProtocol::Status,
                     ClientIntent::Login | ClientIntent::Transfer => ConnectionProtocol::Login,

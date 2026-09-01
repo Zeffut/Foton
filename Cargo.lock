@@ -942,6 +942,7 @@ version = "0.15.2+mc26.2"
 dependencies = [
  "base64 0.23.0",
  "crossbeam",
+ "foton-bedrock",
  "foton-core",
  "foton-protocol",
  "foton-registry",

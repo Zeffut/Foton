@@ -8,12 +8,16 @@
 
 mod authentication;
 mod connection;
+mod floodgate;
 mod handlers;
 mod pre_play_state;
 mod tcp_client;
 
 // Authentication
 pub use authentication::{AuthError, TextureError, mojang_authenticate, signed_bytes_be_to_hex};
+
+// Bedrock login (Floodgate)
+pub use floodgate::BedrockLoginConfig;
 
 // Type re-exports from foton-core
 pub use foton_core::player::{
