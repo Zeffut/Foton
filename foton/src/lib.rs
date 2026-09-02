@@ -125,6 +125,10 @@ impl FotonServer {
         let server_port = foton_config.server.server_port;
         let rcon_config = foton_config.server.rcon.clone();
         let bedrock_config = foton_config.server.bedrock.clone();
+        // Captured here, ahead of `into_runtime_config`'s move below, purely
+        // so the Bedrock startup warnings further down can still read them.
+        let online_mode = foton_config.server.online_mode;
+        let enforce_secure_chat = foton_config.server.enforce_secure_chat;
         let worlds_config = foton_config.worlds;
         let permission_groups =
             PermissionGroupManager::new(foton_config.groups, permission_group_store).map_err(
@@ -182,21 +186,12 @@ impl FotonServer {
         // `run_directory` is `Some` exactly when Bedrock is enabled, so
         // matching on it here is the enable check.
         if let Some(run_directory) = &run_directory {
-            // Purely a config check -- no I/O, so it runs regardless of
+            // Purely config checks -- no I/O, so they run regardless of
             // whether the key below loads. Gated on this same block (which
             // is `Some` exactly when Bedrock is enabled) so an operator with
-            // Bedrock off sees nothing new, and it logs once, here at
+            // Bedrock off sees nothing new, and each logs once, here at
             // startup, rather than per-connection.
-            if bedrock_config.username_prefix_could_collide_with_java_names() {
-                log::warn!(
-                    "Bedrock: bedrock.username_prefix ({:?}) does not contain a character a \
-                     vanilla Java username can never contain, so a Bedrock player's derived \
-                     name can collide with a real Java player's. The default prefix (\".\") \
-                     prevents this by construction; an empty or alphanumeric-only prefix \
-                     does not.",
-                    bedrock_config.username_prefix
-                );
-            }
+            warn_about_risky_bedrock_config(&bedrock_config, online_mode, enforce_secure_chat);
 
             let path = key::key_path(run_directory);
             match key::load_or_create(&path) {
@@ -312,6 +307,58 @@ impl FotonServer {
             }
         }
         let _ = server_handle.await;
+    }
+}
+
+/// Warns at startup about `[server.bedrock]` combinations that are valid but
+/// dangerous or self-defeating -- called only once Bedrock is confirmed
+/// enabled (see the call site in [`FotonServer::new_with_commands`]), never
+/// hard refusals: those genuine rejections belong in
+/// `config::server::validate` instead, which runs before a server is built at
+/// all. These three are things `validate` cannot express as a plain error
+/// without also refusing configurations operators may knowingly want.
+fn warn_about_risky_bedrock_config(
+    bedrock_config: &BedrockConfig,
+    online_mode: bool,
+    enforce_secure_chat: bool,
+) {
+    if bedrock_config.username_prefix_could_collide_with_java_names() {
+        log::warn!(
+            "Bedrock: bedrock.username_prefix ({:?}) does not contain a character a vanilla \
+             Java username can never contain, so a Bedrock player's derived name can collide \
+             with a real Java player's. The default prefix (\".\") prevents this by \
+             construction; an empty or alphanumeric-only prefix does not.",
+            bedrock_config.username_prefix
+        );
+    }
+
+    // A Floodgate player has no Mojang profile key and Geyser sends unsigned
+    // chat, which `foton-core`'s chat handling disconnects on when secure
+    // chat is enforced -- a valid configuration today, and a mystifying
+    // mid-session kick for every Bedrock player's first chat message.
+    if enforce_secure_chat {
+        log::warn!(
+            "Bedrock: enforce_secure_chat is enabled alongside Bedrock support. Bedrock \
+             players send unsigned chat (Geyser/Floodgate players have no Mojang profile \
+             key), so every Bedrock player will be disconnected the moment they send a chat \
+             message. Disable enforce_secure_chat, or accept that Bedrock players cannot \
+             chat, if this combination is intentional."
+        );
+    }
+
+    // Without online_mode, a Java client can claim any username -- including
+    // a Bedrock player's derived one -- so the only thing still protecting
+    // Bedrock identity is bedrock.username_prefix containing a character a
+    // Java username can never hold.
+    if !online_mode {
+        log::warn!(
+            "Bedrock: online_mode is false while Bedrock support is enabled. A Java client \
+             can then claim any username, including a Bedrock player's derived one, since \
+             names are not verified against Mojang; the only remaining protection is \
+             bedrock.username_prefix containing a character a Java username can never hold. \
+             Enable online_mode for identity-safe Bedrock logins, or accept this risk \
+             knowingly."
+        );
     }
 }
 
