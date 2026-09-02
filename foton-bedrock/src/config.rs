@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn resolved_port_honours_an_explicit_port() {
+    fn resolved_port_honors_an_explicit_port() {
         let config = BedrockConfig {
             port: 19132,
             ..BedrockConfig::default()

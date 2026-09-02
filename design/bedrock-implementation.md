@@ -75,7 +75,7 @@ Three further reasons, none of them scheduling:
 - **A crash stays a crash.** Geyser falling over restarts Geyser. It does not
   take the world with it.
 
-The in-JVM route stays open. If the plugin host stabilises and an operator is
+The in-JVM route stays open. If the plugin host stabilizes and an operator is
 running both, hosting Geyser in that JVM becomes a supervisor implementation
 detail, and nothing above the `BedrockSupervisor` interface changes.
 
@@ -186,7 +186,7 @@ key file is the entire trust boundary, not one factor among several.
 
 A Floodgate handshake is an assertion of identity that skips Mojang. If it can
 be forged, anyone becomes anyone, including an operator. Two independent
-defences, both on by default:
+defenses, both on by default:
 
 - **The key.** The assertion is verified against a secret generated on first
   run, readable only by the server, shared only with the Geyser that Foton
@@ -221,7 +221,7 @@ be able to see which edition someone came from. It is configurable and can be
 empty, with the collision consequence documented rather than hidden.
 
 Gamertags also contain characters Java usernames cannot. Foton already validates
-names with `is_valid_player_name`; the Bedrock path sanitises to what the Java
+names with `is_valid_player_name`; the Bedrock path sanitizes to what the Java
 protocol permits before that check, and the mapping is deterministic so it does
 not shift under a returning player.
 
@@ -286,7 +286,7 @@ worth stating rather than assuming.
   notices.
 
 If the plugin host ships first and an operator runs both, the in-JVM supervisor
-becomes attractive as an optimisation, and the interface above is already the
+becomes attractive as an optimization, and the interface above is already the
 place to put it.
 
 ## Testing
@@ -351,7 +351,7 @@ built on a broken assumption and the finding is worth more than the code.
   to fix. The README has to say this next to the claim, the way `PARITY.md`
   keeps its caveat beside its percentages. Overstating this is the failure mode
   that costs trust.
-- **A forged Floodgate handshake is total impersonation.** Two defences, both
+- **A forged Floodgate handshake is total impersonation.** Two defenses, both
   default-on, and a decoder whose failure path is refusal rather than
   downgrade. This is the part of the work to write carefully and review
   hardest.
@@ -387,5 +387,5 @@ The analysis left four. Three are answered here.
 
 One new one, and it is not blocking: an operator running Geyser on a separate
 host has to widen `trusted_proxies`, at which point the shared key is the only
-defence and it crosses a network. That deployment should probably be refused
+defense and it crosses a network. That deployment should probably be refused
 rather than documented, and the decision can wait until someone asks for it.

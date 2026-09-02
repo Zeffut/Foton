@@ -1072,7 +1072,7 @@ Expected: `resolve_floodgate` does not exist.
 Add `foton-bedrock = { path = "../foton-bedrock" }` to `foton-login/Cargo.toml`. Then:
 
 ```rust
-/// Why a handshake claiming to carry Bedrock identity was not honoured.
+/// Why a handshake claiming to carry Bedrock identity was not honored.
 #[derive(Debug, thiserror::Error)]
 pub enum FloodgateLoginError {
     /// The hostname carries no Floodgate payload; this is an ordinary login.
