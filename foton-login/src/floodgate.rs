@@ -114,21 +114,39 @@ pub(crate) fn resolve_floodgate_login(
 }
 
 /// Whether an address is one Foton accepts Bedrock identity from.
+///
+/// Both sides are normalized with [`IpAddr::to_canonical`] before comparing,
+/// so an IPv4-mapped IPv6 address (`::ffff:127.0.0.1`) matches a
+/// `trusted_proxies` entry written as `127.0.0.1`, and vice versa -- exactly
+/// what a dual-stack listener can hand back for a peer that is really just
+/// loopback. `to_canonical` unwraps only that mapped form; it deliberately
+/// leaves the deprecated IPv4-*compatible* form (`::a.b.c.d`, no `ffff`)
+/// alone, which is fine here: that legacy spelling is not what a dual-stack
+/// listener produces, so there is nothing in this bug for it to fix.
+///
+/// This cannot widen trust: normalization is applied identically to `address`
+/// and to every parsed `entry` before the equality check, so it only makes
+/// two spellings of the *same* address compare equal. An address that was
+/// not in `trusted` under exact comparison is still not in `trusted` under
+/// canonical comparison.
 fn is_trusted(address: IpAddr, trusted: &[String]) -> bool {
+    let address = address.to_canonical();
     trusted
         .iter()
         .filter_map(|entry| entry.parse::<IpAddr>().ok())
-        .any(|entry| entry == address)
+        .any(|entry| entry.to_canonical() == address)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
+    use std::net::{IpAddr, SocketAddr};
 
     use foton_bedrock::floodgate::encrypt;
     use foton_bedrock::key;
 
-    use super::{BedrockConfig, FloodgateLoginError, resolve_floodgate, resolve_floodgate_login};
+    use super::{
+        BedrockConfig, FloodgateLoginError, is_trusted, resolve_floodgate, resolve_floodgate_login,
+    };
 
     /// The 12 fields in `BedrockData.toString()` order, matching
     /// `foton-bedrock`'s own fixture shape, encrypted into a full handshake
@@ -257,5 +275,48 @@ mod tests {
         let result = resolve_floodgate_login("mc.example.com", addr("127.0.0.1:52000"), &config);
 
         assert!(matches!(result, Ok(None)));
+    }
+
+    fn ip(text: &str) -> IpAddr {
+        text.parse().expect("valid test IP address")
+    }
+
+    #[test]
+    fn an_ipv4_mapped_ipv6_peer_matches_a_plain_v4_trusted_entry() {
+        let trusted = ["127.0.0.1".to_owned()];
+
+        assert!(is_trusted(ip("::ffff:127.0.0.1"), &trusted));
+    }
+
+    #[test]
+    fn a_plain_v4_peer_matches_an_ipv4_mapped_v6_trusted_entry() {
+        let trusted = ["::ffff:127.0.0.1".to_owned()];
+
+        assert!(is_trusted(ip("127.0.0.1"), &trusted));
+    }
+
+    #[test]
+    fn an_unrelated_address_is_rejected_in_either_form() {
+        let trusted = ["127.0.0.1".to_owned()];
+
+        // Normalization must not widen trust: a genuinely different address
+        // stays untrusted whether it arrives as plain IPv4 or as its
+        // IPv4-mapped IPv6 spelling.
+        assert!(!is_trusted(ip("203.0.113.9"), &trusted));
+        assert!(!is_trusted(ip("::ffff:203.0.113.9"), &trusted));
+    }
+
+    #[test]
+    fn a_garbage_trusted_proxies_entry_is_ignored_rather_than_panicking() {
+        let trusted = ["not-an-ip-address".to_owned(), "127.0.0.1".to_owned()];
+
+        assert!(is_trusted(ip("127.0.0.1"), &trusted));
+        assert!(!is_trusted(ip("203.0.113.9"), &trusted));
+    }
+
+    #[test]
+    fn an_empty_trusted_proxies_list_rejects_everything() {
+        assert!(!is_trusted(ip("127.0.0.1"), &[]));
+        assert!(!is_trusted(ip("::1"), &[]));
     }
 }
