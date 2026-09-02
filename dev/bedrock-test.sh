@@ -45,6 +45,19 @@ note_failure() {
   FAILED=1
 }
 
+# Foton's console renderer never checks whether stdout is a real terminal --
+# server.log (a plain `> server.log` redirect of that stdout) ends up a raw
+# terminal transcript: ANSI colour/cursor escapes (`\x1b[...`) interleaved
+# with the log text, AND a literal `\r` before most newlines (the redraw of
+# the interactive input prompt). That trailing `\r` sits *after* the last
+# visible character on a line, so any regex anchored with `$` -- like the
+# port-number extraction below -- matches nothing: the true last byte before
+# the `\n` is `\r`, not a digit. Confirmed against a real captured
+# server.log: `grep -oE '[0-9]+$'` on an unstripped line returns empty.
+strip_ansi() {
+  sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | tr -d '\r'
+}
+
 # --- skip cleanly on a machine that legitimately cannot run this ----------
 
 if ! command -v node >/dev/null 2>&1; then
@@ -201,7 +214,7 @@ for _ in $(seq 1 90); do
 done
 
 if [ "$GEYSER_STARTED" -eq 1 ]; then
-  GEYSER_STARTUP_LINE=$(grep "Started Geyser on UDP port" server.log | tail -1)
+  GEYSER_STARTUP_LINE=$(grep "Started Geyser on UDP port" server.log | strip_ansi | tail -1)
   echo "  $GEYSER_STARTUP_LINE"
 else
   note_failure "Geyser never started (log relay is working -- it shows Geyser crash-looping and giving up, or nothing at all)"
