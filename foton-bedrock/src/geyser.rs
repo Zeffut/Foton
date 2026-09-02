@@ -77,6 +77,30 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(10);
 /// ping, not a multi-megabyte transfer — too short a bound to reuse here.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Bounded timeout for the `java -version` probe in [`resolve_java`].
+///
+/// [`Supervisor::start`] runs synchronously during server startup, in the
+/// same window [`DOWNLOAD_TIMEOUT`]'s documentation describes: the Java port
+/// is already bound but the accept loop has not started, so an unbounded
+/// wait here is indistinguishable from a dead server to a connecting
+/// client, not merely a slow one. A wedged `java` binary -- a stale NFS
+/// mount, a broken JVM install, a filesystem that never answers -- would
+/// otherwise block startup forever.
+///
+/// A version probe is a different scale of wait than the jar download,
+/// though: it launches a JVM just long enough to print a banner and exit,
+/// no class loading beyond the JDK's own bootstrap, no network, no user
+/// code. On any host where `java` actually works this answers in well
+/// under a second. Ten seconds is two orders of magnitude above that --
+/// generous enough to absorb a loaded CI runner or a cold page cache on
+/// first launch, while still turning a truly wedged binary into the same
+/// finite, logged-and-continued [`GeyserError::JavaNotFound`] the "could
+/// not even start the binary" branch already produces, instead of a
+/// silent hang. A healthy system pays nothing extra for this: the timer
+/// races the probe and is simply dropped once the probe answers, which it
+/// always does long before ten seconds pass.
+const JAVA_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Why the supervisor could not start or keep running Geyser.
 #[derive(Debug, Error)]
 pub enum GeyserError {
@@ -380,13 +404,35 @@ fn parse_java_major_version(banner: &str) -> Option<u32> {
 }
 
 /// Resolves and validates the Java runtime Geyser will run under.
-async fn resolve_java(java_home: Option<&Path>) -> Result<PathBuf, GeyserError> {
+///
+/// `probe_timeout` is a parameter rather than reading [`JAVA_VERSION_PROBE_TIMEOUT`]
+/// directly -- the same shape as [`download`] taking a `timeout` -- so a test
+/// can bound a deliberately wedged fake `java` on a short leash instead of
+/// waiting out the real ten seconds.
+async fn resolve_java(
+    java_home: Option<&Path>,
+    probe_timeout: Duration,
+) -> Result<PathBuf, GeyserError> {
     let binary = java_binary_path(java_home)?;
 
-    let output = Command::new(&binary)
+    let probe = Command::new(&binary)
         .arg("-version")
-        .output()
+        // If the timeout below fires, this future -- and the `Child` it
+        // owns -- is dropped without ever being awaited to completion.
+        // Without `kill_on_drop`, a wedged `java` would be left running as
+        // an orphan process even after this function has already given up
+        // on it and moved on.
+        .kill_on_drop(true)
+        .output();
+    let output = time::timeout(probe_timeout, probe)
         .await
+        .map_err(|_elapsed| GeyserError::JavaNotFound {
+            searched: binary.display().to_string(),
+            source: io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("no response within {probe_timeout:?}"),
+            ),
+        })?
         .map_err(|source| GeyserError::JavaNotFound {
             searched: binary.display().to_string(),
             source,
@@ -801,7 +847,8 @@ impl Supervisor {
                 source,
             })?;
 
-        let java_binary = resolve_java(options.java_home.as_deref()).await?;
+        let java_binary =
+            resolve_java(options.java_home.as_deref(), JAVA_VERSION_PROBE_TIMEOUT).await?;
         let jar_path = resolve_jar(&options, &bedrock_dir).await?;
         write_config_and_key(&options, &bedrock_dir).await?;
 
@@ -832,7 +879,7 @@ mod tests {
 
     use super::{
         GeyserError, GeyserOptions, download, jar_candidate_path, java_binary_path, render_config,
-        to_absolute, verify_checksum,
+        resolve_java, to_absolute, verify_checksum,
     };
     use crate::key;
 
@@ -1074,6 +1121,43 @@ mod tests {
                 );
             }
             other => panic!("expected a GeyserError::Download from a timeout, got: {other:?}"),
+        }
+    }
+
+    /// Unix-only: the fake `java` below is a shebang shell script, which
+    /// only Unix knows how to execute directly. `java_binary_name` also
+    /// only resolves to a bare `java` (no `.exe`) on this platform, which is
+    /// what lets this script's file name double as the binary this test
+    /// points `resolve_java` at.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_wedged_java_probe_times_out_instead_of_hanging_forever() {
+        use std::fs::{Permissions, create_dir_all, set_permissions, write};
+        use std::io::ErrorKind;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // A `java` that never answers -- the same shape as the stale NFS
+        // mount or broken JVM install this timeout exists to survive,
+        // without needing either to actually reproduce a hung filesystem.
+        let java_home = tempfile::tempdir().expect("temp dir");
+        let bin = java_home.path().join("bin");
+        create_dir_all(&bin).expect("creates bin dir");
+        let java = bin.join("java");
+        write(&java, "#!/bin/sh\nsleep 5\n").expect("writes the fake java script");
+        set_permissions(&java, Permissions::from_mode(0o755))
+            .expect("makes the fake java script executable");
+
+        let result = resolve_java(Some(java_home.path()), Duration::from_millis(200)).await;
+
+        match result {
+            Err(GeyserError::JavaNotFound { source, .. }) => {
+                assert_eq!(
+                    source.kind(),
+                    ErrorKind::TimedOut,
+                    "expected the timeout's own error, got: {source:?}"
+                );
+            }
+            other => panic!("expected a timed-out GeyserError::JavaNotFound, got: {other:?}"),
         }
     }
 }
