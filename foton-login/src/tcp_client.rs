@@ -53,6 +53,8 @@ use tokio::{
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
 
+use foton_bedrock::config::BedrockConfig;
+
 use crate::pre_play_state::{PacketSequenceError, PrePlayPacket, PrePlayState};
 
 /// Represents updates to the connection state.
@@ -161,12 +163,28 @@ pub struct JavaTcpClient {
     pub connection_updated: Arc<Notify>,
 
     pub(crate) pre_play_state: SyncMutex<PrePlayState>,
+    /// The hostname the client's handshake declared, captured so the login
+    /// handler can check it for an encrypted Floodgate payload.
+    pub(crate) hostname: SyncMutex<String>,
+    /// Bedrock login policy for this connection.
+    ///
+    /// Handed in at accept time from the server's `[server.bedrock]` section,
+    /// so it is fixed for the life of the connection. Disabled means every
+    /// hostname takes the ordinary Java path, including one carrying a
+    /// Floodgate payload.
+    pub(crate) bedrock: BedrockConfig,
     task_tracker: TaskTracker,
 }
 
 impl JavaTcpClient {
     /// Creates a new `JavaTcpClient`.
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "every argument is a distinct piece of per-connection state the \
+                  accept loop already holds; bundling them into a struct would move \
+                  the same list one indirection away without removing anything"
+    )]
     pub fn new(
         tcp_stream: TcpStream,
         address: SocketAddr,
@@ -175,6 +193,7 @@ impl JavaTcpClient {
         server: Arc<Server>,
         connection_session: Arc<ServerConnectionSession>,
         task_tracker: TaskTracker,
+        bedrock: BedrockConfig,
     ) -> (
         Self,
         UnboundedReceiver<OutboundPacket>,
@@ -202,6 +221,8 @@ impl JavaTcpClient {
             connection_updates,
             connection_updated: Arc::new(Notify::new()),
             pre_play_state: SyncMutex::new(PrePlayState::new()),
+            hostname: SyncMutex::new(String::new()),
+            bedrock,
             task_tracker,
         };
 
@@ -505,6 +526,9 @@ impl JavaTcpClient {
         match packet.id {
             handshake::S_INTENTION => {
                 let packet = SClientIntention::read_packet(data)?;
+                // Captured here so the login handler can check it for an
+                // encrypted Floodgate payload once the client reaches login.
+                self.hostname.lock().clone_from(&packet.hostname);
                 let intent = match packet.intention {
                     ClientIntent::Status => ConnectionProtocol::Status,
                     ClientIntent::Login | ClientIntent::Transfer => ConnectionProtocol::Login,

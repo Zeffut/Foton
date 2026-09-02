@@ -18,6 +18,8 @@
 /saves
 /players
 /script/.gitcraft-tmp
+# Server directories the dev/*-test.sh scripts boot a server in.
+/run-*/
 
 # Misc
 CLAUDE.md

@@ -39,6 +39,23 @@ clear is in [`CONTRIBUTING.md`](CONTRIBUTING.md), and
 [`PARITY.md`](PARITY.md) is the honest inventory of where vanilla parity
 actually stands — it opens by explaining how its own measurement used to lie.
 
+## Bedrock players
+
+Foton runs a [Geyser](https://geysermc.org) of its own, so Bedrock Edition
+players — phone, console, Switch — can join a Foton server with no Java
+account at all, on the **same port number** as Java players by default
+(`bedrock.port = 0`; TCP and UDP don't share a namespace, so this isn't a
+collision). Set `bedrock.enable = true` and restart; Foton fetches, configures,
+runs and supervises Geyser for you.
+
+**The translation is Geyser's, not Foton's.** A Bedrock player experiences the
+Java server exactly as Geyser presents it, and some things do not translate —
+this is the same trade-off every Geyser-fronted server makes, not something
+Foton's own code can fix. `dev/bedrock-test.sh` covers the identity guarantee
+(a stable, prefixed name and a UUID that survives reconnecting) end to end;
+`PARITY.md` is still the source of truth for what a Java client sees, and a
+Bedrock client sees exactly that, filtered through Geyser.
+
 ## Player reports
 
 Reports sent from the game become GitHub issues and their GitHub status is

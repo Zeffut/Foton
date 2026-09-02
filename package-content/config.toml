@@ -50,6 +50,30 @@ port = 25575
 # The server refuses to start with rcon enabled and this left blank.
 password = ""
 
+# Letting Bedrock Edition players in, through a Geyser this server runs.
+[server.bedrock]
+# Whether Geyser is started and the Bedrock port opened at all.
+enable = false
+# UDP port Bedrock clients connect to. 0 means "share server_port" -- one
+# port to open, and it keeps following server_port if that ever moves.
+# Trade-off: a Bedrock client's "Add Server" dialog pre-fills 19132, so
+# sharing the Java port means a player must type the port in by hand. Set
+# this to 19132 explicitly for that automatic experience instead.
+port = 0
+# What Bedrock clients see in the server list; empty reuses the server MOTD.
+motd = ""
+# Prepended to a Bedrock player's gamertag so it cannot collide with a Java
+# player's name. Empty means no prefix, and collisions become possible.
+username_prefix = "."
+# Addresses a Floodgate identity handshake is accepted from. Foton starts
+# Geyser locally, so loopback is the whole list. Widening this means trusting
+# whoever can reach the Java port to say who they are.
+trusted_proxies = ["127.0.0.1", "::1"]
+# A JDK or JRE for Geyser; empty means JAVA_HOME, then java on the path.
+java_home = ""
+# An operator-supplied Geyser jar; empty means fetch the pinned build.
+jar_path = ""
+
 # Where player-filed bug reports are sent, on top of the local
 # reports/bugs.jsonl. Leave the URL unset to keep reports local.
 [server.bug_reports]

@@ -1,0 +1,33 @@
+[package]
+name = "foton-bedrock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Floodgate's identity payload is AES-128-GCM with a base64 topping, so the
+# cipher and the encoding are the whole dependency list of the pure half.
+aes-gcm = "0.11.1"
+base64.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+# The shared key is generated from OS randomness.
+rand.workspace = true
+# The config type lives here because both the binary and the login path need
+# it and only this crate is reachable from both.
+serde.workspace = true
+# `geyser` runs and supervises Geyser as a child process: the async runtime
+# and cancellation to drive it, structured logging to relay its console,
+# an HTTP client to fetch the pinned jar, and a hash to verify it.
+tokio = { workspace = true, features = ["process"] }
+tokio-util.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

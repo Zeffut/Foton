@@ -18,6 +18,14 @@ extend-glob = ["**/locale.rs"]
 check-file = false
 
 [default.extend-words]
+# A captured filesystem path quoted verbatim in design/bedrock-stage0-findings.md
+# runs through the real "Projets" directory of a Windows checkout -- the correct
+# French word, not a misspelling of "Projects". A `[type.*]` override scoped to
+# just that file doesn't work here for the same reason noted above for the
+# French site content: a `.md` file is already claimed by the built-in
+# `markdown` extension type and never falls through to a glob-based custom
+# type, so this has to live here instead.
+Projets = "Projets"
 # Project name: Foton (not a misspelling of "photon").
 foton = "foton"
 Foton = "Foton"

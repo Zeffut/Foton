@@ -252,6 +252,19 @@ fn configured_thread_counts_parse_and_flow_to_runtime_config() {
     assert_eq!(runtime_config.chunk_encoding_threads, Some(7));
 }
 
+/// `bedrock.port = 0` means "share `server_port`"
+/// ([`crate::config::server::validate`]'s Bedrock rules rely on this too),
+/// and a TCP bind on port 0 takes an ephemeral port rather than failing --
+/// so a `server_port` of 0 would silently disagree with itself. Nonsense
+/// independently of Bedrock either way.
+#[test]
+fn validate_rejects_a_server_port_of_zero() {
+    let config_toml = DEFAULT_CONFIG.replace("server_port = 25565", "server_port = 0");
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(validate(&config.server), Err("server_port must not be 0"));
+}
+
 #[test]
 fn validate_rejects_extended_view_distance_without_opt_in() {
     let config_toml = DEFAULT_CONFIG.replace("view_distance = 10", "view_distance = 33");
@@ -507,4 +520,137 @@ fn a_webhook_token_never_reaches_debug_output() {
         printed.contains("example.invalid"),
         "the endpoint should still be identifiable: {printed}"
     );
+}
+
+/// The comment is part of the anchor so the replace cannot also match rcon's
+/// own `enable = false`, which reads identically once the comment is dropped.
+const BEDROCK_DISABLED: &str =
+    "# Whether Geyser is started and the Bedrock port opened at all.\nenable = false";
+const BEDROCK_ENABLED: &str =
+    "# Whether Geyser is started and the Bedrock port opened at all.\nenable = true";
+
+#[test]
+fn validate_accepts_bedrock_sharing_the_java_port() {
+    // Regression test: this rule was reversed. A shared port number is
+    // exactly what "everything on one port" asks for -- TCP (Java) and UDP
+    // (Bedrock/RakNet) do not share a port namespace, so it is not a
+    // collision. See `BedrockConfig::resolved_port`.
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace("port = 0", "port = 25565");
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(validate(&config.server), Ok(()));
+}
+
+#[test]
+fn validate_accepts_the_default_bedrock_port_of_zero() {
+    // The other reversed rule: `0` used to be rejected outright. Now it is
+    // the default, meaning "share `server_port`" -- enabling Bedrock without
+    // touching `port` at all must validate.
+    let config_toml = DEFAULT_CONFIG.replace(BEDROCK_DISABLED, BEDROCK_ENABLED);
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+    assert_eq!(config.server.bedrock.port, 0);
+
+    assert_eq!(validate(&config.server), Ok(()));
+}
+
+#[test]
+fn validate_rejects_bedrock_with_no_trusted_proxies() {
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace(
+            r#"trusted_proxies = ["127.0.0.1", "::1"]"#,
+            "trusted_proxies = []",
+        );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("bedrock.trusted_proxies must list at least one address")
+    );
+}
+
+#[test]
+fn validate_rejects_bedrock_trusted_proxies_that_are_all_unparsable() {
+    // A non-parseable entry is silently dropped by `is_trusted`, not
+    // rejected -- so a list that is non-empty but entirely unparsable
+    // (a hostname, say) used to pass this validator and then refuse every
+    // Bedrock login at runtime.
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace(
+            r#"trusted_proxies = ["127.0.0.1", "::1"]"#,
+            r#"trusted_proxies = ["localhost"]"#,
+        );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("bedrock.trusted_proxies must contain at least one address that parses as an IP")
+    );
+}
+
+#[test]
+fn validate_accepts_bedrock_trusted_proxies_with_one_parseable_entry_among_unparsable_ones() {
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace(
+            r#"trusted_proxies = ["127.0.0.1", "::1"]"#,
+            r#"trusted_proxies = ["localhost", "127.0.0.1"]"#,
+        );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(validate(&config.server), Ok(()));
+}
+
+#[test]
+fn validate_rejects_a_username_prefix_under_sixteen_characters_but_not_sixteen_bytes() {
+    // Six CJK characters are six characters but 18 bytes. The old,
+    // character-counting form of this rule (`.chars().count() >= 16`) let
+    // this through; every derived Bedrock name would then already be over
+    // the login packet's 16-*byte* budget before a single gamertag
+    // character was appended (see `foton-bedrock`'s `java_username`).
+    let config_toml = DEFAULT_CONFIG
+        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
+        .replace(
+            r#"username_prefix = ".""#,
+            "username_prefix = \"\u{67A0}\u{67A0}\u{67A0}\u{67A0}\u{67A0}\u{67A0}\"",
+        );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("bedrock.username_prefix leaves no room for a username")
+    );
+}
+
+/// Bedrock is opt-in: a config written before the section existed, or one
+/// that never mentions it, must not suddenly start a Geyser process.
+///
+/// This parses an input that genuinely has no `[server.bedrock]` table at
+/// all -- not the packaged default, which does have the section (left at its
+/// own disabled default). Mirrors
+/// `server_config_defaults_backward_compatible_fields`'s minimal literal, so
+/// this fails to parse -- rather than silently passing for the wrong reason
+/// -- if `#[serde(default)]` were ever removed from `ServerConfig::bedrock`.
+#[test]
+fn bedrock_is_off_when_the_section_is_absent() {
+    let input = r#"
+            [server]
+            server_port = 25565
+            max_players = 20
+            view_distance = 10
+            simulation_distance = 10
+            online_mode = true
+            encryption = true
+            motd = "A Foton Server"
+            use_favicon = false
+            favicon = "config/favicon.png"
+            enforce_secure_chat = false
+        "#;
+
+    let config: FotonConfig = toml::from_str(input).expect("config should parse");
+
+    assert!(!config.server.bedrock.enable);
 }

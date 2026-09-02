@@ -10,6 +10,13 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 
+# Respect $CARGO_TARGET_DIR the way `cargo build` itself already does. This
+# used to be hardcoded to "$ROOT/target/debug/foton" -- fine when the build
+# lands there, silently wrong (the server never starts, this script blames
+# "SERVER NEVER WROTE A CONFIG") for anyone redirecting the build elsewhere.
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/debug/foton"
+
 PORT=25566
 RUN_DIR="$ROOT/run-offline"
 
@@ -35,7 +42,7 @@ if [ ! -f config/config.toml ]; then
   # cannot satisfy. stdin has to come from /dev/null: the server reads console
   # commands, and a background process that reads a terminal is stopped by
   # SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/foton" > /dev/null 2>&1 < /dev/null &
+  nohup "$BIN" > /dev/null 2>&1 < /dev/null &
   GEN_PID=$!
   for _ in $(seq 1 60); do
     [ -f config/config.toml ] && break
@@ -79,7 +86,7 @@ fi
 rm -rf saves
 
 echo "=== Booting (offline, port $PORT) ==="
-nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
+nohup "$BIN" > server.log 2>&1 < /dev/null &
 PID=$!
 
 STATUS=1

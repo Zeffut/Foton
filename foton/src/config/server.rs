@@ -1,3 +1,8 @@
+// The Bedrock settings live in `foton-bedrock` rather than here: the login
+// path reads them too, and `foton-login` cannot depend on this binary crate.
+pub use foton_bedrock::config::BedrockConfig;
+use std::net::IpAddr;
+
 use foton_core::{
     chunk::chunk_ticket_manager::MAX_SUPPORTED_VIEW_DISTANCE,
     config::{
@@ -73,6 +78,9 @@ pub struct ServerConfig {
     /// Remote administration over the Source Rcon protocol.
     #[serde(default)]
     pub rcon: RconConfig,
+    /// Letting Bedrock Edition players in.
+    #[serde(default)]
+    pub bedrock: BedrockConfig,
     /// Where player-filed bug reports are sent, on top of the local file.
     #[serde(default)]
     pub bug_reports: BugReportsConfig,
@@ -203,6 +211,14 @@ pub struct ThreadConfig {
 /// This function will return an error if the configuration is invalid.
 pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
     validate_login_security(config.online_mode, config.encryption)?;
+    // A TCP bind on port 0 takes an ephemeral port instead of failing, so
+    // this is not caught by the listener's own error path -- and
+    // `bedrock.port = 0` means "share `server_port`" (`resolved_port`), so a
+    // zero `server_port` would silently drag the Bedrock port down with it
+    // too. Nonsense independently of Bedrock either way.
+    if config.server_port == 0 {
+        return Err("server_port must not be 0");
+    }
     if !config.allow_extended_view_distance && !(1..=32).contains(&config.view_distance) {
         return Err("View distance must in range 1..32");
     }
@@ -255,6 +271,40 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         }
         if config.rcon.port == config.server_port {
             return Err("rcon.port must differ from server_port");
+        }
+    }
+    if config.bedrock.enable {
+        // `bedrock.port` may legitimately be `0` (share `server_port`, see
+        // `BedrockConfig::resolved_port`) or equal to `server_port` itself:
+        // TCP (Java) and UDP (Bedrock/RakNet) do not share a port namespace,
+        // so neither is a collision.
+        if config.bedrock.trusted_proxies.is_empty() {
+            return Err("bedrock.trusted_proxies must list at least one address");
+        }
+        // A non-parseable entry is silently dropped by `is_trusted`
+        // (`foton-login`'s login path), not rejected -- so a list that is
+        // non-empty but entirely unparsable (`["localhost"]`, say) passes
+        // the check above and then refuses every Bedrock login. At least one
+        // entry has to actually be an address for `trusted_proxies` to do
+        // anything.
+        if !config
+            .bedrock
+            .trusted_proxies
+            .iter()
+            .any(|entry| entry.parse::<IpAddr>().is_ok())
+        {
+            return Err(
+                "bedrock.trusted_proxies must contain at least one address that parses as an IP",
+            );
+        }
+        // Bounded by bytes, not characters: `java_username` truncates the
+        // prefix and gamertag together to 16 *bytes* (what the login packet's
+        // encoder actually enforces -- see `foton-bedrock`'s `floodgate`
+        // module), so a prefix that is itself 16+ bytes leaves no room for
+        // any of the gamertag, even if it is fewer than 16 characters (a
+        // multi-byte prefix, e.g. six CJK characters at 18 bytes).
+        if config.bedrock.username_prefix.len() >= 16 {
+            return Err("bedrock.username_prefix leaves no room for a username");
         }
     }
     if config.enforce_secure_chat {

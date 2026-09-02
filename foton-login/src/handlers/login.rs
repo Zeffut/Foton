@@ -12,13 +12,47 @@ use sha2::Digest;
 use text_components::TextComponent;
 
 use crate::{
-    AuthError, is_valid_player_name, mojang_authenticate, offline_uuid, signed_bytes_be_to_hex,
+    AuthError,
+    floodgate::resolve_floodgate_login,
+    is_valid_player_name, mojang_authenticate, offline_uuid, signed_bytes_be_to_hex,
     tcp_client::{ConnectionAction, ConnectionUpdate, JavaTcpClient},
 };
 
 impl JavaTcpClient {
     /// Handles the hello packet during the login state.
     pub(crate) async fn handle_hello(&self, packet: SHello) -> ConnectionAction {
+        // A Floodgate handshake derives its identity entirely from the
+        // encrypted hostname payload, never from the client-supplied
+        // `packet.name` below -- checked first so a Bedrock gamertag that
+        // fails Java's ASCII-only name validation (it can hold characters a
+        // Java name cannot) is never rejected before Floodgate gets a
+        // chance to authenticate it. This is a sibling of the offline path
+        // further down, not a replacement: every failure here is a hard
+        // reject that never falls through to it, and a hostname with no
+        // Floodgate payload at all falls straight through to the ordinary
+        // login below, unaffected.
+        let hostname = self.hostname.lock().clone();
+        match resolve_floodgate_login(&hostname, self.address, &self.bedrock) {
+            Ok(Some(profile)) => {
+                let action = self.send_login_finished(&profile).await;
+                let sequence_result = self.pre_play_state.lock().complete_login(profile);
+                return match sequence_result {
+                    Ok(()) => action,
+                    Err(error) => self.reject_unexpected_packet(error).await,
+                };
+            }
+            Ok(None) => {}
+            Err(error) => {
+                log::warn!(
+                    "Client {} ({}) sent a Floodgate handshake that was refused: {error}",
+                    self.id,
+                    self.address
+                );
+                self.kick("Invalid player data".into()).await;
+                return ConnectionAction::none();
+            }
+        }
+
         // The hello UUID is client supplied; only authentication or offline derivation is trusted.
         let requested_username = packet.name;
         if !is_valid_player_name(&requested_username) {
