@@ -156,26 +156,33 @@ impl FotonServer {
             })?;
 
         // The server's own run directory, resolved to an absolute path once,
-        // here, before anything derives a path from it. The Geyser
-        // supervisor started below spawns Geyser with its own working
-        // directory one level deeper (`bedrock/`); a path derived from a
-        // *relative* `run_directory` -- the jar path, the Floodgate key path
-        // written into Geyser's config -- would be handed to that child and
-        // resolved against its cwd instead of ours, landing one `bedrock/`
-        // too deep. This is also what keeps the login path (right below,
-        // via `key::key_path`) and the generated config (inside the
-        // supervisor, via the same function) agreeing on the key's location:
-        // both derive it from this one absolute value, so there is only ever
-        // one file on disk either of them can mean.
-        let run_directory = resolve_run_directory();
+        // here, before anything derives a path from it -- but only when
+        // Bedrock is actually enabled. Resolving it reads the current
+        // directory and, on failure, logs a Bedrock-branded warning (see
+        // `resolve_run_directory`); an operator who switched Bedrock off must
+        // see neither that syscall nor that message. The Geyser supervisor
+        // started below spawns Geyser with its own working directory one
+        // level deeper (`bedrock/`); a path derived from a *relative*
+        // `run_directory` -- the jar path, the Floodgate key path written
+        // into Geyser's config -- would be handed to that child and resolved
+        // against its cwd instead of ours, landing one `bedrock/` too deep.
+        // This is also what keeps the login path (right below, via
+        // `key::key_path`) and the generated config (inside the supervisor,
+        // via the same function) agreeing on the key's location: both derive
+        // it from this one absolute value, so there is only ever one file on
+        // disk either of them can mean.
+        let run_directory = bedrock_config.enable.then(resolve_run_directory);
 
         // The shared key is loaded before the first connection can arrive, so
         // the login path never sees a window where Bedrock is enabled but the
         // key is missing. A failure here disables the feature rather than
         // taking the server down: an operator who cannot read their key file
         // should get a Java server and a loud message, not no server.
-        if bedrock_config.enable {
-            let path = key::key_path(&run_directory);
+        //
+        // `run_directory` is `Some` exactly when Bedrock is enabled, so
+        // matching on it here is the enable check.
+        if let Some(run_directory) = &run_directory {
+            let path = key::key_path(run_directory);
             match key::load_or_create(&path) {
                 Ok(loaded) => {
                     key::init_shared(loaded);
@@ -209,9 +216,13 @@ impl FotonServer {
 
         // Bedrock is an optional feature: a Geyser that cannot start must not
         // take the Java server down with it, unlike Rcon's bind above.
-        let bedrock_supervisor =
-            start_bedrock_supervisor(&bedrock_config, &run_directory, server_port, &cancel_token)
-                .await;
+        let bedrock_supervisor = start_bedrock_supervisor(
+            &bedrock_config,
+            run_directory.as_deref(),
+            server_port,
+            &cancel_token,
+        )
+        .await;
 
         Ok(Self {
             tcp_listener,
@@ -302,6 +313,11 @@ impl FotonServer {
 /// enough (a deleted or permission-stripped cwd) that refusing to start the
 /// whole server over it would be a worse trade than degrading Bedrock
 /// support the way every other optional-feature failure here already does.
+///
+/// Only ever called when `[server.bedrock] enable` is set (see the call site
+/// in [`FotonServer::new_with_commands`]): both the syscall and the warning
+/// this can log are Bedrock-branded, and an operator who disabled Bedrock
+/// must see neither.
 fn resolve_run_directory() -> PathBuf {
     absolute(".").unwrap_or_else(|error| {
         log::warn!(
@@ -317,6 +333,11 @@ fn resolve_run_directory() -> PathBuf {
 /// set — resolving Java, fetching the pinned jar, writing the shared
 /// Floodgate key and `config.yml`, and starting Geyser.
 ///
+/// `run_directory` is `None` exactly when `bedrock_config.enable` is `false`
+/// (the caller only resolves it when Bedrock is enabled); the explicit
+/// `enable` check below still comes first so this function's contract does
+/// not depend on that pairing holding.
+///
 /// A failure here is logged and turned into `None` rather than propagated:
 /// this mirrors the key-loading policy in [`FotonServer::new_with_commands`]
 /// rather than the Rcon listener's — Bedrock is an optional feature, and an
@@ -324,13 +345,14 @@ fn resolve_run_directory() -> PathBuf {
 /// message, not no server at all.
 async fn start_bedrock_supervisor(
     bedrock_config: &BedrockConfig,
-    run_directory: &Path,
+    run_directory: Option<&Path>,
     server_port: u16,
     cancel_token: &CancellationToken,
 ) -> Option<Supervisor> {
     if !bedrock_config.enable {
         return None;
     }
+    let run_directory = run_directory?;
 
     let options = GeyserOptions {
         run_directory: run_directory.to_path_buf(),
@@ -366,7 +388,9 @@ async fn start_bedrock_supervisor(
 mod tests {
     use std::env;
 
-    use super::resolve_run_directory;
+    use super::{
+        BedrockConfig, CancellationToken, resolve_run_directory, start_bedrock_supervisor,
+    };
 
     #[test]
     fn resolve_run_directory_is_always_absolute() {
@@ -396,5 +420,29 @@ mod tests {
         let expected =
             env::current_dir().expect("the process's own current directory must be readable");
         assert_eq!(resolved, expected);
+    }
+
+    #[tokio::test]
+    async fn start_bedrock_supervisor_tolerates_a_missing_run_directory_when_disabled() {
+        // The call site (`FotonServer::new_with_commands`) only resolves a
+        // run directory when Bedrock is enabled, so a disabled config is
+        // always paired with `run_directory: None` here. This asserts that
+        // pairing is safe: the function must short-circuit on `enable`
+        // before it ever needs `run_directory`, not panic reaching for one.
+        // It cannot assert the other half of the fix -- that
+        // `resolve_run_directory` (and the syscall/log inside it) is never
+        // even called for a disabled operator -- without faking a broken
+        // `env::current_dir`, which is beyond what a unit test here can do;
+        // that half is enforced by construction, since `bedrock_config.enable
+        // .then(resolve_run_directory)` at the call site cannot invoke the
+        // function when `enable` is `false`.
+        let bedrock_config = BedrockConfig::default();
+        assert!(!bedrock_config.enable);
+        let cancel_token = CancellationToken::new();
+
+        let supervisor =
+            start_bedrock_supervisor(&bedrock_config, None, 25565, &cancel_token).await;
+
+        assert!(supervisor.is_none());
     }
 }
