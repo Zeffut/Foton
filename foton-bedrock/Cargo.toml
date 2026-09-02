@@ -17,6 +17,14 @@ rand.workspace = true
 # The config type lives here because both the binary and the login path need
 # it and only this crate is reachable from both.
 serde.workspace = true
+# `geyser` runs and supervises Geyser as a child process: the async runtime
+# and cancellation to drive it, structured logging to relay its console,
+# an HTTP client to fetch the pinned jar, and a hash to verify it.
+tokio = { workspace = true, features = ["process"] }
+tokio-util.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
