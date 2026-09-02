@@ -79,6 +79,88 @@ Two more keys mattered that the brief didn't mention at all, both under
   to solve this the same way this session did, or accept it cannot fully
   automate an end-to-end Bedrock join test without a real Microsoft account.
 
+**Addendum (Task 6 fix round 1, 2026-09-02):** two more keys, read the same
+way — directly from `/root/geyser/config.yml`, the pinned build's own
+generated file — that this section didn't originally record, because Task 1
+was focused on the port/auth-type/key-file keys `geyser.rs` needed checked
+against the brief's wrong guesses. A `geyser.rs` doc comment cited this
+document for these two as if a *re-run* against a partial config had
+confirmed them; no such re-run is recorded here. It happened (informally,
+during Task 6, against the same pinned jar), but the citation belongs on the
+observation, so it's recorded here instead of only in a source comment:
+
+- **`bedrock.address`** (default `0.0.0.0`) — the sibling of `bedrock.port`
+  under the same `bedrock:` section in the generated file. The table above
+  only lists `bedrock.port` because that was the one key under `bedrock:`
+  whose name the brief had guessed at; `bedrock.address` was never in
+  question, but it is read from the same file, not invented.
+- **`motd:`** — an entire section the port/auth-type table above doesn't
+  cover, generated in full as:
+
+  ```yaml
+  # MOTD settings
+  motd:
+    # The MOTD that will be broadcasted to Minecraft: Bedrock Edition clients. This is irrelevant if "passthrough-motd" is set to true.
+    # If either of these are empty, the respective string will default to "Geyser"
+    primary-motd: Geyser
+    secondary-motd: Another Geyser server.
+
+    # Whether Geyser should relay the MOTD from the Java server to Bedrock players.
+    passthrough-motd: true
+
+    # Maximum amount of players that can connect.
+    # This is only visual, and is only applied if passthrough-motd is disabled.
+    max-players: 100
+  ```
+
+  `primary-motd` is the operator-facing MOTD string Geyser shows Bedrock
+  clients. `passthrough-motd: true` — Geyser's own default — means Geyser
+  ignores `primary-motd` and instead relays the *Java* server's own MOTD to
+  Bedrock players. This is the exact mechanism `BedrockConfig.motd`'s doc
+  comment ("empty reuses the server MOTD") depends on: `geyser.rs` must emit
+  `passthrough-motd: true` (and can omit `primary-motd`) when the operator's
+  MOTD is empty, and `passthrough-motd: false` with a quoted `primary-motd`
+  otherwise.
+
+**The re-run itself.** A `geyser.rs` doc comment claims the module's minimal,
+partial `config.yml` (only `bedrock.address`/`port`, `java.address`/`port`/
+`auth-type`/`forward-hostname`, `motd.primary-motd`/`passthrough-motd`,
+`advanced.floodgate-key-file`, `advanced.bedrock.validate-bedrock-login` —
+omitting everything else Geyser's own default file has) was confirmed to
+work against the pinned build. What was actually done: the pinned jar was
+copied to a scratch directory outside the repo
+(`/root/geyser-test-partial/`, WSL, deleted afterward), alongside a `key.pem`
+and a hand-written `config.yml` containing exactly those keys — including a
+`primary-motd` of `Foton test motd with #tags & "quotes"`, escaped the same
+way `geyser.rs`'s `yaml_quote` escapes it, `bedrock.port: 19133`, and
+`java.port: 25599` (both intentionally off the defaults, to prove the
+override — not the default — was what took effect). Running
+`java -jar Geyser-Standalone.jar` there (Java 25, WSL) produced:
+
+```
+[12:00:56 INFO] Started Geyser on UDP port 19133
+[12:00:56 INFO] Done (1.806s)! Run /geyser help for help!
+```
+
+— no "unknown key" or missing-field error, and the bound port matched the
+override, not the `19132` default. Geyser then rewrote `config.yml` in
+place, filling in every key the partial file omitted with its own defaults
+(`config-version: 7`, a fresh `metrics-uuid`, the full `gameplay:` section,
+etc.) while preserving every value the partial file did set:
+`java.port: 25599`, `java.auth-type: floodgate`,
+`java.forward-hostname: false`, `motd.passthrough-motd: false`,
+`advanced.floodgate-key-file: /root/geyser-test-partial/key.pem`,
+`advanced.bedrock.validate-bedrock-login: true`, and —
+the specific claim this addendum exists to back up —
+`motd.primary-motd: 'Foton test motd with #tags & "quotes"'`, byte-correct,
+re-serialized by Geyser itself into single-quoted YAML rather than the
+double-quoted form `geyser.rs` writes, with no extra keys and no parse
+error. This confirms both that Geyser tolerates a partial config (filling
+gaps from its own defaults rather than rejecting the file) and that
+`yaml_quote`'s escaping survives a real parse by the pinned build, not just
+the unit tests below.
+
+
 Geyser does **not** generate `key.pem` itself. With `auth-type: floodgate` and
 no key file present, it logs `Error while reading Floodgate key file`
 (`java.nio.file.NoSuchFileException: key.pem`) as an **ERROR**, but this is

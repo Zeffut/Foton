@@ -7,10 +7,12 @@
 //!
 //! [`render_config`]'s key names, and the section layout they live in, were
 //! read from a real `config.yml` a pinned Geyser 2.11.2 build 1233 generated
-//! for itself and confirmed by re-running that build against a
-//! partially-filled config of the exact shape this module writes
-//! (`design/bedrock-stage0-findings.md`) — never guessed from Geyser's own
-//! documentation, an older release's schema, or memory.
+//! for itself — never guessed from Geyser's own documentation, an older
+//! release's schema, or memory. `design/bedrock-stage0-findings.md`, Step 3
+//! and its addendum, records every key this module writes and the re-run
+//! that confirmed a partially-filled config of exactly this shape starts
+//! cleanly against the pinned build, with every override (including an
+//! escaped MOTD) surviving intact.
 
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -147,7 +149,8 @@ pub struct GeyserOptions {
     /// This Java server's own port, which Geyser is told to connect to on
     /// loopback.
     pub java_port: u16,
-    /// What Bedrock clients see in the server list.
+    /// What Bedrock clients see in the server list; empty reuses the Java
+    /// server's own MOTD instead (see [`render_config`]).
     pub motd: String,
     /// Prepended to a Bedrock player's gamertag on the Java side.
     ///
@@ -196,13 +199,30 @@ fn yaml_quote(value: &str) -> String {
 /// tries to preserve edits Geyser made to it (Geyser rewrites `metrics-uuid`,
 /// migrates `config-version`, and fills in every key this function leaves
 /// out with its own defaults — confirmed by running the pinned build against
-/// a config of exactly this shape). Every [`Supervisor::start`] regenerates
+/// a config of exactly this shape, `design/bedrock-stage0-findings.md`'s
+/// Step 3 addendum). Every [`Supervisor::start`] regenerates
 /// the whole file from `options`, so the operator's actual settings are the
 /// only source of truth, never whatever the previous Geyser process happened
 /// to leave on disk.
+///
+/// An empty [`GeyserOptions::motd`] emits `passthrough-motd: true` and no
+/// `primary-motd` at all, so Geyser relays the Java server's own MOTD to
+/// Bedrock clients — the mechanism
+/// [`BedrockConfig::motd`](crate::config::BedrockConfig::motd)'s own doc
+/// comment promises ("empty reuses the server MOTD"). A non-empty one emits
+/// `passthrough-motd: false` and the quoted MOTD, so Geyser shows it instead.
 #[must_use]
 pub fn render_config(options: &GeyserOptions) -> String {
     let key_file = key::key_path(&options.run_directory);
+    let motd_section = if options.motd.is_empty() {
+        "motd:\n  passthrough-motd: true\n".to_owned()
+    } else {
+        format!(
+            "motd:\n  primary-motd: {motd}\n  passthrough-motd: false\n",
+            motd = yaml_quote(&options.motd),
+        )
+    };
+
     format!(
         "\
 bedrock:
@@ -213,17 +233,13 @@ java:
   port: {java_port}
   auth-type: floodgate
   forward-hostname: false
-motd:
-  primary-motd: {motd}
-  passthrough-motd: false
-advanced:
+{motd_section}advanced:
   floodgate-key-file: {key_file}
   bedrock:
     validate-bedrock-login: true
 ",
         bedrock_port = options.bedrock_port,
         java_port = options.java_port,
-        motd = yaml_quote(&options.motd),
         key_file = yaml_quote(&key_file.display().to_string()),
     )
 }
@@ -731,6 +747,29 @@ mod tests {
     }
 
     #[test]
+    fn a_non_empty_motd_is_shown_instead_of_the_java_servers_own() {
+        // `options()`'s default motd, "A Foton server", is already non-empty.
+        let yaml = render_config(&options());
+        assert!(yaml.contains(r#"primary-motd: "A Foton server""#));
+        assert!(yaml.contains("passthrough-motd: false"));
+    }
+
+    #[test]
+    fn an_empty_motd_reuses_the_java_servers_own() {
+        // `BedrockConfig::motd`'s own doc comment promises this: "empty
+        // reuses the server MOTD". `passthrough-motd: true` is Geyser's own
+        // mechanism for it (`design/bedrock-stage0-findings.md`'s Step 3
+        // addendum) -- and `primary-motd` must be absent, not merely empty,
+        // since an empty `primary-motd` would fall back to Geyser's own
+        // literal "Geyser" default rather than to this server's MOTD.
+        let mut options = options();
+        options.motd = String::new();
+        let yaml = render_config(&options);
+        assert!(yaml.contains("passthrough-motd: true"));
+        assert!(!yaml.contains("primary-motd"));
+    }
+
+    #[test]
     fn the_generated_config_quotes_a_motd_that_would_break_yaml() {
         let mut options = options();
         options.motd = "Foton: now with #tags & \"quotes\"".to_owned();
@@ -739,6 +778,41 @@ mod tests {
         // able to add keys.
         assert!(!yaml.contains("\nnow with"));
         assert!(yaml.contains(r#""Foton: now with #tags & \"quotes\""#));
+    }
+
+    #[test]
+    fn the_generated_config_escapes_a_motd_containing_a_backslash() {
+        let mut options = options();
+        options.motd = r"Foton: C:\Users\Test".to_owned();
+        let yaml = render_config(&options);
+        assert!(yaml.contains(r#""Foton: C:\\Users\\Test""#));
+    }
+
+    #[test]
+    fn the_generated_config_escapes_a_motd_ending_in_a_backslash() {
+        // The case the escaping exists to prevent: an unescaped trailing `\`
+        // would combine with the `"` this function appends to close the
+        // scalar into `\"`, an escaped quote rather than the end of the
+        // string -- leaving everything after it, including the rest of the
+        // file, inside one unterminated value.
+        let mut options = options();
+        options.motd = r"Foton\".to_owned();
+        let yaml = render_config(&options);
+        assert!(yaml.contains(r#""Foton\\""#));
+    }
+
+    #[test]
+    fn the_generated_config_escapes_a_motd_containing_a_newline() {
+        let mut options = options();
+        options.motd = "Foton\nsecond line".to_owned();
+        let yaml = render_config(&options);
+        // Escaped to the two-character sequence `\n`, not left as a raw
+        // newline byte -- YAML permits an unescaped literal line break
+        // inside a double-quoted scalar (it folds rather than ending the
+        // string), so only checking this doesn't break parsing wouldn't
+        // prove the escape happened at all.
+        assert!(yaml.contains(r#""Foton\nsecond line""#));
+        assert!(!yaml.contains("Foton\nsecond line"));
     }
 
     #[test]
