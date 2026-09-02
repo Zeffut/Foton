@@ -24,6 +24,7 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 # Internal crates
+foton-bedrock = { path = "foton-bedrock" }
 foton-core = { path = "foton-core" }
 foton-crypto = { path = "foton-crypto" }
 foton-login = { path = "foton-login" }

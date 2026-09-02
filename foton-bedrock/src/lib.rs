@@ -6,5 +6,6 @@
 //! [`key`] is that shared secret: where it lives on disk, and how it reaches
 //! both sides once loaded.
 
+pub mod config;
 pub mod floodgate;
 pub mod key;

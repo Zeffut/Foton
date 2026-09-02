@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 # Internal crates
+foton-bedrock.workspace = true
 foton-core.workspace = true
 foton-login.workspace = true
 foton-utils.workspace = true

@@ -14,6 +14,9 @@ thiserror.workspace = true
 uuid.workspace = true
 # The shared key is generated from OS randomness.
 rand.workspace = true
+# The config type lives here because both the binary and the login path need
+# it and only this crate is reachable from both.
+serde.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

@@ -16,31 +16,11 @@
 
 use std::net::{IpAddr, SocketAddr};
 
+use foton_bedrock::config::BedrockConfig;
 use foton_bedrock::floodgate::{self, FloodgateError};
 use foton_bedrock::key;
 use foton_core::player::GameProfile;
 use thiserror::Error;
-
-/// The subset of `foton::config::server::BedrockConfig` the login path needs.
-///
-/// `foton-login` cannot depend on the `foton` binary crate -- the dependency
-/// runs the other way, `foton` depends on `foton-login` -- so this is its own
-/// mirror of the fields the Floodgate check reads. Whoever wires the real
-/// `[server.bedrock]` config into the running server builds one of these from
-/// it. Defaults to disabled, so a connection that never receives one still
-/// gets the ordinary login path rather than a check that silently never
-/// fires for the wrong reason.
-#[derive(Debug, Clone, Default)]
-pub struct BedrockLoginConfig {
-    /// Whether Bedrock support is turned on at all. Off means every hostname
-    /// takes the ordinary Java path, even one carrying a Floodgate payload.
-    pub enable: bool,
-    /// Prepended to a Bedrock player's gamertag; see the field of the same
-    /// name on `BedrockConfig`.
-    pub username_prefix: String,
-    /// Addresses a Floodgate handshake is accepted from.
-    pub trusted_proxies: Vec<String>,
-}
 
 /// Why a handshake claiming to carry Bedrock identity was not honored.
 #[derive(Debug, Error)]
@@ -79,7 +59,7 @@ pub(crate) fn resolve_floodgate(
     hostname: &str,
     peer: SocketAddr,
     key: &[u8; 16],
-    config: &BedrockLoginConfig,
+    config: &BedrockConfig,
 ) -> Result<Option<GameProfile>, FloodgateLoginError> {
     if !config.enable {
         return Ok(None);
@@ -123,7 +103,7 @@ pub(crate) fn resolve_floodgate(
 pub(crate) fn resolve_floodgate_login(
     hostname: &str,
     peer: SocketAddr,
-    config: &BedrockLoginConfig,
+    config: &BedrockConfig,
 ) -> Result<Option<GameProfile>, FloodgateLoginError> {
     if !config.enable || floodgate::extract_payload(hostname).is_none() {
         return Ok(None);
@@ -149,7 +129,7 @@ mod tests {
     use foton_bedrock::key;
 
     use super::{
-        BedrockLoginConfig, FloodgateLoginError, resolve_floodgate, resolve_floodgate_login,
+        BedrockConfig, FloodgateLoginError, resolve_floodgate, resolve_floodgate_login,
     };
 
     /// The 12 fields in `BedrockData.toString()` order, matching
@@ -162,14 +142,18 @@ mod tests {
         format!("mc.example.com\0{payload}\x00127.0.0.1")
     }
 
-    fn bedrock_config(trusted_proxies: &[&str]) -> BedrockLoginConfig {
-        BedrockLoginConfig {
+    fn bedrock_config(trusted_proxies: &[&str]) -> BedrockConfig {
+        // Only these three fields reach the login path; the rest belong to the
+        // supervisor and are left at their defaults on purpose, so a new field
+        // there cannot silently change what these tests exercise.
+        BedrockConfig {
             enable: true,
             username_prefix: ".".to_owned(),
             trusted_proxies: trusted_proxies
                 .iter()
                 .map(|entry| (*entry).to_owned())
                 .collect(),
+            ..BedrockConfig::default()
         }
     }
 

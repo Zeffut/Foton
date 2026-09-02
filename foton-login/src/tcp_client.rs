@@ -53,7 +53,7 @@ use tokio::{
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
 
-use crate::floodgate::BedrockLoginConfig;
+use foton_bedrock::config::BedrockConfig;
 
 use crate::pre_play_state::{PacketSequenceError, PrePlayPacket, PrePlayState};
 
@@ -168,18 +168,23 @@ pub struct JavaTcpClient {
     pub(crate) hostname: SyncMutex<String>,
     /// Bedrock login policy for this connection.
     ///
-    /// Defaults to disabled: nothing wires the real `[server.bedrock]`
-    /// config into this field yet, so no hostname is treated as a Floodgate
-    /// handshake until that lands. Off is the safe default -- a feature
-    /// nobody asked for should not silently start accepting a new kind of
-    /// login.
-    pub(crate) bedrock: BedrockLoginConfig,
+    /// Handed in at accept time from the server's `[server.bedrock]` section,
+    /// so it is fixed for the life of the connection. Disabled means every
+    /// hostname takes the ordinary Java path, including one carrying a
+    /// Floodgate payload.
+    pub(crate) bedrock: BedrockConfig,
     task_tracker: TaskTracker,
 }
 
 impl JavaTcpClient {
     /// Creates a new `JavaTcpClient`.
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "every argument is a distinct piece of per-connection state the \
+                  accept loop already holds; bundling them into a struct would move \
+                  the same list one indirection away without removing anything"
+    )]
     pub fn new(
         tcp_stream: TcpStream,
         address: SocketAddr,
@@ -188,6 +193,7 @@ impl JavaTcpClient {
         server: Arc<Server>,
         connection_session: Arc<ServerConnectionSession>,
         task_tracker: TaskTracker,
+        bedrock: BedrockConfig,
     ) -> (
         Self,
         UnboundedReceiver<OutboundPacket>,
@@ -216,7 +222,7 @@ impl JavaTcpClient {
             connection_updated: Arc::new(Notify::new()),
             pre_play_state: SyncMutex::new(PrePlayState::new()),
             hostname: SyncMutex::new(String::new()),
-            bedrock: BedrockLoginConfig::default(),
+            bedrock,
             task_tracker,
         };
 

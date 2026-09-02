@@ -7,7 +7,7 @@ authors.workspace = true
 
 [dependencies]
 # Internal crates
-foton-bedrock = { path = "../foton-bedrock" }
+foton-bedrock.workspace = true
 foton-core.workspace = true
 foton-protocol.workspace = true
 foton-registry.workspace = true

@@ -6,9 +6,12 @@ use std::{
     error::Error,
     fmt, io,
     net::{Ipv4Addr, SocketAddrV4},
+    path::Path,
     sync::{Arc, OnceLock},
 };
 
+use foton_bedrock::config::BedrockConfig;
+use foton_bedrock::key;
 use foton_core::{command::CommandRegistry, permission::PermissionGroupManager, server::Server};
 use foton_login::{JavaTcpClient, ServerConnectionSession};
 use tokio::{net::TcpListener, runtime::Runtime, select};
@@ -40,6 +43,11 @@ pub struct FotonServer {
     pub connection_session: Arc<ServerConnectionSession>,
     /// The bound Rcon port, when remote administration is enabled.
     pub rcon_listener: Option<rcon::RconListener>,
+    /// Bedrock policy handed to every accepted connection.
+    ///
+    /// Carried here rather than read per-connection so that what the login
+    /// path enforces is fixed at startup, beside the key it was loaded with.
+    pub bedrock: BedrockConfig,
 }
 
 /// Startup error for expected operational failures.
@@ -108,6 +116,7 @@ impl FotonServer {
         let permission_group_store = foton_config.permission_group_store();
         let server_port = foton_config.server.server_port;
         let rcon_config = foton_config.server.rcon.clone();
+        let bedrock_config = foton_config.server.bedrock.clone();
         let worlds_config = foton_config.worlds;
         let permission_groups =
             PermissionGroupManager::new(foton_config.groups, permission_group_store).map_err(
@@ -138,6 +147,28 @@ impl FotonServer {
                 source,
             })?;
 
+        // The shared key is loaded before the first connection can arrive, so
+        // the login path never sees a window where Bedrock is enabled but the
+        // key is missing. A failure here disables the feature rather than
+        // taking the server down: an operator who cannot read their key file
+        // should get a Java server and a loud message, not no server.
+        if bedrock_config.enable {
+            let path = key::key_path(Path::new("."));
+            match key::load_or_create(&path) {
+                Ok(loaded) => {
+                    key::init_shared(loaded);
+                    log::info!("Bedrock: shared Floodgate key loaded from {}", path.display());
+                }
+                Err(error) => {
+                    log::error!(
+                        "Bedrock: could not load the Floodgate key at {}: {error}. \
+                         Bedrock logins will be refused.",
+                        path.display()
+                    );
+                }
+            }
+        }
+
         let rcon_listener = if rcon_config.enable {
             Some(
                 rcon::RconListener::bind(rcon_config.port, rcon_config.password.into())
@@ -158,6 +189,7 @@ impl FotonServer {
             server: Arc::new(server),
             connection_session: Arc::new(ServerConnectionSession::default()),
             rcon_listener,
+            bedrock: bedrock_config,
         })
     }
 
@@ -199,6 +231,7 @@ impl FotonServer {
                         self.server.clone(),
                         self.connection_session.clone(),
                         task_tracker.clone(),
+                        self.bedrock.clone(),
                     );
                     self.client_id = self.client_id.wrapping_add(1);
                     log::info!("Accepted connection from Java Edition: {address} (id {})", self.client_id);
