@@ -6,11 +6,12 @@ use std::{
     error::Error,
     fmt, io,
     net::{Ipv4Addr, SocketAddrV4},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, OnceLock},
 };
 
 use foton_bedrock::config::BedrockConfig;
+use foton_bedrock::geyser::{GeyserOptions, Supervisor};
 use foton_bedrock::key;
 use foton_core::{command::CommandRegistry, permission::PermissionGroupManager, server::Server};
 use foton_login::{JavaTcpClient, ServerConnectionSession};
@@ -48,6 +49,13 @@ pub struct FotonServer {
     /// Carried here rather than read per-connection so that what the login
     /// path enforces is fixed at startup, beside the key it was loaded with.
     pub bedrock: BedrockConfig,
+    /// The running Geyser supervisor, when Bedrock support started successfully.
+    ///
+    /// `None` covers both "Bedrock is disabled" and "Geyser failed to start" —
+    /// either way there is nothing to hand to [`FotonServer::start`]. A
+    /// failure here never stops the Java server: see the log message where
+    /// this is set.
+    pub bedrock_supervisor: Option<Supervisor>,
 }
 
 /// Startup error for expected operational failures.
@@ -117,6 +125,9 @@ impl FotonServer {
         let server_port = foton_config.server.server_port;
         let rcon_config = foton_config.server.rcon.clone();
         let bedrock_config = foton_config.server.bedrock.clone();
+        // Read before `into_runtime_config()` below consumes `foton_config.server`.
+        // The Bedrock MOTD fallback needs this server's own MOTD.
+        let motd = foton_config.server.motd.clone();
         let worlds_config = foton_config.worlds;
         let permission_groups =
             PermissionGroupManager::new(foton_config.groups, permission_group_store).map_err(
@@ -147,17 +158,26 @@ impl FotonServer {
                 source,
             })?;
 
+        // The server's own run directory. The Geyser supervisor started below
+        // must resolve the shared key under this exact same directory — a
+        // second, independently-typed path would let the two silently drift
+        // and fail every Bedrock login to decrypt.
+        let run_directory = Path::new(".");
+
         // The shared key is loaded before the first connection can arrive, so
         // the login path never sees a window where Bedrock is enabled but the
         // key is missing. A failure here disables the feature rather than
         // taking the server down: an operator who cannot read their key file
         // should get a Java server and a loud message, not no server.
         if bedrock_config.enable {
-            let path = key::key_path(Path::new("."));
+            let path = key::key_path(run_directory);
             match key::load_or_create(&path) {
                 Ok(loaded) => {
                     key::init_shared(loaded);
-                    log::info!("Bedrock: shared Floodgate key loaded from {}", path.display());
+                    log::info!(
+                        "Bedrock: shared Floodgate key loaded from {}",
+                        path.display()
+                    );
                 }
                 Err(error) => {
                     log::error!(
@@ -182,6 +202,17 @@ impl FotonServer {
             None
         };
 
+        // Bedrock is an optional feature: a Geyser that cannot start must not
+        // take the Java server down with it, unlike Rcon's bind above.
+        let bedrock_supervisor = start_bedrock_supervisor(
+            &bedrock_config,
+            run_directory,
+            server_port,
+            &motd,
+            &cancel_token,
+        )
+        .await;
+
         Ok(Self {
             tcp_listener,
             cancel_token,
@@ -190,6 +221,7 @@ impl FotonServer {
             connection_session: Arc::new(ServerConnectionSession::default()),
             rcon_listener,
             bedrock: bedrock_config,
+            bedrock_supervisor,
         })
     }
 
@@ -209,6 +241,14 @@ impl FotonServer {
                 self.cancel_token.clone(),
                 task_tracker.clone(),
             ));
+        }
+
+        // The supervisor already started Geyser and is supervising it on its
+        // own background task (see `Supervisor::start`). Tracking `.wait()`
+        // here, rather than dropping the handle, is what makes shutdown
+        // actually wait for Geyser to stop instead of racing the process exit.
+        if let Some(supervisor) = self.bedrock_supervisor.take() {
+            task_tracker.spawn(supervisor.wait());
         }
 
         loop {
@@ -245,5 +285,55 @@ impl FotonServer {
             }
         }
         let _ = server_handle.await;
+    }
+}
+
+/// Starts this server's Geyser supervisor, if `[server.bedrock] enable` is
+/// set — resolving Java, fetching the pinned jar, writing the shared
+/// Floodgate key and `config.yml`, and starting Geyser.
+///
+/// A failure here is logged and turned into `None` rather than propagated:
+/// this mirrors the key-loading policy in [`FotonServer::new_with_commands`]
+/// rather than the Rcon listener's — Bedrock is an optional feature, and an
+/// operator who misconfigured it should get a working Java server and a loud
+/// message, not no server at all.
+async fn start_bedrock_supervisor(
+    bedrock_config: &BedrockConfig,
+    run_directory: &Path,
+    server_port: u16,
+    motd: &str,
+    cancel_token: &CancellationToken,
+) -> Option<Supervisor> {
+    if !bedrock_config.enable {
+        return None;
+    }
+
+    let options = GeyserOptions {
+        run_directory: run_directory.to_path_buf(),
+        bedrock_port: bedrock_config.port,
+        java_port: server_port,
+        motd: if bedrock_config.motd.is_empty() {
+            motd.to_owned()
+        } else {
+            bedrock_config.motd.clone()
+        },
+        username_prefix: bedrock_config.username_prefix.clone(),
+        java_home: (!bedrock_config.java_home.is_empty())
+            .then(|| PathBuf::from(&bedrock_config.java_home)),
+        jar_path: (!bedrock_config.jar_path.is_empty())
+            .then(|| PathBuf::from(&bedrock_config.jar_path)),
+    };
+
+    match Supervisor::start(options, cancel_token.clone()).await {
+        Ok(supervisor) => Some(supervisor),
+        Err(error) => {
+            log::error!(
+                "Bedrock: Geyser failed to start ({error}). Check bedrock.java_home, \
+                 bedrock.jar_path and the bedrock/ directory under the run directory, \
+                 then restart the server. Continuing without Bedrock support; \
+                 Java players are unaffected."
+            );
+            None
+        }
     }
 }
