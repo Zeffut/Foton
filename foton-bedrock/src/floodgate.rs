@@ -176,7 +176,9 @@ pub fn encrypt(
 /// The number of `\0`-separated fields Floodgate sends. `BedrockData.EXPECTED_LENGTH`.
 const EXPECTED_FIELDS: usize = 12;
 
-/// The longest name the Java protocol accepts.
+/// The longest name the Java protocol accepts, in **bytes** -- what every
+/// downstream consumer of [`BedrockData::java_username`] actually measures
+/// (`str::len()`), not [`char`] count.
 const MAX_JAVA_USERNAME: usize = 16;
 
 /// What Geyser says about the Bedrock player.
@@ -263,13 +265,32 @@ impl BedrockData {
     /// The name this player is known by, prefixed so it cannot collide with a
     /// Java player's and truncated to what the Java protocol accepts.
     ///
-    /// Truncation is on a character boundary, not a byte one: a gamertag can
-    /// hold characters a Java name cannot, and slicing one in half would panic.
+    /// The bound is on **bytes**, not characters: every downstream consumer
+    /// (`c_login_finished`'s `Prefixed(VarInt), bound = 16` write, via
+    /// `foton_utils`' `write_prefixed_bound`, which measures `str::len()`)
+    /// enforces a 16-*byte* limit, not a 16-*character* one. Xbox gamertags
+    /// have supported non-Latin scripts since 2019, so a name that is 16
+    /// characters can easily be 17+ bytes; a character-counting truncation
+    /// produces exactly that value, which then fails to encode. With
+    /// `panic = "abort"` in the release profile, that turns into the whole
+    /// process aborting on an unprivileged remote player's gamertag.
+    ///
+    /// `prefix` shares the same byte budget as the gamertag (folded into one
+    /// `chars()` chain below) rather than being written unconditionally, so
+    /// even a prefix that is itself at or past the limit truncates safely
+    /// instead of producing a name already over budget before the gamertag is
+    /// considered. Truncation still lands on a character boundary, never a
+    /// byte one: slicing a multi-byte character in half would panic.
     #[must_use]
     pub fn java_username(&self, prefix: &str) -> String {
-        let room = MAX_JAVA_USERNAME.saturating_sub(prefix.chars().count());
-        let truncated: String = self.username.chars().take(room).collect();
-        format!("{prefix}{truncated}")
+        let mut name = String::with_capacity(MAX_JAVA_USERNAME);
+        for character in prefix.chars().chain(self.username.chars()) {
+            if name.len() + character.len_utf8() > MAX_JAVA_USERNAME {
+                break;
+            }
+            name.push(character);
+        }
+        name
     }
 }
 
@@ -429,23 +450,28 @@ mod tests {
     }
 
     #[test]
-    fn truncates_so_prefix_and_name_fit_sixteen_characters() {
+    fn truncates_so_prefix_and_name_fit_sixteen_bytes() {
         let data = BedrockData::parse(&sample("AVeryLongGamertag", "1")).expect("parses");
         let name = data.java_username(".");
-        // 16 - ".".chars().count() == 15 characters of room; the 17-char
-        // gamertag's first 15 are "AVeryLongGamert".
+        // All-ASCII, so byte count and character count agree here: 16 - 1
+        // ("." is one byte) == 15 bytes of room; the 17-char gamertag's
+        // first 15 are "AVeryLongGamert". The invariant that matters is the
+        // one the encoder (`Prefixed(VarInt), bound = 16`) actually enforces
+        // -- bytes, not characters -- so that is what is asserted.
         assert_eq!(name, ".AVeryLongGamert");
-        assert_eq!(name.chars().count(), 16);
+        assert!(name.len() <= 16, "name was {} bytes: {name:?}", name.len());
     }
 
     #[test]
-    fn truncates_on_a_character_boundary() {
+    fn truncates_on_a_character_boundary_and_stays_within_the_byte_bound() {
         // 14 single-byte characters place the 2-byte "é" (U+00E9) so it
-        // straddles byte offset 15 -- exactly where `java_username(".")` cuts
-        // (room = 16 - ".".chars().count() == 15). A naive `&self.username[..15]`
-        // byte slice lands on the second byte of "é" and panics; `.chars().take(15)`
-        // must not. Built via `.repeat()`, not hand-counted, and self-checked
-        // with `is_char_boundary` so a miscount fails loudly here rather than
+        // straddles byte offset 15 -- exactly where the byte-bounded
+        // `java_username(".")` must stop (name is "." + 14 "A"s == 15 bytes
+        // before "é" is considered; 15 + 2 > 16, so "é" and everything after
+        // it is dropped). A naive `&self.username[..15]` byte slice would
+        // land on the second byte of "é" and panic; this must not. Built via
+        // `.repeat()`, not hand-counted, and self-checked with
+        // `is_char_boundary` so a miscount fails loudly here rather than
         // silently passing a weaker assertion.
         let username = format!("{}éXYZ", "A".repeat(14));
         assert!(
@@ -455,7 +481,49 @@ mod tests {
 
         let data = BedrockData::parse(&sample(&username, "1")).expect("parses");
         let name = data.java_username(".");
-        assert_eq!(name, format!(".{}é", "A".repeat(14)));
+        assert_eq!(name, format!(".{}", "A".repeat(14)));
+        assert!(name.len() <= 16, "name was {} bytes: {name:?}", name.len());
+    }
+
+    /// Regression test for the crash this module used to certify: a gamertag
+    /// well under the 16-*character* budget can still blow the 16-*byte*
+    /// budget every downstream consumer enforces.
+    ///
+    /// Nine Cyrillic characters are 9 characters but 18 bytes (2 bytes each
+    /// in UTF-8); with the default "." prefix, the old character-counting
+    /// `java_username` never even needed to truncate -- 9 characters is
+    /// under its 15-character room -- so it returned the prefix plus the
+    /// whole gamertag: 19 bytes. That value then failed to encode in
+    /// `c_login_finished`'s `Prefixed(VarInt), bound = 16` write, which
+    /// panics via `.expect("Failed to encode packet")`; with
+    /// `panic = "abort"` in the release profile, an unprivileged Bedrock
+    /// player with a Cyrillic gamertag could abort the whole server.
+    ///
+    /// Fails against the pre-fix `java_username` (asserts `name.len() <=
+    /// 16`, which the old implementation violated at 19 bytes) and passes
+    /// against the byte-bounded one.
+    #[test]
+    fn a_short_multibyte_gamertag_still_fits_the_encoders_byte_bound() {
+        let gamertag = "Ж".repeat(9);
+        assert_eq!(
+            gamertag.len(),
+            18,
+            "fixture must be 18 bytes for this test to be load-bearing"
+        );
+        assert!(
+            gamertag.chars().count() < 16,
+            "fixture must be under the old character-counting truncation's room, or it would \
+             have been truncated for an unrelated reason"
+        );
+
+        let data = BedrockData::parse(&sample(&gamertag, "1")).expect("parses");
+        let name = data.java_username(".");
+
+        assert!(
+            name.len() <= 16,
+            "java_username must never exceed the encoder's 16-byte bound, got {} bytes: {name:?}",
+            name.len()
+        );
     }
 
     #[test]
