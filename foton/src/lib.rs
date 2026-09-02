@@ -125,9 +125,6 @@ impl FotonServer {
         let server_port = foton_config.server.server_port;
         let rcon_config = foton_config.server.rcon.clone();
         let bedrock_config = foton_config.server.bedrock.clone();
-        // Read before `into_runtime_config()` below consumes `foton_config.server`.
-        // The Bedrock MOTD fallback needs this server's own MOTD.
-        let motd = foton_config.server.motd.clone();
         let worlds_config = foton_config.worlds;
         let permission_groups =
             PermissionGroupManager::new(foton_config.groups, permission_group_store).map_err(
@@ -204,14 +201,9 @@ impl FotonServer {
 
         // Bedrock is an optional feature: a Geyser that cannot start must not
         // take the Java server down with it, unlike Rcon's bind above.
-        let bedrock_supervisor = start_bedrock_supervisor(
-            &bedrock_config,
-            run_directory,
-            server_port,
-            &motd,
-            &cancel_token,
-        )
-        .await;
+        let bedrock_supervisor =
+            start_bedrock_supervisor(&bedrock_config, run_directory, server_port, &cancel_token)
+                .await;
 
         Ok(Self {
             tcp_listener,
@@ -301,7 +293,6 @@ async fn start_bedrock_supervisor(
     bedrock_config: &BedrockConfig,
     run_directory: &Path,
     server_port: u16,
-    motd: &str,
     cancel_token: &CancellationToken,
 ) -> Option<Supervisor> {
     if !bedrock_config.enable {
@@ -312,11 +303,11 @@ async fn start_bedrock_supervisor(
         run_directory: run_directory.to_path_buf(),
         bedrock_port: bedrock_config.port,
         java_port: server_port,
-        motd: if bedrock_config.motd.is_empty() {
-            motd.to_owned()
-        } else {
-            bedrock_config.motd.clone()
-        },
+        // Passed through unresolved: an empty string is exactly what tells
+        // `render_config` to emit Geyser's own `passthrough-motd: true` and
+        // relay this Java server's *live* MOTD, rather than one frozen at
+        // this moment during startup.
+        motd: bedrock_config.motd.clone(),
         username_prefix: bedrock_config.username_prefix.clone(),
         java_home: (!bedrock_config.java_home.is_empty())
             .then(|| PathBuf::from(&bedrock_config.java_home)),
