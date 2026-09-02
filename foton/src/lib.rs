@@ -182,6 +182,22 @@ impl FotonServer {
         // `run_directory` is `Some` exactly when Bedrock is enabled, so
         // matching on it here is the enable check.
         if let Some(run_directory) = &run_directory {
+            // Purely a config check -- no I/O, so it runs regardless of
+            // whether the key below loads. Gated on this same block (which
+            // is `Some` exactly when Bedrock is enabled) so an operator with
+            // Bedrock off sees nothing new, and it logs once, here at
+            // startup, rather than per-connection.
+            if bedrock_config.username_prefix_could_collide_with_java_names() {
+                log::warn!(
+                    "Bedrock: bedrock.username_prefix ({:?}) does not contain a character a \
+                     vanilla Java username can never contain, so a Bedrock player's derived \
+                     name can collide with a real Java player's. The default prefix (\".\") \
+                     prevents this by construction; an empty or alphanumeric-only prefix \
+                     does not.",
+                    bedrock_config.username_prefix
+                );
+            }
+
             let path = key::key_path(run_directory);
             match key::load_or_create(&path) {
                 Ok(loaded) => {

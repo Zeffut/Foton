@@ -79,6 +79,30 @@ impl BedrockConfig {
     pub const fn resolved_port(&self, java_port: u16) -> u16 {
         if self.port == 0 { java_port } else { self.port }
     }
+
+    /// Whether [`BedrockConfig::username_prefix`] has stopped guaranteeing
+    /// that a Bedrock player's Java-side name (`username_prefix + gamertag`,
+    /// truncated to 16 characters) can never equal a real Java username.
+    ///
+    /// The guarantee holds only if the prefix contains at least one
+    /// character a vanilla Java username can never contain. Mojang restricts
+    /// Java usernames to ASCII letters, digits and `_`
+    /// (`foton_core::player::is_valid_player_name` enforces that same set on
+    /// this server's own Java logins) — a prefix outside that set, like the
+    /// default `"."`, therefore makes every derived name unspellable as a
+    /// real Java username. An empty prefix, or one built only from letters,
+    /// digits and `_`, gives up that guarantee: a Bedrock-derived name can
+    /// then be spelled identically to an existing or future Java player's.
+    ///
+    /// This crate does not depend on `foton-core`, so the character set is
+    /// checked directly here rather than by calling that function.
+    #[must_use]
+    pub fn username_prefix_could_collide_with_java_names(&self) -> bool {
+        !self
+            .username_prefix
+            .chars()
+            .any(|character| !(character.is_ascii_alphanumeric() || character == '_'))
+    }
 }
 
 #[cfg(test)]
@@ -111,5 +135,45 @@ mod tests {
             ..BedrockConfig::default()
         };
         assert_eq!(config.resolved_port(25565), 19132);
+    }
+
+    #[test]
+    fn the_default_prefix_cannot_collide_with_a_java_name() {
+        // "." is not a legal Java username character, so no derived name can
+        // ever be spelled the way a real Java username is.
+        let config = BedrockConfig::default();
+        assert!(!config.username_prefix_could_collide_with_java_names());
+    }
+
+    #[test]
+    fn an_empty_prefix_can_collide_with_a_java_name() {
+        let config = BedrockConfig {
+            username_prefix: String::new(),
+            ..BedrockConfig::default()
+        };
+        assert!(config.username_prefix_could_collide_with_java_names());
+    }
+
+    #[test]
+    fn an_alphanumeric_only_prefix_can_collide_with_a_java_name() {
+        // Built entirely from characters a real Java username can also
+        // contain, so the derived name is not structurally distinct.
+        let config = BedrockConfig {
+            username_prefix: "bed_".to_owned(),
+            ..BedrockConfig::default()
+        };
+        assert!(config.username_prefix_could_collide_with_java_names());
+    }
+
+    #[test]
+    fn a_prefix_with_one_illegal_character_cannot_collide_with_a_java_name() {
+        // Only one character in the prefix needs to fall outside a Java
+        // username's legal set for the whole derived name to become
+        // unspellable as a real Java username.
+        let config = BedrockConfig {
+            username_prefix: "bed-".to_owned(),
+            ..BedrockConfig::default()
+        };
+        assert!(!config.username_prefix_could_collide_with_java_names());
     }
 }
