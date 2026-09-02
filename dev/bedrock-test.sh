@@ -23,6 +23,36 @@
 #     prefix, and UUID persistence, against real production code, and it
 #     needs no Geyser process at all: it talks to Foton's Java port directly.
 #
+# The server under test runs `online_mode = true, encryption = true` --
+# Foton's own generated default, and the production-shaped configuration.
+# Every prior run of this script, and every manual run recorded in
+# design/bedrock-stage0-findings.md, used `online_mode = false` instead,
+# which is not a configuration any public server should run and cannot catch
+# a Floodgate regression: the whole point of Floodgate is to carry a verified
+# identity on a server that does NOT trust client-claimed usernames. A traced
+# reading of foton-login/src/handlers/login.rs says the Floodgate branch in
+# `handle_hello` returns before the `self.server.config.encryption` check, so
+# online_mode and encryption should never matter to it -- but that was a
+# traced conclusion, never an observed one, until this script ran it.
+#
+# There is deliberately no separate offline-mode run left in this script.
+# `resolve_floodgate_login` (foton-login/src/floodgate.rs) and the branch in
+# `handle_hello` that calls it never read `online_mode` or `encryption` at
+# all, so an offline-mode run exercises nothing on the Floodgate path that
+# this online-mode run does not already cover, at roughly double the
+# wall-clock cost (each run boots two processes and drives two clients over
+# ~1-2 minutes). If that tracing is ever wrong, this run is exactly the one
+# that would catch it; a parallel offline run would not add coverage, only
+# time. The `join` sub-test's outcome (rejected by Geyser's own Xbox gate)
+# is unaffected by this switch either way -- see its own comment below.
+#
+# What `online_mode = true` does NOT introduce: a live dependency on Mojang's
+# session server. The Floodgate handshake short-circuits before
+# `mojang_authenticate` is ever called, and the `join` client never reaches
+# Foton at all (Geyser's own gate rejects it first, same as before). Foton's
+# own Minecraft-services-key fetch at boot happens unconditionally regardless
+# of `online_mode`, so that is not a new network dependency introduced here.
+#
 # Usage: bash dev/bedrock-test.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
@@ -126,12 +156,24 @@ if [ ! -f config/config.toml ]; then
   fi
 fi
 
+# Production-shaped: online_mode and encryption both on (Foton's own
+# generated default, and the pairing its config validator requires -- see
+# "encryption must be true when online_mode is enabled" in
+# foton-core/src/config.rs). enforce_secure_chat stays off: it is also off by
+# default, and turning it on is an orthogonal, documented operator trade-off
+# (foton/src/lib.rs's warn_about_risky_bedrock_config warns about it) that
+# has nothing to do with the question this run exists to answer.
 sed -i \
-  -e 's/^online_mode = .*/online_mode = false/' \
-  -e 's/^encryption = .*/encryption = false/' \
+  -e 's/^online_mode = .*/online_mode = true/' \
+  -e 's/^encryption = .*/encryption = true/' \
   -e 's/^enforce_secure_chat = .*/enforce_secure_chat = false/' \
   -e "s/^server_port = .*/server_port = $PORT/" \
   config/config.toml
+
+if ! grep -q '^online_mode = true' config/config.toml || ! grep -q '^encryption = true' config/config.toml; then
+  echo "COULD NOT SET online_mode/encryption TO true IN THE GENERATED CONFIG"
+  exit 1
+fi
 
 # Enable Bedrock, on the *default* shared port (0 -- follows server_port) and
 # the *default* jar (no jar_path override). This is the main test path, per
@@ -171,7 +213,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "=== Booting (Bedrock enabled, shared port $PORT) ==="
+echo "=== Booting (Bedrock enabled, shared port $PORT, online_mode=true, encryption=true) ==="
 rm -rf saves bedrock
 nohup "$BIN" > server.log 2>&1 < /dev/null &
 PID=$!
