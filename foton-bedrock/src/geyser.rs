@@ -58,6 +58,25 @@ const MAX_CONSECUTIVE_FAILURES: u32 = 5;
 /// How long [`Supervisor`] waits for a polite shutdown before killing Geyser.
 const TERMINATE_GRACE: Duration = Duration::from_secs(10);
 
+/// Bounded total timeout for [`download`] — covering DNS, connect, TLS and
+/// the whole response body, not just a between-bytes idle window.
+///
+/// [`Supervisor::start`] runs synchronously during server startup, after the
+/// Java port is already bound but before the accept loop runs. A download
+/// with no timeout at all means a hung connection to
+/// `download.geysermc.org` blocks startup forever: the Java port sits bound
+/// with nothing accepting on it, which a connecting client cannot tell apart
+/// from a dead server. This bound turns that into an ordinary
+/// [`GeyserError::Download`] that the existing log-and-continue policy
+/// handles, instead of a silent hang.
+///
+/// The pinned jar is roughly 10 MB; at a conservatively slow 1 Mbps
+/// (~125 KB/s) connection that is about 80 seconds. 120 seconds leaves
+/// headroom for connection setup and jitter on top of that while staying
+/// finite. `dev/doctor.sh`'s `curl --max-time 10` is sized for a small API
+/// ping, not a multi-megabyte transfer — too short a bound to reuse here.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Why the supervisor could not start or keep running Geyser.
 #[derive(Debug, Error)]
 pub enum GeyserError {
@@ -92,8 +111,11 @@ pub enum GeyserError {
         /// The major version it reported.
         found: u32,
     },
-    /// The pinned jar could not be downloaded.
-    #[error("failed to download Geyser from {url}: {source}")]
+    /// The pinned jar could not be downloaded — including because it did not
+    /// finish within [`DOWNLOAD_TIMEOUT`].
+    #[error(
+        "failed to download Geyser from {url}: {source}; set bedrock.jar_path to a Geyser jar already on disk instead of relying on this download"
+    )]
     Download {
         /// The URL the download was attempted from.
         url: String,
@@ -145,6 +167,12 @@ pub struct GeyserOptions {
     /// jar, its generated `config.yml`, and the shared Floodgate key.
     pub run_directory: PathBuf,
     /// The UDP port Bedrock clients connect to.
+    ///
+    /// Already resolved — a caller building this from
+    /// [`BedrockConfig`](crate::config::BedrockConfig) must call
+    /// [`BedrockConfig::resolved_port`](crate::config::BedrockConfig::resolved_port)
+    /// first. Unlike [`BedrockConfig::port`](crate::config::BedrockConfig::port),
+    /// `0` here has no special meaning; it is simply not a usable port.
     pub bedrock_port: u16,
     /// This Java server's own port, which Geyser is told to connect to on
     /// loopback.
@@ -341,15 +369,28 @@ async fn resolve_java(java_home: Option<&Path>) -> Result<PathBuf, GeyserError> 
     Ok(binary)
 }
 
-/// Downloads `url` whole into memory. The pinned jar is tens of megabytes, so
-/// buffering it rather than streaming to disk keeps the checksum check —
-/// which must happen before anything is written — simple.
-async fn download(url: &str) -> Result<Vec<u8>, GeyserError> {
+/// Downloads `url` whole into memory, aborting the whole attempt — DNS,
+/// connect, TLS and body included — if it has not finished within `timeout`.
+/// The pinned jar is tens of megabytes, so buffering it rather than
+/// streaming to disk keeps the checksum check — which must happen before
+/// anything is written — simple.
+///
+/// A dedicated [`reqwest::Client`] is built for this rather than the
+/// crate-wide convenience of `reqwest::get`, because that bare function uses
+/// a lazily-initialized client with no timeout at all — exactly the hang
+/// this bound exists to prevent.
+async fn download(url: &str, timeout: Duration) -> Result<Vec<u8>, GeyserError> {
     let wrap = |source: reqwest::Error| GeyserError::Download {
         url: url.to_owned(),
         source,
     };
-    let response = reqwest::get(url)
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(wrap)?;
+    let response = client
+        .get(url)
+        .send()
         .await
         .map_err(wrap)?
         .error_for_status()
@@ -382,7 +423,7 @@ async fn resolve_jar(options: &GeyserOptions, bedrock_dir: &Path) -> Result<Path
         target: "geyser",
         "downloading Geyser {GEYSER_VERSION} build {GEYSER_BUILD} from {GEYSER_URL}"
     );
-    let bytes = download(GEYSER_URL).await?;
+    let bytes = download(GEYSER_URL, DOWNLOAD_TIMEOUT).await?;
     verify_checksum(&bytes, GEYSER_SHA256)?;
     fs::write(&jar_path, &bytes)
         .await
@@ -720,9 +761,13 @@ impl Supervisor {
 
 #[cfg(test)]
 mod tests {
+    use std::future::pending;
     use std::path::PathBuf;
+    use std::time::Duration;
 
-    use super::{GeyserOptions, render_config, verify_checksum};
+    use tokio::net::TcpListener;
+
+    use super::{GeyserError, GeyserOptions, download, render_config, verify_checksum};
     use crate::key;
 
     fn options() -> GeyserOptions {
@@ -862,5 +907,41 @@ mod tests {
     #[test]
     fn rejects_a_banner_with_no_version() {
         assert_eq!(super::parse_java_major_version("command not found"), None);
+    }
+
+    #[tokio::test]
+    async fn a_hung_download_times_out_instead_of_hanging_forever() {
+        // A listener that completes the TCP handshake and then never writes
+        // a byte back -- the same shape as a hung connection to
+        // `download.geysermc.org`, entirely on loopback so this needs no
+        // real network access.
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binding to loopback on an OS-assigned port should succeed");
+        let address = listener
+            .local_addr()
+            .expect("a bound listener has a local address");
+        tokio::spawn(async move {
+            let Ok((socket, _peer)) = listener.accept().await else {
+                return;
+            };
+            // Hold the connection open and silent forever; the test's own
+            // timeout, not this task, is what ends it.
+            let _held_open = socket;
+            pending::<()>().await;
+        });
+
+        let url = format!("http://{address}/geyser.jar");
+        let result = download(&url, Duration::from_millis(200)).await;
+
+        match result {
+            Err(GeyserError::Download { source, .. }) => {
+                assert!(
+                    source.is_timeout(),
+                    "expected a timeout error, got: {source:?}"
+                );
+            }
+            other => panic!("expected a GeyserError::Download from a timeout, got: {other:?}"),
+        }
     }
 }
