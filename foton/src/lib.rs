@@ -426,7 +426,6 @@ async fn start_bedrock_supervisor(
         // relay this Java server's *live* MOTD, rather than one frozen at
         // this moment during startup.
         motd: bedrock_config.motd.clone(),
-        username_prefix: bedrock_config.username_prefix.clone(),
         java_home: (!bedrock_config.java_home.is_empty())
             .then(|| PathBuf::from(&bedrock_config.java_home)),
         jar_path: (!bedrock_config.jar_path.is_empty())
