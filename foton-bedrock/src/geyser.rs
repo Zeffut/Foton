@@ -14,7 +14,7 @@
 //! cleanly against the pinned build, with every override (including an
 //! escaped MOTD) surviving intact.
 
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf, absolute};
 use std::process::{ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use std::{env, io};
@@ -165,6 +165,12 @@ pub enum GeyserError {
 pub struct GeyserOptions {
     /// This server's own run directory; `bedrock/` under it holds Geyser's
     /// jar, its generated `config.yml`, and the shared Floodgate key.
+    ///
+    /// May be relative when a caller builds this: [`Supervisor::start`]
+    /// resolves it to an absolute path itself, before anything is derived
+    /// from it, since Geyser runs with a working directory one level deeper
+    /// (`bedrock_dir`) and a relative path would resolve against the wrong
+    /// place from there.
     pub run_directory: PathBuf,
     /// The UDP port Bedrock clients connect to.
     ///
@@ -189,10 +195,12 @@ pub struct GeyserOptions {
     /// one place cannot let the two drift.
     pub username_prefix: String,
     /// A JDK/JRE to run Geyser with; `None` falls back to `JAVA_HOME`, then
-    /// `java` on the `PATH`.
+    /// `java` on the `PATH`. May be relative -- it is made absolute before
+    /// use, for the same reason as [`GeyserOptions::run_directory`].
     pub java_home: Option<PathBuf>,
     /// An operator-supplied Geyser jar; `None` fetches and caches the pinned
-    /// build.
+    /// build. May be relative -- it is made absolute before use, for the
+    /// same reason as [`GeyserOptions::run_directory`].
     pub jar_path: Option<PathBuf>,
 }
 
@@ -307,6 +315,31 @@ pub fn verify_checksum(bytes: &[u8], expected: &str) -> Result<(), GeyserError> 
     }
 }
 
+/// Resolves `path` to an absolute one.
+///
+/// Every path this module ultimately hands to [`Command::new`]/[`arg`] as a
+/// filesystem path -- the Java binary, the jar -- crosses a `current_dir`
+/// boundary: [`spawn_geyser`] sets the child's working directory to
+/// `bedrock_dir`, one level deeper than where these paths are usually
+/// resolved from. A relative path is not rebased against that -- it is
+/// handed to the OS exec call as a literal string, resolved by the *child*
+/// against *its own* cwd. Making it absolute first, while still running with
+/// this process's own (correct) working directory, is what avoids that.
+///
+/// `absolute` (`std::path::absolute`) rather than `std::fs::canonicalize`:
+/// the latter requires the target to already exist -- not yet true for a
+/// jar this call is about to download -- and on Windows returns a
+/// `\\?\`-prefixed UNC path that not every tool reading it back (Geyser's
+/// own JVM included) is guaranteed to accept.
+///
+/// [`arg`]: tokio::process::Command::arg
+fn to_absolute(path: &Path) -> Result<PathBuf, GeyserError> {
+    absolute(path).map_err(|source| GeyserError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
 /// The `java` executable's conventional name under a JDK/JRE's `bin/`.
 const fn java_binary_name() -> &'static str {
     if cfg!(windows) { "java.exe" } else { "java" }
@@ -314,13 +347,21 @@ const fn java_binary_name() -> &'static str {
 
 /// Resolves which `java` binary to run: `java_home` if given, else
 /// `JAVA_HOME`, else a bare name resolved against `PATH`.
-fn java_binary_path(java_home: Option<&Path>) -> PathBuf {
+///
+/// A `home` from either source is made absolute (see [`to_absolute`]) before
+/// `bin`/the binary name is joined onto it, since the result is handed to
+/// [`Command::new`] in [`spawn_geyser`]. The bare-name fallback is
+/// deliberately left alone: `Command` resolves a separator-free program name
+/// against `PATH`, which does not depend on either process's working
+/// directory, so making it absolute here would break that lookup rather than
+/// fix anything.
+fn java_binary_path(java_home: Option<&Path>) -> Result<PathBuf, GeyserError> {
     let home = java_home
         .map(Path::to_path_buf)
         .or_else(|| env::var_os("JAVA_HOME").map(PathBuf::from));
     match home {
-        Some(home) => home.join("bin").join(java_binary_name()),
-        None => PathBuf::from(java_binary_name()),
+        Some(home) => Ok(to_absolute(&home)?.join("bin").join(java_binary_name())),
+        None => Ok(PathBuf::from(java_binary_name())),
     }
 }
 
@@ -340,7 +381,7 @@ fn parse_java_major_version(banner: &str) -> Option<u32> {
 
 /// Resolves and validates the Java runtime Geyser will run under.
 async fn resolve_java(java_home: Option<&Path>) -> Result<PathBuf, GeyserError> {
-    let binary = java_binary_path(java_home);
+    let binary = java_binary_path(java_home)?;
 
     let output = Command::new(&binary)
         .arg("-version")
@@ -399,14 +440,26 @@ async fn download(url: &str, timeout: Duration) -> Result<Vec<u8>, GeyserError> 
     Ok(bytes.to_vec())
 }
 
-/// Resolves the Geyser jar: an operator-supplied one, or the pinned build
-/// cached under `bedrock_dir`, downloading it first if absent. Either way,
-/// the bytes are checked against [`GEYSER_SHA256`] before this returns.
-async fn resolve_jar(options: &GeyserOptions, bedrock_dir: &Path) -> Result<PathBuf, GeyserError> {
+/// Picks the jar path [`resolve_jar`] should use, made absolute (see
+/// [`to_absolute`]) either way: an operator-supplied [`GeyserOptions::jar_path`]
+/// may itself be relative, and the pinned-build fallback joined onto
+/// `bedrock_dir` inherits whatever `bedrock_dir` is -- absolute only because
+/// [`Supervisor::start`] already made `options.run_directory` absolute
+/// before deriving it. Kept separate from [`resolve_jar`] because this half
+/// does no I/O, so it can be tested without a filesystem or a JVM.
+fn jar_candidate_path(options: &GeyserOptions, bedrock_dir: &Path) -> Result<PathBuf, GeyserError> {
     let jar_path = options
         .jar_path
         .clone()
         .unwrap_or_else(|| bedrock_dir.join(JAR_FILE_NAME));
+    to_absolute(&jar_path)
+}
+
+/// Resolves the Geyser jar: an operator-supplied one, or the pinned build
+/// cached under `bedrock_dir`, downloading it first if absent. Either way,
+/// the bytes are checked against [`GEYSER_SHA256`] before this returns.
+async fn resolve_jar(options: &GeyserOptions, bedrock_dir: &Path) -> Result<PathBuf, GeyserError> {
+    let jar_path = jar_candidate_path(options, bedrock_dir)?;
 
     if jar_path.is_file() {
         let bytes = fs::read(&jar_path)
@@ -720,16 +773,26 @@ impl Supervisor {
     ///
     /// # Errors
     ///
-    /// Returns [`GeyserError`] if no Java [`MIN_JAVA_VERSION`]+ runtime can
-    /// be found, the pinned jar cannot be fetched or does not match its
-    /// checksum, the Bedrock directory's files cannot be written, or the
-    /// process itself cannot be spawned. None of these are retried here —
-    /// only a process that started successfully and later exits is restarted
-    /// automatically.
+    /// Returns [`GeyserError`] if `run_directory` cannot be resolved to an
+    /// absolute path, no Java [`MIN_JAVA_VERSION`]+ runtime can be found, the
+    /// pinned jar cannot be fetched or does not match its checksum, the
+    /// Bedrock directory's files cannot be written, or the process itself
+    /// cannot be spawned. None of these are retried here — only a process
+    /// that started successfully and later exits is restarted automatically.
     pub async fn start(
-        options: GeyserOptions,
+        mut options: GeyserOptions,
         cancel: CancellationToken,
     ) -> Result<Self, GeyserError> {
+        // Made absolute here, defensively, rather than trusted from the
+        // caller: every path this function and the ones it calls derive
+        // from `run_directory` -- `bedrock_dir`, the jar's default location,
+        // the Floodgate key path written into `config.yml` -- is handed
+        // either directly or indirectly to a child process whose own
+        // working directory is `bedrock_dir`, one level deeper. A relative
+        // `run_directory` would make every one of those resolve against the
+        // wrong place from the child's point of view. See [`to_absolute`].
+        options.run_directory = to_absolute(&options.run_directory)?;
+
         let bedrock_dir = options.run_directory.join("bedrock");
         fs::create_dir_all(&bedrock_dir)
             .await
@@ -767,7 +830,10 @@ mod tests {
 
     use tokio::net::TcpListener;
 
-    use super::{GeyserError, GeyserOptions, download, render_config, verify_checksum};
+    use super::{
+        GeyserError, GeyserOptions, download, jar_candidate_path, java_binary_path, render_config,
+        to_absolute, verify_checksum,
+    };
     use crate::key;
 
     fn options() -> GeyserOptions {
@@ -868,6 +934,72 @@ mod tests {
         let yaml = render_config(&options());
         let expected = key::key_path(&options().run_directory);
         assert!(yaml.contains(&expected.display().to_string()));
+    }
+
+    #[test]
+    fn to_absolute_makes_a_relative_path_absolute() {
+        let resolved = to_absolute(&PathBuf::from("bedrock").join("key.pem"))
+            .expect("resolving a relative path against the current directory should succeed");
+        assert!(resolved.is_absolute());
+        assert!(resolved.ends_with(PathBuf::from("bedrock").join("key.pem")));
+    }
+
+    #[test]
+    fn to_absolute_leaves_an_already_absolute_path_pointing_at_the_same_place() {
+        // Idempotence matters here: `Supervisor::start` calls this
+        // unconditionally on `options.run_directory`, so a caller that
+        // already passed an absolute path (every unit test's `options()`
+        // fixture included) must not have it silently rewritten to
+        // something else.
+        let absolute = PathBuf::from("/tmp/run");
+        let resolved = to_absolute(&absolute).expect("an already-absolute path always resolves");
+        assert_eq!(resolved, absolute);
+    }
+
+    #[test]
+    fn jar_candidate_path_is_absolute_even_from_a_relative_run_directory() {
+        // The exact shape of the reported defect: the default jar location
+        // is derived from `bedrock_dir`, which -- before `Supervisor::start`
+        // absolutizes `options.run_directory` -- could itself be relative.
+        // Geyser is spawned with its cwd one directory deeper than wherever
+        // this resolves against, so this must come out absolute regardless.
+        let mut base = options();
+        base.jar_path = None;
+        let bedrock_dir = PathBuf::from("bedrock");
+
+        let jar_path = jar_candidate_path(&base, &bedrock_dir)
+            .expect("resolving the default jar path should succeed");
+
+        assert!(
+            jar_path.is_absolute(),
+            "a relative jar path does not survive Geyser's own current_dir boundary: {jar_path:?}"
+        );
+    }
+
+    #[test]
+    fn jar_candidate_path_absolutizes_an_operator_supplied_relative_jar_too() {
+        // `bedrock.jar_path` is a separate, independently-typed operator
+        // setting -- not derived from `run_directory` at all -- so fixing
+        // the run directory alone does not fix this case; it needs its own
+        // absolutization.
+        let mut base = options();
+        base.jar_path = Some(PathBuf::from("my-geyser/Geyser-Standalone.jar"));
+        let bedrock_dir = PathBuf::from("/tmp/run/bedrock");
+
+        let jar_path = jar_candidate_path(&base, &bedrock_dir)
+            .expect("resolving an operator-supplied relative jar path should succeed");
+
+        assert!(jar_path.is_absolute());
+    }
+
+    #[test]
+    fn java_binary_path_absolutizes_a_relative_java_home() {
+        let binary = java_binary_path(Some(&PathBuf::from("relative/jdk-21")))
+            .expect("resolving a relative java_home should succeed");
+        assert!(
+            binary.is_absolute(),
+            "a relative java_home does not survive Geyser's own current_dir boundary: {binary:?}"
+        );
     }
 
     #[test]

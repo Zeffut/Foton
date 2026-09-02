@@ -6,7 +6,7 @@ use std::{
     error::Error,
     fmt, io,
     net::{Ipv4Addr, SocketAddrV4},
-    path::{Path, PathBuf},
+    path::{Path, PathBuf, absolute},
     sync::{Arc, OnceLock},
 };
 
@@ -155,11 +155,19 @@ impl FotonServer {
                 source,
             })?;
 
-        // The server's own run directory. The Geyser supervisor started below
-        // must resolve the shared key under this exact same directory — a
-        // second, independently-typed path would let the two silently drift
-        // and fail every Bedrock login to decrypt.
-        let run_directory = Path::new(".");
+        // The server's own run directory, resolved to an absolute path once,
+        // here, before anything derives a path from it. The Geyser
+        // supervisor started below spawns Geyser with its own working
+        // directory one level deeper (`bedrock/`); a path derived from a
+        // *relative* `run_directory` -- the jar path, the Floodgate key path
+        // written into Geyser's config -- would be handed to that child and
+        // resolved against its cwd instead of ours, landing one `bedrock/`
+        // too deep. This is also what keeps the login path (right below,
+        // via `key::key_path`) and the generated config (inside the
+        // supervisor, via the same function) agreeing on the key's location:
+        // both derive it from this one absolute value, so there is only ever
+        // one file on disk either of them can mean.
+        let run_directory = resolve_run_directory();
 
         // The shared key is loaded before the first connection can arrive, so
         // the login path never sees a window where Bedrock is enabled but the
@@ -167,7 +175,7 @@ impl FotonServer {
         // taking the server down: an operator who cannot read their key file
         // should get a Java server and a loud message, not no server.
         if bedrock_config.enable {
-            let path = key::key_path(run_directory);
+            let path = key::key_path(&run_directory);
             match key::load_or_create(&path) {
                 Ok(loaded) => {
                     key::init_shared(loaded);
@@ -202,7 +210,7 @@ impl FotonServer {
         // Bedrock is an optional feature: a Geyser that cannot start must not
         // take the Java server down with it, unlike Rcon's bind above.
         let bedrock_supervisor =
-            start_bedrock_supervisor(&bedrock_config, run_directory, server_port, &cancel_token)
+            start_bedrock_supervisor(&bedrock_config, &run_directory, server_port, &cancel_token)
                 .await;
 
         Ok(Self {
@@ -280,6 +288,31 @@ impl FotonServer {
     }
 }
 
+/// Resolves this process's own run directory to an absolute path.
+///
+/// `absolute` (`std::path::absolute`) rather than `std::fs::canonicalize`:
+/// canonicalize requires the path to already exist and, on Windows, returns
+/// a `\\?\`-prefixed UNC path -- not every tool handed a path derived from it
+/// (Geyser's own JVM included) is guaranteed to accept that form. `absolute`
+/// does neither: it never touches the filesystem beyond reading the current
+/// directory, and it never resolves symlinks.
+///
+/// Falls back to a bare relative `.` -- the previous, buggy behavior -- only
+/// if the current directory itself cannot be read; that failure mode is rare
+/// enough (a deleted or permission-stripped cwd) that refusing to start the
+/// whole server over it would be a worse trade than degrading Bedrock
+/// support the way every other optional-feature failure here already does.
+fn resolve_run_directory() -> PathBuf {
+    absolute(".").unwrap_or_else(|error| {
+        log::warn!(
+            "Bedrock: could not resolve the run directory to an absolute path ({error}); \
+             falling back to a relative one, which can break Bedrock support if Geyser's \
+             own working directory differs from this process's."
+        );
+        PathBuf::from(".")
+    })
+}
+
 /// Starts this server's Geyser supervisor, if `[server.bedrock] enable` is
 /// set — resolving Java, fetching the pinned jar, writing the shared
 /// Floodgate key and `config.yml`, and starting Geyser.
@@ -326,5 +359,42 @@ async fn start_bedrock_supervisor(
             );
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env;
+
+    use super::resolve_run_directory;
+
+    #[test]
+    fn resolve_run_directory_is_always_absolute() {
+        // Everything Bedrock support derives from this value -- the shared
+        // Floodgate key this process loads, and every path `GeyserOptions`
+        // hands the supervisor -- crosses Geyser's own `current_dir`
+        // boundary (its working directory is `bedrock/`, one level deeper).
+        // A relative run directory does not survive that boundary; this is
+        // the defect this function exists to close.
+        assert!(
+            resolve_run_directory().is_absolute(),
+            "a relative run directory breaks Bedrock support the moment Geyser's \
+             own working directory differs from this process's"
+        );
+    }
+
+    #[test]
+    fn resolve_run_directory_agrees_with_a_fresh_current_dir_lookup() {
+        // The property the whole fix rests on: the login path (which reads
+        // the shared key from `key::key_path(run_directory)`) and the
+        // supervisor (which writes that same path into Geyser's generated
+        // config) must resolve to the identical file on disk. Both start
+        // from this one function's return value, so proving it matches an
+        // independent, fresh lookup of the current directory is what rules
+        // out the two silently drifting apart.
+        let resolved = resolve_run_directory();
+        let expected =
+            env::current_dir().expect("the process's own current directory must be readable");
+        assert_eq!(resolved, expected);
     }
 }
