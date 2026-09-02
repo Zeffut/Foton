@@ -3,6 +3,26 @@
 What Foton is going to build so a Bedrock player can join, and why each piece is
 shaped the way it is. Written 2026-09-01. Nothing here is built yet.
 
+> **This has since been built.** See `README.md` ("Bedrock players") and
+> `CONFIGURATION.md` (`[server.bedrock]`) for what actually shipped and how to
+> configure it — this document stays as the record of the decision and its
+> reasoning, not a current reference. Checked 2026-09-02. Four things below
+> read differently from what shipped:
+>
+> - the config section is `[server.bedrock]`, not `[bedrock]`, and its switch
+>   is `enable`, not `enabled`
+> - `port` defaults to `0` ("share the Java server's port"), not `19132` —
+>   still settable to `19132` explicitly, per the trade-off the field itself
+>   documents
+> - `geyser_overrides` was never built. Foton generates Geyser's configuration
+>   from its own settings, every start, with no merge-in escape hatch for a
+>   knob Foton does not expose
+> - `dev/doctor.sh`'s pin check only confirms the pinned Geyser build still
+>   exists on GeyserMC. It does not check that the build still claims the
+>   protocol `Cargo.toml` targets — that was verified once, by hand, when the
+>   pin was set, and a future version bump needs the same manual check again,
+>   not an automated one
+
 `bedrock-clients.md` is the analysis that came first: it lays out three routes
 and refuses to pick one until stage 0 has been done. This document picks one,
 and says what it costs. Read that one for why the other two were not chosen;
