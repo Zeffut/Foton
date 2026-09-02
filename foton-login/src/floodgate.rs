@@ -128,9 +128,7 @@ mod tests {
     use foton_bedrock::floodgate::encrypt;
     use foton_bedrock::key;
 
-    use super::{
-        BedrockConfig, FloodgateLoginError, resolve_floodgate, resolve_floodgate_login,
-    };
+    use super::{BedrockConfig, FloodgateLoginError, resolve_floodgate, resolve_floodgate_login};
 
     /// The 12 fields in `BedrockData.toString()` order, matching
     /// `foton-bedrock`'s own fixture shape, encrypted into a full handshake
