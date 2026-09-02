@@ -264,12 +264,10 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         }
     }
     if config.bedrock.enable {
-        if config.bedrock.port == 0 {
-            return Err("bedrock.port must be a real port when bedrock is enabled");
-        }
-        if config.bedrock.port == config.server_port {
-            return Err("bedrock.port must differ from server_port");
-        }
+        // `bedrock.port` may legitimately be `0` (share `server_port`, see
+        // `BedrockConfig::resolved_port`) or equal to `server_port` itself:
+        // TCP (Java) and UDP (Bedrock/RakNet) do not share a port namespace,
+        // so neither is a collision.
         if config.bedrock.trusted_proxies.is_empty() {
             return Err("bedrock.trusted_proxies must list at least one address");
         }

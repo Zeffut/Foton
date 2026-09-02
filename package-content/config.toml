@@ -54,8 +54,12 @@ password = ""
 [server.bedrock]
 # Whether Geyser is started and the Bedrock port opened at all.
 enable = false
-# UDP port Bedrock clients connect to.
-port = 19132
+# UDP port Bedrock clients connect to. 0 means "share server_port" -- one
+# port to open, and it keeps following server_port if that ever moves.
+# Trade-off: a Bedrock client's "Add Server" dialog pre-fills 19132, so
+# sharing the Java port means a player must type the port in by hand. Set
+# this to 19132 explicitly for that automatic experience instead.
+port = 0
 # What Bedrock clients see in the server list; empty reuses the server MOTD.
 motd = ""
 # Prepended to a Bedrock player's gamertag so it cannot collide with a Java

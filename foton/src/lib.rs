@@ -301,7 +301,7 @@ async fn start_bedrock_supervisor(
 
     let options = GeyserOptions {
         run_directory: run_directory.to_path_buf(),
-        bedrock_port: bedrock_config.port,
+        bedrock_port: bedrock_config.resolved_port(server_port),
         java_port: server_port,
         // Passed through unresolved: an empty string is exactly what tells
         // `render_config` to emit Geyser's own `passthrough-motd: true` and

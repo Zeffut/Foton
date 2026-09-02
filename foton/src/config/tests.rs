@@ -517,16 +517,29 @@ const BEDROCK_ENABLED: &str =
     "# Whether Geyser is started and the Bedrock port opened at all.\nenable = true";
 
 #[test]
-fn validate_rejects_bedrock_sharing_the_java_port() {
+fn validate_accepts_bedrock_sharing_the_java_port() {
+    // Regression test: this rule was reversed. A shared port number is
+    // exactly what "everything on one port" asks for -- TCP (Java) and UDP
+    // (Bedrock/RakNet) do not share a port namespace, so it is not a
+    // collision. See `BedrockConfig::resolved_port`.
     let config_toml = DEFAULT_CONFIG
         .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
-        .replace("port = 19132", "port = 25565");
+        .replace("port = 0", "port = 25565");
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
-    assert_eq!(
-        validate(&config.server),
-        Err("bedrock.port must differ from server_port")
-    );
+    assert_eq!(validate(&config.server), Ok(()));
+}
+
+#[test]
+fn validate_accepts_the_default_bedrock_port_of_zero() {
+    // The other reversed rule: `0` used to be rejected outright. Now it is
+    // the default, meaning "share `server_port`" -- enabling Bedrock without
+    // touching `port` at all must validate.
+    let config_toml = DEFAULT_CONFIG.replace(BEDROCK_DISABLED, BEDROCK_ENABLED);
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+    assert_eq!(config.server.bedrock.port, 0);
+
+    assert_eq!(validate(&config.server), Ok(()));
 }
 
 #[test]
@@ -542,19 +555,6 @@ fn validate_rejects_bedrock_with_no_trusted_proxies() {
     assert_eq!(
         validate(&config.server),
         Err("bedrock.trusted_proxies must list at least one address")
-    );
-}
-
-#[test]
-fn validate_rejects_bedrock_on_port_zero() {
-    let config_toml = DEFAULT_CONFIG
-        .replace(BEDROCK_DISABLED, BEDROCK_ENABLED)
-        .replace("port = 19132", "port = 0");
-    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
-
-    assert_eq!(
-        validate(&config.server),
-        Err("bedrock.port must be a real port when bedrock is enabled")
     );
 }
 

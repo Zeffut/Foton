@@ -71,7 +71,7 @@ Letting Bedrock Edition players in, through a Geyser this server runs
 | Key | Type | Default | Range | Meaning |
 |---|---|---|---|---|
 | `enable` | boolean | `false` |  | Whether Geyser is started and the Bedrock port opened at all |
-| `port` | integer | `19132` | 1–65535 | UDP port Bedrock clients connect to |
+| `port` | integer | `0` | 0–65535 | UDP port Bedrock clients connect to; 0 shares server_port. Trade-off: Bedrock's Add Server dialog pre-fills 19132, so sharing the Java port means typing the port in by hand -- set this to 19132 explicitly for that automatic experience instead |
 | `motd` | string | `""` |  | What Bedrock clients see in the server list; empty reuses the server MOTD |
 | `username_prefix` | string | `"."` |  | Prepended to a Bedrock player's gamertag so it cannot collide with a Java player's name |
 | `trusted_proxies` | array of string | `["127.0.0.1", "::1"]` |  | Addresses a Floodgate identity handshake is accepted from |

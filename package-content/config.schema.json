@@ -264,10 +264,10 @@
             },
             "port": {
               "type": "integer",
-              "description": "UDP port Bedrock clients connect to",
-              "minimum": 1,
+              "description": "UDP port Bedrock clients connect to; 0 shares server_port. Trade-off: Bedrock's Add Server dialog pre-fills 19132, so sharing the Java port means typing the port in by hand -- set this to 19132 explicitly for that automatic experience instead",
+              "minimum": 0,
               "maximum": 65535,
-              "default": 19132
+              "default": 0
             },
             "motd": {
               "type": "string",

@@ -22,6 +22,18 @@ pub struct BedrockConfig {
     /// Java route, including one carrying a Floodgate payload.
     pub enable: bool,
     /// The UDP port Bedrock clients connect to.
+    ///
+    /// `0` — the default — means "share the Java server's port": one port
+    /// number for an operator to open, and it keeps following `server_port`
+    /// if that ever moves. [`BedrockConfig::resolved_port`] is the single
+    /// place this is turned into an actual port number; TCP (Java) and
+    /// UDP (Bedrock/RakNet) do not share a port namespace, so this is not a
+    /// collision.
+    ///
+    /// The honest trade-off: a Bedrock client's own "Add Server" dialog
+    /// pre-fills `19132`, so sharing the Java port means a player must type
+    /// the port in by hand. An operator who wants that automatic experience
+    /// back sets this to `19132` explicitly.
     pub port: u16,
     /// What Bedrock clients see in the server list; empty reuses the server MOTD.
     pub motd: String,
@@ -44,14 +56,28 @@ impl Default for BedrockConfig {
     fn default() -> Self {
         Self {
             enable: false,
-            // Bedrock's default port.
-            port: 19132,
+            // 0: share the Java server's port. See the field's own doc comment.
+            port: 0,
             motd: String::new(),
             username_prefix: ".".to_owned(),
             trusted_proxies: vec!["127.0.0.1".to_owned(), "::1".to_owned()],
             java_home: String::new(),
             jar_path: String::new(),
         }
+    }
+}
+
+impl BedrockConfig {
+    /// Resolves the actual port Geyser binds: `java_port` when
+    /// [`BedrockConfig::port`] is `0` ("share the Java server's port"),
+    /// otherwise `port` itself.
+    ///
+    /// This is the single place that resolution happens — a caller that
+    /// needs the real Bedrock port number calls this rather than reading
+    /// `port` directly, which would still be `0` when it means "shared".
+    #[must_use]
+    pub const fn resolved_port(&self, java_port: u16) -> u16 {
+        if self.port == 0 { java_port } else { self.port }
     }
 }
 
@@ -67,5 +93,23 @@ mod tests {
         let config = BedrockConfig::default();
         assert!(!config.enable);
         assert_eq!(config.trusted_proxies, vec!["127.0.0.1", "::1"]);
+    }
+
+    #[test]
+    fn resolved_port_defaults_to_sharing_the_java_servers_port() {
+        // `port`'s own default is `0`; `resolved_port` is what turns that
+        // into an actual port number.
+        let config = BedrockConfig::default();
+        assert_eq!(config.port, 0);
+        assert_eq!(config.resolved_port(25565), 25565);
+    }
+
+    #[test]
+    fn resolved_port_honours_an_explicit_port() {
+        let config = BedrockConfig {
+            port: 19132,
+            ..BedrockConfig::default()
+        };
+        assert_eq!(config.resolved_port(25565), 19132);
     }
 }
