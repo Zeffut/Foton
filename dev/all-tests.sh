@@ -51,7 +51,8 @@ for test in dev/join-test.sh dev/selector-test.sh dev/rcon-test.sh \
             dev/mob-persist-test.sh dev/entity-state-test.sh \
             dev/player-state-test.sh dev/advancement-test.sh dev/statistics-test.sh \
             dev/respawn-test.sh dev/respawn-churn-test.sh \
-            dev/client-sync-test.sh; do
+            dev/client-sync-test.sh \
+            dev/bedrock-test.sh; do
   name=$(basename "$test")
   if bash "$test" > "/tmp/$name.out" 2>&1; then
     printf '%-24s PASS\n' "$name"
