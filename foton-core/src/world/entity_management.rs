@@ -3,9 +3,9 @@ use super::{
     DynamicListenerAction, Entity, EntityChunkCallback, EntityLifecycleChanges, EntityOwnership,
     EntityTracker, EntityVisibility, ExperienceOrbEntity, FxHashSet, GameEventContext,
     GameEventDispatcher, GameEventListenerCount, GameEventListenerStorage, GameEventRef,
-    InactiveEntityCallback, ItemEntity, ItemStack, Player, RemovalReason, SectionPos, SharedEntity,
-    SharedGameEventListener, SyncMutex, World, WorldAabb, WorldChangeRequest, block_entity_ticker,
-    mem, vanilla_entities,
+    InactiveEntityCallback, ItemEntity, ItemStack, LightningBoltEntity, Player, RemovalReason,
+    SectionPos, SharedEntity, SharedGameEventListener, SyncMutex, World, WorldAabb,
+    WorldChangeRequest, block_entity_ticker, mem, next_entity_id, vanilla_entities,
 };
 
 pub(super) struct NavigatingMobTracker {
@@ -244,6 +244,21 @@ impl World {
             .unwrap_or(false)
     }
 
+    /// Spawns a lightning bolt through the canonical world entity path.
+    pub fn spawn_lightning(
+        self: &Arc<Self>,
+        position: DVec3,
+    ) -> Result<Arc<LightningBoltEntity>, AddEntityError> {
+        let bolt = Arc::new(LightningBoltEntity::new(
+            &vanilla_entities::LIGHTNING_BOLT,
+            next_entity_id(),
+            position,
+            Arc::downgrade(self),
+        ));
+        self.try_add_entity(Arc::clone(&bolt) as SharedEntity)?;
+        Ok(bolt)
+    }
+
     /// Adds a runtime entity to the world.
     pub fn try_add_entity(self: &Arc<Self>, entity: SharedEntity) -> Result<(), AddEntityError> {
         let chunk_pos = ChunkPos::from_entity_pos(entity.position());
@@ -373,6 +388,20 @@ impl World {
             velocity,
             Arc::downgrade(self),
         ));
+        let mut spawn_event = crate::event::ItemSpawnEvent::new(
+            entity.uuid(),
+            self.key.to_string(),
+            pos.x,
+            pos.y,
+            pos.z,
+            entity.get_item(),
+        );
+        self.begin_pending_spawn(Arc::clone(&(entity.clone() as SharedEntity)));
+        self.fire_event(&mut spawn_event);
+        self.end_pending_spawn(&entity.uuid());
+        if spawn_event.is_cancelled() {
+            return None;
+        }
         if let Err(error) = self.try_add_entity(entity.clone()) {
             log::warn!("Failed to spawn item entity: {error}");
             return None;
@@ -563,7 +592,19 @@ impl World {
     /// Returns `None` if the entity is not live in the world.
     #[must_use]
     pub fn get_entity_by_uuid(&self, uuid: &uuid::Uuid) -> Option<SharedEntity> {
-        self.entity_manager.get_by_uuid(uuid)
+        self.entity_manager
+            .get_by_uuid(uuid)
+            .or_else(|| self.pending_spawn_entities.lock().get(uuid).cloned())
+    }
+
+    pub(crate) fn begin_pending_spawn(&self, entity: SharedEntity) {
+        self.pending_spawn_entities
+            .lock()
+            .insert(entity.uuid(), entity);
+    }
+
+    pub(crate) fn end_pending_spawn(&self, uuid: &uuid::Uuid) {
+        self.pending_spawn_entities.lock().remove(uuid);
     }
 
     /// Gets all entities intersecting the given bounding box.

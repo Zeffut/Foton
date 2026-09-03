@@ -26,6 +26,7 @@ license = "AGPL-3.0-or-later"
 foton-core = { path = "foton-core" }
 foton-crypto = { path = "foton-crypto" }
 foton-login = { path = "foton-login" }
+foton-plugin = { path = "foton-plugin" }
 foton-macros = { path = "foton-macros" }
 foton-protocol = { path = "foton-protocol" }
 foton-registry = { path = "foton-registry" }

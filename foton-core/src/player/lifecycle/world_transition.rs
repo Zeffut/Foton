@@ -31,6 +31,40 @@ impl Player {
         teleport_transition: &TeleportTransition,
     ) -> bool {
         let current_world = self.get_world();
+        let current_position = self.position();
+        let current_rotation = self.rotation();
+        let current_velocity = self.velocity();
+        let mut teleport_transition = teleport_transition.clone();
+        if matches!(
+            teleport_transition.cause,
+            crate::portal::TeleportTransitionCause::NetherPortal
+                | crate::portal::TeleportTransitionCause::EndPortal
+                | crate::portal::TeleportTransitionCause::EndGateway
+        ) {
+            let mut event = crate::event::PlayerPortalEvent::new(
+                self.uuid(),
+                current_world.key.to_string(),
+                current_position,
+                current_rotation,
+                teleport_transition.target_world.key.to_string(),
+                teleport_transition.position,
+                teleport_transition.rotation,
+                teleport_transition.cause,
+            );
+            self.server().events().fire(&mut event);
+            if event.is_cancelled() {
+                return false;
+            }
+            let Some(target_key) = event.to_world().parse().ok() else {
+                return false;
+            };
+            let Some(target_world) = self.server().worlds.get(&target_key) else {
+                return false;
+            };
+            teleport_transition.target_world = target_world;
+            teleport_transition.position = event.to_position();
+            teleport_transition.rotation = event.to_rotation();
+        }
         let new_world = Arc::clone(&teleport_transition.target_world);
         let new_world_key = new_world.key.clone();
         if current_world.domain() != new_world.domain() {
@@ -42,10 +76,6 @@ impl Player {
             );
             return false;
         }
-
-        let current_position = self.position();
-        let current_rotation = self.rotation();
-        let current_velocity = self.velocity();
         let position = teleport_transition.resolved_position(current_position);
         let rotation = teleport_transition.resolved_rotation(current_rotation);
         let velocity =

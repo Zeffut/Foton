@@ -6,7 +6,9 @@ use foton_utils::Identifier;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use foton_utils::locks::SyncMutex;
 
-use super::{Event, EventBus, EventPriority};
+use super::{
+    EntityResurrectEvent, Event, EventBus, EventPriority, ThunderChangeEvent, WeatherChangeEvent,
+};
 
 /// An event that records who ran, in order.
 struct Trace {
@@ -193,4 +195,70 @@ fn firing_with_no_listeners_does_nothing() {
     bus.fire(&mut event);
 
     assert!(event.ran.is_empty());
+}
+
+#[test]
+fn cancelled_resurrection_skips_consumption_listener() {
+    let bus = EventBus::new();
+    let consumed = Arc::new(SyncMutex::new(false));
+    let consumed_by_listener = Arc::clone(&consumed);
+
+    bus.listen::<EntityResurrectEvent, _>(
+        owner("resurrection-canceler"),
+        EventPriority::Lowest,
+        false,
+        |event| event.set_cancelled(true),
+    );
+    bus.listen::<EntityResurrectEvent, _>(
+        owner("consume-totem"),
+        EventPriority::Normal,
+        false,
+        move |_| *consumed_by_listener.lock() = true,
+    );
+
+    let mut event = EntityResurrectEvent::new(uuid::Uuid::from_u128(42));
+    bus.fire(&mut event);
+
+    assert!(event.is_cancelled());
+    assert!(
+        !*consumed.lock(),
+        "a cancelled resurrection must not consume the death-protection item"
+    );
+}
+
+#[test]
+fn weather_events_are_distinct_and_cancellation_is_observable() {
+    let bus = EventBus::new();
+    let thunder_ran = Arc::new(SyncMutex::new(false));
+    let thunder_ran_by_listener = Arc::clone(&thunder_ran);
+
+    bus.listen::<WeatherChangeEvent, _>(
+        owner("weather-canceler"),
+        EventPriority::Normal,
+        false,
+        |event| {
+            assert_eq!(event.world(), "test_world");
+            assert!(event.raining());
+            event.set_cancelled(true);
+        },
+    );
+    bus.listen::<ThunderChangeEvent, _>(
+        owner("thunder-observer"),
+        EventPriority::Normal,
+        false,
+        move |event| {
+            assert_eq!(event.world(), "test_world");
+            assert!(event.thundering());
+            *thunder_ran_by_listener.lock() = true;
+        },
+    );
+
+    let mut weather = WeatherChangeEvent::new("test_world", true);
+    bus.fire(&mut weather);
+    assert!(weather.is_cancelled());
+
+    let mut thunder = ThunderChangeEvent::new("test_world", true);
+    bus.fire(&mut thunder);
+    assert!(!thunder.is_cancelled());
+    assert!(*thunder_ran.lock());
 }

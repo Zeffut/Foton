@@ -17,6 +17,7 @@ use super::{
     obfuscate_biome_seed, vanilla_dimension_types,
 };
 use crate::entity::ai::brain::{Activity, ScheduleAttribute};
+use crate::event::{Event, ThunderChangeEvent, WeatherChangeEvent};
 
 /// Biome temperature below which precipitation falls as snow.
 ///
@@ -65,8 +66,11 @@ impl World {
         let raining_before = self.is_raining_with_guard(&weather);
 
         // Advance the weather state machine (only if gamerule allows)
+        let (raining_changed, thundering_changed, raining_target, thundering_target);
         {
             let mut level_data = self.level_data.write();
+            let raining_before_flag = level_data.is_raining();
+            let thundering_before_flag = level_data.is_thundering();
 
             if self.get_game_rule_with_guard(&ADVANCE_WEATHER, &level_data) {
                 let clear_weather_time = level_data.clear_weather_time();
@@ -110,6 +114,27 @@ impl World {
                     } else {
                         level_data.set_rain_time(rand::random_range(12_000..=180_000));
                     }
+                }
+            }
+            raining_target = level_data.is_raining();
+            thundering_target = level_data.is_thundering();
+            raining_changed = raining_target != raining_before_flag;
+            thundering_changed = thundering_target != thundering_before_flag;
+        }
+
+        if let Some(server) = self.server() {
+            if raining_changed {
+                let mut event = WeatherChangeEvent::new(self.key.to_string(), raining_target);
+                server.events.fire(&mut event);
+                if event.is_cancelled() {
+                    self.level_data.write().set_raining(!raining_target);
+                }
+            }
+            if thundering_changed {
+                let mut event = ThunderChangeEvent::new(self.key.to_string(), thundering_target);
+                server.events.fire(&mut event);
+                if event.is_cancelled() {
+                    self.level_data.write().set_thundering(!thundering_target);
                 }
             }
         }
@@ -187,19 +212,41 @@ impl World {
     ///
     /// Minecraft 26.2 owns this state at server scope. Foton intentionally owns
     /// it per world so multiple worlds in one domain can have independent weather.
-    pub(crate) fn set_weather_parameters(
+    pub fn set_weather_parameters(
         &self,
         clear_time: i32,
         rain_time: i32,
         raining: bool,
         thundering: bool,
     ) {
-        let mut level_data = self.level_data.write();
-        level_data.set_clear_weather_time(clear_time);
-        level_data.set_rain_time(rain_time);
-        level_data.set_thunder_time(rain_time);
-        level_data.set_raining(raining);
-        level_data.set_thundering(thundering);
+        let (old_raining, old_thundering) = {
+            let level_data = self.level_data.read();
+            (level_data.is_raining(), level_data.is_thundering())
+        };
+        {
+            let mut level_data = self.level_data.write();
+            level_data.set_clear_weather_time(clear_time);
+            level_data.set_rain_time(rain_time);
+            level_data.set_thunder_time(rain_time);
+            level_data.set_raining(raining);
+            level_data.set_thundering(thundering);
+        }
+        if let Some(server) = self.server() {
+            if old_raining != raining {
+                let mut event = WeatherChangeEvent::new(self.key.to_string(), raining);
+                server.events.fire(&mut event);
+                if event.is_cancelled() {
+                    self.level_data.write().set_raining(old_raining);
+                }
+            }
+            if old_thundering != thundering {
+                let mut event = ThunderChangeEvent::new(self.key.to_string(), thundering);
+                server.events.fire(&mut event);
+                if event.is_cancelled() {
+                    self.level_data.write().set_thundering(old_thundering);
+                }
+            }
+        }
     }
 
     /// Checks whether the rain level is high enough to be considered raining.
@@ -452,6 +499,10 @@ impl World {
     /// Returns the seed vanilla's `BiomeManager` fuzzes block-level biome lookups with.
     pub(crate) fn biome_zoom_seed(&self) -> i64 {
         obfuscate_biome_seed(self.seed())
+    }
+
+    pub fn biome_key_at(&self, pos: BlockPos) -> Option<String> {
+        self.biome_at(pos).map(|biome| biome.key.to_string())
     }
 
     pub(crate) fn biome_at(&self, pos: BlockPos) -> Option<BiomeRef> {

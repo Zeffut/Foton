@@ -10,6 +10,9 @@
 
 use std::sync::{Arc, Weak};
 
+use foton_registry::RegistryEntry as _;
+use foton_registry::RegistryHolderEntry as _;
+use foton_registry::banner_pattern::BannerPattern;
 use foton_registry::data_components::DataComponentMap;
 use foton_registry::data_components::components::{BannerPatternLayer, BannerPatternLayers};
 use foton_registry::data_components::vanilla_components::{BANNER_PATTERNS, CUSTOM_NAME};
@@ -17,7 +20,7 @@ use foton_registry::dye_color::DyeColor;
 use foton_registry::registry::holder::RegistryHolder;
 use foton_registry::vanilla_block_entity_types;
 use foton_utils::locks::SyncMutex;
-use foton_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
+use foton_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier};
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use simdnbt::{FromNbtTag as _, ToNbtTag as _};
@@ -71,6 +74,51 @@ impl BannerBlockEntity {
     #[must_use]
     pub fn patterns(&self) -> BannerPatternLayers {
         self.state.lock().patterns.clone()
+    }
+
+    /// Replaces the pattern layers and publishes the changed block entity.
+    pub fn set_patterns(&self, patterns: BannerPatternLayers) {
+        {
+            let mut state = self.state.lock();
+            if state.patterns == patterns {
+                return;
+            }
+            state.patterns = patterns;
+        }
+        self.set_changed();
+    }
+
+    /// Returns registry keys and dye ids for Bukkit-facing pattern views.
+    #[must_use]
+    pub fn pattern_descriptions(&self) -> Vec<(String, u8)> {
+        self.patterns()
+            .layers()
+            .iter()
+            .map(|layer| {
+                let key = layer
+                    .pattern()
+                    .as_reference()
+                    .map(|pattern| pattern.key().to_string())
+                    .unwrap_or_else(|| layer.pattern().value().asset_id().to_string());
+                (key, layer.color() as u8)
+            })
+            .collect()
+    }
+
+    /// Replaces layers after validating each referenced Vanilla registry key.
+    pub fn set_pattern_descriptions(&self, descriptions: Vec<(Identifier, DyeColor)>) -> bool {
+        let mut layers = Vec::with_capacity(descriptions.len());
+        for (key, color) in descriptions {
+            let Some(pattern) = BannerPattern::holder_by_key(&key) else {
+                return false;
+            };
+            layers.push(BannerPatternLayer::new(
+                RegistryHolder::reference(pattern),
+                color,
+            ));
+        }
+        self.set_patterns(BannerPatternLayers::new(layers));
+        true
     }
 
     /// Returns the banner's custom name, if it was renamed.

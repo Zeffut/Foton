@@ -6,6 +6,8 @@
 //! - Slots 10-36: Main inventory (27)
 //! - Slots 37-45: Hotbar (9)
 
+use crate::entity::Entity;
+use crate::event::PrepareItemCraftEvent;
 use crate::inventory::container::CraftingContainer;
 use crate::inventory::container::ResultContainer;
 use crate::inventory::prelude::*;
@@ -98,6 +100,17 @@ impl MenuKind for CraftingKind {
         _player: &Player,
     ) {
         self.handler.update_result(guard);
+        let Some(matrix) = self.handler.input_snapshot(guard) else {
+            return;
+        };
+        let result = self
+            .handler
+            .result_snapshot(guard)
+            .unwrap_or_else(ItemStack::empty);
+        let mut event = PrepareItemCraftEvent::new(_player.uuid(), matrix, result, false);
+        _player.fire_event(&mut event);
+        self.handler
+            .apply_snapshot(guard, event.matrix().to_vec(), event.result().clone());
     }
 }
 

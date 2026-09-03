@@ -1,0 +1,3 @@
+package org.bukkit.event.player;
+import org.bukkit.entity.*; import org.bukkit.event.Cancellable; import org.bukkit.event.HandlerList;
+public final class PlayerShearEntityEvent extends PlayerEvent implements Cancellable { private final Entity entity; private boolean cancelled; private static final HandlerList HANDLERS=new HandlerList(); public PlayerShearEntityEvent(Player p,Entity e){super(p);entity=e;} public Entity getEntity(){return entity;} public boolean isCancelled(){return cancelled;} public void setCancelled(boolean v){cancelled=v;} public HandlerList getHandlers(){return HANDLERS;} public static HandlerList getHandlerList(){return HANDLERS;} }

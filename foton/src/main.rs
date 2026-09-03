@@ -385,6 +385,7 @@ async fn run_server(
     let server = foton.server.clone();
 
     if !server.prepare_spawn_area().await {
+        foton.disable_plugins();
         shutdown_worlds(&server).await;
         return Ok(());
     }
@@ -483,6 +484,12 @@ async fn shutdown_worlds(server: &Arc<Server>) {
                 uuid,
                 &GlobalPlayerData {
                     last_active_domain: domain,
+                    first_played: 0,
+                    last_played: 0,
+                    statistics: Vec::new(),
+                    whitelisted: server
+                        .global_player_data(uuid)
+                        .is_some_and(|data| data.whitelisted),
                 },
             )
             .await

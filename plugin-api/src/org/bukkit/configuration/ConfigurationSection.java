@@ -13,6 +13,17 @@ import java.util.Set;
 public interface ConfigurationSection {
     Set<String> getKeys(boolean deep);
 
+    default java.util.Map<String, Object> getValues(boolean deep) {
+        java.util.LinkedHashMap<String, Object> values = new java.util.LinkedHashMap<>();
+        for (String key : getKeys(deep)) {
+            Object value = get(key);
+            if (value != null) values.put(key, value);
+        }
+        return values;
+    }
+
+
+
     boolean contains(String path);
 
     boolean isSet(String path);
@@ -76,6 +87,16 @@ public interface ConfigurationSection {
     List<Double> getDoubleList(String path);
 
     List<Boolean> getBooleanList(String path);
+
+    default org.bukkit.inventory.ItemStack getItemStack(String path) {
+        Object value = get(path);
+        return value instanceof org.bukkit.inventory.ItemStack ? ((org.bukkit.inventory.ItemStack) value).clone() : null;
+    }
+
+    default org.bukkit.inventory.ItemStack getItemStack(String path, org.bukkit.inventory.ItemStack def) {
+        org.bukkit.inventory.ItemStack value = getItemStack(path);
+        return value == null ? def : value;
+    }
 
     ConfigurationSection getConfigurationSection(String path);
 

@@ -35,12 +35,27 @@ pub(super) struct TagEntry {
 /// Everything a datapack scan found, already merged across packs.
 #[derive(Debug, Default)]
 pub(super) struct DatapackContents {
+    /// Datapacks that were discovered and accepted for this load, in pack order.
+    pub(super) packs: Vec<DatapackInfo>,
     /// Function sources keyed by id. A later pack replaces an earlier one.
     pub(super) functions: FxHashMap<Identifier, FunctionSource>,
     /// Tag entries keyed by tag id, accumulated in pack order.
     pub(super) tags: FxHashMap<Identifier, Vec<TagEntry>>,
     /// Files that could not be read or understood, reported by the caller.
     pub(super) errors: Vec<String>,
+}
+
+/// A datapack directory accepted by the active resource loader.
+///
+/// A pack is reported as compatible only after it has passed the same
+/// directory/resource scan used by the function loader. Foton currently has
+/// no separate pack-format validator, so accepted packs are the authoritative
+/// compatible set rather than an invented version claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DatapackInfo {
+    pub(super) name: String,
+    pub(super) compatibility: &'static str,
+    pub(super) enabled: bool,
 }
 
 #[derive(Debug)]
@@ -100,6 +115,11 @@ pub(super) fn collect(root: &Path) -> DatapackContents {
         if !data.is_dir() {
             continue;
         }
+        contents.packs.push(DatapackInfo {
+            name: pack_name.clone(),
+            compatibility: "COMPATIBLE",
+            enabled: true,
+        });
         let namespaces = match read_sorted_directories(&data) {
             Ok(namespaces) => namespaces,
             Err(error) => {

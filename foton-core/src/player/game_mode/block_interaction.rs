@@ -262,12 +262,32 @@ impl Player {
             return;
         }
 
-        let mut text = sign.get_text(packet.is_front_text);
+        let mut lines = std::array::from_fn(|i| {
+            sign.get_text(packet.is_front_text)
+                .get_message(i)
+                .map_or_else(String::new, |line| {
+                    line.to_plain(&foton_utils::text::DisplayResolutor)
+                })
+        });
         for (i, line) in packet.lines.iter().enumerate() {
             if i < 4 {
-                let stripped = strip_formatting_codes(line);
-                text.set_message(i, TextComponent::plain(stripped));
+                lines[i] = strip_formatting_codes(line);
             }
+        }
+
+        let mut event = crate::event::SignChangeEvent::new(
+            self.gameprofile.id,
+            world.key.to_string(),
+            packet.pos,
+            lines,
+        );
+        self.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
+        let mut text = sign.get_text(packet.is_front_text);
+        for (i, line) in event.lines().iter().enumerate() {
+            text.set_message(i, TextComponent::plain(line.clone()));
         }
 
         sign.set_text(text, packet.is_front_text);
@@ -289,7 +309,32 @@ impl Player {
     /// * `pos` - Position of the sign block
     /// * `is_front_text` - Whether to edit front (true) or back (false) text
     pub fn open_sign_editor(&self, pos: BlockPos, is_front_text: bool) {
+        self.open_sign_editor_with_cause(
+            pos,
+            is_front_text,
+            crate::event::PlayerOpenSignCause::Interact,
+        );
+    }
+
+    pub fn open_sign_editor_with_cause(
+        &self,
+        pos: BlockPos,
+        is_front_text: bool,
+        cause: crate::event::PlayerOpenSignCause,
+    ) {
         let world = self.get_world();
+
+        let mut event = crate::event::PlayerOpenSignEvent::new(
+            self.gameprofile.id,
+            world.key.to_string(),
+            pos,
+            is_front_text,
+            cause,
+        );
+        self.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
 
         if let Some(block_entity) = world.get_block_entity(pos)
             && let Some(sign) = block_entity.downcast_ref::<SignBlockEntity>()

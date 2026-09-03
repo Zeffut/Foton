@@ -100,6 +100,16 @@ impl JavaTcpClient {
             Ok(gameprofile) => gameprofile,
             Err(error) => return self.reject_unexpected_packet(error).await,
         };
+        let mut pre_login = foton_core::event::AsyncPlayerPreLoginEvent::new(
+            gameprofile.id,
+            gameprofile.name.clone(),
+            self.address,
+        );
+        self.server.events().fire(&mut pre_login);
+        if let Some(message) = pre_login.kick_message() {
+            self.kick(message.to_owned().into()).await;
+            return ConnectionAction::none();
+        }
         self.protocol.store(ConnectionProtocol::Play);
 
         let client_info = self.client_information.lock().await.clone();
@@ -114,6 +124,7 @@ impl JavaTcpClient {
                 self.compression.load(),
                 self.network_writer.clone(),
                 self.id,
+                self.address,
                 player_weak.clone(),
             );
             let connection = Arc::new(PlayerConnection::Java(java_connection));

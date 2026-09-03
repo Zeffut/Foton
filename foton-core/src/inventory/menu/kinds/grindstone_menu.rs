@@ -15,7 +15,9 @@ use foton_registry::{level_events, vanilla_blocks, vanilla_menu_types};
 use foton_utils::BlockPos;
 use foton_utils::locks::{IntoShared, Shared};
 
+use crate::entity::Entity;
 use crate::entity::entities::ExperienceOrbEntity;
+use crate::event::PrepareGrindstoneEvent;
 use crate::inventory::container::{ResultContainer, SimpleContainer};
 use crate::inventory::prelude::*;
 use crate::inventory::slots::GrindstoneHandler;
@@ -79,6 +81,18 @@ impl MenuKind for GrindstoneKind {
         _player: &Player,
     ) {
         self.handler.update_result(guard);
+        let Some((upper, lower)) = self.handler.input_snapshot(guard) else {
+            return;
+        };
+        let result = self.handler.result_snapshot(guard);
+        let mut event = PrepareGrindstoneEvent::new(_player.uuid(), upper, lower, result);
+        _player.fire_event(&mut event);
+        self.handler.apply_snapshot(
+            guard,
+            event.upper().clone(),
+            event.lower().clone(),
+            event.result().clone(),
+        );
     }
 
     /// Vanilla parity: the `onTake` of the result slot. The experience is read

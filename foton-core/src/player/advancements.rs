@@ -73,6 +73,18 @@ impl Player {
     ///
     /// Vanilla parity: `PlayerAdvancements.award`.
     pub fn award_advancement_criterion(&self, node: usize, criterion: &str) -> AwardOutcome {
+        let advancement = ADVANCEMENT_TREE.node(node).advancement;
+        let mut grant_event = crate::event::PlayerAdvancementCriterionGrantEvent::new(
+            self.uuid(),
+            advancement.key.to_string(),
+            criterion.to_owned(),
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.events.fire(&mut grant_event);
+        }
+        if grant_event.is_cancelled() {
+            return AwardOutcome::default();
+        }
         let outcome = self
             .advancements
             .lock()
@@ -92,9 +104,12 @@ impl Player {
 
     /// Marks every criterion of one advancement met.
     pub fn award_advancement(&self, node: usize) -> AwardOutcome {
-        let outcome = self.advancements.lock().award_all(node, now_epoch_millis());
-        if outcome.completed {
-            self.complete_advancement(node);
+        let advancement = ADVANCEMENT_TREE.node(node).advancement;
+        let mut outcome = AwardOutcome::default();
+        for criterion in advancement.criteria {
+            let step = self.award_advancement_criterion(node, criterion.name);
+            outcome.granted |= step.granted;
+            outcome.completed |= step.completed;
         }
         outcome
     }
@@ -177,6 +192,11 @@ impl Player {
     fn complete_advancement(&self, node: usize) {
         let advancement = ADVANCEMENT_TREE.node(node).advancement;
         self.grant_advancement_rewards(&advancement.rewards);
+        let mut event =
+            crate::event::PlayerAdvancementDoneEvent::new(self.uuid(), advancement.key.to_string());
+        if let Some(server) = self.server.upgrade() {
+            server.events.fire(&mut event);
+        }
 
         let Some(display) = advancement.display.as_ref() else {
             return;

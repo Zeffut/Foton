@@ -4,7 +4,7 @@ import java.util.List;
 import org.bukkit.plugin.Plugin;
 
 /** A command a plugin declared in its plugin.yml. */
-public final class PluginCommand extends Command {
+public final class PluginCommand extends Command implements PluginIdentifiableCommand {
     private final Plugin owner;
     private CommandExecutor executor;
     private TabCompleter completer;
@@ -18,6 +18,7 @@ public final class PluginCommand extends Command {
         this.completer = owner instanceof TabCompleter ? (TabCompleter) owner : null;
     }
 
+    @Override
     public Plugin getPlugin() {
         return owner;
     }

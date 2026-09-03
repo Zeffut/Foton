@@ -154,6 +154,10 @@ impl ArmorStandEntity {
         self.has_flag(FLAG_SHOW_ARMS)
     }
 
+    pub fn set_show_arms(&self, show: bool) {
+        self.set_flag(FLAG_SHOW_ARMS, show);
+    }
+
     /// Vanilla parity: `ArmorStand.showBasePlate`, which is stored inverted.
     #[must_use]
     pub fn show_base_plate(&self) -> bool {

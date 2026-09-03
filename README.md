@@ -162,6 +162,24 @@ foton            binary, CLI, console, RCON
       └─ foton-crypto     RSA and session authentication
 ```
 
+
+## Java/Paper plugins
+
+The optional Bukkit/Paper compatibility host is enabled only when both the
+plugin directory and Java runtime are configured:
+
+```sh
+FOTON_PLUGIN_DIRECTORY=./plugins
+FOTON_JAVA_HOME=/path/to/jdk
+cargo run
+```
+
+The API jar defaults to `plugin-api/build/foton-plugin-api.jar`. Override it
+with FOTON_PLUGIN_API_JAR; external dependency jars may be placed in a
+folder selected by FOTON_PLUGIN_LIBRARY_DIRECTORY. With no
+FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
+unchanged.
+
 ## License
 
 Foton is free software under the

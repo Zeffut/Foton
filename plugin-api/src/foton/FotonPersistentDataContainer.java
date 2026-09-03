@@ -27,6 +27,7 @@ public final class FotonPersistentDataContainer implements PersistentDataContain
     @Override public <P, C> boolean has(NamespacedKey key, PersistentDataType<P, C> type) {
         return values.containsKey(key);
     }
+    @Override public boolean has(NamespacedKey key) { return values.containsKey(key); }
     @Override public void remove(NamespacedKey key) { values.remove(key); }
     @Override public Set<NamespacedKey> getKeys() { return new HashSet<>(values.keySet()); }
     public FotonPersistentDataContainer copy() {

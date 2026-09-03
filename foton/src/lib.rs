@@ -11,6 +11,7 @@ use std::{
 
 use foton_core::{command::CommandRegistry, permission::PermissionGroupManager, server::Server};
 use foton_login::{JavaTcpClient, ServerConnectionSession};
+use foton_plugin::{PluginHost, PluginHostConfig};
 use tokio::{net::TcpListener, runtime::Runtime, select};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
@@ -40,6 +41,8 @@ pub struct FotonServer {
     pub connection_session: Arc<ServerConnectionSession>,
     /// The bound Rcon port, when remote administration is enabled.
     pub rcon_listener: Option<rcon::RconListener>,
+    /// Java plugin host, enabled only when FOTON_PLUGIN_DIRECTORY is set.
+    plugin_host: Option<PluginHost>,
 }
 
 /// Startup error for expected operational failures.
@@ -54,6 +57,8 @@ pub enum FotonServerError {
         /// Underlying IO error.
         source: io::Error,
     },
+    /// Plugin host could not be started or loaded.
+    Plugin(String),
     /// The Rcon listener could not bind.
     RconBind {
         /// Rcon port that failed to bind.
@@ -70,6 +75,7 @@ impl fmt::Display for FotonServerError {
             Self::Bind { port, source } => {
                 write!(f, "failed to bind to server port {port}: {source}")
             }
+            Self::Plugin(error) => write!(f, "plugin host failed: {error}"),
             Self::RconBind { port, source } => {
                 write!(f, "failed to bind to rcon port {port}: {source}")
             }
@@ -120,7 +126,42 @@ impl FotonServer {
             .into_runtime_config()
             .map_err(FotonServerError::Core)?;
 
-        let server = Server::new_with_commands(
+        // Bukkit's onLoad phase must run before core publishes immutable
+        // registries. The host is started without a server binding; native
+        // gameplay calls are bound only after Server::new_with_commands has
+        // completed its registry bootstrap.
+        let plugin_host = match std::env::var_os("FOTON_PLUGIN_DIRECTORY") {
+            None => None,
+            Some(plugin_directory) => {
+                let plugin_directory = std::path::PathBuf::from(plugin_directory);
+                let java_home = std::env::var_os("FOTON_JAVA_HOME").ok_or_else(|| {
+                    FotonServerError::Plugin(
+                        "FOTON_JAVA_HOME is required when FOTON_PLUGIN_DIRECTORY is set".to_owned(),
+                    )
+                })?;
+                let api_jar = std::env::var_os("FOTON_PLUGIN_API_JAR").map_or_else(
+                    || std::path::PathBuf::from("plugin-api/build/foton-plugin-api.jar"),
+                    std::path::PathBuf::from,
+                );
+                let library_directory = std::env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
+                    .map(std::path::PathBuf::from);
+                let host = PluginHost::start(
+                    &PluginHostConfig {
+                        java_home: java_home.into(),
+                        api_jar,
+                        library_directory,
+                        plugin_directory: plugin_directory.clone(),
+                    },
+                    &std::sync::Weak::new(),
+                )
+                .map_err(|error| FotonServerError::Plugin(error.to_string()))?;
+                host.load_all_on_load(&plugin_directory)
+                    .map_err(|error| FotonServerError::Plugin(error.to_string()))?;
+                Some(host)
+            }
+        };
+
+        let server = match Server::new_with_commands(
             chunk_runtime,
             cancel_token.clone(),
             runtime_config,
@@ -129,7 +170,23 @@ impl FotonServer {
             command_registry,
         )
         .await
-        .map_err(FotonServerError::Core)?;
+        {
+            Ok(server) => Arc::new(server),
+            Err(error) => {
+                if let Some(host) = &plugin_host {
+                    let _ = host.disable_all();
+                }
+                return Err(FotonServerError::Core(error));
+            }
+        };
+
+        if let Some(host) = &plugin_host {
+            host.bind_server(&Arc::downgrade(&server));
+            if let Err(error) = host.enable_all() {
+                let _ = host.disable_all();
+                return Err(FotonServerError::Plugin(error.to_string()));
+            }
+        }
 
         let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, server_port))
             .await
@@ -155,10 +212,20 @@ impl FotonServer {
             tcp_listener,
             cancel_token,
             client_id: 0,
-            server: Arc::new(server),
+            server,
+            plugin_host,
             connection_session: Arc::new(ServerConnectionSession::default()),
             rcon_listener,
         })
+    }
+
+    /// Disables loaded plugins during an early or orderly shutdown.
+    pub fn disable_plugins(&mut self) {
+        if let Some(host) = self.plugin_host.take() {
+            if let Err(error) = host.disable_all() {
+                log::warn!("Failed to disable plugins cleanly: {error}");
+            }
+        }
     }
 
     /// Starts the server and begins accepting connections.
@@ -212,5 +279,6 @@ impl FotonServer {
             }
         }
         let _ = server_handle.await;
+        self.disable_plugins();
     }
 }

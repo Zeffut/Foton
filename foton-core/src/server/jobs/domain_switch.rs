@@ -307,17 +307,26 @@ impl DomainSwitchJob {
         let task_server = Arc::clone(server);
         let task_target_domain = self.target_domain.clone();
         let uuid = self.player.gameprofile.id;
+        // Keep the synchronous OfflinePlayer cache aligned with the domain just entered.
+        let statistics = PersistentPlayerData::from_player(&self.player).statistics;
         let task = tokio::spawn(async move {
+            let global = GlobalPlayerData {
+                last_active_domain: task_target_domain,
+                first_played: 0,
+                last_played: 0,
+                statistics,
+                whitelisted: task_server
+                    .global_player_data(uuid)
+                    .is_some_and(|data| data.whitelisted),
+            };
             let result = task_server
                 .player_data_storage
-                .save_global(
-                    uuid,
-                    &GlobalPlayerData {
-                        last_active_domain: task_target_domain,
-                    },
-                )
+                .save_global(uuid, &global)
                 .await
                 .map_err(|error| format!("failed to save active domain: {error}"));
+            if result.is_ok() {
+                task_server.publish_global_player_data(uuid, global);
+            }
             let _ = sender.send(result);
         });
         self.phase = DomainSwitchJobPhase::SavingGlobal { receiver, task };

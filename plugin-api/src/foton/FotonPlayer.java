@@ -14,16 +14,92 @@ import org.bukkit.plugin.Plugin;
  * what they answer stops meaning anything -- so a handle that stops resolving
  * is not a new hazard for a plugin to learn.
  */
-public final class FotonPlayer implements Player {
+public final class FotonPlayer implements Player, org.bukkit.projectiles.ProjectileSource, net.kyori.adventure.audience.Audience {
+    @Override public void playEffect(org.bukkit.EntityEffect effect) { if (effect != null) Native.playerEntityEffect(getUniqueId().toString(), effect.name()); }
+
+    @Override public Player getKiller() {
+        String uuid = Native.playerKiller(id.toString());
+        try { return uuid == null ? null : new FotonPlayer(UUID.fromString(uuid)); }
+        catch (IllegalArgumentException ignored) { return null; }
+    }
+    @Override public boolean isSprinting() { return Native.entitySprinting(id.toString()); }
+    @Override public boolean isSwimming() { return Native.entitySwimming(id.toString()); }
+    @Override public void hideEntity(Plugin plugin, org.bukkit.entity.Entity entity) {
+        if (entity != null) Native.playerHideEntity(id.toString(), entity.getUniqueId().toString(), true);
+    }
+    @Override public void showEntity(Plugin plugin, org.bukkit.entity.Entity entity) {
+        if (entity != null) Native.playerHideEntity(id.toString(), entity.getUniqueId().toString(), false);
+    }
+    @Override public boolean canSee(Player other) {
+        return other != null && other.isOnline()
+            && Native.playerCanSeeEntity(id.toString(), other.getUniqueId().toString());
+    }
+    @Override public void hidePlayer(Player other) {
+        if (other != null) Native.playerHideEntity(id.toString(), other.getUniqueId().toString(), true);
+    }
+    @Override public void showPlayer(Player other) {
+        if (other != null) Native.playerHideEntity(id.toString(), other.getUniqueId().toString(), false);
+    }
+    @Override public java.util.Set<org.bukkit.entity.Entity> getTrackedBy() {
+        String[] ids = Native.entityTrackedBy(id.toString());
+        java.util.LinkedHashSet<org.bukkit.entity.Entity> result = new java.util.LinkedHashSet<>();
+        if (ids != null) for (String value : ids) try { result.add(new FotonPlayer(UUID.fromString(value))); }
+        catch (IllegalArgumentException ignored) { }
+        return java.util.Collections.unmodifiableSet(result);
+    }
+    private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private final UUID id;
+    private final java.util.concurrent.CopyOnWriteArrayList<org.bukkit.permissions.PermissionAttachment> attachments = new java.util.concurrent.CopyOnWriteArrayList<>();
+    @Override public int getPing() { return Native.playerPing(id.toString()); }
+    @Override public float getWalkSpeed() { return Native.playerWalkSpeed(id.toString()); }
+    @Override public void setWalkSpeed(float speed) { Native.setPlayerWalkSpeed(id.toString(), speed); }
+    @Override public float getFlySpeed() { return Native.playerFlySpeed(id.toString()); }
+    @Override public void setFlySpeed(float speed) { Native.setPlayerFlySpeed(id.toString(), speed); }
+    @Override public boolean addPotionEffect(org.bukkit.potion.PotionEffect effect) {
+        if (effect == null || effect.getType() == null) return false;
+        org.bukkit.potion.PotionEffect old = getPotionEffect(effect.getType());
+        String action = old == null ? "ADDED" : "CHANGED";
+        if (!EventBridge.firePotionEffect(id.toString(), effect.getType().getName(),
+                old == null ? -1 : old.getDuration(), old == null ? -1 : old.getAmplifier(),
+                effect.getDuration(), effect.getAmplifier(), action)) return false;
+        return Native.addPotionEffect(id.toString(), effect.getType().getName(), effect.getDuration(), effect.getAmplifier());
+    }
+    @Override public void removePotionEffect(org.bukkit.potion.PotionEffectType type) {
+        if (type == null) return;
+        org.bukkit.potion.PotionEffect old = getPotionEffect(type);
+        if (old == null) return;
+        if (EventBridge.firePotionEffect(id.toString(), type.getName(),
+                old.getDuration(), old.getAmplifier(), -1, -1, "REMOVED"))
+            Native.removePotionEffect(id.toString(), type.getName());
+    }
+
+    @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
+        if (attribute == null) return null;
+        String value = Native.playerAttribute(id.toString(), attribute.name());
+        if (value == null) return null;
+        String[] fields = value.split("\\|", -1);
+        if (fields.length != 2) return null;
+        try { return new org.bukkit.attribute.AttributeInstance(attribute, Double.parseDouble(fields[0]), Double.parseDouble(fields[1])); }
+        catch (NumberFormatException ignored) { return null; }
+    }
 
     public FotonPlayer(UUID id) {
         this.id = id;
     }
 
+    @Override public com.destroystokyo.paper.profile.PlayerProfile getPlayerProfile() {
+        return new FotonPlayerProfile(id, getName());
+    }
+
     @Override
     public UUID getUniqueId() {
         return id;
+    }
+
+    @Override
+    public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return DATA.computeIfAbsent(id, ignored -> new FotonPersistentDataContainer());
     }
 
     @Override
@@ -43,6 +119,20 @@ public final class FotonPlayer implements Player {
         String name = Native.playerWorld(id.toString());
         return name == null ? null : new FotonWorld(name);
     }
+    @Override
+    public java.net.InetSocketAddress getAddress() {
+        String address = Native.playerAddress(id.toString());
+        if (address == null) return null;
+        int separator = address.lastIndexOf(':');
+        if (separator <= 0 || separator == address.length() - 1) return null;
+        try {
+            return new java.net.InetSocketAddress(
+                address.substring(0, separator),
+                Integer.parseInt(address.substring(separator + 1)));
+        } catch (NumberFormatException error) {
+            return null;
+        }
+    }
 
     /** Where the player is, as of the moment this was asked.
      *
@@ -57,6 +147,12 @@ public final class FotonPlayer implements Player {
             return null;
         }
         return new Location(getWorld(), at[0], at[1], at[2], (float) at[3], (float) at[4]);
+    }
+
+    @Override
+    public void setBedSpawnLocation(org.bukkit.Location location) {
+        if (location != null && location.getWorld() != null)
+            Native.setPlayerRespawnPosition(id.toString(), location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ(), location.getYaw(), location.getPitch());
     }
 
     @Override
@@ -82,9 +178,23 @@ public final class FotonPlayer implements Player {
         return new FotonInventory(id.toString());
     }
 
+    @Override public org.bukkit.inventory.Inventory getEnderChest() {
+        return new FotonEnderChestInventory(id.toString());
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView getOpenInventory() {
+        return new FotonInventoryView(this);
+    }
+
     @Override
     public void updateInventory() {
         Native.updateInventory(id.toString());
+    }
+
+    @Override
+    public void closeInventory() {
+        Native.closeInventory(id.toString());
     }
 
     @Override
@@ -96,15 +206,124 @@ public final class FotonPlayer implements Player {
         return mode == null ? org.bukkit.GameMode.SURVIVAL : mode;
     }
 
+    @Override public long getFirstPlayed() { return Native.firstPlayed(id.toString()); }
+    @Override public long getLastPlayed() { return Native.lastPlayed(id.toString()); }
+
+    @Override public int getStatistic(org.bukkit.Statistic statistic) {
+        return statistic == null ? 0 : Native.statisticValue(id.toString(), statistic.name());
+    }
+
     @Override
     public void setGameMode(org.bukkit.GameMode mode) {
         if (mode != null) Native.setGameMode(id.toString(), mode.name());
+    }
+
+    @Override public boolean getAllowFlight() { return Native.allowFlight(id.toString()); }
+    @Override public void setAllowFlight(boolean value) { Native.setAllowFlight(id.toString(), value); }
+    @Override public boolean isFlying() { return Native.isFlying(id.toString()); }
+    @Override public boolean isGliding() { return Native.entityIsFallFlying(id.toString()); }
+    @Override public boolean isInWater() { return Native.entityInWater(id.toString()); }
+    @Override public void setFlying(boolean value) { Native.setFlying(id.toString(), value); }
+    @Override public boolean isSleepingIgnored() { return Native.isSleepingIgnored(id.toString()); }
+    @Override public void setSleepingIgnored(boolean value) { Native.setSleepingIgnored(id.toString(), value); }
+    @Override public org.bukkit.inventory.InventoryView openInventory(org.bukkit.inventory.Inventory inventory) {
+        if (!(inventory instanceof FotonCustomInventory custom)) return null;
+        custom.attachViewer(id.toString());
+        Native.openGenericInventory(id.toString(), custom.getSize(), custom.getTitle(), custom.encodeContents());
+        if (Native.openMenuTopSlotCount(id.toString()) != custom.getSize()) {
+            custom.detachViewer();
+            return null;
+        }
+        return getOpenInventory();
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openSmithingTable(org.bukkit.Location location, boolean force) {
+        if (location == null || location.getWorld() == null) return null;
+        if (!location.getWorld().getName().equals(getWorld().getName())) return null;
+        if (!Native.openSmithingTable(id.toString(), location.getWorld().getName(),
+                location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
+        return getOpenInventory();
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openLoom(org.bukkit.Location location, boolean force) {
+        if (location == null || location.getWorld() == null) return null;
+        if (!location.getWorld().getName().equals(getWorld().getName())) return null;
+        if (!Native.openLoom(id.toString(), location.getWorld().getName(),
+                location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
+        return getOpenInventory();
+    }
+
+    @Override
+    public void damage(double amount, org.bukkit.entity.Entity source) {
+        if (amount > 0.0 && Double.isFinite(amount))
+            Native.damagePlayer(id.toString(), amount, source == null ? null : source.getUniqueId().toString());
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openCartographyTable(org.bukkit.Location location, boolean force) {
+        if (location == null || location.getWorld() == null) return null;
+        if (!location.getWorld().getName().equals(getWorld().getName())) return null;
+        if (!Native.openCartographyTable(id.toString(), location.getWorld().getName(),
+                location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
+        return getOpenInventory();
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openAnvil(org.bukkit.Location location, boolean force) {
+        if (location == null || location.getWorld() == null) return null;
+        if (!location.getWorld().getName().equals(getWorld().getName())) return null;
+        if (!Native.openAnvil(id.toString(), location.getWorld().getName(),
+                location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
+        return getOpenInventory();
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openStonecutter(org.bukkit.Location location, boolean force) {
+        if (location == null || location.getWorld() == null) return null;
+        if (!location.getWorld().getName().equals(getWorld().getName())) return null;
+        if (!Native.openStonecutter(id.toString(), location.getWorld().getName(),
+                location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
+        return getOpenInventory();
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openGrindstone(org.bukkit.Location location, boolean force) {
+        if (location == null || location.getWorld() == null) return null;
+        if (!Native.openGrindstone(id.toString(), location.getWorld().getName(),
+                location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
+        return getOpenInventory();
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openWorkbench(org.bukkit.Location location, boolean force) {
+        if (location == null || location.getWorld() == null) return null;
+        if (!location.getWorld().getName().equals(getWorld().getName())) return null;
+        if (!Native.openWorkbench(id.toString(), location.getWorld().getName(),
+                location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
+        return getOpenInventory();
     }
 
     @Override
     public boolean isOp() {
         return Native.isOperator(id.toString());
     }
+    @Override public void setOp(boolean value) { Native.setPlayerOperator(id.toString(), value); }
+    @Override public boolean isWhitelisted() { return Native.isWhitelisted(id.toString()); }
+    @Override public void setWhitelisted(boolean value) { Native.setPlayerWhitelisted(id.toString(), value); }
+
+    @Override public float getExp() { return Native.experienceProgress(id.toString()); }
+    @Override public void setExp(float exp) {
+        if (!Float.isFinite(exp) || exp < 0.0f || exp > 1.0f) {
+            throw new IllegalArgumentException("Experience progress must be between 0 and 1");
+        }
+        Native.setExperienceProgress(id.toString(), exp);
+    }
+    @Override public void setLevel(int level) { Native.setExperienceLevel(id.toString(), level); }
+    @Override public int getTotalExperience() { return Native.totalExperience(id.toString()); }
+    @Override public void setTotalExperience(int total) { Native.setTotalExperience(id.toString(), total); }
+    @Override public void giveExp(int amount) { Native.giveExperience(id.toString(), amount); }
 
     @Override
     public int getLevel() {
@@ -120,10 +339,15 @@ public final class FotonPlayer implements Player {
         kickPlayer(text);
     }
 
+    private static final java.util.Map<UUID, org.bukkit.scoreboard.Scoreboard> SCOREBOARDS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
     @Override
     public org.bukkit.scoreboard.Scoreboard getScoreboard() {
-        World world = getWorld();
-        return new FotonScoreboard(world == null ? "" : world.getName());
+        return SCOREBOARDS.computeIfAbsent(id, ignored -> {
+            World world = getWorld();
+            return new FotonScoreboard(world == null ? "" : world.getName());
+        });
     }
 
     /** The name a plugin may have changed, falling back to the real one.
@@ -141,6 +365,11 @@ public final class FotonPlayer implements Player {
     }
 
     @Override
+    public void setPlayerListName(String name) {
+        Native.setPlayerListName(id.toString(), name);
+    }
+
+    @Override
     public void setDisplayName(String name) {
         if (name == null) {
             DISPLAY_NAMES.remove(id);
@@ -151,6 +380,11 @@ public final class FotonPlayer implements Player {
 
     private static final java.util.Map<UUID, String> DISPLAY_NAMES =
         new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public void chat(String message) {
+        if (message != null && !message.isEmpty()) Native.chat(getUniqueId().toString(), message);
+    }
 
     @Override
     public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
@@ -240,15 +474,12 @@ public final class FotonPlayer implements Player {
 
     @Override
     public int getEntityId() {
-        // Foton does not hand out network entity ids to plugins: they are a
-        // protocol detail that changes on respawn, and a plugin using one as
-        // an identity would be wrong in a way that is hard to see.
-        return -1;
+        return Native.entityId(id.toString());
     }
 
     @Override
     public boolean isDead() {
-        return false;
+        return Native.entityWorld(id.toString()) == null;
     }
 
     @Override public org.bukkit.entity.EntityType getType() {
@@ -266,9 +497,17 @@ public final class FotonPlayer implements Player {
     }
 
     @Override public int getFoodLevel() { return Native.playerFoodLevel(id.toString()); }
+    @Override public void setFoodLevel(int level) { Native.setPlayerFood(id.toString(), level, getSaturation(), getExhaustion()); }
+    @Override public float getSaturation() { return Native.playerFoodSaturation(id.toString()); }
+    @Override public void setSaturation(float value) { Native.setPlayerFood(id.toString(), getFoodLevel(), value, getExhaustion()); }
+    @Override public float getExhaustion() { return Native.playerFoodExhaustion(id.toString()); }
+    @Override public void setExhaustion(float value) { Native.setPlayerFood(id.toString(), getFoodLevel(), getSaturation(), value); }
 
     @Override public double getHealth() { return Native.health(id.toString()); }
     @Override public void setHealth(double health) { Native.setHealth(id.toString(), health); }
+    @Override public void setCompassTarget(org.bukkit.Location location) {
+        if (location != null && location.getWorld() != null) Native.setCompassTarget(id.toString(), location.getWorld().getName(), location.getBlockX(), location.getBlockY(), location.getBlockZ());
+    }
     @Override public double getMaxHealth() { return Native.maxHealth(id.toString()); }
 
     @Override
@@ -296,7 +535,10 @@ public final class FotonPlayer implements Player {
 
     @Override
     public void kickPlayer(String message) {
-        Native.kickPlayer(id.toString(), message == null ? "" : message);
+        String reason = message == null ? "" : message;
+        if (EventBridge.firePlayerKick(id.toString(), reason)) {
+            Native.kickPlayer(id.toString(), reason);
+        }
     }
 
     @Override
@@ -313,6 +555,11 @@ public final class FotonPlayer implements Player {
     public void setPlayerListHeaderFooter(String header, String footer) {
         Native.setPlayerListHeaderFooter(id.toString(), header == null ? "" : header,
             footer == null ? "" : footer);
+    }
+
+    @Override
+    public void sendSignChange(org.bukkit.Location location, String[] lines, org.bukkit.DyeColor color) {
+        Player.super.sendSignChange(location, lines, color);
     }
 
     @Override
@@ -346,13 +593,57 @@ public final class FotonPlayer implements Player {
     public void sendMessage(String message) {
         Native.sendMessage(id.toString(), message);
     }
+    @Override
+    public void sendMessage(net.kyori.adventure.text.Component message) {
+        if (message != null) {
+            Native.sendMessage(id.toString(),
+                net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                    .plainText().serialize(message));
+        }
+    }
 
     @Override
     public boolean hasPermission(String permission) {
+        if (permission == null) return false;
+        for (int index = attachments.size() - 1; index >= 0; index--) {
+            Boolean value = attachments.get(index).getPermissions().get(permission);
+            if (value != null) return value;
+        }
         return Native.hasPermission(id.toString(), permission);
     }
 
+    @Override public org.bukkit.permissions.PermissionAttachment addAttachment(Plugin plugin) {
+        org.bukkit.permissions.PermissionAttachment attachment = new org.bukkit.permissions.PermissionAttachment(plugin);
+        attachments.add(attachment);
+        return attachment;
+    }
+    @Override public void removeAttachment(org.bukkit.permissions.PermissionAttachment attachment) {
+        if (attachment != null && attachments.remove(attachment)) attachment.remove();
+    }
+    @Override public void recalculatePermissions() { }
+
+    @Override public java.util.Set<org.bukkit.permissions.PermissionAttachmentInfo> getEffectivePermissions() {
+        java.util.LinkedHashSet<org.bukkit.permissions.PermissionAttachmentInfo> result = new java.util.LinkedHashSet<>();
+        String[] entries = Native.effectivePermissions(id.toString());
+        if (entries != null) for (String entry : entries) {
+            if (entry == null) continue;
+            int separator = entry.lastIndexOf('|');
+            if (separator <= 0) continue;
+            result.add(new org.bukkit.permissions.PermissionAttachmentInfo(this, entry.substring(0, separator), null, "1".equals(entry.substring(separator + 1))));
+        }
+        for (org.bukkit.permissions.PermissionAttachment attachment : attachments)
+            for (java.util.Map.Entry<String, Boolean> entry : attachment.getPermissions().entrySet())
+                result.removeIf(info -> info.getPermission().equalsIgnoreCase(entry.getKey()));
+        for (org.bukkit.permissions.PermissionAttachment attachment : attachments)
+            for (java.util.Map.Entry<String, Boolean> entry : attachment.getPermissions().entrySet())
+                result.add(new org.bukkit.permissions.PermissionAttachmentInfo(this, entry.getKey(), attachment, entry.getValue()));
+        return java.util.Collections.unmodifiableSet(result);
+    }
+
     @Override public boolean isPermissionSet(String permission) {
+        if (permission == null) return false;
+        for (int index = attachments.size() - 1; index >= 0; index--)
+            if (attachments.get(index).getPermissions().containsKey(permission)) return true;
         return Native.isPermissionSet(id.toString(), permission);
     }
 

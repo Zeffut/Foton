@@ -16,6 +16,7 @@ public class PlayerInteractEntityEvent extends PlayerEvent implements Cancellabl
     }
 
     public Entity getRightClicked() { return rightClicked; }
+    public org.bukkit.inventory.EquipmentSlot getHand() { return org.bukkit.inventory.EquipmentSlot.HAND; }
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
     @Override public HandlerList getHandlers() { return HANDLERS; }

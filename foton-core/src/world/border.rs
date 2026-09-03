@@ -413,6 +413,10 @@ impl WorldBorder {
         self.warning_blocks = warning_blocks;
     }
 
+    pub(crate) fn damage_per_block(&self) -> f64 {
+        self.damage_per_block
+    }
+
     pub(crate) fn set_damage_per_block(
         &mut self,
         damage_per_block: f64,
@@ -420,6 +424,10 @@ impl WorldBorder {
         validate_finite("damage_per_block", damage_per_block)?;
         self.damage_per_block = damage_per_block;
         Ok(())
+    }
+
+    pub(crate) fn safe_zone(&self) -> f64 {
+        self.safe_zone
     }
 
     pub(crate) fn set_safe_zone(&mut self, safe_zone: f64) -> Result<(), WorldBorderError> {
@@ -559,6 +567,28 @@ impl World {
         Ok(())
     }
 
+    /// Restores the vanilla default world-border settings.
+    pub fn reset_world_border(&self) {
+        let _ = self.set_world_border_center(0.0, 0.0);
+        let _ = self.set_world_border_size(59_999_970.0);
+        let _ = self.set_world_border_damage_per_block(0.2);
+        let _ = self.set_world_border_safe_zone(5.0);
+        self.set_world_border_warning_blocks(5);
+        self.set_world_border_warning_time(300);
+    }
+
+    /// Returns the client warning delay in ticks.
+    #[must_use]
+    pub fn world_border_warning_time(&self) -> i32 {
+        self.world_border_snapshot().warning_time
+    }
+
+    /// Returns the client warning distance in blocks.
+    #[must_use]
+    pub fn world_border_warning_blocks(&self) -> i32 {
+        self.world_border_snapshot().warning_blocks
+    }
+
     /// Sets the client warning time and broadcasts the vanilla warning-delay packet.
     pub fn set_world_border_warning_time(&self, warning_time: i32) {
         let data = {
@@ -583,6 +613,11 @@ impl World {
         self.broadcast_to_all(CSetBorderWarningDistance { warning_blocks });
     }
 
+    /// Returns the damage applied per block outside the safe zone.
+    pub fn world_border_damage_per_block(&self) -> f64 {
+        self.world_border.lock().damage_per_block()
+    }
+
     /// Sets world border damage per block outside the safe zone.
     pub fn set_world_border_damage_per_block(
         &self,
@@ -598,6 +633,10 @@ impl World {
     }
 
     /// Sets the safe distance outside the world border before damage starts.
+    pub fn world_border_safe_zone(&self) -> f64 {
+        self.world_border.lock().safe_zone()
+    }
+
     pub fn set_world_border_safe_zone(&self, safe_zone: f64) -> Result<(), WorldBorderError> {
         let data = {
             let mut border = self.world_border.lock();

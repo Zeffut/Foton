@@ -19,4 +19,6 @@ public class InvalidConfigurationException extends Exception {
     public InvalidConfigurationException(String message, Throwable cause) {
         super(message, cause);
     }
+
+    @Override public void printStackTrace() { super.printStackTrace(); }
 }

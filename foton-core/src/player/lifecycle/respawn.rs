@@ -382,6 +382,23 @@ fn calculate_respawn_look_at_yaw(position: DVec3, look_at_block_pos: BlockPos) -
 }
 
 impl Player {
+    /// Sets a Bukkit-provided bed respawn target using vanilla respawn data.
+    pub fn set_bukkit_respawn_position(
+        &self,
+        dimension: Identifier,
+        pos: BlockPos,
+        yaw: f32,
+        pitch: f32,
+    ) {
+        self.set_respawn_position(
+            Some(PlayerRespawnConfig::new(
+                RespawnData::of(dimension, pos, yaw, pitch),
+                true,
+            )),
+            false,
+        );
+    }
+
     fn begin_respawn_request(&self) -> Option<PendingWorldChangeToken> {
         let token = self.base.begin_pending_player_respawn()?;
         if self.begin_respawn_transition(token) {
@@ -470,7 +487,6 @@ impl Player {
                 .worlds
                 .get(config.respawn_data.dimension())
                 .filter(|world| world.domain() == source_world.domain())
-                .cloned()
                 .map(|world| (world, config))
         })
     }
@@ -522,13 +538,21 @@ impl Player {
             experience.dirty = true;
         }
 
-        let mut respawn_event = crate::event::PlayerRespawnEvent::new(self.gameprofile.id);
+        let mut respawn_event = crate::event::PlayerRespawnEvent::new(
+            self.gameprofile.id,
+            target_world.key.to_string(),
+            [spawn.position.x, spawn.position.y, spawn.position.z],
+            spawn.rotation,
+            spawn.anchor_deplete_sound_pos.is_some(),
+        );
         target_world.fire_event(&mut respawn_event);
+        let respawn_position = DVec3::from_array(respawn_event.position());
+        let respawn_rotation = respawn_event.rotation();
 
         // TODO: send mob effect packets once effects are implemented
 
         // Shared spawn (teleport, abilities, weather, time, chunk tracking reset)
-        if self.spawn(spawn.position, spawn.rotation, ResetReason::Respawn) {
+        if self.spawn(respawn_position, respawn_rotation, ResetReason::Respawn) {
             if let Some(pos) = spawn.anchor_deplete_sound_pos
                 && target_world.get_block_state(pos).get_block() == &vanilla_blocks::RESPAWN_ANCHOR
             {

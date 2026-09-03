@@ -16,13 +16,43 @@ use super::{
 };
 
 impl World {
+    /// Returns whether player-versus-player damage is enabled.
+    pub fn is_pvp(&self) -> bool {
+        self.pvp.load(Ordering::Relaxed)
+    }
+
+    /// Enables or disables player-versus-player damage.
+    pub fn set_pvp(&self, enabled: bool) {
+        self.pvp.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Returns whether natural monster spawning is allowed.
+    pub fn allow_monsters(&self) -> bool {
+        self.allow_monsters.load(Ordering::Relaxed)
+    }
+
+    /// Sets whether natural monster spawning is allowed.
+    pub fn set_allow_monsters(&self, value: bool) {
+        self.allow_monsters.store(value, Ordering::Relaxed);
+    }
+
+    /// Returns whether natural animal spawning is allowed.
+    pub fn allow_animals(&self) -> bool {
+        self.allow_animals.load(Ordering::Relaxed)
+    }
+
+    /// Sets whether natural animal spawning is allowed.
+    pub fn set_allow_animals(&self, value: bool) {
+        self.allow_animals.store(value, Ordering::Relaxed);
+    }
+
     /// Returns vanilla level difficulty.
     pub fn difficulty(&self) -> Difficulty {
         self.level_data.read().data().difficulty
     }
 
     /// Sets the level difficulty and broadcasts the new value to its players.
-    pub(crate) fn set_difficulty(&self, difficulty: Difficulty) {
+    pub fn set_difficulty(&self, difficulty: Difficulty) {
         let locked = {
             let mut level_data = self.level_data.write();
             level_data.data_mut().difficulty = difficulty;

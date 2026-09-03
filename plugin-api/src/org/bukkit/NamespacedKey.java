@@ -52,4 +52,5 @@ public final class NamespacedKey {
     }
 
     @Override public String toString() { return namespace + ":" + key; }
+    public String asString() { return toString(); }
 }

@@ -104,7 +104,11 @@ impl ItemBehavior for SignItem {
         place_context.with_item_mut(|item| item.shrink(1));
 
         // Sign-specific: Open the sign editor for the player (front text by default)
-        context.player.open_sign_editor(place_pos, true);
+        context.player.open_sign_editor_with_cause(
+            place_pos,
+            true,
+            crate::event::PlayerOpenSignCause::Place,
+        );
 
         InteractionResult::Success
     }

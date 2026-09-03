@@ -3,6 +3,8 @@
 //! The trait is object-safe to allow using `dyn PlayerConnection` for both real network
 //! connections (`JavaConnection`) and test connections (`FlintConnection`).
 
+use std::net::SocketAddr;
+
 mod java;
 
 pub use java::{BundleBuilder, JavaConnection, JavaNetworkWriter, OutboundPacket};
@@ -16,6 +18,7 @@ use foton_protocol::packets::common::{
 use foton_protocol::utils::ConnectionProtocol;
 use text_components::TextComponent;
 
+use crate::event::PlayerLocaleChangeEvent;
 use crate::player::Player;
 
 /// Client-side settings sent via `SClientInformation` packet.
@@ -103,6 +106,11 @@ pub trait NetworkConnection: Send + Sync {
 
     /// Returns whether the connection is closed.
     fn closed(&self) -> bool;
+
+    /// Returns the remote network address when this is a socket-backed connection.
+    fn remote_address(&self) -> Option<SocketAddr> {
+        None
+    }
 }
 
 /// Concrete player connection type using `enum_dispatch` for zero-cost dispatch.
@@ -148,6 +156,10 @@ impl NetworkConnection for Box<dyn NetworkConnection> {
 
     fn closed(&self) -> bool {
         (**self).closed()
+    }
+
+    fn remote_address(&self) -> Option<SocketAddr> {
+        (**self).remote_address()
     }
 }
 
@@ -205,6 +217,7 @@ impl Player {
     /// Handles client information updates during play phase.
     pub fn handle_client_information(&self, packet: SClientInformation) {
         let old_view_distance = self.view_distance();
+        let old_locale = self.client_information().language;
 
         let info = ClientInformation {
             language: packet.language,
@@ -221,6 +234,14 @@ impl Player {
             particle_status: packet.particle_status,
         };
         self.set_client_information(info);
+        let new_locale = self.client_information().language;
+        if old_locale != new_locale {
+            if let Some(player) = self.shared() {
+                self.fire_event(&mut PlayerLocaleChangeEvent::new(
+                    player, old_locale, new_locale,
+                ));
+            }
+        }
         self.publish_client_options();
 
         // Vanilla does not echo CSetChunkCacheRadius here; it is only broadcast

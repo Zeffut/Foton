@@ -176,6 +176,11 @@ impl CreeperEntity {
         *self.entity_data.lock().is_powered.get()
     }
 
+    /// Sets the lightning-powered state exposed by Bukkit.
+    pub fn set_powered(&self, powered: bool) {
+        self.entity_data.lock().is_powered.set(powered);
+    }
+
     /// Returns whether the creeper was lit by hand and can no longer stop.
     #[must_use]
     pub fn is_ignited(&self) -> bool {

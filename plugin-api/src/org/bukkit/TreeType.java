@@ -1,0 +1,9 @@
+package org.bukkit;
+
+/** Tree types supported by the vanilla feature registry. */
+public enum TreeType {
+    TREE, BIG_TREE, REDWOOD, TALL_REDWOOD, BIRCH, JUNGLE, SMALL_JUNGLE,
+    COCOA_TREE, JUNGLE_BUSH, RED_MUSHROOM, BROWN_MUSHROOM, SWAMP,
+    ACACIA, DARK_OAK, MEGA_REDWOOD, CHORUS_PLANT, CRIMSON_FUNGUS,
+    WARPED_FUNGUS, AZALEA, MANGROVE, CHERRY
+}

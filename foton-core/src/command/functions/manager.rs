@@ -11,7 +11,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::super::CommandDispatcher;
 use super::super::execution::CommandSource;
 use super::library::{CommandFunction, FunctionLibrary};
-use super::loader::{self, TagEntry};
+use super::loader::{self, DatapackInfo, TagEntry};
 use super::parser::parse_function;
 
 /// The tag whose functions run once after every load.
@@ -40,6 +40,7 @@ pub(crate) struct FunctionManager {
 struct FunctionManagerState {
     library: Arc<FunctionLibrary>,
     ticking: Vec<Arc<CommandFunction>>,
+    packs: Vec<DatapackInfo>,
     post_reload: bool,
 }
 
@@ -50,6 +51,7 @@ impl FunctionManager {
             state: SyncRwLock::new(FunctionManagerState {
                 library: Arc::new(FunctionLibrary::default()),
                 ticking: Vec::new(),
+                packs: Vec::new(),
                 post_reload: false,
             }),
         }
@@ -93,6 +95,7 @@ impl FunctionManager {
         let mut state = self.state.write();
         state.library = library;
         state.ticking = ticking;
+        state.packs = contents.packs;
         state.post_reload = true;
         report
     }
@@ -106,6 +109,7 @@ impl FunctionManager {
         let mut state = self.state.write();
         state.library = Arc::new(FunctionLibrary::default());
         state.ticking.clear();
+        state.packs.clear();
         state.post_reload = false;
     }
 
@@ -126,6 +130,16 @@ impl FunctionManager {
     /// Returns the `#minecraft:tick` functions cached by the last reload.
     pub(crate) fn ticking_functions(&self) -> Vec<Arc<CommandFunction>> {
         self.state.read().ticking.clone()
+    }
+
+    pub(crate) fn datapack_records(&self, enabled_only: bool) -> Vec<String> {
+        self.state
+            .read()
+            .packs
+            .iter()
+            .filter(|pack| !enabled_only || pack.enabled)
+            .map(|pack| format!("{}\t{}\t{}", pack.name, pack.compatibility, pack.enabled))
+            .collect()
     }
 }
 

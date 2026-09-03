@@ -275,6 +275,18 @@ fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
         facing,
         block_entity: dispenser,
     };
+    let mut pre = crate::event::BlockPreDispenseEvent::new(world.key.to_string(), pos, slot, stack);
+    world.fire_event(&mut pre);
+    if pre.is_cancelled() {
+        return;
+    }
+    let mut event =
+        crate::event::BlockDispenseEvent::new(world.key.to_string(), pos, pre.into_item());
+    world.fire_event(&mut event);
+    if event.is_cancelled() {
+        return;
+    }
+    let stack = event.into_item();
     let behavior = dispense_behavior_for(&stack);
 
     match behavior.execute(&source, stack) {

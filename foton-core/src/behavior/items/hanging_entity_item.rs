@@ -14,6 +14,7 @@ use foton_registry::{sound_events, vanilla_game_events};
 use crate::behavior::{InteractionResult, ItemBehavior, UseOnContext};
 use crate::entity::entities::PaintingEntity;
 use crate::entity::{Entity as _, next_entity_id};
+use crate::event::HangingPlaceEvent;
 use crate::world::game_event::GameEventContext;
 
 /// Behavior for the items that hang an entity on a wall.
@@ -78,6 +79,17 @@ impl ItemBehavior for HangingEntityItem {
         }
 
         let position = painting.position();
+        let mut event = HangingPlaceEvent::new(
+            painting.uuid(),
+            context.player.uuid(),
+            context.world.key.to_string(),
+            context.hit_result.block_pos,
+            format!("{face:?}"),
+        );
+        context.world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return InteractionResult::Fail;
+        }
         painting.play_sound(&sound_events::ENTITY_PAINTING_PLACE, 1.0, 1.0);
         context.world.game_event_at(
             &vanilla_game_events::ENTITY_PLACE,

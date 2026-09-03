@@ -4,7 +4,7 @@ import org.bukkit.Material;
 import org.bukkit.block.BlockFace;
 
 /** Directional block state backed by the vanilla state string. */
-public final class SimpleDirectionalData extends SimpleBlockData implements Directional {
+public class SimpleDirectionalData extends SimpleBlockData implements Directional {
     public SimpleDirectionalData(String text) { super(text); }
 
     @Override public BlockFace getFacing() {

@@ -35,7 +35,7 @@ use crate::entity::{
     change_entity_world,
 };
 use crate::player::Player;
-use crate::portal::{TeleportPostTransition, TeleportTransition};
+use crate::portal::{TeleportPostTransition, TeleportTransition, TeleportTransitionCause};
 use crate::world::World;
 
 /// Fall-style damage dealt to the teleporting owner (vanilla `enderPearl()`, 5.0).
@@ -177,6 +177,7 @@ impl EnderPearlEntity {
 
         let transition = TeleportTransition {
             target_world: Arc::clone(world),
+            cause: TeleportTransitionCause::EnderPearl,
             position: teleport_pos,
             rotation: (0.0, 0.0),
             velocity: DVec3::ZERO,

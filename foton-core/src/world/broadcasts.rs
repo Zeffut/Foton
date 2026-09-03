@@ -14,6 +14,7 @@ impl World {
         _sender: Arc<Player>,
         sender_last_seen: LastSeen,
         message_signature: Option<&[u8; 256]>,
+        recipients: Option<&[uuid::Uuid]>,
     ) {
         log::debug!(
             "broadcast_chat: sender_last_seen has {} signatures, message_signature present: {}",
@@ -22,6 +23,11 @@ impl World {
         );
 
         self.players.iter_players(|_, recipient| {
+            if let Some(recipients) = recipients
+                && !recipients.contains(&recipient.gameprofile.id)
+            {
+                return true;
+            }
             let messages_received = recipient.get_and_increment_messages_received();
             packet.global_index = messages_received;
 
@@ -135,8 +141,17 @@ impl World {
     }
 
     /// Broadcasts an unsigned player chat message to all players.
-    pub fn broadcast_unsigned_chat(&self, mut packet: CPlayerChat) {
+    pub fn broadcast_unsigned_chat(
+        &self,
+        mut packet: CPlayerChat,
+        recipients: Option<&[uuid::Uuid]>,
+    ) {
         self.players.iter_players(|_, recipient| {
+            if let Some(recipients) = recipients
+                && !recipients.contains(&recipient.gameprofile.id)
+            {
+                return true;
+            }
             let messages_received = recipient.get_and_increment_messages_received();
             packet.global_index = messages_received;
 

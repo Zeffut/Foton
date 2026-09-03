@@ -92,6 +92,29 @@ impl BlockDisplayEntity {
     pub fn set_block_state_id(&self, id: BlockStateId) {
         self.entity_data.lock().block_state.set(id);
     }
+
+    /// Sets the packed vanilla brightness override from block and sky light levels.
+    pub fn set_brightness(&self, block: i32, sky: i32) {
+        let block = block.clamp(0, 15);
+        let sky = sky.clamp(0, 15);
+        self.entity_data
+            .lock()
+            .display_mut()
+            .brightness_override
+            .set(block << 4 | sky << 20);
+    }
+
+    pub fn set_view_range(&self, value: f32) {
+        self.entity_data.lock().display_mut().view_range.set(value);
+    }
+
+    pub fn set_shadow_radius(&self, value: f32) {
+        self.entity_data
+            .lock()
+            .display_mut()
+            .shadow_radius
+            .set(value);
+    }
 }
 
 impl Entity for BlockDisplayEntity {

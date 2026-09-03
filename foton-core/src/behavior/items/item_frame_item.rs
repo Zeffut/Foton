@@ -14,6 +14,7 @@ use foton_registry::vanilla_game_events;
 use crate::behavior::{InteractionResult, ItemBehavior, UseOnContext};
 use crate::entity::entities::ItemFrameEntity;
 use crate::entity::{Entity as _, next_entity_id};
+use crate::event::HangingPlaceEvent;
 use crate::world::LevelReader as _;
 use crate::world::game_event::GameEventContext;
 
@@ -65,6 +66,18 @@ impl ItemBehavior for ItemFrameItem {
             Arc::downgrade(context.world),
         ));
         let position = frame.position();
+
+        let mut event = HangingPlaceEvent::new(
+            frame.uuid(),
+            context.player.uuid(),
+            context.world.key.to_string(),
+            clicked,
+            format!("{face:?}"),
+        );
+        context.world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return InteractionResult::Fail;
+        }
 
         if context.world.try_add_entity(frame).is_err() {
             return InteractionResult::Fail;

@@ -17,6 +17,9 @@ public class SimpleBlockData implements BlockData {
     }
 
     @Override
+    public BlockData clone() { return new SimpleBlockData(getAsString()); }
+
+    @Override
     public Material getMaterial() {
         return material;
     }
@@ -24,6 +27,13 @@ public class SimpleBlockData implements BlockData {
     @Override
     public String getAsString() {
         return text;
+    }
+
+    protected String propertyValue(String key) {
+        int start = text.indexOf('['); if (start < 0) return "";
+        String properties = text.substring(start + 1, text.length() - 1);
+        for (String entry : properties.split(",")) { String[] pair = entry.split("=", 2); if (pair.length == 2 && pair[0].trim().equals(key)) return pair[1].trim(); }
+        return "";
     }
 
     protected boolean property(String key) {

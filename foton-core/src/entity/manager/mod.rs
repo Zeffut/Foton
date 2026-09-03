@@ -390,6 +390,7 @@ impl EntityEntry {
                     .entity
                     .removal_reason()
                     .is_some_and(RemovalReason::should_save))
+            && self.entity.is_persistent()
             && !self.entity.is_passenger()
             && !self.entity.has_exactly_one_player_passenger()
             && self.entity.entity_type().can_serialize
@@ -728,7 +729,9 @@ impl WorldEntityManager {
         let mut removed = Vec::with_capacity(entries.len());
         for entry in entries {
             removed.push(entry.entity.uuid());
-            entry.entity.set_level_callback(Arc::new(NullEntityCallback));
+            entry
+                .entity
+                .set_level_callback(Arc::new(NullEntityCallback));
             entry.entity.set_removed(RemovalReason::UnloadedToChunk);
         }
         removed

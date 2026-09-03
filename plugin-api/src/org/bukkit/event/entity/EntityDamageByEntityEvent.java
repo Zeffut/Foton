@@ -10,5 +10,9 @@ public final class EntityDamageByEntityEvent extends EntityDamageEvent {
     public EntityDamageByEntityEvent(Entity damager, Entity entity, DamageCause cause) {
         super(entity, cause); this.damager = damager; this.entity = entity;
     }
+    /** Creates an entity-damage event with an initial raw damage value. */
+    public EntityDamageByEntityEvent(Entity damager, Entity entity, DamageCause cause, double damage) {
+        super(entity, cause, damage); this.damager = damager; this.entity = entity;
+    }
     public Entity getDamager() { return damager; }
 }

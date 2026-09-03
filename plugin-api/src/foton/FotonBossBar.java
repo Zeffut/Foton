@@ -110,7 +110,9 @@ final class FotonBossBar implements BossBar {
 
     @Override public List<Player> getPlayers() {
         List<Player> players = new ArrayList<>();
-        for (String value : Native.bossBarPlayerIds(id)) {
+        String[] ids = Native.bossBarPlayerIds(id);
+        if (ids == null) return List.of();
+        for (String value : ids) {
             UUID uuid = Native.parse(value);
             Player player = uuid == null ? null : org.bukkit.Bukkit.getPlayer(uuid);
             if (player != null) {

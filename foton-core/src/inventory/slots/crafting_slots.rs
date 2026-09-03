@@ -52,6 +52,37 @@ impl CraftingHandler {
         self.crafting_container.clone()
     }
 
+    /// Snapshot of the crafting grid while its containers are locked.
+    pub fn input_snapshot(&self, guard: &ContainerLockGuard) -> Option<Vec<ItemStack>> {
+        guard
+            .get_typed::<CraftingContainer>(self.crafting_id())
+            .map(|c| c.items().to_vec())
+    }
+
+    /// Snapshot of the current result while its container is locked.
+    pub fn result_snapshot(&self, guard: &ContainerLockGuard) -> Option<ItemStack> {
+        guard.get(self.result_id()).map(|c| c.get_item(0).clone())
+    }
+
+    /// Applies a plugin's preview changes under the existing menu lock.
+    pub fn apply_snapshot(
+        &self,
+        guard: &mut ContainerLockGuard,
+        matrix: Vec<ItemStack>,
+        result: ItemStack,
+    ) {
+        if let Some(crafting) = guard.get_typed_mut::<CraftingContainer>(self.crafting_id()) {
+            for (slot, item) in crafting.items_mut().iter_mut().enumerate() {
+                *item = matrix.get(slot).cloned().unwrap_or_else(ItemStack::empty);
+            }
+            crafting.set_changed();
+        }
+        if let Some(container) = guard.get_typed_mut::<ResultContainer>(self.result_id()) {
+            container.set_item(0, result);
+            container.set_changed();
+        }
+    }
+
     /// The `ContainerId` of the result container
     #[must_use]
     pub fn result_id(&self) -> ContainerId {

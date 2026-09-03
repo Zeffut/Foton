@@ -1,5 +1,6 @@
 //! This module contains the `JavaConnection` struct, which is used to represent a connection to a Java client.
 use std::io::Cursor;
+use std::net::SocketAddr;
 use std::sync::{Arc, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -355,14 +356,19 @@ impl ScheduledPlayPacket {
             }
             ScheduledPlayPacketKind::ChatCommand(packet) => {
                 let mut preprocess = crate::event::PlayerCommandPreprocessEvent::new(
-                    player.gameprofile.id, packet.command.clone());
+                    player.gameprofile.id,
+                    packet.command.clone(),
+                );
                 player.fire_event(&mut preprocess);
                 if preprocess.is_cancelled() {
                     player.detect_command_rate_spam();
                     return;
                 }
                 if server
-                    .submit_command(CommandSender::Player(Arc::clone(&player)), preprocess.message().to_owned())
+                    .submit_command(
+                        CommandSender::Player(Arc::clone(&player)),
+                        preprocess.message().to_owned(),
+                    )
                     .is_err()
                 {
                     player.send_message(
@@ -489,6 +495,7 @@ pub struct JavaConnection {
     compression: Option<CompressionInfo>,
     network_writer: JavaNetworkWriter,
     id: u64,
+    remote_address: SocketAddr,
 
     player: Weak<Player>,
     keep_alive_tracker: SyncMutex<KeepAliveTracker>,
@@ -503,6 +510,7 @@ impl JavaConnection {
         compression: Option<CompressionInfo>,
         network_writer: JavaNetworkWriter,
         id: u64,
+        remote_address: SocketAddr,
         player: Weak<Player>,
     ) -> Self {
         Self {
@@ -511,6 +519,7 @@ impl JavaConnection {
             compression,
             network_writer,
             id,
+            remote_address,
             player,
             keep_alive_tracker: SyncMutex::new(KeepAliveTracker {
                 alive_time: 0,
@@ -519,6 +528,11 @@ impl JavaConnection {
             }),
             latency: SyncMutex::new(0),
         }
+    }
+
+    /// Returns the address of the connected Java client.
+    pub const fn remote_address(&self) -> SocketAddr {
+        self.remote_address
     }
 
     async fn write_packet_now(&self, packet: &EncodedPacket) -> Result<(), PacketError> {
@@ -1092,6 +1106,10 @@ impl NetworkConnection for JavaConnection {
 
     fn closed(&self) -> bool {
         self.cancel_token.is_cancelled()
+    }
+
+    fn remote_address(&self) -> Option<SocketAddr> {
+        Some(self.remote_address)
     }
 }
 

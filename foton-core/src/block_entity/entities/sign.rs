@@ -254,6 +254,19 @@ impl SignBlockEntity {
         self.sign.lock().is_waxed
     }
 
+    /// Sets whether this sign is waxed and publishes a changed block entity.
+    pub fn set_waxed(&self, waxed: bool) -> bool {
+        {
+            let mut sign = self.sign.lock();
+            if sign.is_waxed == waxed {
+                return false;
+            }
+            sign.is_waxed = waxed;
+        }
+        self.mark_updated();
+        true
+    }
+
     /// Makes this sign waxed, returning whether its state changed.
     ///
     /// Vanilla parity: `SignBlockEntity.setWaxed(true)`, which marks the entity

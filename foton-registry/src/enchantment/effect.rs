@@ -567,6 +567,33 @@ pub struct CrossbowChargingSounds {
     pub end: Option<SoundEventRef>,
 }
 
+/// Owned, parameter-free enchantment effect components collected from a plugin.
+///
+/// These are the only flag components that can be represented without
+/// resolving additional vanilla registries or effect payloads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OwnedEnchantmentEffects {
+    pub hit_block: bool,
+    pub location_changed: bool,
+    pub tick: bool,
+    pub prevent_equipment_drop: bool,
+    pub prevent_armor_change: bool,
+}
+
+impl OwnedEnchantmentEffects {
+    #[must_use]
+    pub const fn into_effects(self) -> EnchantmentEffects {
+        EnchantmentEffects {
+            hit_block: self.hit_block,
+            location_changed: self.location_changed,
+            prevent_equipment_drop: self.prevent_equipment_drop,
+            prevent_armor_change: self.prevent_armor_change,
+            tick: self.tick,
+            ..EnchantmentEffects::EMPTY
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct EnchantmentEffects {
     pub damage_protection: &'static [ConditionalEnchantmentEffect<EnchantmentValueEffect>],
@@ -784,5 +811,28 @@ mod tests {
             REMOVE_THREE_TENTHS.process_with_random(1, &mut actual_random, input),
             input - expected_removed
         );
+    }
+}
+
+#[cfg(test)]
+mod owned_effect_tests {
+    use super::{EnchantmentEffectComponent, OwnedEnchantmentEffects};
+
+    #[test]
+    fn converts_all_supported_flag_components() {
+        let effects = OwnedEnchantmentEffects {
+            hit_block: true,
+            location_changed: true,
+            tick: true,
+            prevent_equipment_drop: true,
+            prevent_armor_change: true,
+        }
+        .into_effects();
+        assert!(effects.has(EnchantmentEffectComponent::HitBlock));
+        assert!(effects.has(EnchantmentEffectComponent::LocationChanged));
+        assert!(effects.has(EnchantmentEffectComponent::Tick));
+        assert!(effects.has(EnchantmentEffectComponent::PreventEquipmentDrop));
+        assert!(effects.has(EnchantmentEffectComponent::PreventArmorChange));
+        assert!(!effects.has(EnchantmentEffectComponent::Damage));
     }
 }

@@ -36,7 +36,7 @@ pub use connection::{ClientInformation, PlayerConnection};
 use container_counter::ContainerCounter;
 use food_data::FoodData;
 use foton_protocol::packets::game::{
-    CEntityEvent, CHurtAnimation, CPlayerCombatKill, CPlayerLookAt, CRespawn,
+    CEntityEvent, CHurtAnimation, CPlayerCombatKill, CPlayerInfoUpdate, CPlayerLookAt, CRespawn,
     CSetDefaultSpawnPosition, CSetHealth, CSetHeldSlot, CSetPassengers, ClientCommandAction,
     LookAtAnchor, RelativeMovement, SoundSource,
 };
@@ -58,6 +58,7 @@ use foton_registry::{
     vanilla_game_events,
 };
 use foton_registry::{vanilla_custom_stats, vanilla_stat_types};
+use foton_utils::locks::IntoShared;
 use foton_utils::{entity_events::EntityStatus, locks::Shared};
 use game_mode::{BlockBreakingManager, PlayerGameModeState};
 use glam::DVec3;
@@ -117,6 +118,7 @@ use crate::fluid::get_fluid_state;
 use crate::inventory::equipment::{EntityEquipment, EquipmentSlot, EquipmentSlotType};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::menu::Menu;
+use crate::inventory::menu::kinds::chest;
 use crate::inventory::menu::kinds::inventory_menu;
 use crate::inventory::slot_ranges::{
     CURSOR_AND_MOUNT_CHEST_SLOT, ENDER_CHEST_SLOT_OFFSET, PLAYER_CRAFTING_SIZE,
@@ -173,6 +175,8 @@ use std::path::PathBuf;
 pub struct Player {
     /// The player's game profile.
     pub gameprofile: GameProfile,
+    /// Optional tab-list display name supplied by Bukkit plugins.
+    tab_list_name: SyncMutex<Option<TextComponent>>,
     /// The player's connection (abstracted for testing).
     pub connection: Arc<PlayerConnection>,
 
@@ -401,6 +405,54 @@ impl PlayerResidenceState {
 }
 
 impl Player {
+    /// Returns the optional custom tab-list display name.
+    pub fn tab_list_name(&self) -> Option<TextComponent> {
+        self.tab_list_name.lock().clone()
+    }
+
+    /// Updates the tab-list display name for every online viewer.
+    pub fn set_tab_list_name(&self, name: Option<TextComponent>) {
+        *self.tab_list_name.lock() = name.clone();
+        self.server()
+            .broadcast_to_online(CPlayerInfoUpdate::update_display_name(self.uuid(), name));
+    }
+
+    /// Returns the player's cumulative experience points.
+    #[must_use]
+    pub fn total_experience(&self) -> i32 {
+        self.experience.lock().total_points()
+    }
+
+    /// Replaces cumulative experience and schedules the vanilla sync packet.
+    pub fn set_total_experience(&self, total: i32) {
+        *self.experience.lock() = experience::Experience::new(total);
+    }
+
+    /// Opens a generic chest-backed inventory for plugin-created inventories.
+    ///
+    /// The backing container is captured by the menu so it remains alive for
+    /// exactly as long as the open view; no global inventory table is needed.
+    pub fn open_generic_inventory(
+        &self,
+        title: impl Into<TextComponent>,
+        rows: usize,
+        items: Vec<foton_registry::item_stack::ItemStack>,
+    ) {
+        let rows = rows.clamp(1, 6);
+        let mut initial = items;
+        initial.resize(rows * 9, foton_registry::item_stack::ItemStack::empty());
+        initial.truncate(rows * 9);
+        let backing = SimpleContainer::from_items(initial).into_shared();
+        let player_inventory = Arc::clone(&self.inventory);
+        self.open_menu(title, move |context| {
+            chest(
+                player_inventory,
+                context.container_id,
+                Arc::clone(&backing),
+                rows,
+            )
+        });
+    }
     /// Returns the player's configured main arm.
     #[must_use]
     pub fn main_arm(&self) -> HumanoidArm {
@@ -417,11 +469,15 @@ impl Player {
     /// `player.inventory` directly damages the item silently.
     pub fn hurt_item_in_hand(&self, hand: InteractionHand, amount: i32) {
         let has_infinite_materials = self.has_infinite_materials();
+        let broken_item = self.inventory.lock().get_item_in_hand(hand).clone();
         let broke = self
             .inventory
             .lock()
             .hurt_item_in_hand(hand, amount, has_infinite_materials);
         if broke {
+            let mut event =
+                crate::event::PlayerItemBreakEvent::new(self.gameprofile.id, broken_item);
+            self.fire_event(&mut event);
             LivingEntity::on_equipped_item_broken(self, EquipmentSlot::for_hand(hand));
         }
     }
@@ -497,6 +553,7 @@ impl Player {
             gameprofile,
             connection,
 
+            tab_list_name: SyncMutex::new(None),
             world: ArcSwap::new(world),
             server,
             config,
@@ -991,9 +1048,6 @@ impl Player {
             None,
         );
 
-        let mut death_event = crate::event::PlayerDeathEvent::new(self.gameprofile.id);
-        self.fire_event(&mut death_event);
-
         let show_death_messages = world.get_game_rule(&SHOW_DEATH_MESSAGES);
 
         // TODO: `CombatTracker` proper, for the fall-damage variants and the
@@ -1025,6 +1079,23 @@ impl Player {
         self.reset_stat(Stat::custom(&vanilla_custom_stats::TIME_SINCE_DEATH));
         self.reset_stat(Stat::custom(&vanilla_custom_stats::TIME_SINCE_REST));
         let death_message = source.localized_death_message(&world, self, kill_credit.as_deref());
+        let drops =
+            if !world.get_game_rule(&KEEP_INVENTORY) && self.game_mode() != GameType::Spectator {
+                self.inventory.lock().take_death_drops()
+            } else {
+                Vec::new()
+            };
+        let mut death_event = crate::event::PlayerDeathEvent::with_drops(
+            self.gameprofile.id,
+            death_message.to_plain(&foton_utils::text::DisplayResolutor),
+            drops,
+            world.get_game_rule(&KEEP_INVENTORY) || self.game_mode() == GameType::Spectator,
+        );
+        self.fire_event(&mut death_event);
+        let death_message = match death_event.death_message() {
+            Some(message) => TextComponent::plain(message.to_owned()),
+            None => TextComponent::const_plain(""),
+        };
 
         self.send_packet(CPlayerCombatKill {
             player_id: self.id(),
@@ -1044,8 +1115,7 @@ impl Player {
         }
 
         if !world.get_game_rule(&KEEP_INVENTORY) && self.game_mode() != GameType::Spectator {
-            let drops = self.inventory.lock().take_death_drops();
-            for item in drops {
+            for item in death_event.drops().iter().cloned() {
                 let _ = self.drop_item(item, true, false);
             }
 

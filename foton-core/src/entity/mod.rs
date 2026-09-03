@@ -1,4 +1,5 @@
 //! This module contains entity-related traits and types.
+use crate::event::Event;
 
 use std::{
     any::try_as_dyn,
@@ -789,7 +790,7 @@ pub mod entities;
     reason = "the entity module mirrors vanilla's Entity class and groups its implementation"
 )]
 mod entity;
-mod equine;
+pub mod equine;
 mod fluid_contact;
 #[expect(warnings)]
 #[rustfmt::skip]
@@ -825,11 +826,11 @@ mod tracker;
 
 use crate::portal::{
     PortalKind, PortalProcessResult, PortalProcessor, PortalTicketTarget, TeleportPostAction,
-    TeleportTransition, WorldChangeRequest, portal_shape::PortalShape,
+    TeleportTransition, TeleportTransitionCause, WorldChangeRequest, portal_shape::PortalShape,
 };
 pub use abstract_illager::{AbstractIllager, IllagerArmPose};
 pub(crate) use ageable::{AgeableMob, AgeableMobBase};
-pub(crate) use animal::{Animal, AnimalBase};
+pub use animal::{Animal, AnimalBase};
 pub use base::{
     DEFAULT_MAX_AIR_SUPPLY, DEFAULT_TICKS_REQUIRED_TO_FREEZE, EntityAmethystStepSound, EntityBase,
     EntityBaseLoad, EntityBaseSaveData, EntityBaseState, EntityFireFreezeState,
@@ -849,10 +850,11 @@ pub(crate) use entity::apply_entity_look_at;
 pub use entity::{
     AcceptedClientMovement, AcceptedClientMovementOutcome, Entity, EntityEventSource,
 };
+pub use equine::AbstractHorse;
+pub use equine::llama_layer::{Llama, LlamaVariant};
 pub(crate) use equine::{
-    AbstractChestedHorse, AbstractHorse, AbstractHorseBase, BABY_SCALE, Llama, LlamaBase,
-    LlamaVariant, generate_jump_strength, generate_max_health, generate_speed, is_llama,
-    should_follow_mommy,
+    AbstractChestedHorse, AbstractHorseBase, BABY_SCALE, LlamaBase, generate_jump_strength,
+    generate_max_health, generate_speed, is_llama, should_follow_mommy,
 };
 pub use fluid_contact::EntityFluidContact;
 pub use inside_block_effects::{
@@ -872,7 +874,7 @@ pub use manager::{
     AddEntityError, ChunkEntityLoadResult, EntityLifecycleChanges, EntityMoveError,
     EntityMoveUpdate, EntityOwnership, EntityVisibility, WorldEntityManager,
 };
-pub(crate) use mob::{Mob, MobBase, MoveControlKind, NavigationKind, PathfinderMob};
+pub use mob::{Mob, MobBase, MoveControlKind, NavigationKind, PathfinderMob};
 pub use movement_sync::{
     EntityMovementSyncPacket, EntityMovementSyncPackets, EntityMovementSyncState,
     EntityMovementSyncUpdate, EntityPositionRotSyncPacket, EntityPositionSyncDecision,
@@ -891,16 +893,15 @@ pub use projectile::{
 };
 pub use raider::{RaidStatus, Raider, RaiderState};
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
+pub use spawn::EntitySpawnReason;
 pub(crate) use spawn::{
-    AgeableMobGroupData, AxolotlGroupData, EntitySpawnReason, HorseGroupData, LlamaGroupData,
-    SpawnGroupData,
+    AgeableMobGroupData, AxolotlGroupData, HorseGroupData, LlamaGroupData, SpawnGroupData,
 };
 pub use spellcaster_illager::{IllagerSpell, SpellcasterIllager, SpellcasterState};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
 pub use synced_data::{EntitySyncedData, LivingEntitySyncedData};
-pub(crate) use tamable::{
-    TELEPORT_WHEN_DISTANCE_IS_SQ, TamableAnimal, TamableAnimalBase, is_tamed,
-};
+pub use tamable::{TELEPORT_WHEN_DISTANCE_IS_SQ, TamableAnimal, TamableAnimalBase};
+pub use tamable::{is_tamed, owner_uuid, set_owner_uuid, set_tamed};
 pub(crate) use ticking::{
     snapshot_old_pos_and_rot_for_tick, tick_vehicle_passengers_with_ticked_if,
 };
@@ -950,10 +951,7 @@ impl EntityAnchor {
     }
 }
 
-pub(crate) fn start_riding_entities(
-    passenger: &SharedEntity,
-    entity_to_ride: &SharedEntity,
-) -> bool {
+pub fn start_riding_entities(passenger: &SharedEntity, entity_to_ride: &SharedEntity) -> bool {
     if !entity_to_ride.could_accept_passenger() {
         return false;
     }
@@ -978,6 +976,15 @@ pub(crate) fn start_riding_entities(
         || !entity_to_ride.can_add_passenger(passenger.as_ref())
     {
         return false;
+    }
+
+    if let Some(world) = passenger.level() {
+        let mut event =
+            crate::event::EntityMountEvent::new(passenger.uuid(), entity_to_ride.uuid());
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return false;
+        }
     }
 
     if passenger.is_passenger() {
@@ -1008,6 +1015,46 @@ pub(crate) fn change_entity_world(
     }
 
     let source_world = entity.level()?;
+    let mut teleport_transition = teleport_transition.clone();
+    if entity.as_player().is_none()
+        && matches!(
+            teleport_transition.cause,
+            TeleportTransitionCause::NetherPortal
+                | TeleportTransitionCause::EndPortal
+                | TeleportTransitionCause::EndGateway
+        )
+    {
+        let portal_type = match teleport_transition.cause {
+            TeleportTransitionCause::NetherPortal => "NETHER",
+            TeleportTransitionCause::EndPortal | TeleportTransitionCause::EndGateway => "ENDER",
+            _ => "CUSTOM",
+        };
+        let mut event = crate::event::EntityPortalEvent::new(
+            entity.uuid(),
+            source_world.key.to_string(),
+            entity.position(),
+            teleport_transition.target_world.key.to_string(),
+            teleport_transition.position,
+            portal_type.to_owned(),
+        );
+        source_world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return None;
+        }
+        teleport_transition.position = event.to_position();
+        if event.to_world() != teleport_transition.target_world.key.to_string() {
+            let Some(target_key) = event.to_world().parse::<Identifier>().ok() else {
+                return None;
+            };
+            let Some(target_world) = source_world
+                .server()
+                .and_then(|server| server.worlds.get_owned(&target_key))
+            else {
+                return None;
+            };
+            teleport_transition.target_world = target_world;
+        }
+    }
     if source_world.domain() != teleport_transition.target_world.domain() {
         tracing::error!(
             entity_id = entity.id(),
@@ -1028,13 +1075,13 @@ pub(crate) fn change_entity_world(
         };
         // Vanilla `ServerPlayer.teleport` keeps the live player/connection identity
         // and sends respawn/player-position packets instead of recreating from entity NBT.
-        if !player.change_world_within_domain(teleport_transition) {
+        if !player.change_world_within_domain(&teleport_transition) {
             return None;
         }
         return Some(entity);
     }
 
-    change_non_player_entity_world(entity, teleport_transition)
+    change_non_player_entity_world(entity, &teleport_transition)
 }
 
 fn change_non_player_entity_world(
@@ -1321,6 +1368,7 @@ fn passenger_transition(
 
     TeleportTransition {
         target_world: teleport_transition.target_world.clone(),
+        cause: teleport_transition.cause,
         position,
         rotation,
         velocity: teleport_transition.velocity,

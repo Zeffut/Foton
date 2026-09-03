@@ -461,6 +461,14 @@ fn a_datapack_scan_finds_nested_functions_and_tags() {
     let _ = fs::remove_dir_all(&root);
 
     assert!(contents.errors.is_empty(), "{:?}", contents.errors);
+    assert_eq!(
+        contents.packs,
+        vec![loader::DatapackInfo {
+            name: "example".to_owned(),
+            compatibility: "COMPATIBLE",
+            enabled: true,
+        }]
+    );
     let mut found = contents
         .functions
         .keys()
@@ -485,6 +493,7 @@ fn a_missing_datapack_directory_is_not_an_error() {
     let contents = loader::collect(&unique_root("absent"));
     assert!(contents.errors.is_empty());
     assert!(contents.functions.is_empty());
+    assert!(contents.packs.is_empty());
 }
 
 #[test]

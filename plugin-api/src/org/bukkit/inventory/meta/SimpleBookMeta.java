@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /** The mutable book metadata stored by Foton's API-side ItemStack. */
-public final class SimpleBookMeta extends SimpleItemMeta implements BookMeta {
+public final class SimpleBookMeta extends SimpleItemMeta implements WritableBookMeta {
     private static final int MAX_TITLE_LENGTH = 32;
 
     private String title;
@@ -102,7 +102,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements BookMeta {
         generation = value;
     }
 
-    @Override
+        @Override
     public SimpleBookMeta clone() {
         SimpleBookMeta copy = (SimpleBookMeta) super.clone();
         copy.pages = new ArrayList<>(pages);

@@ -11,6 +11,7 @@ public final class EntityPickupItemEvent extends org.bukkit.event.Event implemen
     private static final HandlerList HANDLERS = new HandlerList();
     public EntityPickupItemEvent(LivingEntity entity, Item item) { this.entity = entity; this.item = item; }
     public LivingEntity getEntity() { return entity; } public Item getItem() { return item; }
+    public org.bukkit.entity.EntityType getEntityType() { return entity.getType(); }
     @Override public boolean isCancelled() { return cancelled; } @Override public void setCancelled(boolean value) { cancelled = value; }
     @Override public HandlerList getHandlers() { return HANDLERS; } public static HandlerList getHandlerList() { return HANDLERS; }
 }

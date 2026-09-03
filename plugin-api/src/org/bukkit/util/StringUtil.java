@@ -6,6 +6,10 @@ import java.util.Collection;
 public final class StringUtil {
     private StringUtil() {}
 
+    public static boolean startsWithIgnoreCase(String string, String prefix) {
+        return string != null && prefix != null && string.regionMatches(true, 0, prefix, 0, prefix.length());
+    }
+
     public static <T extends String> Collection<T> copyPartialMatches(
             String token, Iterable<T> originals, Collection<T> collection) {
         if (token == null || originals == null || collection == null) {

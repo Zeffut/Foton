@@ -17,6 +17,7 @@ import org.bukkit.plugin.Plugin;
  */
 public class HandlerList {
     private static final List<HandlerList> ALL = new ArrayList<>();
+    private final List<org.bukkit.plugin.RegisteredListener> listeners = new ArrayList<>();
 
     // The list registers itself so `getHandlerLists` can find it, which
     // means `this` escapes before a subclass finishes constructing. Nothing
@@ -30,18 +31,21 @@ public class HandlerList {
         }
     }
 
-    public void register(RegisteredListener listener) {}
+    public synchronized void register(org.bukkit.plugin.RegisteredListener listener) {
+        if (listener != null && !listeners.contains(listener)) listeners.add(listener);
+    }
 
-    public void unregister(RegisteredListener listener) {}
+    public synchronized void unregister(org.bukkit.plugin.RegisteredListener listener) { listeners.remove(listener); }
 
-    public void unregister(Listener listener) {}
+    public synchronized void unregister(Listener listener) { listeners.removeIf(value -> value.getListener() == listener); }
 
     public void unregister(Plugin plugin) {
+        synchronized (this) { listeners.removeIf(value -> value.getPlugin() == plugin); }
         foton.EventBridge.unregister(plugin);
     }
 
-    public RegisteredListener[] getRegisteredListeners() {
-        return new RegisteredListener[0];
+    public synchronized org.bukkit.plugin.RegisteredListener[] getRegisteredListeners() {
+        return listeners.toArray(new org.bukkit.plugin.RegisteredListener[0]);
     }
 
     public static void unregisterAll() {
@@ -56,7 +60,7 @@ public class HandlerList {
         foton.EventBridge.unregister(listener);
     }
 
-    public static List<HandlerList> getHandlerLists() {
+    public static ArrayList<HandlerList> getHandlerLists() {
         synchronized (ALL) {
             return new ArrayList<>(ALL);
         }

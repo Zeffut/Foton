@@ -4,8 +4,13 @@ import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
 
 final class FotonScoreboardManager implements ScoreboardManager {
+    private Scoreboard main;
+
     @Override public Scoreboard getMainScoreboard() {
-        String[] worlds = Native.worldNames();
-        return new FotonScoreboard(worlds.length == 0 ? "" : worlds[0]);
+        if (main == null) {
+            String[] worlds = Native.worldNames();
+            main = new FotonScoreboard(worlds == null || worlds.length == 0 ? "" : worlds[0]);
+        }
+        return main;
     }
 }

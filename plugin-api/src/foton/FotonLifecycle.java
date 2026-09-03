@@ -9,9 +9,13 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class FotonLifecycle {
     private FotonLifecycle() {}
     public static void dispatchCommands(JavaPlugin plugin) {
-        Commands commands = new Commands();
+        Commands commands = new FotonCommands();
         ReloadableRegistrarEvent event = () -> commands;
-        plugin.getLifecycleManager().dispatch(LifecycleEvents.COMMANDS, event);
+        try {
+            plugin.getLifecycleManager().dispatch(LifecycleEvents.COMMANDS, event);
+        } catch (LinkageError unsupportedLifecycleShape) {
+            System.out.println("[host] " + plugin.getName() + ": Paper lifecycle handler shape is unavailable; continuing without lifecycle commands");
+        }
         CommandMap.registerBrigadier(commands, plugin);
     }
 }

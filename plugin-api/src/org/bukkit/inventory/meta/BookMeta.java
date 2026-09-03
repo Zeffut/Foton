@@ -33,7 +33,7 @@ public interface BookMeta extends ItemMeta {
     /** Spigot's component-page adapter, backed by this book's ordinary pages. */
     default Spigot spigot() {
         BookMeta book = this;
-        return new Spigot() {
+        return new Spigot(book) {
             @Override
             public void addPage(net.md_5.bungee.api.chat.BaseComponent[]... pages) {
                 if (pages == null) return;
@@ -48,8 +48,13 @@ public interface BookMeta extends ItemMeta {
         };
     }
 
-    abstract class Spigot {
+    abstract class Spigot extends ItemMeta.Spigot {
+        private final BookMeta book;
+        protected Spigot() { this(null); }
+        protected Spigot(BookMeta book) { super(book); this.book = book; }
         public abstract void addPage(net.md_5.bungee.api.chat.BaseComponent[]... pages);
+        public List<String> getPages() { return book == null ? List.of() : book.getPages(); }
+        public void setPages(List<String> pages) { if (book != null) book.setPages(pages); }
     }
 
     int getPageCount();

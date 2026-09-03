@@ -11,8 +11,8 @@ use crate::entity::LivingEntity as _;
 impl Server {
     pub(super) fn process_world_changes(self: &Arc<Self>, tick_count: u64, runs_normally: bool) {
         let mut changes = mem::take(&mut *self.pending_world_changes.lock());
-        for world in self.worlds.values() {
-            changes.extend(world.drain_world_changes());
+        for snapshot in self.worlds.snapshots() {
+            changes.extend(snapshot.world().drain_world_changes());
         }
 
         for (entity, request) in changes {
@@ -344,6 +344,7 @@ impl Server {
     ) -> Option<bool> {
         self.worlds
             .values()
+            .into_iter()
             .filter(|world| world.domain() == domain)
             .find_map(|world| {
                 world
@@ -359,7 +360,6 @@ impl Server {
         let default_world = self
             .worlds
             .default_world(domain)
-            .cloned()
             .ok_or_else(|| format!("domain {domain} has no default world"))?;
         let respawn_data = {
             let level_data = default_world.level_data.read();
@@ -369,7 +369,6 @@ impl Server {
             .worlds
             .get(respawn_data.dimension())
             .filter(|world| world.domain() == domain)
-            .cloned()
             .ok_or_else(|| {
                 format!(
                     "respawn dimension {} is not loaded in domain {domain}",
@@ -414,7 +413,6 @@ impl Server {
             .worlds
             .get(&target_world.key)
             .filter(|registered| Arc::ptr_eq(registered, &target_world))
-            .cloned()
             .ok_or_else(|| "target world is not the registered loaded world".to_owned())?;
         let target_domain = target_world.domain().to_owned();
         if !self.worlds.has_domain(&target_domain) {
@@ -532,7 +530,7 @@ impl Server {
                 .worlds
                 .get(&target_world.key)
                 .ok_or_else(|| "target world is no longer loaded".to_owned())?;
-            if !Arc::ptr_eq(registered, target_world) || target_world.domain() != target_domain {
+            if !Arc::ptr_eq(&registered, target_world) || target_world.domain() != target_domain {
                 return Err("target world registration changed before the switch".to_owned());
             }
         }

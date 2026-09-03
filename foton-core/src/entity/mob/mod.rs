@@ -67,6 +67,7 @@ use crate::entity::{
     Entity, EntitySpawnReason, LivingEntity, LivingTravelInput, RemovalReason, SharedEntity,
     SpawnGroupData, WeakEntity,
 };
+use crate::event::Event as _;
 use crate::inventory::equipment::EquipmentSlot;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
@@ -489,8 +490,35 @@ pub trait Mob: LivingEntity + MobSource {
     ///
     /// Returns `false` when the supplied entity is not a living entity.
     fn set_target(&self, target: Option<&SharedEntity>) -> bool {
-        self.mob_base()
-            .set_target(target, |target| self.is_valid_target(target))
+        let previous = self.target();
+        let changed = self
+            .mob_base()
+            .set_target(target, |target| self.is_valid_target(target));
+        if !changed {
+            return false;
+        }
+        self.finish_target_change(previous, target)
+    }
+
+    fn finish_target_change(
+        &self,
+        previous: Option<SharedEntity>,
+        target: Option<&SharedEntity>,
+    ) -> bool {
+        let next_id = target.map(|entity| entity.uuid());
+        if previous.as_ref().map(|entity| entity.uuid()) == next_id {
+            return true;
+        }
+        let Some(world) = self.level() else {
+            return true;
+        };
+        let mut event = crate::event::EntityTargetEvent::new(self.uuid(), next_id);
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            self.mob_base().set_target(previous.as_ref(), |_| true);
+            return false;
+        }
+        true
     }
 
     fn is_valid_target(&self, target: &dyn LivingEntity) -> bool {
@@ -698,9 +726,12 @@ pub trait Mob: LivingEntity + MobSource {
     fn finalize_spawn_mob_base(
         &self,
         _world: &Arc<World>,
-        _spawn_reason: EntitySpawnReason,
+        spawn_reason: EntitySpawnReason,
         group_data: Option<SpawnGroupData>,
     ) -> Option<SpawnGroupData> {
+        // Vanilla records the reason at the mob finalization boundary. Every
+        // mob-specific override delegates here after applying its own data.
+        self.base().set_spawn_reason(spawn_reason);
         let needs_random_spawn_bonus = !self
             .attributes()
             .lock()
@@ -869,6 +900,11 @@ pub trait Mob: LivingEntity + MobSource {
 
     fn set_persistence_required(&self) {
         *self.mob_base().persistence_required().lock() = true;
+    }
+
+    /// Sets the vanilla persistence flag used by Bukkit's remove-when-far API.
+    fn set_persistence_required_value(&self, value: bool) {
+        *self.mob_base().persistence_required().lock() = value;
     }
 
     /// Returns vanilla `Mob.canPickUpLoot`.
@@ -1706,7 +1742,15 @@ pub trait Mob: LivingEntity + MobSource {
         let yaw_radians = self.rotation().0.to_radians();
         let yaw_sin = f64::from(yaw_radians.sin());
         let yaw_cos = f64::from(yaw_radians.cos());
-        living_target.knockback(knockback_amount, yaw_sin, -yaw_cos);
+        let push_allowed = target.level().is_none_or(|world| {
+            let mut event =
+                crate::event::EntityPushedByEntityAttackEvent::new(target.uuid(), self.uuid());
+            world.fire_event(&mut event);
+            !event.is_cancelled()
+        });
+        if push_allowed {
+            living_target.knockback(knockback_amount, yaw_sin, -yaw_cos);
+        }
 
         let velocity = self.velocity();
         self.set_velocity(DVec3::new(velocity.x * 0.6, velocity.y, velocity.z * 0.6));

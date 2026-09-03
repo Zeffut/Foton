@@ -74,8 +74,43 @@ public final class CommandMap {
         byName.clear();
     }
 
+    /** Snapshot exposed through Bukkit's administrative command map API. */
+    public static Map<String, Command> knownCommands() {
+        return new LinkedHashMap<>(byName);
+    }
+
     public static Command get(String name) {
         return byName.get(key(name));
+    }
+    public static java.util.List<String> tabComplete(CommandSender sender, String buffer) {
+        String line = buffer == null ? "" : buffer;
+        String trimmed = line.trim();
+        if (trimmed.isEmpty() || !line.endsWith(" ")) {
+            String prefix = trimmed.toLowerCase(Locale.ROOT);
+            java.util.List<String> result = new java.util.ArrayList<>();
+            for (String name : byName.keySet()) if (name.startsWith(prefix)) result.add(name);
+            return result;
+        }
+        String[] parts = trimmed.split("\\s+");
+        Command command = get(parts[0]);
+        if (command == null) return java.util.Collections.emptyList();
+        String[] args = new String[Math.max(0, parts.length - 1)];
+        if (args.length > 0) System.arraycopy(parts, 1, args, 0, args.length);
+        java.util.List<String> completions;
+        try {
+            completions = command.tabComplete(sender, parts[0], args);
+        } catch (Throwable ignored) {
+            completions = java.util.Collections.emptyList();
+        }
+        org.bukkit.event.server.TabCompleteEvent event =
+            new org.bukkit.event.server.TabCompleteEvent(sender, line, completions);
+        org.bukkit.Bukkit.getPluginManager().callEvent(event);
+        return event.isCancelled() ? java.util.Collections.emptyList() : event.getCompletions();
+    }
+
+    public static boolean unregister(Command command) {
+        boolean removed = byName.entrySet().removeIf(entry -> entry.getValue() == command);
+        return removed;
     }
 
     private static String key(String name) {

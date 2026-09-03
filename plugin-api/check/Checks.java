@@ -10,6 +10,7 @@ public final class Checks {
         Events.check(args[0]);
         Config.check();
         Geometry.check();
+        InventoryViewCheck.check();
         Items.check();
         Colors.check();
         Commands.check();

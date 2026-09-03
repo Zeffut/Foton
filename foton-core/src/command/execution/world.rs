@@ -20,10 +20,10 @@ pub(crate) enum WorldArgument {
 impl WorldArgument {
     pub(crate) fn resolve(&self, source: &CommandSource) -> Result<Arc<World>, CommandSyntaxError> {
         let world = match self {
-            Self::Key(key) => source.server().worlds.get(key),
+            Self::Key(key) => source.server().worlds.get_owned(key),
             Self::Relative(path) => {
                 let key = Identifier::new(source.world().domain().to_owned(), path.to_string());
-                source.server().worlds.get(&key)
+                source.server().worlds.get_owned(&key)
             }
         };
         world.map_or_else(
@@ -33,7 +33,7 @@ impl WorldArgument {
                     .component();
                 Err(CommandSyntaxError::dynamic(message))
             },
-            |world| Ok(Arc::clone(world)),
+            |world| Ok(world),
         )
     }
 }

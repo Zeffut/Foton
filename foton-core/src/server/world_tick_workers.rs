@@ -1,10 +1,13 @@
 use std::{io, sync::Arc, thread};
 
+use foton_utils::Identifier;
+
 use crossbeam::channel::{self, Sender};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
-use crate::world::{World, WorldGameTickTimings};
+use crate::server::worlds::WorldMapSnapshot;
+use crate::world::WorldGameTickTimings;
 
 struct WorldTickRequest {
     tick_count: u64,
@@ -19,7 +22,8 @@ struct WorldTickWorker {
 }
 
 impl WorldTickWorker {
-    fn spawn(index: usize, world: Arc<World>) -> io::Result<Self> {
+    fn spawn(index: usize, snapshot: WorldMapSnapshot) -> io::Result<Self> {
+        let world = Arc::clone(snapshot.world());
         let world_key = Arc::<str>::from(world.key.to_string());
         let (request_sender, request_receiver) = channel::bounded::<WorldTickRequest>(1);
         let thread = thread::Builder::new()
@@ -93,12 +97,44 @@ pub(super) struct WorldTickWorkers {
 }
 
 impl WorldTickWorkers {
-    pub(super) fn spawn<'a>(worlds: impl IntoIterator<Item = &'a Arc<World>>) -> io::Result<Self> {
+    pub(super) fn spawn<S>(worlds: impl IntoIterator<Item = S>) -> io::Result<Self>
+    where
+        S: Into<WorldMapSnapshot>,
+    {
         let mut workers = Vec::new();
-        for (index, world) in worlds.into_iter().enumerate() {
-            workers.push(WorldTickWorker::spawn(index, Arc::clone(world))?);
+        for (index, world) in worlds.into_iter().map(Into::into).enumerate() {
+            workers.push(WorldTickWorker::spawn(index, world)?);
         }
         Ok(Self { workers })
+    }
+
+    /// Adds a worker at a tick safe-point.
+    pub(super) fn add<S>(&mut self, world: S) -> io::Result<()>
+    where
+        S: Into<WorldMapSnapshot>,
+    {
+        let index = self.workers.len();
+        self.workers
+            .push(WorldTickWorker::spawn(index, world.into())?);
+        Ok(())
+    }
+
+    /// Removes a worker after the caller has completed the current tick boundary.
+    ///
+    /// Dropping the worker closes its request channel and joins the thread, so no
+    /// world tick can still be executing when this returns. The world itself is
+    /// intentionally not removed here; the server must first persist it and
+    /// detach it from the loaded-world map.
+    pub(super) fn remove(&mut self, key: &Identifier) -> bool {
+        let Some(index) = self
+            .workers
+            .iter()
+            .position(|worker| worker.world_key.as_ref() == key.to_string())
+        else {
+            return false;
+        };
+        drop(self.workers.remove(index));
+        true
     }
 
     pub(super) async fn tick_all(
@@ -131,6 +167,26 @@ mod tests {
 
     use super::WorldTickWorkers;
     use crate::test_support::fresh_test_world;
+
+    #[test]
+    fn removing_worker_joins_it_and_keeps_remaining_worlds_ticking() {
+        let first = fresh_test_world("removable_worker_first");
+        let second = fresh_test_world("removable_worker_second");
+        let Ok(mut workers) = WorldTickWorkers::spawn([&first, &second]) else {
+            panic!("world tick workers should start");
+        };
+        assert!(block_on(workers.tick_all(1, true)).is_ok());
+
+        assert!(workers.remove(&first.key));
+        assert!(!workers.remove(&first.key));
+        assert!(workers.add(&first).is_ok());
+        let Ok(timings) = block_on(workers.tick_all(2, true)) else {
+            panic!("remaining worker should finish its tick");
+        };
+        assert_eq!(timings.len(), 2);
+        assert_eq!(first.game_time(), 2);
+        assert_eq!(second.game_time(), 2);
+    }
 
     #[test]
     fn persistent_workers_tick_every_world_across_boundaries() {

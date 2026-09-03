@@ -183,6 +183,32 @@ impl BaseSpawner {
         self.state.lock().spawn_delay
     }
 
+    /// Sets the remaining delay before the next spawn attempt.
+    pub fn set_spawn_delay(&self, delay: i32) {
+        self.state.lock().spawn_delay = delay.max(0);
+    }
+
+    /// Returns the minimum delay between spawn attempts.
+    #[must_use]
+    pub fn min_spawn_delay(&self) -> i32 {
+        self.state.lock().min_spawn_delay
+    }
+
+    /// Sets the minimum delay, preserving vanilla's non-negative input contract.
+    pub fn set_min_spawn_delay(&self, delay: i32) {
+        self.state.lock().min_spawn_delay = delay.max(0);
+    }
+
+    /// Maximum ticks between spawn attempts.
+    pub fn max_spawn_delay(&self) -> i32 {
+        self.state.lock().max_spawn_delay
+    }
+
+    /// Sets the maximum spawn delay, clamped to a valid non-negative value.
+    pub fn set_max_spawn_delay(&self, delay: i32) {
+        self.state.lock().max_spawn_delay = delay.max(0);
+    }
+
     /// Returns whether a player is close enough to keep the spawner awake.
     ///
     /// Vanilla parity: `BaseSpawner.isNearPlayer`, which asks
@@ -302,6 +328,18 @@ impl BaseSpawner {
 
         // Vanilla builds the entity from the tag here. Foton has no dispatch on
         // the tag's `id`, so the type is resolved above and handed in.
+        let mut pre_spawn = crate::event::PreCreatureSpawnEvent::new(
+            world.key.to_string(),
+            spawn_pos.x,
+            spawn_pos.y,
+            spawn_pos.z,
+            entity_type.key.to_string(),
+            "Spawner".to_owned(),
+        );
+        world.fire_event(&mut pre_spawn);
+        if pre_spawn.is_cancelled() {
+            return SpawnAttempt::Skipped;
+        }
         let Some(entity) = load_spawner_entity(
             world,
             entity_type,
@@ -350,11 +388,12 @@ impl BaseSpawner {
             entity.position().z,
             "Spawner".to_owned(),
         );
+        world.begin_pending_spawn(Arc::clone(&entity));
         world.fire_event(&mut spawn_event);
+        world.end_pending_spawn(&entity.uuid());
         if spawn_event.is_cancelled() {
             return SpawnAttempt::Skipped;
         }
-
         if world.try_add_entity(Arc::clone(&entity)).is_err() {
             return SpawnAttempt::GiveUp;
         }

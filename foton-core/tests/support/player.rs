@@ -15,6 +15,7 @@ pub(crate) fn test_runtime_config(max_players: u32) -> Arc<RuntimeConfig> {
         simulation_distance: 2,
         max_chained_neighbor_updates: 1_000_000,
         online_mode: false,
+        whitelist_enabled: false,
         auth_server: None,
         profile_server: None,
         services_server: None,

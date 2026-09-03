@@ -7,11 +7,12 @@ use super::{
     ExecutionCommandSource, ExecutionStop, GameTickTaskGuard, Instant, JoinSet, NetworkConnection,
     PendingCommandExecutionQueue, Player, SEND_PLAYER_INFO_INTERVAL, SLOW_CHUNK_TICK_THRESHOLD,
     Server, StringReader, SuggestionError, Suggestions, TAB_LIST_UPDATE_INTERVAL, TabListTickStats,
-    ThreadPool, World, command_suggestions_packet, configured_packet_workers, sleep,
-    spawn_blocking,
+    ThreadPool, World, WorldRemovalRequest, command_suggestions_packet, configured_packet_workers,
+    sleep, spawn_blocking,
 };
 use crate::command::functions::CommandFunction;
 use crate::event::{CommandEvent, ServerTickEvent};
+use foton_utils::Identifier;
 
 impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
@@ -86,7 +87,7 @@ impl Server {
         reason = "the ordered tick phases and their shutdown joins remain easier to audit together"
     )]
     async fn run_game_tick(self: Arc<Self>, cancel_token: CancellationToken) {
-        let world_tick_workers = match WorldTickWorkers::spawn(self.worlds.values()) {
+        let mut world_tick_workers = match WorldTickWorkers::spawn(self.worlds.snapshots()) {
             Ok(workers) => workers,
             Err(error) => {
                 log::error!("Failed to start world tick workers: {error}");
@@ -161,6 +162,7 @@ impl Server {
                 cancel_token.cancel();
                 break;
             }
+            self.process_world_removals(&mut world_tick_workers);
             player_info_ticks += 1;
             if player_info_ticks > SEND_PLAYER_INFO_INTERVAL {
                 let _span = tracing::trace_span!("broadcast_latency").entered();
@@ -177,6 +179,7 @@ impl Server {
                         .await;
             }
 
+            self.process_world_additions(&mut world_tick_workers);
             self.process_domain_switches();
 
             self.tick_command_data_autosave(
@@ -508,7 +511,8 @@ impl Server {
     /// don't re-encode the same chunk within a single tick.
     fn tick_chunk_sending(&self) {
         let tick_start = Instant::now();
-        for world in self.worlds.values() {
+        for snapshot in self.worlds.snapshots() {
+            let world = snapshot.world();
             let mut encode_cache = rustc_hash::FxHashMap::default();
             world.players.iter_players(|_uuid, player| {
                 Self::send_chunks_for_player(
@@ -579,7 +583,8 @@ impl Server {
 
     /// Commits ready chunk lifecycle epochs and forks the next background work.
     fn advance_chunk_scheduling(&self) {
-        for (i, world) in self.worlds.values().enumerate() {
+        for (i, snapshot) in self.worlds.snapshots().into_iter().enumerate() {
+            let world = snapshot.world();
             let timings = world.chunk_map.advance_scheduling();
 
             let background_elapsed = timings.ticket_updates
@@ -626,6 +631,124 @@ impl Server {
                     "Chunk scheduling epoch slow"
                 );
             }
+        }
+    }
+
+    /// Attaches worlds constructed asynchronously at a tick safe-point.
+    fn process_world_additions(&self, workers: &mut WorldTickWorkers) {
+        let worlds = std::mem::take(&mut *self.pending_world_additions.lock());
+        for (id, world, completion) in worlds {
+            let key = world.key.clone();
+            if let Err(error) = self.worlds.insert(key.clone(), world) {
+                let _ = completion.send(Err(error));
+                continue;
+            }
+            let Some(world) = self.worlds.get(&key) else {
+                let _ = completion.send(Err(format!("world {key} was not attached")));
+                continue;
+            };
+            if let Err(error) = workers.add(&world) {
+                log::error!("Failed to start tick worker for {}: {}", key, error);
+                let _ = self.worlds.remove(&key);
+                let _ = completion.send(Err(error.to_string()));
+            } else {
+                let _ = completion.send(Ok(()));
+            }
+        }
+    }
+
+    /// Queues a loaded-world removal for the next tick safe-point.
+    pub fn request_world_removal(&self, key: Identifier) -> bool {
+        if self.worlds.get(&key).is_none() {
+            return false;
+        }
+        self.pending_world_removals
+            .lock()
+            .push(WorldRemovalRequest {
+                key,
+                save: true,
+                completion: None,
+            });
+        true
+    }
+
+    /// Queues a world removal with explicit persistence choice.
+    pub fn request_world_removal_with_save(&self, key: Identifier, save: bool) -> bool {
+        if self.worlds.get(&key).is_none() {
+            return false;
+        }
+        self.pending_world_removals
+            .lock()
+            .push(WorldRemovalRequest {
+                key,
+                save,
+                completion: None,
+            });
+        true
+    }
+
+    /// Queues a removal and returns a receiver completed after persistence.
+    pub fn request_world_removal_with_completion(
+        &self,
+        key: Identifier,
+        save: bool,
+    ) -> Option<tokio::sync::oneshot::Receiver<Result<usize, String>>> {
+        if self.worlds.get(&key).is_none() {
+            return None;
+        }
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.pending_world_removals
+            .lock()
+            .push(WorldRemovalRequest {
+                key,
+                save,
+                completion: Some(sender),
+            });
+        Some(receiver)
+    }
+
+    /// Detaches worlds only after the current tick has completed.
+    fn process_world_removals(&self, workers: &mut WorldTickWorkers) {
+        let requests = std::mem::take(&mut *self.pending_world_removals.lock());
+        for request in requests {
+            let WorldRemovalRequest {
+                key,
+                save,
+                completion,
+            } = request;
+            let Some(world) = self.worlds.get_owned(&key) else {
+                continue;
+            };
+            if !workers.remove(&key) {
+                log::error!("Requested world {key} has no tick worker");
+                if let Some(sender) = completion {
+                    let _ = sender.send(Err("world has no tick worker".to_owned()));
+                }
+                continue;
+            }
+            if let Err(error) = self.worlds.remove(&key) {
+                log::debug!("World removal deferred for {key}: {error:?}");
+                if let Some(sender) = completion {
+                    let _ = sender.send(Err(format!("{error:?}")));
+                }
+                continue;
+            }
+            if !save {
+                if let Some(sender) = completion {
+                    let _ = sender.send(Ok(0));
+                }
+                continue;
+            }
+            // Persistence is I/O and must not stall the serialized game tick.
+            let runtime = Arc::clone(&self.chunk_runtime);
+            let _cleanup = runtime.spawn(async move {
+                let mut saved = 0;
+                world.cleanup(&mut saved).await;
+                tracing::debug!(world = %key, saved_chunks = saved, "World cleanup finished");
+                if let Some(sender) = completion {
+                    let _ = sender.send(Ok(saved));
+                }
+            });
         }
     }
 

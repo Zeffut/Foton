@@ -200,6 +200,18 @@ FROM_OBJECT = frozenset({
     "wait(JI)V",
 })
 
+# Bukkit's serialization wrappers inherit these public methods from the JDK.
+# The wrapper classes are intentionally thin, so calls compiled against the
+# Bukkit owner still resolve through the Java superclass at runtime.
+INHERITED_API = {
+    "org/bukkit/util/io/BukkitObjectInputStream": {
+        "readObject()Ljava/lang/Object;",
+    },
+    "org/bukkit/util/io/BukkitObjectOutputStream": {
+        "writeObject(Ljava/lang/Object;)V",
+    },
+}
+
 FROM_JDK = {
     "java/lang/Object": FROM_OBJECT,
     "java/lang/Enum": FROM_OBJECT | {
@@ -326,7 +338,7 @@ def gaps(corpus, api_jar):
         missing = set()
         for member in wanted:
             owner, signature = member.split("#", 1)
-            if signature not in FROM_OBJECT and signature not in have.get(owner, ()):
+            if signature not in FROM_OBJECT and signature not in INHERITED_API.get(owner, ()) and signature not in have.get(owner, ()):
                 missing.add(member)
         per_plugin[jar.name] = (len(wanted), missing)
         for member in missing:

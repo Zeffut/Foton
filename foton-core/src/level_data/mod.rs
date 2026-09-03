@@ -64,6 +64,9 @@ impl Default for WorldBorderData {
 pub struct LevelData {
     /// World seed for terrain generation.
     pub seed: i64,
+    /// Whether the world has a bonus chest.
+    #[serde(default)]
+    pub bonus_chest: bool,
     /// Total game time in ticks.
     pub game_time: i64,
     /// Independently advancing world-clock instances for this loaded world.
@@ -92,6 +95,9 @@ pub struct LevelData {
     pub game_rules_values: GameRuleValues,
     /// Whether the world has been initialized.
     pub initialized: bool,
+    /// Whether the vanilla spawn area is kept loaded in memory.
+    #[serde(default = "default_keep_spawn_in_memory")]
+    pub keep_spawn_in_memory: bool,
     /// Generator settings this persisted world was created with.
     #[serde(default)]
     pub generation: Option<WorldGenerationSettings>,
@@ -288,6 +294,10 @@ pub struct WeatherState {
     pub clear_weather_time: i32,
 }
 
+fn default_keep_spawn_in_memory() -> bool {
+    true
+}
+
 impl Default for LevelData {
     fn default() -> Self {
         Self::new_with_seed(rand::random())
@@ -306,6 +316,7 @@ impl LevelData {
     pub fn new_with_seed_and_difficulty(seed: i64, difficulty: Difficulty) -> Self {
         Self {
             seed,
+            bonus_chest: false,
             game_time: 0,
             world_clocks: WorldClockManager::new(),
             spawn: SpawnPoint::default(),
@@ -317,6 +328,7 @@ impl LevelData {
             game_rules: FxHashMap::default(),
             game_rules_values: GameRuleValues::new(&REGISTRY.game_rules),
             initialized: false,
+            keep_spawn_in_memory: true,
             generation: None,
         }
     }
@@ -509,8 +521,13 @@ impl LevelDataManager {
 
     /// Prepares dirty level data for an asynchronous disk write.
     pub fn prepare_save(&mut self) -> io::Result<Option<(PathBuf, String)>> {
-        if !self.dirty { return Ok(None); }
-        let Some(path) = &self.path else { self.dirty = false; return Ok(None); };
+        if !self.dirty {
+            return Ok(None);
+        }
+        let Some(path) = &self.path else {
+            self.dirty = false;
+            return Ok(None);
+        };
         self.data.save_game_rules();
         let content = toml::to_string_pretty(&self.data)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -520,8 +537,12 @@ impl LevelDataManager {
 
     /// Saves the level data to disk if it has been modified.
     pub async fn save(&mut self) -> io::Result<()> {
-        let Some((path, content)) = self.prepare_save()? else { return Ok(()); };
-        if let Some(parent) = path.parent() { fs::create_dir_all(parent).await?; }
+        let Some((path, content)) = self.prepare_save()? else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
         fs::write(&path, content).await?;
         log::debug!("Saved level data to {}", path.display());
         Ok(())
@@ -751,6 +772,29 @@ mod tests {
         assert_eq!(deserialized.pos(), BlockPos::new(-4, 70, 8));
         assert_eq!(deserialized.yaw.to_bits(), 179.0_f32.to_bits());
         assert_eq!(deserialized.pitch.to_bits(), (-90.0_f32).to_bits());
+    }
+
+    #[test]
+    fn keep_spawn_in_memory_round_trips_and_defaults_for_legacy_data() {
+        init_vanilla_registry();
+        let mut data = LevelData::new_with_seed(1);
+        data.keep_spawn_in_memory = false;
+        let serialized = toml::to_string(&data).expect("level data should serialize");
+        let restored: LevelData =
+            toml::from_str(&serialized).expect("level data should deserialize");
+        assert!(!restored.keep_spawn_in_memory);
+
+        let legacy = serialized
+            .lines()
+            .filter(|line| !line.starts_with("keep_spawn_in_memory"))
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            );
+        let restored_legacy: LevelData =
+            toml::from_str(&legacy).expect("legacy level data should deserialize");
+        assert!(restored_legacy.keep_spawn_in_memory);
     }
 
     #[test]

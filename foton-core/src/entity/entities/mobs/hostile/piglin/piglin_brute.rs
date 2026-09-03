@@ -206,7 +206,8 @@ impl ConvertiblePiglin for PiglinBruteEntity {
 
         convert_to(
             self,
-            ConversionParams::single(true, true),
+            ConversionParams::single(true, true)
+                .with_reason(crate::entity::conversion::ConversionReason::PiglinZombification),
             |id, position, world| {
                 ZombifiedPiglinEntity::new(&vanilla_entities::ZOMBIFIED_PIGLIN, id, position, world)
             },

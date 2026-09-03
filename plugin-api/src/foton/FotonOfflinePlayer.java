@@ -11,7 +11,7 @@ import org.bukkit.entity.Player;
  * Bukkit does the same: `getOfflinePlayer("nobody")` answers a handle, not
  * null, and plugins branch on `hasPlayedBefore` rather than on nullness.
  */
-public final class FotonOfflinePlayer implements OfflinePlayer {
+public class FotonOfflinePlayer implements OfflinePlayer {
     private final UUID id;
     private final String name;
 
@@ -43,6 +43,24 @@ public final class FotonOfflinePlayer implements OfflinePlayer {
         }
         FotonPlayer player = new FotonPlayer(id);
         return player.isOnline() ? player : null;
+    }
+
+    @Override public boolean isOp() { return id != null && Native.offlineIsOperator(id.toString()); }
+
+    @Override public void setOp(boolean value) { if (id != null) Native.setPlayerOperator(id.toString(), value); }
+
+    @Override public boolean isWhitelisted() { return id != null && Native.offlineIsWhitelisted(id.toString()); }
+
+    @Override public void setWhitelisted(boolean value) { if (id != null) Native.setPlayerWhitelisted(id.toString(), value); }
+
+    @Override public boolean isBanned() { return name != null && FotonServer.isNameBanned(name); }
+
+    @Override public long getFirstPlayed() { return id == null ? 0L : Native.firstPlayed(id.toString()); }
+
+    @Override public long getLastPlayed() { return id == null ? 0L : Native.lastPlayed(id.toString()); }
+
+    @Override public int getStatistic(org.bukkit.Statistic statistic) {
+        return id == null || statistic == null ? 0 : Native.offlineStatistic(id.toString(), statistic.name());
     }
 
     @Override public boolean hasPlayedBefore() {

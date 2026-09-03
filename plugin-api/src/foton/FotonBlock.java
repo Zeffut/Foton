@@ -55,6 +55,15 @@ public final class FotonBlock implements Block {
     }
 
     @Override
+    public org.bukkit.block.Biome getBiome() {
+        String key = world == null ? null : Native.biomeKey(world.getName(), x, y, z);
+        if (key == null) return null;
+        int colon = key.indexOf(':');
+        String name = (colon < 0 ? key : key.substring(colon + 1)).toUpperCase(java.util.Locale.ROOT);
+        try { return org.bukkit.block.Biome.valueOf(name); } catch (IllegalArgumentException ignored) { return null; }
+    }
+
+    @Override
     public Material getType() {
         return getBlockData().getMaterial();
     }
@@ -86,6 +95,31 @@ public final class FotonBlock implements Block {
     @Override
     public BlockData getBlockData() {
         String text = world == null ? null : Native.blockState(world.getName(), x, y, z);
+        if (text != null && text.startsWith("minecraft:bell")) {
+            return new org.bukkit.block.data.type.SimpleBellData(text);
+        }
+        if (text != null && text.startsWith("minecraft:cake")) {
+            return new org.bukkit.block.data.type.SimpleCakeData(text);
+        }
+        if (text != null && text.startsWith("minecraft:piston_head")) {
+            return new org.bukkit.block.data.type.SimplePistonHeadData(text);
+        }
+        if (text != null && text.contains("[rotation=")) {
+            return new org.bukkit.block.data.SimpleRotatableData(text);
+        }
+        if (text != null && text.contains("[face=")) {
+            return new org.bukkit.block.data.SimpleFaceAttachableData(text);
+        }
+        if (text != null && text.contains("[half=")) {
+            if (text.contains("_door[")) return new org.bukkit.block.data.type.SimpleDoorData(text);
+            return new org.bukkit.block.data.SimpleBisectedData(text);
+        }
+        if (text != null && text.contains("[level=")) {
+            return new org.bukkit.block.data.SimpleLeveledData(text);
+        }
+        if (text != null && text.contains("[lit=")) {
+            return new org.bukkit.block.data.SimpleLightableData(text);
+        }
         if (text != null && text.startsWith("minecraft:tripwire")) {
             return new SimpleTripwireData(text);
         }
@@ -100,12 +134,54 @@ public final class FotonBlock implements Block {
 
     @Override
     public BlockState getState() {
+        String key = getBlockData().getMaterial().getKeyName();
+        if (key.endsWith("_sign") || key.endsWith("_wall_sign")) {
+            return new FotonSign(this, getBlockData());
+        }
+        if (key.endsWith("_banner") || key.endsWith("_wall_banner")) {
+            return new FotonBanner(this, getBlockData());
+        }
+        if (getType() == Material.CHISELED_BOOKSHELF) {
+            return new FotonChiseledBookshelf(this, getBlockData());
+        }
+        if (getType() == Material.JUKEBOX) {
+            return new FotonJukebox(this, getBlockData());
+        }
+        if (getType() == Material.HOPPER) {
+            return new FotonHopper(this, getBlockData());
+        }
+        if (getType() == Material.CRAFTER) {
+            return new FotonCrafter(this, getBlockData());
+        }
+        if (getType() == Material.DISPENSER) {
+            return new FotonDispenser(this, getBlockData());
+        }
+        if (getType() == Material.LECTERN) {
+            return new FotonLectern(this, getBlockData());
+        }
+        if (getType() == Material.SPAWNER) {
+            return new FotonCreatureSpawner(this, getBlockData());
+        }
         return new FotonBlockState(this, getBlockData());
     }
 
     @Override
     public boolean isEmpty() {
         return getType().isAir();
+    }
+
+    @Override public byte getLightFromBlocks() {
+        return world == null ? 0 : Native.blockLight(world.getName(), x, y, z);
+    }
+
+    @Override public boolean isBlockIndirectlyPowered() { return world != null && Native.blockIndirectlyPowered(world.getName(), x, y, z); }
+
+    @Override public byte getLightFromSky() {
+        return world == null ? 0 : Native.skyLight(world.getName(), x, y, z);
+    }
+
+    @Override public boolean breakNaturally() {
+        return world != null && Native.breakBlock(world.getName(), x, y, z);
     }
 
     @Override

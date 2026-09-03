@@ -17,6 +17,7 @@ final class FotonTeam implements Team {
     @Override
     public Set<String> getEntries() {
         String[] entries = Native.scoreboardTeamEntries(world, name);
+        if (entries == null) return Collections.emptySet();
         return Collections.unmodifiableSet(new LinkedHashSet<>(Arrays.asList(entries)));
     }
 }

@@ -25,11 +25,12 @@ use crate::{
         vanilla_components::{
             ATTACK_RANGE, ATTRIBUTE_MODIFIERS, AttackRange, BUNDLE_CONTENTS, CHARGED_PROJECTILES,
             CONTAINER, CUSTOM_DATA, CUSTOM_NAME, DAMAGE, DAMAGE_RESISTANT, DAMAGE_TYPE,
-            ENCHANTABLE, ENCHANTMENTS, EQUIPPABLE, Equippable, ITEM_NAME, ItemAttributeModifiers,
-            ItemEnchantments, MAX_DAMAGE, MAX_STACK_SIZE, MINIMUM_ATTACK_CHARGE,
-            OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier, PIERCING_WEAPON, PiercingWeapon,
-            REPAIRABLE, STORED_ENCHANTMENTS, TOOL, Tool, UNBREAKABLE, WEAPON,
-            WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT, Weapon,
+            ENCHANTABLE, ENCHANTMENTS, EQUIPPABLE, Equippable, FIREWORK_EXPLOSION, FIREWORKS,
+            FireworkExplosion, FireworkExplosionShape, Fireworks, ITEM_NAME,
+            ItemAttributeModifiers, ItemEnchantments, MAX_DAMAGE, MAX_STACK_SIZE,
+            MINIMUM_ATTACK_CHARGE, OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier,
+            PIERCING_WEAPON, PiercingWeapon, REPAIRABLE, STORED_ENCHANTMENTS, TOOL, Tool,
+            UNBREAKABLE, WEAPON, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT, Weapon,
         },
     },
     enchantment_effect::EnchantmentEffectComponent,
@@ -48,6 +49,8 @@ pub struct ItemStack {
     pub count: i32,
     /// Modifications to the prototype components.
     patch: DataComponentPatch,
+    /// Opaque plugin-provided NBT retained across the Java bridge.
+    opaque_nbt: Option<String>,
 }
 
 impl Default for ItemStack {
@@ -64,6 +67,7 @@ impl ItemStack {
             item: &vanilla_items::AIR,
             count: 0,
             patch: DataComponentPatch::new(),
+            opaque_nbt: None,
         }
     }
 
@@ -80,6 +84,7 @@ impl ItemStack {
             item,
             count,
             patch: DataComponentPatch::new(),
+            opaque_nbt: None,
         }
     }
 
@@ -87,7 +92,12 @@ impl ItemStack {
     #[must_use]
     pub fn with_count_and_patch(item: ItemRef, count: i32, mut patch: DataComponentPatch) -> Self {
         patch.sanitize_against(&item.components);
-        Self { item, count, patch }
+        Self {
+            item,
+            count,
+            patch,
+            opaque_nbt: None,
+        }
     }
 
     #[must_use]
@@ -119,6 +129,14 @@ impl ItemStack {
         &self.patch
     }
 
+    #[must_use]
+    pub fn opaque_nbt(&self) -> Option<&str> {
+        self.opaque_nbt.as_deref()
+    }
+    pub fn set_opaque_nbt(&mut self, value: Option<String>) {
+        self.opaque_nbt = value;
+    }
+
     pub const fn set_count(&mut self, count: i32) {
         self.count = count;
     }
@@ -143,6 +161,7 @@ impl ItemStack {
             item: self.item,
             count: take,
             patch: self.patch.clone(),
+            opaque_nbt: self.opaque_nbt.clone(),
         };
         self.shrink(take);
         result
@@ -160,6 +179,7 @@ impl ItemStack {
                 item: self.item,
                 count,
                 patch: self.patch.clone(),
+                opaque_nbt: self.opaque_nbt.clone(),
             }
         }
     }
@@ -1186,22 +1206,62 @@ impl ItemStack {
     }
 
     /// Sets firework rocket properties.
-    pub const fn set_fireworks(
+    pub fn set_fireworks(
         &mut self,
-        _explosions: Option<&[crate::loot_table::FireworkExplosion]>,
-        _flight_duration: Option<i32>,
+        explosions: Option<&[crate::loot_table::FireworkExplosion]>,
+        flight_duration: Option<i32>,
     ) {
-        // TODO: Implement firework setting
-        // Set FIREWORKS component
+        let mapped = explosions
+            .unwrap_or(&[])
+            .iter()
+            .map(|explosion| {
+                let shape = match explosion.shape {
+                    crate::loot_table::FireworkShape::SmallBall => {
+                        FireworkExplosionShape::SmallBall
+                    }
+                    crate::loot_table::FireworkShape::LargeBall => {
+                        FireworkExplosionShape::LargeBall
+                    }
+                    crate::loot_table::FireworkShape::Star => FireworkExplosionShape::Star,
+                    crate::loot_table::FireworkShape::Creeper => FireworkExplosionShape::Creeper,
+                    crate::loot_table::FireworkShape::Burst => FireworkExplosionShape::Burst,
+                };
+                FireworkExplosion::new(
+                    shape,
+                    explosion.colors.to_vec(),
+                    explosion.fade_colors.to_vec(),
+                    explosion.has_trail,
+                    explosion.has_twinkle,
+                )
+            })
+            .collect();
+        if let Ok(value) = Fireworks::new(
+            flight_duration.unwrap_or(0).clamp(0, i32::from(u8::MAX)),
+            mapped,
+        ) {
+            self.set(FIREWORKS, value);
+        }
     }
 
     /// Sets firework star explosion properties.
-    pub const fn set_firework_explosion(
-        &mut self,
-        _explosion: &crate::loot_table::FireworkExplosion,
-    ) {
-        // TODO: Implement firework explosion setting
-        // Set FIREWORK_EXPLOSION component
+    pub fn set_firework_explosion(&mut self, explosion: &crate::loot_table::FireworkExplosion) {
+        let shape = match explosion.shape {
+            crate::loot_table::FireworkShape::SmallBall => FireworkExplosionShape::SmallBall,
+            crate::loot_table::FireworkShape::LargeBall => FireworkExplosionShape::LargeBall,
+            crate::loot_table::FireworkShape::Star => FireworkExplosionShape::Star,
+            crate::loot_table::FireworkShape::Creeper => FireworkExplosionShape::Creeper,
+            crate::loot_table::FireworkShape::Burst => FireworkExplosionShape::Burst,
+        };
+        self.set(
+            FIREWORK_EXPLOSION,
+            FireworkExplosion::new(
+                shape,
+                explosion.colors.to_vec(),
+                explosion.fade_colors.to_vec(),
+                explosion.has_trail,
+                explosion.has_twinkle,
+            ),
+        );
     }
 
     /// Sets book cover (title/author for written books).
@@ -1672,6 +1732,18 @@ mod durability_tests {
     use crate::data_components::vanilla_components::{ENCHANTMENTS, ItemEnchantments};
     use crate::init_vanilla_registry;
     use crate::{vanilla_enchantments, vanilla_items};
+
+    #[test]
+    fn opaque_nbt_survives_stack_copy_and_split() {
+        crate::init_vanilla_registry();
+        let mut stack = ItemStack::with_count(&crate::vanilla_items::STONE, 4);
+        stack.set_opaque_nbt(Some("{custom:{nested:[1,2,3]}}".to_string()));
+        let copy = stack.copy_with_count(2);
+        assert_eq!(copy.opaque_nbt(), Some("{custom:{nested:[1,2,3]}}"));
+        let split = stack.split(1);
+        assert_eq!(split.opaque_nbt(), copy.opaque_nbt());
+        assert_eq!(stack.opaque_nbt(), copy.opaque_nbt());
+    }
 
     fn with_unbreaking(item: crate::items::ItemRef, level: u32) -> ItemStack {
         let mut stack = ItemStack::new(item);

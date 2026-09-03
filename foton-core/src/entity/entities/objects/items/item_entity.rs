@@ -322,6 +322,16 @@ impl ItemEntity {
             return false;
         }
 
+        let Some(world) = self.level() else {
+            return false;
+        };
+        let mut pickup_event =
+            crate::event::EntityPickupItemEvent::new(player.gameprofile.id, self.uuid());
+        world.fire_event(&mut pickup_event);
+        if pickup_event.is_cancelled() {
+            return false;
+        }
+
         // Get the item and try to add to inventory
         let mut item = self.get_item();
         let original_count = item.count();
@@ -338,7 +348,7 @@ impl ItemEntity {
         let picked_up_count = original_count - item.count();
 
         // Send the take animation packet to nearby players
-        if let Some(world) = self.level() {
+        {
             let pos = self.position();
             let chunk_pos = foton_utils::ChunkPos::from_entity_pos(pos);
 

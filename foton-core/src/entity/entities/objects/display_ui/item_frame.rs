@@ -1,9 +1,10 @@
 //! The item frame.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use foton_macros::entity_behavior;
 use foton_protocol::packets::game::SoundSource;
+use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::data_components::vanilla_components::MAP_ID;
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::item_stack::ItemStack;
@@ -28,6 +29,7 @@ use crate::entity::{
     ItemFrame, SharedEntity,
 };
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
+use crate::physics::{WorldCollisionProvider, has_block_collision};
 use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -36,10 +38,9 @@ use foton_utils::types::GameType;
 /// An item frame.
 ///
 /// Vanilla parity: `ItemFrame`. A frame holds one item, turns it eight ways,
-/// and reports the rotation to a comparator. Not implemented: drops when the
-/// frame is broken, map tracking, and the support check that makes a frame pop
-/// off when the wall behind it goes -- the frame is placed against a solid
-/// block and then stays there.
+/// and reports the rotation to a comparator. Broken frames drop their contents
+/// according to Vanilla's fixed, creative and drop-chance rules; support is
+/// checked periodically by the entity tick.
 #[entity_behavior(class = "ItemFrame")]
 pub struct ItemFrameEntity {
     base: EntityBase,
@@ -73,6 +74,8 @@ impl Default for FrameState {
 /// chance, and the damage rules built on them. An implementation supplies the
 /// five accessors its own storage decides.
 pub(super) trait FrameLike: BlockAttached {
+    fn frame_direction(&self) -> Direction;
+    fn frame_box(&self) -> WorldAabb;
     /// The saved fields outside the synced data.
     fn frame_state(&self) -> &SyncMutex<FrameState>;
 
@@ -95,6 +98,32 @@ pub(super) trait FrameLike: BlockAttached {
     /// part of the scenery survives a wandering skeleton.
     fn is_fixed(&self) -> bool {
         self.frame_state().lock().fixed
+    }
+
+    fn survives_frame(&self, world: &Arc<World>) -> bool {
+        let pop_box = self.frame_box();
+        if has_block_collision(&WorldCollisionProvider::new(world), pop_box) {
+            return false;
+        }
+        let support = pop_box
+            .translate(self.frame_direction().offset_vec().as_dvec3() * -0.5)
+            .deflate(1.0e-7);
+        let min = BlockPos::new(
+            support.min_x().floor() as i32,
+            support.min_y().floor() as i32,
+            support.min_z().floor() as i32,
+        );
+        let max = BlockPos::new(
+            support.max_x().floor() as i32,
+            support.max_y().floor() as i32,
+            support.max_z().floor() as i32,
+        );
+        BlockPos::between_closed(min, max).all(|pos| {
+            let state = world.get_block_state(pos);
+            state.is_solid()
+                || state.get_block() == &vanilla_blocks::REPEATER
+                || state.get_block() == &vanilla_blocks::COMPARATOR
+        })
     }
 
     /// Returns how often the framed item survives the frame breaking.
@@ -273,6 +302,11 @@ impl ItemFrameEntity {
         }
     }
 
+    /// Returns the item currently displayed in the frame.
+    pub fn framed_item(&self) -> ItemStack {
+        self.entity_data.lock().item.get().clone()
+    }
+
     /// Sets the framed item, matching vanilla by storing a single item.
     pub fn set_item(&self, item: ItemStack) {
         self.set_item_with_update(item, true);
@@ -290,7 +324,16 @@ impl ItemFrameEntity {
         }
     }
 
-    fn set_direction(&self, direction: Direction) {
+    /// Returns whether the frame still has valid support and no collision.
+    #[must_use]
+    pub fn survives(&self) -> bool {
+        let Some(world) = self.level() else {
+            return false;
+        };
+        self.survives_frame(&world)
+    }
+
+    pub fn set_direction(&self, direction: Direction) {
         self.entity_data
             .lock()
             .hanging_entity
@@ -448,6 +491,21 @@ impl Entity for ItemFrameEntity {
         self.hurt_item_frame(world, source)
     }
 
+    fn tick(&self) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        if self.tick_count() % 100 != 0 || self.is_removed() || self.survives_frame(&world) {
+            return;
+        }
+        let mut event = crate::event::HangingBreakEvent::new(self.uuid(), "PHYSICS");
+        world.fire_event(&mut event);
+        if !event.is_cancelled() {
+            self.set_removed(crate::entity::RemovalReason::Discarded);
+            self.drop_item(&world, None);
+        }
+    }
+
     fn spawn_position(&self) -> DVec3 {
         let block_pos = *self.block_pos.lock();
         DVec3::new(
@@ -581,6 +639,14 @@ impl BlockAttached for ItemFrameEntity {
 }
 
 impl FrameLike for ItemFrameEntity {
+    fn frame_direction(&self) -> Direction {
+        self.direction()
+    }
+
+    fn frame_box(&self) -> WorldAabb {
+        self.bounding_box()
+    }
+
     fn frame_state(&self) -> &SyncMutex<FrameState> {
         &self.state
     }
