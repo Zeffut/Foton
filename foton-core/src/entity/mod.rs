@@ -955,7 +955,7 @@ impl EntityAnchor {
 /// Puts `passenger` on `entity_to_ride`, returning whether it took.
 ///
 /// Vanilla parity: `Entity.startRiding`. Refuses a vehicle that cannot accept
-/// passengers or cannot be serialised, so nothing ends up riding something
+/// passengers or cannot be serialized, so nothing ends up riding something
 /// that will not survive a save.
 pub fn start_riding_entities(passenger: &SharedEntity, entity_to_ride: &SharedEntity) -> bool {
     if !entity_to_ride.could_accept_passenger() {

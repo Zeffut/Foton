@@ -222,7 +222,7 @@ pub trait PathfinderMob: Mob {
             .is_some_and(|path| path_end_node_can_reach_target(&path, target_pos))
     }
 
-    /// Advances navigation by one tick and honours any delayed recompute.
+    /// Advances navigation by one tick and honors any delayed recompute.
     ///
     /// Vanilla parity: `PathNavigation.tick`. The recompute is taken out from
     /// under the navigation lock before being run, because recomputing takes

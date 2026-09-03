@@ -289,7 +289,7 @@ impl CatEntity {
         DyeColor::by_id(*self.entity_data.lock().collar_color.get())
     }
 
-    /// Sets the collar colour, synchronised to the client.
+    /// Sets the collar color, synchronized to the client.
     pub fn set_collar_color(&self, color: DyeColor) {
         self.entity_data.lock().collar_color.set(color.id());
     }

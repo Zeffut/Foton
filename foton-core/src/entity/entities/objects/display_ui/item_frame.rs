@@ -335,7 +335,7 @@ impl ItemFrameEntity {
         self.survives_frame(&world)
     }
 
-    /// Turns the frame to face `direction`, updating both the synchronised
+    /// Turns the frame to face `direction`, updating both the synchronized
     /// facing and the bounding box that follows it.
     pub fn set_direction(&self, direction: Direction) {
         self.entity_data

@@ -210,7 +210,7 @@ impl DropChances {
 /// holds one of these and [`Mob`]'s default methods reach it through
 /// [`Mob::mob_base`]. Each field is behind its own mutex rather than the whole
 /// struct behind one: a goal reading the navigation while another writes the
-/// target is the normal case, not contention to be serialised.
+/// target is the normal case, not contention to be serialized.
 #[derive(Debug)]
 pub struct MobBase {
     goal_selector: SyncMutex<GoalSelector>,
@@ -471,7 +471,7 @@ pub trait Mob: LivingEntity + MobSource {
     /// The state this mob holds on `Mob`'s behalf. See [`MobBase`].
     fn mob_base(&self) -> &MobBase;
 
-    /// The packed flag byte vanilla synchronises as `DATA_MOB_FLAGS_ID`.
+    /// The packed flag byte vanilla synchronizes as `DATA_MOB_FLAGS_ID`.
     ///
     /// Bit 1 is "no AI", bit 2 "left-handed", bit 4 "aggressive". Read them
     /// through [`Self::is_no_ai`], [`Self::is_left_handed`] and
@@ -836,7 +836,7 @@ pub trait Mob: LivingEntity + MobSource {
     ///
     /// Records the spawn reason and rolls the random spawn bonus. Rust has no
     /// `super`, so this exists separately for every mob that adds to
-    /// finalisation instead of replacing it.
+    /// finalization instead of replacing it.
     fn finalize_spawn_mob_base(
         &self,
         _world: &Arc<World>,
@@ -1384,9 +1384,9 @@ pub trait Mob: LivingEntity + MobSource {
         true
     }
 
-    /// Distance to `holder`, measured between bounding-box centres.
+    /// Distance to `holder`, measured between bounding-box centers.
     ///
-    /// Vanilla parity: `Leashable.leashDistanceTo`. Centres, not eye or foot
+    /// Vanilla parity: `Leashable.leashDistanceTo`. Centers, not eye or foot
     /// positions, which is why a tall mob does not snap its lead early.
     fn leash_distance_to(&self, holder: &dyn Entity) -> f64 {
         leash_bounding_box_center(self.as_entity_event_source())
@@ -1737,7 +1737,7 @@ pub trait Mob: LivingEntity + MobSource {
         *self.mob_base().home_restriction().lock() = MobHomeRestriction { position, radius };
     }
 
-    /// The centre of this mob's home, vanilla's `Mob.getHomePosition`.
+    /// The center of this mob's home, vanilla's `Mob.getHomePosition`.
     ///
     /// Meaningless unless [`Self::has_home`] is true.
     fn home_position(&self) -> BlockPos {
@@ -1879,7 +1879,7 @@ pub trait Mob: LivingEntity + MobSource {
 
     /// Whether this mob is showing its aggressive pose.
     ///
-    /// Synchronised to the client, which is what raises a zombie's arms or
+    /// Synchronized to the client, which is what raises a zombie's arms or
     /// bristles a wolf; it is not the same as having a target.
     fn is_aggressive(&self) -> bool {
         self.mob_flags() & MOB_FLAG_AGGRESSIVE != 0
