@@ -495,8 +495,7 @@ pub struct Server {
     /// World removals requested by plugins, applied at the tick safe-point.
     pub(crate) pending_world_removals: SyncMutex<Vec<WorldRemovalRequest>>,
     /// Worlds ready to attach at the next tick safe-point.
-    pending_world_additions:
-        SyncMutex<Vec<(Arc<World>, tokio::sync::oneshot::Sender<Result<(), String>>)>>,
+    pending_world_additions: SyncMutex<Vec<(Arc<World>, oneshot::Sender<Result<(), String>>)>>,
     /// Who is listening for what.
     ///
     /// Unlike the block and item registries this is not frozen after startup:
@@ -520,7 +519,7 @@ pub enum WorldCreationState {
 /// Handle for a world creation request. Poll this from a safe-point; never block the game tick.
 pub struct WorldCreationRequest {
     id: u64,
-    receiver: tokio::sync::oneshot::Receiver<Result<(), String>>,
+    receiver: oneshot::Receiver<Result<(), String>>,
 }
 
 impl WorldCreationRequest {
@@ -826,7 +825,7 @@ impl Server {
             .await?;
         world.attach_server(self);
         let id = NEXT_WORLD_CREATION_ID.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (sender, receiver) = oneshot::channel();
         let mut pending = self.pending_world_additions.lock();
         if pending
             .iter()

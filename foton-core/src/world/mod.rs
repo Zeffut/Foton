@@ -182,6 +182,7 @@ use portals::{
     closest_portal_candidate, nether_portal_creation_scan_origin, nether_portal_frame_offset_pos,
 };
 use std::path::PathBuf;
+use tokio::fs;
 use tokio::fs::create_dir_all;
 
 const fn initialize_border_packet(snapshot: WorldBorderSnapshot) -> CInitializeBorder {
@@ -415,10 +416,7 @@ impl World {
     /// Returns the persistent world directory, or `None` for RAM-only worlds.
     #[must_use]
     pub fn world_folder(&self) -> Option<PathBuf> {
-        self.level_data
-            .read()
-            .world_dir()
-            .map(std::path::Path::to_path_buf)
+        self.level_data.read().world_dir().map(Path::to_path_buf)
     }
     /// Returns chunk coordinates whose holders have reached vanilla Full status.
     #[must_use]
@@ -683,7 +681,7 @@ impl World {
                     if let Some(parent) = path.parent() {
                         create_dir_all(parent).await?;
                     }
-                    tokio::fs::write(&path, content).await
+                    fs::write(&path, content).await
                 }
                 .await;
                 match result {
@@ -992,9 +990,9 @@ impl World {
     }
 
     /// Queues a non-blocking save of level data and dirty chunks.
-    pub fn request_save(self: &std::sync::Arc<Self>) {
+    pub fn request_save(self: &Arc<Self>) {
         let prepared = self.level_data.write().prepare_save();
-        let world = std::sync::Arc::clone(self);
+        let world = Arc::clone(self);
         self.chunk_map.chunk_runtime.handle().spawn(async move {
             match prepared {
                 Ok(Some((path, content))) => {
@@ -1004,7 +1002,7 @@ impl World {
                             return;
                         }
                     }
-                    if let Err(error) = tokio::fs::write(&path, content).await {
+                    if let Err(error) = fs::write(&path, content).await {
                         tracing::error!(%error, "World level-data save failed");
                     }
                 }

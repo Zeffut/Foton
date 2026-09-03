@@ -438,11 +438,11 @@ impl Player {
         &self,
         title: impl Into<TextComponent>,
         rows: usize,
-        items: Vec<foton_registry::item_stack::ItemStack>,
+        items: Vec<ItemStack>,
     ) {
         let rows = rows.clamp(1, 6);
         let mut initial = items;
-        initial.resize(rows * 9, foton_registry::item_stack::ItemStack::empty());
+        initial.resize(rows * 9, ItemStack::empty());
         initial.truncate(rows * 9);
         let backing = SimpleContainer::from_items(initial).into_shared();
         let player_inventory = Arc::clone(&self.inventory);

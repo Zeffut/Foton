@@ -54,7 +54,7 @@ pub fn spawn_entity_at(
     let entity_type = REGISTRY.entity_types.by_key(key)?;
     let entity = ENTITIES.create(
         entity_type,
-        crate::entity::next_entity_id(),
+        next_entity_id(),
         position,
         Arc::downgrade(world),
     )?;

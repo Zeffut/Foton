@@ -216,7 +216,7 @@ async fn test_server_with_worlds(
     // Server fixtures exercise block behavior through the same global registry
     // as production. Initialize it here so test outcomes do not depend on
     // another test having run first.
-    crate::behavior::init_behaviors();
+    init_behaviors();
     let worlds = WorldMap::new(default_domain, domains, &[]);
     for world in loaded_worlds {
         assert!(worlds.insert(world.key.clone(), Arc::clone(world)).is_ok());

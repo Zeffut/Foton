@@ -16,6 +16,7 @@ use glam::DVec3;
 
 use crate::entity::callback::RemovalReason;
 use crate::entity::{Entity, EntityBase, Mob, SharedEntity, next_entity_id};
+use crate::event::EntityTransformEvent;
 use crate::world::World;
 
 /// Whether the mob being converted is replaced or merely spawns something.
@@ -130,8 +131,7 @@ where
 
     after(&converted);
 
-    let mut event =
-        crate::event::EntityTransformEvent::new(from.uuid(), converted.uuid(), params.reason);
+    let mut event = EntityTransformEvent::new(from.uuid(), converted.uuid(), params.reason);
     world.fire_event(&mut event);
     if event.is_cancelled() {
         return None;
@@ -147,10 +147,7 @@ where
     }
 
     if let Some(source) = world.get_entity_by_id(from.id()) {
-        crate::entity::EntityBase::transfer_relationships(
-            &source,
-            &(Arc::clone(&converted) as SharedEntity),
-        );
+        EntityBase::transfer_relationships(&source, &(Arc::clone(&converted) as SharedEntity));
     }
 
     if params.conversion_type.should_discard_after_conversion() {
@@ -187,7 +184,7 @@ where
     converted.set_rotation(from.rotation());
     converted.set_on_ground(from.on_ground());
     converted.set_fall_distance(from.fall_distance());
-    let mut event = crate::event::EntityTransformEvent::new(from.uuid(), converted.uuid(), reason);
+    let mut event = EntityTransformEvent::new(from.uuid(), converted.uuid(), reason);
     world.fire_event(&mut event);
     if event.is_cancelled() {
         return None;

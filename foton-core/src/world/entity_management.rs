@@ -7,6 +7,7 @@ use super::{
     SectionPos, SharedEntity, SharedGameEventListener, SyncMutex, World, WorldAabb,
     WorldChangeRequest, block_entity_ticker, mem, next_entity_id, vanilla_entities,
 };
+use crate::event::{EntityRemoveFromWorldEvent, ItemSpawnEvent};
 
 pub(super) struct NavigatingMobTracker {
     ids: SyncMutex<FxHashSet<i32>>,
@@ -346,7 +347,7 @@ impl World {
 
     pub(crate) fn on_entity_chunk_unload_finalized(&self, pos: ChunkPos) {
         for uuid in self.entity_manager.finalize_chunk_unload(pos) {
-            let mut event = crate::event::EntityRemoveFromWorldEvent::new(uuid);
+            let mut event = EntityRemoveFromWorldEvent::new(uuid);
             self.fire_event(&mut event);
         }
     }
@@ -388,7 +389,7 @@ impl World {
             velocity,
             Arc::downgrade(self),
         ));
-        let mut spawn_event = crate::event::ItemSpawnEvent::new(
+        let mut spawn_event = ItemSpawnEvent::new(
             entity.uuid(),
             self.key.to_string(),
             pos.x,

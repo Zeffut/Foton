@@ -29,6 +29,7 @@ use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::{ClipHitResult, World};
+use foton_registry::data_components::components::PotionContents;
 use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
 
 /// Damage an arrow carries before speed is taken into account.
@@ -372,9 +373,7 @@ impl ArrowEntity {
 
     /// Returns the potion contents carried by the ammunition, when tipped.
     #[must_use]
-    pub fn ammo_potion_contents(
-        &self,
-    ) -> Option<foton_registry::data_components::components::PotionContents> {
+    pub fn ammo_potion_contents(&self) -> Option<PotionContents> {
         self.ammo_item()?.get(POTION_CONTENTS).cloned()
     }
 
