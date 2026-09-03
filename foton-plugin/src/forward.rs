@@ -378,6 +378,10 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         }
     });
     let jvm = Arc::clone(&vm);
+    events.on::<PlayerAdvancementDoneEvent, _>(owner(), move |event| {
+        player_advancement_done_call(&jvm, event.player_id(), event.advancement());
+    });
+
     let jvm = Arc::clone(&vm);
     events.on::<PlayerAdvancementCriterionGrantEvent, _>(owner(), move |event| {
         if !player_advancement_criterion_grant_call(

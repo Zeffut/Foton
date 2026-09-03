@@ -1,8 +1,13 @@
-use super::Event;
+use std::sync::Arc;
+
+use foton_registry::item_stack::ItemStack;
 use foton_utils::BlockPos;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use glam::DVec3;
 use uuid::Uuid;
+
+use super::Event;
+use crate::entity::conversion::ConversionReason;
 
 /// Fired when a living entity would die but has a death-protection item.
 #[derive(Debug)]
@@ -20,16 +25,21 @@ impl Event for EntityResurrectEvent {
     }
 }
 impl EntityResurrectEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid) -> Self {
         Self {
             entity,
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity_id(&self) -> Uuid {
         self.entity
     }
-    pub fn set_cancelled(&mut self, cancelled: bool) {
+    /// Stops this from happening, or lets it happen again.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
 }
@@ -37,14 +47,19 @@ impl EntityResurrectEvent {
 pub struct EntityDeathEvent {
     entity: Uuid,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for EntityDeathEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/entity_death");
 }
 impl Event for EntityDeathEvent {}
 impl EntityDeathEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid) -> Self {
         Self { entity }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity_id(&self) -> Uuid {
         self.entity
     }
@@ -66,6 +81,8 @@ impl Event for ProjectileLaunchEvent {
     }
 }
 impl ProjectileLaunchEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(shooter: Uuid, projectile: Uuid) -> Self {
         Self {
             shooter,
@@ -73,12 +90,17 @@ impl ProjectileLaunchEvent {
             cancelled: false,
         }
     }
+    /// Who threw it.
+    #[must_use]
     pub const fn shooter(&self) -> Uuid {
         self.shooter
     }
+    /// What was thrown.
+    #[must_use]
     pub const fn projectile(&self) -> Uuid {
         self.projectile
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -90,6 +112,7 @@ pub struct EntityTargetEvent {
     target: Option<Uuid>,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for EntityTargetEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/entity_target");
 }
@@ -99,6 +122,8 @@ impl Event for EntityTargetEvent {
     }
 }
 impl EntityTargetEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid, target: Option<Uuid>) -> Self {
         Self {
             entity,
@@ -106,12 +131,17 @@ impl EntityTargetEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity_id(&self) -> Uuid {
         self.entity
     }
+    /// Who the mob is now after, or nobody if it lost interest.
+    #[must_use]
     pub const fn target_id(&self) -> Option<Uuid> {
         self.target
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -125,6 +155,7 @@ pub struct EntityChangeBlockEvent {
     to: String,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for EntityChangeBlockEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/entity_change_block");
 }
@@ -134,7 +165,9 @@ impl Event for EntityChangeBlockEvent {
     }
 }
 impl EntityChangeBlockEvent {
-    pub fn new(entity: Uuid, world: String, block: BlockPos, to: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(entity: Uuid, world: String, block: BlockPos, to: String) -> Self {
         Self {
             entity,
             world,
@@ -143,18 +176,27 @@ impl EntityChangeBlockEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Which block this is about.
+    #[must_use]
     pub const fn block(&self) -> BlockPos {
         self.block
     }
+    /// What the block is turning into.
+    #[must_use]
     pub fn to(&self) -> &str {
         &self.to
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -162,11 +204,12 @@ impl EntityChangeBlockEvent {
 
 /// A lightning strike before its consequences are applied.
 pub struct LightningStrikeEvent {
-    entity: std::sync::Arc<str>,
+    entity: Arc<str>,
     world: String,
     cause: String,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for LightningStrikeEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/lightning_strike");
 }
@@ -176,8 +219,9 @@ impl Event for LightningStrikeEvent {
     }
 }
 impl LightningStrikeEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(
-        entity: impl Into<std::sync::Arc<str>>,
+        entity: impl Into<Arc<str>>,
         world: impl Into<String>,
         cause: impl Into<String>,
     ) -> Self {
@@ -188,18 +232,27 @@ impl LightningStrikeEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub fn entity(&self) -> &str {
         &self.entity
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// What brought this about.
+    #[must_use]
     pub fn cause(&self) -> &str {
         &self.cause
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, v: bool) {
         self.cancelled = v;
     }
@@ -235,8 +288,9 @@ pub struct EntityTransformEvent {
     entity: Uuid,
     transformed: Uuid,
     cancelled: bool,
-    reason: crate::entity::conversion::ConversionReason,
+    reason: ConversionReason,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for EntityTransformEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/entity_transform");
 }
@@ -246,11 +300,9 @@ impl Event for EntityTransformEvent {
     }
 }
 impl EntityTransformEvent {
-    pub const fn new(
-        entity: Uuid,
-        transformed: Uuid,
-        reason: crate::entity::conversion::ConversionReason,
-    ) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(entity: Uuid, transformed: Uuid, reason: ConversionReason) -> Self {
         Self {
             entity,
             transformed,
@@ -258,19 +310,28 @@ impl EntityTransformEvent {
             reason,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// What it became. The entity it was is already gone.
+    #[must_use]
     pub const fn transformed(&self) -> Uuid {
         self.transformed
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
-    pub const fn reason(&self) -> crate::entity::conversion::ConversionReason {
+    /// What brought this about.
+    #[must_use]
+    pub const fn reason(&self) -> ConversionReason {
         self.reason
     }
 }
@@ -282,6 +343,7 @@ pub struct BlockExplodeEvent {
     blocks: Vec<BlockPos>,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockExplodeEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_explode");
 }
@@ -291,7 +353,9 @@ impl Event for BlockExplodeEvent {
     }
 }
 impl BlockExplodeEvent {
-    pub fn new(world: String, source: BlockPos, blocks: Vec<BlockPos>) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(world: String, source: BlockPos, blocks: Vec<BlockPos>) -> Self {
         Self {
             world,
             source,
@@ -299,21 +363,31 @@ impl BlockExplodeEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Which block went off.
+    #[must_use]
     pub const fn source(&self) -> BlockPos {
         self.source
     }
+    /// Every block this will affect.
+    #[must_use]
     pub fn blocks(&self) -> &[BlockPos] {
         &self.blocks
     }
-    pub fn blocks_mut(&mut self) -> &mut Vec<BlockPos> {
+    /// Every block this will affect, so a listener can take some out.
+    pub const fn blocks_mut(&mut self) -> &mut Vec<BlockPos> {
         &mut self.blocks
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -329,6 +403,7 @@ impl Event for EntityExplodeEvent {
     }
 }
 impl EntityExplodeEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(
         entity: Option<Uuid>,
         world: String,
@@ -345,30 +420,45 @@ impl EntityExplodeEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Option<Uuid> {
         self.entity
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Every block this will affect.
+    #[must_use]
     pub fn blocks(&self) -> &[BlockPos] {
         &self.blocks
     }
-    pub fn blocks_mut(&mut self) -> &mut Vec<BlockPos> {
+    /// Every block this will affect, so a listener can take some out.
+    pub const fn blocks_mut(&mut self) -> &mut Vec<BlockPos> {
         &mut self.blocks
     }
+    /// What fraction of the broken blocks will actually drop.
+    #[must_use]
     pub const fn yield_factor(&self) -> f32 {
         self.yield_factor
     }
+    /// What this does to blocks, as Bukkit names it: `KEEP`, `BLOCK` or `DESTROY`.
+    #[must_use]
     pub fn explosion_result(&self) -> &str {
         &self.explosion_result
     }
+    /// Changes what fraction of the blocks drop.
     pub const fn set_yield_factor(&mut self, value: f32) {
         self.yield_factor = value;
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -400,6 +490,8 @@ impl Event for EntityPushedByEntityAttackEvent {
     }
 }
 impl EntityPushedByEntityAttackEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid, pushed_by: Uuid) -> Self {
         Self {
             entity,
@@ -407,15 +499,22 @@ impl EntityPushedByEntityAttackEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity_id(&self) -> Uuid {
         self.entity
     }
+    /// Who pushed them.
+    #[must_use]
     pub const fn pushed_by(&self) -> Uuid {
         self.pushed_by
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -438,6 +537,7 @@ impl Event for HangingBreakEvent {
     }
 }
 impl HangingBreakEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(entity: Uuid, cause: impl Into<String>) -> Self {
         Self {
             entity,
@@ -446,6 +546,7 @@ impl HangingBreakEvent {
             cancelled: false,
         }
     }
+    /// Called by Foton when it was a player who took it down, rather than something.
     pub fn new_with_remover(entity: Uuid, cause: impl Into<String>, remover: Uuid) -> Self {
         Self {
             entity,
@@ -454,18 +555,27 @@ impl HangingBreakEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// What brought this about.
+    #[must_use]
     pub fn cause(&self) -> &str {
         &self.cause
     }
+    /// Who took it down, when somebody did.
+    #[must_use]
     pub const fn remover(&self) -> Option<Uuid> {
         self.remover
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -489,6 +599,7 @@ impl Event for HangingPlaceEvent {
     }
 }
 impl HangingPlaceEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(
         entity: Uuid,
         player: Uuid,
@@ -505,24 +616,37 @@ impl HangingPlaceEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player(&self) -> Uuid {
         self.player
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Which block this is about.
+    #[must_use]
     pub const fn block(&self) -> foton_utils::BlockPos {
         self.block
     }
+    /// Which side of the block it hangs on.
+    #[must_use]
     pub fn face(&self) -> &str {
         &self.face
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -538,7 +662,9 @@ impl Event for EntityDamageByEntityEvent {
     }
 }
 impl EntityDamageByEntityEvent {
-    pub fn new(damager: Uuid, entity: Uuid, cause: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(damager: Uuid, entity: Uuid, cause: String) -> Self {
         Self {
             damager,
             entity,
@@ -546,18 +672,27 @@ impl EntityDamageByEntityEvent {
             cancelled: false,
         }
     }
+    /// Who dealt the damage.
+    #[must_use]
     pub const fn damager(&self) -> Uuid {
         self.damager
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// What brought this about.
+    #[must_use]
     pub fn cause(&self) -> &str {
         &self.cause
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -579,6 +714,8 @@ impl Event for EntityPickupItemEvent {
     }
 }
 impl EntityPickupItemEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid, item: Uuid) -> Self {
         Self {
             entity,
@@ -586,15 +723,22 @@ impl EntityPickupItemEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// The item involved.
+    #[must_use]
     pub const fn item(&self) -> Uuid {
         self.item
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -620,7 +764,16 @@ impl Event for PreCreatureSpawnEvent {
     }
 }
 impl PreCreatureSpawnEvent {
-    pub fn new(world: String, x: f64, y: f64, z: f64, entity_type: String, reason: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(
+        world: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        entity_type: String,
+        reason: String,
+    ) -> Self {
         Self {
             world,
             x,
@@ -631,21 +784,32 @@ impl PreCreatureSpawnEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> (f64, f64, f64) {
         (self.x, self.y, self.z)
     }
+    /// What is about to spawn.
+    #[must_use]
     pub fn entity_type(&self) -> &str {
         &self.entity_type
     }
+    /// What brought this about.
+    #[must_use]
     pub fn reason(&self) -> &str {
         &self.reason
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -671,7 +835,9 @@ impl Event for EntityPortalEvent {
     }
 }
 impl EntityPortalEvent {
-    pub fn new(
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(
         entity: Uuid,
         from_world: String,
         from_position: DVec3,
@@ -689,31 +855,55 @@ impl EntityPortalEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// Which world they came from.
+    #[must_use]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "`from_world` is where they came from, not a constructor -- it pairs with `to_world` and renaming either would make the pair unreadable"
+    )]
     pub fn from_world(&self) -> &str {
         &self.from_world
     }
+    /// Where they came from.
+    #[must_use]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "`from_world` is where they came from, not a constructor -- it pairs with `to_world` and renaming either would make the pair unreadable"
+    )]
     pub const fn from_position(&self) -> DVec3 {
         self.from_position
     }
+    /// Which world they are going to.
+    #[must_use]
     pub fn to_world(&self) -> &str {
         &self.to_world
     }
+    /// Sends them somewhere other than where the portal leads.
     pub fn set_destination(&mut self, world: String, position: DVec3) {
         self.to_world = world;
         self.to_position = position;
     }
+    /// Where they are going.
+    #[must_use]
     pub const fn to_position(&self) -> DVec3 {
         self.to_position
     }
+    /// Which kind of portal it is.
+    #[must_use]
     pub fn portal_type(&self) -> &str {
         &self.portal_type
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -739,7 +929,9 @@ impl Event for CreatureSpawnEvent {
     }
 }
 impl CreatureSpawnEvent {
-    pub fn new(entity: Uuid, world: String, x: f64, y: f64, z: f64, reason: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(entity: Uuid, world: String, x: f64, y: f64, z: f64, reason: String) -> Self {
         Self {
             entity,
             world,
@@ -750,21 +942,32 @@ impl CreatureSpawnEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> (f64, f64, f64) {
         (self.x, self.y, self.z)
     }
+    /// What brought this about.
+    #[must_use]
     pub fn reason(&self) -> &str {
         &self.reason
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -786,6 +989,8 @@ impl Event for EntityRegainHealthEvent {
     }
 }
 impl EntityRegainHealthEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid, amount: f32) -> Self {
         Self {
             entity,
@@ -793,15 +998,22 @@ impl EntityRegainHealthEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// How much health is coming back.
+    #[must_use]
     pub const fn amount(&self) -> f32 {
         self.amount
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -817,9 +1029,13 @@ unsafe impl DowncastType for EntityRemoveFromWorldEvent {
 }
 impl Event for EntityRemoveFromWorldEvent {}
 impl EntityRemoveFromWorldEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid) -> Self {
         Self { entity }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
@@ -832,7 +1048,7 @@ pub struct ItemSpawnEvent {
     x: f64,
     y: f64,
     z: f64,
-    item: foton_registry::item_stack::ItemStack,
+    item: ItemStack,
     cancelled: bool,
 }
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
@@ -845,14 +1061,9 @@ impl Event for ItemSpawnEvent {
     }
 }
 impl ItemSpawnEvent {
-    pub fn new(
-        entity: Uuid,
-        world: String,
-        x: f64,
-        y: f64,
-        z: f64,
-        item: foton_registry::item_stack::ItemStack,
-    ) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(entity: Uuid, world: String, x: f64, y: f64, z: f64, item: ItemStack) -> Self {
         Self {
             entity,
             world,
@@ -863,21 +1074,32 @@ impl ItemSpawnEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> (f64, f64, f64) {
         (self.x, self.y, self.z)
     }
-    pub fn item(&self) -> &foton_registry::item_stack::ItemStack {
+    /// The item involved.
+    #[must_use]
+    pub const fn item(&self) -> &ItemStack {
         &self.item
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -889,6 +1111,7 @@ pub struct ExpBottleEvent {
     experience: i32,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for ExpBottleEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/exp_bottle");
 }
@@ -898,6 +1121,8 @@ impl Event for ExpBottleEvent {
     }
 }
 impl ExpBottleEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid, experience: i32) -> Self {
         Self {
             entity,
@@ -905,17 +1130,23 @@ impl ExpBottleEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// How much experience the bottle is worth.
+    #[must_use]
     pub const fn experience(&self) -> i32 {
         self.experience
     }
+    /// Changes what the bottle is worth.
     pub fn set_experience(&mut self, v: i32) {
-        self.experience = v.max(0)
+        self.experience = v.max(0);
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, v: bool) {
-        self.cancelled = v
+        self.cancelled = v;
     }
 }
 
@@ -940,6 +1171,7 @@ pub struct EntityMountEvent {
     vehicle: Uuid,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for EntityMountEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/entity_mount");
 }
@@ -949,6 +1181,8 @@ impl Event for EntityMountEvent {
     }
 }
 impl EntityMountEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(entity: Uuid, vehicle: Uuid) -> Self {
         Self {
             entity,
@@ -956,14 +1190,19 @@ impl EntityMountEvent {
             cancelled: false,
         }
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity(&self) -> Uuid {
         self.entity
     }
+    /// What is being ridden.
+    #[must_use]
     pub const fn vehicle(&self) -> Uuid {
         self.vehicle
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, v: bool) {
-        self.cancelled = v
+        self.cancelled = v;
     }
 }
 

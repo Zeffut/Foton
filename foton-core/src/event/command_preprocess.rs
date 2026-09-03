@@ -18,26 +18,36 @@ impl Event for PlayerCommandPreprocessEvent {
     }
 }
 impl PlayerCommandPreprocessEvent {
-    pub fn new(player_id: Uuid, message: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player_id: Uuid, message: String) -> Self {
         Self {
             player_id,
             message,
             cancelled: false,
         }
     }
-    pub fn player_id(&self) -> Uuid {
+    /// Who did it.
+    #[must_use]
+    pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// The command line as typed, leading slash included.
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
+    /// Rewrites the line before the server parses it.
     pub fn set_message(&mut self, message: String) {
         self.message = message;
     }
-    pub fn is_cancelled(&self) -> bool {
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
-    pub fn set_cancelled(&mut self, cancelled: bool) {
+    /// Stops this from happening, or lets it happen again.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
 }

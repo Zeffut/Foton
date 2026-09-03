@@ -29,13 +29,16 @@ use rustc_hash::FxHashMap;
 
 pub mod block;
 pub mod command;
+/// A command a player typed, before the server has read it.
 pub mod command_preprocess;
+/// Events about entities that are not players.
 pub mod entity;
 mod fertilize;
 pub mod inventory;
 mod lectern;
 pub mod player;
 pub mod server;
+/// Events about a world rather than anyone in it.
 pub mod world;
 
 pub use block::{

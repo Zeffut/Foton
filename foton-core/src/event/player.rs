@@ -9,6 +9,8 @@
 use foton_utils::BlockPos;
 use glam::DVec3;
 use std::net::SocketAddr;
+
+use crate::portal::TeleportTransitionCause;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -21,6 +23,7 @@ pub struct PlayerAdvancementCriterionGrantEvent {
     criterion: String,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerAdvancementCriterionGrantEvent {
     const TYPE_KEY: DowncastTypeKey =
         DowncastTypeKey::new("foton:event/player_advancement_criterion_grant");
@@ -31,7 +34,9 @@ impl Event for PlayerAdvancementCriterionGrantEvent {
     }
 }
 impl PlayerAdvancementCriterionGrantEvent {
-    pub fn new(player_id: Uuid, advancement: String, criterion: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player_id: Uuid, advancement: String, criterion: String) -> Self {
         Self {
             player_id,
             advancement,
@@ -39,18 +44,27 @@ impl PlayerAdvancementCriterionGrantEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which advancement the criterion belongs to.
+    #[must_use]
     pub fn advancement(&self) -> &str {
         &self.advancement
     }
+    /// Which of its criteria was just met.
+    #[must_use]
     pub fn criterion(&self) -> &str {
         &self.criterion
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -61,6 +75,7 @@ pub struct PlayerAdvancementDoneEvent {
     player_id: Uuid,
     advancement: String,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerAdvancementDoneEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_advancement_done");
 }
@@ -70,15 +85,21 @@ impl Event for PlayerAdvancementDoneEvent {
     }
 }
 impl PlayerAdvancementDoneEvent {
-    pub fn new(player_id: Uuid, advancement: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player_id: Uuid, advancement: String) -> Self {
         Self {
             player_id,
             advancement,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which advancement they finished.
+    #[must_use]
     pub fn advancement(&self) -> &str {
         &self.advancement
     }
@@ -87,20 +108,28 @@ impl PlayerAdvancementDoneEvent {
 /// Asynchronous admission check before a player object is created.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AsyncPlayerPreLoginResult {
+    /// Let them in.
     Allowed,
+    /// Turn them away: the server is full.
     KickFull,
+    /// Turn them away: they are banned.
     KickBanned,
+    /// Turn them away: they are not on the whitelist.
     KickWhitelist,
+    /// Turn them away for a reason of the plugin's own.
     KickOther,
 }
 
 /// A player is about to travel through a portal.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlayerOpenSignCause {
+    /// They clicked a sign that was already standing.
     Interact,
+    /// They placed it, and the editor opens by itself.
     Place,
 }
 
+/// Fired before a sign's text editor opens for a player.
 pub struct PlayerOpenSignEvent {
     player_id: Uuid,
     world: String,
@@ -120,7 +149,9 @@ impl Event for PlayerOpenSignEvent {
     }
 }
 impl PlayerOpenSignEvent {
-    pub fn new(
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(
         player_id: Uuid,
         world: String,
         position: BlockPos,
@@ -136,29 +167,43 @@ impl PlayerOpenSignEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// True for the front of the sign, false for the back.
+    #[must_use]
     pub const fn front_side(&self) -> bool {
         self.front_side
     }
+    /// What brought this about.
+    #[must_use]
     pub const fn cause(&self) -> PlayerOpenSignCause {
         self.cause
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
 }
 
+/// Fired before a player is carried through a portal.
 pub struct PlayerPortalEvent {
     player_id: Uuid,
     from_world: String,
@@ -167,9 +212,10 @@ pub struct PlayerPortalEvent {
     to_world: String,
     to_position: DVec3,
     to_rotation: (f32, f32),
-    cause: crate::portal::TeleportTransitionCause,
+    cause: TeleportTransitionCause,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerPortalEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_portal");
 }
@@ -179,7 +225,13 @@ impl Event for PlayerPortalEvent {
     }
 }
 impl PlayerPortalEvent {
-    pub fn new(
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a portal crossing is a where-from and a where-to, each of them a world,                   a position and a rotation, plus who and why -- grouping them into a                   struct would name the halves and hide nothing"
+    )]
+    pub const fn new(
         player_id: Uuid,
         from_world: String,
         from_position: DVec3,
@@ -187,7 +239,7 @@ impl PlayerPortalEvent {
         to_world: String,
         to_position: DVec3,
         to_rotation: (f32, f32),
-        cause: crate::portal::TeleportTransitionCause,
+        cause: TeleportTransitionCause,
     ) -> Self {
         Self {
             player_id,
@@ -201,30 +253,59 @@ impl PlayerPortalEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world they came from.
+    #[must_use]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "`from_world` is where they came from, not a constructor -- it pairs with `to_world` and renaming either would make the pair unreadable"
+    )]
     pub fn from_world(&self) -> &str {
         &self.from_world
     }
+    /// Where they came from.
+    #[must_use]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "`from_world` is where they came from, not a constructor -- it pairs with `to_world` and renaming either would make the pair unreadable"
+    )]
     pub const fn from_position(&self) -> DVec3 {
         self.from_position
     }
+    /// Which way they were facing when they entered.
+    #[must_use]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "`from_world` is where they came from, not a constructor -- it pairs with `to_world` and renaming either would make the pair unreadable"
+    )]
     pub const fn from_rotation(&self) -> (f32, f32) {
         self.from_rotation
     }
+    /// Which world they are going to.
+    #[must_use]
     pub fn to_world(&self) -> &str {
         &self.to_world
     }
+    /// Where they are going.
+    #[must_use]
     pub const fn to_position(&self) -> DVec3 {
         self.to_position
     }
+    /// Which way they will face when they arrive.
+    #[must_use]
     pub const fn to_rotation(&self) -> (f32, f32) {
         self.to_rotation
     }
-    pub const fn cause(&self) -> crate::portal::TeleportTransitionCause {
+    /// What brought this about.
+    #[must_use]
+    pub const fn cause(&self) -> TeleportTransitionCause {
         self.cause
     }
+    /// Sends them somewhere other than where the portal leads.
     pub fn set_destination(
         &mut self,
         world: impl Into<String>,
@@ -235,10 +316,14 @@ impl PlayerPortalEvent {
         self.to_position = position;
         self.to_rotation = rotation;
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
 }
+/// Fired while a player is still connecting, off the tick thread, before they are let in.
+///
+/// Off the tick means a listener here must not touch the world. It runs before the player exists on the server at all, which is what makes it the right place to turn somebody away and the wrong place for anything else.
 pub struct AsyncPlayerPreLoginEvent {
     uuid: Uuid,
     name: String,
@@ -246,6 +331,7 @@ pub struct AsyncPlayerPreLoginEvent {
     result: AsyncPlayerPreLoginResult,
     kick_message: Option<String>,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for AsyncPlayerPreLoginEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/async_pre_login");
 }
@@ -255,7 +341,9 @@ impl Event for AsyncPlayerPreLoginEvent {
     }
 }
 impl AsyncPlayerPreLoginEvent {
-    pub fn new(uuid: Uuid, name: String, address: SocketAddr) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(uuid: Uuid, name: String, address: SocketAddr) -> Self {
         Self {
             uuid,
             name,
@@ -264,21 +352,32 @@ impl AsyncPlayerPreLoginEvent {
             kick_message: None,
         }
     }
+    /// Who is trying to connect.
+    #[must_use]
     pub const fn uuid(&self) -> Uuid {
         self.uuid
     }
+    /// The name they are connecting under.
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
+    /// Where they are connecting from.
+    #[must_use]
     pub const fn address(&self) -> SocketAddr {
         self.address
     }
+    /// Why they are being turned away, if they are.
+    #[must_use]
     pub fn kick_message(&self) -> Option<&str> {
         self.kick_message.as_deref()
     }
+    /// What will happen unless a listener changes it.
+    #[must_use]
     pub const fn result(&self) -> AsyncPlayerPreLoginResult {
         self.result
     }
+    /// Turns them away, with a reason they will be shown.
     pub fn disallow(&mut self, result: AsyncPlayerPreLoginResult, message: impl Into<String>) {
         self.result = result;
         self.kick_message = Some(message.into());
@@ -309,6 +408,8 @@ impl Event for FoodLevelChangeEvent {
     }
 }
 impl FoodLevelChangeEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(player_id: Uuid, food_level: i32) -> Self {
         Self {
             player_id,
@@ -316,18 +417,26 @@ impl FoodLevelChangeEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// The hunger they will be left with, out of twenty.
+    #[must_use]
     pub const fn food_level(&self) -> i32 {
         self.food_level
     }
+    /// Changes the hunger they are left with.
     pub const fn set_food_level(&mut self, food_level: i32) {
         self.food_level = food_level;
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -350,6 +459,7 @@ pub struct PlayerBucketFillEvent {
     bucket: String,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerBucketFillEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_bucket_fill");
 }
@@ -359,6 +469,7 @@ impl Event for PlayerBucketFillEvent {
     }
 }
 impl PlayerBucketFillEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(
         player_id: Uuid,
         world: impl Into<String>,
@@ -373,18 +484,27 @@ impl PlayerBucketFillEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// Which bucket they filled.
+    #[must_use]
     pub fn bucket(&self) -> &str {
         &self.bucket
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -395,18 +515,25 @@ pub struct PlayerItemBreakEvent {
     player_id: Uuid,
     item: ItemStack,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerItemBreakEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_item_break");
 }
 impl Event for PlayerItemBreakEvent {}
 impl PlayerItemBreakEvent {
-    pub fn new(player_id: Uuid, item: ItemStack) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player_id: Uuid, item: ItemStack) -> Self {
         Self { player_id, item }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
-    pub fn item(&self) -> &ItemStack {
+    /// The item involved.
+    #[must_use]
+    pub const fn item(&self) -> &ItemStack {
         &self.item
     }
 }
@@ -429,6 +556,7 @@ impl Event for PlayerFishEvent {
     }
 }
 impl PlayerFishEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(player_id: Uuid, hook_id: Uuid, state: impl Into<String>) -> Self {
         Self {
             player_id,
@@ -437,22 +565,32 @@ impl PlayerFishEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// The bobber in the water.
+    #[must_use]
     pub const fn hook_id(&self) -> Uuid {
         self.hook_id
     }
+    /// What just happened to the line, as Bukkit names it -- `CAUGHT_FISH` and the rest of its State enum.
+    #[must_use]
     pub fn state(&self) -> &str {
         &self.state
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerBucketEmptyEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_bucket_empty");
 }
@@ -462,6 +600,7 @@ impl Event for PlayerBucketEmptyEvent {
     }
 }
 impl PlayerBucketEmptyEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(
         player_id: Uuid,
         world: impl Into<String>,
@@ -476,18 +615,27 @@ impl PlayerBucketEmptyEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// Which bucket they emptied.
+    #[must_use]
     pub fn bucket(&self) -> &str {
         &self.bucket
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -509,6 +657,8 @@ impl Event for PlayerDropItemEvent {
     }
 }
 impl PlayerDropItemEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(player_id: Uuid, item_id: Uuid) -> Self {
         Self {
             player_id,
@@ -516,15 +666,22 @@ impl PlayerDropItemEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// The dropped item, which is now an entity lying in the world.
+    #[must_use]
     pub const fn item_id(&self) -> Uuid {
         self.item_id
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -546,11 +703,13 @@ pub struct PlayerSpawnLocationEvent {
     position: [f64; 3],
     rotation: (f32, f32),
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerSpawnLocationEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_spawn_location");
 }
 impl Event for PlayerSpawnLocationEvent {}
 impl PlayerSpawnLocationEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(
         player_id: Uuid,
         world: impl Into<String>,
@@ -564,18 +723,27 @@ impl PlayerSpawnLocationEvent {
             rotation,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> [f64; 3] {
         self.position
     }
+    /// Which way they were facing, as yaw and pitch.
+    #[must_use]
     pub const fn rotation(&self) -> (f32, f32) {
         self.rotation
     }
+    /// Chooses where they appear instead.
     pub fn set_spawn(
         &mut self,
         world: impl Into<String>,
@@ -587,11 +755,13 @@ impl PlayerSpawnLocationEvent {
         self.rotation = rotation;
     }
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerRespawnEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_respawn");
 }
 impl Event for PlayerRespawnEvent {}
 impl PlayerRespawnEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(
         player_id: Uuid,
         world: impl Into<String>,
@@ -607,21 +777,32 @@ impl PlayerRespawnEvent {
             anchor_spawn,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> [f64; 3] {
         self.position
     }
+    /// Which way they were facing, as yaw and pitch.
+    #[must_use]
     pub const fn rotation(&self) -> (f32, f32) {
         self.rotation
     }
+    /// Whether they came back at a respawn anchor rather than a bed or the world spawn.
+    #[must_use]
     pub const fn is_anchor_spawn(&self) -> bool {
         self.anchor_spawn
     }
+    /// Chooses where they come back instead.
     pub fn set_spawn(
         &mut self,
         world: impl Into<String>,
@@ -647,6 +828,7 @@ unsafe impl DowncastType for PlayerDeathEvent {
 }
 impl Event for PlayerDeathEvent {}
 impl PlayerDeathEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(player_id: Uuid, death_message: impl Into<String>) -> Self {
         Self {
             player_id,
@@ -655,6 +837,7 @@ impl PlayerDeathEvent {
             keep_inventory: false,
         }
     }
+    /// Called by Foton when the death leaves items on the ground.
     pub fn with_drops(
         player_id: Uuid,
         death_message: impl Into<String>,
@@ -668,24 +851,35 @@ impl PlayerDeathEvent {
             keep_inventory,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// What everyone will be told, if anything.
+    #[must_use]
     pub fn death_message(&self) -> Option<&str> {
         self.death_message.as_deref()
     }
+    /// Changes what everyone is told, or silences it.
     pub fn set_death_message(&mut self, message: Option<String>) {
         self.death_message = message;
     }
+    /// What will be left on the ground.
+    #[must_use]
     pub fn drops(&self) -> &[ItemStack] {
         &self.drops
     }
-    pub fn drops_mut(&mut self) -> &mut Vec<ItemStack> {
+    /// What will be left on the ground, so a listener can add to it or take from it.
+    pub const fn drops_mut(&mut self) -> &mut Vec<ItemStack> {
         &mut self.drops
     }
+    /// Whether they keep what they were carrying.
+    #[must_use]
     pub const fn keep_inventory(&self) -> bool {
         self.keep_inventory
     }
+    /// Decides whether they keep what they were carrying.
     pub const fn set_keep_inventory(&mut self, keep_inventory: bool) {
         self.keep_inventory = keep_inventory;
     }
@@ -714,6 +908,8 @@ impl Event for PlayerInteractEntityEvent {
     }
 }
 impl PlayerInteractEntityEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
     pub const fn new(player_id: Uuid, entity_id: Uuid) -> Self {
         Self {
             player_id,
@@ -721,15 +917,22 @@ impl PlayerInteractEntityEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which entity this is about.
+    #[must_use]
     pub const fn entity_id(&self) -> Uuid {
         self.entity_id
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -1009,10 +1212,12 @@ impl PlayerChatEvent {
     }
 
     /// UUIDs of players who should receive this message.
+    #[must_use]
     pub fn recipients(&self) -> &[Uuid] {
         &self.recipients
     }
-    pub fn recipients_mut(&mut self) -> &mut Vec<Uuid> {
+    /// Who will see the message, so a listener can narrow it.
+    pub const fn recipients_mut(&mut self) -> &mut Vec<Uuid> {
         &mut self.recipients
     }
 
@@ -1113,24 +1318,32 @@ pub struct PlayerLocaleChangeEvent {
     old_locale: String,
     new_locale: String,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for PlayerLocaleChangeEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_locale_change");
 }
 impl Event for PlayerLocaleChangeEvent {}
 impl PlayerLocaleChangeEvent {
-    pub fn new(player: Arc<Player>, old_locale: String, new_locale: String) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    pub const fn new(player: Arc<Player>, old_locale: String, new_locale: String) -> Self {
         Self {
             player,
             old_locale,
             new_locale,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player(&self) -> &Arc<Player> {
         &self.player
     }
+    /// The language they had.
+    #[must_use]
     pub fn old_locale(&self) -> &str {
         &self.old_locale
     }
+    /// The language they switched to.
+    #[must_use]
     pub fn new_locale(&self) -> &str {
         &self.new_locale
     }

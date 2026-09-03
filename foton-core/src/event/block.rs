@@ -18,6 +18,7 @@ pub struct BlockDamageEvent {
     position: BlockPos,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockDamageEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_damage");
 }
@@ -27,7 +28,9 @@ impl Event for BlockDamageEvent {
     }
 }
 impl BlockDamageEvent {
-    pub fn new(player_id: Uuid, world: String, position: BlockPos) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player_id: Uuid, world: String, position: BlockPos) -> Self {
         Self {
             player_id,
             world,
@@ -35,15 +38,22 @@ impl BlockDamageEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -55,6 +65,7 @@ pub struct BlockBurnEvent {
     position: BlockPos,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockBurnEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_burn");
 }
@@ -64,6 +75,7 @@ impl Event for BlockBurnEvent {
     }
 }
 impl BlockBurnEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(world: impl Into<String>, position: BlockPos) -> Self {
         Self {
             world: world.into(),
@@ -71,12 +83,17 @@ impl BlockBurnEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -95,6 +112,7 @@ pub struct LeavesDecayEvent {
     position: BlockPos,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for LeavesDecayEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/leaves_decay");
 }
@@ -104,6 +122,7 @@ impl Event for LeavesDecayEvent {
     }
 }
 impl LeavesDecayEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(world: impl Into<String>, position: BlockPos) -> Self {
         Self {
             world: world.into(),
@@ -111,12 +130,17 @@ impl LeavesDecayEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -130,6 +154,7 @@ pub struct BlockIgniteEvent {
     player: Option<Uuid>,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockIgniteEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_ignite");
 }
@@ -139,6 +164,7 @@ impl Event for BlockIgniteEvent {
     }
 }
 impl BlockIgniteEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(world: impl Into<String>, position: BlockPos) -> Self {
         Self {
             world: world.into(),
@@ -148,25 +174,36 @@ impl BlockIgniteEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// What brought this about.
+    #[must_use]
     pub fn cause(&self) -> &str {
         &self.cause
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Option<Uuid> {
         self.player
     }
-    pub fn set_player(&mut self, player: Uuid) {
+    /// Names who is responsible, once a listener has decided somebody is.
+    pub const fn set_player(&mut self, player: Uuid) {
         self.player = Some(player);
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockFadeEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_fade");
 }
@@ -176,6 +213,7 @@ impl Event for BlockFadeEvent {
     }
 }
 impl BlockFadeEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(world: impl Into<String>, position: BlockPos) -> Self {
         Self {
             world: world.into(),
@@ -183,12 +221,17 @@ impl BlockFadeEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -210,6 +253,7 @@ pub struct BlockPreDispenseEvent {
     item: ItemStack,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockPreDispenseEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_pre_dispense");
 }
@@ -219,7 +263,9 @@ impl Event for BlockPreDispenseEvent {
     }
 }
 impl BlockPreDispenseEvent {
-    pub fn new(world: String, position: BlockPos, slot: usize, item: ItemStack) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(world: String, position: BlockPos, slot: usize, item: ItemStack) -> Self {
         Self {
             world,
             position,
@@ -228,31 +274,46 @@ impl BlockPreDispenseEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// Which slot of the dispenser the item is leaving.
+    #[must_use]
     pub const fn slot(&self) -> usize {
         self.slot
     }
-    pub fn item(&self) -> &ItemStack {
+    /// The item involved.
+    #[must_use]
+    pub const fn item(&self) -> &ItemStack {
         &self.item
     }
+    /// Replaces the item involved.
     pub fn set_item(&mut self, item: ItemStack) {
         self.item = item;
     }
+    /// Takes the item out of the event, leaving it empty.
+    #[must_use]
     pub fn into_item(self) -> ItemStack {
         self.item
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockDispenseEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_dispense");
 }
@@ -262,7 +323,9 @@ impl Event for BlockDispenseEvent {
     }
 }
 impl BlockDispenseEvent {
-    pub fn new(world: String, position: BlockPos, item: ItemStack) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(world: String, position: BlockPos, item: ItemStack) -> Self {
         Self {
             world,
             position,
@@ -270,24 +333,36 @@ impl BlockDispenseEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
-    pub fn item(&self) -> &ItemStack {
+    /// The item involved.
+    #[must_use]
+    pub const fn item(&self) -> &ItemStack {
         &self.item
     }
+    /// Replaces the item involved.
     pub fn set_item(&mut self, item: ItemStack) {
         self.item = item;
     }
+    /// Takes the item out of the event, leaving it empty.
+    #[must_use]
     pub fn into_item(self) -> ItemStack {
         self.item
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -324,7 +399,9 @@ impl Event for PistonEvent {
     }
 }
 impl PistonEvent {
-    pub fn new(
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(
         world: String,
         piston: BlockPos,
         blocks: Vec<BlockPos>,
@@ -340,27 +417,41 @@ impl PistonEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where the piston itself is, not the block it is moving.
+    #[must_use]
     pub const fn piston(&self) -> BlockPos {
         self.piston
     }
+    /// Every block this will affect.
+    #[must_use]
     pub fn blocks(&self) -> &[BlockPos] {
         &self.blocks
     }
-    pub fn blocks_mut(&mut self) -> &mut Vec<BlockPos> {
+    /// Every block this will affect, so a listener can take some out.
+    pub const fn blocks_mut(&mut self) -> &mut Vec<BlockPos> {
         &mut self.blocks
     }
+    /// Which way the piston faces.
+    #[must_use]
     pub fn direction(&self) -> &str {
         &self.direction
     }
+    /// True while pushing out, false while pulling back.
+    #[must_use]
     pub const fn extending(&self) -> bool {
         self.extending
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -376,7 +467,14 @@ impl Event for SignChangeEvent {
     }
 }
 impl SignChangeEvent {
-    pub fn new(player_id: Uuid, world: String, position: BlockPos, lines: [String; 4]) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(
+        player_id: Uuid,
+        world: String,
+        position: BlockPos,
+        lines: [String; 4],
+    ) -> Self {
         Self {
             player_id,
             world,
@@ -385,24 +483,36 @@ impl SignChangeEvent {
             cancelled: false,
         }
     }
+    /// Who did it.
+    #[must_use]
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
-    pub fn lines(&self) -> &[String; 4] {
+    /// The four lines as they stand.
+    #[must_use]
+    pub const fn lines(&self) -> &[String; 4] {
         &self.lines
     }
-    pub fn lines_mut(&mut self) -> &mut [String; 4] {
+    /// The four lines, so a listener can rewrite them before they are saved.
+    pub const fn lines_mut(&mut self) -> &mut [String; 4] {
         &mut self.lines
     }
+    /// Whether a listener has stopped this from happening.
+    #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
@@ -496,7 +606,7 @@ pub struct BlockPlaceEvent {
     player: Arc<Player>,
     position: BlockPos,
     state: BlockStateId,
-    item: foton_registry::item_stack::ItemStack,
+    item: ItemStack,
     cancelled: bool,
 }
 
@@ -506,12 +616,14 @@ unsafe impl DowncastType for BlockPlaceEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_place");
 }
 
+/// Fired when something flows or falls from one block into the next.
 pub struct BlockFromToEvent {
     world: String,
     block: BlockPos,
     to_block: BlockPos,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockFromToEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_from_to");
 }
@@ -521,7 +633,9 @@ impl Event for BlockFromToEvent {
     }
 }
 impl BlockFromToEvent {
-    pub fn new(world: String, block: BlockPos, to_block: BlockPos) -> Self {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(world: String, block: BlockPos, to_block: BlockPos) -> Self {
         Self {
             world,
             block,
@@ -529,15 +643,22 @@ impl BlockFromToEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Which block this is about.
+    #[must_use]
     pub const fn block(&self) -> BlockPos {
         self.block
     }
+    /// Where it is moving to.
+    #[must_use]
     pub const fn to_block(&self) -> BlockPos {
         self.to_block
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }
@@ -551,11 +672,11 @@ impl Event for BlockPlaceEvent {
 impl BlockPlaceEvent {
     /// Creates the event for a placement that has not happened yet.
     #[must_use]
-    pub fn new(
+    pub const fn new(
         player: Arc<Player>,
         position: BlockPos,
         state: BlockStateId,
-        item: foton_registry::item_stack::ItemStack,
+        item: ItemStack,
     ) -> Self {
         Self {
             player,
@@ -584,8 +705,9 @@ impl BlockPlaceEvent {
         self.state
     }
 
+    /// The item involved.
     #[must_use]
-    pub fn item(&self) -> &foton_registry::item_stack::ItemStack {
+    pub const fn item(&self) -> &ItemStack {
         &self.item
     }
 
@@ -602,6 +724,7 @@ pub struct BlockExpEvent {
     exp_to_drop: i32,
     cancelled: bool,
 }
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
 unsafe impl DowncastType for BlockExpEvent {
     const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_exp");
 }
@@ -611,6 +734,7 @@ impl Event for BlockExpEvent {
     }
 }
 impl BlockExpEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     pub fn new(world: impl Into<String>, position: BlockPos, exp_to_drop: i32) -> Self {
         Self {
             world: world.into(),
@@ -619,18 +743,26 @@ impl BlockExpEvent {
             cancelled: false,
         }
     }
+    /// Which world this happened in.
+    #[must_use]
     pub fn world(&self) -> &str {
         &self.world
     }
+    /// Where it happened.
+    #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
+    /// How much experience breaking this will drop.
+    #[must_use]
     pub const fn exp_to_drop(&self) -> i32 {
         self.exp_to_drop
     }
+    /// Changes how much experience it drops.
     pub fn set_exp_to_drop(&mut self, value: i32) {
         self.exp_to_drop = value.max(0);
     }
+    /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, value: bool) {
         self.cancelled = value;
     }
