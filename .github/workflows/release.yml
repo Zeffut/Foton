@@ -10,6 +10,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-23
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: crate-ci/typos@v1.48.0
+      - name: Verify the full release candidate
+        run: bash dev/ci.sh
+
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -43,41 +56,53 @@ jobs:
           fi
 
   build:
-    needs: version
+    needs:
+      - ci
+      - version
     if: needs.version.outputs.changed == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
-          - name: foton-linux
-            os: ubuntu-latest
-            artifact: foton
-            target: ""
-          - name: foton-linux-musl
+          # Static musl builds so no distribution's libc matters.
+          - name: foton-linux-x86_64-musl
             os: ubuntu-latest
             artifact: foton
             target: x86_64-unknown-linux-musl
-          - name: foton-windows
+          # Native ARM runner: cross-linking musl for aarch64 from an x86
+          # runner needs its own linker, a native runner needs none.
+          - name: foton-linux-aarch64-musl
+            os: ubuntu-24.04-arm
+            artifact: foton
+            target: aarch64-unknown-linux-musl
+          - name: foton-windows-x86_64
             os: windows-latest
             artifact: foton.exe
             target: ""
-          - name: foton-macos
+          - name: foton-macos-aarch64
             os: macos-latest
             artifact: foton
             target: ""
+          # macos-latest runners are Apple Silicon; the Intel build is a
+          # cross-compile, which the bundled SDK supports without extra setup.
+          - name: foton-macos-x86_64
+            os: macos-latest
+            artifact: foton
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Install musl toolchain
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+        if: contains(matrix.target, 'musl')
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
           rustup target add ${{ matrix.target }}
+      - name: Add cross-compile target
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: rustup target add ${{ matrix.target }}
       - name: Build portable release binary
-        env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --features stand-alone,deadlock_detection --verbose
+        run: cargo build --locked --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --features stand-alone,deadlock_detection --verbose
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
@@ -100,10 +125,17 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          mv artifacts/foton-linux/foton release/foton-linux
-          mv artifacts/foton-linux-musl/foton release/foton-linux-musl
-          mv artifacts/foton-windows/foton.exe release/foton-windows.exe
-          mv artifacts/foton-macos/foton release/foton-macos
+          mv artifacts/foton-linux-x86_64-musl/foton release/foton-linux-x86_64-musl
+          mv artifacts/foton-linux-aarch64-musl/foton release/foton-linux-aarch64-musl
+          mv artifacts/foton-windows-x86_64/foton.exe release/foton-windows-x86_64.exe
+          mv artifacts/foton-macos-aarch64/foton release/foton-macos-aarch64
+          mv artifacts/foton-macos-x86_64/foton release/foton-macos-x86_64
+
+      - name: Generate checksums
+        run: |
+          cd release
+          shasum -a 256 * > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

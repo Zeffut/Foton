@@ -5,11 +5,25 @@
   "outputDirectory": "site/dist",
   "framework": null,
   "trailingSlash": true,
+  "rewrites": [
+    {
+      "source": "/api/bug-reports/",
+      "destination": "/api/report"
+    },
+    {
+      "source": "/api/github-issues/",
+      "destination": "/api/report"
+    }
+  ],
   "redirects": [
     {
       "source": "/",
       "has": [
-        { "type": "header", "key": "accept-language", "value": "^fr.*" }
+        {
+          "type": "header",
+          "key": "accept-language",
+          "value": "^fr.*"
+        }
       ],
       "destination": "/fr/",
       "statusCode": 302
@@ -24,14 +38,23 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
       ]
     },
     {
       "source": "/style.css",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
       ]
     }
   ]

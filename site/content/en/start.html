@@ -1,1 +1,81 @@
-<main class="wrap"><section class="band" style="border-bottom:0"><h1>Get started</h1></section></main>
+<main>
+  <section class="band">
+    <div class="wrap">
+      <div class="eyebrow">FIRST WORLD</div>
+      <h1>Get started</h1>
+      <p class="pull">Install Foton and start your world.</p>
+      <p class="rest">Foton is pre-alpha. Use it for testing, not yet for a server you rely on.</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <h2>1. Install</h2>
+      <p>Open a terminal in the folder where you want the server, then run one command. Foton installs in that folder.</p>
+      <div class="cmd">
+        <div class="cmd-switch">
+          <button type="button" class="cmd-tab is-active" data-os="unix" aria-pressed="true">macOS / Linux</button>
+          <button type="button" class="cmd-tab" data-os="win" aria-pressed="false">Windows</button>
+        </div>
+        <div class="cmd-line" data-os="unix">
+          <div class="cmd-code"><code><b>$</b> <span class="cmd-text">curl -fsSL https://foton.zeffut.fr/install.sh | sh</span></code></div>
+          <button type="button" class="cmd-copy" aria-label="Copy" data-label-copy="Copy" data-label-copied="Copied" data-label-failed="Copy failed">Copy</button>
+        </div>
+        <div class="cmd-line cmd-hidden" data-os="win">
+          <div class="cmd-code"><code><b>&gt;</b> <span class="cmd-text">irm https://foton.zeffut.fr/install.ps1 | iex</span></code></div>
+          <button type="button" class="cmd-copy" aria-label="Copy" data-label-copy="Copy" data-label-copied="Copied" data-label-failed="Copy failed">Copy</button>
+        </div>
+      </div>
+      <p>The installer asks for the server name, port, player limit, authentication and difficulty, then creates the configuration files.</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <h2>2. Start and join</h2>
+      <div class="cols-2">
+        <div>
+          <h3>Join</h3>
+          <p>In Minecraft Java Edition, open <strong>Multiplayer</strong>, add a server, then enter <code>localhost</code> when the server runs on the same machine.</p>
+          <p class="rest">If you chose another port during installation, enter <code>localhost:port</code>.</p>
+        </div>
+      </div>
+      <h3>Start</h3>
+      <div class="cmd">
+        <div class="cmd-switch">
+          <button type="button" class="cmd-tab is-active" data-os="unix" aria-pressed="true">macOS / Linux</button>
+          <button type="button" class="cmd-tab" data-os="win" aria-pressed="false">Windows</button>
+        </div>
+        <div class="cmd-line" data-os="unix">
+          <div class="cmd-code"><code><b>$</b> <span class="cmd-text">./foton</span></code></div>
+          <button type="button" class="cmd-copy" aria-label="Copy" data-label-copy="Copy" data-label-copied="Copied" data-label-failed="Copy failed">Copy</button>
+        </div>
+        <div class="cmd-line cmd-hidden" data-os="win">
+          <div class="cmd-code"><code><b>&gt;</b> <span class="cmd-text">.\foton.exe</span></code></div>
+          <button type="button" class="cmd-copy" aria-label="Copy" data-label-copy="Copy" data-label-copied="Copied" data-label-failed="Copy failed">Copy</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" style="border-bottom:0">
+    <div class="wrap">
+      <h2>Update</h2>
+      <p>Stop the server, then run the command for your system from its folder. Your worlds and settings stay in place.</p>
+      <div class="cmd">
+        <div class="cmd-switch">
+          <button type="button" class="cmd-tab is-active" data-os="unix" aria-pressed="true">macOS / Linux</button>
+          <button type="button" class="cmd-tab" data-os="win" aria-pressed="false">Windows</button>
+        </div>
+        <div class="cmd-line" data-os="unix">
+          <div class="cmd-code"><code><b>$</b> <span class="cmd-text">curl -fsSL https://foton.zeffut.fr/install.sh | sh -s -- --update</span></code></div>
+          <button type="button" class="cmd-copy" aria-label="Copy" data-label-copy="Copy" data-label-copied="Copied" data-label-failed="Copy failed">Copy</button>
+        </div>
+        <div class="cmd-line cmd-hidden" data-os="win">
+          <div class="cmd-code"><code><b>&gt;</b> <span class="cmd-text">iex "&amp; { $(irm https://foton.zeffut.fr/install.ps1) } -Update"</span></code></div>
+          <button type="button" class="cmd-copy" aria-label="Copy" data-label-copy="Copy" data-label-copied="Copied" data-label-failed="Copy failed">Copy</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>

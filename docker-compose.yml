@@ -1,7 +1,9 @@
 services:
   foton:
-    # Built by .github/workflows/docker-build.yml from the GitHub repository name.
-    image: ghcr.io/zeffut/foton:nightly
+    # The published image is not built yet -- docker-build.yml has never
+    # completed on the ARM runner. Until it does, build locally:
+    #   docker compose build
+    build: .
     stdin_open: true
     tty: true
     container_name: foton-mc

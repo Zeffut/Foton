@@ -25,7 +25,7 @@ what does.
 - A home page.
 - A getting-started guide.
 - A generated configuration reference.
-- A contributing guide.
+- A player-reports page.
 - All four in English and French.
 
 ### Out of scope
@@ -176,7 +176,7 @@ Direction E, *Isometric Atlas*, from the design canvas:
 | `/` | Make the case, and say plainly where the project stands |
 | `/start/` | A world running in under ten minutes, by any of three routes |
 | `/configuration/` | Answer "what does this key do, what is its default" |
-| `/contributing/` | Take someone from curious to a first change |
+| `/bugs/` | Show player-filed reports and their current GitHub status |
 | `/api/` | Parked rustdoc, unthemed |
 
 ### Home
@@ -230,13 +230,6 @@ report a bug, including that `/bug` opens a real form in-game.
 
 The three files, every key with type, default, range and description, navigable
 by section. Generated.
-
-### Contributing
-
-The bar a change clears. The engineering rules, condensed. The central
-mechanism: name a struct exactly after its vanilla class, annotate it, and the
-build finds it and writes the registration — there is no registry list to edit.
-The checks: `dev/doctor.sh`, `dev/ci.sh`, `dev/all-tests.sh`.
 
 ## Structure
 
@@ -356,3 +349,21 @@ contents land on a public page.
 Mitigated by a bearer token the server holds and a size limit, not solved: a
 leaked token means junk commits. It is recoverable — the file is versioned —
 and the alternative was a database this design would rather not have.
+
+## Amendment: GitHub issues are the report work queue
+
+Accepted 2026-09-01. The JSONL file remains the offline source that builds the
+site, but every new report now also creates a GitHub issue. Its card links to
+that issue once the link is committed.
+
+GitHub's signed `issues` webhook is the only way an issue changes the public
+report state. Open and reopened issues map to `open`; a closed issue labeled
+`fixed` maps to `fixed`; one labeled `not-a-bug` maps to `closed`. A closure
+with neither, or both, labels is not guessed at and therefore remains open on
+the site until the maintainer classifies it. The webhook only accepts issues
+carrying `foton-report`, so ordinary project issues are outside this system.
+
+`REPORTING.md` owns the deployment contract: Vercel secrets, token permissions,
+the webhook URL, and the status labels. Keeping it outside this design record
+makes the exact operational setup easy to follow without turning this document
+into a deployment checklist.

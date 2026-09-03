@@ -56,8 +56,11 @@ password = ""
 # reports/bugs.jsonl. Leave the URL unset to keep reports local.
 [server.bug_reports]
 # Endpoint each filed report is posted to; unset keeps reports local.
-# webhook_url = "https://example.invalid/api/bug-reports"
-# Optional bearer token sent with each post.
+# The public intake publishes what it receives at foton.zeffut.fr/reports,
+# so it is left unset here: a server sends its players' reports somewhere
+# public only because its operator decided to, never by default.
+# webhook_url = "https://foton.zeffut.fr/api/bug-reports"
+# The token the endpoint expects. Without it the post is rejected.
 # webhook_token = ""
 
 # Optional worker counts for server thread pools. 0 or omitted uses each pool's automatic default.

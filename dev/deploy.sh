@@ -23,6 +23,15 @@ set -u
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO" || exit 1
 
+# A deployment is a statement about one reviewed commit.  Formatting it or
+# silently using an older checkout would make that statement untrue.
+git diff --quiet || { echo "worktree has uncommitted changes; refusing to deploy"; exit 1; }
+git fetch origin master || { echo "could not fetch origin/master"; exit 1; }
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ] || {
+  echo "HEAD is not origin/master; refusing to deploy an outdated checkout"
+  exit 1
+}
+
 KEY=${FOTON_DEPLOY_SSH_KEY:?FOTON_DEPLOY_SSH_KEY is not set}
 HOST=${FOTON_DEPLOY_HOST:?FOTON_DEPLOY_HOST is not set}
 DIR=${FOTON_DEPLOY_DIR:-\~/foton-test}
@@ -33,10 +42,6 @@ GRACE=${FOTON_DEPLOY_GRACE:-30}
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
 # --- 1. the suite decides whether anything ships at all -------------------
-# Formatting is mechanical: fixing it is never a judgment call, and a deploy
-# that stops for it wastes a ten-minute build on nothing.
-cargo fmt --all
-
 say "continuous integration"
 if ! bash dev/ci.sh; then
   echo "CI is red. Nothing was built and nothing was deployed."
@@ -47,7 +52,8 @@ fi
 say "release build (static musl)"
 rustup target add x86_64-unknown-linux-musl >/dev/null 2>&1
 command -v musl-gcc >/dev/null || apt-get install -y -qq musl-tools >/dev/null 2>&1
-cargo build --release --target x86_64-unknown-linux-musl || exit 1
+cargo build --locked --release --target x86_64-unknown-linux-musl \
+  --features stand-alone,deadlock_detection || exit 1
 
 BIN=target/x86_64-unknown-linux-musl/release/foton
 [ -s "$BIN" ] || { echo "no binary was produced"; exit 1; }
@@ -90,6 +96,7 @@ RCON
 # --- 4. ship it, checking the fingerprint at every hop --------------------
 say "shipping"
 scp -i "$KEY" -o BatchMode=yes -q "$BIN" "$HOST:$DIR/bin/foton" || exit 1
+scp -i "$KEY" -o BatchMode=yes -q dev/deploy.Dockerfile "$HOST:$DIR/bin/Dockerfile" || exit 1
 
 ssh -i "$KEY" -o BatchMode=yes "$HOST" "bash -s '$SUM' '$NAME' '$DIR'" <<'REMOTE' || exit 1
 set -u

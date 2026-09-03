@@ -22,12 +22,12 @@ healthy.
 
 ### 1. One script makes a release, whoever runs it
 
-`dev/release.sh` is the procedure. It runs on a laptop today and CI calls the
-same script when Actions works again.
+`dev/release.sh` is the manual publishing procedure. GitHub Actions builds the
+platform matrix itself, but it runs the same full `dev/ci.sh` gate before
+building or publishing any release artifact.
 
-The alternative — a workflow that knows how to build and a script that also
-knows how to build — is two procedures that drift, and the one nobody runs is
-the one that breaks. There is one, and it is the one a human can run and read.
+The shared verification gate prevents a release workflow and the documented
+manual path from disagreeing about whether a commit is publishable.
 
 ### 2. The installer does not write configuration. The server does
 
@@ -87,13 +87,29 @@ What it does, in order, stopping at the first failure:
    runs on any distribution without a runtime. This is why a laptop can produce
    a Linux artifact at all.
 6. **Writes `SHA256SUMS`** over every artifact.
-7. **Creates the tag and the GitHub release** and attaches the binaries and the
+7. **Prints platform coverage**: which of the five release assets (below) it
+   is about to publish and which are missing, so a partial release is never
+   mistaken for a complete one.
+8. **Creates the tag and the GitHub release** and attaches the binaries and the
    checksum file.
 
-Platforms a laptop can produce: `foton-macos-aarch64` natively, and
-`foton-linux-x86_64-musl` through the container. Windows needs CI; the release
-is published without it and the installer says so rather than offering a
-download that does not exist.
+A full release has exactly five assets:
+
+| Asset | Platform | Built by |
+|-------|----------|----------|
+| `foton-linux-x86_64-musl` | Linux, Intel/AMD | a laptop (Docker) or CI |
+| `foton-linux-aarch64-musl` | Linux, ARM | CI only (`ubuntu-24.04-arm` runner) |
+| `foton-macos-aarch64` | macOS, Apple Silicon | a laptop (native) or CI |
+| `foton-macos-x86_64` | macOS, Intel | CI only (cross-compiled from `macos-latest`) |
+| `foton-windows-x86_64.exe` | Windows, Intel/AMD | CI only |
+
+A laptop can produce two of the five: `foton-macos-aarch64` natively, and
+`foton-linux-x86_64-musl` through the container -- and only if it happens to be
+an Apple Silicon Mac, since the host binary is built for whatever the laptop
+is. The other three need GitHub Actions. `dev/release.sh` prints which of the
+five it is about to publish and which are missing before it publishes anything,
+so a laptop release is never mistaken for a complete one. Run the "Build
+Release" workflow (`workflow_dispatch` or a push to `master`) for all five.
 
 ## Installing
 
@@ -101,17 +117,34 @@ download that does not exist.
 curl -fsSL https://foton.zeffut.fr/install.sh | sh
 ```
 
-The script:
+Covers macOS and Linux natively, and Windows too but only inside a POSIX
+shell -- Git Bash, MSYS2, Cygwin or WSL -- because it is a `sh` script. For
+Windows PowerShell, which is what most Windows users actually have, there is
+a second installer:
+
+```powershell
+irm https://foton.zeffut.fr/install.ps1 | iex
+```
+
+The two ask the same five questions with the same defaults and write the same
+two config files; `install.ps1` exists only because requiring a POSIX shell
+to install a Minecraft server would rule out most Windows users. See
+`site/static/install.ps1`'s header comment for how to pass `-Update` through
+`irm | iex`, since piping to `iex` leaves no normal place for arguments.
+
+The `sh` script:
 
 1. Detects the operating system and CPU, and picks the matching asset. An
    unsupported pair stops with the list of what exists, not a failed download.
+   The script is POSIX `sh`, so on Windows it needs Git Bash, MSYS2, Cygwin or
+   WSL -- there is no native `sh` to run it under otherwise.
 2. Fetches the release metadata from the GitHub API — the repository is public,
    so no token is involved.
 3. Downloads the binary **and `SHA256SUMS`**, and verifies the binary against it
    before making it executable. A mismatch deletes the download and stops.
-4. Asks six questions on `/dev/tty`: where to install, the server name, the
-   port, the maximum number of players, whether to use Mojang authentication,
-   and the difficulty.
+4. Installs in the current directory, then asks five questions on `/dev/tty`:
+   the server name, the port, the maximum number of players, whether to use
+   Mojang authentication, and the difficulty.
 5. Runs the binary once so it writes its own configuration, then applies the
    answers to `config/config.toml` and `config/worlds.toml`.
 6. Offers to start the server.
@@ -125,7 +158,13 @@ refuses to overwrite an existing installation without being told to.
 curl -fsSL https://foton.zeffut.fr/install.sh | sh -s -- --update
 ```
 
-Run inside an existing installation, `--update` replaces the binary and leaves
+On Windows PowerShell, the equivalent is `-Update`:
+
+```powershell
+iex "& { $(irm https://foton.zeffut.fr/install.ps1) } -Update"
+```
+
+Run inside an existing installation, `--update` (`-Update` on Windows) replaces the binary and leaves
 `config/` and `saves/` untouched. It checks the installed version against the
 latest release first and does nothing when they match.
 

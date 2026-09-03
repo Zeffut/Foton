@@ -50,3 +50,4 @@ __pycache__/
 # server to provide are other people's artifacts. Neither is source.
 plugin-api/build
 plugin-api/lib
+/.superpowers

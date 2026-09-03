@@ -14,12 +14,21 @@ API="https://api.github.com/repos/$REPO/releases/latest"
 UPDATE=0
 [ "${1:-}" = "--update" ] && UPDATE=1
 
+# The installed binary's name -- foton.exe on Windows, foton everywhere else.
+# Every reference to it below goes through this variable.
+BIN=foton
+
 red() { printf '\033[31m%s\033[0m\n' "$1" >&2; }
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 die() { red "error: $1"; exit 1; }
 
+# /dev/tty can exist and still not be openable -- a detached session, a cron
+# job, a container without a terminal. `[ -r /dev/tty ]` says yes there and
+# the open then fails, so the test is an actual open, not a permission check.
 have_tty=0
-[ -r /dev/tty ] && have_tty=1
+if (exec 3< /dev/tty) 2>/dev/null; then
+  have_tty=1
+fi
 
 # ask <prompt> <default> -- echoes the answer
 ask() {
@@ -27,18 +36,28 @@ ask() {
     printf '%s' "$2"
     return
   fi
-  printf '%s [%s]: ' "$1" "$2" > /dev/tty
-  read -r reply < /dev/tty || reply=""
+  printf '%s [%s]: ' "$1" "$2" > /dev/tty 2>/dev/null || {
+    printf '%s' "$2"
+    return
+  }
+  # A read that fails mid-run must fall back rather than kill the install.
+  reply=""
+  read -r reply < /dev/tty 2>/dev/null || reply=""
   [ -n "$reply" ] && printf '%s' "$reply" || printf '%s' "$2"
 }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required and was not found"; }
 need curl
 
+# Windows has no native POSIX shell, so this script only ever runs there
+# inside Git Bash, MSYS2 or Cygwin, which report one of these uname strings.
+# WSL reports plain "Linux" and needs no special case: the Linux binary is
+# correct there too.
 case "$(uname -s)" in
   Darwin) OS=macos ;;
   Linux)  OS=linux ;;
-  *) die "unsupported system: $(uname -s). Foton publishes macOS and Linux builds." ;;
+  MINGW*|MSYS*|CYGWIN*) OS=windows ;;
+  *) die "unsupported system: $(uname -s). Foton publishes macOS, Linux and Windows builds." ;;
 esac
 case "$(uname -m)" in
   arm64|aarch64) ARCH=aarch64 ;;
@@ -46,18 +65,22 @@ case "$(uname -m)" in
   *) die "unsupported processor: $(uname -m)" ;;
 esac
 
-if [ "$OS" = linux ]; then
-  ASSET="foton-linux-x86_64-musl"
-  [ "$ARCH" = x86_64 ] || die "Linux builds are x86_64 only for now; yours is $ARCH"
-else
-  ASSET="foton-macos-$ARCH"
-fi
+case "$OS" in
+  linux)   ASSET="foton-linux-$ARCH-musl" ;;
+  windows)
+    [ "$ARCH" = x86_64 ] || die "Windows builds are x86_64 only for now; yours is $ARCH"
+    ASSET="foton-windows-x86_64.exe"
+    BIN=foton.exe
+    ;;
+  *) ASSET="foton-macos-$ARCH" ;;
+esac
 
 TMP_META=$(mktemp)
 TMP=""
+STAGED=""
 # One trap for the whole script: a second `trap ... EXIT` would replace this
 # one rather than run alongside it, and the first temporary file would leak.
-trap 'rm -f "$TMP_META"; [ -n "$TMP" ] && rm -rf "$TMP"' EXIT
+trap 'rm -f "$TMP_META"; [ -n "$TMP" ] && rm -rf "$TMP"; [ -n "$STAGED" ] && rm -f "$STAGED"' EXIT
 
 bold "Foton installer"
 printf 'Looking up the latest release...\n'
@@ -79,8 +102,8 @@ printf 'Latest release: %s\n' "$TAG"
 printf 'Asset for this machine: %s\n' "$ASSET"
 
 if [ "$UPDATE" -eq 1 ]; then
-  [ -x ./foton ] || die "--update must run inside an existing installation"
-  CURRENT=$(./foton --version 2>/dev/null | awk '{print $2}')
+  [ -x "./$BIN" ] || die "--update must run inside an existing installation"
+  CURRENT=$("./$BIN" --version 2>/dev/null | awk '{print $2}')
   if [ "v$CURRENT" = "$TAG" ]; then
     bold "Already on $TAG. Nothing to do."
     exit 0
@@ -88,37 +111,47 @@ if [ "$UPDATE" -eq 1 ]; then
   printf 'Updating from %s to %s\n' "$CURRENT" "$TAG"
   DIR=.
 else
-  DIR=$(ask "Where should Foton live?" "./foton")
-  if [ -e "$DIR/foton" ]; then
-    OVERWRITE=$(ask "$DIR already has Foton in it. Replace the binary?" "no")
+  DIR=.
+  if [ -e "$DIR/$BIN" ]; then
+    OVERWRITE=$(ask "This directory already has Foton. Replace the binary?" "no")
     case "$OVERWRITE" in y|Y|yes|Yes) ;; *) die "stopping, nothing was changed" ;; esac
   fi
-  mkdir -p "$DIR"
 fi
 
 TMP=$(mktemp -d)
 
 printf 'Downloading...\n'
-curl -fsSL "$BASE/$ASSET" -o "$TMP/foton" || die "could not download $ASSET from $TAG"
+curl -fsSL "$BASE/$ASSET" -o "$TMP/$BIN" || die "could not download $ASSET from $TAG"
 curl -fsSL "$BASE/SHA256SUMS" -o "$TMP/SHA256SUMS" || die "could not download SHA256SUMS"
 
 printf 'Verifying...\n'
 EXPECTED=$(grep " $ASSET\$" "$TMP/SHA256SUMS" | awk '{print $1}')
 [ -n "$EXPECTED" ] || die "$ASSET is not listed in SHA256SUMS"
 if command -v shasum >/dev/null 2>&1; then
-  ACTUAL=$(shasum -a 256 "$TMP/foton" | awk '{print $1}')
+  ACTUAL=$(shasum -a 256 "$TMP/$BIN" | awk '{print $1}')
 else
-  ACTUAL=$(sha256sum "$TMP/foton" | awk '{print $1}')
+  ACTUAL=$(sha256sum "$TMP/$BIN" | awk '{print $1}')
 fi
 if [ "$EXPECTED" != "$ACTUAL" ]; then
-  rm -f "$TMP/foton"
+  rm -f "$TMP/$BIN"
   die "checksum mismatch -- the download does not match the published release"
 fi
 
-[ -f "$DIR/foton" ] && mv "$DIR/foton" "$DIR/foton.previous"
-mv "$TMP/foton" "$DIR/foton"
-chmod +x "$DIR/foton"
-bold "Installed $TAG to $DIR/foton"
+# Stage in the destination directory before replacing anything.  A download
+# under /tmp can be on another filesystem, so moving it directly to $DIR can
+# fail half-way through a cross-filesystem copy.
+STAGED="$DIR/$BIN.new"
+mv "$TMP/$BIN" "$STAGED"
+chmod +x "$STAGED"
+if [ -f "$DIR/$BIN" ]; then
+  mv -f "$DIR/$BIN" "$DIR/$BIN.previous"
+fi
+if ! mv -f "$STAGED" "$DIR/$BIN"; then
+  [ -f "$DIR/$BIN.previous" ] && mv -f "$DIR/$BIN.previous" "$DIR/$BIN"
+  die "could not replace the existing binary; the previous binary was restored"
+fi
+STAGED=""
+bold "Installed $TAG to ./$BIN"
 
 if [ "$UPDATE" -eq 1 ]; then
   bold "Updated. Your config/ and saves/ were left alone."
@@ -126,10 +159,10 @@ if [ "$UPDATE" -eq 1 ]; then
 fi
 
 printf 'Writing the default configuration...\n'
-( cd "$DIR" && ./foton --generate-config ) || die "could not generate the configuration"
+( cd "$DIR" && "./$BIN" --generate-config ) || die "could not generate the configuration"
 
 if [ "$have_tty" -eq 0 ]; then
-  bold "No terminal here, so the defaults were kept. Edit $DIR/config/ to change them."
+  bold "No terminal here, so the defaults were kept. Edit ./config/ to change them."
   exit 0
 fi
 
@@ -140,6 +173,21 @@ ONLINE=$(ask "Require a Mojang account to join?" "yes")
 DIFFICULTY=$(ask "Difficulty (peaceful, easy, normal, hard)" "normal")
 
 case "$ONLINE" in n|N|no|No) ONLINE_VALUE=false ;; *) ONLINE_VALUE=true ;; esac
+
+# These values are written into TOML, not passed to a shell.  Keep the small
+# interactive surface strict so malformed input cannot leave a server that
+# immediately fails to start.  The forbidden punctuation would also be
+# significant to sed's replacement syntax below.
+newline='
+'
+case "$NAME" in
+  ''|*'"'*|*'\\'*|*'&'*|*'|'*|*"$newline"*) die 'server name cannot contain quotes, backslashes, &, |, or line breaks' ;;
+esac
+case "$PORT" in ''|*[!0-9]*) die 'port must be a number from 1 to 65000' ;; esac
+[ "${#PORT}" -le 5 ] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65000 ] || die 'port must be a number from 1 to 65000'
+case "$PLAYERS" in ''|*[!0-9]*) die 'maximum players must be a number from 1 to 2147483647' ;; esac
+[ "${#PLAYERS}" -le 10 ] && [ "$PLAYERS" -ge 1 ] && [ "$PLAYERS" -le 2147483647 ] || die 'maximum players must be a number from 1 to 2147483647'
+case "$DIFFICULTY" in peaceful|easy|normal|hard) ;; *) die 'difficulty must be peaceful, easy, normal, or hard' ;; esac
 
 set_key() {  # set_key <file> <key> <value>
   if grep -q "^$2 *=" "$1"; then
@@ -153,6 +201,15 @@ set_key "$DIR/config/config.toml" online_mode "$ONLINE_VALUE"
 set_key "$DIR/config/worlds.toml" difficulty "\"$DIFFICULTY\""
 
 bold "Done."
-printf 'Start it with:  cd %s && ./foton\n' "$DIR"
+printf 'Start it with:  ./%s\n' "$BIN"
 START=$(ask "Start it now?" "yes")
-case "$START" in y|Y|yes|Yes) cd "$DIR" && exec ./foton ;; esac
+# The server reads its console from standard input, which under `curl | sh`
+# is the pipe curl is writing into -- already at end of file. Handing it the
+# terminal is what makes the console usable; without this the server starts
+# and ignores every command typed at it.
+case "$START" in
+  y|Y|yes|Yes)
+    cd "$DIR" || exit 1
+    exec "./$BIN" < /dev/tty
+    ;;
+esac

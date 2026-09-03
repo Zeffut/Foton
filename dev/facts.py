@@ -146,7 +146,11 @@ def all():
     reports = bug_reports()
     out["reports_total"] = str(len(reports))
     out["reports_open"] = str(sum(1 for r in reports if r.get("status") == "open"))
-    out["reports_fixed"] = str(sum(1 for r in reports if r.get("status") == "fixed"))
+    # "Dealt with" covers both fixed and closed, so that filed = fixed + open
+    # holds on the page. A tile nobody can reconcile is worse than no tile.
+    out["reports_fixed"] = str(
+        sum(1 for r in reports if r.get("status") in ("fixed", "closed"))
+    )
     out["bug_categories"] = ", ".join(bug_categories())
     for name, hole in (("_scene-island.svg", "scene_island"),
                        ("_scene-crates.svg", "scene_crates")):

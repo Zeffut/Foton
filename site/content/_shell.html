@@ -21,6 +21,7 @@
 <footer class="bar foot">
   <span>Foton {{ version }} — Minecraft {{ mc_target }}, protocol {{ protocol }}</span>
   <span><a href="https://github.com/Zeffut/Foton">{{ footer_source }}</a> — AGPL-3.0-or-later</span>
+  <span class="footer-origin">{{ footer_fork }} <a href="https://github.com/Steel-Foundation/SteelMC">SteelMC</a></span>
 </footer>
 <script>
   (function () {
@@ -36,6 +37,83 @@
       });
     }, { rootMargin: "0px 0px -10% 0px" });
     targets.forEach(function (el) { seen.observe(el); });
+  })();
+</script>
+<script>
+  (function () {
+    var blocks = document.querySelectorAll(".cmd");
+    if (!blocks.length) { return; }
+
+    function detectedOS() {
+      var uad = window.navigator.userAgentData;
+      var platform = (uad && uad.platform) || window.navigator.platform || "";
+      return /Win/.test(platform) ? "win" : "unix";
+    }
+
+    function activate(block, os) {
+      block.querySelectorAll(".cmd-tab").forEach(function (tab) {
+        var active = tab.getAttribute("data-os") === os;
+        tab.classList.toggle("is-active", active);
+        tab.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      block.querySelectorAll(".cmd-line").forEach(function (line) {
+        line.classList.toggle("cmd-hidden", line.getAttribute("data-os") !== os);
+      });
+    }
+
+    function selectText(el) {
+      if (!window.getSelection || !document.createRange) { return; }
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      var selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    function wireCopy(button) {
+      var text = button.closest(".cmd-line").querySelector(".cmd-text");
+      var labelCopy = button.getAttribute("data-label-copy");
+      var labelCopied = button.getAttribute("data-label-copied");
+      var labelFailed = button.getAttribute("data-label-failed");
+      var timer = null;
+
+      function setLabel(label) {
+        button.textContent = label;
+        button.setAttribute("aria-label", label);
+      }
+
+      function flash(label) {
+        if (timer) { clearTimeout(timer); }
+        setLabel(label);
+        timer = setTimeout(function () {
+          timer = null;
+          setLabel(labelCopy);
+        }, 2000);
+      }
+
+      button.addEventListener("click", function () {
+        var value = text.textContent;
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          selectText(text);
+          flash(labelFailed);
+          return;
+        }
+        navigator.clipboard.writeText(value).then(function () {
+          flash(labelCopied);
+        }, function () {
+          selectText(text);
+          flash(labelFailed);
+        });
+      });
+    }
+
+    blocks.forEach(function (block) {
+      activate(block, detectedOS());
+      block.querySelectorAll(".cmd-tab").forEach(function (tab) {
+        tab.addEventListener("click", function () { activate(block, tab.getAttribute("data-os")); });
+      });
+      block.querySelectorAll(".cmd-copy").forEach(wireCopy);
+    });
   })();
 </script>
 <!-- Served by Vercel's edge at /_vercel/*, so nothing is bundled here and
