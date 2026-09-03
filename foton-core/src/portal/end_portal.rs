@@ -9,7 +9,9 @@ use glam::DVec3;
 use crate::{
     entity::Entity,
     level_data::RespawnData,
-    portal::{PortalTicketTarget, TeleportPostTransition, TeleportTransition},
+    portal::{
+        PortalTicketTarget, TeleportPostTransition, TeleportTransition, TeleportTransitionCause,
+    },
     world::World,
 };
 
@@ -52,6 +54,7 @@ pub(crate) fn calculate_entry_transition(
 
     Some(TeleportTransition {
         target_world: target_world.clone(),
+        cause: TeleportTransitionCause::EndPortal,
         position: end_entry_position(entity.as_player().is_some()),
         rotation: (Direction::West.to_yaw(), 0.0),
         velocity: DVec3::ZERO,
@@ -72,6 +75,7 @@ pub(crate) fn calculate_entity_return_transition(
     let spawn_pos = target_world.adjust_spawn_location(respawn_data.pos());
     TeleportTransition {
         target_world: target_world.clone(),
+        cause: TeleportTransitionCause::EndPortal,
         position: block_bottom_center(spawn_pos),
         rotation: (respawn_data.yaw, respawn_data.pitch),
         velocity: DVec3::ZERO,
@@ -97,6 +101,7 @@ pub(crate) fn calculate_player_return_transition(
 ) -> TeleportTransition {
     TeleportTransition {
         target_world: target_world.clone(),
+        cause: TeleportTransitionCause::EndPortal,
         position,
         rotation,
         velocity: DVec3::ZERO,

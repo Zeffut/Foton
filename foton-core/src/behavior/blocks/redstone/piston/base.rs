@@ -247,7 +247,19 @@ impl PistonBaseBlock {
             return false;
         }
 
-        let to_push = resolver.to_push().to_vec();
+        let mut to_push = resolver.to_push().to_vec();
+        let mut piston_event = crate::event::PistonEvent::new(
+            world.key.to_string(),
+            piston_pos,
+            to_push.clone(),
+            format!("{direction:?}"),
+            extending,
+        );
+        world.fire_event(&mut piston_event);
+        if piston_event.is_cancelled() {
+            return false;
+        }
+        to_push = piston_event.blocks().to_vec();
         let to_destroy = resolver.to_destroy().to_vec();
         let push_direction = resolver.push_direction();
         let mut delete_after_move = Vec::with_capacity(to_push.len());

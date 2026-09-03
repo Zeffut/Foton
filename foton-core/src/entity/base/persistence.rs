@@ -31,6 +31,8 @@ pub struct EntityBaseSaveData {
     pub tags: BTreeSet<String>,
     /// Vanilla custom data component payload.
     pub custom_data: NbtCompound,
+    /// Whether this entity is retained when chunks unload.
+    pub persistent: bool,
 }
 
 impl EntityBaseSaveData {
@@ -48,6 +50,7 @@ impl EntityBaseSaveData {
             glowing: false,
             tags: BTreeSet::new(),
             custom_data: NbtCompound::new(),
+            persistent: true,
         }
     }
 

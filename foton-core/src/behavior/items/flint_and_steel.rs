@@ -14,6 +14,7 @@ use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId};
 
 use crate::entity::Entity;
+use crate::event::Event as _;
 use crate::world::game_event::GameEventContext;
 
 /// Behavior for flint and foton items.
@@ -132,6 +133,12 @@ fn try_light_block(
     pitch: f32,
 ) -> bool {
     if !can_light(state) {
+        return false;
+    }
+    let mut ignite = crate::event::BlockIgniteEvent::new(context.world.key.to_string(), pos);
+    ignite.set_player(context.player.uuid());
+    context.world.fire_event(&mut ignite);
+    if ignite.is_cancelled() {
         return false;
     }
 

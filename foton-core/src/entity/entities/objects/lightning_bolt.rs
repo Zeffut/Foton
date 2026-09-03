@@ -41,6 +41,7 @@ use crate::behavior::waxables::get_normal_from_waxed_variant;
 use crate::behavior::weathering::{get_weather_state, previous_copper_stage};
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, RemovalReason};
+use crate::event::LightningStrikeEvent;
 use crate::world::{LevelReader as _, World};
 
 /// Ticks a fresh bolt has left.
@@ -272,6 +273,18 @@ impl Entity for LightningBoltEntity {
         };
 
         if life == START_LIFE {
+            let mut strike_event = LightningStrikeEvent::new(
+                self.uuid().to_string(),
+                world.key.to_string(),
+                "WEATHER",
+            );
+            if let Some(server) = world.server() {
+                server.events().fire(&mut strike_event);
+                if strike_event.is_cancelled() {
+                    self.set_removed(RemovalReason::Discarded);
+                    return;
+                }
+            }
             // Vanilla only scatters fire on Normal and Hard; on Easy and
             // Peaceful a strike is loud and harmless to the terrain.
             if matches!(world.difficulty(), Difficulty::Normal | Difficulty::Hard) {
@@ -777,5 +790,29 @@ mod tests {
         assert_eq!(stand.remaining_fire_ticks(), 0);
         assert!(!frame.is_removed());
         assert_eq!(frame.remaining_fire_ticks(), 0);
+    }
+}
+
+#[cfg(test)]
+mod spawn_primitive_tests {
+    use super::*;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use foton_utils::ChunkPos;
+    use glam::DVec3;
+    use std::sync::Arc;
+    #[test]
+    fn world_spawn_lightning_uses_canonical_entity_path() {
+        let world = fresh_test_world("spawn_lightning_primitive");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let bolt = world
+            .spawn_lightning(DVec3::new(0.5, 64.0, 0.5))
+            .expect("loaded chunk accepts lightning");
+        assert_eq!(bolt.position().y, 64.0);
+    }
+    #[test]
+    fn world_spawn_lightning_rejects_unloaded_chunk() {
+        let world = fresh_test_world("spawn_lightning_unloaded");
+        let result = world.spawn_lightning(DVec3::new(32.5, 64.0, 32.5));
+        assert!(result.is_err());
     }
 }

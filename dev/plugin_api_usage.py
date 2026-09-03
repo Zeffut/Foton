@@ -53,6 +53,11 @@ SURFACES = {
     "org/bukkit/craftbukkit/": "internal",
 }
 
+# A specific implementation package must win over its public-package parent.
+# `org/bukkit/craftbukkit` starts with `org/bukkit`, so insertion order would
+# otherwise classify the implementation internals as API.
+SURFACE_PREFIXES = sorted(SURFACES.items(), key=lambda entry: len(entry[0]), reverse=True)
+
 # Constant pool tags, from the JVM specification, table 4.4-B.
 TAG_UTF8 = 1
 TAG_CLASS = 7
@@ -103,6 +108,11 @@ def constant_pool(data):
     -- says how the references are used, and this tool only needs to know that
     they exist.
     """
+    return _read_pool(data)[0]
+
+
+def _read_pool(data):
+    """The pool, and the offset just past it, which is where the class begins."""
     if len(data) < 10 or data[:4] != b"\xca\xfe\xba\xbe":
         raise NotAClassFile("bad magic")
     count = struct.unpack_from(">H", data, 8)[0]
@@ -124,7 +134,7 @@ def constant_pool(data):
             pool[index] = (tag, data[offset:offset + width])
             offset += width
         index += 2 if tag in DOUBLE_WIDTH_TAGS else 1
-    return pool
+    return pool, offset
 
 
 def _utf8(pool, index):
@@ -156,7 +166,7 @@ def references(data):
         if not owner:
             continue
         surface = next(
-            (kind for prefix, kind in SURFACES.items() if owner.startswith(prefix)),
+            (kind for prefix, kind in SURFACE_PREFIXES if owner.startswith(prefix)),
             None,
         )
         if surface is None:
@@ -164,10 +174,176 @@ def references(data):
         entry = pool.get(name_and_type_index)
         if not entry or entry[0] != TAG_NAME_AND_TYPE:
             continue
-        name_index = struct.unpack(">HH", entry[1])[0]
+        name_index, descriptor_index = struct.unpack(">HH", entry[1])
         member = _utf8(pool, name_index)
-        if member:
-            yield surface, f"{owner}#{member}"
+        descriptor = _utf8(pool, descriptor_index)
+        if member and descriptor:
+            yield surface, f"{owner}#{member}{descriptor}"
+
+
+# What a class answers because a JDK supertype does. Those class files are not
+# in the API jar and never will be, but `player.toString()` and
+# `material.name()` both compile to references on the API type -- so without
+# this, every such call would be counted as a gap that does not exist and
+# phantom members would sit near the top of the ranking.
+FROM_OBJECT = frozenset({
+    "toString()Ljava/lang/String;",
+    "equals(Ljava/lang/Object;)Z",
+    "hashCode()I",
+    "getClass()Ljava/lang/Class;",
+    "clone()Ljava/lang/Object;",
+    "finalize()V",
+    "notify()V",
+    "notifyAll()V",
+    "wait()V",
+    "wait(J)V",
+    "wait(JI)V",
+})
+
+# Bukkit's serialization wrappers inherit these public methods from the JDK.
+# The wrapper classes are intentionally thin, so calls compiled against the
+# Bukkit owner still resolve through the Java superclass at runtime.
+INHERITED_API = {
+    "org/bukkit/util/io/BukkitObjectInputStream": {
+        "readObject()Ljava/lang/Object;",
+    },
+    "org/bukkit/util/io/BukkitObjectOutputStream": {
+        "writeObject(Ljava/lang/Object;)V",
+    },
+}
+
+FROM_JDK = {
+    "java/lang/Object": FROM_OBJECT,
+    "java/lang/Enum": FROM_OBJECT | {
+        "name()Ljava/lang/String;",
+        "ordinal()I",
+        "compareTo(Ljava/lang/Enum;)I",
+        "getDeclaringClass()Ljava/lang/Class;",
+        "describeConstable()Ljava/util/Optional;",
+    },
+    "java/lang/Record": FROM_OBJECT,
+    "java/lang/Throwable": FROM_OBJECT | {
+        "getMessage()Ljava/lang/String;",
+        "getLocalizedMessage()Ljava/lang/String;",
+        "getCause()Ljava/lang/Throwable;",
+        "printStackTrace()V",
+        "printStackTrace(Ljava/io/PrintStream;)V",
+        "printStackTrace(Ljava/io/PrintWriter;)V",
+        "getStackTrace()[Ljava/lang/StackTraceElement;",
+        "initCause(Ljava/lang/Throwable;)Ljava/lang/Throwable;",
+        "addSuppressed(Ljava/lang/Throwable;)V",
+        "getSuppressed()[Ljava/lang/Throwable;",
+        "fillInStackTrace()Ljava/lang/Throwable;",
+    },
+}
+
+
+def declares(data):
+    """What one class file *provides*: its name, its supertypes, its members.
+
+    The mirror of `references`. Together they answer the only question that
+    matters for compatibility -- whether the thing a plugin calls is there --
+    which counting classes written never could.
+    """
+    pool, offset = _read_pool(data)
+    offset += 2  # access_flags
+    this_index, super_index, interface_count = struct.unpack_from(">HHH", data, offset)
+    offset += 6
+    supertypes = []
+    if super_index:
+        supertypes.append(_class_name(pool, super_index))
+    for _ in range(interface_count):
+        supertypes.append(_class_name(pool, struct.unpack_from(">H", data, offset)[0]))
+        offset += 2
+
+    members = set()
+    for _ in range(2):  # fields, then methods: the same shape twice
+        count = struct.unpack_from(">H", data, offset)[0]
+        offset += 2
+        for _ in range(count):
+            name = _utf8(pool, struct.unpack_from(">H", data, offset + 2)[0])
+            descriptor = _utf8(pool, struct.unpack_from(">H", data, offset + 4)[0])
+            if name and descriptor:
+                members.add(f"{name}{descriptor}")
+            offset += 6
+            attributes = struct.unpack_from(">H", data, offset)[0]
+            offset += 2
+            for _ in range(attributes):
+                length = struct.unpack_from(">I", data, offset + 2)[0]
+                offset += 6 + length
+    return _class_name(pool, this_index), [s for s in supertypes if s], members
+
+
+def provided(api_jar):
+    """Every member the built API jar can answer, per class.
+
+    Returns {class: {member, ...}} with inherited members folded in, because a
+    plugin calls `JavaPlugin#getServer` and `Plugin#getServer` interchangeably
+    and both have to resolve.
+    """
+    own = {}
+    parents = {}
+    with zipfile.ZipFile(api_jar) as archive:
+        for entry in archive.namelist():
+            if not entry.endswith(".class"):
+                continue
+            try:
+                name, supertypes, members = declares(archive.read(entry))
+            except (NotAClassFile, struct.error, KeyError, IndexError):
+                continue
+            if name:
+                own[name] = members
+                parents[name] = supertypes
+
+    resolved = {}
+
+    def walk(name, seen):
+        if name in resolved:
+            return resolved[name]
+        if name in seen:
+            return set()
+        if name not in own:
+            # A supertype the jar does not hold. If the JDK provides it, what
+            # it provides is still reachable; anything else is genuinely absent.
+            return FROM_JDK.get(name, set())
+        seen.add(name)
+        members = set(own[name])
+        for parent in parents.get(name, ()):
+            members |= walk(parent, seen)
+        resolved[name] = members
+        return members
+
+    for name in own:
+        walk(name, set())
+    return resolved
+
+
+def gaps(corpus, api_jar):
+    """What each plugin still calls that the jar cannot answer.
+
+    Only the `api` surface. A plugin reaching into net.minecraft or CraftBukkit
+    is out of reach by construction and saying otherwise would be a lie about
+    the ceiling.
+    """
+    have = provided(api_jar)
+    per_plugin = {}
+    missing_audience = collections.Counter()
+    for jar in sorted(corpus.glob("*.jar")):
+        found, _ = scan(jar)
+        if found["internal"]:
+            continue
+        wanted = found["api"]
+        if not wanted:
+            continue
+        missing = set()
+        for member in wanted:
+            owner, signature = member.split("#", 1)
+            if signature not in FROM_OBJECT and signature not in INHERITED_API.get(owner, ()) and signature not in have.get(owner, ()):
+                missing.add(member)
+        per_plugin[jar.name] = (len(wanted), missing)
+        for member in missing:
+            missing_audience[member] += 1
+    return per_plugin, missing_audience
 
 
 def scan(jar):
@@ -260,13 +436,49 @@ def coverage_curve(reachable, ranked):
         )
     return rows
 
+def report_gap(corpus, api_jar, top):
+    """Prints how far the built jar gets, and what is next by audience."""
+    per_plugin, missing_audience = gaps(corpus, api_jar)
+    if not per_plugin:
+        raise SystemExit(f"no jars in {corpus}")
+
+    served = [name for name, (_, missing) in per_plugin.items() if not missing]
+    total = len(per_plugin)
+    print(f"corpus: {total} plugins referencing the servable surface")
+    print(f"fully served: {len(served)}")
+    for name in sorted(served):
+        print(f"    {name}")
+
+    close = sorted(
+        ((len(missing), name, wanted) for name, (wanted, missing) in per_plugin.items() if missing),
+        key=lambda row: row[0],
+    )
+    print()
+    print("nearest, by how many members are still missing:")
+    for count, name, wanted in close[:top]:
+        print(f"    {count:4d} missing of {wanted:4d}  {name}")
+
+    print()
+    print(f"next by audience -- plugins that would gain, top {top}:")
+    for member, plugins in missing_audience.most_common(top):
+        print(f"    {plugins:3d}  {member}")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", type=pathlib.Path, help="directory of plugin jars")
     parser.add_argument("--write", action="store_true", help="update the committed ledger")
     parser.add_argument("--top", type=int, default=30, help="how many members to print")
+    parser.add_argument(
+        "--gap",
+        type=pathlib.Path,
+        help="measure a built API jar against the corpus instead of ranking it",
+    )
     args = parser.parse_args()
+
+    if args.gap:
+        report_gap(args.corpus, args.gap, args.top)
+        return
 
     jars = sorted(args.corpus.glob("*.jar"))
     if not jars:

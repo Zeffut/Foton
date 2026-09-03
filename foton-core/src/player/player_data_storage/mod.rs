@@ -45,14 +45,22 @@ use foton_utils::{BlockPos, Identifier};
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
 const PLAYER_STORAGE_VERSION: u16 = 11;
-const GLOBAL_STORAGE_VERSION: u16 = 1;
-const GLOBAL_PLAYER_DATA_VERSION: i32 = 1;
+const GLOBAL_STORAGE_VERSION: u16 = 3;
+const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
 
 /// Server-wide player data.
 #[derive(Debug, Clone)]
 pub struct GlobalPlayerData {
     /// Last active domain for reconnects.
     pub last_active_domain: String,
+    /// Unix epoch milliseconds of the first observed login.
+    pub first_played: i64,
+    /// Unix epoch milliseconds of the most recent observed login/logout.
+    pub last_played: i64,
+    /// Statistics from the player's last active domain, cached for synchronous OfflinePlayer lookups.
+    pub statistics: Vec<PersistentStatistic>,
+    /// Whether this player is allowed by the server whitelist.
+    pub whitelisted: bool,
 }
 
 /// Manages player data persistence.
@@ -174,6 +182,23 @@ struct SlotFile {
 struct GlobalPlayerDataFile {
     data_version: i32,
     last_active_domain: String,
+    first_played: i64,
+    last_played: i64,
+    whitelisted: bool,
+}
+
+#[derive(SchemaWrite, SchemaRead)]
+struct LegacyGlobalPlayerDataFile {
+    data_version: i32,
+    last_active_domain: String,
+}
+
+#[derive(SchemaWrite, SchemaRead)]
+struct LegacyGlobalPlayerDataFileV2 {
+    data_version: i32,
+    last_active_domain: String,
+    first_played: i64,
+    last_played: i64,
 }
 
 impl PlayerDataStorage {
@@ -193,10 +218,18 @@ impl PlayerDataStorage {
     pub async fn save(&self, player: &Player) -> io::Result<()> {
         let domain = player.get_world().domain().to_owned();
         self.save_domain(&domain, player).await?;
+        let whitelisted = self
+            .load_global(player.gameprofile.id)
+            .await?
+            .is_some_and(|data| data.whitelisted);
         self.save_global(
             player.gameprofile.id,
             &GlobalPlayerData {
                 last_active_domain: domain,
+                first_played: 0,
+                last_played: unix_epoch_millis(),
+                statistics: Vec::new(),
+                whitelisted,
             },
         )
         .await
@@ -348,6 +381,10 @@ impl FilePlayerDataStorage {
         let file = decode_global_file(&bytes)?;
         Ok(Some(GlobalPlayerData {
             last_active_domain: file.last_active_domain,
+            first_played: file.first_played,
+            last_played: file.last_played,
+            statistics: Vec::new(),
+            whitelisted: file.whitelisted,
         }))
     }
 
@@ -397,10 +434,32 @@ impl FilePlayerDataStorage {
         Ok(true)
     }
 
-    async fn save_global(&self, uuid: Uuid, data: &GlobalPlayerData) -> io::Result<()> {
+    pub(crate) async fn save_global(&self, uuid: Uuid, data: &GlobalPlayerData) -> io::Result<()> {
+        let existing = self.load_global(uuid).await?.unwrap_or(GlobalPlayerData {
+            last_active_domain: String::new(),
+            first_played: 0,
+            last_played: 0,
+            statistics: Vec::new(),
+            whitelisted: false,
+        });
         let file = GlobalPlayerDataFile {
             data_version: GLOBAL_PLAYER_DATA_VERSION,
             last_active_domain: data.last_active_domain.clone(),
+            first_played: if data.first_played == 0 {
+                if existing.first_played == 0 {
+                    unix_epoch_millis()
+                } else {
+                    existing.first_played
+                }
+            } else {
+                data.first_played
+            },
+            last_played: if data.last_played == 0 {
+                existing.last_played
+            } else {
+                data.last_played
+            },
+            whitelisted: data.whitelisted,
         };
         let bytes = encode_global_file(&file)?;
         self.write_atomic(&self.global_players_dir(), uuid, bytes)
@@ -919,9 +978,52 @@ fn encode_global_file(file: &GlobalPlayerDataFile) -> io::Result<Vec<u8>> {
 }
 
 fn decode_global_file(bytes: &[u8]) -> io::Result<GlobalPlayerDataFile> {
-    let payload = decode_file(GLOBAL_MAGIC, GLOBAL_STORAGE_VERSION, bytes)?;
+    if bytes.len() < 6 || bytes[0..4] != GLOBAL_MAGIC {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid global player data header",
+        ));
+    }
+    let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+    let payload = zstd::decode_all(&bytes[6..])?;
+    if version == 1 {
+        let legacy: LegacyGlobalPlayerDataFile = wincode::deserialize(&payload)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        return Ok(GlobalPlayerDataFile {
+            data_version: GLOBAL_PLAYER_DATA_VERSION,
+            last_active_domain: legacy.last_active_domain,
+            first_played: 0,
+            last_played: 0,
+            whitelisted: false,
+        });
+    }
+    if version == 2 {
+        let legacy: LegacyGlobalPlayerDataFileV2 = wincode::deserialize(&payload)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        return Ok(GlobalPlayerDataFile {
+            data_version: GLOBAL_PLAYER_DATA_VERSION,
+            last_active_domain: legacy.last_active_domain,
+            first_played: legacy.first_played,
+            last_played: legacy.last_played,
+            whitelisted: false,
+        });
+    }
+    if version != GLOBAL_STORAGE_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported global player data storage version {version}"),
+        ));
+    }
     wincode::deserialize(&payload)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+}
+
+fn unix_epoch_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
+        .unwrap_or(0)
 }
 
 fn encode_file(
@@ -1504,6 +1606,9 @@ mod tests {
         let file = GlobalPlayerDataFile {
             data_version: GLOBAL_PLAYER_DATA_VERSION,
             last_active_domain: "minecraft".to_owned(),
+            first_played: 1_000,
+            last_played: 2_000,
+            whitelisted: true,
         };
 
         let encoded = encode_global_file(&file).expect("global file should encode");
@@ -1514,6 +1619,7 @@ mod tests {
             GLOBAL_STORAGE_VERSION
         );
         assert_eq!(decoded.last_active_domain, "minecraft");
+        assert!(decoded.whitelisted);
     }
 
     #[tokio::test]

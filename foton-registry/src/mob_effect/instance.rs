@@ -124,13 +124,15 @@ impl MobEffectInstance {
         )
     }
 
-    pub(crate) fn to_nbt_tag_ref(&self) -> NbtTag {
+    #[must_use]
+    pub fn to_nbt_tag_ref(&self) -> NbtTag {
         let mut compound = self.details().to_nbt_compound();
         compound.insert("id", self.effect.key.to_string());
         NbtTag::Compound(compound)
     }
 
-    pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+    #[must_use]
+    pub fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
         let compound = tag.compound()?;
         let id = Identifier::from_str(&compound.get("id")?.string()?.to_string()).ok()?;
         let effect = REGISTRY.mob_effects.by_key(&id)?;

@@ -1,0 +1,3 @@
+package org.bukkit.event.entity;
+import org.bukkit.entity.Entity; import org.bukkit.event.Cancellable; import org.bukkit.event.HandlerList;
+public final class EntityToggleGlideEvent extends EntityEvent implements Cancellable { private final boolean gliding; private boolean cancelled; private static final HandlerList HANDLERS=new HandlerList(); public EntityToggleGlideEvent(Entity e,boolean g){super(e);gliding=g;} public boolean isGliding(){return gliding;} public boolean isCancelled(){return cancelled;} public void setCancelled(boolean v){cancelled=v;} public HandlerList getHandlers(){return HANDLERS;} public static HandlerList getHandlerList(){return HANDLERS;} }

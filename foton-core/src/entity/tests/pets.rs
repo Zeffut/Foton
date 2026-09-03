@@ -53,6 +53,7 @@ fn run_ai(world: &Arc<World>, pet: &SharedEntity) {
         panic!("every pet is a mob");
     };
     mob.finalize_spawn(world, EntitySpawnReason::Natural, None);
+    assert_eq!(pet.base().spawn_reason(), Some(EntitySpawnReason::Natural));
 }
 
 #[test]

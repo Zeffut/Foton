@@ -421,12 +421,14 @@ impl Mob for ZombifiedPiglinEntity {
     /// the transition from calm to angry, not on every retarget, so a piglin
     /// switching victims does not grunt again.
     fn set_target(&self, target: Option<&SharedEntity>) -> bool {
-        if self.target().is_none() && target.is_some() {
+        let previous = self.target();
+        if previous.is_none() && target.is_some() {
             *self.play_first_anger_sound_in.lock() = rand::random_range(0..=FIRST_ANGER_SOUND_MAX);
             *self.ticks_until_next_alert.lock() =
                 rand::random_range(ALERT_INTERVAL_MIN..=ALERT_INTERVAL_MAX);
         }
-        self.mob_base().set_target(target, |_| true)
+        let changed = self.mob_base().set_target(target, |_| true);
+        changed && self.finish_target_change(previous, target)
     }
 
     /// Runs the anger clock, the speed bonus, the grunt and the shout.

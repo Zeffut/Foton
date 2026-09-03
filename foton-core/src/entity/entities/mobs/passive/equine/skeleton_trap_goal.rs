@@ -13,7 +13,6 @@ use foton_utils::random::{Random as _, legacy_random::LegacyRandom};
 use glam::DVec3;
 
 use crate::entity::ai::goal::{Goal, GoalControls};
-use crate::entity::entities::LightningBoltEntity;
 use crate::entity::entities::mobs::passive::equine::SkeletonHorseEntity;
 use crate::entity::{
     AbstractHorse, AgeableMob, ENTITIES, Entity, EntitySpawnReason, LivingEntity, PathfinderMob,
@@ -163,18 +162,14 @@ impl Goal for SkeletonTrapGoal {
         horse.set_age(0);
 
         let position = mob.position();
-        let bolt = Arc::new(LightningBoltEntity::new(
-            &vanilla_entities::LIGHTNING_BOLT,
-            next_entity_id(),
-            position,
-            Arc::downgrade(&world),
-        ));
+        let bolt = match world.spawn_lightning(position) {
+            Ok(bolt) => bolt,
+            Err(error) => {
+                log::debug!("skeleton trap could not call down its bolt: {error}");
+                return;
+            }
+        };
         bolt.set_visual_only(true);
-        let bolt_entity: SharedEntity = bolt;
-        if let Err(error) = world.try_add_entity(bolt_entity) {
-            log::debug!("skeleton trap could not call down its bolt: {error}");
-            return;
-        }
 
         let Some(rider) = Self::create_skeleton(&world, position) else {
             return;

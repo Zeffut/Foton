@@ -16,6 +16,8 @@ simulation_distance = 10
 max_chained_neighbor_updates = 1000000
 # Whether to use Mojang's authentication service
 online_mode = true
+# Whether only persisted whitelist entries may join
+whitelist_enabled = false
 # Optional authentication endpoint for online mode. Omit to use Mojang's session server.
 # auth_server = "https://sessionserver.mojang.com/session/minecraft/hasJoined"
 # Optional name-to-profile lookup endpoint used by commands such as /op.

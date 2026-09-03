@@ -172,10 +172,20 @@ impl PluginHost {
                     .map_err(|_| PluginHostError::NotARuntime(library.clone()))?;
 
             let class_path = CString::new(format!("-Djava.class.path={class_path}"))?;
-            let mut options = [JavaVMOption {
-                optionString: class_path.as_ptr().cast_mut(),
-                extraInfo: ptr::null_mut(),
-            }];
+            let plugins_directory = CString::new(format!(
+                "-Dfoton.plugins-directory={}",
+                config.plugin_directory.display()
+            ))?;
+            let mut options = [
+                JavaVMOption {
+                    optionString: class_path.as_ptr().cast_mut(),
+                    extraInfo: ptr::null_mut(),
+                },
+                JavaVMOption {
+                    optionString: plugins_directory.as_ptr().cast_mut(),
+                    extraInfo: ptr::null_mut(),
+                },
+            ];
             let mut args = JavaVMInitArgs {
                 version: JNI_VERSION_1_8,
                 nOptions: options.len().try_into().unwrap_or(0),
@@ -200,13 +210,28 @@ impl PluginHost {
             vm: Arc::new(vm),
             _runtime: runtime,
         };
-        host.register_natives()?;
+        if let Err(error) = host.register_natives() {
+            eprintln!("native registration failed: {error:?}");
+            return Err(error);
+        }
         // Foton's events reach plugins only once this is done, which is why it
         // happens before any plugin is loaded rather than after.
         if let Some(server) = server.upgrade() {
             forward::subscribe(&server, Arc::clone(&host.vm));
         }
         Ok(host)
+    }
+
+    /// Binds the already-running host to the fully initialized Foton server.
+    ///
+    /// This is deliberately separate from [`Self::start`]: Java plugins must
+    /// receive `onLoad` before core registries are initialized, while natives
+    /// that access gameplay state must only observe the completed server.
+    pub fn bind_server(&self, server: &Weak<Server>) {
+        natives::bind(server.clone());
+        if let Some(server) = server.upgrade() {
+            forward::subscribe(&server, Arc::clone(&self.vm));
+        }
     }
 
     /// Tells the runtime which Rust function answers each declared native.
@@ -217,7 +242,10 @@ impl PluginHost {
     fn register_natives(&self) -> Result<(), PluginHostError> {
         let mut env = self.vm.attach_current_thread()?;
         let class = env.find_class(NATIVE_CLASS)?;
-        env.register_native_methods(&class, &natives::bindings())?;
+        if let Err(error) = env.register_native_methods(&class, &natives::bindings()) {
+            let _ = env.exception_describe();
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -243,6 +271,28 @@ impl PluginHost {
         Ok(enabled)
     }
 
+    /// Loads plugin classes and invokes only their Bukkit `onLoad` phase.
+    pub fn load_all_on_load(&self, directory: &Path) -> Result<i32, PluginHostError> {
+        let mut env = self.vm.attach_current_thread()?;
+        let directory = env.new_string(directory.to_string_lossy().as_ref())?;
+        Ok(env
+            .call_static_method(
+                HOST_CLASS,
+                "loadAllOnLoad",
+                "(Ljava/lang/String;)I",
+                &[(&directory).into()],
+            )?
+            .i()?)
+    }
+
+    /// Invokes `onEnable` for all plugins loaded during the first phase.
+    pub fn enable_all(&self) -> Result<i32, PluginHostError> {
+        let mut env = self.vm.attach_current_thread()?;
+        Ok(env
+            .call_static_method(HOST_CLASS, "enableAll", "()I", &[])?
+            .i()?)
+    }
+
     /// Asks the Java side what it thinks the server is called.
     ///
     /// Exists for the bridge test and for a first-run diagnostic: it is the
@@ -259,6 +309,18 @@ impl PluginHost {
             .l()?;
         let value: JString<'_> = value.into();
         Ok(env.get_string(&value)?.into())
+    }
+
+    /// Asks the Java API whether this caller is on Foton's game-tick thread.
+    ///
+    /// This small diagnostic crosses the same native boundary plugins use, so
+    /// its integration test catches a Java declaration and JNI descriptor
+    /// drifting apart.
+    pub fn is_primary_thread_from_java(&self) -> Result<bool, PluginHostError> {
+        let mut env = self.vm.attach_current_thread()?;
+        Ok(env
+            .call_static_method(NATIVE_CLASS, "isPrimaryThread", "()Z", &[])?
+            .z()?)
     }
 
     /// Stops delivering Foton's events to plugins.

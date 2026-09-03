@@ -14,6 +14,7 @@ use crate::behavior::{
     ItemBehavior, UseItemContext, pickup_waterlogged_block,
 };
 use crate::entity::Entity;
+use crate::event::Event as _;
 use crate::fluid::FluidStateExt;
 use crate::player::Player;
 use crate::world::{RaytraceAction, World};
@@ -111,6 +112,16 @@ fn use_empty_bucket(context: &mut UseItemContext) -> InteractionResult {
     };
 
     let hit_state = context.world.get_block_state(hit_pos);
+    let mut event = crate::event::PlayerBucketFillEvent::new(
+        context.player.gameprofile.id,
+        context.world.key.to_string(),
+        hit_pos,
+        "BUCKET",
+    );
+    context.world.fire_event(&mut event);
+    if event.is_cancelled() {
+        return InteractionResult::Fail;
+    }
     let block_behavior = BLOCK_BEHAVIORS.get_behavior(hit_state.get_block());
 
     if let Some(result) =
@@ -238,6 +249,24 @@ pub(super) fn use_filled_bucket(
         block_pos: clicked_pos,
         direction,
     };
+
+    let bucket = if is_water_bucket {
+        "WATER_BUCKET"
+    } else if fluid_block == Some(&vanilla_blocks::LAVA) {
+        "LAVA_BUCKET"
+    } else {
+        "POWDER_SNOW_BUCKET"
+    };
+    let mut event = crate::event::PlayerBucketEmptyEvent::new(
+        context.player.gameprofile.id,
+        context.world.key.to_string(),
+        place_pos,
+        bucket,
+    );
+    context.world.fire_event(&mut event);
+    if event.is_cancelled() {
+        return InteractionResult::Fail;
+    }
 
     if !item.empty_contents(Some(context.player), context.world, place_pos, Some(hit)) {
         return InteractionResult::Fail;

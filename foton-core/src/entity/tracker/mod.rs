@@ -31,6 +31,8 @@ const BLOCKS_PER_CHUNK: f64 = 16.0;
 pub struct EntityTracker {
     /// Maps entity ID to its tracking data.
     entities: scc::HashMap<i32, TrackedEntity>,
+    /// Explicit per-player Bukkit visibility overrides.
+    hidden: SyncMutex<FxHashSet<(i32, i32)>>,
 }
 
 /// Packet sinks used by [`EntityTracker::send_changes`].
@@ -114,6 +116,7 @@ impl EntityTracker {
     pub fn new() -> Self {
         Self {
             entities: scc::HashMap::new(),
+            hidden: SyncMutex::new(FxHashSet::default()),
         }
     }
 
@@ -239,7 +242,9 @@ impl EntityTracker {
                 return true;
             };
 
-            let visible = !entity.is_removed()
+            let explicitly_hidden = self.hidden.lock().contains(&(entity_id, player_id));
+            let visible = !explicitly_hidden
+                && !entity.is_removed()
                 && entity_id != player_id
                 && view.contains(tracked.registered_chunk)
                 && is_chunk_sent(tracked.registered_chunk)
@@ -282,6 +287,22 @@ impl EntityTracker {
         for entity_id in dead_entities {
             self.remove_dead_entity(entity_id);
         }
+    }
+
+    /// Hides or reveals an entity for one player. The next tracker refresh
+    /// applies the corresponding spawn/despawn packet.
+    pub fn set_hidden_for_player(&self, entity_id: i32, player_id: i32, hidden: bool) {
+        let mut overrides = self.hidden.lock();
+        if hidden {
+            overrides.insert((entity_id, player_id));
+        } else {
+            overrides.remove(&(entity_id, player_id));
+        }
+    }
+
+    /// Returns whether a player has explicitly hidden an entity.
+    pub fn is_hidden_for_player(&self, entity_id: i32, player_id: i32) -> bool {
+        self.hidden.lock().contains(&(entity_id, player_id))
     }
 
     /// Sends tracker-owned movement changes for all tracked entities.

@@ -455,6 +455,31 @@ pub fn is_tamed(entity: &dyn Entity) -> bool {
         .is_some_and(TamableAnimal::is_tame)
 }
 
+/// Updates the tame flag when the entity supports vanilla taming.
+pub fn set_tamed(entity: &dyn Entity, tamed: bool) -> bool {
+    let Some(animal) = entity.as_tamable_animal() else {
+        return false;
+    };
+    animal.set_tame(tamed, true);
+    true
+}
+
+/// Returns the vanilla owner UUID, when the entity supports taming.
+pub fn owner_uuid(entity: &dyn Entity) -> Option<Uuid> {
+    entity
+        .as_tamable_animal()
+        .and_then(TamableAnimal::owner_uuid)
+}
+
+/// Updates the vanilla owner UUID, returning whether the entity is tamable.
+pub fn set_owner_uuid(entity: &dyn Entity, owner: Option<Uuid>) -> bool {
+    let Some(animal) = entity.as_tamable_animal() else {
+        return false;
+    };
+    animal.set_owner_uuid(owner);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

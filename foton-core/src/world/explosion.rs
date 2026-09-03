@@ -266,6 +266,41 @@ impl World {
     ) -> Vec<BlockPos> {
         let mut to_blow = self.calculate_exploded_positions(center, spec.radius);
         to_blow.retain(|pos| should_explode(*pos));
+        if spec.direct_entity_id.is_some() {
+            let entity = spec
+                .direct_entity_id
+                .and_then(|id| self.get_entity_by_id(id))
+                .map(|entity| entity.uuid());
+            let mut event = crate::event::EntityExplodeEvent::new(
+                entity,
+                self.key.to_string(),
+                to_blow.clone(),
+                1.0,
+                match spec.interaction {
+                    ExplosionBlockInteraction::Keep => "KEEP",
+                    ExplosionBlockInteraction::Destroy => "BLOCK",
+                    ExplosionBlockInteraction::DestroyWithDecay => "DESTROY",
+                },
+            );
+            self.fire_event(&mut event);
+            if event.is_cancelled() {
+                return Vec::new();
+            }
+            to_blow = event.blocks().to_vec();
+        } else {
+            let source = BlockPos::new(
+                center.x.floor() as i32,
+                center.y.floor() as i32,
+                center.z.floor() as i32,
+            );
+            let mut event =
+                crate::event::BlockExplodeEvent::new(self.key.to_string(), source, to_blow.clone());
+            self.fire_event(&mut event);
+            if event.is_cancelled() {
+                return Vec::new();
+            }
+            to_blow = event.blocks().to_vec();
+        }
         let hit_players = self.hurt_entities_from_explosion(&spec, center);
 
         if spec.interaction.destroys_blocks() {

@@ -17,7 +17,7 @@ use super::super::{
 };
 use crate::{
     entity::{Entity, EntityAnchor, LivingEntity as _, SharedEntity, change_entity_world},
-    portal::{TeleportPostTransition, TeleportTransition},
+    portal::{TeleportPostTransition, TeleportTransition, TeleportTransitionCause},
     world::World,
 };
 
@@ -194,6 +194,7 @@ fn teleport_to_entity(
     for target in targets {
         let transition = TeleportTransition {
             target_world: Arc::clone(&target_world),
+            cause: TeleportTransitionCause::Command,
             position,
             rotation: wrap_rotation(rotation),
             velocity: DVec3::ZERO,
@@ -239,6 +240,7 @@ fn teleport_to_position(
         let desired_rotation = resolved_rotation.unwrap_or(target_rotation);
         let transition = TeleportTransition {
             target_world: Arc::clone(source.world()),
+            cause: TeleportTransitionCause::Command,
             position: packet_position(position, target.position(), relatives),
             rotation: packet_rotation(desired_rotation, target_rotation, relatives),
             velocity: DVec3::ZERO,

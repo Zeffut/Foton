@@ -2,6 +2,10 @@ use super::{
     Arc, BlockPos, BlockStateExt, ChunkGenerator, ChunkPos, Direction, HeightmapType, SectionPos,
     World, is_offset_face_full, vanilla_dimension_types,
 };
+use crate::worldgen::feature::FeatureDecorationRunner;
+use foton_registry::{REGISTRY, RegistryExt};
+use foton_utils::Identifier;
+use foton_utils::random::worldgen_random::WorldgenRandom;
 
 const fn chunk_min_block_x(pos: ChunkPos) -> i32 {
     pos.0.x << 4
@@ -20,6 +24,40 @@ const fn chunk_max_block_z(pos: ChunkPos) -> i32 {
 }
 
 impl World {
+    /// Initializes the spawn and, for a newly-created overworld, places the
+    /// configured vanilla bonus chest exactly once.
+    pub async fn initialize_spawn_if_needed_with_bonus_chest(
+        self: &Arc<Self>,
+        bonus_chest: bool,
+    ) -> Result<(), String> {
+        let already_initialized = self.level_data.read().data().initialized;
+        self.initialize_spawn_if_needed().await?;
+        if !bonus_chest || already_initialized {
+            return Ok(());
+        }
+        if self.dimension_type.key != vanilla_dimension_types::OVERWORLD.key {
+            return Ok(());
+        }
+
+        let spawn = self.level_data.read().data().spawn_pos();
+        let key = Identifier::vanilla_static("bonus_chest");
+        let Some(feature) = REGISTRY.configured_features.by_key(&key) else {
+            return Err(format!("missing vanilla configured feature {key}"));
+        };
+        let mut random = WorldgenRandom::from_seed(self.seed() as u64);
+        let decoration_seed = random.set_decoration_seed(self.seed(), spawn.x(), spawn.z());
+        random.set_feature_seed(decoration_seed, 0, 0);
+        FeatureDecorationRunner::place_configured_feature_kind(
+            self,
+            &REGISTRY,
+            &mut random,
+            &feature.kind,
+            spawn,
+            self.seed(),
+        );
+        Ok(())
+    }
+
     /// Initializes this world's default spawn using vanilla's first-world spawn search.
     pub async fn initialize_spawn_if_needed(self: &Arc<Self>) -> Result<(), String> {
         if self.level_data.read().data().initialized {
@@ -77,6 +115,9 @@ impl World {
             data.set_spawn_pos(spawn_pos);
             data.spawn.angle = 0.0;
             data.initialized = true;
+        }
+        if self.keep_spawn_in_memory() {
+            self.chunk_map.place_spawn_ticket(spawn_pos);
         }
 
         log::info!("World {} spawn initialized at {spawn_pos:?}", self.key);

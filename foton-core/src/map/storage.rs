@@ -190,16 +190,13 @@ impl DomainMapData {
     }
 }
 
-fn domain_default_world<'a>(worlds: &'a WorldMap, domain: &str) -> io::Result<&'a World> {
-    worlds
-        .default_world(domain)
-        .map(AsRef::as_ref)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("domain '{domain}' has no loaded default world"),
-            )
-        })
+fn domain_default_world(worlds: &WorldMap, domain: &str) -> io::Result<Arc<World>> {
+    worlds.default_world(domain).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("domain '{domain}' has no loaded default world"),
+        )
+    })
 }
 
 fn map_io_error(domain: &str, error: io::Error) -> io::Error {

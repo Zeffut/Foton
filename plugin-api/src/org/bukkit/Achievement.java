@@ -1,0 +1,40 @@
+package org.bukkit;
+
+/** Legacy pre-advancement achievement identifiers retained for Bukkit compatibility. */
+@Deprecated
+public enum Achievement {
+    OPEN_INVENTORY,
+    MINE_WOOD,
+    BUILD_WORKBENCH,
+    BUILD_PICKAXE,
+    BUILD_BETTER_PICKAXE,
+    BUILD_FURNACE,
+    ACQUIRE_IRON,
+    BUILD_HOE,
+    MAKE_BREAD,
+    BAKE_CAKE,
+    BUILD_SWORD,
+    KILL_ENEMY,
+    KILL_COW,
+    BREED_COW,
+    FLY_PIG,
+    SNIPE_SKELETON,
+    GET_DIAMONDS,
+    NETHER_PORTAL,
+    GHAST_RETURN,
+    GET_BLAZE_ROD,
+    ENCHANTMENTS,
+    OVERKILL,
+    BOOKCASE,
+    EXPLORE_ALL_BIOMES,
+    SPAWN_WITHER,
+    KILL_WITHER,
+    FULL_BEACON,
+    BREW_POTION,
+    END_PORTAL,
+    THE_END,
+    COOK_FISH,
+    ON_A_RAIL,
+    OVERPOWERED,
+    DIAMONDS_TO_YOU
+}

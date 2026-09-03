@@ -138,6 +138,11 @@ impl HopperBlockEntity {
         self.name.custom_name()
     }
 
+    /// Sets the optional custom name stored by this hopper.
+    pub fn set_custom_name(&self, name: Option<TextComponent>) {
+        self.name.set_custom_name(name);
+    }
+
     /// Creates a hopper block entity.
     #[must_use]
     pub fn new(level: Weak<World>, pos: BlockPos, state: BlockStateId) -> Self {

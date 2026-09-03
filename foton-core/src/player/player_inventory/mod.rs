@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use foton_registry::item_stack::ItemStack;
 use text_components::TextComponent;
 
 use crate::{inventory::menu::Menu, player::Player, world::World};
@@ -55,6 +56,7 @@ impl MenuItemDisposition {
 
 pub(super) struct OpenMenuState {
     menu: Option<Menu>,
+    title: Option<String>,
     dispatch: Option<OpenMenuDispatch>,
     terminal_removal: Option<TerminalMenuRemoval>,
     active_open_operations: usize,
@@ -99,6 +101,9 @@ impl PlayerInventorySyncState {
 struct OpenMenuDispatch {
     container_id: u8,
     overrides_player_slots: bool,
+    top_slot_count: usize,
+    menu_type: Option<String>,
+    snapshot: Vec<ItemStack>,
     actions: Vec<DeferredMenuAction>,
 }
 
@@ -113,6 +118,7 @@ enum DeferredMenuAction {
     Close { send_packet: bool },
     Open(Box<PendingMenuOpen>),
     Install(Box<PreparedMenu>),
+    SetSlot { index: usize, stack: ItemStack },
 }
 
 type MenuFactory = Box<dyn for<'a> FnOnce(MenuOpenContext<'a>) -> Menu + Send + 'static>;
@@ -136,6 +142,7 @@ impl OpenMenuState {
     pub(super) const fn new() -> Self {
         Self {
             menu: None,
+            title: None,
             dispatch: None,
             terminal_removal: None,
             active_open_operations: 0,

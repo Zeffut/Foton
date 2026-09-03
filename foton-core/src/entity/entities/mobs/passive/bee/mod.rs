@@ -317,7 +317,7 @@ impl BeeEntity {
         self.get_flag(FLAG_HAS_STUNG)
     }
 
-    fn set_has_stung(&self, has_stung: bool) {
+    pub fn set_has_stung(&self, has_stung: bool) {
         self.set_flag(FLAG_HAS_STUNG, has_stung);
     }
 

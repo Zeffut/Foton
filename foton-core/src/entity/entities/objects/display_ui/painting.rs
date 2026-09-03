@@ -28,24 +28,24 @@ use crate::entity::block_attached::drop_would_be_wasted;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
-    ItemFrame, SharedEntity,
+    ItemFrame, RemovalReason, SharedEntity,
 };
+use crate::event::HangingBreakEvent;
 use crate::physics::{WorldCollisionProvider, has_block_collision};
 use crate::world::World;
 
 /// A painting hanging on a wall.
 ///
 /// Vanilla parity: `Painting`. The variant carries the size, so every change
-/// of variant or facing resizes the entity. Not implemented: the periodic
-/// survival check of `BlockAttachedEntity.tick` that pops a painting off a wall
-/// someone mined -- Foton has no block-attached tick pass, so a painting
-/// outlives its wall.
+/// of variant or facing resizes the entity. Support is checked periodically and
+/// a physics break event is emitted when the wall no longer supports it.
 #[entity_behavior(class = "Painting")]
 pub struct PaintingEntity {
     base: EntityBase,
     entity_type: EntityTypeRef,
     entity_data: SyncMutex<PaintingEntityData>,
     block_pos: SyncMutex<BlockPos>,
+    check_interval: SyncMutex<i32>,
 }
 
 // SAFETY: This key is owned by Foton and uniquely identifies `PaintingEntity`.
@@ -117,6 +117,7 @@ impl PaintingEntity {
             entity_type,
             entity_data: SyncMutex::new(entity_data),
             block_pos: SyncMutex::new(block_pos),
+            check_interval: SyncMutex::new(0),
         };
         entity
             .entity_data
@@ -140,6 +141,7 @@ impl PaintingEntity {
                 position.y.floor() as i32,
                 position.z.floor() as i32,
             )),
+            check_interval: SyncMutex::new(0),
         }
     }
 
@@ -267,7 +269,7 @@ impl PaintingEntity {
     }
 
     /// Vanilla parity: `HangingEntity.setDirection`.
-    fn set_direction(&self, direction: Direction) {
+    pub fn set_direction(&self, direction: Direction) {
         self.entity_data
             .lock()
             .hanging_entity
@@ -356,6 +358,27 @@ impl Entity for PaintingEntity {
 
     fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
         self.hurt_block_attached(world, source)
+    }
+
+    fn tick(&self) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        let mut interval = self.check_interval.lock();
+        if *interval < 100 {
+            *interval += 1;
+            return;
+        }
+        *interval = 0;
+        if self.is_removed() || self.survives() {
+            return;
+        }
+        let mut event = HangingBreakEvent::new(self.uuid(), "PHYSICS");
+        world.fire_event(&mut event);
+        if !event.is_cancelled() {
+            self.set_removed(RemovalReason::Discarded);
+            self.drop_item(&world, None);
+        }
     }
 
     /// Vanilla parity: `Painting.trackingPosition`, the lower corner of the

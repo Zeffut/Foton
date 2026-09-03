@@ -12,12 +12,15 @@ use foton_utils::locks::SyncMutex;
 use foton_utils::{BlockPos, Downcast as _, DowncastType, DowncastTypeKey, WorldAabb};
 use glam::DVec3;
 
+use crate::behavior::InteractionResult;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, RemovalReason,
     SharedEntity, next_entity_id,
 };
+use crate::player::Player;
 use crate::world::World;
+use foton_utils::types::InteractionHand;
 
 /// Vanilla leash knot attached to a fence block.
 #[entity_behavior(class = "LeashFenceKnotEntity")]
@@ -221,6 +224,28 @@ impl Entity for LeashFenceKnotEntity {
 
     fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
         self.hurt_block_attached(world, source)
+    }
+
+    /// Vanilla parity: right-clicking a knot releases every mob attached to it
+    /// and removes the knot. Each mob owns the lead drop, so creative players
+    /// and the entity-drops gamerule retain their normal handling.
+    fn interact(
+        &self,
+        _player: &Player,
+        _hand: InteractionHand,
+        _location: DVec3,
+    ) -> InteractionResult {
+        let leashables = self.leashables_leashed_to();
+        if leashables.is_empty() {
+            return InteractionResult::Pass;
+        }
+        for leashable in leashables {
+            if let Some(mob) = leashable.as_mob() {
+                mob.drop_leash();
+            }
+        }
+        self.set_removed(RemovalReason::Killed);
+        InteractionResult::SuccessServer
     }
 
     fn spawn_position(&self) -> DVec3 {

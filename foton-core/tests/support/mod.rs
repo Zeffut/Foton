@@ -260,6 +260,7 @@ fn create_test_world_in_dimension(
                 sea_level: 63,
                 default_gamemode: GameType::Survival,
                 difficulty,
+                bonus_chest: false,
             },
             Arc::clone(&resources.generation_pool),
         ))

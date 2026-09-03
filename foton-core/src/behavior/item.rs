@@ -141,9 +141,9 @@ fn apply_consume_effects(
 /// Vanilla parity: the five `ConsumeEffect.apply` implementations. They are
 /// dispatched by the keyed type rather than a match on the value, because that
 /// is the seam a plugin would add its own kind through.
-fn apply_one_consume_effect(
-    world: &Arc<World>,
-    user: &dyn LivingEntity,
+pub(crate) fn apply_one_consume_effect<T: LivingEntity + ?Sized>(
+    world: &World,
+    user: &T,
     effect: &ConsumeEffectData,
 ) {
     if let Some(apply) = effect.downcast_ref::<ApplyStatusEffectsConsumeEffect>() {
@@ -210,7 +210,7 @@ fn apply_one_consume_effect(
 /// Vanilla parity: `TeleportRandomlyConsumeEffect.apply`, the chorus fruit. It
 /// tries sixteen spots and stops at the first that takes, which is why eating
 /// one against a wall sometimes moves you nowhere at all.
-fn teleport_randomly(world: &Arc<World>, user: &dyn LivingEntity, diameter: f64) {
+fn teleport_randomly<T: LivingEntity + ?Sized>(world: &World, user: &T, diameter: f64) {
     let min_y = f64::from(world.get_min_y());
     let max_y = min_y + f64::from(world.get_height()) - 1.0;
 
@@ -935,7 +935,7 @@ mod consume_effect_tests {
             }
         }
 
-        teleport_randomly(&world, cow.as_ref(), 4.0);
+        teleport_randomly(world.as_ref(), cow.as_ref(), 4.0);
 
         assert!(
             cow.position() != DRINKER,

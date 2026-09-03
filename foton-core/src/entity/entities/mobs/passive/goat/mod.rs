@@ -202,6 +202,16 @@ impl GoatEntity {
         *self.entity_data.lock().has_right_horn.get()
     }
 
+    /// Sets whether the left horn is present.
+    pub fn set_left_horn(&self, present: bool) {
+        self.set_horn(HornSide::Left, present);
+    }
+
+    /// Sets whether the right horn is present.
+    pub fn set_right_horn(&self, present: bool) {
+        self.set_horn(HornSide::Right, present);
+    }
+
     fn set_horn(&self, side: HornSide, present: bool) {
         let mut entity_data = self.entity_data.lock();
         match side {

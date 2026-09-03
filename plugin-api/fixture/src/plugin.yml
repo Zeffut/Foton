@@ -1,3 +1,14 @@
 name: EventFixture
 version: 1.0
 main: example.EventFixture
+description: Exercises the parts of the plugin path that are easy to get wrong.
+authors: [Foton]
+commands:
+  fixture:
+    description: Answers, so the check can see that it ran.
+    usage: /<command> <word>
+    aliases: [fx, fixt]
+  guarded:
+    description: Runs only for whoever holds the permission.
+    permission: fixture.guarded
+    permission-message: You may not do that.

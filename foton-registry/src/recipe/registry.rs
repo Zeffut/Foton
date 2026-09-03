@@ -1,8 +1,11 @@
 //! Recipe registry for looking up recipes.
 
 use foton_utils::Identifier;
+use foton_utils::locks::SyncRwLock;
 use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 
+use super::RecipeResult;
 use super::cooking::{CookingKind, SmeltingRecipe};
 use super::crafting::{CraftingInput, CraftingRecipe, ShapedRecipe, ShapelessRecipe};
 use super::smithing::SmithingTransformRecipe;
@@ -43,6 +46,10 @@ pub struct RecipeRegistry {
     campfire_recipes: Vec<&'static SmeltingRecipe>,
     /// Whether registration is still allowed.
     allows_registering: bool,
+    /// Plugin recipes registered after vanilla initialization.
+    runtime_shaped: SyncRwLock<Vec<&'static ShapedRecipe>>,
+    runtime_shapeless: SyncRwLock<Vec<&'static ShapelessRecipe>>,
+    disabled: SyncRwLock<FxHashSet<Identifier>>,
 }
 
 impl Default for RecipeRegistry {
@@ -67,7 +74,50 @@ impl RecipeRegistry {
             smoking_recipes: Vec::new(),
             campfire_recipes: Vec::new(),
             allows_registering: true,
+            runtime_shaped: SyncRwLock::new(Vec::new()),
+            runtime_shapeless: SyncRwLock::new(Vec::new()),
+            disabled: SyncRwLock::new(FxHashSet::default()),
         }
+    }
+
+    /// Registers a plugin-owned shaped recipe after the vanilla registry froze.
+    pub fn register_runtime_shaped(&self, recipe: ShapedRecipe) -> bool {
+        let recipe = Box::leak(Box::new(recipe));
+        if self.contains_key(&recipe.id) {
+            return false;
+        }
+        let mut recipes = self.runtime_shaped.write();
+        if recipes.iter().any(|existing| existing.id == recipe.id) {
+            return false;
+        }
+        recipes.push(recipe);
+        true
+    }
+
+    /// Registers a plugin-owned shapeless recipe after the vanilla registry froze.
+    pub fn register_runtime_shapeless(&self, recipe: ShapelessRecipe) -> bool {
+        let recipe = Box::leak(Box::new(recipe));
+        if self.contains_key(&recipe.id) {
+            return false;
+        }
+        let mut recipes = self.runtime_shapeless.write();
+        if recipes.iter().any(|existing| existing.id == recipe.id) {
+            return false;
+        }
+        recipes.push(recipe);
+        true
+    }
+
+    /// Disables a recipe without mutating the frozen vanilla registry.
+    pub fn remove(&self, id: &Identifier) -> bool {
+        if !self.contains_key(id) {
+            return false;
+        }
+        self.disabled.write().insert(id.clone())
+    }
+
+    fn is_disabled(&self, id: &Identifier) -> bool {
+        self.disabled.read().contains(id)
     }
 
     /// Registers a shaped recipe.
@@ -231,7 +281,10 @@ impl RecipeRegistry {
     /// the scan is cheaper than a second index.
     #[must_use]
     pub fn contains_key(&self, key: &Identifier) -> bool {
-        if self.recipes_by_key.contains_key(key) {
+        if self.recipes_by_key.contains_key(key)
+            || self.runtime_shaped.read().iter().any(|r| &r.id == key)
+            || self.runtime_shapeless.read().iter().any(|r| &r.id == key)
+        {
             return true;
         }
         if self.find_cooking_recipe_by_id(key).is_some() {
@@ -254,6 +307,33 @@ impl RecipeRegistry {
             .copied()
     }
 
+    /// Returns the result of any registered recipe identified by `id`.
+    #[must_use]
+    pub fn result_by_id(&self, id: &Identifier) -> Option<&RecipeResult> {
+        if self.is_disabled(id) {
+            return None;
+        }
+        if let Some(recipe) = self.get_shaped(id) {
+            return Some(&recipe.result);
+        }
+        if let Some(recipe) = self.get_shapeless(id) {
+            return Some(&recipe.result);
+        }
+        if let Some(recipe) = self.find_cooking_recipe_by_id(id) {
+            return Some(&recipe.result);
+        }
+        self.stonecutting_recipes
+            .iter()
+            .find(|recipe| &recipe.id == id)
+            .map(|recipe| &recipe.result)
+            .or_else(|| {
+                self.smithing_recipes
+                    .iter()
+                    .find(|recipe| &recipe.id == id)
+                    .map(|recipe| &recipe.result)
+            })
+    }
+
     /// Returns the number of recipes in one cooking family.
     #[must_use]
     pub const fn cooking_count(&self, kind: CookingKind) -> usize {
@@ -266,14 +346,26 @@ impl RecipeRegistry {
     pub fn find_crafting_recipe(&self, input: &CraftingInput) -> Option<CraftingRecipe> {
         // Try shaped recipes first (they're more specific)
         for recipe in &self.shaped_recipes {
-            if recipe.matches(input) {
+            if !self.is_disabled(&recipe.id) && recipe.matches(input) {
+                return Some(CraftingRecipe::Shaped(recipe));
+            }
+        }
+
+        for recipe in self.runtime_shaped.read().iter().copied() {
+            if !self.is_disabled(&recipe.id) && recipe.matches(input) {
                 return Some(CraftingRecipe::Shaped(recipe));
             }
         }
 
         // Then try shapeless
         for recipe in &self.shapeless_recipes {
-            if recipe.matches(input) {
+            if !self.is_disabled(&recipe.id) && recipe.matches(input) {
+                return Some(CraftingRecipe::Shapeless(recipe));
+            }
+        }
+
+        for recipe in self.runtime_shapeless.read().iter().copied() {
+            if !self.is_disabled(&recipe.id) && recipe.matches(input) {
                 return Some(CraftingRecipe::Shapeless(recipe));
             }
         }
@@ -287,14 +379,24 @@ impl RecipeRegistry {
     pub fn find_crafting_recipe_2x2(&self, input: &CraftingInput) -> Option<CraftingRecipe> {
         // Try shaped recipes first (they're more specific)
         for recipe in &self.shaped_recipes {
-            if recipe.fits_in_2x2() && recipe.matches(input) {
+            if !self.is_disabled(&recipe.id) && recipe.fits_in_2x2() && recipe.matches(input) {
+                return Some(CraftingRecipe::Shaped(recipe));
+            }
+        }
+        for recipe in self.runtime_shaped.read().iter().copied() {
+            if !self.is_disabled(&recipe.id) && recipe.fits_in_2x2() && recipe.matches(input) {
                 return Some(CraftingRecipe::Shaped(recipe));
             }
         }
 
         // Then try shapeless
         for recipe in &self.shapeless_recipes {
-            if recipe.fits_in_2x2() && recipe.matches(input) {
+            if !self.is_disabled(&recipe.id) && recipe.fits_in_2x2() && recipe.matches(input) {
+                return Some(CraftingRecipe::Shapeless(recipe));
+            }
+        }
+        for recipe in self.runtime_shapeless.read().iter().copied() {
+            if !self.is_disabled(&recipe.id) && recipe.fits_in_2x2() && recipe.matches(input) {
                 return Some(CraftingRecipe::Shapeless(recipe));
             }
         }
@@ -305,13 +407,33 @@ impl RecipeRegistry {
     /// Gets a shaped recipe by its identifier.
     #[must_use]
     pub fn get_shaped(&self, id: &Identifier) -> Option<&'static ShapedRecipe> {
-        self.shaped_recipes.iter().find(|r| &r.id == id).copied()
+        self.shaped_recipes
+            .iter()
+            .find(|r| &r.id == id)
+            .copied()
+            .or_else(|| {
+                self.runtime_shaped
+                    .read()
+                    .iter()
+                    .find(|r| &r.id == id)
+                    .copied()
+            })
     }
 
     /// Gets a shapeless recipe by its identifier.
     #[must_use]
     pub fn get_shapeless(&self, id: &Identifier) -> Option<&'static ShapelessRecipe> {
-        self.shapeless_recipes.iter().find(|r| &r.id == id).copied()
+        self.shapeless_recipes
+            .iter()
+            .find(|r| &r.id == id)
+            .copied()
+            .or_else(|| {
+                self.runtime_shapeless
+                    .read()
+                    .iter()
+                    .find(|r| &r.id == id)
+                    .copied()
+            })
     }
 
     /// Finds the first furnace smelting result stack for `input`.
@@ -347,12 +469,46 @@ impl RecipeRegistry {
 
     /// Iterates over all shaped recipes.
     pub fn iter_shaped(&self) -> impl Iterator<Item = &'static ShapedRecipe> + '_ {
-        self.shaped_recipes.iter().copied()
+        let mut recipes = self.shaped_recipes.clone();
+        recipes.extend(self.runtime_shaped.read().iter().copied());
+        recipes.into_iter()
     }
 
     /// Iterates over all shapeless recipes.
     pub fn iter_shapeless(&self) -> impl Iterator<Item = &'static ShapelessRecipe> + '_ {
-        self.shapeless_recipes.iter().copied()
+        let mut recipes = self.shapeless_recipes.clone();
+        recipes.extend(self.runtime_shapeless.read().iter().copied());
+        recipes.into_iter()
+    }
+
+    /// Iterates all shaped and shapeless crafting recipes in registration order.
+    pub fn iter_crafting(&self) -> impl Iterator<Item = CraftingRecipe> + '_ {
+        let mut recipes: Vec<CraftingRecipe> = self
+            .recipes_by_id
+            .iter()
+            .filter(|recipe| !self.is_disabled(recipe.id()))
+            .map(|recipe| match **recipe {
+                CraftingRecipe::Shaped(value) => CraftingRecipe::Shaped(value),
+                CraftingRecipe::Shapeless(value) => CraftingRecipe::Shapeless(value),
+            })
+            .collect();
+        recipes.extend(
+            self.runtime_shaped
+                .read()
+                .iter()
+                .filter(|r| !self.is_disabled(&r.id))
+                .copied()
+                .map(CraftingRecipe::Shaped),
+        );
+        recipes.extend(
+            self.runtime_shapeless
+                .read()
+                .iter()
+                .filter(|r| !self.is_disabled(&r.id))
+                .copied()
+                .map(CraftingRecipe::Shapeless),
+        );
+        recipes.into_iter()
     }
 
     /// Iterates over all furnace smelting recipes.

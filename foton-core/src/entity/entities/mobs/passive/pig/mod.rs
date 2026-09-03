@@ -294,7 +294,8 @@ impl Entity for PigEntity {
         // saddle is left behind rather than carried over.
         let converted = convert_to(
             self,
-            ConversionParams::single(false, true),
+            ConversionParams::single(false, true)
+                .with_reason(crate::entity::conversion::ConversionReason::Lightning),
             |id, position, world| {
                 ZombifiedPiglinEntity::new(&vanilla_entities::ZOMBIFIED_PIGLIN, id, position, world)
             },

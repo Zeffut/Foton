@@ -840,6 +840,7 @@ dependencies = [
  "foton-bedrock",
  "foton-core",
  "foton-login",
+ "foton-plugin",
  "foton-utils",
  "futures",
  "log",
@@ -986,9 +987,14 @@ name = "foton-plugin"
 version = "0.15.2+mc26.2"
 dependencies = [
  "foton-core",
+ "foton-protocol",
+ "foton-registry",
  "foton-utils",
+ "glam",
  "jni 0.21.1",
  "libloading",
+ "rustc-hash 2.1.3",
+ "simdnbt",
  "tempfile",
  "text_components",
  "thiserror 2.0.19",

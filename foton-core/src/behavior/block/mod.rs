@@ -40,6 +40,7 @@ use crate::entity::projectile::Projectile;
 use crate::entity::{
     Entity, InsideBlockEffectCollector, MobEffectInstance, damage::DamageSource, entity_loot_ref,
 };
+use crate::event::{BlockExpEvent, Event};
 use crate::fluid::is_water_fluid;
 use crate::inventory::lock::{AttachedContainers, ContainerRef};
 use crate::physics::collide;
@@ -127,7 +128,11 @@ pub(crate) fn try_drop_experience(
         base_experience as f32,
     ) as i32;
     if experience > 0 {
-        world.pop_experience(pos, experience);
+        let mut event = BlockExpEvent::new(world.key.to_string(), pos, experience);
+        world.fire_event(&mut event);
+        if !event.is_cancelled() && event.exp_to_drop() > 0 {
+            world.pop_experience(pos, event.exp_to_drop());
+        }
     }
 }
 

@@ -22,6 +22,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, Projectile,
     ProjectileBase, ProjectileDeflection, RemovalReason, SharedEntity, next_entity_id,
 };
+use crate::event::Event as _;
 use crate::inventory::container::Container as _;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
@@ -113,6 +114,8 @@ struct ArrowState {
     ///
     /// Vanilla parity: `AbstractArrow.firedFromWeapon`.
     fired_from_weapon: Option<ItemStack>,
+    /// The ammunition item, including PotionContents for tipped arrows.
+    fired_from_ammo: Option<ItemStack>,
     /// Effects the arrow hands to whatever it hits.
     effects: Vec<MobEffectInstance>,
 }
@@ -125,6 +128,7 @@ impl ArrowState {
             shake_time: 0,
             pickup: ArrowPickup::Disallowed,
             fired_from_weapon: None,
+            fired_from_ammo: None,
             effects: Vec::new(),
         }
     }
@@ -177,7 +181,7 @@ impl ArrowEntity {
         entity_type: EntityTypeRef,
         power: f32,
         uncertainty: f32,
-    ) -> Arc<Self> {
+    ) -> Option<Arc<Self>> {
         let position = shooter.position().with_y(shooter.get_eye_y() - 0.1);
         let arrow = Arc::new(Self::new(
             entity_type,
@@ -190,10 +194,16 @@ impl ArrowEntity {
         let (yaw, pitch) = shooter.rotation();
         arrow.shoot_from_rotation(shooter, pitch, yaw, 0.0, power, uncertainty);
 
+        let mut event = crate::event::ProjectileLaunchEvent::new(shooter.uuid(), arrow.uuid());
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return None;
+        }
         if let Err(error) = world.try_add_entity(Arc::clone(&arrow) as Arc<dyn Entity>) {
             log::error!("failed to add arrow entity: {error}");
+            return None;
         }
-        arrow
+        Some(arrow)
     }
 
     /// Spawns an arrow aimed at `target` rather than along the shooter's look.
@@ -240,6 +250,11 @@ impl ArrowEntity {
     /// slowness, and only diverges for the tipped arrows Foton cannot fire yet.
     pub fn add_effect(&self, effect: MobEffectInstance) {
         self.state.lock().effects.push(effect);
+    }
+
+    /// Returns the effects this arrow applies on impact.
+    pub fn effects(&self) -> Vec<MobEffectInstance> {
+        self.state.lock().effects.clone()
     }
 
     /// Hands the arrow's effects to a living target.
@@ -345,6 +360,60 @@ impl ArrowEntity {
     #[must_use]
     pub fn weapon_item(&self) -> Option<ItemStack> {
         self.state.lock().fired_from_weapon.clone()
+    }
+
+    /// Returns the ammunition item used to create this arrow.
+    #[must_use]
+    pub fn ammo_item(&self) -> Option<ItemStack> {
+        self.state.lock().fired_from_ammo.clone()
+    }
+
+    /// Returns the potion contents carried by the ammunition, when tipped.
+    #[must_use]
+    pub fn ammo_potion_contents(
+        &self,
+    ) -> Option<foton_registry::data_components::components::PotionContents> {
+        self.ammo_item()?
+            .get(foton_registry::data_components::vanilla_components::POTION_CONTENTS)
+            .cloned()
+    }
+
+    /// Computes the vanilla potion display color, including custom effects.
+    #[must_use]
+    pub fn ammo_potion_color(&self) -> Option<i32> {
+        let contents = self.ammo_potion_contents()?;
+        if let Some(color) = contents.custom_color() {
+            return Some(color);
+        }
+        let mut red = 0i64;
+        let mut green = 0i64;
+        let mut blue = 0i64;
+        let mut weight = 0i64;
+        if let Some(potion) = contents.potion() {
+            for effect in potion.value().effects {
+                let color = effect.effect.color;
+                let effect_weight = i64::from(effect.amplifier + 1);
+                red += i64::from(color.red()) * effect_weight;
+                green += i64::from(color.green()) * effect_weight;
+                blue += i64::from(color.blue()) * effect_weight;
+                weight += effect_weight;
+            }
+        }
+        for effect in contents.custom_effects() {
+            let color = effect.effect().color;
+            let effect_weight = i64::from(effect.amplifier() + 1);
+            red += i64::from(color.red()) * effect_weight;
+            green += i64::from(color.green()) * effect_weight;
+            blue += i64::from(color.blue()) * effect_weight;
+            weight += effect_weight;
+        }
+        (weight > 0)
+            .then(|| ((red / weight) << 16 | (green / weight) << 8 | (blue / weight)) as i32)
+    }
+
+    /// Records the ammunition item used to create this arrow.
+    pub fn set_ammo_item(&self, ammo: ItemStack) {
+        self.state.lock().fired_from_ammo = Some(ammo);
     }
 
     /// Applies vanilla's owner-dependent pickup rule.

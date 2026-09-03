@@ -1,3 +1,4 @@
+use crate::player::player_data_storage::GlobalPlayerData;
 use std::sync::LazyLock;
 
 use super::{
@@ -37,6 +38,73 @@ pub(super) fn validate_player_permission_group_update<E>(
 }
 
 impl Server {
+    /// Returns whether a player may join under the configured whitelist.
+    #[must_use]
+    pub fn is_player_whitelisted(&self, uuid: Uuid) -> bool {
+        !self.config.whitelist_enabled
+            || self
+                .global_player_data(uuid)
+                .is_some_and(|data| data.whitelisted)
+    }
+
+    /// Queues a persistent whitelist update and publishes it to synchronous lookups.
+    pub fn queue_player_whitelist_update(self: &Arc<Self>, uuid: Uuid, whitelisted: bool) {
+        let server = Arc::clone(self);
+        self.jobs
+            .spawn(FnServerJob::new(move |_context: &mut ServerJobContext| {
+                let server = Arc::clone(&server);
+                tokio::spawn(async move {
+                    let mut data =
+                        server
+                            .global_player_data(uuid)
+                            .unwrap_or_else(|| GlobalPlayerData {
+                                last_active_domain: server.worlds.default_domain().to_owned(),
+                                first_played: 0,
+                                last_played: 0,
+                                statistics: Vec::new(),
+                                whitelisted: false,
+                            });
+                    data.whitelisted = whitelisted;
+                    if server
+                        .player_data_storage
+                        .save_global(uuid, &data)
+                        .await
+                        .is_ok()
+                    {
+                        server.publish_global_player_data(uuid, data);
+                    }
+                });
+            }));
+    }
+
+    /// Queues a persistent operator-group update for a plugin caller.
+    pub fn queue_player_operator_update(self: &Arc<Self>, uuid: Uuid, operator: bool) {
+        let server = Arc::clone(self);
+        self.jobs
+            .spawn(FnServerJob::new(move |_context: &mut ServerJobContext| {
+                let server = Arc::clone(&server);
+                tokio::spawn(async move {
+                    let _ = server
+                        .try_update_player_permissions(uuid, move |state| {
+                            let (mut groups, overrides, metadata) = state.into_parts();
+                            let already = groups.iter().any(|group| group == OP_GROUP);
+                            if operator && !already {
+                                groups.push(OP_GROUP.to_owned());
+                            } else if !operator && already {
+                                groups.retain(|group| group != OP_GROUP);
+                            }
+                            Ok::<_, std::convert::Infallible>((
+                                PermissionSubjectState::new_with_metadata(
+                                    groups, overrides, metadata,
+                                ),
+                                (),
+                            ))
+                        })
+                        .await;
+                });
+            }));
+    }
+
     pub(super) fn apply_cached_or_default_permission_state(&self, player: &Player) -> u64 {
         let state = self
             .player_permission_states
@@ -80,7 +148,7 @@ impl Server {
 
     /// Returns whether the latest published subject state assigns the operator group.
     #[must_use]
-    pub(crate) fn is_operator(&self, uuid: Uuid) -> bool {
+    pub fn is_operator(&self, uuid: Uuid) -> bool {
         self.player_permission_states
             .read()
             .get(uuid)

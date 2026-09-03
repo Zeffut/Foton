@@ -31,7 +31,7 @@ use crate::behavior::InteractionResult;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
-    ItemFrame, SharedEntity,
+    ItemFrame, RemovalReason, SharedEntity,
 };
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::player::Player;
@@ -259,6 +259,21 @@ impl Entity for GlowItemFrameEntity {
         self.hurt_item_frame(world, source)
     }
 
+    fn tick(&self) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        if self.tick_count() % 100 != 0 || self.is_removed() || self.survives_frame(&world) {
+            return;
+        }
+        let mut event = crate::event::HangingBreakEvent::new(self.uuid(), "PHYSICS");
+        world.fire_event(&mut event);
+        if !event.is_cancelled() {
+            self.set_removed(RemovalReason::Discarded);
+            self.drop_item(&world, None);
+        }
+    }
+
     fn spawn_position(&self) -> DVec3 {
         let block_pos = *self.block_pos.lock();
         DVec3::new(
@@ -392,6 +407,14 @@ impl BlockAttached for GlowItemFrameEntity {
 }
 
 impl FrameLike for GlowItemFrameEntity {
+    fn frame_direction(&self) -> Direction {
+        self.direction()
+    }
+
+    fn frame_box(&self) -> WorldAabb {
+        self.bounding_box()
+    }
+
     fn frame_state(&self) -> &SyncMutex<FrameState> {
         &self.state
     }

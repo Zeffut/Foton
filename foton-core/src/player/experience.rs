@@ -112,6 +112,14 @@ impl Experience {
         self.progress
     }
 
+    /// Sets the progress bar without changing the level or total points.
+    pub fn set_progress(&mut self, progress: f32) {
+        if self.progress.to_bits() != progress.to_bits() {
+            self.progress = progress;
+            self.dirty = true;
+        }
+    }
+
     /// Adds levels like vanilla `Player.giveExperienceLevels`.
     pub const fn add_levels(&mut self, additional_levels: i32) {
         if additional_levels == 0 {
@@ -330,4 +338,20 @@ pub(super) fn first_point_level_up_sound(
         return None;
     }
     i32::try_from(first_multiple).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Experience;
+
+    #[test]
+    fn setting_progress_preserves_level_and_total_points() {
+        let mut experience = Experience::from_parts(12, 0.25, 999);
+        experience.dirty = false;
+        experience.set_progress(0.75);
+        assert_eq!(experience.level(), 12);
+        assert_eq!(experience.total_points(), 999);
+        assert_eq!(experience.progress().to_bits(), 0.75_f32.to_bits());
+        assert!(experience.dirty);
+    }
 }

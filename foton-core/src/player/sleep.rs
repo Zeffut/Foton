@@ -244,6 +244,18 @@ impl Player {
         self.sleep_state.lock().sleep_counter()
     }
 
+    /// Returns whether this player is excluded from night-skip sleeping counts.
+    #[must_use]
+    pub fn is_sleeping_ignored(&self) -> bool {
+        self.sleep_state.lock().sleeping_ignored()
+    }
+
+    /// Sets whether this player is excluded from night-skip sleeping counts.
+    pub fn set_sleeping_ignored(&self, value: bool) {
+        self.sleep_state.lock().set_sleeping_ignored(value);
+        self.get_world().update_sleeping_player_list();
+    }
+
     /// Returns whether this player has slept long enough for vanilla night skip.
     #[must_use]
     pub fn is_sleeping_long_enough(&self) -> bool {

@@ -65,6 +65,11 @@ unsafe impl DowncastType for PrimedTntEntity {
 }
 
 impl PrimedTntEntity {
+    /// Returns the entity id that directly primed this TNT, when known.
+    pub fn source_entity_id(&self) -> Option<i32> {
+        self.state.lock().owner_id
+    }
+
     /// Creates primed TNT with the default fuse.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {

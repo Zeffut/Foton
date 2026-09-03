@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use foton_registry::entity_type::EntityTypeRef;
+use foton_registry::entity_type::{EntityTypeRef, MobCategory};
 use foton_registry::{
     init_vanilla_registry, sound_events, vanilla_entities, vanilla_fluids, vanilla_game_rules,
     vanilla_items,
@@ -31,6 +31,34 @@ fn advance_scheduling_until(world: &Arc<World>, mut ready: impl FnMut() -> bool)
         thread::sleep(Duration::from_millis(1));
     }
     panic!("chunk scheduling condition did not become ready");
+}
+
+#[test]
+fn spawn_limit_override_is_clamped_and_clearable() {
+    let world = fresh_test_world("spawn_limit_override");
+    assert_eq!(world.spawn_limit(MobCategory::Monster), None);
+    world.set_spawn_limit(MobCategory::Monster, Some(-4));
+    assert_eq!(world.spawn_limit(MobCategory::Monster), Some(0));
+    world.set_spawn_limit(MobCategory::Monster, None);
+    assert_eq!(world.spawn_limit(MobCategory::Monster), None);
+}
+
+#[test]
+fn spawn_tick_override_is_clamped_per_category() {
+    let world = fresh_test_world("spawn_tick_override");
+    assert_eq!(world.spawn_ticks(MobCategory::Monster), None);
+    world.set_spawn_ticks(MobCategory::Monster, -2);
+    assert_eq!(world.spawn_ticks(MobCategory::Monster), Some(0));
+}
+
+#[test]
+fn keep_spawn_in_memory_toggle_is_observable() {
+    let world = fresh_test_world("keep_spawn_toggle");
+    assert!(world.keep_spawn_in_memory());
+    world.set_keep_spawn_in_memory(false);
+    assert!(!world.keep_spawn_in_memory());
+    world.set_keep_spawn_in_memory(true);
+    assert!(world.keep_spawn_in_memory());
 }
 
 #[test]
@@ -614,4 +642,13 @@ fn breaking_a_chest_scatters_what_it_held() {
         dropped.iter().any(|key| key == "minecraft:diamond"),
         "breaking a chest must scatter its contents, dropped: {dropped:?}"
     );
+}
+#[test]
+fn keep_spawn_in_memory_toggle_updates_world_state() {
+    let world = fresh_test_world("keep_spawn_in_memory_toggle");
+    assert!(world.keep_spawn_in_memory());
+    world.set_keep_spawn_in_memory(false);
+    assert!(!world.keep_spawn_in_memory());
+    world.set_keep_spawn_in_memory(true);
+    assert!(world.keep_spawn_in_memory());
 }

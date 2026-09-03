@@ -26,28 +26,40 @@ if ! command -v javac >/dev/null 2>&1; then
   exit 1
 fi
 
-rm -rf "$OUT/classes"
-mkdir -p "$OUT/classes"
+rm -rf "$OUT/classes" "$OUT/generated"
+mkdir -p "$OUT/classes" "$OUT/generated"
+
+# Material is sixteen hundred constants over every block and item. It is
+# generated from the same registry files the server itself is built from, so
+# the enum cannot name a block Foton does not have -- and so there is no
+# hand-written second copy to drift.
+python3 "$REPO/dev/gen-material.py" "$OUT/generated"
+python3 "$REPO/dev/gen-entity-type.py" "$OUT/generated"
+python3 "$REPO/dev/gen-enchantment.py" "$OUT/generated"
+python3 "$REPO/dev/gen-potion-type.py" "$OUT/generated"
 
 # javac reads a file of sources with @, which avoids both mapfile (bash 4+,
 # and macOS ships bash 3.2) and an argument list long enough to overflow exec.
 SOURCES="$OUT/sources.txt"
-find "$SRC" -name '*.java' | sort > "$SOURCES"
+find "$SRC" "$OUT/generated" -name '*.java' | sort > "$SOURCES"
 echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
+LIBS=""
+if [ -d "$REPO/plugin-api/lib" ]; then
+  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
+fi
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.
-javac -Xlint:all -d "$OUT/classes" "@$SOURCES"
+javac -Xlint:all -cp "${LIBS#:}" -d "$OUT/classes" "@$SOURCES"
+
+# EssentialsX (and older Bukkit consumers) were compiled against the pre-generic BanEntry ABI, whose erased getTarget return type is String.
+# Add a default binary bridge while retaining the generic Object method.
+python3 "$REPO/dev/add-banentry-bridge.py" "$OUT/classes/org/bukkit/BanEntry.class"
 
 jar --create --file "$JAR" -C "$OUT/classes" .
 echo "wrote ${JAR#"$REPO"/} ($(du -h "$JAR" | cut -f1), $(find "$OUT/classes" -name '*.class' | wc -l) classes)"
 
 if [ "${1:-}" != "--check" ]; then
   exit 0
-fi
-
-LIBS=""
-if [ -d "$REPO/plugin-api/lib" ]; then
-  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
 fi
 
 # The fixture plugin exercises the parts of the event path that are easy to get
@@ -58,48 +70,19 @@ if [ -d "$FIXTURE_SRC" ]; then
   FIX="$OUT/fixture"
   rm -rf "$FIX"
   mkdir -p "$FIX/classes"
-  javac -nowarn -d "$FIX/classes" -cp "$JAR" "$FIXTURE_SRC"/example/*.java
+  javac -nowarn -d "$FIX/classes" -cp "$JAR$LIBS" "$FIXTURE_SRC"/example/*.java
   cp "$FIXTURE_SRC/plugin.yml" "$FIX/classes/"
+  cp "$FIXTURE_SRC/config.yml" "$FIX/classes/"
   jar --create --file "$FIX/EventFixture.jar" -C "$FIX/classes" .
 
   mkdir -p "$FIX/plugins"
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
 
-  cat > "$FIX/Events.java" <<'JAVA'
-/** Loads the fixture and checks what its handlers actually decide. */
-public final class Events {
-    public static void main(String[] args) {
-        if (foton.PluginHost.loadAll(args[0]) != 1) {
-            throw new AssertionError("the fixture plugin should have enabled");
-        }
-
-        String id = "00000000-0000-0000-0000-000000000001";
-
-        String join = foton.EventBridge.fireJoin(id, "original");
-        if (!"rewritten by the fixture".equals(join)) {
-            throw new AssertionError("a handler's rewrite did not travel back: " + join);
-        }
-
-        if (foton.EventBridge.fireChat(id, "hush now") != null) {
-            throw new AssertionError("a cancelled chat should come back as nothing");
-        }
-        if (!"hello".equals(foton.EventBridge.fireChat(id, "hello"))) {
-            throw new AssertionError("an uncancelled chat should come back unchanged");
-        }
-
-        // The LOWEST handler cancels; the HIGH one would undo it but did not
-        // ask to see cancelled events, so it must never run.
-        if (foton.EventBridge.fireBlockBreak(id, 1, 2, 3, "minecraft:overworld")) {
-            throw new AssertionError("a cancelled break was reported as allowed");
-        }
-
-        foton.PluginHost.disableAll();
-        System.out.println("event path checked: rewrite, veto and priority all hold");
-    }
-}
-JAVA
-  javac -nowarn -d "$FIX" -cp "$JAR$LIBS" "$FIX/Events.java"
-  java -cp "$FIX:$JAR$LIBS" Events "$FIX/plugins"
+  # The checks read the fixture's counters, so they compile against its
+  # classes. The jar in plugins/ is still what gets loaded; this is only so
+  # the names resolve.
+  javac -nowarn -d "$FIX" -cp "$JAR$LIBS:$FIX/classes" "$REPO"/plugin-api/check/*.java
+  java -cp "$FIX:$JAR$LIBS:$FIX/classes" Checks "$FIX/plugins"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

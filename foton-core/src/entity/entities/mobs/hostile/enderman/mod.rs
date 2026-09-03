@@ -604,7 +604,15 @@ impl Mob for EndermanEntity {
     /// transient: it is added when a target is taken and removed when it is
     /// dropped, so a calm enderman moves at its ordinary pace.
     fn set_target(&self, target: Option<&SharedEntity>) -> bool {
+        let previous = self.target();
         let changed = self.mob_base().set_target(target, |_| true);
+        if !changed {
+            return false;
+        }
+        let accepted = self.finish_target_change(previous, target);
+        if !accepted {
+            return false;
+        }
 
         if target.is_none() {
             *self.target_change_time.lock() = 0;
@@ -631,7 +639,7 @@ impl Mob for EndermanEntity {
             );
         }
 
-        changed
+        true
     }
 
     /// Runs the anger clock, and flees the sun.

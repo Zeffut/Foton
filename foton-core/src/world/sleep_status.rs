@@ -32,7 +32,7 @@ impl SleepStatus {
     }
 
     pub(super) fn add_player(&mut self, player: &Player) {
-        if player.is_spectator() {
+        if player.is_spectator() || player.is_sleeping_ignored() {
             return;
         }
         self.active_players += 1;

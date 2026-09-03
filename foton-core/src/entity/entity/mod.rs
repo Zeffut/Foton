@@ -191,6 +191,9 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         nbt.insert("Air", NbtTag::Short(self.air_supply() as i16));
         nbt.insert("OnGround", nbt_bool(self.on_ground()));
         nbt.insert("Invulnerable", nbt_bool(self.is_invulnerable()));
+        if !self.is_persistent() {
+            nbt.insert("PersistenceRequired", nbt_bool(false));
+        }
         nbt.insert("PortalCooldown", self.portal_cooldown());
         nbt.insert(
             "UUID",
@@ -1721,6 +1724,51 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         try_as_dyn::<Self, dyn AgeableMob>(self)
     }
 
+    /// Sets the vanilla baby/adult state when this entity is ageable.
+    fn set_ageable_baby(&self, baby: bool) {
+        let Some(ageable) = self.as_ageable_mob() else {
+            return;
+        };
+        ageable.set_age(if baby { -24_000 } else { 0 });
+    }
+
+    /// Returns the vanilla age-lock flag when this entity is ageable.
+    fn is_ageable_age_locked(&self) -> bool {
+        self.as_ageable_mob()
+            .is_some_and(|ageable| ageable.is_age_locked())
+    }
+
+    /// Sets the vanilla age-lock flag when this entity is ageable.
+    fn set_ageable_age_locked(&self, locked: bool) {
+        if let Some(ageable) = self.as_ageable_mob() {
+            ageable.set_age_locked(locked);
+        }
+    }
+
+    /// Returns the vanilla age in ticks, or zero for non-ageable entities.
+    fn entity_age(&self) -> i32 {
+        self.as_ageable_mob().map_or(0, AgeableMob::get_age)
+    }
+
+    /// Sets the vanilla age in ticks when this entity is ageable.
+    fn set_entity_age(&self, age: i32) {
+        if let Some(ageable) = self.as_ageable_mob() {
+            ageable.set_age(age);
+        }
+    }
+
+    /// Returns whether vanilla permits this mob to pick up dropped items.
+    fn entity_can_pick_up_loot(&self) -> bool {
+        self.as_mob().is_none_or(Mob::can_pick_up_loot)
+    }
+
+    /// Sets whether vanilla permits this mob to pick up dropped items.
+    fn entity_set_can_pick_up_loot(&self, can_pick_up: bool) {
+        if let Some(mob) = self.as_mob() {
+            mob.set_can_pick_up_loot(can_pick_up);
+        }
+    }
+
     /// Registers, moves or unregisters whatever game-event listeners this
     /// entity carries.
     ///
@@ -1821,6 +1869,19 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// what puts a chest in command slot 499.
     fn as_abstract_chested_horse(&self) -> Option<&dyn AbstractChestedHorse> {
         try_as_dyn::<Self, dyn AbstractChestedHorse>(self)
+    }
+
+    /// Returns whether this entity carries a chest, when supported.
+    fn has_carried_chest(&self) -> Option<bool> {
+        self.as_abstract_chested_horse()
+            .map(AbstractChestedHorse::has_chest)
+    }
+
+    /// Sets the carried-chest state, when supported.
+    fn set_carried_chest(&self, carrying: bool) {
+        if let Some(chested) = self.as_abstract_chested_horse() {
+            chested.set_chest(carrying);
+        }
     }
 
     /// Reads the stack in one of vanilla's numeric command slots.
@@ -3239,6 +3300,14 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     }
 
     /// Returns whether sounds from this entity are suppressed.
+    fn is_persistent(&self) -> bool {
+        self.base().is_persistent()
+    }
+
+    fn set_persistent(&self, persistent: bool) {
+        self.base().set_persistent(persistent);
+    }
+
     fn is_silent(&self) -> bool {
         self.base().silent()
     }

@@ -4,6 +4,7 @@ use super::{
     wrap_degrees,
 };
 use crate::advancement::triggers;
+use crate::event::PlayerInteractEvent;
 
 /// Handles using an item on a block.
 ///
@@ -197,6 +198,12 @@ impl Player {
             inventory.get_item_in_hand(packet.hand).is_empty()
         };
         if item_stack_is_empty {
+            return;
+        }
+
+        let mut interaction = PlayerInteractEvent::new(self.gameprofile.id);
+        self.fire_event(&mut interaction);
+        if interaction.cancelled() {
             return;
         }
 

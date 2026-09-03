@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use foton_core::entity::next_entity_id;
+use foton_core::event::PlayerLoginEvent;
 use foton_core::player::PlayerConnection;
 use foton_core::player::connection::JavaConnection;
 use foton_core::player::{ClientInformation, Player};
@@ -99,6 +100,16 @@ impl JavaTcpClient {
             Ok(gameprofile) => gameprofile,
             Err(error) => return self.reject_unexpected_packet(error).await,
         };
+        let mut pre_login = foton_core::event::AsyncPlayerPreLoginEvent::new(
+            gameprofile.id,
+            gameprofile.name.clone(),
+            self.address,
+        );
+        self.server.events().fire(&mut pre_login);
+        if let Some(message) = pre_login.kick_message() {
+            self.kick(message.to_owned().into()).await;
+            return ConnectionAction::none();
+        }
         self.protocol.store(ConnectionProtocol::Play);
 
         let client_info = self.client_information.lock().await.clone();
@@ -113,6 +124,7 @@ impl JavaTcpClient {
                 self.compression.load(),
                 self.network_writer.clone(),
                 self.id,
+                self.address,
                 player_weak.clone(),
             );
             let connection = Arc::new(PlayerConnection::Java(java_connection));
@@ -142,6 +154,13 @@ impl JavaTcpClient {
         tokio::select! {
             () = self.connection_updated.notified() => {}
             () = self.cancel_token.cancelled() => return ConnectionAction::none(),
+        }
+
+        let mut login = PlayerLoginEvent::new(Arc::clone(&player));
+        self.server.events().fire(&mut login);
+        if let Some(message) = login.kick_message() {
+            self.kick(message.to_owned().into()).await;
+            return ConnectionAction::none();
         }
         self.server.queue_player_join(player);
 

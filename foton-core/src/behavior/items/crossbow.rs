@@ -43,6 +43,7 @@ use crate::behavior::items::arrow_entity_type_for;
 use crate::enchantment_helper;
 use crate::entity::entities::{ArrowEntity, FireworkRocketEntity};
 use crate::entity::{Entity, LivingEntity, Projectile as _, SharedEntity, next_entity_id};
+use crate::event::Event as _;
 use crate::inventory::container::Container as _;
 use crate::inventory::equipment::EquipmentSlot;
 use crate::world::World;
@@ -648,6 +649,12 @@ fn shoot(
             angle,
             target_override,
         );
+        let mut launch_event =
+            crate::event::ProjectileLaunchEvent::new(shooter.uuid(), projectile.uuid());
+        world.fire_event(&mut launch_event);
+        if launch_event.is_cancelled() {
+            continue;
+        }
         if let Err(error) = world.try_add_entity(Arc::clone(&projectile)) {
             log::debug!("failed to spawn crossbow projectile: {error}");
         }
@@ -715,6 +722,7 @@ fn create_projectile(
     // the weapon it came off, which is where the bolt's Piercing is read from.
     // Without it a Piercing crossbow stops at the first mob like a plain one.
     arrow.set_fired_from_weapon(Some(weapon.copy_with_count(weapon.count())));
+    arrow.set_ammo_item(ammo.copy_with_count(1));
     // TODO: vanilla also swaps the arrow's hit sound to `CROSSBOW_HIT` and
     // marks a player's shot critical. Foton's arrow models neither.
     Arc::new(arrow)

@@ -90,6 +90,11 @@ impl JukeboxBlockEntity {
     pub fn is_playing(&self) -> bool {
         self.state.lock().song.is_some()
     }
+    /// Returns the record currently held by the jukebox.
+    #[must_use]
+    pub fn item(&self) -> ItemStack {
+        self.state.lock().item.clone()
+    }
 
     /// Returns what a comparator reads off it.
     ///

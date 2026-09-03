@@ -11,6 +11,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use std::sync::Arc;
+
 use foton_utils::locks::{AsyncMutex, SyncRwLock};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -275,6 +277,20 @@ impl Scoreboard {
     #[must_use]
     pub fn team_names(&self) -> Vec<String> {
         self.state.read().teams.iter().cloned().collect()
+    }
+
+    /// Returns score holders currently assigned to a team in stable order.
+    #[must_use]
+    pub fn team_entries(&self, team: &ScoreboardTeam) -> Vec<String> {
+        let state = self.state.read();
+        if !state.teams.contains(team.name()) {
+            return Vec::new();
+        }
+        state
+            .holder_teams
+            .iter()
+            .filter_map(|(holder, assigned)| (assigned == team.name()).then(|| holder.to_owned()))
+            .collect()
     }
 
     /// Returns the current team name for a score holder.
@@ -571,16 +587,13 @@ impl DomainScoreboards {
     }
 }
 
-fn domain_default_world<'a>(worlds: &'a WorldMap, domain: &str) -> io::Result<&'a World> {
-    worlds
-        .default_world(domain)
-        .map(AsRef::as_ref)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("domain '{domain}' has no loaded default world"),
-            )
-        })
+fn domain_default_world(worlds: &WorldMap, domain: &str) -> io::Result<Arc<World>> {
+    worlds.default_world(domain).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("domain '{domain}' has no loaded default world"),
+        )
+    })
 }
 
 fn scoreboard_io_error(domain: &str, error: io::Error) -> io::Error {

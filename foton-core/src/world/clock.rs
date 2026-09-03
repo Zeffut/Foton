@@ -236,7 +236,7 @@ impl World {
     }
 
     /// Broadcasts all clock states to players in this world.
-    pub(crate) fn broadcast_time_sync(&self) {
+    pub fn broadcast_time_sync(&self) {
         self.broadcast_to_all(self.time_sync_packet());
     }
 

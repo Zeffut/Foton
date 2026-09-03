@@ -252,7 +252,8 @@ impl HoglinEntity {
     pub fn finish_conversion(&self) -> Option<Arc<ZoglinEntity>> {
         convert_to(
             self,
-            ConversionParams::single(true, false),
+            ConversionParams::single(true, false)
+                .with_reason(crate::entity::conversion::ConversionReason::PiglinZombification),
             |id, position, world| ZoglinEntity::new(&vanilla_entities::ZOGLIN, id, position, world),
             |zoglin| {
                 // The age comes across in `copy_common_state`, which runs

@@ -6,12 +6,12 @@
 //! gets past the invulnerability check removes the entity outright and asks it
 //! what to leave behind.
 //!
-//! Not implemented: the hundred-tick `survives` sweep of
-//! `BlockAttachedEntity.tick`, which pops one of these off a wall somebody
-//! mined. Foton has no block-attached tick pass, so a frame outlives its wall.
+//! Each concrete hanging entity performs Vanilla's periodic support check in
+//! its own tick implementation and emits a cancellable physics break event.
 
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, SharedEntity};
+use crate::event::HangingBreakEvent;
 use crate::player::Player;
 use crate::world::World;
 use foton_registry::vanilla_game_rules::MOB_GRIEFING;
@@ -44,6 +44,23 @@ pub trait BlockAttached: Entity {
                 .as_ref()
                 .is_some_and(|entity| entity.as_mob().is_some())
         {
+            return false;
+        }
+
+        let cause =
+            if source.is(&foton_registry::vanilla_damage_type_tags::DamageTypeTag::IS_EXPLOSION) {
+                "EXPLOSION"
+            } else if caused_by.is_some() {
+                "ENTITY"
+            } else {
+                "DEFAULT"
+            };
+        let mut event = caused_by.as_ref().map_or_else(
+            || HangingBreakEvent::new(self.uuid(), cause),
+            |entity| HangingBreakEvent::new_with_remover(self.uuid(), cause, entity.uuid()),
+        );
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
             return false;
         }
 

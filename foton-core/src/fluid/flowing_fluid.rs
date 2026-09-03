@@ -14,6 +14,7 @@ use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId};
 
 use crate::behavior::{BLOCK_BEHAVIORS, BlockStateBehaviorExt, FLUID_BEHAVIORS};
+use crate::event::{BlockFromToEvent, Event};
 use crate::fluid::{
     FluidBehavior, FluidState, can_hold_any_fluid_state, can_hold_specific_fluid,
     can_pass_through_wall, fluid_state_to_block, fluid_state_to_block_with_existing,
@@ -168,8 +169,17 @@ pub trait FlowingFluid: FluidBehavior {
         world: &Arc<World>,
         pos: BlockPos,
         fluid_state: FluidState,
-        _direction: Direction,
+        direction: Direction,
     ) {
+        let mut event = BlockFromToEvent::new(
+            world.key.to_string(),
+            direction.opposite().relative(pos),
+            pos,
+        );
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
         self.base_spread_to(world, pos, fluid_state);
     }
 

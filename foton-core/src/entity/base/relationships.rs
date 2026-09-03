@@ -1,4 +1,4 @@
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use crate::entity::{RemovalReason, SharedEntity, WeakEntity};
 
@@ -88,6 +88,18 @@ impl EntityRelationshipState {
                 .upgrade()
                 .is_some_and(|entity| entity.id() == passenger_id)
         })
+    }
+
+    pub(super) fn replace_passenger_id(&mut self, old_id: i32, replacement: &SharedEntity) -> bool {
+        let Some(index) = self.passengers.iter().position(|passenger| {
+            passenger
+                .upgrade()
+                .is_some_and(|entity| entity.id() == old_id)
+        }) else {
+            return false;
+        };
+        self.passengers[index] = Arc::downgrade(replacement);
+        true
     }
 
     pub(super) fn remove_passenger_id(&mut self, passenger_id: i32) -> bool {

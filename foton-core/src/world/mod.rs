@@ -76,7 +76,7 @@ use foton_utils::{
     random::{Random as _, RandomSource, legacy_random::LegacyRandom},
 };
 use foton_worldgen::{biomes::obfuscate_biome_seed, noise::PerlinSimplexNoise};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use simdnbt::owned::NbtCompound;
 
 use foton_utils::{
@@ -97,8 +97,8 @@ use crate::{
         EntityMovementSyncPacket, EntityOwnership, EntityTracker, EntityVisibility,
         InactiveEntityCallback, MobEffectSyncPacket, RemovalReason, SharedEntity,
         WorldEntityManager,
-        entities::{ExperienceOrbEntity, ItemEntity},
-        entity_loot_ref,
+        entities::{ExperienceOrbEntity, ItemEntity, LightningBoltEntity},
+        entity_loot_ref, next_entity_id,
     },
     fluid::{FluidStateExt as _, fluid_state_to_block},
     level_data::{LevelDataManager, RespawnData, WorldGenerationSettings},
@@ -268,9 +268,25 @@ pub struct WorldConfig {
     pub default_gamemode: GameType,
     /// Difficulty used when creating new level data.
     pub difficulty: Difficulty,
+    /// Whether the world has a bonus chest.
+    pub bonus_chest: bool,
 }
 
 /// A struct that represents a world.
+pub trait SpawnLimitValue {
+    fn into_limit(self) -> Option<i32>;
+}
+impl SpawnLimitValue for i32 {
+    fn into_limit(self) -> Option<i32> {
+        Some(self)
+    }
+}
+impl SpawnLimitValue for Option<i32> {
+    fn into_limit(self) -> Option<i32> {
+        self
+    }
+}
+
 pub struct World {
     /// The chunk map of the world.
     pub chunk_map: Arc<ChunkMap>,
@@ -306,9 +322,23 @@ pub struct World {
     pub sea_level: i32,
     /// Default game mode for first-visit player data.
     pub default_gamemode: GameType,
+    /// Whether the world has a bonus chest.
+    pub bonus_chest: bool,
     /// Whether the tick rate is running normally (not frozen/paused).
     /// When false, movement validation checks are skipped.
     tick_runs_normally: AtomicBool,
+    /// Whether player-versus-player damage is enabled in this world.
+    pvp: AtomicBool,
+    /// Whether natural monsters are allowed in this world.
+    allow_monsters: AtomicBool,
+    /// Whether natural animals are allowed in this world.
+    allow_animals: AtomicBool,
+    /// Per-world natural-spawn limits overridden by plugins.
+    spawn_limits: SyncRwLock<FxHashMap<foton_registry::entity_type::MobCategory, i32>>,
+    /// Per-world natural-spawn cadence overrides in ticks.
+    spawn_ticks: SyncRwLock<FxHashMap<foton_registry::entity_type::MobCategory, i32>>,
+    keep_spawn_in_memory: AtomicBool,
+    auto_save: AtomicBool,
     /// Whether vanilla's scheduled/chunk/block-event tick phase is active.
     handling_tick: AtomicBool,
     /// Ordered, duplicate-suppressing server block events awaiting execution.
@@ -317,6 +347,8 @@ pub struct World {
     neighbor_updater: CollectingNeighborUpdater,
     /// Central runtime entity ownership and lookup.
     entity_manager: WorldEntityManager,
+    /// Entities being evaluated by a pre-insertion spawn event.
+    pending_spawn_entities: SyncMutex<FxHashMap<uuid::Uuid, SharedEntity>>,
     /// World-global ordered block-entity ticker phase.
     block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers,
     /// Physical entries retained by this world's chunk-owned game-event registries.
@@ -369,6 +401,90 @@ pub struct World {
 }
 
 impl World {
+    /// Fires a plugin event when this world is attached to a server.
+    pub(crate) fn fire_event<E: crate::event::Event>(&self, event: &mut E) {
+        if let Some(server) = self.server.get().and_then(Weak::upgrade) {
+            server.events.fire(event);
+        }
+    }
+    /// Returns the persistent world directory, or `None` for RAM-only worlds.
+    #[must_use]
+    pub fn world_folder(&self) -> Option<std::path::PathBuf> {
+        self.level_data
+            .read()
+            .world_dir()
+            .map(std::path::Path::to_path_buf)
+    }
+    /// Returns chunk coordinates whose holders have reached vanilla Full status.
+    #[must_use]
+    pub fn loaded_chunk_positions(&self) -> Vec<ChunkPos> {
+        let mut positions = Vec::new();
+        self.chunk_map.chunks.iter_sync(|pos, holder| {
+            if !holder.is_status_disallowed(ChunkStatus::Full)
+                && holder.try_chunk(ChunkStatus::Full).is_some()
+            {
+                positions.push(*pos);
+            }
+            true
+        });
+        positions
+    }
+
+    /// Returns block-entity positions and states for a loaded full chunk.
+    #[must_use]
+    pub fn block_entity_positions_in_chunk(&self, x: i32, z: i32) -> Vec<(BlockPos, BlockStateId)> {
+        let pos = ChunkPos::new(x, z);
+        let mut holder = None;
+        self.chunk_map.chunks.iter_sync(|chunk_pos, value| {
+            if *chunk_pos == pos {
+                holder = Some(Arc::clone(value));
+                false
+            } else {
+                true
+            }
+        });
+        let Some(holder) = holder else {
+            return Vec::new();
+        };
+        let Some(chunk) = holder.try_chunk(ChunkStatus::Full) else {
+            return Vec::new();
+        };
+        chunk
+            .get_block_entities()
+            .into_iter()
+            .map(|entity| (entity.get_block_pos(), entity.get_block_state()))
+            .collect()
+    }
+
+    /// Returns whether the requested chunk has an active Full-status holder.
+    #[must_use]
+    /// Removes a live entity as an explicit plugin discard.
+    pub fn remove_entity(&self, entity_id: i32) -> bool {
+        self.entity_manager()
+            .remove_live_entity(entity_id, crate::entity::RemovalReason::Discarded)
+            .is_some()
+    }
+
+    pub fn is_chunk_loaded(&self, x: i32, z: i32) -> bool {
+        self.loaded_chunk_positions()
+            .iter()
+            .any(|pos| pos.0.x == x && pos.0.y == z)
+    }
+
+    /// Checks persisted generation state without stalling a game tick.
+    ///
+    /// Bukkit exposes this synchronously. Outside a tick we may query the
+    /// storage runtime; during a tick the query is intentionally conservative
+    /// to avoid waiting on asynchronous region I/O on the tick thread.
+    pub fn is_chunk_generated(&self, x: i32, z: i32) -> bool {
+        if self.is_chunk_loaded(x, z) || self.handling_tick.load(Ordering::Relaxed) {
+            return self.is_chunk_loaded(x, z);
+        }
+        self.chunk_map
+            .chunk_runtime
+            .block_on(self.chunk_map.storage.chunk_exists(ChunkPos::new(x, z)))
+            .unwrap_or(false)
+    }
     /// Creates a new world with custom configuration.
     ///
     /// This allows specifying storage backend (disk or RAM-only) and other options.
@@ -417,6 +533,7 @@ impl World {
         let is_flat = config.is_flat;
         let sea_level = config.sea_level;
         let default_gamemode = config.default_gamemode;
+        let bonus_chest = config.bonus_chest;
         // Create storage backend based on config
         let storage: Arc<ChunkStorage> = match &config.storage {
             WorldStorageConfig::Disk { path } => {
@@ -447,6 +564,7 @@ impl World {
         let dragon_fight = load_dragon_fight(&saved_data, dimension_type, seed).await?;
         let world_border = WorldBorder::new(level_data.data().world_border)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let keep_spawn_in_memory = level_data.data().keep_spawn_in_memory;
         // let generator = Arc::new(ChunkGeneratorType::Flat(FlatChunkGenerator::new(
         //     REGISTRY
         //         .blocks
@@ -495,11 +613,20 @@ impl World {
                 is_flat,
                 sea_level,
                 default_gamemode,
+                bonus_chest,
                 tick_runs_normally: AtomicBool::new(true),
+                pvp: AtomicBool::new(true),
+                allow_monsters: AtomicBool::new(true),
+                allow_animals: AtomicBool::new(true),
+                spawn_limits: SyncRwLock::new(FxHashMap::default()),
+                spawn_ticks: SyncRwLock::new(FxHashMap::default()),
+                keep_spawn_in_memory: AtomicBool::new(keep_spawn_in_memory),
+                auto_save: AtomicBool::new(true),
                 handling_tick: AtomicBool::new(false),
                 block_events: SyncMutex::new(BlockEventQueue::default()),
                 neighbor_updater: CollectingNeighborUpdater::new(max_chained_neighbor_updates),
                 entity_manager: WorldEntityManager::new(),
+                pending_spawn_entities: SyncMutex::new(FxHashMap::default()),
                 block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers::new(),
                 game_event_listener_count: GameEventListenerCount::shared(),
                 entity_tracker: EntityTracker::new(),
@@ -542,15 +669,25 @@ impl World {
     }
 
     /// Cleans up the world by saving all chunks.
-    #[expect(
-        clippy::await_holding_lock,
-        reason = "holding the write lock across await is safe here because it only happens during shutdown"
-    )]
     pub async fn cleanup(&self, total_saved: &mut usize) {
         self.sync_world_border_to_level_data();
-        match self.level_data.write().save().await {
-            Ok(()) => log::info!("World {} level data saved successfully", self.key),
-            Err(e) => log::error!("Failed to save world level data: {e}"),
+        let level_data_save = self.level_data.write().prepare_save();
+        match level_data_save {
+            Ok(Some((path, content))) => {
+                let result = async {
+                    if let Some(parent) = path.parent() {
+                        tokio::fs::create_dir_all(parent).await?;
+                    }
+                    tokio::fs::write(&path, content).await
+                }
+                .await;
+                match result {
+                    Ok(()) => log::info!("World {} level data saved successfully", self.key),
+                    Err(error) => log::error!("Failed to save world level data: {error}"),
+                }
+            }
+            Ok(None) => {}
+            Err(error) => log::error!("Failed to prepare world level data: {error}"),
         }
 
         let chunk_tickets = self.chunk_map.persistent_chunk_tickets();
@@ -591,6 +728,12 @@ impl World {
     #[must_use]
     pub fn domain(&self) -> &str {
         self.key.namespace.as_ref()
+    }
+
+    /// Returns whether this world has a bonus chest.
+    #[must_use]
+    pub const fn has_bonus_chest(&self) -> bool {
+        self.bonus_chest
     }
 
     /// Returns the dragon fight this world runs, if it runs one.
@@ -649,9 +792,24 @@ impl World {
 
         let random_tick_speed = self.get_game_rule(&RANDOM_TICK_SPEED) as u32;
 
+        let loaded_before = self.loaded_chunk_positions();
         let mut chunk_map_timings =
             self.chunk_map
                 .tick_game(self, tick_count, random_tick_speed, runs_normally);
+        let loaded_before = loaded_before
+            .into_iter()
+            .map(|pos| (pos.0.x, pos.0.y))
+            .collect::<rustc_hash::FxHashSet<_>>();
+        for pos in self.loaded_chunk_positions() {
+            if loaded_before.contains(&(pos.0.x, pos.0.y)) {
+                continue;
+            }
+            self.fire_event(&mut crate::event::ChunkLoadEvent::new(
+                self.key.to_string(),
+                pos,
+                false,
+            ));
+        }
 
         if runs_normally {
             let _span = tracing::trace_span!("block_events").entered();
@@ -778,6 +936,88 @@ impl World {
             chunk_map: chunk_map_timings,
             entity_tick,
         }
+    }
+
+    /// Returns whether this world participates in automatic saves.
+    #[must_use]
+    pub fn keep_spawn_in_memory(&self) -> bool {
+        self.keep_spawn_in_memory.load(Ordering::Acquire)
+    }
+    pub fn set_keep_spawn_in_memory(&self, value: bool) {
+        let old = self.keep_spawn_in_memory.swap(value, Ordering::AcqRel);
+        if old == value {
+            return;
+        }
+        let spawn = {
+            let mut level_data = self.level_data.write();
+            level_data.data_mut().keep_spawn_in_memory = value;
+            level_data.data().spawn_pos()
+        };
+        if value {
+            self.chunk_map.place_spawn_ticket(spawn);
+        } else {
+            self.chunk_map.remove_spawn_ticket(spawn);
+        }
+    }
+
+    pub fn spawn_limit(&self, category: foton_registry::entity_type::MobCategory) -> Option<i32> {
+        self.spawn_limits.read().get(&category).copied()
+    }
+
+    pub fn set_spawn_limit<L: SpawnLimitValue>(
+        &self,
+        category: foton_registry::entity_type::MobCategory,
+        limit: L,
+    ) {
+        let mut limits = self.spawn_limits.write();
+        if let Some(limit) = limit.into_limit() {
+            limits.insert(category, limit.max(0));
+        } else {
+            limits.remove(&category);
+        }
+    }
+
+    pub fn spawn_ticks(&self, category: foton_registry::entity_type::MobCategory) -> Option<i32> {
+        self.spawn_ticks.read().get(&category).copied()
+    }
+
+    pub fn set_spawn_ticks(&self, category: foton_registry::entity_type::MobCategory, ticks: i32) {
+        self.spawn_ticks.write().insert(category, ticks.max(0));
+    }
+
+    pub fn is_auto_save(&self) -> bool {
+        self.auto_save.load(Ordering::Acquire)
+    }
+
+    /// Enables or disables automatic saves for this world.
+    pub fn set_auto_save(&self, value: bool) {
+        self.auto_save.store(value, Ordering::Release);
+    }
+
+    /// Queues a non-blocking save of level data and dirty chunks.
+    pub fn request_save(self: &std::sync::Arc<Self>) {
+        let prepared = self.level_data.write().prepare_save();
+        let world = std::sync::Arc::clone(self);
+        self.chunk_map.chunk_runtime.handle().spawn(async move {
+            match prepared {
+                Ok(Some((path, content))) => {
+                    if let Some(parent) = path.parent() {
+                        if let Err(error) = tokio::fs::create_dir_all(parent).await {
+                            tracing::error!(%error, "World level-data directory save failed");
+                            return;
+                        }
+                    }
+                    if let Err(error) = tokio::fs::write(&path, content).await {
+                        tracing::error!(%error, "World level-data save failed");
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => tracing::error!(%error, "World level-data serialization failed"),
+            }
+            if let Err(error) = world.save_all_chunks().await {
+                tracing::error!(%error, "World chunk save failed");
+            }
+        });
     }
 
     /// Saves all dirty chunks in this world to disk.

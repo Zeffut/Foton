@@ -88,6 +88,8 @@ pub struct RuntimeConfig {
     pub max_chained_neighbor_updates: i32,
     /// Whether the server is in online mode.
     pub online_mode: bool,
+    /// Whether admission is restricted to the persisted whitelist.
+    pub whitelist_enabled: bool,
     /// Optional authentication endpoint for online-mode `hasJoined` checks.
     pub auth_server: Option<String>,
     /// Optional endpoint for online-mode player name-to-profile lookups.
@@ -267,6 +269,9 @@ pub struct WorldEntryConfig {
     /// World difficulty override for new level data.
     #[serde(default, deserialize_with = "deserialize_optional_difficulty")]
     pub difficulty: Option<Difficulty>,
+    /// Whether vanilla should place a bonus chest while creating this world.
+    #[serde(default)]
+    pub bonus_chest: bool,
     /// World storage override.
     #[serde(default)]
     pub storage: Option<StorageSelection>,
@@ -366,6 +371,8 @@ pub struct ResolvedWorldConfig {
     pub default_gamemode: GameType,
     /// Difficulty for new level data in this world.
     pub difficulty: Difficulty,
+    /// Whether vanilla should place a bonus chest during first-world setup.
+    pub bonus_chest: bool,
     /// Resolved world storage selection.
     pub storage: StorageSelection,
     /// Explicit same-domain Nether portal target, if configured.
@@ -570,6 +577,7 @@ fn resolve_world_config(
             .map_or(domain_defaults.seed, seed_from_config),
         default_gamemode: world.default_gamemode.unwrap_or(domain_defaults.gamemode),
         difficulty: world.difficulty.unwrap_or(domain_defaults.difficulty),
+        bonus_chest: world.bonus_chest,
         storage,
         nether_portal_target,
         end_portal_target,

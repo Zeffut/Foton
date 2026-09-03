@@ -242,18 +242,28 @@ impl BlockBreakingManager {
                     });
                     return;
                 }
-
-                // Creative mode: instant break
-                if player.game_mode() == GameType::Creative {
-                    self.destroy_and_ack(player, world, pos);
-                    return;
-                }
-
+                // Restrictions are checked before firing the event. Apart from
+                // matching vanilla ordering, this keeps detached test players
+                // from requiring a live server for an action that is rejected.
                 if player.block_action_restricted(world, pos) {
                     player.send_packet(CBlockUpdate {
                         pos,
                         block_state: world.get_block_state(pos),
                     });
+                    return;
+                }
+                let mut event =
+                    crate::event::BlockDamageEvent::new(player.uuid(), world.key.to_string(), pos);
+                if let Some(server) = player.server.upgrade() {
+                    server.events.fire(&mut event);
+                }
+                if event.is_cancelled() {
+                    return;
+                }
+
+                // Creative mode: instant break
+                if player.game_mode() == GameType::Creative {
+                    self.destroy_and_ack(player, world, pos);
                     return;
                 }
 
@@ -367,13 +377,16 @@ impl BlockBreakingManager {
 
         // Before anything touches the block, so cancelling leaves the world as
         // it was rather than having to put it back.
-        if let Some(shared) = player.shared() {
+        let event_drop_items = if let Some(shared) = player.shared() {
             let mut event = BlockBreakEvent::new(shared, pos, state);
             player.fire_event(&mut event);
             if event.is_cancelled() {
                 return false;
             }
-        }
+            event.drop_items()
+        } else {
+            true
+        };
 
         // TODO: Check for GameMasterBlock (command blocks, etc.)
         // TODO: Check blockActionRestricted
@@ -459,7 +472,8 @@ impl BlockBreakingManager {
 
             // Handle drops (skip for creative/spectator)
             let game_mode = player.game_mode();
-            if game_mode != GameType::Spectator
+            if event_drop_items
+                && game_mode != GameType::Spectator
                 && game_mode != GameType::Creative
                 && has_correct_tool
             {

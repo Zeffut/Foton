@@ -23,7 +23,8 @@ use foton_registry::vanilla_blocks;
 use foton_utils::random::worldgen_random::WorldgenRandom;
 use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId, Identifier};
-use rand::{Rng, RngExt};
+use rand::rngs::SmallRng;
+use rand::{Rng, RngExt, SeedableRng};
 
 use crate::fluid::fluid_state_to_block;
 use crate::world::{LevelReader as _, World};
@@ -225,6 +226,15 @@ fn place_tree(world: &Arc<World>, pos: BlockPos, rng: &mut dyn Rng, key: &'stati
         pos,
         &mut ground_features,
     )
+}
+
+/// Generates a plugin-requested tree with a deterministic world/position seed.
+pub fn generate_tree(world: &Arc<World>, pos: BlockPos, key: &'static str) -> bool {
+    let seed = world.seed() as u64
+        ^ (pos.x() as u64).wrapping_mul(341_873_128_712)
+        ^ (pos.z() as u64).wrapping_mul(132_897_987_541);
+    let mut random = SmallRng::seed_from_u64(seed);
+    place_tree(world, pos, &mut random, key)
 }
 
 /// Vanilla parity: `TreeGrower.isTwoByTwoSapling`.

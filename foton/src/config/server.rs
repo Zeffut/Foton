@@ -43,6 +43,9 @@ pub struct ServerConfig {
     pub max_chained_neighbor_updates: i32,
     /// Whether the server is in online mode.
     pub online_mode: bool,
+    /// Whether admission is restricted to the persisted whitelist.
+    #[serde(default)]
+    pub whitelist_enabled: bool,
     /// Optional authentication endpoint for online-mode `hasJoined` checks.
     pub auth_server: Option<String>,
     /// Optional endpoint for online-mode player name-to-profile lookups.
@@ -138,6 +141,7 @@ impl ServerConfig {
             simulation_distance: self.simulation_distance,
             max_chained_neighbor_updates: self.max_chained_neighbor_updates,
             online_mode: self.online_mode,
+            whitelist_enabled: self.whitelist_enabled,
             auth_server: self.auth_server,
             profile_server: self.profile_server,
             services_server: self.services_server,
