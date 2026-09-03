@@ -145,6 +145,33 @@ public interface Server {
     /** Vanilla's maximum world border diameter in blocks. */
     default int getMaxWorldSize() { return 59_999_968; }
 
+    /** Whether a nether world is loaded. */
+    boolean getAllowNether();
+
+    /** Whether an end world is loaded. */
+    boolean getAllowEnd();
+
+    /** How long a connecting address must wait between attempts.
+     *
+     * Foton does not throttle connections, and zero is how vanilla says so.
+     */
+    default long getConnectionThrottle() { return 0; }
+
+    /** After how many ticks an idle player is kicked.
+     *
+     * Foton never kicks for idling, and zero is how vanilla says so.
+     */
+    default int getIdleTimeout() { return 0; }
+
+    /** What players are told when the server stops. */
+    default String getShutdownMessage() { return "Server closed"; }
+
+    /** How many blocks around spawn are protected from building.
+     *
+     * Not configurable in Foton yet; this is vanilla's default.
+     */
+    default int getSpawnRadius() { return 16; }
+
     Logger getLogger();
 
     default BanList<?> getBanList(BanList.Type type) { return null; }

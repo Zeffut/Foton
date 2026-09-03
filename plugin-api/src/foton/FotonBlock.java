@@ -115,7 +115,7 @@ public final class FotonBlock implements Block {
             return new org.bukkit.block.data.SimpleBisectedData(text);
         }
         if (text != null && text.contains("[level=")) {
-            return new org.bukkit.block.data.SimpleLeveledData(text);
+            return new org.bukkit.block.data.SimpleLevelledData(text);
         }
         if (text != null && text.contains("[lit=")) {
             return new org.bukkit.block.data.SimpleLightableData(text);

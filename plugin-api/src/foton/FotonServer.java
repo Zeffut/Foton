@@ -261,6 +261,28 @@ public final class FotonServer implements Server {
         return new io.papermc.paper.configuration.ServerConfiguration(false);
     }
 
+    /** Answered from the worlds that are actually loaded, rather than from a
+     * setting: Foton builds its worlds from domains, so whether the nether
+     * exists is a fact about the server rather than a flag on it. */
+    @Override
+    public boolean getAllowNether() {
+        return hasDimension("the_nether");
+    }
+
+    @Override
+    public boolean getAllowEnd() {
+        return hasDimension("the_end");
+    }
+
+    private boolean hasDimension(String suffix) {
+        for (String name : Native.worldNames()) {
+            if (name.endsWith(suffix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public int getMaxPlayers() {
         return Native.maxPlayers();

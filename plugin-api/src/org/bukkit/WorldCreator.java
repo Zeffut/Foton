@@ -94,6 +94,25 @@ public class WorldCreator {
      * Preserves Bukkit's synchronous contract only when creation has already
      * completed; pending creation must use {@link #createWorldAsync()}.
      */
+    /** Looks up a biome provider a plugin named in a config file.
+     *
+     * Bukkit resolves `plugin:id` against the plugin that registered it.
+     * Foton has no registry of plugin biome providers, so nothing is found
+     * and the caller is told rather than left guessing -- which is also what
+     * Bukkit does for a name no plugin claimed.
+     */
+    public static BiomeProvider getBiomeProviderForName(
+            String world, String name, org.bukkit.command.CommandSender output) {
+        if (name == null || name.isEmpty()) {
+            return null;
+        }
+        if (output != null) {
+            output.sendMessage("No biome provider is registered under " + name
+                + "; " + world + " will use its generator's biomes.");
+        }
+        return null;
+    }
+
     public World createWorld() {
         WorldCreationRequest request = createWorldRequest();
         int state = foton.Native.worldCreationState(request.id());

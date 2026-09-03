@@ -18,6 +18,21 @@ public final class ServerBuildInfo {
         return OptionalInt.empty();
     }
 
+    /** Whether this server answers to a brand a plugin is asking about.
+     *
+     * Plugins use this to find out whether they are on Paper. Foton serves
+     * Paper's API, so it says yes to Paper's key and to its own, and no to
+     * anything else -- a plugin asking for Folia's brand wants to know
+     * whether regions are threaded, and here they are not.
+     */
+    public boolean isBrandCompatible(net.kyori.adventure.key.Key brand) {
+        if (brand == null) {
+            return false;
+        }
+        String name = brand.asString();
+        return "papermc:paper".equals(name) || "foton:foton".equals(name);
+    }
+
     /** Minecraft data version targeted by this server. */
     public String minecraftVersionId() {
         return "26.2";

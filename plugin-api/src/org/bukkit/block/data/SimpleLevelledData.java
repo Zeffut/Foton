@@ -1,8 +1,8 @@
 package org.bukkit.block.data;
 
 /** Live textual adapter for a block state carrying a level property. */
-public final class SimpleLeveledData extends SimpleBlockData implements Leveled {
-    public SimpleLeveledData(String text) { super(text); }
+public final class SimpleLevelledData extends SimpleBlockData implements Levelled {
+    public SimpleLevelledData(String text) { super(text); }
     @Override public int getLevel() {
         int start = text.indexOf("[level=");
         if (start < 0) return 0;
