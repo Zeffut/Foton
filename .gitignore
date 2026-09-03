@@ -52,3 +52,6 @@ __pycache__/
 # server to provide are other people's artifacts. Neither is source.
 plugin-api/build
 /.superpowers
+
+# Ruflo tooling state, written into the working tree by the plugin's hooks.
+.claude-flow/
