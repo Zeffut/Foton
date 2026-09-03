@@ -492,13 +492,8 @@ pub struct Server {
     /// World removals requested by plugins, applied at the tick safe-point.
     pub(crate) pending_world_removals: SyncMutex<Vec<WorldRemovalRequest>>,
     /// Worlds ready to attach at the next tick safe-point.
-    pending_world_additions: SyncMutex<
-        Vec<(
-            u64,
-            Arc<World>,
-            tokio::sync::oneshot::Sender<Result<(), String>>,
-        )>,
-    >,
+    pending_world_additions:
+        SyncMutex<Vec<(Arc<World>, tokio::sync::oneshot::Sender<Result<(), String>>)>>,
     /// Who is listening for what.
     ///
     /// Unlike the block and item registries this is not frozen after startup:
@@ -818,16 +813,6 @@ impl Server {
         Ok(world)
     }
 
-    /// Builds a world off-thread and queues attachment at the next tick safe-point.
-    pub(crate) async fn load_world_from_config(
-        self: &Arc<Self>,
-        world_entry: ResolvedWorldConfig,
-    ) -> Result<(), String> {
-        let _request = self.load_world_from_config_tracked(world_entry).await?;
-        drop(_request);
-        Ok(())
-    }
-
     pub(crate) async fn load_world_from_config_tracked(
         self: &Arc<Self>,
         world_entry: ResolvedWorldConfig,
@@ -844,14 +829,14 @@ impl Server {
         let mut pending = self.pending_world_additions.lock();
         if pending
             .iter()
-            .any(|(_, pending_world, _)| pending_world.key == world_entry.key)
+            .any(|(pending_world, _)| pending_world.key == world_entry.key)
         {
             return Err(format!(
                 "world {} is already pending attachment",
                 world_entry.key
             ));
         }
-        pending.push((id, world, sender));
+        pending.push((world, sender));
         Ok(WorldCreationRequest { id, receiver })
     }
 
@@ -970,7 +955,7 @@ impl Server {
                 global_player_data.insert(known.uuid(), data);
             }
         }
-        let mut worlds = WorldMap::new(
+        let worlds = WorldMap::new(
             resolved_worlds.default_domain.clone(),
             &resolved_worlds.domains,
             &resolved_worlds.worlds,

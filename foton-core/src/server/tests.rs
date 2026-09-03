@@ -81,6 +81,7 @@ use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::blocks::properties::Direction;
 use foton_utils::Identifier;
 use foton_utils::types::GameType;
+use tokio::sync::oneshot::channel;
 
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,
@@ -216,7 +217,7 @@ async fn test_server_with_worlds(
     // as production. Initialize it here so test outcomes do not depend on
     // another test having run first.
     crate::behavior::init_behaviors();
-    let mut worlds = WorldMap::new(default_domain, domains, &[]);
+    let worlds = WorldMap::new(default_domain, domains, &[]);
     for world in loaded_worlds {
         assert!(worlds.insert(world.key.clone(), Arc::clone(world)).is_ok());
     }
@@ -315,14 +316,14 @@ async fn test_server_with_worlds(
 
 #[tokio::test]
 async fn world_creation_request_poll_and_wait_are_non_blocking() {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let (sender, receiver) = channel();
     let mut request = WorldCreationRequest { id: 7, receiver };
     assert_eq!(request.id(), 7);
     assert_eq!(request.poll(), WorldCreationState::Pending);
     sender.send(Ok(())).expect("request receiver remains live");
     assert_eq!(request.poll(), WorldCreationState::Ready);
 
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let (sender, receiver) = channel();
     let request = WorldCreationRequest { id: 8, receiver };
     sender
         .send(Err("build failed".to_owned()))

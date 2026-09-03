@@ -97,7 +97,7 @@ impl MenuKind for CraftingKind {
         &mut self,
         _behavior: &mut MenuBehavior,
         guard: &mut ContainerLockGuard,
-        _player: &Player,
+        player: &Player,
     ) {
         self.handler.update_result(guard);
         let Some(matrix) = self.handler.input_snapshot(guard) else {
@@ -107,8 +107,8 @@ impl MenuKind for CraftingKind {
             .handler
             .result_snapshot(guard)
             .unwrap_or_else(ItemStack::empty);
-        let mut event = PrepareItemCraftEvent::new(_player.uuid(), matrix, result, false);
-        _player.fire_event(&mut event);
+        let mut event = PrepareItemCraftEvent::new(player.uuid(), matrix, result, false);
+        player.fire_event(&mut event);
         self.handler
             .apply_snapshot(guard, event.matrix().to_vec(), event.result().clone());
     }

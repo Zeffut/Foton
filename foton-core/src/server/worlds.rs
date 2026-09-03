@@ -362,7 +362,7 @@ mod tests {
     fn map_snapshots_are_owned_and_cover_loaded_worlds() {
         let world = fresh_test_world_in_domain("main", "snapshot_map");
         let key = world.key.clone();
-        let mut worlds = WorldMap::new(
+        let worlds = WorldMap::new(
             "main".to_owned(),
             &[domain("main", Identifier::new("main", "spawn"))],
             &[],
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn remove_rejects_unloaded_world() {
-        let mut worlds = WorldMap::new("main".to_owned(), &[], &[]);
+        let worlds = WorldMap::new("main".to_owned(), &[], &[]);
         let key = Identifier::new("main", "missing");
         assert!(matches!(
             worlds.remove(&key),
@@ -418,7 +418,7 @@ mod tests {
     fn remove_rejects_domain_default_world() {
         let world = fresh_test_world_in_domain("main", "spawn");
         let key = world.key.clone();
-        let mut worlds = WorldMap::new("main".to_owned(), &[domain("main", key.clone())], &[]);
+        let worlds = WorldMap::new("main".to_owned(), &[domain("main", key.clone())], &[]);
         assert!(worlds.insert(key.clone(), world).is_ok());
         assert!(matches!(
             worlds.remove(&key),
@@ -431,7 +431,7 @@ mod tests {
     fn remove_rejects_world_with_players() {
         let world = fresh_test_world_in_domain("main", "arena");
         let key = world.key.clone();
-        let mut worlds = WorldMap::new(
+        let worlds = WorldMap::new(
             "main".to_owned(),
             &[domain("main", Identifier::new("main", "spawn"))],
             &[],
@@ -450,7 +450,7 @@ mod tests {
     fn remove_detaches_empty_non_default_world() {
         let world = fresh_test_world_in_domain("main", "arena");
         let key = world.key.clone();
-        let mut worlds = WorldMap::new(
+        let worlds = WorldMap::new(
             "main".to_owned(),
             &[domain("main", Identifier::new("main", "spawn"))],
             &[],

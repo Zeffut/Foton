@@ -799,7 +799,6 @@ mod spawn_primitive_tests {
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
     use foton_utils::ChunkPos;
     use glam::DVec3;
-    use std::sync::Arc;
     #[test]
     fn world_spawn_lightning_uses_canonical_entity_path() {
         let world = fresh_test_world("spawn_lightning_primitive");

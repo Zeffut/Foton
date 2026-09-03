@@ -13,6 +13,8 @@ use super::{
 use crate::command::functions::CommandFunction;
 use crate::event::{CommandEvent, ServerTickEvent};
 use foton_utils::Identifier;
+use std::mem::take;
+use tokio::sync::oneshot::{Receiver, channel};
 
 impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
@@ -636,8 +638,8 @@ impl Server {
 
     /// Attaches worlds constructed asynchronously at a tick safe-point.
     fn process_world_additions(&self, workers: &mut WorldTickWorkers) {
-        let worlds = std::mem::take(&mut *self.pending_world_additions.lock());
-        for (id, world, completion) in worlds {
+        let worlds = take(&mut *self.pending_world_additions.lock());
+        for (world, completion) in worlds {
             let key = world.key.clone();
             if let Err(error) = self.worlds.insert(key.clone(), world) {
                 let _ = completion.send(Err(error));
@@ -692,11 +694,11 @@ impl Server {
         &self,
         key: Identifier,
         save: bool,
-    ) -> Option<tokio::sync::oneshot::Receiver<Result<usize, String>>> {
+    ) -> Option<Receiver<Result<usize, String>>> {
         if self.worlds.get(&key).is_none() {
             return None;
         }
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (sender, receiver) = channel();
         self.pending_world_removals
             .lock()
             .push(WorldRemovalRequest {
@@ -709,7 +711,7 @@ impl Server {
 
     /// Detaches worlds only after the current tick has completed.
     fn process_world_removals(&self, workers: &mut WorldTickWorkers) {
-        let requests = std::mem::take(&mut *self.pending_world_removals.lock());
+        let requests = take(&mut *self.pending_world_removals.lock());
         for request in requests {
             let WorldRemovalRequest {
                 key,

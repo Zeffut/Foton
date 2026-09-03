@@ -78,15 +78,15 @@ impl MenuKind for GrindstoneKind {
         &mut self,
         _behavior: &mut MenuBehavior,
         guard: &mut ContainerLockGuard,
-        _player: &Player,
+        player: &Player,
     ) {
         self.handler.update_result(guard);
         let Some((upper, lower)) = self.handler.input_snapshot(guard) else {
             return;
         };
         let result = self.handler.result_snapshot(guard);
-        let mut event = PrepareGrindstoneEvent::new(_player.uuid(), upper, lower, result);
-        _player.fire_event(&mut event);
+        let mut event = PrepareGrindstoneEvent::new(player.uuid(), upper, lower, result);
+        player.fire_event(&mut event);
         self.handler.apply_snapshot(
             guard,
             event.upper().clone(),
