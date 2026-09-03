@@ -53,6 +53,7 @@ impl CraftingHandler {
     }
 
     /// Snapshot of the crafting grid while its containers are locked.
+    #[must_use]
     pub fn input_snapshot(&self, guard: &ContainerLockGuard) -> Option<Vec<ItemStack>> {
         guard
             .get_typed::<CraftingContainer>(self.crafting_id())
@@ -60,6 +61,7 @@ impl CraftingHandler {
     }
 
     /// Snapshot of the current result while its container is locked.
+    #[must_use]
     pub fn result_snapshot(&self, guard: &ContainerLockGuard) -> Option<ItemStack> {
         guard.get(self.result_id()).map(|c| c.get_item(0).clone())
     }

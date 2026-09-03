@@ -131,7 +131,7 @@ impl World {
                 }
                 let cap = self
                     .spawn_limit(category)
-                    .map_or_else(|| default_category_cap(category) as i32, |limit| limit)
+                    .unwrap_or_else(|| default_category_cap(category) as i32)
                     .max(0) as usize;
                 if self.mobs_near(origin, category) >= cap {
                     continue;

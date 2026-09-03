@@ -128,6 +128,7 @@ impl AttributeInstance {
     }
 
     /// Returns all modifiers currently applied to this instance.
+    #[must_use]
     pub fn modifiers(&self) -> &[AttributeModifier] {
         &self.modifiers
     }

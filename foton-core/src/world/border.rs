@@ -413,7 +413,7 @@ impl WorldBorder {
         self.warning_blocks = warning_blocks;
     }
 
-    pub(crate) fn damage_per_block(&self) -> f64 {
+    pub(crate) const fn damage_per_block(&self) -> f64 {
         self.damage_per_block
     }
 
@@ -426,7 +426,7 @@ impl WorldBorder {
         Ok(())
     }
 
-    pub(crate) fn safe_zone(&self) -> f64 {
+    pub(crate) const fn safe_zone(&self) -> f64 {
         self.safe_zone
     }
 

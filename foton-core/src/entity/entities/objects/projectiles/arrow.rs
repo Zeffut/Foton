@@ -117,7 +117,7 @@ struct ArrowState {
     ///
     /// Vanilla parity: `AbstractArrow.firedFromWeapon`.
     fired_from_weapon: Option<ItemStack>,
-    /// The ammunition item, including PotionContents for tipped arrows.
+    /// The ammunition item, including `PotionContents` for tipped arrows.
     fired_from_ammo: Option<ItemStack>,
     /// Effects the arrow hands to whatever it hits.
     effects: Vec<MobEffectInstance>,

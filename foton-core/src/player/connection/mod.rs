@@ -235,12 +235,12 @@ impl Player {
         };
         self.set_client_information(info);
         let new_locale = self.client_information().language;
-        if old_locale != new_locale {
-            if let Some(player) = self.shared() {
-                self.fire_event(&mut PlayerLocaleChangeEvent::new(
-                    player, old_locale, new_locale,
-                ));
-            }
+        if old_locale != new_locale
+            && let Some(player) = self.shared()
+        {
+            self.fire_event(&mut PlayerLocaleChangeEvent::new(
+                player, old_locale, new_locale,
+            ));
         }
         self.publish_client_options();
 

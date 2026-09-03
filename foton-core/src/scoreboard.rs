@@ -289,7 +289,8 @@ impl Scoreboard {
         state
             .holder_teams
             .iter()
-            .filter_map(|(holder, assigned)| (assigned == team.name()).then(|| holder.to_owned()))
+            .filter(|(_, assigned)| *assigned == team.name())
+            .map(|(holder, _)| holder.to_owned())
             .collect()
     }
 

@@ -996,11 +996,11 @@ impl World {
         self.chunk_map.chunk_runtime.handle().spawn(async move {
             match prepared {
                 Ok(Some((path, content))) => {
-                    if let Some(parent) = path.parent() {
-                        if let Err(error) = create_dir_all(parent).await {
-                            tracing::error!(%error, "World level-data directory save failed");
-                            return;
-                        }
+                    if let Some(parent) = path.parent()
+                        && let Err(error) = create_dir_all(parent).await
+                    {
+                        tracing::error!(%error, "World level-data directory save failed");
+                        return;
                     }
                     if let Err(error) = fs::write(&path, content).await {
                         tracing::error!(%error, "World level-data save failed");

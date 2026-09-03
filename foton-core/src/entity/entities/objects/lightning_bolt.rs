@@ -799,6 +799,12 @@ mod spawn_primitive_tests {
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
     use foton_utils::ChunkPos;
     use glam::DVec3;
+    // The y read back is the literal handed to `spawn_lightning`, stored and
+    // returned with no arithmetic in between -- exact equality is the assertion.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the value is stored and read back unchanged"
+    )]
     #[test]
     fn world_spawn_lightning_uses_canonical_entity_path() {
         let world = fresh_test_world("spawn_lightning_primitive");

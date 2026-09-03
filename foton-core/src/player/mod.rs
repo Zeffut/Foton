@@ -414,7 +414,7 @@ impl Player {
 
     /// Updates the tab-list display name for every online viewer.
     pub fn set_tab_list_name(&self, name: Option<TextComponent>) {
-        *self.tab_list_name.lock() = name.clone();
+        (*self.tab_list_name.lock()).clone_from(&name);
         self.server()
             .broadcast_to_online(CPlayerInfoUpdate::update_display_name(self.uuid(), name));
     }

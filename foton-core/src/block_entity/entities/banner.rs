@@ -95,11 +95,10 @@ impl BannerBlockEntity {
             .layers()
             .iter()
             .map(|layer| {
-                let key = layer
-                    .pattern()
-                    .as_reference()
-                    .map(|pattern| pattern.key().to_string())
-                    .unwrap_or_else(|| layer.pattern().value().asset_id().to_string());
+                let key = layer.pattern().as_reference().map_or_else(
+                    || layer.pattern().value().asset_id().to_string(),
+                    |pattern| pattern.key().to_string(),
+                );
                 (key, layer.color() as u8)
             })
             .collect()

@@ -113,7 +113,7 @@ impl Experience {
     }
 
     /// Sets the progress bar without changing the level or total points.
-    pub fn set_progress(&mut self, progress: f32) {
+    pub const fn set_progress(&mut self, progress: f32) {
         if self.progress.to_bits() != progress.to_bits() {
             self.progress = progress;
             self.dirty = true;

@@ -510,8 +510,7 @@ impl Player {
                 let drag_type = menu
                     .behavior()
                     .quickcraft()
-                    .map(|kind| format!("{kind:?}"))
-                    .unwrap_or_else(|| "UNKNOWN".to_owned());
+                    .map_or_else(|| "UNKNOWN".to_owned(), |kind| format!("{kind:?}"));
                 let mut drag_event = InventoryDragEvent::new(
                     self.gameprofile.id,
                     menu.behavior().quickcraft_slots().to_vec(),
@@ -535,8 +534,8 @@ impl Player {
                     .map(|view| view.get_item(&guard).clone())
             });
             let click_name = match (packet.click_type, packet.button_num) {
-                (ClickType::Pickup, 0) => "LEFT",
-                (ClickType::Pickup, 1) => "RIGHT",
+                (ClickType::Pickup | ClickType::QuickCraft, 0) => "LEFT",
+                (ClickType::Pickup | ClickType::QuickCraft, 1) => "RIGHT",
                 (ClickType::QuickMove, 0) => "SHIFT_LEFT",
                 (ClickType::QuickMove, 1) => "SHIFT_RIGHT",
                 (ClickType::Swap, _) => "NUMBER_KEY",
@@ -544,8 +543,6 @@ impl Player {
                 (ClickType::Throw, 0) => "DROP",
                 (ClickType::Throw, 1) => "CONTROL_DROP",
                 (ClickType::PickupAll, _) => "DOUBLE_CLICK",
-                (ClickType::QuickCraft, 0) => "LEFT",
-                (ClickType::QuickCraft, 1) => "RIGHT",
                 _ => "UNKNOWN",
             };
             let cursor_item = menu.behavior().carried().clone();
@@ -1147,7 +1144,7 @@ impl Player {
         open_menu
             .menu
             .as_ref()
-            .and_then(|menu| menu.menu_type())
+            .and_then(Menu::menu_type)
             .map(|menu_type| menu_type.key.to_string())
             .or_else(|| {
                 open_menu

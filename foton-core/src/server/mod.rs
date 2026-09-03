@@ -495,7 +495,7 @@ pub struct Server {
     /// World removals requested by plugins, applied at the tick safe-point.
     pub(crate) pending_world_removals: SyncMutex<Vec<WorldRemovalRequest>>,
     /// Worlds ready to attach at the next tick safe-point.
-    pending_world_additions: SyncMutex<Vec<(Arc<World>, oneshot::Sender<Result<(), String>>)>>,
+    pending_world_additions: SyncMutex<Vec<PendingWorldAddition>>,
     /// Who is listening for what.
     ///
     /// Unlike the block and item registries this is not frozen after startup:
@@ -517,6 +517,10 @@ pub enum WorldCreationState {
 }
 
 /// Handle for a world creation request. Poll this from a safe-point; never block the game tick.
+/// A world built off-thread, paired with the channel that reports whether it
+/// attached at the next tick safe-point.
+type PendingWorldAddition = (Arc<World>, oneshot::Sender<Result<(), String>>);
+
 pub struct WorldCreationRequest {
     id: u64,
     receiver: oneshot::Receiver<Result<(), String>>,
@@ -730,7 +734,7 @@ impl Server {
     /// Creates a new server with only Foton's built-in commands.
     /// Builds a world using the same validated generator/storage pipeline as startup.
     ///
-    /// The caller must insert the returned world into WorldMap and attach it at a
+    /// The caller must insert the returned world into `WorldMap` and attach it at a
     /// tick safe-point.
     pub(crate) async fn build_world_from_config(
         &self,
@@ -943,14 +947,13 @@ impl Server {
                 .map_err(|error| format!("failed to load global data: {error}"))?
             {
                 let mut data = data;
-                if !data.last_active_domain.is_empty() {
-                    if let Some(domain_data) = player_data_storage
+                if !data.last_active_domain.is_empty()
+                    && let Some(domain_data) = player_data_storage
                         .load_domain(&data.last_active_domain, known.uuid())
                         .await
                         .map_err(|error| format!("failed to load player statistics: {error}"))?
-                    {
-                        data.statistics = domain_data.statistics;
-                    }
+                {
+                    data.statistics = domain_data.statistics;
                 }
                 global_player_data.insert(known.uuid(), data);
             }

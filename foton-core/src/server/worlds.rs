@@ -47,13 +47,13 @@ impl WorldMapSnapshot {
 
     /// Returns the stable loaded-world identifier.
     #[must_use]
-    pub fn key(&self) -> &Identifier {
+    pub const fn key(&self) -> &Identifier {
         &self.key
     }
 
     /// Returns the retained world reference.
     #[must_use]
-    pub fn world(&self) -> &Arc<World> {
+    pub const fn world(&self) -> &Arc<World> {
         &self.world
     }
 }
@@ -190,8 +190,9 @@ impl WorldMap {
         self.worlds.read().keys().cloned().collect()
     }
 
-    /// Iterates loaded world key/value pairs.
-    pub fn iter(&self) -> Vec<(Identifier, Arc<World>)> {
+    /// Captures owned key/world pairs for all currently loaded worlds.
+    #[must_use]
+    pub fn entry_snapshots(&self) -> Vec<(Identifier, Arc<World>)> {
         self.worlds
             .read()
             .iter()

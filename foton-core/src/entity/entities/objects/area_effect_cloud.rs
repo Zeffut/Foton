@@ -146,7 +146,7 @@ struct CloudState {
     radius_on_use: f32,
     /// Effects this cloud carries.
     ///
-    /// Keep complete MobEffectInstance metadata so cloud dosing preserves
+    /// Keep complete `MobEffectInstance` metadata so cloud dosing preserves
     /// vanilla ambient, particle and icon visibility flags.
     effects: Vec<MobEffectInstance>,
     /// Entity id to the tick it may be dosed again on.

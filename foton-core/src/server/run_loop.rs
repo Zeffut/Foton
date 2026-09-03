@@ -650,7 +650,7 @@ impl Server {
                 continue;
             };
             if let Err(error) = workers.add(&world) {
-                log::error!("Failed to start tick worker for {}: {}", key, error);
+                log::error!("Failed to start tick worker for {key}: {error}");
                 let _ = self.worlds.remove(&key);
                 let _ = completion.send(Err(error.to_string()));
             } else {
@@ -695,9 +695,7 @@ impl Server {
         key: Identifier,
         save: bool,
     ) -> Option<Receiver<Result<usize, String>>> {
-        if self.worlds.get(&key).is_none() {
-            return None;
-        }
+        self.worlds.get(&key)?;
         let (sender, receiver) = channel();
         self.pending_world_removals
             .lock()

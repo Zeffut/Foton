@@ -96,7 +96,7 @@ impl BlockItem {
         if let Some(player) = context.player()
             && let Some(shared) = player.shared()
         {
-            let item = context.with_item(|stack| stack.clone());
+            let item = context.with_item(Clone::clone);
             let mut event = BlockPlaceEvent::new(shared, place_pos, new_state, item);
             player.fire_event(&mut event);
             if event.is_cancelled() {

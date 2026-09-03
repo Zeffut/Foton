@@ -314,7 +314,9 @@ impl Player {
         let result = food.tick(difficulty, natural_regen, current_health, max_health);
         let current = food.food_level;
         drop(food);
-        let applied_level = if current != previous {
+        let applied_level = if current == previous {
+            current
+        } else {
             let Some(level) = self.allow_food_level_change(current) else {
                 self.food_data.lock().food_level = previous;
                 return;
@@ -322,8 +324,6 @@ impl Player {
             let level = level.clamp(0, 20);
             self.food_data.lock().food_level = level;
             level
-        } else {
-            current
         };
         let mut food = self.food_data.lock();
 

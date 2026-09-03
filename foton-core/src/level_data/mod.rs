@@ -294,7 +294,7 @@ pub struct WeatherState {
     pub clear_weather_time: i32,
 }
 
-fn default_keep_spawn_in_memory() -> bool {
+const fn default_keep_spawn_in_memory() -> bool {
     true
 }
 

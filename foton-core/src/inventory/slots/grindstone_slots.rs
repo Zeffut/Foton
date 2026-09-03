@@ -59,6 +59,7 @@ impl GrindstoneHandler {
     }
 
     /// Returns both inputs.
+    #[must_use]
     pub fn input_snapshot(&self, guard: &ContainerLockGuard) -> Option<(ItemStack, ItemStack)> {
         let container = guard.get(self.input_id())?;
         Some((

@@ -57,7 +57,8 @@ pub struct GlobalPlayerData {
     pub first_played: i64,
     /// Unix epoch milliseconds of the most recent observed login/logout.
     pub last_played: i64,
-    /// Statistics from the player's last active domain, cached for synchronous OfflinePlayer lookups.
+    /// Statistics from the player's last active domain, cached for synchronous
+    /// `OfflinePlayer` lookups.
     pub statistics: Vec<PersistentStatistic>,
     /// Whether this player is allowed by the server whitelist.
     pub whitelisted: bool,
@@ -1022,8 +1023,9 @@ fn unix_epoch_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
-        .unwrap_or(0)
+        .map_or(0, |duration| {
+            duration.as_millis().min(i64::MAX as u128) as i64
+        })
 }
 
 fn encode_file(

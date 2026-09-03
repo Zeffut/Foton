@@ -22,7 +22,7 @@ impl PlayerSleepState {
         self.sleeping_ignored
     }
 
-    pub(super) fn set_sleeping_ignored(&mut self, value: bool) {
+    pub(super) const fn set_sleeping_ignored(&mut self, value: bool) {
         self.sleeping_ignored = value;
     }
 

@@ -1043,15 +1043,10 @@ pub(crate) fn change_entity_world(
         }
         teleport_transition.position = event.to_position();
         if event.to_world() != teleport_transition.target_world.key.to_string() {
-            let Some(target_key) = event.to_world().parse::<Identifier>().ok() else {
-                return None;
-            };
-            let Some(target_world) = source_world
+            let target_key = event.to_world().parse::<Identifier>().ok()?;
+            let target_world = source_world
                 .server()
-                .and_then(|server| server.worlds.get_owned(&target_key))
-            else {
-                return None;
-            };
+                .and_then(|server| server.worlds.get_owned(&target_key))?;
             teleport_transition.target_world = target_world;
         }
     }
