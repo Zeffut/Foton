@@ -204,6 +204,13 @@ impl DropChances {
     }
 }
 
+/// The per-mob state vanilla keeps in `Mob`'s own fields.
+///
+/// Foton has no class hierarchy to inherit those fields from, so every mob
+/// holds one of these and [`Mob`]'s default methods reach it through
+/// [`Mob::mob_base`]. Each field is behind its own mutex rather than the whole
+/// struct behind one: a goal reading the navigation while another writes the
+/// target is the normal case, not contention to be serialised.
 #[derive(Debug)]
 pub struct MobBase {
     goal_selector: SyncMutex<GoalSelector>,
@@ -239,6 +246,10 @@ impl MobHomeRestriction {
 }
 
 impl MobBase {
+    /// Creates the state a freshly constructed mob starts with.
+    ///
+    /// The values match vanilla's field initialisers: no target, no home, no
+    /// leash, persistence off, loot pickup off, and the default drop chances.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -261,11 +272,17 @@ impl MobBase {
         }
     }
 
+    /// The goals that decide what this mob does, vanilla's `Mob.goalSelector`.
     #[must_use]
     pub const fn goal_selector(&self) -> &SyncMutex<GoalSelector> {
         &self.goal_selector
     }
 
+    /// The goals that decide what this mob attacks, vanilla's
+    /// `Mob.targetSelector`.
+    ///
+    /// Vanilla runs it as a second, separate selector so that picking a target
+    /// and acting on one can hold different goal slots at the same tick.
     #[must_use]
     pub const fn target_selector(&self) -> &SyncMutex<GoalSelector> {
         &self.target_selector
@@ -276,6 +293,12 @@ impl MobBase {
         &self.sensing
     }
 
+    /// The current target, if it still exists and still passes `is_valid`.
+    ///
+    /// Vanilla parity: `Mob.getTarget` through `asValidTarget`. The target is
+    /// held weakly, so a target that has since been removed reads as `None` and
+    /// clears the field on the way out -- which is why this takes `&self` and
+    /// still mutates.
     #[must_use]
     pub fn target(&self, is_valid: impl Fn(&dyn LivingEntity) -> bool) -> Option<SharedEntity> {
         let mut target = self.target.lock();
@@ -290,6 +313,11 @@ impl MobBase {
         Some(upgraded)
     }
 
+    /// Sets the target, returning whether it was accepted.
+    ///
+    /// Vanilla parity: `Mob.setTarget`. Clearing it always succeeds; an entity
+    /// that is not living, or that `is_valid` rejects, is refused and leaves the
+    /// mob with no target at all.
     pub fn set_target(
         &self,
         target: Option<&SharedEntity>,
@@ -314,26 +342,37 @@ impl MobBase {
         true
     }
 
+    /// The move, look and jump controls, vanilla's `MoveControl`,
+    /// `LookControl` and `JumpControl` held together.
     #[must_use]
     pub const fn controls(&self) -> &SyncMutex<MobControls> {
         &self.controls
     }
 
+    /// The path this mob is following, vanilla's `Mob.navigation`.
     #[must_use]
     pub const fn navigation(&self) -> &SyncMutex<PathNavigation> {
         &self.navigation
     }
 
+    /// Per-block-type path costs, vanilla's `Mob.pathfindingMalus` map.
+    ///
+    /// A malus of `-1` means the mob refuses that block type outright rather
+    /// than paying to cross it.
     #[must_use]
     pub const fn pathfinding_malus(&self) -> &SyncMutex<PathfindingMalus> {
         &self.pathfinding_malus
     }
 
+    /// Whether this mob survives despawning, vanilla's
+    /// `Mob.persistenceRequired`.
     #[must_use]
     pub const fn persistence_required(&self) -> &SyncMutex<bool> {
         &self.persistence_required
     }
 
+    /// Whether this mob picks up items it walks over, vanilla's
+    /// `Mob.canPickUpLoot`.
     pub const fn can_pick_up_loot(&self) -> &SyncMutex<bool> {
         &self.can_pick_up_loot
     }
@@ -358,11 +397,16 @@ impl MobBase {
         &self.leash_data
     }
 
+    /// Ticks since this mob last made its idle noise.
+    ///
+    /// Vanilla parity: `Mob.ambientSoundTime`, which counts up until it passes
+    /// [`Mob::ambient_sound_interval`] and then resets to a negative value.
     #[must_use]
     pub fn ambient_sound_time(&self) -> i32 {
         *self.ambient_sound_time.lock()
     }
 
+    /// Overwrites the idle-noise counter. See [`Self::ambient_sound_time`].
     pub fn set_ambient_sound_time(&self, ambient_sound_time: i32) {
         *self.ambient_sound_time.lock() = ambient_sound_time;
     }
@@ -374,11 +418,16 @@ impl MobBase {
         previous
     }
 
+    /// Experience this mob drops when killed, vanilla's `Mob.xpReward`.
+    ///
+    /// Computed once at spawn from `getBaseExperienceReward` and its equipment,
+    /// not recomputed on death.
     #[must_use]
     pub fn xp_reward(&self) -> i32 {
         *self.xp_reward.lock()
     }
 
+    /// Sets the experience drop. See [`Self::xp_reward`].
     pub fn set_xp_reward(&self, xp_reward: i32) {
         *self.xp_reward.lock() = xp_reward;
     }
@@ -410,11 +459,26 @@ impl<T: Mob> MobSource for T {
     }
 }
 
+/// A living entity that vanilla derives from `Mob`: it has goals, a
+/// navigation, and a target.
+///
+/// Every method here names the vanilla method it stands for. The default
+/// bodies are `Mob`'s own, so a mob overrides only what its Java class
+/// overrides; where a vanilla override would call `super`, the default body is
+/// exposed separately under a `mob_`-prefixed name, because Rust has no
+/// `super`.
 pub trait Mob: LivingEntity + MobSource {
+    /// The state this mob holds on `Mob`'s behalf. See [`MobBase`].
     fn mob_base(&self) -> &MobBase;
 
+    /// The packed flag byte vanilla synchronises as `DATA_MOB_FLAGS_ID`.
+    ///
+    /// Bit 1 is "no AI", bit 2 "left-handed", bit 4 "aggressive". Read them
+    /// through [`Self::is_no_ai`], [`Self::is_left_handed`] and
+    /// [`Self::is_aggressive`] rather than masking here.
     fn mob_flags(&self) -> i8;
 
+    /// Writes the whole flag byte. See [`Self::mob_flags`].
     fn set_mob_flags(&self, flags: i8);
 
     /// Returns vanilla `Mob.isSaddled`.
@@ -449,17 +513,28 @@ pub trait Mob: LivingEntity + MobSource {
         None
     }
 
+    /// The per-mob work that runs inside the server AI step.
+    ///
+    /// Vanilla parity: `Mob.customServerAiStep`, the hook a subclass overrides
+    /// instead of `serverAiStep`, which is `final`.
     fn custom_server_ai_step(&self) {}
 
     /// Runs vanilla `Mob.ate`, invoked after an eating goal resolves a block.
     fn ate(&self) {}
 
+    /// Runs this mob's goal and target selectors for one tick.
+    ///
+    /// Empty by default because a brain mob has no selectors to run: vanilla
+    /// splits here between `Mob.serverAiStep`'s selector ticks and the brain's
+    /// own `Brain.tick`.
     fn tick_goal_selectors(&self) {}
 
+    /// Experience dropped on death, vanilla's `Mob.xpReward`.
     fn xp_reward(&self) -> i32 {
         self.mob_base().xp_reward()
     }
 
+    /// Sets the experience dropped on death. See [`Self::xp_reward`].
     fn set_xp_reward(&self, xp_reward: i32) {
         self.mob_base().set_xp_reward(xp_reward);
     }
@@ -501,6 +576,12 @@ pub trait Mob: LivingEntity + MobSource {
         self.finish_target_change(previous, target)
     }
 
+    /// Announces a target change and undoes it if a plugin cancels.
+    ///
+    /// Split out of [`Self::set_target`] because a mob that sets its target
+    /// through the brain reaches the same event from a different path. A
+    /// change to the same entity fires nothing, matching vanilla, which only
+    /// notifies on an actual transition.
     fn finish_target_change(
         &self,
         previous: Option<SharedEntity>,
@@ -522,6 +603,11 @@ pub trait Mob: LivingEntity + MobSource {
         true
     }
 
+    /// Whether `target` may be held as this mob's target at all.
+    ///
+    /// Vanilla parity: `Mob.asValidTarget`, which is what drops a target that
+    /// switched to creative or spectator rather than waiting for the goal to
+    /// notice.
     fn is_valid_target(&self, target: &dyn LivingEntity) -> bool {
         if target
             .as_player()
@@ -547,6 +633,12 @@ pub trait Mob: LivingEntity + MobSource {
         target.entity_type() != &vanilla_entities::GHAST && LivingEntity::can_attack(self, target)
     }
 
+    /// The body of vanilla `Mob.getBaseExperienceReward`.
+    ///
+    /// Each worn equipment slot that can carry experience and is not a
+    /// guaranteed drop adds `1 + random(0..3)`, on top of the mob's own
+    /// reward. A mob rewarding nothing stays at nothing: equipment does not
+    /// make a zero-experience mob pay out.
     fn base_experience_reward_mob(&self) -> i32 {
         let xp_reward = self.xp_reward();
         if xp_reward <= 0 {
@@ -570,6 +662,7 @@ pub trait Mob: LivingEntity + MobSource {
         result
     }
 
+    /// Ticks between idle noises, vanilla's `Mob.getAmbientSoundInterval`.
     fn ambient_sound_interval(&self) -> i32 {
         if let Some(animal) = self.as_animal() {
             return animal.ambient_sound_interval_animal();
@@ -578,14 +671,23 @@ pub trait Mob: LivingEntity + MobSource {
         80
     }
 
+    /// The idle noise this mob makes, vanilla's `Mob.getAmbientSound`.
+    ///
+    /// `None` is vanilla's `null`: a mob that makes no idle noise at all.
     fn ambient_sound(&self) -> Option<SoundEventRef> {
         None
     }
 
+    /// Plays the idle noise, vanilla's `Mob.playAmbientSound`.
     fn play_ambient_sound(&self) {
         self.make_sound(self.ambient_sound());
     }
 
+    /// Restarts the idle-noise countdown, vanilla's
+    /// `Mob.resetAmbientSoundTime`.
+    ///
+    /// The counter is set to minus the interval, so it has to climb back
+    /// through zero before the next noise can roll.
     fn reset_ambient_sound_time(&self) {
         self.mob_base()
             .set_ambient_sound_time(-self.ambient_sound_interval());
@@ -715,6 +817,12 @@ pub trait Mob: LivingEntity + MobSource {
         check_mob_spawn_rules(world, spawn_reason, pos)
     }
 
+    /// Last chance to shape a mob before it enters the world.
+    ///
+    /// Vanilla parity: `Mob.finalizeSpawn`. The returned group data is passed
+    /// to the next mob of the same spawn attempt, which is how a pack shares
+    /// one leader or one variant. A mob overriding this applies its own data
+    /// and then delegates to [`Self::finalize_spawn_mob_base`].
     fn finalize_spawn(
         &self,
         world: &Arc<World>,
@@ -724,6 +832,11 @@ pub trait Mob: LivingEntity + MobSource {
         self.finalize_spawn_mob_base(world, spawn_reason, group_data)
     }
 
+    /// The body of [`Self::finalize_spawn`], callable from an override.
+    ///
+    /// Records the spawn reason and rolls the random spawn bonus. Rust has no
+    /// `super`, so this exists separately for every mob that adds to
+    /// finalisation instead of replacing it.
     fn finalize_spawn_mob_base(
         &self,
         _world: &Arc<World>,
@@ -886,19 +999,37 @@ pub trait Mob: LivingEntity + MobSource {
         // TODO: Apply USE_REMAINDER components once item use-remainder support exists.
     }
 
+    /// Whether this mob may despawn at `dist_sqr` from the nearest player.
+    ///
+    /// Vanilla parity: `Mob.removeWhenFarAway`. Anything that is not an animal
+    /// answers yes; an animal defers to its own rule, which is what keeps a
+    /// tamed or bred animal in the world.
     fn remove_when_far_away(&self, dist_sqr: f64) -> bool {
         self.as_animal()
             .is_none_or(|animal| animal.remove_when_far_away_animal(dist_sqr))
     }
 
+    /// Whether something other than the persistence flag is keeping this mob
+    /// loaded.
+    ///
+    /// Vanilla parity: `Mob.requiresCustomPersistence` -- a passenger or a
+    /// leashed mob, neither of which may vanish under the player.
     fn requires_custom_persistence(&self) -> bool {
         self.is_passenger() || self.is_leashed()
     }
 
+    /// Whether this mob is exempt from despawning, vanilla's
+    /// `Mob.isPersistenceRequired`.
     fn is_persistence_required(&self) -> bool {
         *self.mob_base().persistence_required().lock()
     }
 
+    /// Marks this mob as never despawning, vanilla's
+    /// `Mob.setPersistenceRequired`.
+    ///
+    /// Vanilla only ever sets the flag, never clears it -- naming a mob or
+    /// putting it in a boat is one-way. [`Self::set_persistence_required_value`]
+    /// is the Bukkit-facing exception.
     fn set_persistence_required(&self) {
         *self.mob_base().persistence_required().lock() = true;
     }
@@ -913,18 +1044,30 @@ pub trait Mob: LivingEntity + MobSource {
         *self.mob_base().can_pick_up_loot().lock()
     }
 
+    /// Sets whether this mob picks up items, vanilla's
+    /// `Mob.setCanPickUpLoot`.
     fn set_can_pick_up_loot(&self, can_pick_up_loot: bool) {
         *self.mob_base().can_pick_up_loot().lock() = can_pick_up_loot;
     }
 
+    /// The chance the item in `slot` drops on death.
+    ///
+    /// Vanilla parity: `Mob.getDropChances`. A value above `1.0` marks a
+    /// guaranteed drop and also excludes the slot from the equipment
+    /// experience bonus -- see [`Self::base_experience_reward_mob`].
     fn equipment_drop_chance(&self, slot: EquipmentSlot) -> f32 {
         self.mob_base().drop_chances().lock().by_equipment(slot)
     }
 
+    /// Whether `slot` survives death instead of rolling its drop chance.
+    ///
+    /// Vanilla parity: the preserved set that `Mob.dropPreservedEquipment`
+    /// walks.
     fn is_equipment_drop_preserved(&self, slot: EquipmentSlot) -> bool {
         self.mob_base().drop_chances().lock().is_preserved(slot)
     }
 
+    /// Makes `slot` always drop, vanilla's `Mob.setGuaranteedDrop`.
     fn set_guaranteed_drop(&self, slot: EquipmentSlot) {
         self.mob_base()
             .drop_chances()
@@ -1011,6 +1154,11 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// The body of vanilla `Mob.dropCustomDeathLoot`: the equipment roll.
+    ///
+    /// Each worn slot rolls its drop chance, with the looting bonus applied
+    /// only when a player landed the kill. A mob overriding
+    /// `dropCustomDeathLoot` calls this for the equipment half.
     fn drop_custom_death_loot_mob(&self, _source: &DamageSource, killed_by_player: bool) {
         if self.level().is_none() {
             return;
@@ -1064,6 +1212,11 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// Writes the mob-owned half of this entity's save data.
+    ///
+    /// Vanilla parity: `Mob.addAdditionalSaveData`. Keys match vanilla's
+    /// exactly, and the optional ones are omitted rather than written empty,
+    /// so a world saved here reloads in a vanilla server.
     fn save_mob(&self, nbt: &mut NbtCompound) {
         nbt.insert("CanPickUpLoot", i8::from(self.can_pick_up_loot()));
         nbt.insert(
@@ -1101,6 +1254,11 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// Reads the mob-owned half of this entity's save data.
+    ///
+    /// Vanilla parity: `Mob.readAdditionalSaveData`. A missing key leaves the
+    /// field at its constructor default, which is how a mob written by an
+    /// older version still loads.
     fn load_mob(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
         self.set_can_pick_up_loot(nbt.byte("CanPickUpLoot").is_some_and(|value| value != 0));
         *self.mob_base().persistence_required().lock() = nbt
@@ -1131,14 +1289,21 @@ pub trait Mob: LivingEntity + MobSource {
         self.set_no_ai(nbt.byte("NoAI").is_some_and(|value| value != 0));
     }
 
+    /// Overrides the loot table this mob drops from on death.
+    ///
+    /// Vanilla parity: the `DeathLootTable` tag. `None` restores the table the
+    /// entity type carries.
     fn set_death_loot_table(&self, loot_table: Option<Identifier>) {
         *self.mob_base().death_loot_table().lock() = loot_table;
     }
 
+    /// Fixes the roll of the death loot table, vanilla's
+    /// `DeathLootTableSeed`. Zero means "roll freshly".
     fn set_death_loot_table_seed(&self, seed: i64) {
         *self.mob_base().death_loot_table_seed().lock() = seed;
     }
 
+    /// The overridden death loot table, resolved, if one was set.
     fn custom_death_loot_table(&self) -> Option<LootTableRef> {
         self.mob_base()
             .death_loot_table()
@@ -1147,26 +1312,42 @@ pub trait Mob: LivingEntity + MobSource {
             .and_then(|key| REGISTRY.loot_tables.by_key(key))
     }
 
+    /// Whether this mob drops from an overridden table rather than its entity
+    /// type's own.
     fn has_custom_death_loot_table(&self) -> bool {
         self.mob_base().death_loot_table().lock().is_some()
     }
 
+    /// The fixed roll for the death loot table, or zero for a fresh roll.
     fn death_loot_table_seed(&self) -> i64 {
         *self.mob_base().death_loot_table_seed().lock()
     }
 
+    /// Drops the override, returning this mob to its entity type's loot table
+    /// and a fresh roll.
     fn clear_custom_death_loot_table(&self) {
         *self.mob_base().death_loot_table().lock() = None;
     }
 
+    /// Whether a leash currently connects this mob to something.
+    ///
+    /// Vanilla parity: `Leashable.isLeashed`. False for a mob whose leash data
+    /// exists but whose holder has not been resolved yet -- see
+    /// [`Self::may_be_leashed`].
     fn is_leashed(&self) -> bool {
         self.leash_holder().is_some()
     }
 
+    /// Whether this mob holds leash data at all, resolved or not.
+    ///
+    /// Vanilla parity: `Leashable.mayBeLeashed`. A mob loaded from disk has
+    /// data naming a holder it has not found yet, and must not be treated as
+    /// free in the meantime.
     fn may_be_leashed(&self) -> bool {
         self.mob_base().leash_data().lock().is_some()
     }
 
+    /// What this mob is leashed to, vanilla's `Leashable.getLeashHolder`.
     fn leash_holder(&self) -> Option<SharedEntity> {
         self.mob_base()
             .leash_data()
@@ -1175,6 +1356,10 @@ pub trait Mob: LivingEntity + MobSource {
             .and_then(LeashData::holder)
     }
 
+    /// The leash as it should be written to disk: a holder's UUID, or the
+    /// block position of a fence post.
+    ///
+    /// Vanilla parity: what `Leashable.writeLeashData` persists.
     fn leash_attachment(&self) -> Option<LeashAttachment> {
         self.mob_base()
             .leash_data()
@@ -1183,40 +1368,68 @@ pub trait Mob: LivingEntity + MobSource {
             .map(LeashData::saved_attachment)
     }
 
+    /// Records a leash whose holder is not loaded yet.
+    ///
+    /// Vanilla parity: `Leashable.setDelayedLeashHolderId` and the delayed
+    /// half of `readLeashData`. The holder is resolved on a later tick, once
+    /// the chunk holding it is in memory.
     fn set_delayed_leash_attachment(&self, attachment: LeashAttachment) {
         *self.mob_base().leash_data().lock() = Some(LeashData::from_delayed_attachment(attachment));
     }
 
+    /// Whether a player may put this mob on a lead at all, vanilla's
+    /// `Leashable.canBeLeashed`.
     fn can_be_leashed(&self) -> bool {
         // TODO: Return false for enemy mobs once hostile mob foundations exist.
         true
     }
 
+    /// Distance to `holder`, measured between bounding-box centres.
+    ///
+    /// Vanilla parity: `Leashable.leashDistanceTo`. Centres, not eye or foot
+    /// positions, which is why a tall mob does not snap its lead early.
     fn leash_distance_to(&self, holder: &dyn Entity) -> f64 {
         leash_bounding_box_center(self.as_entity_event_source())
             .distance(leash_bounding_box_center(holder))
     }
 
+    /// Distance past which the lead breaks, vanilla's
+    /// `Leashable.leashSnapDistance`.
     fn leash_snap_distance(&self) -> f64 {
         LEASH_SNAP_DISTANCE
     }
 
+    /// Distance past which the lead starts pulling, vanilla's
+    /// `Leashable.leashElasticDistance`.
     fn leash_elastic_distance(&self) -> f64 {
         LEASH_ELASTIC_DISTANCE
     }
 
+    /// Runs once when the lead is attached, vanilla's
+    /// `Leashable.whenLeashedTo`.
     fn when_leashed_to(&self, holder: &dyn Entity) {
         holder.notify_leash_holder(self.as_entity_event_source());
     }
 
+    /// What this mob does when the lead passes its snap distance.
+    ///
+    /// Vanilla parity: `Leashable.leashTooFarBehaviour`, which drops the lead.
     fn leash_too_far_behavior(&self) {
         self.drop_leash();
     }
 
+    /// Runs each tick the lead is pulling this mob.
+    ///
+    /// Vanilla parity: `Leashable.onElasticLeashPull`, which resets fall
+    /// distance so a mob dangling on a lead takes no fall damage.
     fn on_elastic_leash_pull(&self) {
         self.check_fall_distance_accumulation();
     }
 
+    /// Runs each tick the holder is within the elastic distance.
+    ///
+    /// Vanilla parity: `Leashable.closeRangeLeashBehaviour`, empty for most
+    /// mobs and overridden by the ones that follow their holder.
     fn close_range_leash_behavior(&self, _holder: &dyn Entity) {}
 
     /// Returns whether this mob hangs four leads off a single holder.
@@ -1273,6 +1486,11 @@ pub trait Mob: LivingEntity + MobSource {
         true
     }
 
+    /// Spends one tick of the spin a lead imparted, and decays what is left.
+    ///
+    /// Vanilla parity: the angular-momentum block of `Leashable.tickLeash`.
+    /// Returns `false` when this mob has no leash data, so the caller can skip
+    /// the rest of the leash tick.
     fn apply_leash_angular_momentum(&self) -> bool {
         let angular_friction = self.leash_angular_friction();
         let angular_momentum = {
@@ -1288,11 +1506,16 @@ pub trait Mob: LivingEntity + MobSource {
         true
     }
 
+    /// Turns this mob by one tick's worth of leash spin.
+    ///
+    /// Subtracted from yaw, matching vanilla's sign: a lead pulled clockwise
+    /// spins the mob clockwise.
     fn rotate_by_leash_angular_momentum(&self, angular_momentum: f64) {
         let (yaw, pitch) = self.rotation();
         self.set_rotation((yaw - angular_momentum as f32, pitch));
     }
 
+    /// The spin this mob still carries from its lead, if it is leashed.
     fn leash_angular_momentum(&self) -> Option<f64> {
         self.mob_base()
             .leash_data()
@@ -1301,6 +1524,11 @@ pub trait Mob: LivingEntity + MobSource {
             .map(|leash_data| leash_data.angular_momentum)
     }
 
+    /// How much leash spin survives one tick.
+    ///
+    /// Vanilla parity: `Leashable.angularFriction`. On the ground the block
+    /// underfoot decides it, so ice keeps a mob spinning; in fluid it is a
+    /// flat `0.8`, and in air `0.91`.
     fn leash_angular_friction(&self) -> f64 {
         if self.on_ground() {
             let Some(world) = self.level() else {
@@ -1319,12 +1547,21 @@ pub trait Mob: LivingEntity + MobSource {
         0.91
     }
 
+    /// Whether a lead from `holder` to this mob may be created now.
+    ///
+    /// Vanilla parity: `Leashable.canHaveALeashAttachedTo` -- not itself, not
+    /// already beyond snapping distance, and leashable at all.
     fn can_have_a_leash_attached_to(&self, holder: &dyn Entity) -> bool {
         self.id() != holder.id()
             && self.leash_distance_to(holder) <= self.leash_snap_distance()
             && self.can_be_leashed()
     }
 
+    /// Attaches this mob's lead to `holder`, returning whether it took.
+    ///
+    /// Vanilla parity: `Leashable.setLeashedTo`. Re-attaching to a new holder
+    /// keeps the existing leash data rather than replacing it, so accumulated
+    /// spin survives a hand-off.
     fn set_leashed_to(&self, holder: &SharedEntity) -> bool {
         if self.id() == holder.id() {
             return false;
@@ -1351,6 +1588,10 @@ pub trait Mob: LivingEntity + MobSource {
         true
     }
 
+    /// Runs one tick of leash physics: resolve a delayed holder, snap or
+    /// pull, and spend the spin.
+    ///
+    /// Vanilla parity: `Leashable.tickLeash`.
     fn tick_leash(&self) {
         if let Some(holder) = self.leash_holder() {
             if !self.can_interact_with_level() || !holder.can_interact_with_level() {
@@ -1431,6 +1672,8 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// Breaks the lead and drops a lead item, vanilla's
+    /// `Leashable.dropLeash`.
     fn drop_leash(&self) {
         if self.leash_holder().is_none() {
             return;
@@ -1443,6 +1686,8 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// Breaks the lead without dropping an item, vanilla's
+    /// `Leashable.removeLeash`.
     fn remove_leash(&self) {
         if self.leash_holder().is_some()
             && let Some(holder) = self.remove_leash_state()
@@ -1451,6 +1696,10 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// Clears the leash data and returns the holder it named.
+    ///
+    /// The shared half of [`Self::drop_leash`] and [`Self::remove_leash`],
+    /// which differ only in whether a lead item hits the ground.
     fn remove_leash_state(&self) -> Option<SharedEntity> {
         self.mob_base()
             .leash_data()
@@ -1459,42 +1708,67 @@ pub trait Mob: LivingEntity + MobSource {
             .and_then(|leash_data| leash_data.holder())
     }
 
+    /// Whether this mob is inside its home radius right now.
+    ///
+    /// Vanilla parity: `Mob.isWithinHome()`. Always true for a mob with no
+    /// home, which is what lets a home-unaware goal use this unconditionally.
     fn is_within_home(&self) -> bool {
         self.is_within_home_pos(self.block_position())
     }
 
+    /// Whether `pos` is inside this mob's home radius, vanilla's
+    /// `Mob.isWithinHome(BlockPos)`.
     fn is_within_home_pos(&self, pos: BlockPos) -> bool {
         let home = *self.mob_base().home_restriction().lock();
         home.radius == -1
             || block_pos_distance_sqr(home.position, pos) < home_radius_sqr(home.radius)
     }
 
+    /// Whether `pos` is inside this mob's home radius, vanilla's
+    /// `Mob.isWithinHome(Vec3)`.
     fn is_within_home_vec(&self, pos: DVec3) -> bool {
         let home = *self.mob_base().home_restriction().lock();
         home.radius == -1
             || block_center_distance_sqr(home.position, pos) < home_radius_sqr(home.radius)
     }
 
+    /// Ties this mob to `position` within `radius`, vanilla's `Mob.setHomeTo`.
     fn set_home_to(&self, position: BlockPos, radius: i32) {
         *self.mob_base().home_restriction().lock() = MobHomeRestriction { position, radius };
     }
 
+    /// The centre of this mob's home, vanilla's `Mob.getHomePosition`.
+    ///
+    /// Meaningless unless [`Self::has_home`] is true.
     fn home_position(&self) -> BlockPos {
         self.mob_base().home_restriction().lock().position
     }
 
+    /// The radius of this mob's home, vanilla's `Mob.getHomeRadius`.
+    ///
+    /// `-1` is vanilla's "no home", and is what [`Self::has_home`] tests.
     fn home_radius(&self) -> i32 {
         self.mob_base().home_restriction().lock().radius
     }
 
+    /// Frees this mob from its home, vanilla's `Mob.clearHome`.
     fn clear_home(&self) {
         self.mob_base().home_restriction().lock().radius = -1;
     }
 
+    /// Whether this mob is tied to a home, vanilla's `Mob.hasHome`.
     fn has_home(&self) -> bool {
         self.home_radius() != -1
     }
 
+    /// Decides whether this mob is removed for being unwatched.
+    ///
+    /// Vanilla parity: `Mob.checkDespawn`. Four outcomes in order: a mob not
+    /// allowed in peaceful goes immediately; a persistent one only has its
+    /// idle clock reset; one past its category's despawn distance goes; and
+    /// one past the no-despawn distance that has idled for 600 ticks goes with
+    /// probability 1/800 per tick, which is what makes distant despawning
+    /// gradual rather than a cliff.
     fn check_mob_despawn(&self) {
         if self
             .level()
@@ -1539,11 +1813,18 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// Squared distance to the nearest player, or `None` when the world holds
+    /// none.
+    ///
+    /// Squared because every caller compares it against a squared threshold;
+    /// no despawn decision needs the real distance.
     fn nearest_player_distance_sqr(&self) -> Option<f64> {
         let world = self.level()?;
         world.nearest_player_distance_sqr(self.position())
     }
 
+    /// The body of vanilla `Mob.getControllingPassenger`: the first passenger,
+    /// when this mob is steerable at all.
     fn controlling_passenger_mob(&self) -> Option<SharedEntity> {
         let first_passenger = self.first_passenger()?;
         if self.is_no_ai() || !first_passenger.is_mob() || !first_passenger.can_control_vehicle() {
@@ -1553,6 +1834,10 @@ pub trait Mob: LivingEntity + MobSource {
         Some(first_passenger)
     }
 
+    /// The path cost this mob pays to cross `path_type`.
+    ///
+    /// Vanilla parity: `Mob.getPathfindingMalus`. A negative value means the
+    /// mob refuses the block type outright.
     fn get_pathfinding_malus(&self, path_type: PathType) -> f32 {
         self.mob_base().pathfinding_malus().lock().get(path_type)
     }
@@ -1562,6 +1847,8 @@ pub trait Mob: LivingEntity + MobSource {
         3
     }
 
+    /// Sets the path cost for `path_type`, vanilla's
+    /// `Mob.setPathfindingMalus`.
     fn set_pathfinding_malus(&self, path_type: PathType, malus: f32) {
         self.mob_base()
             .pathfinding_malus()
@@ -1569,22 +1856,31 @@ pub trait Mob: LivingEntity + MobSource {
             .set(path_type, malus);
     }
 
+    /// Whether this mob's AI is switched off, the `NoAI` tag.
     fn is_no_ai(&self) -> bool {
         self.mob_flags() & MOB_FLAG_NO_AI != 0
     }
 
+    /// Switches this mob's AI off or on. See [`Self::is_no_ai`].
     fn set_no_ai(&self, no_ai: bool) {
         self.set_mob_flag(MOB_FLAG_NO_AI, no_ai);
     }
 
+    /// Whether this mob holds its weapon in the off hand, the `LeftHanded`
+    /// tag. Rolled once at spawn, and purely visual.
     fn is_left_handed(&self) -> bool {
         self.mob_flags() & MOB_FLAG_LEFT_HANDED != 0
     }
 
+    /// Sets the handedness. See [`Self::is_left_handed`].
     fn set_left_handed(&self, left_handed: bool) {
         self.set_mob_flag(MOB_FLAG_LEFT_HANDED, left_handed);
     }
 
+    /// Whether this mob is showing its aggressive pose.
+    ///
+    /// Synchronised to the client, which is what raises a zombie's arms or
+    /// bristles a wolf; it is not the same as having a target.
     fn is_aggressive(&self) -> bool {
         self.mob_flags() & MOB_FLAG_AGGRESSIVE != 0
     }
@@ -1830,16 +2126,22 @@ pub trait Mob: LivingEntity + MobSource {
         base.inflate_xyz(horizontal_expansion, 0.0, horizontal_expansion)
     }
 
+    /// Sets the aggressive pose. See [`Self::is_aggressive`].
     fn set_aggressive(&self, aggressive: bool) {
         self.set_mob_flag(MOB_FLAG_AGGRESSIVE, aggressive);
     }
 
+    /// Sets or clears one bit of [`Self::mob_flags`], leaving the rest alone.
     fn set_mob_flag(&self, flag: i8, enabled: bool) {
         let flags = self.mob_flags();
         let next = if enabled { flags | flag } else { flags & !flag };
         self.set_mob_flags(next);
     }
 
+    /// The mob this one is riding and steering, if any.
+    ///
+    /// Used by the goals that must act through a mount rather than on the
+    /// rider's own body.
     fn controlled_mob_vehicle(&self) -> Option<SharedEntity> {
         let vehicle = self.vehicle()?;
         if vehicle
@@ -1852,6 +2154,8 @@ pub trait Mob: LivingEntity + MobSource {
         Some(vehicle)
     }
 
+    /// Points the move control at `position`, vanilla's
+    /// `MoveControl.setWantedPosition`.
     fn set_wanted_position(&self, position: DVec3, speed_modifier: f64) {
         self.default_set_wanted_position(position, speed_modifier);
     }
@@ -1876,6 +2180,8 @@ pub trait Mob: LivingEntity + MobSource {
             .set_wanted_position(position, speed_modifier);
     }
 
+    /// Asks the jump control to jump on the next tick, vanilla's
+    /// `JumpControl.jump`.
     fn jump_control_jump(&self) {
         self.mob_base().controls().lock().jump_control.jump();
     }
@@ -2263,6 +2569,14 @@ pub trait Mob: LivingEntity + MobSource {
         self.increment_no_action_time();
     }
 
+    /// The body of vanilla `Mob.serverAiStep`: sensing, goals, navigation and
+    /// the three controls, in vanilla's order.
+    ///
+    /// Vanilla's `serverAiStep` is `final` and a subclass overrides
+    /// `customServerAiStep` instead; here the whole body is exposed because a
+    /// mob may need to run it from its own tick. Order matters: sensing is
+    /// refreshed before the goals that read it, and the controls run after the
+    /// goals that set them.
     fn mob_server_ai_step(&self) {
         self.update_no_action_time();
         // Vanilla runs this from `Raider.aiStep`, an override of
@@ -2285,6 +2599,8 @@ pub trait Mob: LivingEntity + MobSource {
         self.tick_jump_control();
     }
 
+    /// Advances the current path by one tick, vanilla's
+    /// `PathNavigation.tick`.
     fn tick_path_navigation(&self) {
         let Some(world) = self.level() else {
             return;
@@ -2422,6 +2738,9 @@ pub trait Mob: LivingEntity + MobSource {
         ));
     }
 
+    /// Steers this mob toward `wanted_position` for one tick.
+    ///
+    /// Vanilla parity: the `MOVE_TO` arm of `MoveControl.tick`.
     fn tick_move_to_control(&self, wanted_position: DVec3, speed_modifier: f64) {
         let position = self.position();
         let xd = wanted_position.x - position.x;
@@ -2456,6 +2775,12 @@ pub trait Mob: LivingEntity + MobSource {
         }
     }
 
+    /// Runs one tick of sideways movement, vanilla's `STRAFE` arm of
+    /// `MoveControl.tick`.
+    ///
+    /// If the strafed direction is not walkable the mob falls back to walking
+    /// straight forward, which is what stops a strafing skeleton from backing
+    /// itself off a ledge.
     fn tick_strafe_control(&self, forward: f32, right: f32) {
         let movement_speed = self
             .attributes()
@@ -2489,6 +2814,11 @@ pub trait Mob: LivingEntity + MobSource {
         self.mob_base().controls().lock().move_control.set_wait();
     }
 
+    /// Whether the block one step along `(dx, dz)` can be strafed onto.
+    ///
+    /// Vanilla parity: the `isWalkable` check inside `MoveControl.tick`. True
+    /// when the world is unavailable, so a mob is never frozen by a missing
+    /// chunk.
     fn is_strafe_walkable(&self, dx: f32, dz: f32) -> bool {
         let Some(world) = self.level() else {
             return true;
@@ -2503,6 +2833,8 @@ pub trait Mob: LivingEntity + MobSource {
         WalkPathEvaluator::path_type_static(&mut context, pos) == PathType::Walkable
     }
 
+    /// Runs one tick of the jump-to-move gait, vanilla's `JUMPING` arm of
+    /// `MoveControl.tick` -- how a rabbit or a slime travels.
     fn tick_jumping_control(&self, speed_modifier: f64) {
         let movement_speed = self
             .attributes()
@@ -2571,6 +2903,11 @@ pub trait Mob: LivingEntity + MobSource {
         self.clamp_head_rotation_to_body_when_pathing();
     }
 
+    /// Pulls the head back within the body's turn limit while a path is being
+    /// followed.
+    ///
+    /// Vanilla parity: `Mob.clampHeadRotationToBody`. Skipped when navigation
+    /// is done, which is what lets an idle mob keep looking over its shoulder.
     fn clamp_head_rotation_to_body_when_pathing(&self) {
         if self.mob_base().navigation().lock().is_done() {
             return;
@@ -2583,6 +2920,7 @@ pub trait Mob: LivingEntity + MobSource {
         ));
     }
 
+    /// Runs one tick of the jump control, vanilla's `JumpControl.tick`.
     fn tick_jump_control(&self) {
         self.default_tick_jump_control();
     }
@@ -2596,6 +2934,11 @@ pub trait Mob: LivingEntity + MobSource {
         self.set_jumping(jumping);
     }
 
+    /// Decides which goal control flags this mob may use this tick.
+    ///
+    /// Vanilla parity: `Mob.updateControlFlags`. A mob being ridden or with no
+    /// AI gives up MOVE and LOOK, which is what stops its goals from fighting
+    /// the rider for the controls.
     fn update_control_flags(&self) {
         let no_controller = self
             .controlling_passenger()
