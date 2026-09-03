@@ -56,7 +56,7 @@ const PERSISTENT_SPAWN_INTERVAL_TICKS: u64 = 400;
 ///
 /// Every other category's budget is derived from this one, so that the ratios
 /// between categories stay vanilla's even though the absolute figure is Foton's
-/// own. See [`category_cap`].
+/// own. See [`default_category_cap`].
 const MONSTER_CAP_PER_PLAYER: i32 = 24;
 
 /// Categories the spawner populates, in vanilla's declaration order.
@@ -80,7 +80,7 @@ const SPAWNABLE_CATEGORIES: [MobCategory; 7] = [
 /// the per-chunk density becomes a flat local budget: the monster figure is the
 /// one Foton already used, and every other category keeps vanilla's ratio to
 /// it. That is what makes a ring hold far more zombies than squid.
-fn category_cap(category: MobCategory) -> usize {
+fn default_category_cap(category: MobCategory) -> usize {
     let max = category.max_instances_per_chunk();
     if max <= 0 {
         return 0;
@@ -114,13 +114,25 @@ impl World {
                 // Vanilla parity: `NaturalSpawner.getFilteredSpawningCategories`
                 // drops the monsters when `doMobSpawning` is off, and drops the
                 // persistent categories on every tick but the four-hundredth.
-                if !category.is_friendly() && !spawn_monsters {
+                if (!category.is_friendly() && (!spawn_monsters || !self.allow_monsters()))
+                    || (category.is_friendly() && !self.allow_animals())
+                {
                     continue;
                 }
                 if category.is_persistent() && !spawn_persistent {
                     continue;
                 }
-                if self.mobs_near(origin, category) >= category_cap(category) {
+                let interval = self
+                    .spawn_ticks(category)
+                    .unwrap_or(if category.is_persistent() { 400 } else { 20 });
+                if interval == 0 || !tick_count.is_multiple_of(interval as u64) {
+                    continue;
+                }
+                let cap = self
+                    .spawn_limit(category)
+                    .map_or_else(|| default_category_cap(category) as i32, |limit| limit)
+                    .max(0) as usize;
+                if self.mobs_near(origin, category) >= cap {
                     continue;
                 }
                 for _ in 0..ATTEMPTS_PER_PLAYER {
@@ -193,6 +205,18 @@ impl World {
             return;
         }
 
+        let mut pre_spawn = crate::event::PreCreatureSpawnEvent::new(
+            self.key.to_string(),
+            center.x,
+            center.y,
+            center.z,
+            entity_type.key.to_string(),
+            "Natural".to_owned(),
+        );
+        self.fire_event(&mut pre_spawn);
+        if pre_spawn.is_cancelled() {
+            return;
+        }
         let Some(entity) =
             ENTITIES.create(entity_type, next_entity_id(), center, Arc::downgrade(self))
         else {
@@ -215,7 +239,21 @@ impl World {
         // than a pack, so there is no group data to thread from a previous mob.
         let _ = mob.finalize_spawn(self, EntitySpawnReason::Natural, None);
 
-        if let Err(error) = self.try_add_entity(entity) {
+        let mut spawn_event = crate::event::CreatureSpawnEvent::new(
+            entity.uuid(),
+            self.key.to_string(),
+            entity.position().x,
+            entity.position().y,
+            entity.position().z,
+            "Natural".to_owned(),
+        );
+        self.begin_pending_spawn(Arc::clone(&entity));
+        self.fire_event(&mut spawn_event);
+        self.end_pending_spawn(&entity.uuid());
+        if spawn_event.is_cancelled() {
+            return;
+        }
+        if let Err(error) = self.try_add_entity(Arc::clone(&entity)) {
             log::debug!("natural spawn rejected: {error}");
         }
     }
@@ -257,7 +295,7 @@ mod tests {
     fn every_spawnable_category_gets_a_budget() {
         for category in SPAWNABLE_CATEGORIES {
             assert!(
-                category_cap(category) > 0,
+                default_category_cap(category) > 0,
                 "{category:?} would never spawn anything"
             );
         }
@@ -265,7 +303,7 @@ mod tests {
 
     #[test]
     fn misc_never_spawns() {
-        assert_eq!(category_cap(MobCategory::Misc), 0);
+        assert_eq!(default_category_cap(MobCategory::Misc), 0);
         assert!(!SPAWNABLE_CATEGORIES.contains(&MobCategory::Misc));
     }
 
@@ -298,8 +336,16 @@ mod tests {
         // Vanilla lets a chunk hold seven times as many monsters as animals, and
         // twice as many drifting fish as animals. The ring budgets are smaller
         // but must not reshuffle that ordering.
-        assert!(category_cap(MobCategory::Monster) > category_cap(MobCategory::Ambient));
-        assert!(category_cap(MobCategory::Ambient) > category_cap(MobCategory::Creature));
-        assert!(category_cap(MobCategory::WaterAmbient) > category_cap(MobCategory::WaterCreature));
+        assert!(
+            default_category_cap(MobCategory::Monster) > default_category_cap(MobCategory::Ambient)
+        );
+        assert!(
+            default_category_cap(MobCategory::Ambient)
+                > default_category_cap(MobCategory::Creature)
+        );
+        assert!(
+            default_category_cap(MobCategory::WaterAmbient)
+                > default_category_cap(MobCategory::WaterCreature)
+        );
     }
 }

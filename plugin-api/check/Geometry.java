@@ -19,8 +19,8 @@ final class Geometry {
         Checks.same(new Location(null, -0.5, 0, 0).getBlockX(), -1,
             "a coordinate just below zero is in block -1");
 
-        // The setters return `this` and mutate, because Bukkit's do and
-        // plugins chain off that.
+        // Arithmetic returns `this` and mutates, because Bukkit's does and
+        // plugins chain off it.
         Location moved = at.add(1, 0, 0);
         Checks.expect(moved == at, "add returns the same object");
         Checks.same(at.getX(), 2.5, "add moved it");
@@ -54,6 +54,24 @@ final class Geometry {
         Checks.same(new Vector(0, 0, 0).normalize().length(), 0.0,
             "normalizing nothing stays nothing rather than becoming NaN");
         Checks.same(new Vector(0, 5, 0).normalize().getY(), 1.0, "normalize scales to one");
+        Location vectorLocation = new Vector(3, 4, 5).toLocation(null, 30, 15);
+        Checks.same(vectorLocation.getX(), 3.0, "a vector carries x into a location");
+        Checks.same(vectorLocation.getYaw(), 30f, "a vector carries yaw into a location");
+
+        Location facing = new Location(null, 0, 0, 0);
+        Vector south = facing.getDirection();
+        Checks.expect(Math.abs(south.getX()) < 1.0e-12
+            && Math.abs(south.getY()) < 1.0e-12
+            && Math.abs(south.getZ() - 1.0) < 1.0e-12,
+            "zero yaw and pitch face south");
+        facing.setYaw(90);
+        Vector west = facing.getDirection();
+        Checks.expect(Math.abs(west.getX() + 1.0) < 1.0e-12
+            && Math.abs(west.getZ()) < 1.0e-12,
+            "positive ninety yaw faces west");
+        facing.setPitch(90);
+        Checks.expect(Math.abs(facing.getDirection().getY() + 1.0) < 1.0e-12,
+            "positive ninety pitch faces down");
 
         Checks.same(org.bukkit.NamespacedKey.fromString("foton:overworld").getKey(), "overworld",
             "a namespaced key splits");
@@ -84,5 +102,21 @@ final class Geometry {
         @Override public long getTime() { return 0; }
 
         @Override public long getFullTime() { return 0; }
+
+        @Override public int getMinHeight() { return 0; }
+
+        @Override public int getMaxHeight() { return 0; }
+
+        @Override public java.util.List<org.bukkit.entity.Player> getPlayers() {
+            return java.util.List.of();
+        }
+
+        @Override public java.util.List<org.bukkit.entity.Entity> getEntities() {
+            return java.util.List.of();
+        }
+
+        @Override public org.bukkit.World.Environment getEnvironment() {
+            return org.bukkit.World.Environment.CUSTOM;
+        }
     }
 }

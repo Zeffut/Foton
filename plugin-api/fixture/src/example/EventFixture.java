@@ -82,8 +82,8 @@ public final class EventFixture extends JavaPlugin implements Listener, org.bukk
         event.setCancelled(true);
     }
 
-    /** Would undo the cancel, but must never run: it did not opt in. */
-    @EventHandler(priority = EventPriority.HIGH)
+    /** Would undo the cancel, but explicitly ignores cancelled events. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBreakLater(BlockBreakEvent event) {
         event.setCancelled(false);
     }

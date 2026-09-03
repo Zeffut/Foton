@@ -49,27 +49,28 @@ public class Location implements Cloneable {
         return x;
     }
 
-    public Location setX(double value) {
+    public void setX(double value) {
         this.x = value;
-        return this;
     }
 
     public double getY() {
         return y;
     }
 
-    public Location setY(double value) {
+    public void setY(double value) {
         this.y = value;
-        return this;
     }
 
     public double getZ() {
         return z;
     }
 
-    public Location setZ(double value) {
+    public void setZ(double value) {
         this.z = value;
-        return this;
+    }
+
+    public Location set(double x, double y, double z) {
+        this.x = x; this.y = y; this.z = z; return this;
     }
 
     /** The block containing this point. Floor, not truncation: -0.5 is in
@@ -91,17 +92,35 @@ public class Location implements Cloneable {
         return yaw;
     }
 
-    public Location setYaw(float value) {
+    public void setYaw(float value) {
         this.yaw = value;
-        return this;
     }
 
     public float getPitch() {
         return pitch;
     }
 
-    public Location setPitch(float value) {
+    public void setPitch(float value) {
         this.pitch = value;
+    }
+
+    /** A unit vector pointing where this location faces. */
+    public Vector getDirection() {
+        double pitchRadians = Math.toRadians(pitch);
+        double horizontal = Math.cos(pitchRadians);
+        return new Vector(
+            -horizontal * Math.sin(Math.toRadians(yaw)),
+            -Math.sin(pitchRadians),
+            horizontal * Math.cos(Math.toRadians(yaw)));
+    }
+
+    /** Sets yaw and pitch from a direction vector, matching Bukkit orientation. */
+    public Location setDirection(Vector direction) {
+        if (direction == null || direction.lengthSquared() == 0.0) return this;
+        double x = direction.getX(), y = direction.getY(), z = direction.getZ();
+        double horizontal = Math.sqrt(x * x + z * z);
+        yaw = (float) Math.toDegrees(Math.atan2(-x, z));
+        pitch = (float) Math.toDegrees(Math.atan2(-y, horizontal));
         return this;
     }
 
@@ -160,8 +179,21 @@ public class Location implements Cloneable {
         return world == null ? null : world.getBlockAt(getBlockX(), getBlockY(), getBlockZ());
     }
 
+    public io.papermc.paper.math.BlockPosition toBlock() {
+        return new io.papermc.paper.math.BlockPosition(getBlockX(), getBlockY(), getBlockZ());
+    }
+
     public Chunk getChunk() {
         return world == null ? null : world.getChunkAt(this);
+    }
+
+    public <T extends org.bukkit.entity.Entity> java.util.Collection<T> getNearbyEntitiesByType(
+            Class<T> type, double x, double y, double z) {
+        if (world == null || type == null) return java.util.List.of();
+        java.util.Collection<org.bukkit.entity.Entity> nearby = world.getNearbyEntities(this, x, y, z);
+        java.util.ArrayList<T> result = new java.util.ArrayList<>();
+        for (org.bukkit.entity.Entity entity : nearby) if (type.isInstance(entity)) result.add(type.cast(entity));
+        return result;
     }
 
     @Override

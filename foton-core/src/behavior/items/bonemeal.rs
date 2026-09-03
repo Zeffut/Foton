@@ -12,6 +12,7 @@ use rand::RngExt;
 use crate::{
     behavior::{BLOCK_BEHAVIORS, InteractionResult, ItemBehavior, UseOnContext},
     entity::Entity,
+    event::Event as _,
     world::{LevelReader as _, World},
 };
 
@@ -114,6 +115,15 @@ impl BoneMealItem {
 
 impl ItemBehavior for BoneMealItem {
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
+        let mut fertilize = crate::event::BlockFertilizeEvent::new(
+            context.world.key.to_string(),
+            context.hit_result.block_pos,
+            Some(context.player.uuid()),
+        );
+        context.world.fire_event(&mut fertilize);
+        if fertilize.is_cancelled() {
+            return InteractionResult::Fail;
+        }
         if Self::grow(context.world, context.hit_result.block_pos) {
             context.inv.with_item(|item| item.shrink(1));
             Self::cause_finish_use_vibration(context);

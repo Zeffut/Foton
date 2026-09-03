@@ -34,26 +34,32 @@ mkdir -p "$OUT/classes" "$OUT/generated"
 # the enum cannot name a block Foton does not have -- and so there is no
 # hand-written second copy to drift.
 python3 "$REPO/dev/gen-material.py" "$OUT/generated"
+python3 "$REPO/dev/gen-entity-type.py" "$OUT/generated"
+python3 "$REPO/dev/gen-enchantment.py" "$OUT/generated"
+python3 "$REPO/dev/gen-potion-type.py" "$OUT/generated"
 
 # javac reads a file of sources with @, which avoids both mapfile (bash 4+,
 # and macOS ships bash 3.2) and an argument list long enough to overflow exec.
 SOURCES="$OUT/sources.txt"
 find "$SRC" "$OUT/generated" -name '*.java' | sort > "$SOURCES"
 echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
+LIBS=""
+if [ -d "$REPO/plugin-api/lib" ]; then
+  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
+fi
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.
-javac -Xlint:all -d "$OUT/classes" "@$SOURCES"
+javac -Xlint:all -cp "${LIBS#:}" -d "$OUT/classes" "@$SOURCES"
+
+# EssentialsX (and older Bukkit consumers) were compiled against the pre-generic BanEntry ABI, whose erased getTarget return type is String.
+# Add a default binary bridge while retaining the generic Object method.
+python3 "$REPO/dev/add-banentry-bridge.py" "$OUT/classes/org/bukkit/BanEntry.class"
 
 jar --create --file "$JAR" -C "$OUT/classes" .
 echo "wrote ${JAR#"$REPO"/} ($(du -h "$JAR" | cut -f1), $(find "$OUT/classes" -name '*.class' | wc -l) classes)"
 
 if [ "${1:-}" != "--check" ]; then
   exit 0
-fi
-
-LIBS=""
-if [ -d "$REPO/plugin-api/lib" ]; then
-  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
 fi
 
 # The fixture plugin exercises the parts of the event path that are easy to get
@@ -64,7 +70,7 @@ if [ -d "$FIXTURE_SRC" ]; then
   FIX="$OUT/fixture"
   rm -rf "$FIX"
   mkdir -p "$FIX/classes"
-  javac -nowarn -d "$FIX/classes" -cp "$JAR" "$FIXTURE_SRC"/example/*.java
+  javac -nowarn -d "$FIX/classes" -cp "$JAR$LIBS" "$FIXTURE_SRC"/example/*.java
   cp "$FIXTURE_SRC/plugin.yml" "$FIX/classes/"
   cp "$FIXTURE_SRC/config.yml" "$FIX/classes/"
   jar --create --file "$FIX/EventFixture.jar" -C "$FIX/classes" .

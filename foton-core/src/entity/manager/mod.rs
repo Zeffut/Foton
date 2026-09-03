@@ -390,6 +390,7 @@ impl EntityEntry {
                     .entity
                     .removal_reason()
                     .is_some_and(RemovalReason::should_save))
+            && self.entity.is_persistent()
             && !self.entity.is_passenger()
             && !self.entity.has_exactly_one_player_passenger()
             && self.entity.entity_type().can_serialize
@@ -717,7 +718,7 @@ impl WorldEntityManager {
     }
 
     /// Finalizes an unloading chunk. Retained entities are detached and dropped.
-    pub fn finalize_chunk_unload(&self, pos: ChunkPos) {
+    pub fn finalize_chunk_unload(&self, pos: ChunkPos) -> Vec<Uuid> {
         let entries = self
             .state
             .write()
@@ -725,12 +726,15 @@ impl WorldEntityManager {
             .remove(&pos)
             .unwrap_or_default();
 
+        let mut removed = Vec::with_capacity(entries.len());
         for entry in entries {
+            removed.push(entry.entity.uuid());
             entry
                 .entity
                 .set_level_callback(Arc::new(NullEntityCallback));
             entry.entity.set_removed(RemovalReason::UnloadedToChunk);
         }
+        removed
     }
 
     /// Registers a live runtime entity.

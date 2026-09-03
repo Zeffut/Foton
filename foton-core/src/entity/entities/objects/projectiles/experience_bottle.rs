@@ -23,6 +23,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, Projectile, ProjectileBase,
     ProjectileHit, RemovalReason, ThrowableItemProjectile, ThrowableProjectile,
 };
+use crate::event::{Event, ExpBottleEvent};
 use crate::world::World;
 
 /// Vanilla parity: `ThrownExperienceBottle.getDefaultGravity`, heavier than the
@@ -134,7 +135,11 @@ impl Projectile for ExperienceBottleEntity {
         let experience = BASE_EXPERIENCE
             + (rand::random::<u32>() % EXPERIENCE_ROLL as u32) as i32
             + (rand::random::<u32>() % EXPERIENCE_ROLL as u32) as i32;
-        ExperienceOrbEntity::award(&world, position, experience);
+        let mut event = ExpBottleEvent::new(self.uuid(), experience);
+        world.fire_event(&mut event);
+        if !event.is_cancelled() && event.experience() > 0 {
+            ExperienceOrbEntity::award(&world, position, event.experience());
+        }
 
         self.set_removed(RemovalReason::Discarded);
     }

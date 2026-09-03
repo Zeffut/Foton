@@ -1066,10 +1066,12 @@ impl Mob for FoxEntity {
     /// Vanilla parity: `Fox.setTarget`, which stops defending once the target
     /// is gone.
     fn set_target(&self, target: Option<&SharedEntity>) -> bool {
+        let previous = self.target();
         if self.is_defending() && target.is_none() {
             self.set_defending(false);
         }
-        self.mob_base().set_target(target, |_| true)
+        let changed = self.mob_base().set_target(target, |_| true);
+        changed && self.finish_target_change(previous, target)
     }
 
     /// Vanilla parity: `Fox.canHoldItem`, which lets a fox swap a trinket for

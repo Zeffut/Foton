@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use rand::Rng;
 
+use crate::event::{Event, LeavesDecayEvent};
 use crate::{
     behavior::{
         BlockBehavior, BlockPlaceContext, block::schedule_water_tick_if_waterlogged,
@@ -83,6 +84,11 @@ impl LeavesBlock {
 impl BlockBehavior for LeavesBlock {
     fn random_tick(&self, state: BlockStateId, world: &Arc<World>, pos: BlockPos) {
         if Self::decaying(state) {
+            let mut event = LeavesDecayEvent::new(world.key.to_string(), pos);
+            world.fire_event(&mut event);
+            if event.is_cancelled() {
+                return;
+            }
             world.drop_resources(state, pos);
             world.set_block(
                 pos,

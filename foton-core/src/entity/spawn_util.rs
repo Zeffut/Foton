@@ -14,7 +14,8 @@ use foton_registry::blocks::properties::Direction;
 use foton_registry::blocks::shapes::is_face_full;
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::vanilla_block_tags::BlockTag;
-use foton_registry::{REGISTRY, TaggedRegistryExt as _, vanilla_blocks};
+use foton_registry::{REGISTRY, RegistryExt as _, TaggedRegistryExt as _, vanilla_blocks};
+use foton_utils::Identifier;
 use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use glam::DVec3;
 
@@ -41,6 +42,24 @@ pub enum SpawnStrategy {
     /// rather than a rule -- glass and leaves it would fall through, and a
     /// handful of blocks a heavy mob landing on them would make a nuisance of.
     LegacyIronGolem,
+}
+
+/// Creates and inserts an entity at an exact Bukkit-requested position.
+#[must_use]
+pub fn spawn_entity_at(
+    world: &Arc<World>,
+    key: &Identifier,
+    position: DVec3,
+) -> Option<SharedEntity> {
+    let entity_type = REGISTRY.entity_types.by_key(key)?;
+    let entity = ENTITIES.create(
+        entity_type,
+        crate::entity::next_entity_id(),
+        position,
+        Arc::downgrade(world),
+    )?;
+    world.try_add_entity(Arc::clone(&entity)).ok()?;
+    Some(entity)
 }
 
 impl SpawnStrategy {

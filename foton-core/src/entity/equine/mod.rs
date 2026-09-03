@@ -10,11 +10,12 @@
 
 mod abstract_horse;
 mod chested_horse;
-mod llama_layer;
+pub mod llama_layer;
 
+pub use abstract_horse::AbstractHorse;
 pub(crate) use abstract_horse::{
-    AbstractHorse, AbstractHorseBase, BABY_SCALE, generate_jump_strength, generate_max_health,
-    generate_speed,
+    AbstractHorseBase, BABY_SCALE, generate_jump_strength, generate_max_health, generate_speed,
 };
 pub(crate) use chested_horse::AbstractChestedHorse;
-pub(crate) use llama_layer::{Llama, LlamaBase, LlamaVariant, is_llama, should_follow_mommy};
+pub use llama_layer::{Llama, LlamaVariant};
+pub(crate) use llama_layer::{LlamaBase, is_llama, should_follow_mommy};

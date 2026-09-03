@@ -436,6 +436,22 @@ impl TropicalFishEntity {
         self.set_packed_variant(variant.packed_id());
     }
 
+    /// Returns the vanilla pattern component of this fish's variant.
+    #[must_use]
+    pub fn pattern(&self) -> TropicalFishPattern {
+        self.variant().pattern()
+    }
+
+    /// Replaces the pattern while preserving both vanilla dye colors.
+    pub fn set_pattern(&self, pattern: TropicalFishPattern) {
+        let variant = self.variant();
+        self.set_variant(TropicalFishVariant::new(
+            pattern,
+            variant.base_color(),
+            variant.pattern_color(),
+        ));
+    }
+
     /// Returns whether this fish came out of a bucket.
     ///
     /// Vanilla parity: `AbstractFish.fromBucket`.

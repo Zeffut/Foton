@@ -641,6 +641,24 @@ impl ChunkMap {
         Some(result)
     }
 
+    /// Holds the vanilla spawn area persistently.
+    pub(crate) fn place_spawn_ticket(&self, ticket_position: BlockPos) {
+        let center = ChunkPos::from_block_pos(ticket_position);
+        let mut timed = self.timed_chunk_tickets.lock();
+        if let Some(ticket) = timed.add_spawn_ticket(center) {
+            self.add_chunk_ticket(center, ticket);
+        }
+    }
+
+    /// Removes the vanilla spawn ticket at a previous spawn position.
+    pub(crate) fn remove_spawn_ticket(&self, ticket_position: BlockPos) {
+        let center = ChunkPos::from_block_pos(ticket_position);
+        let mut timed = self.timed_chunk_tickets.lock();
+        if let Some(ticket) = timed.remove_spawn_ticket(center) {
+            self.remove_chunk_ticket(center, ticket);
+        }
+    }
+
     /// Adds or refreshes vanilla's post-portal chunk ticket.
     pub(crate) fn place_portal_ticket(&self, ticket_position: BlockPos) {
         let center = ChunkPos::from_block_pos(ticket_position);

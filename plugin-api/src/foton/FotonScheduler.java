@@ -21,7 +21,17 @@ import org.bukkit.scheduler.BukkitTask;
  */
 public final class FotonScheduler implements BukkitScheduler {
     private static final ConcurrentLinkedQueue<Scheduled> pending = new ConcurrentLinkedQueue<>();
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, BukkitTask> active =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private static final AtomicInteger nextId = new AtomicInteger(1);
+
+    @Override
+    public <T> java.util.concurrent.Future<T> callSyncMethod(
+            Plugin plugin, java.util.concurrent.Callable<T> task) {
+        java.util.concurrent.FutureTask<T> result = new java.util.concurrent.FutureTask<>(task);
+        runTask(plugin, result);
+        return result;
+    }
 
     @Override
     public BukkitTask runTask(Plugin plugin, Runnable task) {
@@ -65,11 +75,14 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     private static BukkitTask offTick(Plugin plugin, Runnable body, long delay, long period) {
-        Async task = new Async(nextId.getAndIncrement(), plugin);
+        Async task = new Async(nextId.getAndIncrement(), plugin, period > 0);
+        active.put(task.id, task);
         Runnable guarded = () -> {
             if (task.cancelled) {
                 return;
             }
+            task.running = true;
+            task.thread = Thread.currentThread();
             try {
                 body.run();
             } catch (Throwable error) {
@@ -77,16 +90,23 @@ public final class FotonScheduler implements BukkitScheduler {
                 // thread would silently stop a repeating task forever.
                 System.out.println("[scheduler] " + plugin.getName()
                     + " threw in an async task: " + error);
+            } finally {
+                task.running = false;
+                task.thread = null;
+                if (!task.repeating) {
+                    active.remove(task.id, task);
+                }
             }
         };
         // A tick is fifty milliseconds. Bukkit measures async delays in ticks
         // too, which reads oddly and is what plugins pass.
         long delayMillis = delay * 50;
-        task.handle = period > 0
+        java.util.concurrent.ScheduledFuture<?> handle = period > 0
             ? OFF_TICK.scheduleAtFixedRate(guarded, delayMillis, period * 50,
                 java.util.concurrent.TimeUnit.MILLISECONDS)
             : OFF_TICK.schedule(guarded, delayMillis,
                 java.util.concurrent.TimeUnit.MILLISECONDS);
+        task.bind(handle);
         return task;
     }
 
@@ -94,20 +114,36 @@ public final class FotonScheduler implements BukkitScheduler {
     private static final class Async implements BukkitTask {
         final int id;
         final Plugin plugin;
+        final boolean repeating;
         volatile java.util.concurrent.ScheduledFuture<?> handle;
         volatile boolean cancelled;
+        volatile boolean running;
+        volatile Thread thread;
 
-        Async(int id, Plugin plugin) {
+        Async(int id, Plugin plugin, boolean repeating) {
             this.id = id;
             this.plugin = plugin;
+            this.repeating = repeating;
+        }
+
+        synchronized void bind(java.util.concurrent.ScheduledFuture<?> handle) {
+            this.handle = handle;
+            if (cancelled) {
+                handle.cancel(false);
+            }
         }
 
         @Override public int getTaskId() {
             return id;
         }
 
+        @Override public Plugin getOwner() { return plugin; }
+        @Override public boolean isSync() { return false; }
+        @Override public boolean isCancelled() { return cancelled; }
+
         @Override public void cancel() {
             cancelled = true;
+            active.remove(id, this);
             java.util.concurrent.ScheduledFuture<?> future = handle;
             if (future != null) {
                 future.cancel(false);
@@ -133,24 +169,46 @@ public final class FotonScheduler implements BukkitScheduler {
 
     @Override
     public void cancelTask(int taskId) {
-        for (Scheduled task : pending) {
-            if (task.id == taskId) {
-                task.cancelled = true;
-            }
+        BukkitTask task = active.get(taskId);
+        if (task != null) {
+            task.cancel();
         }
     }
 
     @Override
     public void cancelTasks(Plugin plugin) {
-        for (Scheduled task : pending) {
-            if (task.plugin == plugin) {
-                task.cancelled = true;
+        for (BukkitTask task : active.values()) {
+            if (task.getOwner() == plugin) {
+                task.cancel();
             }
         }
     }
 
+    @Override
+    public boolean isCurrentlyRunning(int taskId) {
+        BukkitTask task = active.get(taskId);
+        return task instanceof Async async ? async.running
+            : task instanceof Scheduled scheduled && scheduled.running;
+    }
+
+    @Override
+    public java.util.List<org.bukkit.scheduler.BukkitWorker> getActiveWorkers() {
+        java.util.List<org.bukkit.scheduler.BukkitWorker> workers = new java.util.ArrayList<>();
+        for (BukkitTask task : active.values()) {
+            if (task instanceof Async async && async.running) workers.add(new Worker(async));
+            if (task instanceof Scheduled scheduled && scheduled.running) workers.add(new Worker(scheduled));
+        }
+        return java.util.List.copyOf(workers);
+    }
+
+    @Override
+    public java.util.List<BukkitTask> getPendingTasks() {
+        return java.util.List.copyOf(active.values());
+    }
+
     private static Scheduled submit(Plugin plugin, Runnable body, long delay, long period) {
         Scheduled task = new Scheduled(nextId.getAndIncrement(), plugin, body, delay, period);
+        active.put(task.id, task);
         pending.add(task);
         return task;
     }
@@ -188,7 +246,12 @@ public final class FotonScheduler implements BukkitScheduler {
 
         int ran = 0;
         for (Scheduled ready : due) {
+            if (ready.cancelled) {
+                continue;
+            }
             try {
+                ready.running = true;
+                ready.thread = Thread.currentThread();
                 ready.body.run();
                 ran++;
             } catch (Throwable error) {
@@ -196,6 +259,12 @@ public final class FotonScheduler implements BukkitScheduler {
                 // reach Foton: an exception crossing JNI is a crash.
                 System.out.println("[scheduler] " + ready.plugin.getName()
                     + " threw in a task: " + error);
+            } finally {
+                ready.running = false;
+                ready.thread = null;
+                if (ready.period <= 0) {
+                    active.remove(ready.id, ready);
+                }
             }
         }
         return ran;
@@ -203,7 +272,23 @@ public final class FotonScheduler implements BukkitScheduler {
 
     /** Forgets everything, for a shutdown. */
     public static void clear() {
+        for (BukkitTask task : active.values()) {
+            task.cancel();
+        }
+        active.clear();
         pending.clear();
+    }
+
+    private static final class Worker implements org.bukkit.scheduler.BukkitWorker {
+        private final BukkitTask task;
+        Worker(BukkitTask task) { this.task = task; }
+        @Override public int getTaskId() { return task.getTaskId(); }
+        @Override public Plugin getOwner() { return task.getOwner(); }
+        @Override public Thread getThread() {
+            if (task instanceof Async async) return async.thread;
+            if (task instanceof Scheduled scheduled) return scheduled.thread;
+            return null;
+        }
     }
 
     private static final class Scheduled implements BukkitTask {
@@ -213,6 +298,8 @@ public final class FotonScheduler implements BukkitScheduler {
         final long period;
         long remaining;
         volatile boolean cancelled;
+        volatile boolean running;
+        volatile Thread thread;
 
         Scheduled(int id, Plugin plugin, Runnable body, long delay, long period) {
             this.id = id;
@@ -223,6 +310,12 @@ public final class FotonScheduler implements BukkitScheduler {
         }
 
         @Override public int getTaskId() { return id; }
-        @Override public void cancel() { cancelled = true; }
+        @Override public Plugin getOwner() { return plugin; }
+        @Override public boolean isSync() { return true; }
+        @Override public boolean isCancelled() { return cancelled; }
+        @Override public void cancel() {
+            cancelled = true;
+            active.remove(id, this);
+        }
     }
 }

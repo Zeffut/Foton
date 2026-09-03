@@ -8,6 +8,9 @@ package org.bukkit.event;
  * `foton.EventBridge` rather than through these lists.
  */
 public abstract class Event {
+    /** Result used by events that distinguish allow, default, and deny. */
+    public enum Result { DENY, DEFAULT, ALLOW }
+
     private final boolean async;
 
     protected Event() {

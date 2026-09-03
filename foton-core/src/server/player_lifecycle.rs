@@ -30,9 +30,11 @@ impl Server {
             .await
         {
             Ok(Some(global)) if self.worlds.has_domain(&global.last_active_domain) => {
+                self.publish_global_player_data(player.gameprofile.id, global.clone());
                 Ok(global.last_active_domain)
             }
             Ok(Some(global)) => {
+                self.publish_global_player_data(player.gameprofile.id, global.clone());
                 log::warn!(
                     "Player {} last active domain {} no longer exists, using default domain",
                     player.gameprofile.name,
@@ -40,7 +42,20 @@ impl Server {
                 );
                 Ok(self.worlds.default_domain().to_owned())
             }
-            Ok(None) => Ok(self.worlds.default_domain().to_owned()),
+            Ok(None) => {
+                let now = chrono::Utc::now().timestamp_millis();
+                self.publish_global_player_data(
+                    player.gameprofile.id,
+                    super::GlobalPlayerData {
+                        last_active_domain: self.worlds.default_domain().to_owned(),
+                        first_played: now,
+                        last_played: now,
+                        statistics: Vec::new(),
+                        whitelisted: false,
+                    },
+                );
+                Ok(self.worlds.default_domain().to_owned())
+            }
             Err(e) => Err(format!("failed to load global player data: {e}")),
         }
     }
@@ -67,7 +82,6 @@ impl Server {
         let default_world = self
             .worlds
             .default_world(target_domain)
-            .cloned()
             .ok_or_else(|| format!("domain {target_domain} has no default world"))?;
 
         match self
@@ -233,13 +247,13 @@ impl Server {
         {
             return None;
         }
-        let Some(saved_world) = self.worlds.get(&saved_world_key) else {
+        let Some(saved_world) = self.worlds.get_owned(&saved_world_key) else {
             log::warn!(
                 "Saved world {saved_world_key} for player {player_name} is missing, using target spawn"
             );
             return None;
         };
-        Some(Arc::clone(saved_world))
+        Some(saved_world)
     }
 
     pub(super) fn apply_domain_player_state(player: &Arc<Player>, state: &DomainPlayerState) {
@@ -259,6 +273,19 @@ impl Server {
                 player.reset_domain_data_for_first_visit();
                 apply_default_spawn(player, &state.world, *spawn);
             }
+        }
+        let mut spawn_event = crate::event::PlayerSpawnLocationEvent::new(
+            player.gameprofile.id,
+            state.world.key.to_string(),
+            player.position().to_array(),
+            player.rotation(),
+        );
+        player.fire_event(&mut spawn_event);
+        if spawn_event.world() == state.world.key.to_string() {
+            player
+                .base()
+                .set_position_local(glam::DVec3::from_array(spawn_event.position()));
+            player.set_rotation(spawn_event.rotation());
         }
     }
 
@@ -370,7 +397,7 @@ impl Server {
             );
             return None;
         };
-        let Some(world) = self.worlds.get(&key) else {
+        let Some(world) = self.worlds.get_owned(&key) else {
             log::warn!(
                 "Saved ender pearl world {key} for player {} is missing, skipping",
                 player.gameprofile.name
@@ -399,7 +426,7 @@ impl Server {
         player.send_packet(CLogin {
             player_id: player.id(),
             hardcore: false,
-            levels: self.worlds.keys().cloned().collect(),
+            levels: self.worlds.key_snapshots(),
             max_players: self.config.max_players as i32,
             chunk_radius: self.config.view_distance.into(),
             simulation_distance: self.config.simulation_distance.into(),
@@ -518,12 +545,14 @@ impl Server {
     /// Returns the server default world or if not exists the first world.
     /// # Panics
     /// if no world exists on this server crisis is there!
-    pub fn overworld(&self) -> &Arc<World> {
+    pub fn overworld(&self) -> Arc<World> {
         self.worlds.server_default_world().unwrap_or_else(|| {
             self.worlds
                 .values()
+                .into_iter()
                 .next()
                 .expect("At least one world must exist")
+                .clone()
         })
     }
 
@@ -535,7 +564,6 @@ impl Server {
         let default_world = self
             .worlds
             .default_world(domain)
-            .cloned()
             .ok_or_else(|| format!("domain {domain} has no default world"))?;
         let respawn_data = {
             let level_data = default_world.level_data.read();
@@ -546,7 +574,6 @@ impl Server {
             .worlds
             .get(respawn_data.dimension())
             .filter(|world| world.domain() == domain)
-            .cloned()
         else {
             let respawn_data = default_world
                 .world_border_adjusted_respawn_data(local_respawn_data_for_world(&default_world));
@@ -569,13 +596,11 @@ impl Server {
         let default_world = self
             .worlds
             .default_world(domain)
-            .cloned()
             .ok_or_else(|| format!("domain {domain} has no default world"))?;
         let target_world = self
             .worlds
             .get(respawn_data.dimension())
             .filter(|world| world.domain() == domain)
-            .cloned()
             .ok_or_else(|| {
                 format!(
                     "respawn dimension {} is not loaded in domain {domain}",
@@ -607,26 +632,25 @@ impl Server {
             yaw: respawn_data.yaw,
             pitch: respawn_data.pitch,
         };
-        for world in self
-            .worlds
-            .values()
-            .filter(|world| world.domain() == domain)
-        {
-            world.broadcast_to_all(packet.clone());
+        for snapshot in self.worlds.snapshots() {
+            let world = snapshot.world();
+            if world.domain() == domain {
+                world.broadcast_to_all(packet.clone());
+            }
         }
 
         Ok(())
     }
 
     /// Returns the default domain's conventional nether world, if present.
-    pub fn nether(&self) -> Option<&Arc<World>> {
+    pub fn nether(&self) -> Option<Arc<World>> {
         let key = Identifier::new(self.worlds.default_domain().to_owned(), "the_nether");
-        self.worlds.get(&key)
+        self.worlds.get_owned(&key)
     }
 
     /// Returns the default domain's conventional end world, if present.
-    pub fn the_end(&self) -> Option<&Arc<World>> {
+    pub fn the_end(&self) -> Option<Arc<World>> {
         let key = Identifier::new(self.worlds.default_domain().to_owned(), "the_end");
-        self.worlds.get(&key)
+        self.worlds.get_owned(&key)
     }
 }

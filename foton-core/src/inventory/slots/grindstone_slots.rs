@@ -59,12 +59,36 @@ impl GrindstoneHandler {
     }
 
     /// Returns both inputs.
-    fn inputs(&self, guard: &ContainerLockGuard) -> Option<(ItemStack, ItemStack)> {
+    pub fn input_snapshot(&self, guard: &ContainerLockGuard) -> Option<(ItemStack, ItemStack)> {
         let container = guard.get(self.input_id())?;
         Some((
             container.get_item(GRINDSTONE_INPUT).clone(),
             container.get_item(GRINDSTONE_ADDITIONAL).clone(),
         ))
+    }
+
+    pub fn result_snapshot(&self, guard: &ContainerLockGuard) -> ItemStack {
+        guard
+            .get(self.result_id())
+            .map_or_else(ItemStack::empty, |c| c.get_item(0).clone())
+    }
+
+    pub fn apply_snapshot(
+        &self,
+        guard: &mut ContainerLockGuard,
+        upper: ItemStack,
+        lower: ItemStack,
+        result: ItemStack,
+    ) {
+        if let Some(container) = guard.get_mut(self.input_id()) {
+            container.set_item(GRINDSTONE_INPUT, upper);
+            container.set_item(GRINDSTONE_ADDITIONAL, lower);
+            container.set_changed();
+        }
+        if let Some(container) = guard.get_typed_mut::<ResultContainer>(self.result_id()) {
+            container.set_item(0, result);
+            container.set_changed();
+        }
     }
 
     /// Returns the experience the two inputs are worth.
@@ -74,7 +98,7 @@ impl GrindstoneHandler {
     /// the same item twice does not give the same experience.
     #[must_use]
     pub fn experience(&self, guard: &ContainerLockGuard) -> i32 {
-        let Some((first, second)) = self.inputs(guard) else {
+        let Some((first, second)) = self.input_snapshot(guard) else {
             return 0;
         };
         let total = experience_from(&first) + experience_from(&second);
@@ -269,7 +293,7 @@ impl ResultHandler for GrindstoneHandler {
 
     fn update_result(&self, guard: &mut ContainerLockGuard) {
         let result = self
-            .inputs(guard)
+            .input_snapshot(guard)
             .map_or_else(ItemStack::empty, |(first, second)| {
                 grindstone_result(&first, &second)
             });
@@ -295,7 +319,7 @@ impl ResultHandler for GrindstoneHandler {
     }
 
     fn is_result_valid(&self, guard: &ContainerLockGuard, _player: &Player) -> bool {
-        self.inputs(guard)
+        self.input_snapshot(guard)
             .is_some_and(|(first, second)| !grindstone_result(&first, &second).is_empty())
     }
 }

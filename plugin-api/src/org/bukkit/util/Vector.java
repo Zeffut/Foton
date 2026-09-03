@@ -20,6 +20,10 @@ public class Vector implements Cloneable {
         this.z = z;
     }
 
+    public Vector(float x, float y, float z) {
+        this((double) x, (double) y, (double) z);
+    }
+
     public Vector(int x, int y, int z) {
         this((double) x, (double) y, (double) z);
     }
@@ -76,6 +80,18 @@ public class Vector implements Cloneable {
         z -= other.z;
         return this;
     }
+    /** Returns the scalar product without mutating either vector. */
+    public double dot(Vector other) {
+        return x * other.x + y * other.y + z * other.z;
+    }
+
+    public Vector crossProduct(Vector other) {
+        double nx = y * other.z - z * other.y;
+        double ny = z * other.x - x * other.z;
+        double nz = x * other.y - y * other.x;
+        x = nx; y = ny; z = nz;
+        return this;
+    }
 
     public Vector multiply(double factor) {
         x *= factor;
@@ -83,6 +99,19 @@ public class Vector implements Cloneable {
         z *= factor;
         return this;
     }
+
+    public Vector multiply(int factor) {
+        return multiply((double) factor);
+    }
+
+    public org.bukkit.Location toLocation(org.bukkit.World world) {
+        return new org.bukkit.Location(world, x, y, z);
+    }
+
+    public org.bukkit.Location toLocation(org.bukkit.World world, float yaw, float pitch) {
+        return new org.bukkit.Location(world, x, y, z, yaw, pitch);
+    }
+    public BlockVector toBlockVector() { return new BlockVector(getBlockX(), getBlockY(), getBlockZ()); }
 
     public double length() {
         return Math.sqrt(lengthSquared());
@@ -109,6 +138,14 @@ public class Vector implements Cloneable {
         if (length > 0) {
             multiply(1 / length);
         }
+        return this;
+    }
+
+    public Vector rotateAroundY(double angle) {
+        double cos = Math.cos(angle), sin = Math.sin(angle);
+        double nx = x * cos + z * sin;
+        double nz = x * -sin + z * cos;
+        x = nx; z = nz;
         return this;
     }
 

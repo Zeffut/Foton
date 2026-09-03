@@ -1,8 +1,11 @@
 package org.bukkit.scheduler;
 
 import org.bukkit.plugin.Plugin;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
 
 public interface BukkitScheduler {
+    <T> Future<T> callSyncMethod(Plugin plugin, Callable<T> task);
     BukkitTask runTask(Plugin plugin, Runnable task);
     BukkitTask runTaskLater(Plugin plugin, Runnable task, long delayTicks);
     BukkitTask runTaskTimer(Plugin plugin, Runnable task, long delayTicks, long periodTicks);
@@ -30,4 +33,8 @@ public interface BukkitScheduler {
 
     void cancelTask(int taskId);
     void cancelTasks(Plugin plugin);
+
+    boolean isCurrentlyRunning(int taskId);
+    default java.util.List<BukkitTask> getPendingTasks() { return java.util.Collections.emptyList(); }
+    default java.util.List<BukkitWorker> getActiveWorkers() { return java.util.Collections.emptyList(); }
 }

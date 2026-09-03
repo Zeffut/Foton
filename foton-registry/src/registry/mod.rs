@@ -2,6 +2,7 @@
 
 pub mod holder;
 pub mod holder_set;
+pub mod plugin;
 pub mod reference;
 mod tags;
 
@@ -111,15 +112,41 @@ impl RegistryLock {
     }
 }
 
+/// Builds the generated Vanilla registry, lets the caller append dynamic
+/// entries, and freezes it before publication.
+///
+/// Dynamic registration must happen in this phase: after publication the
+/// global registry is intentionally immutable and all Vanilla IDs are fixed.
+pub fn build_vanilla_registry(register: impl FnOnce(&mut Registry)) -> Registry {
+    let mut registry = Registry::new_vanilla();
+    register(&mut registry);
+    registry.freeze();
+    registry
+}
+
 /// Returns `false` if the registry was already published.
+#[expect(
+    clippy::must_use_candidate,
+    reason = "callers may use the publication status"
+)]
 pub fn init_vanilla_registry() -> bool {
+    init_vanilla_registry_with(|_| {})
+}
+
+/// Initializes the global registry and runs `register` before its freeze.
+///
+/// This is the bootstrap seam for plugin-owned typed registrations. The
+/// callback runs at most once, on the thread that publishes the registry.
+pub fn init_vanilla_registry_with(register: impl FnOnce(&mut Registry)) -> bool {
     static INIT: Once = Once::new();
 
     let mut published = false;
+    let mut register = Some(register);
     INIT.call_once(|| {
-        let mut registry = Registry::new_vanilla();
-        registry.freeze();
-        published = REGISTRY.init(registry).is_ok();
+        if let Some(register) = register.take() {
+            let registry = build_vanilla_registry(register);
+            published = REGISTRY.init(registry).is_ok();
+        }
     });
     published
 }
@@ -306,7 +333,10 @@ impl Debug for Registry {
 }
 
 impl Registry {
-    #[must_use]
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "constructor result is required by callers"
+    )]
     pub fn new_vanilla() -> Self {
         let mut registry = Self::new_empty();
 
@@ -698,7 +728,10 @@ impl Registry {
         }
     }
 
-    #[must_use]
+    #[expect(
+        clippy::must_use_candidate,
+        reason = "constructor result is required by callers"
+    )]
     pub fn new_empty() -> Self {
         Self {
             attributes: AttributeRegistry::new(),
@@ -774,8 +807,11 @@ mod tests {
     use rustc_hash::FxHashMap;
 
     use crate::biome::{Biome, BiomeEffects, GrassColorModifier, TemperatureModifier};
+    use crate::enchantment::{Enchantment, EnchantmentCost};
+    use crate::enchantment_effect::EnchantmentEffects;
+    use crate::vanilla_enchantments;
 
-    use super::{Registry, RegistryExt};
+    use super::{Registry, RegistryExt, build_vanilla_registry};
 
     fn biome_with_refs(carvers: Vec<Identifier>, features: Vec<Vec<Identifier>>) -> &'static Biome {
         Box::leak(Box::new(Biome {
@@ -902,6 +938,44 @@ mod tests {
         assert_eq!(
             registry.painting_variants.by_id(16).map(|entry| &entry.key),
             Some(&earth)
+        );
+    }
+
+    #[test]
+    fn builder_appends_dynamic_enchantment_before_freeze() {
+        let registry = build_vanilla_registry(|registry| {
+            let entry = Box::leak(Box::new(Enchantment {
+                key: Identifier::new("test".to_owned(), "builder".to_owned()),
+                max_level: 1,
+                min_cost: EnchantmentCost {
+                    base: 1,
+                    per_level_above_first: 0,
+                },
+                max_cost: EnchantmentCost {
+                    base: 1,
+                    per_level_above_first: 0,
+                },
+                anvil_cost: 1,
+                weight: 1,
+                slots: &[],
+                supported_items: "#minecraft:enchantable/durability",
+                primary_items: None,
+                exclusive_set: None,
+                effects_nbt: vanilla_enchantments::AQUA_AFFINITY.effects_nbt,
+                effects: EnchantmentEffects::EMPTY,
+            }));
+            let id = registry
+                .enchantments
+                .register_dynamic(entry)
+                .unwrap_or(usize::MAX);
+            assert_eq!(id, registry.enchantments.len() - 1);
+        });
+        assert!(registry.enchantments.is_frozen());
+        assert!(
+            registry
+                .enchantments
+                .by_key(&Identifier::new("test".to_owned(), "builder".to_owned()))
+                .is_some()
         );
     }
 

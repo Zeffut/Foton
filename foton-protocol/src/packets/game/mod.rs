@@ -59,11 +59,13 @@ mod c_set_passengers;
 mod c_set_player_inventory;
 mod c_set_time;
 mod c_sound;
+mod c_stop_sound;
 mod c_tab_list;
 mod c_take_item_entity;
 mod c_teleport_entity;
 mod c_ticking_state;
 mod c_ticking_step;
+mod c_titles;
 mod c_update_advancements;
 mod c_update_attributes;
 mod c_update_mob_effect;
@@ -182,11 +184,13 @@ pub use c_set_passengers::CSetPassengers;
 pub use c_set_player_inventory::CSetPlayerInventory;
 pub use c_set_time::CSetTime;
 pub use c_sound::{CSound, SoundSource};
+pub use c_stop_sound::CStopSound;
 pub use c_tab_list::CTabList;
 pub use c_take_item_entity::CTakeItemEntity;
 pub use c_teleport_entity::CTeleportEntity;
 pub use c_ticking_state::CTickingState;
 pub use c_ticking_step::CTickingStep;
+pub use c_titles::{CClearTitles, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation};
 pub use c_update_advancements::{AddedAdvancement, CUpdateAdvancements};
 pub use c_update_attributes::{
     AttributeModifierData, AttributeModifierOperation, AttributeSnapshot, CUpdateAttributes,

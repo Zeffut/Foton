@@ -194,6 +194,29 @@ impl PortalProcessor {
     }
 }
 
+/// Describes why a teleport transition was created.
+///
+/// The variants mirror the vanilla transition-producing paths. Keeping this
+/// value on the transition lets later event bridges distinguish portal travel
+/// from commands and other world changes without guessing from coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeleportTransitionCause {
+    /// Travel through a Nether portal.
+    NetherPortal,
+    /// Travel through an End portal.
+    EndPortal,
+    /// Travel through an End gateway.
+    EndGateway,
+    /// Travel caused by an ender pearl.
+    EnderPearl,
+    /// Travel requested by a command.
+    Command,
+    /// Travel caused by player/entity respawn or world spawn placement.
+    Respawn,
+    /// A transition whose producer is not yet classified.
+    Unknown,
+}
+
 /// Describes a teleport transition to another loaded world.
 ///
 /// Vanilla names loaded worlds "dimensions" in packets and saves. Foton uses
@@ -203,6 +226,8 @@ impl PortalProcessor {
 pub struct TeleportTransition {
     /// The target world to teleport into.
     pub target_world: Arc<World>,
+    /// The vanilla cause that produced this transition.
+    pub cause: TeleportTransitionCause,
     /// The position in the target world.
     pub position: DVec3,
     /// The rotation (yaw, pitch) values, interpreted by `relatives`.
@@ -266,6 +291,12 @@ impl TeleportPostTransition {
     }
 }
 
+impl Default for TeleportTransitionCause {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 impl Default for TeleportPostTransition {
     fn default() -> Self {
         Self::do_nothing()
@@ -296,6 +327,7 @@ impl TeleportTransition {
     pub fn with_position(&self, position: DVec3) -> Self {
         Self {
             target_world: self.target_world.clone(),
+            cause: self.cause,
             position,
             rotation: self.rotation,
             velocity: self.velocity,

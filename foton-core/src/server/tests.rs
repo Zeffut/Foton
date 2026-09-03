@@ -1,3 +1,4 @@
+use super::{WorldCreationRequest, WorldCreationState};
 use std::{
     env::temp_dir,
     io::Cursor,
@@ -28,6 +29,7 @@ use tokio::{fs, runtime::Builder, task::JoinSet, time::sleep};
 use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
+use crate::chunk_saver::registry::WorldStorageRegistry;
 use crate::command::execution::{
     CommandArgumentSource, CommandExecutionContext, CommandPermissionSource, CommandResultCallback,
     CommandSource, ExecutionCommandSource, ExecutionStop, parse_entity_selector_text,
@@ -51,6 +53,7 @@ use crate::test_support::{
     test_world,
 };
 use crate::world::World;
+use crate::worldgen::WorldGeneratorRegistry;
 
 use super::known_players::{
     KnownPlayerSaveStep, UncachedPlayerTarget, classify_uncached_player_target, direct_uuid_profile,
@@ -154,6 +157,7 @@ fn test_runtime_config() -> Arc<RuntimeConfig> {
         simulation_distance: 2,
         max_chained_neighbor_updates: 1_000_000,
         online_mode: false,
+        whitelist_enabled: false,
         auth_server: None,
         profile_server: None,
         services_server: None,
@@ -208,9 +212,13 @@ async fn test_server_with_worlds(
     player_permission_states: PermissionSubjectIndex,
     storage_root: &Path,
 ) -> Result<Arc<Server>, String> {
+    // Server fixtures exercise block behavior through the same global registry
+    // as production. Initialize it here so test outcomes do not depend on
+    // another test having run first.
+    crate::behavior::init_behaviors();
     let mut worlds = WorldMap::new(default_domain, domains, &[]);
     for world in loaded_worlds {
-        worlds.insert(world.key.clone(), Arc::clone(world));
+        assert!(worlds.insert(world.key.clone(), Arc::clone(world)).is_ok());
     }
     let scoreboards = DomainScoreboards::load(&worlds)
         .await
@@ -242,6 +250,14 @@ async fn test_server_with_worlds(
     let registry_cache = RegistryCache::new(config.compression);
 
     Ok(Arc::new(Server {
+        chunk_runtime: Arc::clone(
+            &worlds
+                .get(&loaded_worlds[0].key)
+                .expect("test world")
+                .chunk_map
+                .chunk_runtime,
+        ),
+        world_save_path: storage_root.to_path_buf(),
         config,
         permission_groups,
         cancel_token: CancellationToken::new(),
@@ -249,6 +265,7 @@ async fn test_server_with_worlds(
         registry_cache,
         worlds,
         online_players: PlayerMap::new(),
+        global_player_data: SyncRwLock::new(FxHashMap::default()),
         player_admissions: SyncMutex::new(FxHashMap::default()),
         tick_rate_manager: SyncRwLock::new(TickRateManager::new()),
         scoreboards,
@@ -260,6 +277,16 @@ async fn test_server_with_worlds(
         command_permission_keys,
         command_requests: CommandRequestQueue::new(),
         packet_processor: PacketProcessor::new(),
+        world_generator_registry: WorldGeneratorRegistry::new_with_builtins()
+            .expect("test generator registry should initialize"),
+        world_storage_registry: WorldStorageRegistry::new_with_builtins()
+            .expect("test storage registry should initialize"),
+        generation_pool: Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .build()
+                .expect("test generation pool should initialize"),
+        ),
         chunk_encoding_pool: Arc::new(
             rayon::ThreadPoolBuilder::new()
                 .num_threads(1)
@@ -279,9 +306,31 @@ async fn test_server_with_worlds(
         pending_player_joins: PlayerJoinQueue::new(),
         pending_player_disconnects: PlayerDisconnectQueue::new(),
         pending_world_changes: SyncMutex::new(Vec::new()),
+        pending_world_removals: SyncMutex::new(Vec::new()),
+        pending_world_additions: SyncMutex::new(Vec::new()),
         events: EventBus::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
+}
+
+#[tokio::test]
+async fn world_creation_request_poll_and_wait_are_non_blocking() {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let mut request = WorldCreationRequest { id: 7, receiver };
+    assert_eq!(request.id(), 7);
+    assert_eq!(request.poll(), WorldCreationState::Pending);
+    sender.send(Ok(())).expect("request receiver remains live");
+    assert_eq!(request.poll(), WorldCreationState::Ready);
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let request = WorldCreationRequest { id: 8, receiver };
+    sender
+        .send(Err("build failed".to_owned()))
+        .expect("request receiver remains live");
+    assert_eq!(
+        request.wait().await,
+        WorldCreationState::Failed("build failed".to_owned())
+    );
 }
 
 #[test]

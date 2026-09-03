@@ -10,7 +10,9 @@ use glam::DVec3;
 use crate::{
     block_entity::entities::EndGatewayBlockEntity,
     entity::Entity,
-    portal::{PortalTicketTarget, TeleportPostTransition, TeleportTransition},
+    portal::{
+        PortalTicketTarget, TeleportPostTransition, TeleportTransition, TeleportTransitionCause,
+    },
     world::World,
 };
 
@@ -282,6 +284,7 @@ fn gateway_transition(
     let is_ender_pearl = entity.entity_type() == &vanilla_entities::ENDER_PEARL;
     TeleportTransition {
         target_world: world.clone(),
+        cause: TeleportTransitionCause::EndGateway,
         position: block_bottom_center(destination),
         rotation: (0.0, 0.0),
         velocity: DVec3::ZERO,

@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use super::{
     Arc, CPlayerInfoUpdate, CRemovePlayerInfo, ClientPacket, ConnectionProtocol, DomainPlayerState,
     EncodedPacket, Entity, GlobalPlayerData, Instant, JoinSet, NetworkConnection,
@@ -130,6 +132,12 @@ impl Server {
         let uuid = player.gameprofile.id;
         if player.connection.closed() {
             self.release_player_admission(uuid, PlayerAdmissionState::Joining);
+            return;
+        }
+
+        if !self.is_player_whitelisted(uuid) {
+            self.release_player_admission(uuid, PlayerAdmissionState::Joining);
+            player.disconnect("You are not whitelisted");
             return;
         }
 
@@ -312,8 +320,8 @@ impl Server {
         let live_memberships = self
             .worlds
             .values()
+            .into_iter()
             .filter(|world| world.contains_player(&player))
-            .cloned()
             .collect::<Vec<_>>();
         if !live_memberships.is_empty() {
             tracing::error!(
@@ -354,8 +362,8 @@ impl Server {
         let live_memberships = self
             .worlds
             .values()
+            .into_iter()
             .filter(|world| world.contains_player(&player))
-            .cloned()
             .collect::<Vec<_>>();
         if !live_memberships.is_empty() {
             tracing::error!(
@@ -456,17 +464,25 @@ impl Server {
         {
             log::error!("Failed to save player domain data for {uuid}: {e}");
         }
-        if let Err(e) = self
-            .player_data_storage
-            .save_global(
-                uuid,
-                &GlobalPlayerData {
-                    last_active_domain: domain,
-                },
-            )
-            .await
-        {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(i64::MAX as u128) as i64;
+        let mut global = self.global_player_data(uuid).unwrap_or(GlobalPlayerData {
+            last_active_domain: domain.clone(),
+            first_played: now,
+            last_played: now,
+            statistics: Vec::new(),
+            whitelisted: false,
+        });
+        global.last_active_domain = domain.clone();
+        global.last_played = now;
+        global.statistics = player_data.statistics.clone();
+        if let Err(e) = self.player_data_storage.save_global(uuid, &global).await {
             log::error!("Failed to save global player data for {uuid}: {e}");
+        } else {
+            self.publish_global_player_data(uuid, global);
         }
 
         player.cleanup();
@@ -527,7 +543,7 @@ impl Server {
                 existing_player.gameprofile.properties.clone(),
                 existing_player.game_mode().into(),
                 existing_player.connection.latency(),
-                None,
+                existing_player.tab_list_name(),
                 true,
             );
             player.send_packet(add_existing);
@@ -550,7 +566,7 @@ impl Server {
             player.gameprofile.properties.clone(),
             player.game_mode().into(),
             player.connection.latency(),
-            None,
+            player.tab_list_name(),
             true,
         );
         self.broadcast_to_online(player_info_packet);

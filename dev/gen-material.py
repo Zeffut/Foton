@@ -21,12 +21,15 @@ code.
 """
 import json
 import pathlib
+import re
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 ITEMS = REPO / "foton-registry" / "build_assets" / "items.json"
 BLOCKS = REPO / "foton-registry" / "build_assets" / "blocks.json"
 SOUNDS = REPO / "foton-registry" / "build_assets" / "sound_events.json"
+CLASSES = REPO / "foton-core" / "build" / "classes.json"
+FIRE_BLOCK = REPO / "minecraft-src" / "minecraft" / "src" / "net" / "minecraft" / "world" / "level" / "block" / "FireBlock.java"
 
 # Java keywords cannot be enum constants. None of the registry names is one
 # today, and a name that became one would otherwise fail to compile with a
@@ -41,19 +44,58 @@ void volatile while
 
 
 def read():
-    """Every material, as {name: (is_block, is_item, stack_size)}."""
+    """Every material, as {name: (is_block, is_item, stack_size, max_damage, is_solid, is_occluding)}."""
     items = json.loads(ITEMS.read_text(encoding="utf-8"))["items"]
-    blocks = json.loads(BLOCKS.read_text(encoding="utf-8"))["blocks"]
+    block_data = json.loads(BLOCKS.read_text(encoding="utf-8"))
+    classes = json.loads(CLASSES.read_text(encoding="utf-8"))
+    gravity_classes = {"AnvilBlock", "ColoredFallingBlock", "ConcretePowderBlock", "DragonEggBlock", "SandBlock"}
+    gravity_blocks = {entry["name"] for entry in classes["blocks"] if entry.get("class") in gravity_classes}
+    fire_source = FIRE_BLOCK.read_text(encoding="utf-8")
+    burnable_blocks = {match.group(1).lower() for match in re.finditer(r"setFlammable\(Blocks\.([A-Z0-9_]+),", fire_source)}
+    blocks = block_data["blocks"]
+    shapes = block_data["shapes"]
 
     stacks = {}
+    damages = {}
     for item in items:
-        size = item.get("components", {}).get("minecraft:max_stack_size", 64)
+        components = item.get("components", {})
+        size = components.get("minecraft:max_stack_size", 64)
         stacks[item["name"]] = size if isinstance(size, int) else 64
+        damage = components.get("minecraft:max_damage", 0)
+        damages[item["name"]] = damage if isinstance(damage, int) else 0
 
     block_names = {block["name"] for block in blocks}
     materials = {}
+    for block in blocks:
+        properties = block["behavior_properties"]
+        block["_is_occluding"] = bool(properties["canOcclude"])
+        if properties["forceSolidOn"]:
+            solid = True
+        elif properties["forceSolidOff"] or properties["dynamicShape"]:
+            solid = False
+        else:
+            boxes = [shapes[index] for index in block["collision_shapes"]["default"]]
+            if not boxes:
+                solid = False
+            else:
+                minimum = [min(box["min"][axis] for box in boxes) for axis in range(3)]
+                maximum = [max(box["max"][axis] for box in boxes) for axis in range(3)]
+                size = sum(maximum[axis] - minimum[axis] for axis in range(3)) / 3.0
+                solid = size >= 0.7291666666666666 or maximum[1] - minimum[1] >= 1.0
+        block["_is_solid"] = solid
+
+    solids = {block["name"]: block["_is_solid"] for block in blocks}
     for name in sorted(block_names | set(stacks)):
-        materials[name] = (name in block_names, name in stacks, stacks.get(name, 0))
+        materials[name] = (
+            name in block_names,
+            name in stacks,
+            stacks.get(name, 0),
+            damages.get(name, 0),
+            solids.get(name, False),
+            next((block["_is_occluding"] for block in blocks if block["name"] == name), False),
+            name in gravity_blocks,
+            name in burnable_blocks,
+        )
     return materials
 
 
@@ -81,13 +123,22 @@ def render(materials):
         " * edit: the registry is the source of truth, and a hand-edit here would be",
         " * a second one that drifts.",
         " */",
-        "public enum Material {",
+        "public enum Material implements org.bukkit.Keyed {",
     ]
 
-    for name, (is_block, is_item, stack) in materials.items():
+    for name, (is_block, is_item, stack, damage, is_solid, is_occluding, has_gravity, is_burnable) in materials.items():
         flags = (1 if is_block else 0) | (2 if is_item else 0)
-        lines.append(f'    {constant(name)}("{name}", {flags}, {stack}),')
+        if is_solid:
+            flags |= 4
+        if is_occluding:
+            flags |= 8
+        if has_gravity:
+            flags |= 16
+        if is_burnable:
+            flags |= 32
+        lines.append(f'    {constant(name)}("{name}", {flags}, {stack}, {damage}),')
     lines[-1] = lines[-1][:-1] + ";"
+    lines += ["", "    /** Legacy alias for the generic infested-stone block. */", "    public static final Material MONSTER_EGG = INFESTED_STONE;"]
 
     lines += [
         "",
@@ -103,11 +154,13 @@ def render(materials):
         "    private final String key;",
         "    private final int flags;",
         "    private final int stackSize;",
+        "    private final int maxDamage;",
         "",
-        "    Material(String key, int flags, int stackSize) {",
+        "    Material(String key, int flags, int stackSize, int maxDamage) {",
         "        this.key = key;",
         "        this.flags = flags;",
         "        this.stackSize = stackSize;",
+        "        this.maxDamage = maxDamage;",
         "    }",
         "",
         "    /** Whether this can be placed in the world. */",
@@ -125,6 +178,29 @@ def render(materials):
         "        return (flags & 2) != 0;",
         "    }",
         "",
+        "    /** Whether the default block state has vanilla's legacy solid shape. */",
+        "    public boolean isSolid() {",
+        "        return (flags & 4) != 0;",
+        "    }",
+        "",
+        "    /** Whether the default block state occludes faces in vanilla. */",
+        "    public boolean isBurnable() {",
+        "        return (flags & 32) != 0;",
+        "    }",
+        "",
+        "    public boolean hasGravity() {",
+        "        return (flags & 16) != 0;",
+        "    }",
+        "",
+        "    public boolean isOccluding() {",
+        "        return (flags & 8) != 0;",
+        "    }",
+        "",
+        "    /** Whether the default block state is transparent to light and faces. */",
+        "    public boolean isTransparent() {",
+        "        return !isOccluding();",
+        "    }",
+        "",
         "    public boolean isAir() {",
         "        return this == AIR || this == CAVE_AIR || this == VOID_AIR;",
         "    }",
@@ -132,6 +208,41 @@ def render(materials):
         "    /** How many fit in one stack. Zero for a block that is not an item. */",
         "    public int getMaxStackSize() {",
         "        return stackSize;",
+        "    }",
+        "",
+        "    /** Maximum durability for damageable items, zero otherwise. */",
+        "    public short getMaxDurability() {",
+        "        return (short) maxDamage;",
+        "    }",
+        "",
+        "    /** Legacy data class; modern registry entries use the generic representation. */",
+        "    public Class<? extends org.bukkit.material.MaterialData> getData() {",
+        "        return org.bukkit.material.MaterialData.class;",
+        "    }",
+        "",
+        "    /** Legacy magic IDs are not defined for modern materials. */",
+        "    @Deprecated",
+        "    public int getId() {",
+        '        throw new IllegalArgumentException("Cannot get ID of Modern Material");',
+        "    }",
+        "",
+        "    public org.bukkit.block.data.BlockData createBlockData() {",
+        "        return new org.bukkit.block.data.SimpleBlockData(\"minecraft:\" + key);",
+        "    }",
+        "",
+        "    public org.bukkit.block.data.BlockData createBlockData(String data) {",
+        "        if (data == null || data.isEmpty()) return createBlockData();",
+        "        return new org.bukkit.block.data.SimpleBlockData(data);",
+        "    }",
+        "",
+        "    public org.bukkit.inventory.EquipmentSlot getEquipmentSlot() {",
+        "        String upper = name().toUpperCase(Locale.ROOT);",
+        "        if (upper.endsWith(\"_HELMET\") || upper.endsWith(\"_SKULL\") || upper.endsWith(\"_HEAD\")) return org.bukkit.inventory.EquipmentSlot.HEAD;",
+        "        if (upper.endsWith(\"_CHESTPLATE\")) return org.bukkit.inventory.EquipmentSlot.CHEST;",
+        "        if (upper.endsWith(\"_LEGGINGS\")) return org.bukkit.inventory.EquipmentSlot.LEGS;",
+        "        if (upper.endsWith(\"_BOOTS\")) return org.bukkit.inventory.EquipmentSlot.FEET;",
+        "        if (upper.equals(\"SADDLE\")) return org.bukkit.inventory.EquipmentSlot.SADDLE;",
+        "        return org.bukkit.inventory.EquipmentSlot.HAND;",
         "    }",
         "",
         "    public NamespacedKey getKey() {",
@@ -166,6 +277,19 @@ def render(materials):
         "        } catch (IllegalArgumentException unknown) {",
         "            return null;",
         "        }",
+        "    }",
+        "",
+        "    /** Overload retained for Bukkit callers that request legacy-name matching. */",
+        "    public static Material matchMaterial(String name, boolean legacyName) {",
+        "        return matchMaterial(name);",
+        "    }",
+        "",
+        "    /** Legacy Bukkit alias retained for plugins that use getMaterial. */",
+        "    public static Material getMaterial(String name) {",
+        "        return matchMaterial(name);",
+        "    }",
+        "    public static Material getMaterial(String name, boolean legacyName) {",
+        "        return matchMaterial(name, legacyName);",
         "    }",
         "}",
         "",
@@ -224,7 +348,6 @@ def render_sounds(found):
         "        this.key = key;",
         "    }",
         "",
-        "    /** The registry key, which is what crosses to Foton. */",
         "    public String getKey() {",
         "        return key;",
         "    }",

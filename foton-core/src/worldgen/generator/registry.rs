@@ -154,6 +154,23 @@ impl WorldGeneratorRegistry {
         })
     }
 
+    /// Returns registered generator identifiers in deterministic order.
+    ///
+    /// This is an inspection boundary for integrations: callers can discover
+    /// supported factories without receiving or mutating private closures.
+    #[must_use]
+    pub fn keys(&self) -> Vec<Identifier> {
+        let mut keys: Vec<_> = self.factories.keys().cloned().collect();
+        keys.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+        keys
+    }
+
+    /// Returns whether a generator factory is registered for the key.
+    #[must_use]
+    pub fn contains(&self, key: &Identifier) -> bool {
+        self.factories.contains_key(key)
+    }
+
     /// Creates a generator from a validated generator ID and config.
     pub fn create(
         &self,
@@ -521,6 +538,25 @@ fn sea_level_for_dimension_type(dimension_type: DimensionTypeRef) -> i32 {
 mod tests {
     use super::*;
     use foton_registry::init_vanilla_registry;
+
+    #[test]
+    fn builtins_are_discoverable_in_deterministic_order() {
+        let registry = WorldGeneratorRegistry::new_with_builtins()
+            .expect("built-in generator registry should initialize");
+        let keys = registry.keys();
+        assert_eq!(
+            keys.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            vec![
+                "foton:empty",
+                "minecraft:flat",
+                "minecraft:overworld",
+                "minecraft:the_end",
+                "minecraft:the_nether",
+            ]
+        );
+        assert!(registry.contains(&Identifier::vanilla_static("flat")));
+        assert!(!registry.contains(&Identifier::vanilla_static("missing")));
+    }
 
     #[test]
     fn default_flat_config_matches_vanilla_superflat() {

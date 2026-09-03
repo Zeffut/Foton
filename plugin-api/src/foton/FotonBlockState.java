@@ -13,13 +13,19 @@ import org.bukkit.block.data.BlockData;
  * does not change what it says, and `update` is what writes it back. Plugins
  * read a state, decide, and then either update it or throw it away.
  */
-public final class FotonBlockState implements BlockState {
+public class FotonBlockState implements BlockState {
     private final Block block;
-    private final BlockData data;
+    private String originalState;
+    private BlockData data;
+    private final FotonPersistentDataContainer persistentData = new FotonPersistentDataContainer();
 
-    FotonBlockState(Block block, BlockData data) {
+    protected FotonBlockState(Block block, BlockData data) {
         this.block = block;
         this.data = data;
+        this.originalState = data == null ? null : data.getAsString();
+    }
+    @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return persistentData;
     }
 
     @Override
@@ -28,8 +34,13 @@ public final class FotonBlockState implements BlockState {
     }
 
     @Override
+    public void setBlockData(BlockData value) {
+        if (value != null) data = value.clone();
+    }
+
+    @Override
     public BlockData getBlockData() {
-        return data;
+        return data == null ? null : data.clone();
     }
 
     @Override
@@ -70,11 +81,18 @@ public final class FotonBlockState implements BlockState {
     @Override
     public boolean update(boolean force) {
         World world = block.getWorld();
-        if (world == null) {
+        if (world == null || data == null) {
             return false;
         }
-        Native.setBlock(world.getName(), block.getX(), block.getY(), block.getZ(),
-            data.getAsString());
+        if (!force) {
+            String current = Native.blockState(world.getName(), block.getX(), block.getY(), block.getZ());
+            if (current == null || !current.equals(originalState)) {
+                return false;
+            }
+        }
+        String state = data.getAsString();
+        Native.setBlock(world.getName(), block.getX(), block.getY(), block.getZ(), state);
+        originalState = state;
         return true;
     }
 

@@ -31,8 +31,8 @@ impl World {
             server
                 .worlds
                 .values()
+                .into_iter()
                 .filter(|world| world.contains_player(player))
-                .cloned()
                 .collect()
         })
     }

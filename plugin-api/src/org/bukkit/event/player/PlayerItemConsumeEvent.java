@@ -1,0 +1,3 @@
+package org.bukkit.event.player;
+import org.bukkit.entity.Player; import org.bukkit.inventory.ItemStack; import org.bukkit.event.Cancellable; import org.bukkit.event.HandlerList;
+public final class PlayerItemConsumeEvent extends PlayerEvent implements Cancellable { private final ItemStack item; private boolean cancelled; private static final HandlerList HANDLERS=new HandlerList(); public PlayerItemConsumeEvent(Player p,ItemStack item){super(p);this.item=item;} public ItemStack getItem(){return item;} public boolean isCancelled(){return cancelled;} public void setCancelled(boolean v){cancelled=v;} public HandlerList getHandlers(){return HANDLERS;} public static HandlerList getHandlerList(){return HANDLERS;} }

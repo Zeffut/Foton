@@ -40,7 +40,7 @@ public final class Yaml {
         return out.toString();
     }
 
-    // ---------------------------------------------------------------- read
+    // read
 
     /** One line, kept with its indent so structure is a column comparison. */
     private static final class Line {
@@ -313,7 +313,7 @@ public final class Yaml {
         return text;
     }
 
-    // -------------------------------------------------------------- scalars
+    // scalars
 
     /** One value, given the type YAML 1.1 gives it. */
     static Object scalar(String text) {
@@ -480,7 +480,7 @@ public final class Yaml {
         return out;
     }
 
-    // --------------------------------------------------------------- write
+    // write
 
     @SuppressWarnings("unchecked")
     private static void writeNode(StringBuilder out, Object value, int indent, boolean inline) {

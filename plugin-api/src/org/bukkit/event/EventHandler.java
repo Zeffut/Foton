@@ -15,6 +15,6 @@ import java.lang.annotation.Target;
 public @interface EventHandler {
     EventPriority priority() default EventPriority.NORMAL;
 
-    /** Whether this handler still runs after something cancelled the event. */
+    /** Whether this handler ignores an event that was already cancelled. */
     boolean ignoreCancelled() default false;
 }

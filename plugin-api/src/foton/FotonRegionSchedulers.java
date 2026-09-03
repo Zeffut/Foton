@@ -32,30 +32,92 @@ public final class FotonRegionSchedulers {
     }
 
     /** A Folia task wrapping a Bukkit one, since they are the same task. */
-    private record Task(Plugin owner, BukkitTask task) implements ScheduledTask {
+    private static final class Task implements ScheduledTask {
+        private final Plugin owner;
+        private final boolean repeating;
+        private volatile ExecutionState state = ExecutionState.IDLE;
+        private BukkitTask task;
+
+        private Task(Plugin owner, boolean repeating) {
+            this.owner = owner;
+            this.repeating = repeating;
+        }
+
+        private synchronized void bind(BukkitTask task) {
+            this.task = task;
+            if (isCancelled()) {
+                task.cancel();
+            }
+        }
+
+        private void run(Consumer<ScheduledTask> body) {
+            synchronized (this) {
+                if (state != ExecutionState.IDLE) {
+                    return;
+                }
+                state = ExecutionState.RUNNING;
+            }
+            try {
+                body.accept(this);
+            } finally {
+                synchronized (this) {
+                    if (state == ExecutionState.CANCELLED_RUNNING) {
+                        state = ExecutionState.CANCELLED;
+                    } else {
+                        state = repeating ? ExecutionState.IDLE : ExecutionState.FINISHED;
+                    }
+                }
+            }
+        }
+
         @Override public Plugin getOwningPlugin() {
             return owner;
         }
 
-        @Override public boolean isCancelled() {
-            return false;
+        @Override public boolean isRepeatingTask() {
+            return repeating;
         }
 
-        @Override public void cancel() {
-            task.cancel();
+        @Override public synchronized CancelledState cancel() {
+            return switch (state) {
+                case IDLE -> {
+                    state = ExecutionState.CANCELLED;
+                    if (task != null) {
+                        task.cancel();
+                    }
+                    yield CancelledState.CANCELLED_BY_CALLER;
+                }
+                case RUNNING -> {
+                    if (!repeating) {
+                        yield CancelledState.RUNNING;
+                    }
+                    state = ExecutionState.CANCELLED_RUNNING;
+                    if (task != null) {
+                        task.cancel();
+                    }
+                    yield CancelledState.NEXT_RUNS_CANCELLED;
+                }
+                case FINISHED -> CancelledState.ALREADY_EXECUTED;
+                case CANCELLED -> CancelledState.CANCELLED_ALREADY;
+                case CANCELLED_RUNNING -> CancelledState.NEXT_RUNS_CANCELLED_ALREADY;
+            };
+        }
+
+        @Override public ExecutionState getExecutionState() {
+            return state;
         }
     }
 
     /** Folia hands the task itself to the body; Bukkit does not. */
     private static ScheduledTask submit(
             Plugin plugin, Consumer<ScheduledTask> body, long delay, long period) {
-        ScheduledTask[] handle = new ScheduledTask[1];
-        Runnable runnable = () -> body.accept(handle[0]);
+        Task handle = new Task(plugin, period > 0);
+        Runnable runnable = () -> handle.run(body);
         BukkitTask task = period > 0
             ? new FotonScheduler().runTaskTimer(plugin, runnable, delay, period)
             : new FotonScheduler().runTaskLater(plugin, runnable, delay);
-        handle[0] = new Task(plugin, task);
-        return handle[0];
+        handle.bind(task);
+        return handle;
     }
 
     private static final class Global implements GlobalRegionScheduler {
@@ -165,14 +227,14 @@ public final class FotonRegionSchedulers {
                 TimeUnit unit) {
             long delayTicks = unit.toMillis(delay) / 50;
             long periodTicks = period <= 0 ? -1 : Math.max(1, unit.toMillis(period) / 50);
-            ScheduledTask[] handle = new ScheduledTask[1];
-            Runnable runnable = () -> task.accept(handle[0]);
+            Task handle = new Task(plugin, periodTicks > 0);
+            Runnable runnable = () -> handle.run(task);
             BukkitTask bukkit = periodTicks > 0
                 ? new FotonScheduler().runTaskTimerAsynchronously(
                     plugin, runnable, delayTicks, periodTicks)
                 : new FotonScheduler().runTaskLaterAsynchronously(plugin, runnable, delayTicks);
-            handle[0] = new Task(plugin, bukkit);
-            return handle[0];
+            handle.bind(bukkit);
+            return handle;
         }
     }
 }

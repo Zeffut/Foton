@@ -9,6 +9,7 @@ import org.bukkit.event.Cancellable;
 public class BlockBreakEvent extends BlockEvent implements Cancellable {
     private final Player player;
     private boolean cancelled;
+    private boolean dropItems = true;
 
     public BlockBreakEvent(Block block, Player player) {
         super(block);
@@ -19,6 +20,10 @@ public class BlockBreakEvent extends BlockEvent implements Cancellable {
 
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean value) { this.cancelled = value; }
+
+    /** Controls whether the normal block drops are spawned. */
+    public boolean isDropItems() { return dropItems; }
+    public void setDropItems(boolean value) { this.dropItems = value; }
 
     /** Bukkit gives every event its own handler list, and plugins reach for
      * the static one to register or unregister by hand. Foton dispatches

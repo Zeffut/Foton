@@ -12,15 +12,21 @@ import org.bukkit.event.Cancellable;
  */
 public class AsyncPlayerChatEvent extends PlayerEvent implements Cancellable {
     private String message;
+    private final java.util.Set<Player> recipients = new java.util.LinkedHashSet<>();
     private boolean cancelled;
+    private String format = "<%1$s> %2$s";
 
     public AsyncPlayerChatEvent(Player player, String message) {
         super(player);
         this.message = message;
     }
 
+    public String getFormat() { return format; }
+    public void setFormat(String value) { format = value == null ? "" : value; }
+
     public String getMessage() { return message; }
     public void setMessage(String value) { this.message = value; }
+    public java.util.Set<Player> getRecipients() { return recipients; }
 
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean value) { this.cancelled = value; }

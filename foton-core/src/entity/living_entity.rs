@@ -3,7 +3,9 @@ use std::f32::consts::PI;
 use foton_registry::DyeColor;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::data_components::components::ItemDamageFunction;
-use foton_registry::data_components::vanilla_components::{self, BLOCKS_ATTACKS, KINETIC_WEAPON};
+use foton_registry::data_components::vanilla_components::{
+    self, BLOCKS_ATTACKS, DEATH_PROTECTION, KINETIC_WEAPON,
+};
 use foton_registry::particle_type::{BlockParticleOption, ParticleData};
 use foton_registry::vanilla_particle_types;
 
@@ -11,6 +13,7 @@ use super::*;
 use crate::advancement::triggers;
 use crate::behavior::ITEM_BEHAVIORS;
 use crate::entity::kill_score;
+use crate::event::{EntityResurrectEvent, Event};
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
 use crate::player::player_inventory::PlayerInventory;
@@ -84,6 +87,16 @@ pub trait LivingEntity: Entity {
     /// living runtime state such as attributes, cached movement speed,
     /// damage cooldown, and death animation counters.
     fn living_base(&self) -> &LivingEntityBase;
+
+    /// Returns vanilla `noDamageTicks` (the remaining hurt invulnerability).
+    fn no_damage_ticks(&self) -> i32 {
+        self.living_base().invulnerable_time()
+    }
+
+    /// Sets vanilla `noDamageTicks`.
+    fn set_no_damage_ticks(&self, ticks: i32) {
+        self.living_base().set_invulnerable_time(ticks.max(0));
+    }
 
     /// Returns vanilla living body/head rotation state.
     fn living_rotation_state(&self) -> LivingRotationState {
@@ -971,6 +984,9 @@ pub trait LivingEntity: Entity {
             self.apply_damage_knockback(source, blocked);
         }
 
+        if self.is_dead_or_dying() && self.try_death_protection(world) {
+            return true;
+        }
         if self.is_dead_or_dying() {
             if took_full_damage {
                 self.play_death_sound();
@@ -1144,6 +1160,35 @@ pub trait LivingEntity: Entity {
             damage = combat_rules::get_damage_after_magic_absorb(damage, enchantment_armor);
         }
         damage
+    }
+
+    /// Applies a Death Protection component before vanilla death processing.
+    fn try_death_protection(&self, world: &World) -> bool {
+        let hand = [InteractionHand::MainHand, InteractionHand::OffHand]
+            .into_iter()
+            .find(|hand| self.get_item_in_hand(*hand).get(DEATH_PROTECTION).is_some());
+        let Some(hand) = hand else {
+            return false;
+        };
+        let mut event = EntityResurrectEvent::new(self.uuid());
+        world.fire_event(&mut event);
+        if Event::is_cancelled(&event) {
+            return false;
+        }
+        let stack = self.get_item_in_hand(hand);
+        if !self.has_infinite_materials() {
+            self.set_item_in_hand(hand, stack.copy_with_count(stack.count().saturating_sub(1)));
+        }
+        self.set_health(1.0);
+        self.set_absorption_amount(0.0);
+        self.game_event(&vanilla_game_events::ENTITY_DIE);
+        self.broadcast_entity_event(EntityStatus::ProtectedFromDeath);
+        if let Some(protection) = stack.get(DEATH_PROTECTION) {
+            for effect in protection.death_effects() {
+                crate::behavior::item::apply_one_consume_effect(world, self, effect);
+            }
+        }
+        true
     }
 
     /// Applies damage after vanilla reductions.
@@ -1340,6 +1385,9 @@ pub trait LivingEntity: Entity {
         };
 
         if perished {
+            if let Some(world) = self.level() {
+                world.fire_event(&mut crate::event::EntityDeathEvent::new(self.uuid()));
+            }
             self.game_event(&vanilla_game_events::ENTITY_DIE);
             self.drop_all_death_loot(source);
         }

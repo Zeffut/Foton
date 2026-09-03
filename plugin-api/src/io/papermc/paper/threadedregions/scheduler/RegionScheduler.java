@@ -18,8 +18,19 @@ public interface RegionScheduler {
 
     ScheduledTask run(Plugin plugin, Location location, Consumer<ScheduledTask> task);
 
+    default ScheduledTask run(Plugin plugin, World world, int chunkX, int chunkZ, Consumer<ScheduledTask> task) {
+        if (world == null) return null;
+        return run(plugin, world.getBlockAt(chunkX * 16, world.getMinHeight(), chunkZ * 16).getLocation(), task);
+    }
+
     ScheduledTask runDelayed(
         Plugin plugin, Location location, Consumer<ScheduledTask> task, long delayTicks);
+
+    default ScheduledTask runDelayed(Plugin plugin, World world, int chunkX, int chunkZ,
+        Consumer<ScheduledTask> task, long delayTicks) {
+        if (world == null) return null;
+        return runDelayed(plugin, world.getBlockAt(chunkX * 16, world.getMinHeight(), chunkZ * 16).getLocation(), task, delayTicks);
+    }
 
     ScheduledTask runAtFixedRate(
         Plugin plugin,
@@ -27,4 +38,10 @@ public interface RegionScheduler {
         Consumer<ScheduledTask> task,
         long delayTicks,
         long periodTicks);
+
+    default ScheduledTask runAtFixedRate(Plugin plugin, World world, int chunkX, int chunkZ,
+        Consumer<ScheduledTask> task, long delayTicks, long periodTicks) {
+        if (world == null) return null;
+        return runAtFixedRate(plugin, world.getBlockAt(chunkX * 16, world.getMinHeight(), chunkZ * 16).getLocation(), task, delayTicks, periodTicks);
+    }
 }

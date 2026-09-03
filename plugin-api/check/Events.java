@@ -37,7 +37,71 @@ final class Events {
         Checks.expect(!foton.EventBridge.fireBlockBreak(id, 1, 2, 3, "minecraft:overworld"),
             "a cancelled break was reported as allowed");
 
+        int[] ignoredCancellation = {0};
+        org.bukkit.event.Listener listener = new org.bukkit.event.Listener() {};
+        org.bukkit.plugin.Plugin owner = foton.PluginHost.all()[0];
+        org.bukkit.Bukkit.getPluginManager().registerEvent(
+            org.bukkit.event.player.AsyncPlayerChatEvent.class,
+            listener,
+            org.bukkit.event.EventPriority.NORMAL,
+            (registered, event) -> ignoredCancellation[0]++,
+            owner,
+            true);
+        org.bukkit.event.player.AsyncPlayerChatEvent cancelled =
+            new org.bukkit.event.player.AsyncPlayerChatEvent(null, "cancelled");
+        cancelled.setCancelled(true);
+        org.bukkit.Bukkit.getPluginManager().callEvent(cancelled);
+        Checks.same(ignoredCancellation[0], 0,
+            "registerEvent(ignoreCancelled=true) should ignore a cancelled event");
+
+        org.bukkit.Bukkit.getPluginManager().registerEvent(
+            org.bukkit.event.player.AsyncPlayerChatEvent.class,
+            listener,
+            org.bukkit.event.EventPriority.NORMAL,
+            (registered, event) -> ignoredCancellation[0]++,
+            owner,
+            false);
+        org.bukkit.Bukkit.getPluginManager().callEvent(cancelled);
+        Checks.same(ignoredCancellation[0], 1,
+            "registerEvent(ignoreCancelled=false) should receive a cancelled event");
+
+        pluginMessages(owner);
         scheduler();
+    }
+
+    private static void pluginMessages(org.bukkit.plugin.Plugin owner) {
+        org.bukkit.plugin.messaging.Messenger messenger = org.bukkit.Bukkit.getMessenger();
+        int[] heard = {0};
+        org.bukkit.plugin.messaging.PluginMessageListener listener =
+            (channel, player, message) -> {
+                Checks.same(channel, "fixture:messages", "the plugin channel changed in transit");
+                Checks.same(message[0], (byte) 7, "the plugin payload changed in transit");
+                heard[0]++;
+            };
+        org.bukkit.plugin.messaging.PluginMessageListenerRegistration registration =
+            messenger.registerIncomingPluginChannel(owner, "fixture:messages", listener);
+        Checks.expect(registration.isValid(), "a fresh plugin channel registration is invalid");
+        Checks.expect(messenger.getIncomingChannels(owner).contains("fixture:messages"),
+            "the plugin's incoming channel was not recorded");
+
+        messenger.dispatchIncomingMessage(
+            new foton.FotonPlayer(java.util.UUID.fromString(
+                "00000000-0000-0000-0000-000000000001")),
+            "fixture:messages",
+            new byte[] {7, 8});
+        Checks.same(heard[0], 1, "an incoming plugin message missed its listener");
+
+        boolean duplicateRejected = false;
+        try {
+            messenger.registerIncomingPluginChannel(owner, "fixture:messages", listener);
+        } catch (IllegalArgumentException expected) {
+            duplicateRejected = true;
+        }
+        Checks.expect(duplicateRejected, "a duplicate plugin channel listener was accepted");
+
+        messenger.registerOutgoingPluginChannel(owner, "fixture:messages");
+        Checks.expect(messenger.isOutgoingChannelRegistered(owner, "fixture:messages"),
+            "the outgoing plugin channel was not recorded");
     }
 
     /** The scheduler's promise is about *when*, so this checks when. */
@@ -67,5 +131,112 @@ final class Events {
             "a one-shot task ran again");
         // Five ticks, a period of two: runs on 1, 3 and 5.
         Checks.same(example.EventFixture.repeating, 3, "the repeat lost its period");
+
+        foliaTaskState(owner());
+    }
+
+    /** Folia exposes the lifecycle and the outcome of cancellation to plugins. */
+    private static void foliaTaskState(org.bukkit.plugin.Plugin owner) {
+        io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler scheduler =
+            org.bukkit.Bukkit.getGlobalRegionScheduler();
+
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask cancelled =
+            scheduler.runDelayed(owner, ignored -> {
+                throw new AssertionError("a cancelled Folia task ran");
+            }, 2);
+        Checks.same(cancelled.getExecutionState(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.IDLE,
+            "a queued Folia task should be idle");
+        Checks.same(cancelled.cancel(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState
+                .CANCELLED_BY_CALLER,
+            "the first cancellation should cancel an idle task");
+        Checks.expect(cancelled.isCancelled(), "a cancelled Folia task should say so");
+        Checks.same(cancelled.cancel(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState
+                .CANCELLED_ALREADY,
+            "a second cancellation should report the existing cancellation");
+
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask[] observed = {null};
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask once = scheduler.run(owner, task -> {
+            observed[0] = task;
+            Checks.same(task.getExecutionState(),
+                io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.RUNNING,
+                "a Folia task body should observe itself running");
+        });
+        Checks.expect(!once.isRepeatingTask(), "a one-shot Folia task reported as repeating");
+        foton.FotonScheduler.tick();
+        Checks.expect(observed[0] == once, "the Folia body received a different task handle");
+        Checks.same(once.getExecutionState(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.FINISHED,
+            "a one-shot Folia task should finish after its body");
+        Checks.same(once.cancel(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState.ALREADY_EXECUTED,
+            "a finished Folia task cannot be cancelled retroactively");
+
+        int[] runs = {0};
+        io.papermc.paper.threadedregions.scheduler.ScheduledTask repeating =
+            scheduler.runAtFixedRate(owner, task -> {
+                runs[0]++;
+                Checks.same(task.cancel(),
+                    io.papermc.paper.threadedregions.scheduler.ScheduledTask.CancelledState
+                        .NEXT_RUNS_CANCELLED,
+                    "cancelling a running repeat should cancel its next runs");
+                Checks.same(task.getExecutionState(),
+                    io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState
+                        .CANCELLED_RUNNING,
+                    "a running repeat should expose its pending cancellation");
+            }, 0, 1);
+        Checks.expect(repeating.isRepeatingTask(), "a repeating Folia task reported as one-shot");
+        foton.FotonScheduler.tick();
+        Checks.same(repeating.getExecutionState(),
+            io.papermc.paper.threadedregions.scheduler.ScheduledTask.ExecutionState.CANCELLED,
+            "a cancelled repeat should settle after its body");
+        foton.FotonScheduler.tick();
+        Checks.same(runs[0], 1, "a cancelled Folia repeat ran again");
+
+        bukkitRunnable(owner);
+    }
+
+    private static void bukkitRunnable(org.bukkit.plugin.Plugin owner) {
+        int[] runs = {0};
+        org.bukkit.scheduler.BukkitRunnable runnable = new org.bukkit.scheduler.BukkitRunnable() {
+            @Override public void run() {
+                runs[0]++;
+            }
+        };
+        boolean unscheduledRejected = false;
+        try {
+            runnable.getTaskId();
+        } catch (IllegalStateException expected) {
+            unscheduledRejected = true;
+        }
+        Checks.expect(unscheduledRejected, "an unscheduled BukkitRunnable exposed a task id");
+
+        org.bukkit.scheduler.BukkitTask task = runnable.runTask(owner);
+        Checks.expect(task.isSync() && task.getOwner() == owner,
+            "a BukkitRunnable lost its owner or sync contract");
+        foton.FotonScheduler.tick();
+        Checks.same(runs[0], 1, "a scheduled BukkitRunnable did not run");
+
+        boolean rescheduleRejected = false;
+        try {
+            runnable.runTask(owner);
+        } catch (IllegalStateException expected) {
+            rescheduleRejected = true;
+        }
+        Checks.expect(rescheduleRejected, "a BukkitRunnable was scheduled twice");
+
+        org.bukkit.scheduler.BukkitTask async = org.bukkit.Bukkit.getScheduler()
+            .runTaskLaterAsynchronously(owner, () -> {
+                throw new AssertionError("a cancelled async task ran");
+            }, 100);
+        org.bukkit.Bukkit.getScheduler().cancelTasks(owner);
+        Checks.expect(async.isCancelled(),
+            "cancelTasks(plugin) left an asynchronous task running");
+    }
+
+    private static org.bukkit.plugin.Plugin owner() {
+        return foton.PluginHost.all()[0];
     }
 }

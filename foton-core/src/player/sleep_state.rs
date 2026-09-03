@@ -1,17 +1,29 @@
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PlayerSleepState {
     sleep_counter: i32,
+    sleeping_ignored: bool,
 }
 
 impl PlayerSleepState {
     #[must_use]
     pub(super) const fn new() -> Self {
-        Self { sleep_counter: 0 }
+        Self {
+            sleep_counter: 0,
+            sleeping_ignored: false,
+        }
     }
 
     #[must_use]
     pub(super) const fn sleep_counter(self) -> i32 {
         self.sleep_counter
+    }
+
+    pub(super) const fn sleeping_ignored(self) -> bool {
+        self.sleeping_ignored
+    }
+
+    pub(super) fn set_sleeping_ignored(&mut self, value: bool) {
+        self.sleeping_ignored = value;
     }
 
     pub(super) const fn set_sleep_counter(&mut self, sleep_counter: i32) {

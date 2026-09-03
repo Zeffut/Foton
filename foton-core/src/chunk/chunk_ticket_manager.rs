@@ -310,6 +310,7 @@ struct PersistentChunkTicket {
 #[serde(rename_all = "snake_case")]
 enum PersistentChunkTicketKind {
     Portal,
+    Spawn,
 }
 
 /// Timed chunk tickets owned by vanilla gameplay systems.
@@ -358,6 +359,11 @@ impl TimedChunkTickets {
     }
 
     /// Adds or refreshes vanilla's in-flight ender pearl ticket.
+    /// Adds the persistent vanilla spawn ticket.
+    pub(crate) fn add_spawn_ticket(&mut self, pos: ChunkPos) -> Option<ChunkTicket> {
+        self.add_or_reset(TimedChunkTicketKind::Spawn, pos, spawn_ticket(), i64::MAX)
+    }
+
     pub(crate) fn add_ender_pearl_ticket(&mut self, pos: ChunkPos) -> Option<ChunkTicket> {
         self.add_or_reset(
             TimedChunkTicketKind::EnderPearl,
@@ -393,6 +399,14 @@ impl TimedChunkTickets {
         expired_tickets
     }
 
+    pub(crate) fn remove_spawn_ticket(&mut self, pos: ChunkPos) -> Option<ChunkTicket> {
+        let index = self
+            .tickets
+            .iter()
+            .position(|entry| entry.kind == TimedChunkTicketKind::Spawn && entry.pos == pos)?;
+        Some(self.tickets.swap_remove(index).ticket)
+    }
+
     fn add_or_reset(
         &mut self,
         kind: TimedChunkTicketKind,
@@ -426,7 +440,26 @@ impl TimedChunkTickets {
                     persistent.ticks_left,
                 );
             }
+            PersistentChunkTicketKind::Spawn => {
+                self.add_loaded_spawn_ticket(ChunkPos::new(persistent.chunk_x, persistent.chunk_z));
+            }
         }
+    }
+
+    fn add_loaded_spawn_ticket(&mut self, pos: ChunkPos) {
+        if self
+            .tickets
+            .iter()
+            .any(|entry| entry.kind == TimedChunkTicketKind::Spawn && entry.pos == pos)
+        {
+            return;
+        }
+        self.tickets.push(TimedChunkTicket {
+            kind: TimedChunkTicketKind::Spawn,
+            pos,
+            ticket: spawn_ticket(),
+            ticks_left: i64::MAX,
+        });
     }
 
     fn add_loaded_portal_ticket(&mut self, pos: ChunkPos, ticks_left: i64) {
@@ -475,6 +508,12 @@ impl TimedChunkTicket {
                 chunk_z: self.pos.0.y,
                 ticks_left: self.ticks_left,
             }),
+            TimedChunkTicketKind::Spawn => Some(PersistentChunkTicket {
+                kind: PersistentChunkTicketKind::Spawn,
+                chunk_x: self.pos.0.x,
+                chunk_z: self.pos.0.y,
+                ticks_left: i64::MAX,
+            }),
             TimedChunkTicketKind::EnderPearl => None,
         }
     }
@@ -483,6 +522,7 @@ impl TimedChunkTicket {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TimedChunkTicketKind {
     Portal,
+    Spawn,
     EnderPearl,
 }
 
@@ -492,6 +532,10 @@ const fn portal_ticket() -> ChunkTicket {
 }
 
 #[must_use]
+const fn spawn_ticket() -> ChunkTicket {
+    ChunkTicket::simulated_full_chunks(11)
+}
+
 const fn ender_pearl_ticket() -> ChunkTicket {
     ChunkTicket::simulated_full_chunks(ENDER_PEARL_TICKET_RADIUS)
 }
@@ -1151,6 +1195,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn persistent_spawn_ticket_round_trips_and_deduplicates() {
+        let persistent = PersistentChunkTickets {
+            tickets: vec![
+                PersistentChunkTicket {
+                    kind: PersistentChunkTicketKind::Spawn,
+                    chunk_x: 0,
+                    chunk_z: -2,
+                    ticks_left: i64::MAX,
+                },
+                PersistentChunkTicket {
+                    kind: PersistentChunkTicketKind::Spawn,
+                    chunk_x: 0,
+                    chunk_z: -2,
+                    ticks_left: i64::MAX,
+                },
+            ],
+        };
+        let restored = TimedChunkTickets::from_persistent(persistent).to_persistent();
+        assert_eq!(restored.tickets.len(), 1);
+        assert_eq!(restored.tickets[0].kind, PersistentChunkTicketKind::Spawn);
+        assert_eq!(
+            (restored.tickets[0].chunk_x, restored.tickets[0].chunk_z),
+            (0, -2)
+        );
+    }
     #[test]
     fn test_no_recalculation_when_clean() {
         let mut manager = ChunkTicketManager::new();

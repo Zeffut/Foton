@@ -168,6 +168,17 @@ pub struct PersistentPlayerData {
     pub living_nbt: Vec<u8>,
 }
 
+impl PersistentPlayerData {
+    /// Returns a persisted statistic by its vanilla registry keys.
+    #[must_use]
+    pub fn statistic_value(&self, stat_type: &str, value: &str) -> i32 {
+        self.statistics
+            .iter()
+            .find(|stat| stat.stat_type == stat_type && stat.value == value)
+            .map_or(0, |stat| stat.count)
+    }
+}
+
 /// One advancement's saved progress.
 ///
 /// Vanilla parity: one entry of `PlayerAdvancements.Data`, whose value is an

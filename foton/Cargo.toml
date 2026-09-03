@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 # Internal crates
 foton-core.workspace = true
+foton-plugin.workspace = true
 foton-login.workspace = true
 foton-utils.workspace = true
 

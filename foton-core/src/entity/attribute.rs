@@ -127,6 +127,11 @@ impl AttributeInstance {
         self.cached_value
     }
 
+    /// Returns all modifiers currently applied to this instance.
+    pub fn modifiers(&self) -> &[AttributeModifier] {
+        &self.modifiers
+    }
+
     /// Adds a modifier. Returns `false` if a modifier with this ID already exists
     pub fn add_modifier(&mut self, modifier: AttributeModifier, persistent: bool) -> bool {
         if self.modifiers.iter().any(|m| m.id == modifier.id) {

@@ -192,18 +192,21 @@ impl ItemBehavior for BowItem {
             return false;
         }
 
-        let arrow = ArrowEntity::shoot_from(
+        let Some(arrow) = ArrowEntity::shoot_from(
             world,
             user,
             arrow_entity_type_for(&ammo),
             power * SHOT_POWER_SCALE,
             SHOT_UNCERTAINTY,
-        );
+        ) else {
+            return false;
+        };
         // Vanilla parity: `ProjectileWeaponItem.createProjectile` marks a fully
         // drawn shot critical and hands the arrow the weapon it came off, which
         // is what Power and Punch are read from when it lands.
         arrow.set_crit_arrow(power >= FULL_DRAW_POWER);
         arrow.set_fired_from_weapon(Some(stack.copy_with_count(stack.count())));
+        arrow.set_ammo_item(ammo.copy_with_count(1));
         if free_shot {
             arrow.set_pickup(ArrowPickup::CreativeOnly);
         }

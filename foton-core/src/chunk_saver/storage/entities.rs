@@ -113,6 +113,7 @@ impl ChunkStorage {
                 .cloned()
                 .collect(),
             custom_data: Self::compound_from_persistent(&persistent.custom_data_nbt, uuid),
+            persistent: true,
         }
     }
 

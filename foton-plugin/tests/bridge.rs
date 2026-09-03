@@ -81,4 +81,10 @@ fn a_call_made_in_java_reaches_foton() {
         name, "Foton",
         "the answer came from Rust, so it should be Rust's"
     );
+    assert!(
+        !host
+            .is_primary_thread_from_java()
+            .expect("the Java side should be able to ask about its thread"),
+        "the test thread has not entered Foton's tick"
+    );
 }

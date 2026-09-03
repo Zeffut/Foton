@@ -1,8 +1,9 @@
 # Bukkit-family plugins — design
 
 Where Foton stands on running Bukkit, Spigot, Paper and Purpur plugins, what
-blocks it, and how the surface gets bounded. Written 2026-08-31. Nothing here is
-built yet.
+blocks it, and how the surface gets bounded. Written 2026-08-31. The measured
+API bridge and event foundation are now under active implementation; the
+staging notes below remain the architecture and coverage baseline.
 
 ## What is actually being asked for
 

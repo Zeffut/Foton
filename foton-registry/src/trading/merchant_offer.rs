@@ -180,6 +180,11 @@ impl MerchantOffer {
         self.uses
     }
 
+    /// Sets the number of completed trades.
+    pub const fn set_uses(&mut self, uses: i32) {
+        self.uses = uses.max(0);
+    }
+
     /// Vanilla parity: `resetUses`.
     pub const fn reset_uses(&mut self) {
         self.uses = 0;
@@ -191,6 +196,12 @@ impl MerchantOffer {
         self.max_uses
     }
 
+    /// Sets the maximum number of trades.
+    pub const fn set_max_uses(&mut self, max_uses: i32) {
+        self.max_uses = max_uses.max(1);
+        self.uses = self.uses.min(self.max_uses);
+    }
+
     /// Vanilla parity: `increaseUses`.
     pub const fn increase_uses(&mut self) {
         self.uses += 1;
@@ -200,6 +211,11 @@ impl MerchantOffer {
     #[must_use]
     pub const fn demand(&self) -> i32 {
         self.demand
+    }
+
+    /// Sets the standing demand modifier.
+    pub const fn set_demand(&mut self, demand: i32) {
+        self.demand = demand;
     }
 
     /// Vanilla parity: `addToSpecialPriceDiff`.

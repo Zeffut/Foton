@@ -33,6 +33,7 @@ use crate::behavior::context::{
 };
 use crate::block_entity::entities::{CrafterBlockEntity, insert_into_containers_at};
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
+use crate::event::{CrafterCraftEvent, Event};
 use crate::inventory::menu::kinds::crafter;
 use crate::player::Player;
 use crate::world::{LevelReader, SignalGetter as _, World};
@@ -106,16 +107,34 @@ impl CrafterBlock {
         };
 
         let input = crafter.as_craft_input();
-        let result = REGISTRY
-            .recipes
-            .find_crafting_recipe(&input)
-            .map(|recipe| (recipe.assemble(), recipe.get_remaining_items(&input)));
+        let result = REGISTRY.recipes.find_crafting_recipe(&input).map(|recipe| {
+            (
+                recipe,
+                recipe.assemble(),
+                recipe.get_remaining_items(&input),
+            )
+        });
 
-        let Some((result, remainders)) = result.filter(|(result, _)| !result.is_empty()) else {
+        let Some((recipe, recipe_result, remainders)) =
+            result.filter(|(_, result, _)| !result.is_empty())
+        else {
             world.level_event(level_events::SOUND_CRAFTER_FAIL, pos, 0, None);
             return;
         };
 
+        let mut event = CrafterCraftEvent::new(
+            world.key.to_string(),
+            pos,
+            recipe.id().to_string(),
+            recipe_result,
+            remainders,
+        );
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
+        let result = event.result().clone();
+        let remainders = event.remaining_items().to_vec();
         crafter.set_crafting_ticks_remaining(MAX_CRAFTING_TICKS);
         world.set_block(
             pos,

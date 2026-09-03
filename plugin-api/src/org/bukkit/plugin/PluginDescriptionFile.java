@@ -16,7 +16,7 @@ import java.util.Map;
  * for the author list in an /about command, and for the command map they were
  * declared with -- so this holds the file rather than three fields from it.
  */
-public final class PluginDescriptionFile {
+public final class PluginDescriptionFile implements io.papermc.paper.plugin.configuration.PluginMeta {
     private final String name;
     private final String version;
     private final String main;
@@ -24,9 +24,12 @@ public final class PluginDescriptionFile {
     private final List<String> authors;
     private final List<String> depend;
     private final List<String> softDepend;
+    private final List<String> loadBefore;
     private final Map<String, Map<String, Object>> commands;
     private final String apiVersion;
     private final String prefix;
+    private final String website;
+    private final List<org.bukkit.permissions.Permission> permissions;
 
     @SuppressWarnings("unchecked")
     public PluginDescriptionFile(Reader reader) throws InvalidDescriptionException {
@@ -53,9 +56,12 @@ public final class PluginDescriptionFile {
         this.description = text(root.get("description"));
         this.apiVersion = text(root.get("api-version"));
         this.prefix = text(root.get("prefix"));
+        this.website = text(root.get("website"));
         this.authors = names(root.get("authors"), root.get("author"));
         this.depend = names(root.get("depend"), null);
         this.softDepend = names(root.get("softdepend"), null);
+        this.loadBefore = names(root.get("loadbefore"), null);
+        this.permissions = permissions(root.get("permissions"));
 
         Map<String, Map<String, Object>> declared = new LinkedHashMap<>();
         if (root.get("commands") instanceof Map) {
@@ -83,10 +89,13 @@ public final class PluginDescriptionFile {
         this.description = null;
         this.apiVersion = null;
         this.prefix = null;
+        this.website = null;
         this.authors = List.of();
         this.depend = List.of();
         this.softDepend = List.of();
+        this.loadBefore = List.of();
         this.commands = Map.of();
+        this.permissions = List.of();
     }
 
     private static String read(Reader reader) {
@@ -125,9 +134,27 @@ public final class PluginDescriptionFile {
         return Collections.unmodifiableList(out);
     }
 
+    private static List<org.bukkit.permissions.Permission> permissions(Object value) {
+        if (!(value instanceof Map)) return List.of();
+        List<org.bukkit.permissions.Permission> out = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            String name = String.valueOf(entry.getKey());
+            String description = "";
+            org.bukkit.permissions.PermissionDefault defaultValue = org.bukkit.permissions.PermissionDefault.FALSE;
+            if (entry.getValue() instanceof Map<?, ?> fields) {
+                Object d = fields.get("description");
+                if (d != null) description = String.valueOf(d);
+                Object def = fields.get("default");
+                if (def != null) try { defaultValue = org.bukkit.permissions.PermissionDefault.valueOf(String.valueOf(def).toUpperCase(java.util.Locale.ROOT)); } catch (IllegalArgumentException ignored) { }
+            }
+            out.add(new org.bukkit.permissions.Permission(name, description, defaultValue));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
     public String getName() { return name; }
 
-    public String getVersion() { return version; }
+    @Override public String getVersion() { return version; }
 
     public String getMain() { return main; }
 
@@ -139,9 +166,14 @@ public final class PluginDescriptionFile {
 
     public List<String> getSoftDepend() { return softDepend; }
 
+    public List<String> getLoadBefore() { return loadBefore; }
+    public List<org.bukkit.permissions.Permission> getPermissions() { return permissions; }
+
     public String getAPIVersion() { return apiVersion; }
 
     public String getPrefix() { return prefix; }
+
+    public String getWebsite() { return website; }
 
     public Map<String, Map<String, Object>> getCommands() { return commands; }
 

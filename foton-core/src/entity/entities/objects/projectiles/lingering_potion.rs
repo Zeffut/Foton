@@ -180,7 +180,9 @@ impl LingeringPotionEntity {
             self.position(),
             Arc::downgrade(world),
         ));
+        cloud.set_owner_uuid(self.owner_uuid());
         cloud.configure_as_lingering(effects);
+        cloud.set_base_potion(contents.potion().map(|potion| potion.value()));
 
         let entity: SharedEntity = cloud;
         if let Err(error) = world.try_add_entity(entity) {

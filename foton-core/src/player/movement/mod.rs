@@ -24,6 +24,7 @@ use glam::DVec3;
 use crate::entity::{
     AcceptedClientMovement, AcceptedClientMovementOutcome, Entity, EntityMoveError, LivingEntity,
 };
+use crate::event::{Event as _, PlayerMoveEvent};
 use crate::physics::{
     MOVEMENT_ERROR_THRESHOLD, MovementCollisionValidation, MoverType, WorldCollisionProvider,
     is_colliding_with_new_shapes, movement_error_delta,
@@ -414,6 +415,25 @@ impl Player {
                 self.remove_latest_movement_recording();
                 return;
             }
+        }
+
+        let Some(player_arc) = self
+            .server()
+            .online_players()
+            .get_by_uuid(&self.gameprofile.id)
+        else {
+            return;
+        };
+        let mut move_event = PlayerMoveEvent::new(player_arc, start_pos, target_pos);
+        self.server().events().fire(&mut move_event);
+        if move_event.is_cancelled() {
+            let _ = self.teleport(start_pos, target_yaw, target_pitch);
+            return;
+        }
+        if move_event.to() != target_pos {
+            let destination = move_event.to();
+            let _ = self.teleport(destination, target_yaw, target_pitch);
+            return;
         }
 
         // Vanilla parity: the `tryResetCurrentImpulseContext` that closes

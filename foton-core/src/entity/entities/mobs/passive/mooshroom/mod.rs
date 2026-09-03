@@ -373,7 +373,8 @@ impl MushroomCowEntity {
         // Vanilla's `ConversionParams.single(this, false, false)`.
         convert_to(
             self,
-            ConversionParams::single(false, false),
+            ConversionParams::single(false, false)
+                .with_reason(crate::entity::conversion::ConversionReason::Lightning),
             |id, position, level| CowEntity::new(&vanilla_entities::COW, id, position, level),
             |_cow| {
                 let position = self.position();

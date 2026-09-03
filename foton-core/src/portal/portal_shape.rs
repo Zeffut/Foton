@@ -15,6 +15,7 @@ use glam::DVec3;
 use std::sync::Arc;
 
 use crate::entity::Entity;
+use crate::event::Event as _;
 use crate::physics::WorldCollisionProvider;
 use crate::world::{LevelReader, World};
 
@@ -330,16 +331,23 @@ impl PortalShape {
             .default_state()
             .set_value(&BlockStateProperties::HORIZONTAL_AXIS, self.axis);
         let flags = UpdateFlags::UPDATE_CLIENTS.union(UpdateFlags::UPDATE_KNOWN_SHAPE);
+        let mut blocks = Vec::with_capacity((self.width * self.height) as usize);
         for w in 0..self.width {
             for h in 0..self.height {
-                world.set_block(
+                blocks.push(
                     self.bottom_left
                         .above_n(h as i32)
                         .relative_n(self.right_dir, w as i32),
-                    portal_state,
-                    flags,
                 );
             }
+        }
+        let mut event = crate::event::PortalCreateEvent::new(world.key.to_string(), blocks);
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
+        for pos in event.blocks() {
+            world.set_block(*pos, portal_state, flags);
         }
     }
 

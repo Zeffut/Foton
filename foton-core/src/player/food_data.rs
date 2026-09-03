@@ -277,7 +277,7 @@ impl Player {
         if difficulty == Difficulty::Peaceful && natural_regen {
             if tick % 20 == 0 {
                 if self.is_hurt() {
-                    self.heal(1.0);
+                    self.heal_with_regain_event(1.0);
                 }
 
                 let mut food = self.food_data.lock();
@@ -288,8 +288,18 @@ impl Player {
 
             if tick % 10 == 0 {
                 let mut food = self.food_data.lock();
+                let previous = food.food_level;
                 if food.needs_food() {
                     food.food_level += 1;
+                }
+                let changed = food.food_level != previous;
+                let current = food.food_level;
+                drop(food);
+                if changed {
+                    match self.allow_food_level_change(current) {
+                        Some(level) => self.food_data.lock().food_level = level.clamp(0, 20),
+                        None => self.food_data.lock().food_level = previous,
+                    }
                 }
             }
         }
@@ -298,14 +308,39 @@ impl Player {
         let max_health = self.get_max_health();
 
         let mut food = self.food_data.lock();
+        let previous = food.food_level;
         let result = food.tick(difficulty, natural_regen, current_health, max_health);
+        let current = food.food_level;
+        drop(food);
+        let applied_level = if current != previous {
+            let Some(level) = self.allow_food_level_change(current) else {
+                self.food_data.lock().food_level = previous;
+                return;
+            };
+            let level = level.clamp(0, 20);
+            self.food_data.lock().food_level = level;
+            level
+        } else {
+            current
+        };
+        let mut food = self.food_data.lock();
+
+        // The Bukkit event is authoritative: changing the level can invalidate
+        // the action the hunger tick computed from the pre-event value.
+        let result = match result {
+            FoodTickResult::Starve if applied_level > 0 => FoodTickResult::None,
+            FoodTickResult::Heal { .. } if applied_level < food_constants::HEAL_LEVEL => {
+                FoodTickResult::None
+            }
+            result => result,
+        };
 
         match result {
             FoodTickResult::Heal { amount, exhaustion } => {
                 food.add_exhaustion(exhaustion);
 
                 drop(food);
-                self.heal(amount);
+                self.heal_with_regain_event(amount);
             }
             FoodTickResult::Starve => {
                 drop(food);
@@ -318,6 +353,20 @@ impl Player {
             }
             FoodTickResult::None => {}
         }
+    }
+
+    fn heal_with_regain_event(&self, amount: f32) {
+        let mut event = crate::event::EntityRegainHealthEvent::new(self.gameprofile.id, amount);
+        self.fire_event(&mut event);
+        if !event.is_cancelled() {
+            self.heal(event.amount());
+        }
+    }
+
+    fn allow_food_level_change(&self, level: i32) -> Option<i32> {
+        let mut event = crate::event::player::FoodLevelChangeEvent::new(self.gameprofile.id, level);
+        self.fire_event(&mut event);
+        (!event.is_cancelled()).then_some(event.food_level())
     }
 
     /// Adds food exhaustion, gated by invulnerability.

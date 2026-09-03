@@ -11,16 +11,28 @@ import org.bukkit.block.data.BlockData;
  * does not change what the snapshot says, and `update` is what writes it back.
  * That is the contract plugins are written against, so it is the one here.
  */
-public interface BlockState {
+public interface BlockState extends org.bukkit.persistence.PersistentDataHolder {
+    default org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        return new foton.FotonPersistentDataContainer();
+    }
     Material getType();
 
     BlockData getBlockData();
+
+    /** Legacy material-data view retained for older plugins. */
+    @Deprecated
+    default org.bukkit.material.MaterialData getData() { return new org.bukkit.material.MaterialData(getType()); }
+
+    void setBlockData(BlockData data);
 
     Block getBlock();
 
     Location getLocation();
 
     World getWorld();
+
+    /** Returns the chunk containing this snapshot. */
+    default org.bukkit.Chunk getChunk() { return getWorld().getChunkAt(getX() >> 4, getZ() >> 4); }
 
     int getX();
 
@@ -32,4 +44,6 @@ public interface BlockState {
     boolean update();
 
     boolean update(boolean force);
+    default boolean update(boolean force, boolean applyPhysics) { return update(force); }
+    default boolean isPlaced() { return true; }
 }

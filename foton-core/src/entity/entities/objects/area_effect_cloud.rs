@@ -6,25 +6,30 @@
 //! catches shrinks it -- so one cloud can serve a crowd once or one target
 //! several times, but not both.
 
+use uuid::Uuid;
+
 use std::sync::{Arc, Weak};
 
+use crate::entity::living_base::{
+    MobEffectInstance, apply_instantaneous_mob_effect, is_instantaneous,
+};
 use foton_macros::entity_behavior;
+use foton_registry::RegistryExt;
 use foton_registry::entity_data::ParticleData;
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::particle_type::PowerParticleOption;
+use foton_registry::potion::PotionRef;
 use foton_registry::vanilla_entity_data::AreaEffectCloudEntityData;
 use foton_registry::{vanilla_mob_effects, vanilla_particle_types};
+use foton_utils::UuidExt;
 use foton_utils::locks::SyncMutex;
 use foton_utils::{DowncastType, DowncastTypeKey, WorldAabb};
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
-use simdnbt::owned::NbtCompound;
+use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 
-use crate::entity::living_base::{apply_instantaneous_mob_effect, is_instantaneous};
-use crate::entity::{
-    Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, RemovalReason,
-};
+use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntitySyncedData, RemovalReason};
 use crate::world::World;
 use foton_registry::entity_data::EntityPose;
 use foton_registry::entity_type::EntityDimensions;
@@ -139,10 +144,17 @@ struct CloudState {
     radius_per_tick: f32,
     /// How the radius changes each time somebody is dosed.
     radius_on_use: f32,
-    /// Effects this cloud carries, as (effect, duration, amplifier).
-    effects: Vec<(MobEffectRef, i32, i32)>,
+    /// Effects this cloud carries.
+    ///
+    /// Keep complete MobEffectInstance metadata so cloud dosing preserves
+    /// vanilla ambient, particle and icon visibility flags.
+    effects: Vec<MobEffectInstance>,
     /// Entity id to the tick it may be dosed again on.
     victims: FxHashMap<i32, i32>,
+    /// UUID of the projectile owner, when this cloud came from a projectile.
+    owner_uuid: Option<Uuid>,
+    /// Base potion carried by the cloud, when created from a potion item.
+    base_potion: Option<PotionRef>,
 }
 
 /// A lingering cloud of potion effects.
@@ -176,6 +188,8 @@ impl AreaEffectCloudEntity {
                 radius_on_use: 0.0,
                 effects: Vec::new(),
                 victims: FxHashMap::default(),
+                owner_uuid: None,
+                base_potion: None,
             }),
         }
     }
@@ -202,8 +216,30 @@ impl AreaEffectCloudEntity {
                 radius_on_use: 0.0,
                 effects: Vec::new(),
                 victims: FxHashMap::default(),
+                owner_uuid: None,
+                base_potion: None,
             }),
         }
+    }
+
+    /// Sets the entity that created this cloud.
+    pub fn set_owner_uuid(&self, owner: Option<Uuid>) {
+        self.state.lock().owner_uuid = owner;
+    }
+
+    /// Returns the UUID of the entity that created this cloud, if available.
+    /// Sets the base potion represented by this cloud.
+    pub fn set_base_potion(&self, potion: Option<PotionRef>) {
+        self.state.lock().base_potion = potion;
+    }
+
+    /// Returns the base potion represented by this cloud.
+    pub fn base_potion(&self) -> Option<PotionRef> {
+        self.state.lock().base_potion
+    }
+
+    pub fn owner_uuid(&self) -> Option<Uuid> {
+        self.state.lock().owner_uuid
     }
 
     /// Sets this cloud up the way a lingering potion does.
@@ -224,7 +260,12 @@ impl AreaEffectCloudEntity {
         )]
         let per_tick = -DEFAULT_LINGERING_RADIUS / DEFAULT_LINGERING_DURATION as f32;
         state.radius_per_tick = per_tick;
-        state.effects = effects;
+        state.effects = effects
+            .into_iter()
+            .map(|(effect, duration, amplifier)| {
+                MobEffectInstance::with_duration(effect, duration, amplifier)
+            })
+            .collect();
     }
 
     /// Sets this cloud up the way a creeper's death does.
@@ -250,7 +291,12 @@ impl AreaEffectCloudEntity {
         )]
         let per_tick = -CREEPER_CLOUD_RADIUS / CREEPER_CLOUD_DURATION as f32;
         state.radius_per_tick = per_tick;
-        state.effects = effects;
+        state.effects = effects
+            .into_iter()
+            .map(|(effect, duration, amplifier)| {
+                MobEffectInstance::with_duration(effect, duration, amplifier)
+            })
+            .collect();
     }
 
     /// Sets this cloud up the way a dragon fireball does.
@@ -278,7 +324,7 @@ impl AreaEffectCloudEntity {
         state.radius_on_use = 0.0;
         state.radius_per_tick =
             (DRAGON_BREATH_FINAL_RADIUS - DRAGON_BREATH_RADIUS) / DRAGON_BREATH_DURATION as f32;
-        state.effects = vec![(
+        state.effects = vec![MobEffectInstance::with_duration(
             vanilla_mob_effects::INSTANT_DAMAGE,
             1,
             DRAGON_BREATH_AMPLIFIER,
@@ -307,7 +353,11 @@ impl AreaEffectCloudEntity {
         // one-argument constructor is duration zero. That never matters: a
         // cloud applies an instant effect on the spot rather than afflicting
         // anyone with it, so the duration is never read.
-        state.effects = vec![(vanilla_mob_effects::INSTANT_DAMAGE, 0, 0)];
+        state.effects = vec![MobEffectInstance::with_duration(
+            vanilla_mob_effects::INSTANT_DAMAGE,
+            0,
+            0,
+        )];
     }
 
     /// Returns how far the cloud reaches.
@@ -323,6 +373,82 @@ impl AreaEffectCloudEntity {
         self.refresh_dimensions();
     }
 
+    /// Returns the active lifetime in ticks after the initial wait.
+    #[must_use]
+    pub fn duration(&self) -> i32 {
+        self.state.lock().duration
+    }
+
+    pub fn set_duration(&self, duration: i32) {
+        self.state.lock().duration = duration;
+    }
+
+    /// Returns the initial wait time in ticks.
+    #[must_use]
+    pub fn wait_time(&self) -> i32 {
+        self.state.lock().wait_time
+    }
+
+    pub fn set_wait_time(&self, wait_time: i32) {
+        self.state.lock().wait_time = wait_time;
+    }
+
+    /// Returns the per-entity reapplication cooldown in ticks.
+    #[must_use]
+    pub fn reapplication_delay(&self) -> i32 {
+        self.state.lock().reapplication_delay
+    }
+
+    pub fn set_reapplication_delay(&self, delay: i32) {
+        self.state.lock().reapplication_delay = delay;
+    }
+
+    #[must_use]
+    pub fn radius_per_tick(&self) -> f32 {
+        self.state.lock().radius_per_tick
+    }
+
+    pub fn set_radius_per_tick(&self, radius: f32) {
+        self.state.lock().radius_per_tick = radius;
+    }
+
+    #[must_use]
+    pub fn radius_on_use(&self) -> f32 {
+        self.state.lock().radius_on_use
+    }
+
+    pub fn set_radius_on_use(&self, radius: f32) {
+        self.state.lock().radius_on_use = radius;
+    }
+
+    /// Returns the complete custom effects carried by this cloud.
+    #[must_use]
+    pub fn effects(&self) -> Vec<MobEffectInstance> {
+        self.state.lock().effects.clone()
+    }
+
+    /// Adds a custom effect, following Bukkit override semantics.
+    pub fn add_custom_effect(&self, effect: MobEffectInstance, override_existing: bool) -> bool {
+        let mut state = self.state.lock();
+        if let Some(existing) = state
+            .effects
+            .iter_mut()
+            .find(|existing| existing.effect() == effect.effect())
+        {
+            if !override_existing {
+                return false;
+            }
+            *existing = effect;
+            return true;
+        }
+        state.effects.push(effect);
+        true
+    }
+
+    /// Removes all custom effects from this cloud.
+    pub fn clear_custom_effects(&self) {
+        self.state.lock().effects.clear();
+    }
     /// Returns whether the cloud is still settling.
     #[must_use]
     fn is_waiting(&self) -> bool {
@@ -383,7 +509,8 @@ impl AreaEffectCloudEntity {
             }
 
             let mut dosed = false;
-            for (effect, duration, amplifier) in &effects {
+            for effect_instance in &effects {
+                let effect = effect_instance.effect();
                 // Vanilla parity: the `isInstantaneous` branch of
                 // `AreaEffectCloud.tick`. A cloud does not afflict anyone with
                 // an instant effect -- it applies it on the spot, and at half
@@ -394,13 +521,13 @@ impl AreaEffectCloudEntity {
                         world,
                         living,
                         effect,
-                        *amplifier,
+                        effect_instance.amplifier(),
                         CLOUD_INSTANT_SCALE,
                     );
                     dosed = true;
                     continue;
                 }
-                let instance = MobEffectInstance::with_duration(effect, *duration, *amplifier);
+                let instance = effect_instance.clone();
                 if !living.can_be_affected(&instance) {
                     continue;
                 }
@@ -499,6 +626,24 @@ impl Entity for AreaEffectCloudEntity {
         nbt.insert("RadiusPerTick", state.radius_per_tick);
         nbt.insert("RadiusOnUse", state.radius_on_use);
         nbt.insert("Radius", self.radius());
+        if !state.effects.is_empty() {
+            nbt.insert(
+                "Effects",
+                NbtList::Compound(
+                    state
+                        .effects
+                        .iter()
+                        .map(MobEffectInstance::to_vanilla_nbt)
+                        .collect(),
+                ),
+            );
+        }
+        if let Some(potion) = state.base_potion {
+            nbt.insert("Potion", potion.key.to_string());
+        }
+        if let Some(owner) = state.owner_uuid {
+            nbt.insert("Owner", NbtTag::IntArray(owner.to_int_array().to_vec()));
+        }
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
@@ -510,11 +655,26 @@ impl Entity for AreaEffectCloudEntity {
             .unwrap_or(DEFAULT_REAPPLICATION_DELAY);
         state.radius_per_tick = nbt.float("RadiusPerTick").unwrap_or(0.0);
         state.radius_on_use = nbt.float("RadiusOnUse").unwrap_or(0.0);
+
+        state.effects = nbt
+            .list("Effects")
+            .and_then(|list| list.compounds())
+            .map(|effects| {
+                effects
+                    .into_iter()
+                    .filter_map(|effect| MobEffectInstance::from_vanilla_nbt(&effect))
+                    .collect()
+            })
+            .unwrap_or_default();
+        state.base_potion = nbt
+            .string("Potion")
+            .and_then(|key| key.to_str().parse().ok())
+            .and_then(|key| foton_registry::REGISTRY.potions.by_key(&key));
+        state.owner_uuid = nbt
+            .int_array("Owner")
+            .and_then(|values| Uuid::from_int_array(&values));
         drop(state);
         self.set_radius(nbt.float("Radius").unwrap_or(DEFAULT_LINGERING_RADIUS));
-
-        // TODO: the effects a saved cloud carried are not restored yet; a world
-        // reloaded mid-cloud leaves a shrinking patch that doses nobody.
     }
 }
 

@@ -18,6 +18,7 @@ use foton_registry::{sound_events, vanilla_mob_effects, vanilla_particle_types};
 use foton_utils::entity_events::EntityStatus;
 
 use crate::advancement::triggers;
+use crate::event::PlayerInteractEntityEvent;
 
 /// Returns a height `progress` of the way up an entity's hitbox.
 ///
@@ -151,14 +152,22 @@ impl Player {
             let yaw_radians = self.rotation().0.to_radians();
             let yaw_sin = f64::from(yaw_radians.sin());
             let yaw_cos = f64::from(yaw_radians.cos());
-            if let Some(living_target) = entity.as_living_entity() {
-                living_target.knockback(knockback_amount, yaw_sin, -yaw_cos);
-            } else {
-                entity.push_impulse(DVec3::new(
-                    -yaw_sin * knockback_amount,
-                    0.1,
-                    yaw_cos * knockback_amount,
-                ));
+            let push_allowed = entity.level().is_none_or(|world| {
+                let mut event =
+                    crate::event::EntityPushedByEntityAttackEvent::new(entity.uuid(), self.uuid());
+                world.fire_event(&mut event);
+                !event.is_cancelled()
+            });
+            if push_allowed {
+                if let Some(living_target) = entity.as_living_entity() {
+                    living_target.knockback(knockback_amount, yaw_sin, -yaw_cos);
+                } else {
+                    entity.push_impulse(DVec3::new(
+                        -yaw_sin * knockback_amount,
+                        0.1,
+                        yaw_cos * knockback_amount,
+                    ));
+                }
             }
 
             let velocity = self.velocity();
@@ -470,12 +479,23 @@ impl Player {
         let damage = base_damage + magic_boost;
         let old_movement = entity.velocity();
         let mut affected = deals_knockback;
+        let mut damage_allowed = true;
+        if deals_damage {
+            let mut event = crate::event::EntityDamageByEntityEvent::new(
+                self.uuid(),
+                entity.uuid(),
+                "ENTITY_ATTACK".to_owned(),
+            );
+            self.fire_event(&mut event);
+            damage_allowed = !event.is_cancelled();
+        }
         let damage_dealt = deals_damage
+            && damage_allowed
             && entity
                 .level()
                 .is_some_and(|world| entity.hurt(&world, &damage_source, damage));
         affected |= damage_dealt;
-        if deals_knockback {
+        if deals_knockback && (!deals_damage || damage_allowed) {
             self.cause_extra_knockback(
                 entity,
                 0.4 + Self::get_knockback(0.0, &attacking_item, &enchantment_context),
@@ -521,6 +541,11 @@ impl Player {
     }
 
     fn cannot_attack(&self, entity: &dyn Entity) -> bool {
+        if entity.entity_type() == &vanilla_entities::PLAYER
+            && self.level().is_some_and(|world| !world.is_pvp())
+        {
+            return true;
+        }
         !entity.attackable() || entity.skip_attack_interaction(self)
     }
 
@@ -594,7 +619,14 @@ impl Player {
             enchantment_helper::do_post_piercing_attack_effects(&world, self);
             return false;
         };
-        let was_hurt = entity.hurt(&target_world, &damage_source, total_damage);
+        let mut event = crate::event::EntityDamageByEntityEvent::new(
+            self.uuid(),
+            entity.uuid(),
+            "ENTITY_ATTACK".to_owned(),
+        );
+        self.fire_event(&mut event);
+        let damage_allowed = !event.is_cancelled();
+        let was_hurt = damage_allowed && entity.hurt(&target_world, &damage_source, total_damage);
         if was_hurt {
             let sprint_knockback = if knockback_attack { 0.5 } else { 0.0 };
             self.cause_extra_knockback(
@@ -886,6 +918,12 @@ impl Player {
     ) -> InteractionResult {
         if self.is_spectator() {
             // TODO: Open entity menu providers in spectator once that foundation exists.
+            return InteractionResult::Pass;
+        }
+
+        let mut event = PlayerInteractEntityEvent::new(self.gameprofile.id, entity.uuid());
+        self.fire_event(&mut event);
+        if event.is_cancelled() {
             return InteractionResult::Pass;
         }
 

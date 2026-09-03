@@ -181,6 +181,39 @@ impl VillagerEntity {
     /// Vanilla parity: `AbstractVillager.inventory`'s eight slots.
     const INVENTORY_SIZE: usize = 8;
 
+    /// Reads a location-backed Bukkit memory by its vanilla key.
+    pub fn memory_global_pos(&self, key: &str) -> Option<GlobalPos> {
+        match key {
+            "home" => self.brain.get_memory(memory_module_types::HOME),
+            "job_site" => self.brain.get_memory(memory_module_types::JOB_SITE),
+            "potential_job_site" => self
+                .brain
+                .get_memory(memory_module_types::POTENTIAL_JOB_SITE),
+            "meeting_point" => self.brain.get_memory(memory_module_types::MEETING_POINT),
+            _ => None,
+        }
+    }
+
+    /// Writes or erases a location-backed Bukkit memory.
+    pub fn set_memory_global_pos(&self, key: &str, value: Option<GlobalPos>) -> bool {
+        match key {
+            "home" => self
+                .brain
+                .set_memory_or_erase(memory_module_types::HOME, value),
+            "job_site" => self
+                .brain
+                .set_memory_or_erase(memory_module_types::JOB_SITE, value),
+            "potential_job_site" => self
+                .brain
+                .set_memory_or_erase(memory_module_types::POTENTIAL_JOB_SITE, value),
+            "meeting_point" => self
+                .brain
+                .set_memory_or_erase(memory_module_types::MEETING_POINT, value),
+            _ => return false,
+        }
+        true
+    }
+
     /// Creates a new villager at runtime.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {
@@ -811,6 +844,11 @@ impl VillagerEntity {
     #[must_use]
     pub fn villager_xp(&self) -> i32 {
         self.merchant.xp()
+    }
+
+    /// Sets the experience banked toward the next villager level.
+    pub fn set_villager_xp(&self, xp: i32) {
+        self.merchant.set_xp(xp.max(0));
     }
 
     /// Vanilla parity: `Villager.playWorkSound`.

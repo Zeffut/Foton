@@ -29,13 +29,47 @@ use rustc_hash::FxHashMap;
 
 pub mod block;
 pub mod command;
+pub mod command_preprocess;
+pub mod entity;
+mod fertilize;
+pub mod inventory;
+mod lectern;
 pub mod player;
 pub mod server;
+pub mod world;
 
-pub use block::{BlockBreakEvent, BlockPlaceEvent};
+pub use block::{
+    BlockBreakEvent, BlockBurnEvent, BlockDamageEvent, BlockDispenseEvent, BlockExpEvent,
+    BlockFadeEvent, BlockFromToEvent, BlockIgniteEvent, BlockPlaceEvent, BlockPreDispenseEvent,
+    LeavesDecayEvent, PistonEvent, SignChangeEvent,
+};
 pub use command::CommandEvent;
-pub use player::{PlayerChatEvent, PlayerJoinEvent, PlayerQuitEvent};
+pub use command_preprocess::PlayerCommandPreprocessEvent;
+pub use entity::{
+    BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
+    EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
+    EntityPortalEvent, EntityPushedByEntityAttackEvent, EntityRegainHealthEvent,
+    EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTargetEvent, EntityTransformEvent,
+    ExpBottleEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent, LightningStrikeEvent,
+    PreCreatureSpawnEvent, ProjectileLaunchEvent,
+};
+pub use fertilize::BlockFertilizeEvent;
+pub use inventory::{
+    CrafterCraftEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
+    InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
+};
+pub use lectern::PlayerTakeLecternBookEvent;
+pub use player::{
+    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent,
+    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
+    PlayerBucketFillEvent, PlayerChatEvent, PlayerCustomPayloadEvent, PlayerDeathEvent,
+    PlayerDropItemEvent, PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent,
+    PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginEvent,
+    PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerRespawnEvent, PlayerSpawnLocationEvent,
+};
 pub use server::ServerTickEvent;
+pub use world::{ChunkLoadEvent, PortalCreateEvent, ThunderChangeEvent, WeatherChangeEvent};
 
 /// Something that happened, which a listener may observe and possibly stop.
 ///

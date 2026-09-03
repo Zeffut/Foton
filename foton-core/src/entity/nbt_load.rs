@@ -151,6 +151,8 @@ pub(crate) fn read_entity_nbt(nbt: &BorrowedNbtCompoundView<'_, '_>) -> Option<E
             custom_data: nbt
                 .compound("data")
                 .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
+            persistent: !nbt.contains("PersistenceRequired")
+                || read_flag(nbt, "PersistenceRequired"),
         },
         remainder,
         passengers,

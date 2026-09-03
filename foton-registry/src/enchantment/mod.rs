@@ -216,6 +216,91 @@ impl EnchantmentRegistry {
     }
 }
 
+/// Failure returned when a dynamic enchantment cannot be registered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnchantmentRegistrationError {
+    /// Registration is only valid before the registry is frozen.
+    Frozen,
+    /// The key is already occupied, including by a Vanilla enchantment.
+    DuplicateKey(Identifier),
+}
+
+/// Owned input for a plugin enchantment collected before registry publication.
+/// The registry converts this once into its static reference representation.
+#[derive(Debug)]
+pub struct OwnedEnchantment {
+    pub key: Identifier,
+    pub max_level: u32,
+    pub min_cost: EnchantmentCost,
+    pub max_cost: EnchantmentCost,
+    pub anvil_cost: i32,
+    pub weight: u32,
+    pub slots: Vec<EquipmentSlotGroup>,
+    pub supported_items: String,
+    pub primary_items: Option<String>,
+    pub exclusive_set: Option<String>,
+    pub effects_nbt: fn() -> NbtCompound,
+    pub effects: EnchantmentEffects,
+}
+
+impl EnchantmentRegistry {
+    /// Registers a plugin-owned enchantment while the registry is still open.
+    ///
+    /// IDs are appended after the generated Vanilla entries, so existing IDs
+    /// remain stable. The entry must be static, matching the registry's
+    /// existing reference model.
+    /// Converts owned plugin data and registers it before the registry freezes.
+    /// The immutable definition is leaked once because registry references are static by design.
+    pub fn register_owned_dynamic(
+        &mut self,
+        owned: OwnedEnchantment,
+    ) -> Result<usize, EnchantmentRegistrationError> {
+        let entry = Box::leak(Box::new(Enchantment {
+            key: owned.key,
+            max_level: owned.max_level,
+            min_cost: owned.min_cost,
+            max_cost: owned.max_cost,
+            anvil_cost: owned.anvil_cost,
+            weight: owned.weight,
+            slots: Box::leak(owned.slots.into_boxed_slice()),
+            supported_items: Box::leak(owned.supported_items.into_boxed_str()),
+            primary_items: owned
+                .primary_items
+                .map(|value| Box::leak(value.into_boxed_str()) as &'static str),
+            exclusive_set: owned
+                .exclusive_set
+                .map(|value| Box::leak(value.into_boxed_str()) as &'static str),
+            effects_nbt: owned.effects_nbt,
+            effects: owned.effects,
+        }));
+        self.register_dynamic(entry)
+    }
+
+    pub fn register_dynamic(
+        &mut self,
+        entry: EnchantmentRef,
+    ) -> Result<usize, EnchantmentRegistrationError> {
+        if !self.allows_registering {
+            return Err(EnchantmentRegistrationError::Frozen);
+        }
+        if self.enchantments_by_key.contains_key(&entry.key) {
+            return Err(EnchantmentRegistrationError::DuplicateKey(
+                entry.key.clone(),
+            ));
+        }
+        let id = self.enchantments_by_id.len();
+        self.enchantments_by_id.push(entry);
+        self.enchantments_by_key.insert(entry.key.clone(), id);
+        Ok(id)
+    }
+
+    /// Whether no further dynamic entries may be registered.
+    #[must_use]
+    pub const fn is_frozen(&self) -> bool {
+        !self.allows_registering
+    }
+}
+
 crate::impl_registry_ext!(
     EnchantmentRegistry,
     Enchantment,
@@ -235,17 +320,55 @@ crate::impl_tagged_registry!(EnchantmentRegistry, enchantments_by_key, "enchantm
 
 #[cfg(test)]
 mod tests {
-    use super::Enchantment;
+    use super::{Enchantment, EnchantmentEffects, EquipmentSlotGroup};
     use crate::enchantment_effect::{
         DamageSourcePredicate, EnchantmentEffectComponent, EnchantmentEffectRequirements,
         EnchantmentEntityEffect, EnchantmentTarget,
     };
     use crate::equipment::EquipmentSlot;
     use crate::item_stack::ItemStack;
-    use crate::{init_vanilla_registry, vanilla_enchantments, vanilla_items};
+    use crate::{RegistryExt, init_vanilla_registry, vanilla_enchantments, vanilla_items};
     use foton_utils::Identifier;
     use simdnbt::ToNbtTag;
-    use simdnbt::owned::{NbtList, NbtTag};
+    use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+
+    #[test]
+    fn dynamic_registration_rejects_duplicates_and_freeze() {
+        let mut registry = super::EnchantmentRegistry::new();
+        let entry = Box::leak(Box::new(Enchantment {
+            key: Identifier::new("test".to_owned(), "dynamic".to_owned()),
+            max_level: 1,
+            min_cost: super::EnchantmentCost {
+                base: 1,
+                per_level_above_first: 0,
+            },
+            max_cost: super::EnchantmentCost {
+                base: 1,
+                per_level_above_first: 0,
+            },
+            anvil_cost: 1,
+            weight: 1,
+            slots: &[],
+            supported_items: "#minecraft:enchantable/durability",
+            primary_items: None,
+            exclusive_set: None,
+            effects_nbt: vanilla_enchantments::AQUA_AFFINITY.effects_nbt,
+            effects: crate::enchantment_effect::EnchantmentEffects::EMPTY,
+        }));
+        assert_eq!(registry.register_dynamic(entry), Ok(0));
+        assert_eq!(
+            registry.register_dynamic(entry),
+            Err(super::EnchantmentRegistrationError::DuplicateKey(
+                entry.key.clone()
+            ))
+        );
+        <super::EnchantmentRegistry as crate::RegistryExt>::freeze(&mut registry);
+        assert!(registry.is_frozen());
+        assert_eq!(
+            registry.register_dynamic(entry),
+            Err(super::EnchantmentRegistrationError::Frozen)
+        );
+    }
 
     #[test]
     fn binding_curse_has_prevent_armor_change_effect() {
@@ -512,6 +635,40 @@ mod tests {
                 .iter()
                 .any(|effect| entity_effect_contains_change_item_damage(&effect.effect))
         );
+    }
+
+    #[test]
+    fn owned_dynamic_registration_leaks_only_after_accepting_definition() {
+        let mut registry = super::EnchantmentRegistry::new();
+        let id = registry
+            .register_owned_dynamic(super::OwnedEnchantment {
+                key: Identifier::new("plugin".to_owned(), "vein_mining".to_owned()),
+                max_level: 3,
+                min_cost: super::EnchantmentCost {
+                    base: 1,
+                    per_level_above_first: 1,
+                },
+                max_cost: super::EnchantmentCost {
+                    base: 10,
+                    per_level_above_first: 2,
+                },
+                anvil_cost: 2,
+                weight: 5,
+                slots: vec![EquipmentSlotGroup::Hand],
+                supported_items: "#minecraft:enchantable/mining".to_owned(),
+                primary_items: None,
+                exclusive_set: None,
+                effects_nbt: || NbtCompound::new(),
+                effects: EnchantmentEffects::EMPTY,
+            })
+            .expect("open registry accepts owned definition");
+        let entry = registry.by_id(id).expect("registered entry exists");
+        assert_eq!(
+            entry.key,
+            Identifier::new("plugin".to_owned(), "vein_mining".to_owned())
+        );
+        assert_eq!(entry.max_level, 3);
+        assert_eq!(entry.supported_items, "#minecraft:enchantable/mining");
     }
 
     fn requirements_contain_random_chance(requirements: &EnchantmentEffectRequirements) -> bool {

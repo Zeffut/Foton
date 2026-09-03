@@ -46,3 +46,5 @@ pub(crate) mod test_support;
 pub mod trading;
 pub mod world;
 pub mod worldgen;
+
+pub use portal::TeleportTransitionCause;

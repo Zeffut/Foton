@@ -15,7 +15,7 @@ use std::sync::{Arc, Weak};
 use glam::DVec3;
 
 use crate::entity::callback::RemovalReason;
-use crate::entity::{Mob, SharedEntity, next_entity_id};
+use crate::entity::{Entity, EntityBase, Mob, SharedEntity, next_entity_id};
 use crate::world::World;
 
 /// Whether the mob being converted is replaced or merely spawns something.
@@ -28,6 +28,21 @@ pub enum ConversionType {
     Single,
     /// The old mob spawns the new one and stays put -- a slime splitting.
     SplitOnDeath,
+}
+
+/// Why vanilla replaced an entity. Kept on the conversion so Bukkit can expose
+/// the same reason instead of guessing from the source and target types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversionReason {
+    Unknown,
+    Cured,
+    Drowned,
+    Frozen,
+    Infection,
+    Lightning,
+    PiglinZombification,
+    Poison,
+    Split,
 }
 
 impl ConversionType {
@@ -53,6 +68,8 @@ pub struct ConversionParams {
     pub keep_equipment: bool,
     /// Whether the new mob inherits `canPickUpLoot`.
     pub preserve_can_pick_up_loot: bool,
+    /// Vanilla-facing reason reported by `EntityTransformEvent`.
+    pub reason: ConversionReason,
     // MISSING FOUNDATION: vanilla's fourth field is the old mob's scoreboard
     // `PlayerTeam`, which the conversion re-registers the new mob into. Foton
     // has no scoreboard teams, so a converted mob simply has no team to keep.
@@ -66,7 +83,15 @@ impl ConversionParams {
             conversion_type: ConversionType::Single,
             keep_equipment,
             preserve_can_pick_up_loot,
+            reason: ConversionReason::Unknown,
         }
+    }
+
+    /// Attaches the vanilla cause reported by the transform event.
+    #[must_use]
+    pub const fn with_reason(mut self, reason: ConversionReason) -> Self {
+        self.reason = reason;
+        self
     }
 }
 
@@ -105,6 +130,13 @@ where
 
     after(&converted);
 
+    let mut event =
+        crate::event::EntityTransformEvent::new(from.uuid(), converted.uuid(), params.reason);
+    world.fire_event(&mut event);
+    if event.is_cancelled() {
+        return None;
+    }
+
     if world
         .try_add_entity(Arc::clone(&converted) as SharedEntity)
         .is_err()
@@ -114,10 +146,60 @@ where
         return None;
     }
 
+    if let Some(source) = world.get_entity_by_id(from.id()) {
+        crate::entity::EntityBase::transfer_relationships(
+            &source,
+            &(Arc::clone(&converted) as SharedEntity),
+        );
+    }
+
     if params.conversion_type.should_discard_after_conversion() {
         from.set_removed(RemovalReason::Discarded);
     }
 
+    Some(converted)
+}
+
+/// Replaces a non-mob entity while preserving its shared riding relationships.
+///
+/// This is intentionally narrower than mob conversion: callers own any
+/// type-specific state, while the world insertion/removal and relationship
+/// ordering are handled centrally.
+pub fn replace_entity<T, B>(
+    from: &SharedEntity,
+    reason: ConversionReason,
+    build: B,
+) -> Option<Arc<T>>
+where
+    T: Entity + 'static,
+    B: FnOnce(i32, DVec3, Weak<World>) -> T,
+{
+    if from.is_removed() {
+        return None;
+    }
+    let world = from.level()?;
+    let converted = Arc::new(build(
+        next_entity_id(),
+        from.position(),
+        Arc::downgrade(&world),
+    ));
+    converted.set_velocity(from.velocity());
+    converted.set_rotation(from.rotation());
+    converted.set_on_ground(from.on_ground());
+    converted.set_fall_distance(from.fall_distance());
+    let mut event = crate::event::EntityTransformEvent::new(from.uuid(), converted.uuid(), reason);
+    world.fire_event(&mut event);
+    if event.is_cancelled() {
+        return None;
+    }
+    if world
+        .try_add_entity(Arc::clone(&converted) as SharedEntity)
+        .is_err()
+    {
+        return None;
+    }
+    EntityBase::transfer_relationships(from, &(Arc::clone(&converted) as SharedEntity));
+    from.set_removed(RemovalReason::Discarded);
     Some(converted)
 }
 

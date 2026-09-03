@@ -33,8 +33,28 @@ public abstract class JavaPlugin implements Plugin {
     private boolean enabled;
     private FileConfiguration config;
     private final java.util.Map<String, PluginCommand> commands = new java.util.HashMap<>();
+    private final io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager lifecycleManager =
+        new io.papermc.paper.plugin.lifecycle.event.FotonLifecycleEventManager();
 
     public JavaPlugin() {}
+
+    /** Returns the loaded plugin whose class matches the requested type. */
+    public static <T extends JavaPlugin> T getPlugin(Class<T> clazz) {
+        if (clazz == null) throw new IllegalArgumentException("clazz");
+        for (Plugin plugin : org.bukkit.Bukkit.getPluginManager().getPlugins()) {
+            if (clazz.isInstance(plugin)) return clazz.cast(plugin);
+        }
+        throw new IllegalArgumentException("Plugin class is not loaded: " + clazz.getName());
+    }
+
+    public static JavaPlugin getProvidingPlugin(Class<?> clazz) {
+        if (clazz == null) throw new IllegalArgumentException("clazz");
+        ClassLoader loader = clazz.getClassLoader();
+        if (loader instanceof PluginClassLoader pluginLoader && pluginLoader.getPlugin() != null) {
+            return pluginLoader.getPlugin();
+        }
+        throw new IllegalArgumentException("Plugin class is not loaded: " + clazz.getName());
+    }
 
     public final void init(Server server, PluginDescriptionFile description, File dataFolder) {
         this.server = server;
@@ -87,10 +107,14 @@ public abstract class JavaPlugin implements Plugin {
 
     @Override public File getDataFolder() { return dataFolder; }
     @Override public PluginDescriptionFile getDescription() { return description; }
+    public io.papermc.paper.plugin.configuration.PluginMeta getPluginMeta() { return description; }
     @Override public Server getServer() { return server; }
     @Override public Logger getLogger() { return logger; }
     @Override public String getName() { return description.getName(); }
     @Override public boolean isEnabled() { return enabled; }
+    @Override public io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager getLifecycleManager() {
+        return lifecycleManager;
+    }
 
     public final void setEnabled(boolean value) { this.enabled = value; }
 

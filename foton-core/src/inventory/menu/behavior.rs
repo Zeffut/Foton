@@ -157,6 +157,10 @@ impl MenuBehavior {
         self.quickcraft
     }
 
+    pub(crate) fn quickcraft_slots(&self) -> &[usize] {
+        &self.quickcraft_slots
+    }
+
     /// The identity stamp of the menu this behavior belongs to.
     pub(crate) const fn instance(&self) -> MenuInstanceId {
         self.instance

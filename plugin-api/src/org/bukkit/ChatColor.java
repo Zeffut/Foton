@@ -40,6 +40,14 @@ public enum ChatColor {
         this.text = new String(new char[] {COLOR_CHAR, code});
     }
 
+    /** Looks up a color or formatting code (case-insensitive). */
+    public static ChatColor getByChar(String code) {
+        if (code == null || code.isEmpty()) return null;
+        char value = Character.toLowerCase(code.charAt(0));
+        for (ChatColor color : values()) if (color.code == value) return color;
+        return null;
+    }
+
     public char getChar() {
         return code;
     }
@@ -80,5 +88,22 @@ public enum ChatColor {
             out.append(c);
         }
         return out.toString();
+    }
+
+    /** Returns the formatting codes active at the end of a string. */
+    public static String getLastColors(String input) {
+        if (input == null || input.isEmpty()) return "";
+        StringBuilder result = new StringBuilder(2);
+        for (int i = input.length() - 2; i >= 0; i--) {
+            if (input.charAt(i) != COLOR_CHAR) continue;
+            char code = Character.toLowerCase(input.charAt(i + 1));
+            if ("0123456789abcdef".indexOf(code) >= 0) {
+                result.insert(0, COLOR_CHAR).insert(1, code);
+                break;
+            }
+            if ("klmno".indexOf(code) >= 0) result.insert(0, COLOR_CHAR).insert(1, code);
+            else if (code == 'r') { result.setLength(0); break; }
+        }
+        return result.toString();
     }
 }

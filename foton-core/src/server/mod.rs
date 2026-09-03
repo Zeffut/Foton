@@ -35,7 +35,9 @@ use crate::command::{
     PendingCommandExecutionQueue, client_permission_event, command_suggestions_packet,
     command_tree_packet, create_registered_dispatcher,
 };
-use crate::config::{ResolvedWorldConfig, RuntimeConfig, WorldsConfig, validate_login_security};
+use crate::config::{
+    ResolvedWorldConfig, RuntimeConfig, StorageSelection, WorldsConfig, validate_login_security,
+};
 use crate::entity::{
     Entity, EntityBase, PendingWorldChangeToken, RemovalReason, SharedEntity, change_entity_world,
 };
@@ -95,16 +97,17 @@ use foton_utils::{
     locks::{AsyncMutex, SyncMutex, SyncRwLock},
     text::DisplayResolutor,
     translations,
+    types::GameType,
 };
 use glam::DVec3;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use rustc_hash::FxHashMap;
-use std::sync::atomic::{AtomicI32, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering, Ordering as AtomicOrdering};
 use std::{
     collections::BTreeSet,
     io, mem,
     num::NonZero,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
@@ -409,6 +412,8 @@ use jobs::teleport::{
 pub struct Server {
     /// Runtime configuration (view distance, compression, etc.).
     pub config: Arc<RuntimeConfig>,
+    /// Runtime used by world loading and chunk tasks.
+    chunk_runtime: Arc<Runtime>,
     /// Runtime permission groups and their persistence boundary.
     pub permission_groups: PermissionGroupManager,
     /// The cancellation token for graceful shutdown.
@@ -419,6 +424,8 @@ pub struct Server {
     pub registry_cache: RegistryCache,
     /// A list of all the worlds on the server.
     pub worlds: WorldMap,
+    /// Root directory used by dynamically constructed world storage.
+    world_save_path: PathBuf,
     /// Players currently connected to the server, independent of world membership.
     online_players: PlayerMap,
     // Read by the plugin host, which lives outside this crate: a plugin asking
@@ -450,12 +457,20 @@ pub struct Server {
     command_requests: CommandRequestQueue,
     /// Decoded serverbound play packets handled during the inter-tick phase.
     packet_processor: PacketProcessor,
+    /// Registry of world generator factories retained for dynamic world loading.
+    world_generator_registry: WorldGeneratorRegistry,
+    /// Registry of world storage backends retained for dynamic world loading.
+    world_storage_registry: WorldStorageRegistry,
+    /// Dedicated pool for CPU-heavy chunk generation.
+    generation_pool: Arc<ThreadPool>,
     /// Dedicated worker pool for CPU-heavy chunk persistence and packet encoding.
     chunk_encoding_pool: Arc<ThreadPool>,
     /// Jobs resumed from a known point in the server game tick.
     pub jobs: ServerJobQueue,
     /// Player data storage for saving/loading player state.
     pub player_data_storage: PlayerDataStorage,
+    /// In-memory snapshot of server-wide player timestamps for synchronous plugin lookups.
+    global_player_data: SyncRwLock<FxHashMap<Uuid, GlobalPlayerData>>,
     /// Persisted permission state indexed by player UUID.
     player_permission_states: SyncRwLock<PermissionSubjectIndex>,
     /// Serializes persistence and cache publication for player permission edits.
@@ -474,6 +489,16 @@ pub struct Server {
     pending_player_disconnects: PlayerDisconnectQueue,
     /// Queued world changes to process after the tick.
     pub pending_world_changes: SyncMutex<Vec<(SharedEntity, WorldChangeRequest)>>,
+    /// World removals requested by plugins, applied at the tick safe-point.
+    pub(crate) pending_world_removals: SyncMutex<Vec<WorldRemovalRequest>>,
+    /// Worlds ready to attach at the next tick safe-point.
+    pending_world_additions: SyncMutex<
+        Vec<(
+            u64,
+            Arc<World>,
+            tokio::sync::oneshot::Sender<Result<(), String>>,
+        )>,
+    >,
     /// Who is listening for what.
     ///
     /// Unlike the block and item registries this is not frozen after startup:
@@ -482,6 +507,56 @@ pub struct Server {
     pub events: EventBus,
     /// Queued domain switches to process after world ticks.
     pending_domain_switches: SyncMutex<Vec<DomainSwitchRequest>>,
+}
+
+/// A world removal requested for the next game-tick safe point.
+static NEXT_WORLD_CREATION_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum WorldCreationState {
+    Pending,
+    Ready,
+    Failed(String),
+}
+
+/// Handle for a world creation request. Poll this from a safe-point; never block the game tick.
+pub struct WorldCreationRequest {
+    id: u64,
+    receiver: tokio::sync::oneshot::Receiver<Result<(), String>>,
+}
+
+impl WorldCreationRequest {
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Polls the request without waiting for asynchronous world construction.
+    pub fn poll(&mut self) -> WorldCreationState {
+        match self.receiver.try_recv() {
+            Ok(Ok(())) => WorldCreationState::Ready,
+            Ok(Err(error)) => WorldCreationState::Failed(error),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => WorldCreationState::Pending,
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                WorldCreationState::Failed("world creation task closed".to_owned())
+            }
+        }
+    }
+
+    /// Awaits completion for callers already outside the game tick.
+    pub async fn wait(self) -> WorldCreationState {
+        match self.receiver.await {
+            Ok(Ok(())) => WorldCreationState::Ready,
+            Ok(Err(error)) => WorldCreationState::Failed(error),
+            Err(_) => WorldCreationState::Failed("world creation task closed".to_owned()),
+        }
+    }
+}
+
+pub(crate) struct WorldRemovalRequest {
+    pub(crate) key: Identifier,
+    pub(crate) save: bool,
+    pub(crate) completion: Option<oneshot::Sender<Result<usize, String>>>,
 }
 
 struct GameTickTaskGuard {
@@ -506,6 +581,122 @@ impl Drop for GameTickTaskGuard {
 }
 
 impl Server {
+    /// Schedules creation of a plugin-requested world without blocking the game
+    /// tick. Completion is reported only after safe-point attachment.
+    pub fn request_world_creation(
+        self: &Arc<Self>,
+        name: String,
+        generator: Identifier,
+        seed: i64,
+        bonus_chest: bool,
+    ) -> Result<WorldCreationRequest, String> {
+        if name.is_empty() || !Identifier::validate_path(&name) {
+            return Err(format!("invalid world name {name}"));
+        }
+        let domain = self.worlds.default_domain().to_owned();
+        let key = Identifier::new(domain.clone(), name.clone());
+        if self.worlds.get(&key).is_some() {
+            return Err(format!("world {key} is already loaded"));
+        }
+        let generator_config = self
+            .world_generator_registry
+            .validate_config(&generator, &toml::Value::Table(toml::map::Map::new()))?;
+        let world_entry = ResolvedWorldConfig {
+            key,
+            domain,
+            name,
+            generator,
+            generator_config,
+            seed,
+            default_gamemode: GameType::Survival,
+            difficulty: foton_utils::types::Difficulty::Normal,
+            bonus_chest,
+            storage: StorageSelection::default_world_disk(),
+            nether_portal_target: None,
+            end_portal_target: None,
+        };
+        let (sender, receiver) = oneshot::channel();
+        let server = Arc::clone(self);
+        self.chunk_runtime.spawn(async move {
+            let result = match server.load_world_from_config_tracked(world_entry).await {
+                Ok(request) => match request.wait().await {
+                    WorldCreationState::Ready => Ok(()),
+                    WorldCreationState::Failed(error) => Err(error),
+                    WorldCreationState::Pending => {
+                        Err("world creation request ended pending".to_owned())
+                    }
+                },
+                Err(error) => Err(error),
+            };
+            let _ = sender.send(result);
+        });
+        let id = NEXT_WORLD_CREATION_ID.fetch_add(1, Ordering::Relaxed);
+        Ok(WorldCreationRequest { id, receiver })
+    }
+
+    /// Publishes the latest server-wide player metadata for synchronous plugin lookups.
+    pub fn publish_global_player_data(&self, uuid: Uuid, data: GlobalPlayerData) {
+        self.global_player_data.write().insert(uuid, data);
+    }
+
+    /// Returns the cached server-wide player metadata without performing I/O.
+    #[must_use]
+    pub fn global_player_data(&self, uuid: Uuid) -> Option<GlobalPlayerData> {
+        self.global_player_data.read().get(&uuid).cloned()
+    }
+
+    /// Returns a cached statistic for the player's last active domain.
+    #[must_use]
+    pub fn offline_statistic(&self, uuid: Uuid, statistic: &str) -> i32 {
+        let Some(data) = self.global_player_data(uuid) else {
+            return 0;
+        };
+        let value = match statistic {
+            "JUMP" => "minecraft:jump",
+            "TIME_SINCE_REST" => "minecraft:time_since_rest",
+            _ => return 0,
+        };
+        data.statistics
+            .iter()
+            .find(|entry| entry.stat_type == "minecraft:custom" && entry.value == value)
+            .map_or(0, |entry| entry.count)
+    }
+
+    /// Returns UUIDs of all currently connected players for plugin recipient sets.
+    pub fn online_player_ids(&self) -> Vec<Uuid> {
+        let mut ids = Vec::new();
+        self.online_players.iter_players(|uuid, _| {
+            ids.push(*uuid);
+            true
+        });
+        ids
+    }
+
+    /// Queues asynchronous saves for every currently connected player.
+    pub fn request_save_players(self: &Arc<Self>) {
+        let Some(runtime) = self
+            .worlds
+            .values()
+            .into_iter()
+            .next()
+            .map(|world| Arc::clone(&world.chunk_map.chunk_runtime))
+        else {
+            return;
+        };
+        let mut players = Vec::new();
+        self.online_players.iter_players(|_, player| {
+            players.push(Arc::clone(player));
+            true
+        });
+        let server = Arc::clone(self);
+        runtime.handle().spawn(async move {
+            for player in players {
+                if let Err(error) = server.player_data_storage.save(&player).await {
+                    log::error!("Failed to save player {}: {error}", player.gameprofile.id);
+                }
+            }
+        });
+    }
     pub(crate) fn permission_rule_suggestions(&self) -> Vec<String> {
         let mut suggestions = self
             .command_permission_keys
@@ -542,6 +733,128 @@ impl Server {
     }
 
     /// Creates a new server with only Foton's built-in commands.
+    /// Builds a world using the same validated generator/storage pipeline as startup.
+    ///
+    /// The caller must insert the returned world into WorldMap and attach it at a
+    /// tick safe-point.
+    pub(crate) async fn build_world_from_config(
+        &self,
+        chunk_runtime: Arc<Runtime>,
+        world_entry: &ResolvedWorldConfig,
+    ) -> Result<Arc<World>, String> {
+        let world_path = self
+            .world_save_path
+            .join(&world_entry.domain)
+            .join("worlds")
+            .join(&world_entry.name);
+        let storage_output = self
+            .world_storage_registry
+            .create(&world_entry.storage, &self.world_save_path, &world_path)
+            .map_err(|error| {
+                format!("failed to create storage for {}: {error}", world_entry.key)
+            })?;
+        let world_seed = LevelDataManager::load_seed_or_default(
+            storage_output.level_data_path.as_deref(),
+            world_entry.seed,
+        )
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to load level data seed for {}: {error}",
+                world_entry.key
+            )
+        })?;
+        let generator_output = self
+            .world_generator_registry
+            .create(
+                storage_output.level_data_path.as_deref(),
+                &world_entry.generator_config,
+                world_seed,
+                Arc::clone(&self.generation_pool),
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to create generator for {}: {error}",
+                    world_entry.key
+                )
+            })?;
+        let generation_settings = generation_settings_for_world(world_entry, &generator_output);
+        let world = World::new_with_config_and_encoding_pool(
+            chunk_runtime,
+            world_entry.key.clone(),
+            generator_output.dimension_type,
+            world_seed,
+            WorldConfig {
+                storage: storage_output.storage,
+                level_data_path: storage_output
+                    .level_data_path
+                    .map(|path| path.to_string_lossy().into_owned()),
+                generator: Arc::new(generator_output.generator),
+                generation_settings,
+                view_distance: self.config.view_distance,
+                simulation_distance: self.config.simulation_distance,
+                max_chained_neighbor_updates: self.config.max_chained_neighbor_updates,
+                compression: self.config.compression,
+                is_flat: generator_output.is_flat,
+                sea_level: generator_output.sea_level,
+                default_gamemode: world_entry.default_gamemode,
+                difficulty: world_entry.difficulty,
+                bonus_chest: world_entry.bonus_chest,
+            },
+            Arc::clone(&self.generation_pool),
+            Arc::clone(&self.chunk_encoding_pool),
+        )
+        .await
+        .map_err(|error| format!("failed to create world {}: {error}", world_entry.key))?;
+        world
+            .initialize_spawn_if_needed_with_bonus_chest(world_entry.bonus_chest)
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to initialize spawn for {}: {error}",
+                    world_entry.key
+                )
+            })?;
+        Ok(world)
+    }
+
+    /// Builds a world off-thread and queues attachment at the next tick safe-point.
+    pub(crate) async fn load_world_from_config(
+        self: &Arc<Self>,
+        world_entry: ResolvedWorldConfig,
+    ) -> Result<(), String> {
+        let _request = self.load_world_from_config_tracked(world_entry).await?;
+        drop(_request);
+        Ok(())
+    }
+
+    pub(crate) async fn load_world_from_config_tracked(
+        self: &Arc<Self>,
+        world_entry: ResolvedWorldConfig,
+    ) -> Result<WorldCreationRequest, String> {
+        if self.worlds.get(&world_entry.key).is_some() {
+            return Err(format!("world {} is already loaded", world_entry.key));
+        }
+        let world = self
+            .build_world_from_config(Arc::clone(&self.chunk_runtime), &world_entry)
+            .await?;
+        world.attach_server(self);
+        let id = NEXT_WORLD_CREATION_ID.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let mut pending = self.pending_world_additions.lock();
+        if pending
+            .iter()
+            .any(|(_, pending_world, _)| pending_world.key == world_entry.key)
+        {
+            return Err(format!(
+                "world {} is already pending attachment",
+                world_entry.key
+            ));
+        }
+        pending.push((id, world, sender));
+        Ok(WorldCreationRequest { id, receiver })
+    }
+
     pub async fn new(
         chunk_runtime: Arc<Runtime>,
         cancel_token: CancellationToken,
@@ -637,6 +950,26 @@ impl Server {
             .load_known_players()
             .await
             .map_err(|error| format!("failed to load known players: {error}"))?;
+        let mut global_player_data = FxHashMap::default();
+        for known in known_players.entries() {
+            if let Some(data) = player_data_storage
+                .load_global(known.uuid())
+                .await
+                .map_err(|error| format!("failed to load global data: {error}"))?
+            {
+                let mut data = data;
+                if !data.last_active_domain.is_empty() {
+                    if let Some(domain_data) = player_data_storage
+                        .load_domain(&data.last_active_domain, known.uuid())
+                        .await
+                        .map_err(|error| format!("failed to load player statistics: {error}"))?
+                    {
+                        data.statistics = domain_data.statistics;
+                    }
+                }
+                global_player_data.insert(known.uuid(), data);
+            }
+        }
         let mut worlds = WorldMap::new(
             resolved_worlds.default_domain.clone(),
             &resolved_worlds.domains,
@@ -696,6 +1029,7 @@ impl Server {
                     sea_level: generator_output.sea_level,
                     default_gamemode: world_entry.default_gamemode,
                     difficulty: world_entry.difficulty,
+                    bonus_chest: world_entry.bonus_chest,
                 },
                 generation_pool.clone(),
                 Arc::clone(&chunk_encoding_pool),
@@ -703,10 +1037,12 @@ impl Server {
             .await
             .map_err(|e| format!("failed to create world {}: {e}", world_entry.key))?;
             world
-                .initialize_spawn_if_needed()
+                .initialize_spawn_if_needed_with_bonus_chest(world_entry.bonus_chest)
                 .await
                 .map_err(|e| format!("failed to initialize spawn for {}: {e}", world_entry.key))?;
-            worlds.insert(world_entry.key.clone(), world);
+            worlds
+                .insert(world_entry.key.clone(), world)
+                .map_err(|error| format!("failed to publish world {}: {error}", world_entry.key))?;
         }
 
         let scoreboards = DomainScoreboards::load(&worlds)
@@ -734,10 +1070,12 @@ impl Server {
 
         Ok(Server {
             config,
+            chunk_runtime,
             permission_groups,
             cancel_token,
             key_store: KeyStore::create(),
             worlds,
+            world_save_path: resolved_worlds.save_path.clone(),
             online_players: PlayerMap::new(),
             player_admissions: SyncMutex::new(FxHashMap::default()),
             registry_cache,
@@ -751,9 +1089,13 @@ impl Server {
             command_permission_keys,
             command_requests: CommandRequestQueue::new(),
             packet_processor: PacketProcessor::new(),
+            world_generator_registry: generator_registry,
+            world_storage_registry: storage_registry,
+            generation_pool,
             chunk_encoding_pool,
             jobs: ServerJobQueue::new(),
             player_data_storage,
+            global_player_data: SyncRwLock::new(global_player_data),
             player_permission_states: SyncRwLock::new(player_permission_states),
             player_permission_updates: AsyncMutex::new(()),
             known_players: SyncMutex::new(KnownPlayerCacheState::new(known_players)),
@@ -763,6 +1105,8 @@ impl Server {
             pending_player_joins: PlayerJoinQueue::new(),
             pending_player_disconnects: PlayerDisconnectQueue::new(),
             pending_world_changes: SyncMutex::new(vec![]),
+            pending_world_removals: SyncMutex::new(vec![]),
+            pending_world_additions: SyncMutex::new(vec![]),
             events: EventBus::new(),
             pending_domain_switches: SyncMutex::new(vec![]),
         })
@@ -802,8 +1146,8 @@ impl Server {
     /// passed to `World::new`. Nothing that runs before this call may rely on
     /// [`crate::world::World::server`].
     pub fn attach_worlds(self: &Arc<Self>) {
-        for world in self.worlds.values() {
-            world.attach_server(self);
+        for snapshot in self.worlds.snapshots() {
+            snapshot.world().attach_server(self);
         }
     }
 
@@ -815,6 +1159,11 @@ impl Server {
         let compilation_source = self.function_source();
         let dispatcher = self.command_dispatcher.read();
         self.functions.reload(&dispatcher, &compilation_source)
+    }
+
+    /// Snapshot of datapacks accepted by the active function/resource scan.
+    pub fn datapack_records(&self, enabled_only: bool) -> Vec<String> {
+        self.functions.datapack_records(enabled_only)
     }
 
     /// Runs `visit` against the live command graph.

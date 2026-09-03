@@ -651,8 +651,16 @@ impl FishingHookEntity {
                 DAMAGE_HOOKED_ENTITY
             };
         } else if self.state.lock().nibble > 0 {
-            self.drop_catch(&world, &owner, player, rod);
-            damage = DAMAGE_CAUGHT_FISH;
+            let mut event = crate::event::PlayerFishEvent::new(
+                player.gameprofile.id,
+                self.uuid(),
+                "CAUGHT_FISH",
+            );
+            world.fire_event(&mut event);
+            if !event.is_cancelled() {
+                self.drop_catch(&world, &owner, player, rod);
+                damage = DAMAGE_CAUGHT_FISH;
+            }
         }
 
         if self.on_ground() {

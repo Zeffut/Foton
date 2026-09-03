@@ -35,8 +35,8 @@ use uuid::Uuid;
 
 use crate::entity::fluid_contact::EntityFluidContact;
 use crate::entity::{
-    EntityLevelCallback, EntityMoveError, InsideBlockEffectType, NullEntityCallback, RemovalReason,
-    SharedEntity,
+    EntityLevelCallback, EntityMoveError, EntitySpawnReason, InsideBlockEffectType,
+    NullEntityCallback, RemovalReason, SharedEntity,
 };
 use crate::physics::EntityPhysicsState;
 use crate::portal::{PortalKind, PortalProcessResult, PortalProcessor};
@@ -389,6 +389,11 @@ pub struct EntityBase {
     save_data: SyncMutex<EntityBaseSaveData>,
     /// Per-tick movement segments used by vanilla block-contact effects.
     movement_trace: SyncMutex<EntityMovementTrace>,
+    /// Spawn provenance retained for Bukkit/Paper entity APIs.
+    ///
+    /// This is set by the vanilla mob finalization path. Entities restored
+    /// from disk intentionally have no new spawn reason.
+    spawn_reason: SyncMutex<Option<EntitySpawnReason>>,
     /// Removal and tick bookkeeping.
     lifecycle: SyncMutex<EntityLifecycleState>,
     /// Passenger, vehicle, and boarding-cooldown state.
@@ -451,6 +456,7 @@ impl EntityBase {
             world: SyncMutex::new(world),
             state: SyncMutex::new(state),
             save_data: SyncMutex::new(EntityBaseSaveData::new()),
+            spawn_reason: SyncMutex::new(None),
             movement_trace: SyncMutex::new(EntityMovementTrace::default()),
             lifecycle: SyncMutex::new(EntityLifecycleState::new()),
             relationships: SyncMutex::new(EntityRelationshipState::default()),
@@ -487,6 +493,18 @@ impl EntityBase {
     #[inline]
     pub const fn uuid(&self) -> Uuid {
         self.uuid
+    }
+
+    /// Returns the reason supplied by vanilla when this entity was spawned.
+    #[inline]
+    pub fn spawn_reason(&self) -> Option<EntitySpawnReason> {
+        *self.spawn_reason.lock()
+    }
+
+    /// Records the reason supplied by vanilla during spawn finalization.
+    #[inline]
+    pub fn set_spawn_reason(&self, reason: EntitySpawnReason) {
+        *self.spawn_reason.lock() = Some(reason);
     }
 
     /// Gets the entity's current position.
@@ -592,6 +610,14 @@ impl EntityBase {
     }
 
     /// Returns a snapshot of shared vanilla save data.
+    pub fn is_persistent(&self) -> bool {
+        self.save_data.lock().persistent
+    }
+
+    pub fn set_persistent(&self, persistent: bool) {
+        self.save_data.lock().persistent = persistent;
+    }
+
     pub fn save_data(&self) -> EntityBaseSaveData {
         self.save_data.lock().clone()
     }
@@ -801,6 +827,48 @@ impl EntityBase {
     /// Returns the vanilla boarding cooldown in ticks.
     pub fn boarding_cooldown(&self) -> i32 {
         self.relationships.lock().boarding_cooldown
+    }
+
+    /// Transfers the complete direct riding relationship tree to a replacement.
+    pub(crate) fn transfer_relationships(old: &SharedEntity, replacement: &SharedEntity) {
+        let (vehicle, passengers) = {
+            let mut relationships = old.base().relationships.lock();
+            let vehicle = relationships.vehicle();
+            let passengers = relationships.passengers();
+            relationships.vehicle = None;
+            relationships.passengers.clear();
+            (vehicle, passengers)
+        };
+
+        if let Some(vehicle) = vehicle {
+            Self::replace_passenger_relationship(&vehicle, old.id(), replacement);
+            replacement.base().relationships.lock().vehicle = Some(Arc::downgrade(&vehicle));
+        }
+
+        let mut replacement_relationships = replacement.base().relationships.lock();
+        replacement_relationships.passengers = passengers.iter().map(Arc::downgrade).collect();
+        drop(replacement_relationships);
+        for passenger in passengers {
+            passenger.base().relationships.lock().vehicle = Some(Arc::downgrade(replacement));
+        }
+    }
+
+    /// Replaces a direct passenger while preserving its seat order.
+    pub(crate) fn replace_passenger_relationship(
+        vehicle: &SharedEntity,
+        old_id: i32,
+        replacement: &SharedEntity,
+    ) -> bool {
+        if !vehicle
+            .base()
+            .relationships
+            .lock()
+            .replace_passenger_id(old_id, replacement)
+        {
+            return false;
+        }
+        replacement.base().relationships.lock().vehicle = Some(Arc::downgrade(vehicle));
+        true
     }
 
     /// Removes a direct passenger by entity ID.

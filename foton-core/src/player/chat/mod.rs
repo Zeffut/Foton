@@ -278,6 +278,9 @@ impl Player {
         // Anything listening gets the message before anyone hears it, and
         // before the packet is built around it.
         let mut event = PlayerChatEvent::new(Arc::clone(&player), chat_message);
+        event
+            .recipients_mut()
+            .extend(self.server().online_player_ids());
         self.fire_event(&mut event);
         if event.is_cancelled() {
             // The send still counts against the spam throttle. A plugin that
@@ -289,6 +292,7 @@ impl Player {
         // The client signed the text it sent. A rewritten message is not that
         // text, so its signature is dropped and the unsigned path carries it.
         let rewritten = event.was_changed();
+        let recipients = event.recipients().to_vec();
         let chat_message = event.into_message();
         let signature = if rewritten { None } else { signature };
 
@@ -321,17 +325,21 @@ impl Player {
                 LastSeen::default()
             };
 
-            for world in self.server().worlds.values() {
+            for snapshot in self.server().worlds.snapshots() {
+                let world = snapshot.world();
                 world.broadcast_chat(
                     chat_packet.clone(),
                     Arc::clone(&player),
                     last_seen.clone(),
                     Some(&sig_array),
+                    Some(&recipients),
                 );
             }
         } else {
-            for world in self.server().worlds.values() {
-                world.broadcast_unsigned_chat(chat_packet.clone());
+            for snapshot in self.server().worlds.snapshots() {
+                snapshot
+                    .world()
+                    .broadcast_unsigned_chat(chat_packet.clone(), Some(&recipients));
             }
         }
 
@@ -376,6 +384,30 @@ impl Player {
                 target_name: None,
             },
         )
+    }
+
+    /// Submits an unsigned message through the normal player-chat pipeline.
+    pub fn chat_from_plugin(self: &Arc<Self>, message: String) {
+        if message.is_empty() {
+            return;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(i64::MAX as u128) as i64;
+        self.handle_chat(
+            SChat {
+                message,
+                timestamp: now,
+                salt: 0,
+                signature: None,
+                offset: 0,
+                acknowledged: [0; 3],
+                checksum: 0,
+            },
+            Arc::clone(self),
+        );
     }
 
     /// Sends a system message to the player.

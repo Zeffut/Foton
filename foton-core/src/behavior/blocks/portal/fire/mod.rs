@@ -27,6 +27,7 @@ use crate::behavior::blocks::redstone::TntBlock;
 use crate::behavior::context::BlockPlaceContext;
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, InsideBlockEffectCollector, InsideBlockEffectType};
+use crate::event::Event as _;
 use crate::portal::portal_shape::{PortalShape, nether_portal_config};
 use crate::world::{LevelReader, ScheduledTickAccess, World};
 
@@ -59,6 +60,14 @@ fn fire_tick_delay(rng: &mut impl Rng) -> i32 {
 #[block_behavior]
 pub struct FireBlock {
     block: BlockRef,
+}
+
+fn remove_fire_with_event(world: &Arc<World>, pos: BlockPos) {
+    let mut event = crate::event::BlockFadeEvent::new(world.key.to_string(), pos);
+    world.fire_event(&mut event);
+    if !event.is_cancelled() {
+        world.remove_block(pos, false);
+    }
 }
 
 impl FireBlock {
@@ -183,6 +192,11 @@ impl FireBlock {
         }
 
         let old_block = world.get_block_state(pos).get_block();
+        let mut event = crate::event::BlockBurnEvent::new(world.key.to_string(), pos);
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
         if rng.random_range(0..i32::from(age) + 10) < 5 && !world.is_raining_at(pos) {
             let new_age = MAX_AGE.min(age + rng.random_range(0..5) / 4);
             world.set_block(
@@ -364,7 +378,7 @@ impl BlockBehavior for FireBlock {
         // tick regardless; the spread it then rolls is what makes fire creep
         // sideways off a ledge.
         if !Self::can_survive_at(world.as_ref(), pos) {
-            world.remove_block(pos, false);
+            remove_fire_with_event(world, pos);
         }
 
         let below_pos = pos.below();
@@ -376,7 +390,7 @@ impl BlockBehavior for FireBlock {
             && Self::is_near_rain(world, pos)
             && rng.random::<f32>() < 0.2 + f32::from(age) * 0.03
         {
-            world.remove_block(pos, false);
+            remove_fire_with_event(world, pos);
             return;
         }
 
@@ -389,7 +403,7 @@ impl BlockBehavior for FireBlock {
             if !Self::is_valid_fire_location(world.as_ref(), pos) {
                 let below_state = world.get_block_state(below_pos);
                 if !world.is_face_sturdy(below_state, below_pos, Direction::Up) || age > 3 {
-                    world.remove_block(pos, false);
+                    remove_fire_with_event(world, pos);
                 }
                 return;
             }
@@ -398,7 +412,7 @@ impl BlockBehavior for FireBlock {
                 && rng.random_range(0..4) == 0
                 && !can_burn(world.get_block_state(below_pos))
             {
-                world.remove_block(pos, false);
+                remove_fire_with_event(world, pos);
                 return;
             }
         }
@@ -520,7 +534,7 @@ impl BlockBehavior for SoulFireBlock {
             return;
         }
         if !Self::can_survive_at(world.as_ref(), pos) {
-            world.remove_block(pos, false);
+            remove_fire_with_event(world, pos);
         }
     }
 

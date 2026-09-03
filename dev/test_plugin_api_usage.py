@@ -47,6 +47,18 @@ public class Sneaky {
 }
 """
 
+REACHES_CRAFTBUKKIT = """
+package example;
+
+import org.bukkit.craftbukkit.entity.CraftPlayer;
+
+public class Crafty {
+    public Object handle(CraftPlayer player) {
+        return player.getHandle();
+    }
+}
+"""
+
 STUBS = {
     "org/bukkit/Bukkit.java": """
         package org.bukkit;
@@ -74,6 +86,12 @@ STUBS = {
         package net.minecraft;
         public final class FakeInternals {
             public static void reachInside() { }
+        }
+    """,
+    "org/bukkit/craftbukkit/entity/CraftPlayer.java": """
+        package org.bukkit.craftbukkit.entity;
+        public class CraftPlayer {
+            public Object getHandle() { return null; }
         }
     """,
 }
@@ -139,6 +157,8 @@ class Scanning(unittest.TestCase):
         root = pathlib.Path(cls._dir.name)
         cls.plain = build_jar({"example/ExamplePlugin.java": PLUGIN}, root / "plain")
         cls.sneaky = build_jar({"example/Sneaky.java": REACHES_INTERNALS}, root / "sneaky")
+        cls.crafty = build_jar({"example/Crafty.java": REACHES_CRAFTBUKKIT}, root / "crafty")
+        cls.api = build_jar({}, root / "api")
 
     @classmethod
     def tearDownClass(cls):
@@ -147,8 +167,10 @@ class Scanning(unittest.TestCase):
     def test_it_finds_the_api_members_a_plugin_calls(self):
         found, _ = plugin_api_usage.scan(self.plain)
 
-        self.assertIn("org/bukkit/Bukkit#getServerName", found["api"])
-        self.assertIn("org/bukkit/entity/Player#sendMessage", found["api"])
+        self.assertIn(
+            "org/bukkit/Bukkit#getServerName()Ljava/lang/String;", found["api"])
+        self.assertIn(
+            "org/bukkit/entity/Player#sendMessage(Ljava/lang/String;)V", found["api"])
 
     def test_a_plugin_that_stays_on_the_api_is_not_counted_as_reaching_inside(self):
         # The ceiling on how much of the ecosystem can ever run is this number,
@@ -161,8 +183,22 @@ class Scanning(unittest.TestCase):
     def test_reaching_for_the_mojang_server_is_counted_separately(self):
         found, _ = plugin_api_usage.scan(self.sneaky)
 
-        self.assertIn("net/minecraft/FakeInternals#reachInside", found["internal"])
+        self.assertIn("net/minecraft/FakeInternals#reachInside()V", found["internal"])
         self.assertEqual(found["api"], set())
+
+    def test_craftbukkit_is_internal_even_though_its_name_starts_with_bukkit(self):
+        found, _ = plugin_api_usage.scan(self.crafty)
+
+        self.assertIn(
+            "org/bukkit/craftbukkit/entity/CraftPlayer#getHandle()Ljava/lang/Object;",
+            found["internal"])
+        self.assertEqual(found["api"], set())
+
+    def test_an_internals_reaching_plugin_is_not_offered_as_api_work(self):
+        per_plugin, missing = plugin_api_usage.gaps(self.sneaky.parent, self.api)
+
+        self.assertNotIn(self.sneaky.name, per_plugin)
+        self.assertEqual(missing, collections.Counter())
 
     def test_every_class_in_the_jar_is_read(self):
         # A jar whose classes silently failed to parse would produce a ranking
@@ -202,7 +238,7 @@ class Gaps(unittest.TestCase):
                 archive.read("org/bukkit/Bukkit.class"))
 
         self.assertEqual(name, "org/bukkit/Bukkit")
-        self.assertIn("getServerName", members)
+        self.assertIn("getServerName()Ljava/lang/String;", members)
         self.assertIn("java/lang/Object", supertypes)
 
     def test_an_inherited_member_counts_as_provided(self):
@@ -211,8 +247,9 @@ class Gaps(unittest.TestCase):
         # would report a gap that does not exist.
         have = plugin_api_usage.provided(self.complete)
 
-        self.assertIn("sendMessage", have["org/bukkit/entity/Player"])
-        self.assertIn("getName", have["org/bukkit/entity/Player"],
+        self.assertIn(
+            "sendMessage(Ljava/lang/String;)V", have["org/bukkit/entity/Player"])
+        self.assertIn("getName()Ljava/lang/String;", have["org/bukkit/entity/Player"],
                       "a member inherited from a supertype should still resolve")
 
     def test_what_java_lang_object_gives_every_class_is_not_a_gap(self):
@@ -222,7 +259,8 @@ class Gaps(unittest.TestCase):
         corpus = self.plugin.parent
         _, missing = plugin_api_usage.gaps(corpus, self.complete)
 
-        self.assertNotIn("org/bukkit/entity/Player#toString", missing)
+        self.assertNotIn(
+            "org/bukkit/entity/Player#toString()Ljava/lang/String;", missing)
 
     def test_what_an_enum_gives_its_constants_is_not_a_gap(self):
         # `Material.name()` comes from java.lang.Enum, whose class file is not
@@ -230,8 +268,8 @@ class Gaps(unittest.TestCase):
         # "needs" at the top of the ranking, pointing the work at nothing.
         have = plugin_api_usage.provided(self.complete)
 
-        self.assertIn("name", have["org/bukkit/Season"])
-        self.assertIn("toString", have["org/bukkit/Season"])
+        self.assertIn("name()Ljava/lang/String;", have["org/bukkit/Season"])
+        self.assertIn("toString()Ljava/lang/String;", have["org/bukkit/Season"])
 
     def test_a_jar_that_answers_everything_leaves_no_gap(self):
         corpus = self.plugin.parent
@@ -244,7 +282,8 @@ class Gaps(unittest.TestCase):
         corpus = self.plugin.parent
         _, missing = plugin_api_usage.gaps(corpus, self.partial)
 
-        self.assertEqual(missing["org/bukkit/Bukkit#getServerName"], 1)
+        self.assertEqual(
+            missing["org/bukkit/Bukkit#getServerName()Ljava/lang/String;"], 1)
 
 
 class ConstantPool(unittest.TestCase):

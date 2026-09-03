@@ -159,7 +159,8 @@ impl ZombieEntity {
         let converted = convert_to(
             villager,
             // Vanilla parity: `ConversionParams.single(villager, true, true)`.
-            ConversionParams::single(true, true),
+            ConversionParams::single(true, true)
+                .with_reason(crate::entity::conversion::ConversionReason::Drowned),
             |id, position, world| {
                 ZombieVillagerEntity::new(&vanilla_entities::ZOMBIE_VILLAGER, id, position, world)
             },

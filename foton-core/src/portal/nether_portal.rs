@@ -17,7 +17,8 @@ use glam::DVec3;
 use crate::{
     entity::Entity,
     portal::{
-        PortalTicketTarget, TeleportPostTransition, TeleportTransition, portal_shape::PortalShape,
+        PortalTicketTarget, TeleportPostTransition, TeleportTransition, TeleportTransitionCause,
+        portal_shape::PortalShape,
     },
     world::World,
 };
@@ -208,6 +209,7 @@ fn create_dimension_transition(
 
     TeleportTransition {
         target_world: target_world.clone(),
+        cause: TeleportTransitionCause::NetherPortal,
         position: collision_free_pos,
         rotation: (output_rotation, 0.0),
         velocity: DVec3::ZERO,

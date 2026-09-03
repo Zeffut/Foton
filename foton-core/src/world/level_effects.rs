@@ -6,6 +6,7 @@ use super::{
     World, WorldEntityManager, entity_loot_ref, fluid_state_to_block, level_events, vanilla_blocks,
     vanilla_game_events,
 };
+use crate::event::Event as _;
 
 pub(super) fn sound_is_within_range(
     sound: SoundEventRef,
@@ -332,6 +333,20 @@ impl World {
         // Vanilla parity: fluidState.createLegacyBlock() — breaking a waterlogged
         // block leaves water behind instead of air.
         let replacement = fluid_state_to_block(state.get_fluid_state());
+        if let Some(entity) = entity {
+            if let Some(server) = self.server() {
+                let mut event = crate::event::EntityChangeBlockEvent::new(
+                    entity.uuid(),
+                    self.key.to_string(),
+                    pos,
+                    replacement.get_block().key.to_string(),
+                );
+                server.events.fire(&mut event);
+                if event.is_cancelled() {
+                    return false;
+                }
+            }
+        }
         let destroyed =
             self.set_block_with_limit(pos, replacement, UpdateFlags::UPDATE_ALL, recursion_left);
         if destroyed {

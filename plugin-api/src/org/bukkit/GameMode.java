@@ -6,6 +6,10 @@ public enum GameMode {
     SURVIVAL,
     ADVENTURE,
     SPECTATOR;
+    public int getValue() { return ordinal(); }
+    public static GameMode getByValue(int value) {
+        return value < 0 || value >= values().length ? null : values()[value];
+    }
 
     /** Reads the name Foton uses, which is the lower-case one. */
     public static GameMode byName(String name) {

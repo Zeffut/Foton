@@ -8,6 +8,7 @@ use super::super::{
 };
 use super::{JobPoll, ServerJob, ServerJobContext};
 use crate::entity::LivingEntity as _;
+use crate::portal::TeleportTransitionCause;
 
 pub(in crate::server) struct RootVehicleRestoreJob {
     player: Arc<Player>,
@@ -221,7 +222,7 @@ impl WorldSpawnTeleportJob {
             && server
                 .worlds
                 .get(&self.target_world.key)
-                .is_some_and(|registered| Arc::ptr_eq(registered, &self.target_world))
+                .is_some_and(|registered| Arc::ptr_eq(&registered, &self.target_world))
     }
 
     fn finish_pending(&self) {
@@ -276,6 +277,7 @@ impl ServerJob for WorldSpawnTeleportJob {
                         }
                         let transition = TeleportTransition {
                             target_world: Arc::clone(&self.target_world),
+                            cause: TeleportTransitionCause::Respawn,
                             position: spawn.position,
                             rotation: spawn.rotation,
                             velocity: DVec3::ZERO,
