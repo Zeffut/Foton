@@ -47,9 +47,25 @@ def main():
     rendered = json.dumps(fresh, indent=2) + "\n"
 
     if args.check:
-        if not OUTPUT.is_file() or OUTPUT.read_text(encoding="utf-8") != rendered:
+        if not OUTPUT.is_file():
+            print(f"{OUTPUT.relative_to(REPO)} is missing; run python3 dev/count-tests.py",
+                  file=sys.stderr)
+            return 1
+        if OUTPUT.read_text(encoding="utf-8") != rendered:
+            # Say both numbers. "Stale" alone is unactionable when the machine
+            # that disagrees is a CI runner nobody can put a shell on: it took
+            # a whole build to learn only that two machines counted
+            # differently, and not by how much.
+            try:
+                committed = json.loads(OUTPUT.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                committed = {}
             print(f"{OUTPUT.relative_to(REPO)} is stale; run python3 dev/count-tests.py",
                   file=sys.stderr)
+            print(f"  committed: {committed.get('unit_tests', '?')} tests across "
+                  f"{committed.get('targets', '?')} targets", file=sys.stderr)
+            print(f"  measured here: {fresh['unit_tests']} tests across "
+                  f"{fresh['targets']} targets", file=sys.stderr)
             return 1
         return 0
 
