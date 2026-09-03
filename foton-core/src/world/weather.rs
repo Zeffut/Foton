@@ -501,6 +501,9 @@ impl World {
         obfuscate_biome_seed(self.seed())
     }
 
+    /// The registry key of the biome at `pos`, as a string.
+    ///
+    /// `None` when the chunk holding `pos` is not loaded.
     pub fn biome_key_at(&self, pos: BlockPos) -> Option<String> {
         self.biome_at(pos).map(|biome| biome.key.to_string())
     }

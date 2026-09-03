@@ -364,6 +364,7 @@ impl WolfEntity {
         DyeColor::by_id(*self.entity_data.lock().collar_color.get())
     }
 
+    /// Sets the collar colour, synchronised to the client.
     pub fn set_collar_color(&self, color: DyeColor) {
         self.entity_data.lock().collar_color.set(color.id());
     }

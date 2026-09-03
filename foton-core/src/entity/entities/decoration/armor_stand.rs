@@ -154,6 +154,7 @@ impl ArmorStandEntity {
         self.has_flag(FLAG_SHOW_ARMS)
     }
 
+    /// Sets whether this armor stand shows arms, vanilla's `ShowArms` tag.
     pub fn set_show_arms(&self, show: bool) {
         self.set_flag(FLAG_SHOW_ARMS, show);
     }

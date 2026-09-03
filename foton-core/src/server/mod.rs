@@ -509,10 +509,14 @@ pub struct Server {
 /// A world removal requested for the next game-tick safe point.
 static NEXT_WORLD_CREATION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Where a world creation request has got to.
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorldCreationState {
+    /// Still building, or built and waiting for the next tick safe-point.
     Pending,
+    /// Attached and tickable.
     Ready,
+    /// Gave up, with the reason.
     Failed(String),
 }
 
@@ -521,12 +525,19 @@ pub enum WorldCreationState {
 /// attached at the next tick safe-point.
 type PendingWorldAddition = (Arc<World>, oneshot::Sender<Result<(), String>>);
 
+/// A handle on a world being built off-thread.
+///
+/// Poll it from a safe-point with [`WorldCreationRequest::poll`], or await it
+/// from outside the game tick; never block the tick on one.
 pub struct WorldCreationRequest {
     id: u64,
     receiver: oneshot::Receiver<Result<(), String>>,
 }
 
 impl WorldCreationRequest {
+    /// This request's identifier, unique for the lifetime of the server.
+    ///
+    /// Lets a caller that fired several creations tell the answers apart.
     #[must_use]
     pub const fn id(&self) -> u64 {
         self.id
@@ -844,6 +855,15 @@ impl Server {
         Ok(WorldCreationRequest { id, receiver })
     }
 
+    /// Builds a server with the built-in command set.
+    ///
+    /// Use [`Self::new_with_commands`] to add commands before startup: the
+    /// registry is frozen once the server is running.
+    ///
+    /// # Errors
+    ///
+    /// Returns the reason as a string when a world fails to load or a
+    /// subsystem fails to start.
     pub async fn new(
         chunk_runtime: Arc<Runtime>,
         cancel_token: CancellationToken,

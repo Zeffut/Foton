@@ -317,6 +317,7 @@ impl BeeEntity {
         self.get_flag(FLAG_HAS_STUNG)
     }
 
+    /// Sets whether this bee has already stung -- the flag that dooms it.
     pub fn set_has_stung(&self, has_stung: bool) {
         self.set_flag(FLAG_HAS_STUNG, has_stung);
     }

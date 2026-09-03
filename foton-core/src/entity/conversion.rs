@@ -35,14 +35,24 @@ pub enum ConversionType {
 /// the same reason instead of guessing from the source and target types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConversionReason {
+    /// A transition whose producer is not yet classified.
     Unknown,
+    /// A golden apple and weakness -- a zombie villager becoming a villager.
     Cured,
+    /// Held under water -- a zombie becoming a drowned.
     Drowned,
+    /// Left in powder snow -- a skeleton becoming a stray.
     Frozen,
+    /// A zombie infecting a villager.
     Infection,
+    /// Struck by lightning -- a pig becoming a zombified piglin, a villager a
+    /// witch.
     Lightning,
+    /// Carried into the overworld -- a piglin becoming a zombified piglin.
     PiglinZombification,
+    /// Poisoned -- a mooshroom changing variant.
     Poison,
+    /// A slime or magma cube splitting on death.
     Split,
 }
 

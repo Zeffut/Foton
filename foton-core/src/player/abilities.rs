@@ -174,9 +174,11 @@ impl Player {
         self.abilities.lock().flying_speed = speed;
     }
 
+    /// The player's walking speed.
     pub fn get_walking_speed(&self) -> f32 {
         self.abilities.lock().walking_speed
     }
+    /// Sets the player's walking speed and tells the client.
     pub fn set_walking_speed(&self, speed: f32) {
         self.abilities.lock().walking_speed = speed;
         self.send_abilities();

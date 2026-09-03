@@ -238,6 +238,10 @@ impl AreaEffectCloudEntity {
         self.state.lock().base_potion
     }
 
+    /// Who is credited for what this cloud does.
+    ///
+    /// `None` for a cloud with no thrower -- a dragon's breath left by the
+    /// ender dragon, say -- in which case its kills credit nobody.
     pub fn owner_uuid(&self) -> Option<Uuid> {
         self.state.lock().owner_uuid
     }
@@ -379,6 +383,7 @@ impl AreaEffectCloudEntity {
         self.state.lock().duration
     }
 
+    /// Sets how many ticks this cloud has left to live.
     pub fn set_duration(&self, duration: i32) {
         self.state.lock().duration = duration;
     }
@@ -389,6 +394,8 @@ impl AreaEffectCloudEntity {
         self.state.lock().wait_time
     }
 
+    /// Sets the delay before the cloud starts affecting anyone.
+    /// See [`Self::wait_time`].
     pub fn set_wait_time(&self, wait_time: i32) {
         self.state.lock().wait_time = wait_time;
     }
@@ -399,24 +406,31 @@ impl AreaEffectCloudEntity {
         self.state.lock().reapplication_delay
     }
 
+    /// Sets how long an entity is immune after being dosed.
+    /// See [`Self::reapplication_delay`].
     pub fn set_reapplication_delay(&self, delay: i32) {
         self.state.lock().reapplication_delay = delay;
     }
 
+    /// How much the radius changes each tick, normally negative so the cloud
+    /// shrinks away.
     #[must_use]
     pub fn radius_per_tick(&self) -> f32 {
         self.state.lock().radius_per_tick
     }
 
+    /// Sets the per-tick radius change. See [`Self::radius_per_tick`].
     pub fn set_radius_per_tick(&self, radius: f32) {
         self.state.lock().radius_per_tick = radius;
     }
 
+    /// How much the radius changes each time the cloud doses someone.
     #[must_use]
     pub fn radius_on_use(&self) -> f32 {
         self.state.lock().radius_on_use
     }
 
+    /// Sets the per-dose radius change. See [`Self::radius_on_use`].
     pub fn set_radius_on_use(&self, radius: f32) {
         self.state.lock().radius_on_use = radius;
     }

@@ -61,6 +61,11 @@ impl AnimalBase {
         }
     }
 
+    /// Applies the path costs every animal shares.
+    ///
+    /// Vanilla parity: the `setPathfindingMalus` calls in `Animal`'s
+    /// constructor -- fire is refused outright, and a block next to fire is
+    /// expensive but crossable.
     pub fn initialize_pathfinding_malus(mob_base: &MobBase) {
         let mut malus = mob_base.pathfinding_malus().lock();
         malus.set(PathType::FireInNeighbor, 16.0);

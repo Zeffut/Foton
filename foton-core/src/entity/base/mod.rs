@@ -614,10 +614,12 @@ impl EntityBase {
         self.save_data.lock().persistent
     }
 
+    /// Sets whether this entity is written to disk when its chunk is saved.
     pub fn set_persistent(&self, persistent: bool) {
         self.save_data.lock().persistent = persistent;
     }
 
+    /// A copy of the vanilla save fields every entity carries.
     pub fn save_data(&self) -> EntityBaseSaveData {
         self.save_data.lock().clone()
     }

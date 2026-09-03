@@ -3298,15 +3298,17 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         &sound_events::ENTITY_GENERIC_SWIM
     }
 
-    /// Returns whether sounds from this entity are suppressed.
+    /// Returns whether this entity is written to disk when its chunk is saved.
     fn is_persistent(&self) -> bool {
         self.base().is_persistent()
     }
 
+    /// Sets whether this entity is written to disk when its chunk is saved.
     fn set_persistent(&self, persistent: bool) {
         self.base().set_persistent(persistent);
     }
 
+    /// Returns whether sounds from this entity are suppressed.
     fn is_silent(&self) -> bool {
         self.base().silent()
     }

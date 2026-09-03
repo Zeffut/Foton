@@ -68,12 +68,18 @@ impl GrindstoneHandler {
         ))
     }
 
+    /// The currently previewed result, empty when the inputs make nothing.
     pub fn result_snapshot(&self, guard: &ContainerLockGuard) -> ItemStack {
         guard
             .get(self.result_id())
             .map_or_else(ItemStack::empty, |c| c.get_item(0).clone())
     }
 
+    /// Writes a plugin's edited inputs and result back under the existing menu
+    /// lock.
+    ///
+    /// Takes the guard the caller already holds, so the whole preview-edit-write
+    /// cycle happens without the containers being unlocked in between.
     pub fn apply_snapshot(
         &self,
         guard: &mut ContainerLockGuard,

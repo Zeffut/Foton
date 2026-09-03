@@ -138,18 +138,36 @@ pub enum NavigationKind {
     },
 }
 
+/// A mob that finds its way around, vanilla's `PathfinderMob`.
+///
+/// Almost every method here forwards to the mount first: a mob steering
+/// another mob paths with the mount's body, not its own, so a rider never
+/// computes a path its legs cannot walk.
 pub trait PathfinderMob: Mob {
+    /// The mount this mob steers, when that mount can path itself.
+    ///
+    /// `None` for a mob walking on its own legs, which is what makes the
+    /// forwarding at the head of the other methods fall through.
     fn controlled_pathfinder_vehicle(&self) -> Option<SharedEntity> {
         let vehicle = self.controlled_mob_vehicle()?;
         vehicle.as_pathfinder_mob()?;
         Some(vehicle)
     }
 
+    /// How much this mob wants to stand at `pos`, higher being better.
+    ///
+    /// Vanilla parity: `PathfinderMob.getWalkTargetValue`. Zero is
+    /// indifference; an animal overrides this to prefer the block it grazes.
     fn get_walk_target_value(&self, pos: BlockPos) -> f32 {
         self.as_animal()
             .map_or(0.0, |animal| animal.animal_walk_target_value(pos))
     }
 
+    /// Whether this mob can see `target`, answered from the sensing cache.
+    ///
+    /// Vanilla parity: `Sensing.hasLineOfSight`, which memoises the ray cast
+    /// for one tick so several goals asking about the same target pay for one
+    /// trace rather than one each.
     fn has_line_of_sight_cached(&self, target: &dyn Entity) -> bool {
         self.mob_base()
             .sensing()
@@ -179,6 +197,7 @@ pub trait PathfinderMob: Mob {
         )
     }
 
+    /// Whether this mob will path to a target under the surface it walks on.
     fn can_path_to_targets_below_surface(&self) -> bool {
         if let Some(vehicle) = self.controlled_pathfinder_vehicle()
             && let Some(pathfinder) = vehicle.as_pathfinder_mob()
@@ -192,12 +211,22 @@ pub trait PathfinderMob: Mob {
             .can_path_to_targets_below_surface()
     }
 
+    /// Whether a path exists that actually arrives at `target`.
+    ///
+    /// A path is computed and then checked for reaching its destination:
+    /// navigation happily returns a partial path that stops short, and a goal
+    /// asking this wants to know the difference.
     fn can_reach_living_target(&self, target: &dyn LivingEntity) -> bool {
         let target_pos = target.block_position();
         self.create_path_to(target_pos, 0)
             .is_some_and(|path| path_end_node_can_reach_target(&path, target_pos))
     }
 
+    /// Advances navigation by one tick and honours any delayed recompute.
+    ///
+    /// Vanilla parity: `PathNavigation.tick`. The recompute is taken out from
+    /// under the navigation lock before being run, because recomputing takes
+    /// the same lock again.
     fn tick_pathfinder_path_navigation(&self) {
         let Some(world) = self.level() else {
             return;
@@ -218,6 +247,12 @@ pub trait PathfinderMob: Mob {
         tick_path_navigation_target(self, &world, game_time, can_update_path);
     }
 
+    /// Runs this mob's goal and target selectors for one tick.
+    ///
+    /// Vanilla parity: the selector ticks inside `Mob.serverAiStep`. On odd
+    /// ticks only the running goals are ticked, not the full re-selection --
+    /// vanilla's way of halving goal cost -- and the parity is offset by the
+    /// entity id so mobs do not all re-select on the same tick.
     fn tick_pathfinder_goal_selectors(&self)
     where
         Self: Sized,
@@ -234,6 +269,10 @@ pub trait PathfinderMob: Mob {
         }
     }
 
+    /// Whether `pos` is somewhere this mob could stop.
+    ///
+    /// Vanilla parity: `PathNavigation.isStableDestination`, and the flying
+    /// override, which asks about the block itself rather than the one below.
     fn is_stable_destination(&self, pos: BlockPos) -> bool {
         if self.navigation_kind() == NavigationKind::Flying {
             // Vanilla parity: `FlyingPathNavigation.isStableDestination` asks
@@ -247,6 +286,11 @@ pub trait PathfinderMob: Mob {
             .is_some_and(|world| world.get_block_state(pos.below()).is_solid_render())
     }
 
+    /// Computes a path to `target`, or `None` if none was found.
+    ///
+    /// Vanilla parity: `PathNavigation.createPath`. An unloaded destination
+    /// chunk yields `None` rather than a path through terrain that has not
+    /// been generated.
     fn create_path_to(&self, target: BlockPos, reach_range: i32) -> Option<Path> {
         if let Some(vehicle) = self.controlled_pathfinder_vehicle()
             && let Some(pathfinder) = vehicle.as_pathfinder_mob()
@@ -264,6 +308,7 @@ pub trait PathfinderMob: Mob {
         self.create_path_to_targets(&world, &targets, reach_range)
     }
 
+    /// Recomputes the current path, vanilla's `PathNavigation.recomputePath`.
     fn recompute_path(&self, request: NavigationRecomputeRequest) {
         if let Some(vehicle) = self.controlled_pathfinder_vehicle()
             && let Some(pathfinder) = vehicle.as_pathfinder_mob()
@@ -279,10 +324,19 @@ pub trait PathfinderMob: Mob {
             .complete_recompute_path(path, request.game_time);
     }
 
+    /// Paths to `target` and starts walking, vanilla's
+    /// `PathNavigation.moveTo(double, double, double, double)`.
+    ///
+    /// Returns whether a path was found and accepted.
     fn move_to_pos(&self, target: DVec3, speed_modifier: f64) -> bool {
         self.move_to_pos_with_reach(target, 1, speed_modifier)
     }
 
+    /// [`Self::move_to_pos`] with an explicit reach range: how close counts as
+    /// arriving.
+    ///
+    /// A missing world or an unloaded destination stops navigation and returns
+    /// `false`, rather than leaving the mob walking toward nothing.
     fn move_to_pos_with_reach(&self, target: DVec3, reach_range: i32, speed_modifier: f64) -> bool {
         if let Some(vehicle) = self.controlled_pathfinder_vehicle()
             && let Some(pathfinder) = vehicle.as_pathfinder_mob()
@@ -320,6 +374,10 @@ pub trait PathfinderMob: Mob {
         self.move_to_path(path, speed_modifier)
     }
 
+    /// Starts following an already computed path.
+    ///
+    /// Vanilla parity: `PathNavigation.moveTo(Path, double)`. A `None` path
+    /// stops navigation, which is how a goal cancels movement.
     fn move_to_path(&self, path: Option<Path>, speed_modifier: f64) -> bool {
         if let Some(vehicle) = self.controlled_pathfinder_vehicle()
             && let Some(pathfinder) = vehicle.as_pathfinder_mob()
@@ -340,6 +398,8 @@ pub trait PathfinderMob: Mob {
         navigation.move_to(world.as_ref(), path, speed_modifier, self.position())
     }
 
+    /// Whether this mob is currently following a path, vanilla's
+    /// `PathNavigation.isInProgress`.
     fn is_path_finding(&self) -> bool {
         if let Some(vehicle) = self.controlled_pathfinder_vehicle()
             && let Some(pathfinder) = vehicle.as_pathfinder_mob()
@@ -383,6 +443,11 @@ pub trait PathfinderMob: Mob {
             .has_running_tempt_goal()
     }
 
+    /// Computes one path toward the best of several candidate destinations.
+    ///
+    /// Vanilla parity: `PathNavigation.createPath(Set<BlockPos>, int)`. An
+    /// empty candidate set, a mob below the world floor, or a navigation that
+    /// cannot update right now all yield `None`.
     fn create_path_to_targets(
         &self,
         world: &Arc<World>,

@@ -104,10 +104,13 @@ impl BlockDisplayEntity {
             .set(block << 4 | sky << 20);
     }
 
+    /// Sets how far away this display stays visible, as a multiple of the
+    /// client's render distance.
     pub fn set_view_range(&self, value: f32) {
         self.entity_data.lock().display_mut().view_range.set(value);
     }
 
+    /// Sets the radius of the shadow drawn under this display. Zero draws none.
     pub fn set_shadow_radius(&self, value: f32) {
         self.entity_data
             .lock()

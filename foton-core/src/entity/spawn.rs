@@ -6,33 +6,62 @@ use crate::entity::entities::{HorseVariant, RabbitVariant, TropicalFishVariant};
 /// Vanilla `EntitySpawnReason`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntitySpawnReason {
+    /// The periodic mob spawning that fills loaded chunks.
     Natural,
+    /// Placed while the chunk was being generated, before any player saw it.
     ChunkGeneration,
+    /// A monster spawner block.
     Spawner,
+    /// Placed as part of a structure, such as a pillager outpost's guards.
     Structure,
+    /// Born from two parents.
     Breeding,
+    /// Summoned by another mob -- a witch's cat, an evoker's vexes.
     MobSummoned,
+    /// Spawned riding another mob, such as a chicken jockey.
     Jockey,
+    /// Part of a scripted event, such as a raid wave.
     Event,
+    /// The result of one mob turning into another. See
+    /// [`crate::entity::conversion`].
     Conversion,
+    /// Called in by a zombie that took damage.
     Reinforcement,
+    /// Released by a trigger, such as a trial spawner's projectile.
     Triggered,
+    /// Poured out of a bucket.
     Bucket,
+    /// Placed by a spawn egg.
     SpawnItemUse,
+    /// Created by `/summon` or another command.
     Command,
+    /// Fired out of a dispenser.
     Dispenser,
+    /// A pillager patrol.
     Patrol,
+    /// A trial spawner.
     TrialSpawner,
+    /// Read back from disk rather than newly created.
     Load,
+    /// Re-created on the far side of a portal.
     DimensionTravel,
 }
 
 impl EntitySpawnReason {
+    /// Whether a spawner block produced this mob.
+    ///
+    /// Vanilla parity: `EntitySpawnReason.isSpawner`. Both spawner kinds
+    /// count, which is what exempts them from the spawn-position checks a
+    /// natural spawn has to pass.
     #[must_use]
     pub const fn is_spawner(self) -> bool {
         matches!(self, Self::Spawner | Self::TrialSpawner)
     }
 
+    /// Whether this reason lets a mob appear regardless of light level.
+    ///
+    /// Vanilla parity: `EntitySpawnReason.ignoresLightRequirements` -- only a
+    /// trial spawner, which is why an ordinary spawner still respects light.
     #[must_use]
     pub const fn ignores_light_requirements(self) -> bool {
         matches!(self, Self::TrialSpawner)

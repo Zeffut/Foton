@@ -474,6 +474,10 @@ impl World {
     pub(crate) fn world_border_snapshot(&self) -> WorldBorderSnapshot {
         self.world_border.lock().snapshot()
     }
+    /// This world's border as `(center_x, center_z, size)`.
+    ///
+    /// The size is the target of any movement in progress, not the size right
+    /// now: a shrinking border reports where it is heading.
     pub fn world_border_center_size(&self) -> (f64, f64, f64) {
         let border = self.world_border_snapshot();
         (border.center_x, border.center_z, border.new_size)
@@ -637,6 +641,11 @@ impl World {
         self.world_border.lock().safe_zone()
     }
 
+    /// Sets how far outside the border a player may stand unharmed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldBorderError`] when the value is not finite.
     pub fn set_world_border_safe_zone(&self, safe_zone: f64) -> Result<(), WorldBorderError> {
         let data = {
             let mut border = self.world_border.lock();

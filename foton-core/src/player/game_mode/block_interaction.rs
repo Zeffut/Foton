@@ -313,6 +313,8 @@ impl Player {
         self.open_sign_editor_with_cause(pos, is_front_text, PlayerOpenSignCause::Interact);
     }
 
+    /// Opens the sign editor, naming why, so a plugin can tell placing a sign
+    /// apart from clicking one.
     pub fn open_sign_editor_with_cause(
         &self,
         pos: BlockPos,

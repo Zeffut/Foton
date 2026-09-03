@@ -278,8 +278,12 @@ pub struct WorldConfig {
     pub bonus_chest: bool,
 }
 
-/// A struct that represents a world.
+/// A spawn limit that may or may not be set.
+///
+/// Lets [`World::set_spawn_limit`] take either a plain `i32` or an
+/// `Option<i32>`, where `None` clears the override and restores the default.
 pub trait SpawnLimitValue {
+    /// The limit, or `None` to clear it.
     fn into_limit(self) -> Option<i32>;
 }
 impl SpawnLimitValue for i32 {
@@ -293,6 +297,10 @@ impl SpawnLimitValue for Option<i32> {
     }
 }
 
+/// One loaded world: its chunks, its entities, its players and its clock.
+///
+/// A server holds several, keyed by [`foton_utils::Identifier`], and ticks
+/// each on its own worker.
 pub struct World {
     /// The chunk map of the world.
     pub chunk_map: Arc<ChunkMap>,
@@ -468,6 +476,9 @@ impl World {
             .is_some()
     }
 
+    /// Whether the chunk at these chunk coordinates is loaded.
+    ///
+    /// Note the arguments are chunk coordinates, not block coordinates.
     pub fn is_chunk_loaded(&self, x: i32, z: i32) -> bool {
         self.loaded_chunk_positions()
             .iter()
@@ -946,6 +957,10 @@ impl World {
     pub fn keep_spawn_in_memory(&self) -> bool {
         self.keep_spawn_in_memory.load(Ordering::Acquire)
     }
+    /// Sets whether the spawn chunks stay loaded with no player nearby.
+    ///
+    /// Placing or removing the spawn ticket takes effect immediately, so
+    /// turning this off frees the chunks without waiting for a save.
     pub fn set_keep_spawn_in_memory(&self, value: bool) {
         let old = self.keep_spawn_in_memory.swap(value, Ordering::AcqRel);
         if old == value {
@@ -963,10 +978,16 @@ impl World {
         }
     }
 
+    /// This world's override of how many mobs of `category` may exist, if one
+    /// was set.
+    ///
+    /// `None` means the category's own default applies.
     pub fn spawn_limit(&self, category: MobCategory) -> Option<i32> {
         self.spawn_limits.read().get(&category).copied()
     }
 
+    /// Overrides how many mobs of `category` this world may hold, or clears
+    /// the override with `None`. Negative limits are clamped to zero.
     pub fn set_spawn_limit<L: SpawnLimitValue>(&self, category: MobCategory, limit: L) {
         let mut limits = self.spawn_limits.write();
         if let Some(limit) = limit.into_limit() {
@@ -976,14 +997,19 @@ impl World {
         }
     }
 
+    /// This world's override of how often `category` is considered for
+    /// spawning, in ticks.
     pub fn spawn_ticks(&self, category: MobCategory) -> Option<i32> {
         self.spawn_ticks.read().get(&category).copied()
     }
 
+    /// Sets how often `category` is considered for spawning, in ticks.
+    /// Negative values are clamped to zero, meaning every tick.
     pub fn set_spawn_ticks(&self, category: MobCategory, ticks: i32) {
         self.spawn_ticks.write().insert(category, ticks.max(0));
     }
 
+    /// Whether this world is saved automatically. See [`Self::set_auto_save`].
     pub fn is_auto_save(&self) -> bool {
         self.auto_save.load(Ordering::Acquire)
     }
