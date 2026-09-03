@@ -1734,8 +1734,7 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
 
     /// Returns the vanilla age-lock flag when this entity is ageable.
     fn is_ageable_age_locked(&self) -> bool {
-        self.as_ageable_mob()
-            .is_some_and(|ageable| ageable.is_age_locked())
+        self.as_ageable_mob().is_some_and(AgeableMob::is_age_locked)
     }
 
     /// Sets the vanilla age-lock flag when this entity is ageable.

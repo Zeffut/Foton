@@ -199,7 +199,7 @@ impl PortalProcessor {
 /// The variants mirror the vanilla transition-producing paths. Keeping this
 /// value on the transition lets later event bridges distinguish portal travel
 /// from commands and other world changes without guessing from coordinates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TeleportTransitionCause {
     /// Travel through a Nether portal.
     NetherPortal,
@@ -214,6 +214,7 @@ pub enum TeleportTransitionCause {
     /// Travel caused by player/entity respawn or world spawn placement.
     Respawn,
     /// A transition whose producer is not yet classified.
+    #[default]
     Unknown,
 }
 
@@ -288,12 +289,6 @@ impl TeleportPostTransition {
         let mut actions = SmallVec::new();
         actions.push(action);
         Self { actions }
-    }
-}
-
-impl Default for TeleportTransitionCause {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 

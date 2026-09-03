@@ -440,6 +440,10 @@ impl Player {
     ///
     /// This is the common implementation shared between inventory menu and
     /// external menus (crafting table, chest, etc.).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per vanilla click type; splitting hides the table"
+    )]
     fn process_container_click(&self, menu: &mut Menu, packet: SContainerClick) {
         if self.game_mode() == GameType::Spectator || self.get_health() <= 0.0 {
             menu.behavior_mut()

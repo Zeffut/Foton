@@ -282,6 +282,10 @@ impl BaseSpawner {
     }
 
     /// One iteration of vanilla's `for (int c = 0; c < this.spawnCount; c++)`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "transposes BaseSpawner.serverTick's single attempt, guard for guard"
+    )]
     fn try_spawn_one(
         &self,
         world: &Arc<World>,

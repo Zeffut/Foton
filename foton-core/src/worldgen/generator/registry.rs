@@ -161,7 +161,7 @@ impl WorldGeneratorRegistry {
     #[must_use]
     pub fn keys(&self) -> Vec<Identifier> {
         let mut keys: Vec<_> = self.factories.keys().cloned().collect();
-        keys.sort_by_key(std::string::ToString::to_string);
+        keys.sort_by_key(ToString::to_string);
         keys
     }
 
