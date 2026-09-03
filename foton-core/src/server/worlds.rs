@@ -179,25 +179,10 @@ impl WorldMap {
             .collect()
     }
 
-    /// Iterates loaded world keys.
-    pub fn keys(&self) -> Vec<Identifier> {
-        self.worlds.read().keys().cloned().collect()
-    }
-
     /// Captures owned identifiers of all currently loaded worlds.
     #[must_use]
     pub fn key_snapshots(&self) -> Vec<Identifier> {
         self.worlds.read().keys().cloned().collect()
-    }
-
-    /// Captures owned key/world pairs for all currently loaded worlds.
-    #[must_use]
-    pub fn entry_snapshots(&self) -> Vec<(Identifier, Arc<World>)> {
-        self.worlds
-            .read()
-            .iter()
-            .map(|(key, world)| (key.clone(), Arc::clone(world)))
-            .collect()
     }
 
     /// Returns number of loaded worlds.
