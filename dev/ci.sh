@@ -15,6 +15,10 @@ run() {
     echo "PASS ($(($(date +%s) - START))s)"
   else
     echo "FAIL ($(($(date +%s) - START))s)"
+    # Show the errors first, then the tail. Tailing alone hid a javac failure
+    # behind forty-four warnings that came after it, and the log on a CI runner
+    # is the only copy anyone gets.
+    grep -inE "error" /tmp/foton-ci.log | head -20
     tail -25 /tmp/foton-ci.log
     FAIL=1
   fi

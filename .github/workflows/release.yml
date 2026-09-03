@@ -19,6 +19,15 @@ jobs:
           toolchain: nightly-2026-07-23
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # build-plugin-api.sh asks for a JDK 21 or newer and the workflow never
+      # said which one it would get, so the suite ran on whatever ubuntu-latest
+      # happens to default to. That is older than 21, and the API failed to
+      # compile there while building on every developer's machine. A build that
+      # needs a Java version has to name it.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - uses: crate-ci/typos@v1.48.0
       # The action above runs typos itself and does not leave the binary on
       # the PATH, so `dev/ci.sh` -- which runs the same check as part of the
