@@ -51,5 +51,4 @@ __pycache__/
 # The plugin API jar is built, and the libraries a plugin expects a
 # server to provide are other people's artifacts. Neither is source.
 plugin-api/build
-plugin-api/lib
 /.superpowers
