@@ -672,6 +672,10 @@ async fn request_graceful_stop(child: &Child) {
 
 /// See the Unix implementation's documentation.
 #[cfg(not(unix))]
+#[expect(
+    clippy::unused_async,
+    reason = "the signature has to match the Unix implementation `terminate` awaits"
+)]
 async fn request_graceful_stop(_child: &Child) {}
 
 /// Stops `child`: a polite termination request, up to [`TERMINATE_GRACE`] to
@@ -876,7 +880,7 @@ mod tests {
 
     use super::{
         GeyserError, GeyserOptions, download, jar_candidate_path, java_binary_path, render_config,
-        resolve_java, to_absolute, verify_checksum,
+        to_absolute, verify_checksum,
     };
     use crate::key;
 
@@ -1149,6 +1153,8 @@ mod tests {
         use std::fs::{Permissions, create_dir_all, set_permissions, write};
         use std::io::ErrorKind;
         use std::os::unix::fs::PermissionsExt as _;
+
+        use super::resolve_java;
 
         // A `java` that never answers -- the same shape as the stale NFS
         // mount or broken JVM install this timeout exists to survive,
