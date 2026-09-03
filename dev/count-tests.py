@@ -35,12 +35,42 @@ def measure():
         sys.stderr.write(result.stderr)
         raise SystemExit("cargo test --list failed; build the workspace first")
     tests = sum(1 for line in result.stdout.splitlines() if line.endswith(": test"))
-    # cargo streams its `Running <target>` progress lines to stderr, and
-    # capture_output keeps the two apart -- counting targets in stdout alone
-    # would always find zero.
-    targets = sum(1 for line in (result.stdout + result.stderr).splitlines()
-                  if line.strip().startswith("Running "))
-    return {"unit_tests": tests, "targets": targets}
+    return {"unit_tests": tests, "targets": count_targets()}
+
+
+def count_targets():
+    """How many test binaries the workspace has, from cargo's JSON.
+
+    The first version of this counted cargo's `Running <target>` lines on
+    stderr. That is status prose, and whether cargo emits it depends on things
+    that are not the workspace: the runner printed none, so the check reported
+    "5399 tests across 0 targets" and went red on CI while staying green on
+    every developer's machine. It took two thirteen-minute builds to learn that
+    the number in question was zero.
+
+    `--message-format=json` is the output cargo means to be parsed. A test
+    binary is an artifact compiled with the test profile that produced an
+    executable.
+    """
+    result = subprocess.run(
+        ["cargo", "test", "--workspace", "--no-run", "--message-format=json"],
+        cwd=REPO, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        raise SystemExit("cargo test --no-run failed; build the workspace first")
+
+    targets = 0
+    for line in result.stdout.splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (record.get("reason") == "compiler-artifact"
+                and record.get("executable")
+                and record.get("profile", {}).get("test")):
+            targets += 1
+    return targets
 
 
 def main():
