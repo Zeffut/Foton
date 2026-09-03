@@ -35,6 +35,7 @@ use super::abstract_piglin::{self, ConvertiblePiglin, PiglinArmPose};
 use super::piglin_brute_ai;
 use crate::entity::ai::brain::Activity;
 use crate::entity::ai::brain::memory::memory_module_types;
+use crate::entity::conversion::ConversionReason::PiglinZombification;
 
 /// Experience this mob drops.
 ///
@@ -206,8 +207,7 @@ impl ConvertiblePiglin for PiglinBruteEntity {
 
         convert_to(
             self,
-            ConversionParams::single(true, true)
-                .with_reason(crate::entity::conversion::ConversionReason::PiglinZombification),
+            ConversionParams::single(true, true).with_reason(PiglinZombification),
             |id, position, world| {
                 ZombifiedPiglinEntity::new(&vanilla_entities::ZOMBIFIED_PIGLIN, id, position, world)
             },

@@ -172,12 +172,17 @@ pub use tick_scheduler::ScheduledTick;
 pub use weather::Precipitation;
 pub(crate) use worldgen_level::WorldGenLevel;
 
+use crate::entity::RemovalReason::Discarded;
+use crate::event::{ChunkLoadEvent, Event};
+use foton_registry::entity_type::MobCategory;
 #[cfg(test)]
 use level_effects::sound_is_within_range;
 #[cfg(test)]
 use portals::{
     closest_portal_candidate, nether_portal_creation_scan_origin, nether_portal_frame_offset_pos,
 };
+use std::path::PathBuf;
+use tokio::fs::create_dir_all;
 
 const fn initialize_border_packet(snapshot: WorldBorderSnapshot) -> CInitializeBorder {
     CInitializeBorder {
@@ -334,9 +339,9 @@ pub struct World {
     /// Whether natural animals are allowed in this world.
     allow_animals: AtomicBool,
     /// Per-world natural-spawn limits overridden by plugins.
-    spawn_limits: SyncRwLock<FxHashMap<foton_registry::entity_type::MobCategory, i32>>,
+    spawn_limits: SyncRwLock<FxHashMap<MobCategory, i32>>,
     /// Per-world natural-spawn cadence overrides in ticks.
-    spawn_ticks: SyncRwLock<FxHashMap<foton_registry::entity_type::MobCategory, i32>>,
+    spawn_ticks: SyncRwLock<FxHashMap<MobCategory, i32>>,
     keep_spawn_in_memory: AtomicBool,
     auto_save: AtomicBool,
     /// Whether vanilla's scheduled/chunk/block-event tick phase is active.
@@ -402,14 +407,14 @@ pub struct World {
 
 impl World {
     /// Fires a plugin event when this world is attached to a server.
-    pub(crate) fn fire_event<E: crate::event::Event>(&self, event: &mut E) {
+    pub(crate) fn fire_event<E: Event>(&self, event: &mut E) {
         if let Some(server) = self.server.get().and_then(Weak::upgrade) {
             server.events.fire(event);
         }
     }
     /// Returns the persistent world directory, or `None` for RAM-only worlds.
     #[must_use]
-    pub fn world_folder(&self) -> Option<std::path::PathBuf> {
+    pub fn world_folder(&self) -> Option<PathBuf> {
         self.level_data
             .read()
             .world_dir()
@@ -461,7 +466,7 @@ impl World {
     /// Removes a live entity as an explicit plugin discard.
     pub fn remove_entity(&self, entity_id: i32) -> bool {
         self.entity_manager()
-            .remove_live_entity(entity_id, crate::entity::RemovalReason::Discarded)
+            .remove_live_entity(entity_id, Discarded)
             .is_some()
     }
 
@@ -676,7 +681,7 @@ impl World {
             Ok(Some((path, content))) => {
                 let result = async {
                     if let Some(parent) = path.parent() {
-                        tokio::fs::create_dir_all(parent).await?;
+                        create_dir_all(parent).await?;
                     }
                     tokio::fs::write(&path, content).await
                 }
@@ -804,11 +809,7 @@ impl World {
             if loaded_before.contains(&(pos.0.x, pos.0.y)) {
                 continue;
             }
-            self.fire_event(&mut crate::event::ChunkLoadEvent::new(
-                self.key.to_string(),
-                pos,
-                false,
-            ));
+            self.fire_event(&mut ChunkLoadEvent::new(self.key.to_string(), pos, false));
         }
 
         if runs_normally {
@@ -960,15 +961,11 @@ impl World {
         }
     }
 
-    pub fn spawn_limit(&self, category: foton_registry::entity_type::MobCategory) -> Option<i32> {
+    pub fn spawn_limit(&self, category: MobCategory) -> Option<i32> {
         self.spawn_limits.read().get(&category).copied()
     }
 
-    pub fn set_spawn_limit<L: SpawnLimitValue>(
-        &self,
-        category: foton_registry::entity_type::MobCategory,
-        limit: L,
-    ) {
+    pub fn set_spawn_limit<L: SpawnLimitValue>(&self, category: MobCategory, limit: L) {
         let mut limits = self.spawn_limits.write();
         if let Some(limit) = limit.into_limit() {
             limits.insert(category, limit.max(0));
@@ -977,11 +974,11 @@ impl World {
         }
     }
 
-    pub fn spawn_ticks(&self, category: foton_registry::entity_type::MobCategory) -> Option<i32> {
+    pub fn spawn_ticks(&self, category: MobCategory) -> Option<i32> {
         self.spawn_ticks.read().get(&category).copied()
     }
 
-    pub fn set_spawn_ticks(&self, category: foton_registry::entity_type::MobCategory, ticks: i32) {
+    pub fn set_spawn_ticks(&self, category: MobCategory, ticks: i32) {
         self.spawn_ticks.write().insert(category, ticks.max(0));
     }
 
@@ -1002,7 +999,7 @@ impl World {
             match prepared {
                 Ok(Some((path, content))) => {
                     if let Some(parent) = path.parent() {
-                        if let Err(error) = tokio::fs::create_dir_all(parent).await {
+                        if let Err(error) = create_dir_all(parent).await {
                             tracing::error!(%error, "World level-data directory save failed");
                             return;
                         }

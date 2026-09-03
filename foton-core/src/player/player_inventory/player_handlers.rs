@@ -1,6 +1,10 @@
 use std::{f32::consts::TAU, mem, sync::Arc};
 
 use crate::event::Event as _;
+use crate::event::{
+    InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent, InventoryOpenEvent,
+    PlayerDropItemEvent,
+};
 use crate::inventory::click::QuickCraft;
 use foton_protocol::packets::game::{
     CContainerClose, CMountScreenOpen, COpenBook, COpenScreen, CSetPlayerInventory, ClickType,
@@ -393,7 +397,7 @@ impl Player {
         // The menu is installed before this callback so Bukkit's view accessors
         // observe the same open view that the client received. Cancelling closes
         // that view immediately, matching the externally visible Bukkit result.
-        let mut open_event = crate::event::InventoryOpenEvent::new(self.gameprofile.id);
+        let mut open_event = InventoryOpenEvent::new(self.gameprofile.id);
         self.fire_event(&mut open_event);
         if open_event.is_cancelled() {
             self.close_container();
@@ -508,7 +512,7 @@ impl Player {
                     .quickcraft()
                     .map(|kind| format!("{kind:?}"))
                     .unwrap_or_else(|| "UNKNOWN".to_owned());
-                let mut drag_event = crate::event::InventoryDragEvent::new(
+                let mut drag_event = InventoryDragEvent::new(
                     self.gameprofile.id,
                     menu.behavior().quickcraft_slots().to_vec(),
                     menu.behavior().carried().clone(),
@@ -545,7 +549,7 @@ impl Player {
                 _ => "UNKNOWN",
             };
             let cursor_item = menu.behavior().carried().clone();
-            let mut inventory_click = crate::event::InventoryClickEvent::new(
+            let mut inventory_click = InventoryClickEvent::new(
                 self.gameprofile.id,
                 current_item,
                 Some(cursor_item),
@@ -1094,7 +1098,7 @@ impl Player {
                 container_id: i32::from(menu.container_id()),
             });
         }
-        let mut close_event = crate::event::InventoryCloseEvent::new(self.gameprofile.id);
+        let mut close_event = InventoryCloseEvent::new(self.gameprofile.id);
         self.fire_event(&mut close_event);
         self.remove_open_menu(&mut menu);
         self.finish_open_menu_removal();
@@ -1468,7 +1472,7 @@ impl Player {
             entity.set_thrower(self.gameprofile.id);
         }
         let world = self.get_world();
-        let mut event = crate::event::PlayerDropItemEvent::new(self.gameprofile.id, entity.uuid());
+        let mut event = PlayerDropItemEvent::new(self.gameprofile.id, entity.uuid());
         world.fire_event(&mut event);
         if event.is_cancelled() {
             let _ = world.remove_entity(entity.id());

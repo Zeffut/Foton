@@ -50,6 +50,7 @@ use crate::world::{LevelReader as _, World};
 use super::abstract_piglin::{self, PiglinArmPose};
 use super::piglin_ai;
 use crate::entity::InventoryCarrier;
+use crate::entity::conversion::ConversionReason::PiglinZombification;
 use foton_registry::entity_data::EntityPose;
 use foton_registry::entity_type::{EntityAttachmentPoint, EntityAttachments, EntityDimensions};
 use foton_utils::Identifier;
@@ -419,8 +420,7 @@ impl PiglinEntity {
 
         convert_to(
             self,
-            ConversionParams::single(true, true)
-                .with_reason(crate::entity::conversion::ConversionReason::PiglinZombification),
+            ConversionParams::single(true, true).with_reason(PiglinZombification),
             |id, position, world| {
                 ZombifiedPiglinEntity::new(&vanilla_entities::ZOMBIFIED_PIGLIN, id, position, world)
             },

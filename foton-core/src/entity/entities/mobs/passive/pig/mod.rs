@@ -32,6 +32,7 @@ use crate::entity::ai::goal::{
     BreedGoal, FloatGoal, FollowParentGoal, LookAtPlayerGoal, PanicGoal, RandomLookAroundGoal,
     TemptGoal, WaterAvoidingRandomStrollGoal,
 };
+use crate::entity::conversion::ConversionReason::Lightning;
 use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ZombifiedPiglinEntity;
@@ -294,8 +295,7 @@ impl Entity for PigEntity {
         // saddle is left behind rather than carried over.
         let converted = convert_to(
             self,
-            ConversionParams::single(false, true)
-                .with_reason(crate::entity::conversion::ConversionReason::Lightning),
+            ConversionParams::single(false, true).with_reason(Lightning),
             |id, position, world| {
                 ZombifiedPiglinEntity::new(&vanilla_entities::ZOMBIFIED_PIGLIN, id, position, world)
             },

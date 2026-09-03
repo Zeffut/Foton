@@ -23,11 +23,13 @@ use crate::entity::{
     ProjectileBase, ProjectileDeflection, RemovalReason, SharedEntity, next_entity_id,
 };
 use crate::event::Event as _;
+use crate::event::ProjectileLaunchEvent;
 use crate::inventory::container::Container as _;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::{ClipHitResult, World};
+use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
 
 /// Damage an arrow carries before speed is taken into account.
 ///
@@ -194,7 +196,7 @@ impl ArrowEntity {
         let (yaw, pitch) = shooter.rotation();
         arrow.shoot_from_rotation(shooter, pitch, yaw, 0.0, power, uncertainty);
 
-        let mut event = crate::event::ProjectileLaunchEvent::new(shooter.uuid(), arrow.uuid());
+        let mut event = ProjectileLaunchEvent::new(shooter.uuid(), arrow.uuid());
         world.fire_event(&mut event);
         if event.is_cancelled() {
             return None;
@@ -373,9 +375,7 @@ impl ArrowEntity {
     pub fn ammo_potion_contents(
         &self,
     ) -> Option<foton_registry::data_components::components::PotionContents> {
-        self.ammo_item()?
-            .get(foton_registry::data_components::vanilla_components::POTION_CONTENTS)
-            .cloned()
+        self.ammo_item()?.get(POTION_CONTENTS).cloned()
     }
 
     /// Computes the vanilla potion display color, including custom effects.

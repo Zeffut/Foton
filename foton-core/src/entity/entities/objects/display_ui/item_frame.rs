@@ -22,12 +22,14 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtTag};
 
 use crate::behavior::InteractionResult;
+use crate::entity::RemovalReason::Discarded;
 use crate::entity::block_attached::{caused_by_entity, drop_would_be_wasted};
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
     ItemFrame, SharedEntity,
 };
+use crate::event::HangingBreakEvent;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::{WorldCollisionProvider, has_block_collision};
 use crate::player::Player;
@@ -498,10 +500,10 @@ impl Entity for ItemFrameEntity {
         if self.tick_count() % 100 != 0 || self.is_removed() || self.survives_frame(&world) {
             return;
         }
-        let mut event = crate::event::HangingBreakEvent::new(self.uuid(), "PHYSICS");
+        let mut event = HangingBreakEvent::new(self.uuid(), "PHYSICS");
         world.fire_event(&mut event);
         if !event.is_cancelled() {
-            self.set_removed(crate::entity::RemovalReason::Discarded);
+            self.set_removed(Discarded);
             self.drop_item(&world, None);
         }
     }

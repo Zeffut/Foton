@@ -17,6 +17,7 @@ use crate::behavior::blocks::{signal_lectern_page_change, take_book_from};
 use crate::block_entity::entities::LecternBlockEntity;
 use crate::entity::Entity as _;
 use crate::event::Event as _;
+use crate::event::PlayerTakeLecternBookEvent;
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
@@ -99,7 +100,7 @@ impl MenuKind for LecternKind {
             BUTTON_PREVIOUS_PAGE => current - 1,
             BUTTON_NEXT_PAGE => current + 1,
             BUTTON_TAKE_BOOK => {
-                let mut event = crate::event::PlayerTakeLecternBookEvent::new(
+                let mut event = PlayerTakeLecternBookEvent::new(
                     player.uuid(),
                     self.world.key.to_string(),
                     self.block_pos,

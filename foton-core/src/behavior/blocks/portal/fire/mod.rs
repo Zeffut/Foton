@@ -28,6 +28,7 @@ use crate::behavior::context::BlockPlaceContext;
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, InsideBlockEffectCollector, InsideBlockEffectType};
 use crate::event::Event as _;
+use crate::event::{BlockBurnEvent, BlockFadeEvent};
 use crate::portal::portal_shape::{PortalShape, nether_portal_config};
 use crate::world::{LevelReader, ScheduledTickAccess, World};
 
@@ -63,7 +64,7 @@ pub struct FireBlock {
 }
 
 fn remove_fire_with_event(world: &Arc<World>, pos: BlockPos) {
-    let mut event = crate::event::BlockFadeEvent::new(world.key.to_string(), pos);
+    let mut event = BlockFadeEvent::new(world.key.to_string(), pos);
     world.fire_event(&mut event);
     if !event.is_cancelled() {
         world.remove_block(pos, false);
@@ -192,7 +193,7 @@ impl FireBlock {
         }
 
         let old_block = world.get_block_state(pos).get_block();
-        let mut event = crate::event::BlockBurnEvent::new(world.key.to_string(), pos);
+        let mut event = BlockBurnEvent::new(world.key.to_string(), pos);
         world.fire_event(&mut event);
         if event.is_cancelled() {
             return;

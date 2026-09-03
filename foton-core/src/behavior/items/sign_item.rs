@@ -22,6 +22,7 @@ use super::standing_and_wall_block_item::StandingAndWallBlockItem;
 use crate::behavior::context::{InteractionResult, UseOnContext};
 use crate::behavior::{BLOCK_BEHAVIORS, ItemBehavior};
 use crate::entity::Entity;
+use crate::event::PlayerOpenSignCause::Place;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader as _, World};
 
@@ -104,11 +105,9 @@ impl ItemBehavior for SignItem {
         place_context.with_item_mut(|item| item.shrink(1));
 
         // Sign-specific: Open the sign editor for the player (front text by default)
-        context.player.open_sign_editor_with_cause(
-            place_pos,
-            true,
-            crate::event::PlayerOpenSignCause::Place,
-        );
+        context
+            .player
+            .open_sign_editor_with_cause(place_pos, true, Place);
 
         InteractionResult::Success
     }

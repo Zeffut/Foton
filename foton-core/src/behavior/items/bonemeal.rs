@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::event::BlockFertilizeEvent;
 use foton_macros::item_behavior;
 use foton_registry::{
     blocks::{block_state_ext::BlockStateExt, shapes::is_offset_shape_full_block},
@@ -115,7 +116,7 @@ impl BoneMealItem {
 
 impl ItemBehavior for BoneMealItem {
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
-        let mut fertilize = crate::event::BlockFertilizeEvent::new(
+        let mut fertilize = BlockFertilizeEvent::new(
             context.world.key.to_string(),
             context.hit_result.block_pos,
             Some(context.player.uuid()),

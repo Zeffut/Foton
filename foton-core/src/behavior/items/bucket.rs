@@ -35,6 +35,7 @@ use foton_registry::vanilla_items;
 use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId};
 
+use crate::event::{PlayerBucketEmptyEvent, PlayerBucketFillEvent};
 use crate::world::game_event::GameEventContext;
 
 /// Handles all bucket variants (empty, water, lava).
@@ -112,7 +113,7 @@ fn use_empty_bucket(context: &mut UseItemContext) -> InteractionResult {
     };
 
     let hit_state = context.world.get_block_state(hit_pos);
-    let mut event = crate::event::PlayerBucketFillEvent::new(
+    let mut event = PlayerBucketFillEvent::new(
         context.player.gameprofile.id,
         context.world.key.to_string(),
         hit_pos,
@@ -257,7 +258,7 @@ pub(super) fn use_filled_bucket(
     } else {
         "POWDER_SNOW_BUCKET"
     };
-    let mut event = crate::event::PlayerBucketEmptyEvent::new(
+    let mut event = PlayerBucketEmptyEvent::new(
         context.player.gameprofile.id,
         context.world.key.to_string(),
         place_pos,

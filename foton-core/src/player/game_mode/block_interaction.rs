@@ -1,5 +1,8 @@
 use super::{block_breaking::BlockBreakAction, *};
 use crate::event::PlayerInteractEvent;
+use crate::event::{PlayerOpenSignCause, PlayerOpenSignEvent, SignChangeEvent};
+use foton_utils::text::DisplayResolutor;
+use std::array::from_fn;
 
 impl Player {
     /// Sends block update packets for a position and its neighbor.
@@ -262,12 +265,10 @@ impl Player {
             return;
         }
 
-        let mut lines = std::array::from_fn(|i| {
+        let mut lines = from_fn(|i| {
             sign.get_text(packet.is_front_text)
                 .get_message(i)
-                .map_or_else(String::new, |line| {
-                    line.to_plain(&foton_utils::text::DisplayResolutor)
-                })
+                .map_or_else(String::new, |line| line.to_plain(&DisplayResolutor))
         });
         for (i, line) in packet.lines.iter().enumerate() {
             if i < 4 {
@@ -275,7 +276,7 @@ impl Player {
             }
         }
 
-        let mut event = crate::event::SignChangeEvent::new(
+        let mut event = SignChangeEvent::new(
             self.gameprofile.id,
             world.key.to_string(),
             packet.pos,
@@ -309,22 +310,18 @@ impl Player {
     /// * `pos` - Position of the sign block
     /// * `is_front_text` - Whether to edit front (true) or back (false) text
     pub fn open_sign_editor(&self, pos: BlockPos, is_front_text: bool) {
-        self.open_sign_editor_with_cause(
-            pos,
-            is_front_text,
-            crate::event::PlayerOpenSignCause::Interact,
-        );
+        self.open_sign_editor_with_cause(pos, is_front_text, PlayerOpenSignCause::Interact);
     }
 
     pub fn open_sign_editor_with_cause(
         &self,
         pos: BlockPos,
         is_front_text: bool,
-        cause: crate::event::PlayerOpenSignCause,
+        cause: PlayerOpenSignCause,
     ) {
         let world = self.get_world();
 
-        let mut event = crate::event::PlayerOpenSignEvent::new(
+        let mut event = PlayerOpenSignEvent::new(
             self.gameprofile.id,
             world.key.to_string(),
             pos,

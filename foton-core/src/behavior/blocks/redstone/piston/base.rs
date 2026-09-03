@@ -20,6 +20,7 @@ use crate::behavior::{BLOCK_BEHAVIORS, BlockBehavior, BlockPlaceContext, Placeme
 use crate::block_entity::SharedBlockEntity;
 use crate::block_entity::entities::PistonMovingBlockEntity;
 use crate::entity::ai::path::PathComputationType;
+use crate::event::PistonEvent;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader, SignalGetter as _, World};
 
@@ -248,7 +249,7 @@ impl PistonBaseBlock {
         }
 
         let mut to_push = resolver.to_push().to_vec();
-        let mut piston_event = crate::event::PistonEvent::new(
+        let mut piston_event = PistonEvent::new(
             world.key.to_string(),
             piston_pos,
             to_push.clone(),

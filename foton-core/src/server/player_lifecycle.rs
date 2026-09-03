@@ -1,5 +1,6 @@
 use std::ptr;
 
+use crate::event::PlayerSpawnLocationEvent;
 use crate::player::connection::NetworkConnection;
 
 use super::{
@@ -274,7 +275,7 @@ impl Server {
                 apply_default_spawn(player, &state.world, *spawn);
             }
         }
-        let mut spawn_event = crate::event::PlayerSpawnLocationEvent::new(
+        let mut spawn_event = PlayerSpawnLocationEvent::new(
             player.gameprofile.id,
             state.world.key.to_string(),
             player.position().to_array(),

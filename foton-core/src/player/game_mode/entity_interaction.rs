@@ -19,6 +19,7 @@ use foton_utils::entity_events::EntityStatus;
 
 use crate::advancement::triggers;
 use crate::event::PlayerInteractEntityEvent;
+use crate::event::{EntityDamageByEntityEvent, EntityPushedByEntityAttackEvent};
 
 /// Returns a height `progress` of the way up an entity's hitbox.
 ///
@@ -153,8 +154,7 @@ impl Player {
             let yaw_sin = f64::from(yaw_radians.sin());
             let yaw_cos = f64::from(yaw_radians.cos());
             let push_allowed = entity.level().is_none_or(|world| {
-                let mut event =
-                    crate::event::EntityPushedByEntityAttackEvent::new(entity.uuid(), self.uuid());
+                let mut event = EntityPushedByEntityAttackEvent::new(entity.uuid(), self.uuid());
                 world.fire_event(&mut event);
                 !event.is_cancelled()
             });
@@ -481,7 +481,7 @@ impl Player {
         let mut affected = deals_knockback;
         let mut damage_allowed = true;
         if deals_damage {
-            let mut event = crate::event::EntityDamageByEntityEvent::new(
+            let mut event = EntityDamageByEntityEvent::new(
                 self.uuid(),
                 entity.uuid(),
                 "ENTITY_ATTACK".to_owned(),
@@ -619,11 +619,8 @@ impl Player {
             enchantment_helper::do_post_piercing_attack_effects(&world, self);
             return false;
         };
-        let mut event = crate::event::EntityDamageByEntityEvent::new(
-            self.uuid(),
-            entity.uuid(),
-            "ENTITY_ATTACK".to_owned(),
-        );
+        let mut event =
+            EntityDamageByEntityEvent::new(self.uuid(), entity.uuid(), "ENTITY_ATTACK".to_owned());
         self.fire_event(&mut event);
         let damage_allowed = !event.is_cancelled();
         let was_hurt = damage_allowed && entity.hurt(&target_world, &damage_source, total_damage);

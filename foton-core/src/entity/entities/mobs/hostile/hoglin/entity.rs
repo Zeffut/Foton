@@ -50,6 +50,7 @@ use crate::world::{LevelReader as _, World};
 
 use super::hoglin_ai;
 use crate::entity::ai::brain::behavior::utils;
+use crate::entity::conversion::ConversionReason::PiglinZombification;
 use foton_registry::entity_data::EntityPose;
 use foton_registry::entity_type::{EntityAttachmentPoint, EntityAttachments, EntityDimensions};
 
@@ -252,8 +253,7 @@ impl HoglinEntity {
     pub fn finish_conversion(&self) -> Option<Arc<ZoglinEntity>> {
         convert_to(
             self,
-            ConversionParams::single(true, false)
-                .with_reason(crate::entity::conversion::ConversionReason::PiglinZombification),
+            ConversionParams::single(true, false).with_reason(PiglinZombification),
             |id, position, world| ZoglinEntity::new(&vanilla_entities::ZOGLIN, id, position, world),
             |zoglin| {
                 // The age comes across in `copy_common_state`, which runs

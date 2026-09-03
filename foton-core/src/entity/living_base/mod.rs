@@ -34,6 +34,7 @@ use crate::enchantment_helper;
 use crate::entity::attribute::{AttributeMap, AttributeModifier, AttributeModifierOperation};
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity as _, LivingEntity, SharedEntity, WeakEntity};
+use crate::event::EntityRegainHealthEvent;
 use crate::inventory::equipment::{EntityEquipment, EquipmentSlot, OwnedEntityEquipment};
 use crate::inventory::lock::SharedContainer;
 use crate::raid::DEFAULT_MAX_RAID_OMEN_LEVEL;
@@ -2195,7 +2196,7 @@ fn apply_heal_or_hurt<E: LivingEntity + ?Sized>(
     amount: f32,
 ) {
     if heals {
-        let mut event = crate::event::EntityRegainHealthEvent::new(entity.uuid(), amount);
+        let mut event = EntityRegainHealthEvent::new(entity.uuid(), amount);
         world.fire_event(&mut event);
         if !event.is_cancelled() {
             entity.heal(event.amount());

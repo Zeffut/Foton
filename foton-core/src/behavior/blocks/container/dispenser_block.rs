@@ -30,6 +30,7 @@ use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionRes
 use crate::behavior::item_utils::spawn_item_toward;
 use crate::block_entity::BLOCK_ENTITIES;
 use crate::block_entity::entities::{DispenserBlockEntity, insert_into_containers_at};
+use crate::event::{BlockDispenseEvent, BlockPreDispenseEvent};
 use crate::inventory::container::calculate_redstone_signal_from_container;
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::menu::kinds::dispenser;
@@ -275,13 +276,12 @@ fn dispense_from(world: &Arc<World>, state: BlockStateId, pos: BlockPos) {
         facing,
         block_entity: dispenser,
     };
-    let mut pre = crate::event::BlockPreDispenseEvent::new(world.key.to_string(), pos, slot, stack);
+    let mut pre = BlockPreDispenseEvent::new(world.key.to_string(), pos, slot, stack);
     world.fire_event(&mut pre);
     if pre.is_cancelled() {
         return;
     }
-    let mut event =
-        crate::event::BlockDispenseEvent::new(world.key.to_string(), pos, pre.into_item());
+    let mut event = BlockDispenseEvent::new(world.key.to_string(), pos, pre.into_item());
     world.fire_event(&mut event);
     if event.is_cancelled() {
         return;

@@ -31,6 +31,7 @@ use crate::entity::{
     ProjectileDeflection, ProjectileHit, RemovalReason, SharedEntity, next_entity_id,
 };
 use crate::event::Event as _;
+use crate::event::ProjectileLaunchEvent;
 use crate::inventory::container::Container as _;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
@@ -236,8 +237,7 @@ impl ThrownTridentEntity {
         trident_item: &ItemStack,
         trident: Arc<Self>,
     ) -> Arc<Self> {
-        let mut launch_event =
-            crate::event::ProjectileLaunchEvent::new(thrower.uuid(), trident.uuid());
+        let mut launch_event = ProjectileLaunchEvent::new(thrower.uuid(), trident.uuid());
         world.fire_event(&mut launch_event);
         if launch_event.is_cancelled() {
             return trident;

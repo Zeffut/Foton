@@ -9,6 +9,8 @@ use foton_utils::types::Difficulty;
 
 use crate::entity::LivingEntity;
 use crate::entity::damage::DamageSource;
+use crate::event::EntityRegainHealthEvent;
+use crate::event::player::FoodLevelChangeEvent;
 use crate::player::Player;
 
 /// All food-system constants bundled in one place.
@@ -356,7 +358,7 @@ impl Player {
     }
 
     fn heal_with_regain_event(&self, amount: f32) {
-        let mut event = crate::event::EntityRegainHealthEvent::new(self.gameprofile.id, amount);
+        let mut event = EntityRegainHealthEvent::new(self.gameprofile.id, amount);
         self.fire_event(&mut event);
         if !event.is_cancelled() {
             self.heal(event.amount());
@@ -364,7 +366,7 @@ impl Player {
     }
 
     fn allow_food_level_change(&self, level: i32) -> Option<i32> {
-        let mut event = crate::event::player::FoodLevelChangeEvent::new(self.gameprofile.id, level);
+        let mut event = FoodLevelChangeEvent::new(self.gameprofile.id, level);
         self.fire_event(&mut event);
         (!event.is_cancelled()).then_some(event.food_level())
     }

@@ -44,6 +44,7 @@ use crate::enchantment_helper;
 use crate::entity::entities::{ArrowEntity, FireworkRocketEntity};
 use crate::entity::{Entity, LivingEntity, Projectile as _, SharedEntity, next_entity_id};
 use crate::event::Event as _;
+use crate::event::ProjectileLaunchEvent;
 use crate::inventory::container::Container as _;
 use crate::inventory::equipment::EquipmentSlot;
 use crate::world::World;
@@ -649,8 +650,7 @@ fn shoot(
             angle,
             target_override,
         );
-        let mut launch_event =
-            crate::event::ProjectileLaunchEvent::new(shooter.uuid(), projectile.uuid());
+        let mut launch_event = ProjectileLaunchEvent::new(shooter.uuid(), projectile.uuid());
         world.fire_event(&mut launch_event);
         if launch_event.is_cancelled() {
             continue;

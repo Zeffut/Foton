@@ -24,6 +24,7 @@ use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
+use crate::entity::conversion::ConversionReason::Drowned;
 use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::{VillagerEntity, ZombieVillagerEntity};
@@ -159,8 +160,7 @@ impl ZombieEntity {
         let converted = convert_to(
             villager,
             // Vanilla parity: `ConversionParams.single(villager, true, true)`.
-            ConversionParams::single(true, true)
-                .with_reason(crate::entity::conversion::ConversionReason::Drowned),
+            ConversionParams::single(true, true).with_reason(Drowned),
             |id, position, world| {
                 ZombieVillagerEntity::new(&vanilla_entities::ZOMBIE_VILLAGER, id, position, world)
             },

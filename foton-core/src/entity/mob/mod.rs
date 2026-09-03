@@ -68,6 +68,7 @@ use crate::entity::{
     SpawnGroupData, WeakEntity,
 };
 use crate::event::Event as _;
+use crate::event::{EntityPickupItemEvent, EntityPushedByEntityAttackEvent, EntityTargetEvent};
 use crate::inventory::equipment::EquipmentSlot;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
@@ -512,7 +513,7 @@ pub trait Mob: LivingEntity + MobSource {
         let Some(world) = self.level() else {
             return true;
         };
-        let mut event = crate::event::EntityTargetEvent::new(self.uuid(), next_id);
+        let mut event = EntityTargetEvent::new(self.uuid(), next_id);
         world.fire_event(&mut event);
         if event.is_cancelled() {
             self.mob_base().set_target(previous.as_ref(), |_| true);
@@ -1743,8 +1744,7 @@ pub trait Mob: LivingEntity + MobSource {
         let yaw_sin = f64::from(yaw_radians.sin());
         let yaw_cos = f64::from(yaw_radians.cos());
         let push_allowed = target.level().is_none_or(|world| {
-            let mut event =
-                crate::event::EntityPushedByEntityAttackEvent::new(target.uuid(), self.uuid());
+            let mut event = EntityPushedByEntityAttackEvent::new(target.uuid(), self.uuid());
             world.fire_event(&mut event);
             !event.is_cancelled()
         });
@@ -2246,7 +2246,7 @@ pub trait Mob: LivingEntity + MobSource {
         });
 
         for item in items {
-            let mut event = crate::event::EntityPickupItemEvent::new(self.uuid(), item.uuid());
+            let mut event = EntityPickupItemEvent::new(self.uuid(), item.uuid());
             world.fire_event(&mut event);
             if !event.is_cancelled() {
                 self.pick_up_item(&world, &item);

@@ -19,6 +19,7 @@ use crate::behavior::item::ItemBehavior;
 use crate::entity::entities::{ExperienceBottleEntity, SnowballEntity, ThrownEggEntity};
 use crate::entity::{Entity, SharedEntity, ThrowableItemProjectile, next_entity_id};
 use crate::event::Event as _;
+use crate::event::ProjectileLaunchEvent;
 
 /// How hard a snowball or an egg is thrown.
 ///
@@ -162,8 +163,7 @@ where
     projectile.shoot_from_rotation(player, player_pitch + pitch_offset, yaw, 0.0, power, 1.0);
 
     let projectile: SharedEntity = projectile;
-    let mut event =
-        crate::event::ProjectileLaunchEvent::new(player.gameprofile.id, projectile.uuid());
+    let mut event = ProjectileLaunchEvent::new(player.gameprofile.id, projectile.uuid());
     world.fire_event(&mut event);
     if event.is_cancelled() {
         return InteractionResult::Fail;

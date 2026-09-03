@@ -21,6 +21,7 @@ use glam::DVec3;
 
 use crate::entity::ENTITIES;
 use crate::entity::{Entity, EntitySpawnReason, next_entity_id};
+use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
 use crate::world::World;
 use crate::world::spawn_placement::spawn_placement_for;
 
@@ -205,7 +206,7 @@ impl World {
             return;
         }
 
-        let mut pre_spawn = crate::event::PreCreatureSpawnEvent::new(
+        let mut pre_spawn = PreCreatureSpawnEvent::new(
             self.key.to_string(),
             center.x,
             center.y,
@@ -239,7 +240,7 @@ impl World {
         // than a pack, so there is no group data to thread from a previous mob.
         let _ = mob.finalize_spawn(self, EntitySpawnReason::Natural, None);
 
-        let mut spawn_event = crate::event::CreatureSpawnEvent::new(
+        let mut spawn_event = CreatureSpawnEvent::new(
             entity.uuid(),
             self.key.to_string(),
             entity.position().x,

@@ -7,6 +7,7 @@ use super::{
     PermissionSubjectState, Player, PlayerPermissionUpdateError, Server, ServerJobContext, Uuid,
 };
 use crate::permission::PermissionGroups;
+use std::convert::Infallible;
 
 /// The built-in `command_block` group, used when `groups.toml` defines none.
 ///
@@ -93,7 +94,7 @@ impl Server {
                             } else if !operator && already {
                                 groups.retain(|group| group != OP_GROUP);
                             }
-                            Ok::<_, std::convert::Infallible>((
+                            Ok::<_, Infallible>((
                                 PermissionSubjectState::new_with_metadata(
                                     groups, overrides, metadata,
                                 ),

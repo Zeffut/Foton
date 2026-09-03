@@ -50,6 +50,7 @@ use crate::entity::{
     LivingEntity as _, MoverType, Projectile, ProjectileBase, RemovalReason, SharedEntity,
     entity_loot_ref, next_entity_id,
 };
+use crate::event::PlayerFishEvent;
 use crate::fluid::is_water_fluid;
 use crate::fluid::state::{get_fluid_state, get_height};
 use crate::player::Player;
@@ -651,11 +652,7 @@ impl FishingHookEntity {
                 DAMAGE_HOOKED_ENTITY
             };
         } else if self.state.lock().nibble > 0 {
-            let mut event = crate::event::PlayerFishEvent::new(
-                player.gameprofile.id,
-                self.uuid(),
-                "CAUGHT_FISH",
-            );
+            let mut event = PlayerFishEvent::new(player.gameprofile.id, self.uuid(), "CAUGHT_FISH");
             world.fire_event(&mut event);
             if !event.is_cancelled() {
                 self.drop_catch(&world, &owner, player, rod);

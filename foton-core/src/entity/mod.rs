@@ -83,6 +83,7 @@ use crate::world::game_event::{DynamicListenerAction, GameEventContext};
 use crate::world::{ClipBlockShape, ClipFluid, LevelReader, World};
 use crate::{enchantment_helper, entity::damage::DamageSource, player::Player};
 
+use crate::event::{EntityMountEvent, EntityPortalEvent};
 use entities::ExperienceOrbEntity;
 
 fn nbt_bool(value: bool) -> NbtTag {
@@ -979,8 +980,7 @@ pub fn start_riding_entities(passenger: &SharedEntity, entity_to_ride: &SharedEn
     }
 
     if let Some(world) = passenger.level() {
-        let mut event =
-            crate::event::EntityMountEvent::new(passenger.uuid(), entity_to_ride.uuid());
+        let mut event = EntityMountEvent::new(passenger.uuid(), entity_to_ride.uuid());
         world.fire_event(&mut event);
         if event.is_cancelled() {
             return false;
@@ -1029,7 +1029,7 @@ pub(crate) fn change_entity_world(
             TeleportTransitionCause::EndPortal | TeleportTransitionCause::EndGateway => "ENDER",
             _ => "CUSTOM",
         };
-        let mut event = crate::event::EntityPortalEvent::new(
+        let mut event = EntityPortalEvent::new(
             entity.uuid(),
             source_world.key.to_string(),
             entity.position(),

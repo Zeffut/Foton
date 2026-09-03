@@ -21,6 +21,7 @@ use glam::DVec3;
 
 use crate::entity::Entity;
 use crate::entity::damage::DamageSource;
+use crate::event::{BlockExplodeEvent, EntityExplodeEvent};
 use crate::fluid::get_fluid_state;
 use crate::world::World;
 use crate::world::raycast::{ClipBlockShape, ClipFluid};
@@ -271,7 +272,7 @@ impl World {
                 .direct_entity_id
                 .and_then(|id| self.get_entity_by_id(id))
                 .map(|entity| entity.uuid());
-            let mut event = crate::event::EntityExplodeEvent::new(
+            let mut event = EntityExplodeEvent::new(
                 entity,
                 self.key.to_string(),
                 to_blow.clone(),
@@ -293,8 +294,7 @@ impl World {
                 center.y.floor() as i32,
                 center.z.floor() as i32,
             );
-            let mut event =
-                crate::event::BlockExplodeEvent::new(self.key.to_string(), source, to_blow.clone());
+            let mut event = BlockExplodeEvent::new(self.key.to_string(), source, to_blow.clone());
             self.fire_event(&mut event);
             if event.is_cancelled() {
                 return Vec::new();

@@ -14,6 +14,7 @@ use crate::entity::{Entity, SharedEntity};
 use crate::event::HangingBreakEvent;
 use crate::player::Player;
 use crate::world::World;
+use foton_registry::vanilla_damage_type_tags::DamageTypeTag;
 use foton_registry::vanilla_game_rules::MOB_GRIEFING;
 
 /// An entity that hangs on a block.
@@ -47,14 +48,13 @@ pub trait BlockAttached: Entity {
             return false;
         }
 
-        let cause =
-            if source.is(&foton_registry::vanilla_damage_type_tags::DamageTypeTag::IS_EXPLOSION) {
-                "EXPLOSION"
-            } else if caused_by.is_some() {
-                "ENTITY"
-            } else {
-                "DEFAULT"
-            };
+        let cause = if source.is(&DamageTypeTag::IS_EXPLOSION) {
+            "EXPLOSION"
+        } else if caused_by.is_some() {
+            "ENTITY"
+        } else {
+            "DEFAULT"
+        };
         let mut event = caused_by.as_ref().map_or_else(
             || HangingBreakEvent::new(self.uuid(), cause),
             |entity| HangingBreakEvent::new_with_remover(self.uuid(), cause, entity.uuid()),

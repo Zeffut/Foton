@@ -30,6 +30,7 @@ use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::World;
 
+use crate::event::EntityPickupItemEvent;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use foton_protocol::packets::game::CTakeItemEntity;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
@@ -325,8 +326,7 @@ impl ItemEntity {
         let Some(world) = self.level() else {
             return false;
         };
-        let mut pickup_event =
-            crate::event::EntityPickupItemEvent::new(player.gameprofile.id, self.uuid());
+        let mut pickup_event = EntityPickupItemEvent::new(player.gameprofile.id, self.uuid());
         world.fire_event(&mut pickup_event);
         if pickup_event.is_cancelled() {
             return false;

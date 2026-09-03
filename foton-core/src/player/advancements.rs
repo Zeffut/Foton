@@ -22,6 +22,7 @@ use crate::inventory::container::Container as _;
 
 use super::Player;
 use super::player_inventory::PlayerInventory;
+use crate::event::{PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent};
 
 /// The player inventory and the stacks that changed in it.
 ///
@@ -74,7 +75,7 @@ impl Player {
     /// Vanilla parity: `PlayerAdvancements.award`.
     pub fn award_advancement_criterion(&self, node: usize, criterion: &str) -> AwardOutcome {
         let advancement = ADVANCEMENT_TREE.node(node).advancement;
-        let mut grant_event = crate::event::PlayerAdvancementCriterionGrantEvent::new(
+        let mut grant_event = PlayerAdvancementCriterionGrantEvent::new(
             self.uuid(),
             advancement.key.to_string(),
             criterion.to_owned(),
@@ -192,8 +193,7 @@ impl Player {
     fn complete_advancement(&self, node: usize) {
         let advancement = ADVANCEMENT_TREE.node(node).advancement;
         self.grant_advancement_rewards(&advancement.rewards);
-        let mut event =
-            crate::event::PlayerAdvancementDoneEvent::new(self.uuid(), advancement.key.to_string());
+        let mut event = PlayerAdvancementDoneEvent::new(self.uuid(), advancement.key.to_string());
         if let Some(server) = self.server.upgrade() {
             server.events.fire(&mut event);
         }

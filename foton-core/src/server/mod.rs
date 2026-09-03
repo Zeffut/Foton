@@ -165,7 +165,10 @@ pub struct CommandDataSaveResults {
 
 mod known_players;
 
+use foton_utils::types::Difficulty::Normal;
 use known_players::KnownPlayerCacheState;
+use tokio::sync::oneshot::error::TryRecvError::{Closed, Empty};
+use toml::map::Map;
 
 /// Tick rate for the chunk sending loop.
 const CHUNK_SENDING_TPS: u64 = 20;
@@ -531,10 +534,8 @@ impl WorldCreationRequest {
         match self.receiver.try_recv() {
             Ok(Ok(())) => WorldCreationState::Ready,
             Ok(Err(error)) => WorldCreationState::Failed(error),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => WorldCreationState::Pending,
-            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                WorldCreationState::Failed("world creation task closed".to_owned())
-            }
+            Err(Empty) => WorldCreationState::Pending,
+            Err(Closed) => WorldCreationState::Failed("world creation task closed".to_owned()),
         }
     }
 
@@ -595,7 +596,7 @@ impl Server {
         }
         let generator_config = self
             .world_generator_registry
-            .validate_config(&generator, &toml::Value::Table(toml::map::Map::new()))?;
+            .validate_config(&generator, &toml::Value::Table(Map::new()))?;
         let world_entry = ResolvedWorldConfig {
             key,
             domain,
@@ -604,7 +605,7 @@ impl Server {
             generator_config,
             seed,
             default_gamemode: GameType::Survival,
-            difficulty: foton_utils::types::Difficulty::Normal,
+            difficulty: Normal,
             bonus_chest,
             storage: StorageSelection::default_world_disk(),
             nether_portal_target: None,

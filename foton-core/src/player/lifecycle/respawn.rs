@@ -2,6 +2,7 @@ use std::ptr;
 
 use super::*;
 use crate::entity::PendingWorldChangeToken;
+use crate::event::PlayerRespawnEvent;
 use crate::player::connection::NetworkConnection as _;
 use crate::{
     behavior::{
@@ -538,7 +539,7 @@ impl Player {
             experience.dirty = true;
         }
 
-        let mut respawn_event = crate::event::PlayerRespawnEvent::new(
+        let mut respawn_event = PlayerRespawnEvent::new(
             self.gameprofile.id,
             target_world.key.to_string(),
             [spawn.position.x, spawn.position.y, spawn.position.z],

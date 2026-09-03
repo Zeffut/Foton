@@ -29,6 +29,7 @@ use simdnbt::owned::NbtCompound;
 
 use crate::chunk::light::LightLayer;
 use crate::entity::{ENTITIES, Entity, EntitySpawnReason, SharedEntity, next_entity_id};
+use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
 use crate::physics::{WorldCollisionProvider, has_collision};
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -328,7 +329,7 @@ impl BaseSpawner {
 
         // Vanilla builds the entity from the tag here. Foton has no dispatch on
         // the tag's `id`, so the type is resolved above and handed in.
-        let mut pre_spawn = crate::event::PreCreatureSpawnEvent::new(
+        let mut pre_spawn = PreCreatureSpawnEvent::new(
             world.key.to_string(),
             spawn_pos.x,
             spawn_pos.y,
@@ -380,7 +381,7 @@ impl BaseSpawner {
             }
         }
 
-        let mut spawn_event = crate::event::CreatureSpawnEvent::new(
+        let mut spawn_event = CreatureSpawnEvent::new(
             entity.uuid(),
             world.key.to_string(),
             entity.position().x,

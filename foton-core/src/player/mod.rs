@@ -162,12 +162,14 @@ use crate::bug_dialog;
 use crate::bug_report::{BugCategory, BugReport, MAX_DESCRIPTION, forward};
 use crate::chunk::player_chunk_view::PlayerChunkView;
 use crate::event::{Event, PlayerCustomPayloadEvent};
+use crate::event::{PlayerDeathEvent, PlayerItemBreakEvent};
 use crate::player::chunk_sender::ChunkSender;
 use crate::portal::{
     PortalTicketTarget, TeleportPostAction, TeleportPostTransition, TeleportTransition,
 };
 use crate::world::World;
 use foton_protocol::packets::common::SCustomClickAction;
+use foton_utils::text::DisplayResolutor;
 use std::env::current_dir;
 use std::path::PathBuf;
 
@@ -475,8 +477,7 @@ impl Player {
             .lock()
             .hurt_item_in_hand(hand, amount, has_infinite_materials);
         if broke {
-            let mut event =
-                crate::event::PlayerItemBreakEvent::new(self.gameprofile.id, broken_item);
+            let mut event = PlayerItemBreakEvent::new(self.gameprofile.id, broken_item);
             self.fire_event(&mut event);
             LivingEntity::on_equipped_item_broken(self, EquipmentSlot::for_hand(hand));
         }
@@ -1085,9 +1086,9 @@ impl Player {
             } else {
                 Vec::new()
             };
-        let mut death_event = crate::event::PlayerDeathEvent::with_drops(
+        let mut death_event = PlayerDeathEvent::with_drops(
             self.gameprofile.id,
-            death_message.to_plain(&foton_utils::text::DisplayResolutor),
+            death_message.to_plain(&DisplayResolutor),
             drops,
             world.get_game_rule(&KEEP_INVENTORY) || self.game_mode() == GameType::Spectator,
         );

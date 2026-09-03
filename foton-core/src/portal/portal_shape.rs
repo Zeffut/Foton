@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use crate::entity::Entity;
 use crate::event::Event as _;
+use crate::event::PortalCreateEvent;
 use crate::physics::WorldCollisionProvider;
 use crate::world::{LevelReader, World};
 
@@ -341,7 +342,7 @@ impl PortalShape {
                 );
             }
         }
-        let mut event = crate::event::PortalCreateEvent::new(world.key.to_string(), blocks);
+        let mut event = PortalCreateEvent::new(world.key.to_string(), blocks);
         world.fire_event(&mut event);
         if event.is_cancelled() {
             return;

@@ -1,5 +1,7 @@
 use super::*;
 use crate::advancement::triggers;
+use crate::event::PlayerPortalEvent;
+use crate::portal::TeleportTransitionCause::{EndGateway, EndPortal, NetherPortal};
 
 impl Player {
     fn apply_post_teleport_transition(&self, post_transition: &TeleportPostTransition) {
@@ -37,11 +39,9 @@ impl Player {
         let mut teleport_transition = teleport_transition.clone();
         if matches!(
             teleport_transition.cause,
-            crate::portal::TeleportTransitionCause::NetherPortal
-                | crate::portal::TeleportTransitionCause::EndPortal
-                | crate::portal::TeleportTransitionCause::EndGateway
+            NetherPortal | EndPortal | EndGateway
         ) {
-            let mut event = crate::event::PlayerPortalEvent::new(
+            let mut event = PlayerPortalEvent::new(
                 self.uuid(),
                 current_world.key.to_string(),
                 current_position,

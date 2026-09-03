@@ -26,6 +26,7 @@ use foton_utils::{
 use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, ITEM_BEHAVIORS};
 use crate::block_entity::SharedBlockEntity;
 use crate::entity::{Entity, LivingEntity};
+use crate::event::BlockDamageEvent;
 use crate::event::{BlockBreakEvent, Event as _};
 use crate::fluid::fluid_state_to_block;
 use crate::player::Player;
@@ -252,8 +253,7 @@ impl BlockBreakingManager {
                     });
                     return;
                 }
-                let mut event =
-                    crate::event::BlockDamageEvent::new(player.uuid(), world.key.to_string(), pos);
+                let mut event = BlockDamageEvent::new(player.uuid(), world.key.to_string(), pos);
                 if let Some(server) = player.server.upgrade() {
                     server.events.fire(&mut event);
                 }

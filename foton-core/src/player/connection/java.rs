@@ -39,6 +39,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError}
 use tokio_util::sync::CancellationToken;
 
 use crate::command::{handle_client_request, sender::CommandSender};
+use crate::event::PlayerCommandPreprocessEvent;
 use crate::player::Player;
 use crate::player::connection::NetworkConnection;
 use crate::server::Server;
@@ -355,7 +356,7 @@ impl ScheduledPlayPacket {
                 }
             }
             ScheduledPlayPacketKind::ChatCommand(packet) => {
-                let mut preprocess = crate::event::PlayerCommandPreprocessEvent::new(
+                let mut preprocess = PlayerCommandPreprocessEvent::new(
                     player.gameprofile.id,
                     packet.command.clone(),
                 );

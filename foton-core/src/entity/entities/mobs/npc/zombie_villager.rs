@@ -44,6 +44,7 @@ use crate::entity::ai::goal::{
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::ai::gossip::{GossipContainer, ReputationEventType};
+use crate::entity::conversion::ConversionReason::Cured;
 use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::VillagerEntity;
@@ -391,8 +392,7 @@ impl ZombieVillagerEntity {
         let converted = convert_to(
             self,
             // Vanilla parity: `ConversionParams.single(this, false, false)`.
-            ConversionParams::single(false, false)
-                .with_reason(crate::entity::conversion::ConversionReason::Cured),
+            ConversionParams::single(false, false).with_reason(Cured),
             |id, position, world| {
                 VillagerEntity::new(&vanilla_entities::VILLAGER, id, position, world)
             },

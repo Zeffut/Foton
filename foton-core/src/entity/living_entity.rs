@@ -12,7 +12,9 @@ use foton_registry::vanilla_particle_types;
 use super::*;
 use crate::advancement::triggers;
 use crate::behavior::ITEM_BEHAVIORS;
+use crate::behavior::item::apply_one_consume_effect;
 use crate::entity::kill_score;
+use crate::event::EntityDeathEvent;
 use crate::event::{EntityResurrectEvent, Event};
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
@@ -1185,7 +1187,7 @@ pub trait LivingEntity: Entity {
         self.broadcast_entity_event(EntityStatus::ProtectedFromDeath);
         if let Some(protection) = stack.get(DEATH_PROTECTION) {
             for effect in protection.death_effects() {
-                crate::behavior::item::apply_one_consume_effect(world, self, effect);
+                apply_one_consume_effect(world, self, effect);
             }
         }
         true
@@ -1386,7 +1388,7 @@ pub trait LivingEntity: Entity {
 
         if perished {
             if let Some(world) = self.level() {
-                world.fire_event(&mut crate::event::EntityDeathEvent::new(self.uuid()));
+                world.fire_event(&mut EntityDeathEvent::new(self.uuid()));
             }
             self.game_event(&vanilla_game_events::ENTITY_DIE);
             self.drop_all_death_loot(source);

@@ -33,6 +33,7 @@ use crate::entity::{
     BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
     ItemFrame, RemovalReason, SharedEntity,
 };
+use crate::event::HangingBreakEvent;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::player::Player;
 use crate::world::World;
@@ -266,7 +267,7 @@ impl Entity for GlowItemFrameEntity {
         if self.tick_count() % 100 != 0 || self.is_removed() || self.survives_frame(&world) {
             return;
         }
-        let mut event = crate::event::HangingBreakEvent::new(self.uuid(), "PHYSICS");
+        let mut event = HangingBreakEvent::new(self.uuid(), "PHYSICS");
         world.fire_event(&mut event);
         if !event.is_cancelled() {
             self.set_removed(RemovalReason::Discarded);
