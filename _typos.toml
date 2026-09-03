@@ -35,6 +35,11 @@ strat = "strat"
 axe = "axe"
 BlockBehaviour = "BlockBehaviour"
 behaviour = "behaviour"
+# Bukkit's block-data interface, org.bukkit.block.data.Levelled. A compiled
+# plugin resolves it by its exact name, so this one is not ours to correct --
+# spelling it Leveled means CoreProtect and anything else that reads a fluid
+# level finds no such interface.
+Levelled = "Levelled"
 interruptable = "interruptable"
 neighbour = "neighbour"
 # The camel-case half of a Vanilla method name (SculkSensorBlock.updateNeighbours).
