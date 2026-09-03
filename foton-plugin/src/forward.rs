@@ -12,6 +12,10 @@
 use std::sync::Arc;
 
 use crate::natives;
+use crate::natives::describe_slot;
+use crate::natives::parse_slot;
+use foton_core::entity::conversion::ConversionReason;
+use foton_core::event::EntityTargetEvent;
 use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
     BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
@@ -34,10 +38,12 @@ use foton_core::event::{
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
+use foton_registry::item_stack::ItemStack;
 use foton_utils::text::DisplayResolutor;
 use foton_utils::{BlockPos, Identifier};
 use jni::JavaVM;
 use jni::objects::{JObject, JString, JValue, JValueGen};
+use std::net::SocketAddr;
 use text_components::TextComponent;
 use uuid::Uuid;
 
@@ -61,6 +67,12 @@ fn owner() -> Identifier {
 /// once, apply what came back. The repetition is on purpose -- a generic
 /// version would need each event to describe itself to the bridge, which is
 /// more machinery than five events justify.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one subscription per event, each the same six lines; a reader looking \
+              for an event finds it here, and splitting the list by category would \
+              only move the question of which file to open"
+)]
 pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let events = server.events();
     for snapshot in server.worlds.snapshots() {
@@ -217,7 +229,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     });
 
     let jvm = Arc::clone(&vm);
-    events.on::<foton_core::event::EntityTargetEvent, _>(owner(), move |event| {
+    events.on::<EntityTargetEvent, _>(owner(), move |event| {
         let target = event
             .target_id()
             .map_or_else(String::new, |id| id.to_string());
@@ -637,7 +649,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         ) {
             Answer::Nothing => event.set_cancelled(true),
             Answer::Message(rewritten) => {
-                event.set_message(rewritten.strip_prefix('/').unwrap_or(&rewritten).to_owned())
+                event.set_message(rewritten.strip_prefix('/').unwrap_or(&rewritten).to_owned());
             }
             Answer::Unreachable => {}
         }
@@ -996,11 +1008,11 @@ fn block_pre_dispense_call(
     world: &str,
     pos: BlockPos,
     slot: usize,
-    item: &foton_registry::item_stack::ItemStack,
-) -> Option<(bool, foton_registry::item_stack::ItemStack)> {
+    item: &ItemStack,
+) -> Option<(bool, ItemStack)> {
     let mut env = vm.attach_current_thread().ok()?;
     let world = env.new_string(world).ok()?;
-    let encoded = env.new_string(crate::natives::describe_slot(item)).ok()?;
+    let encoded = env.new_string(describe_slot(item)).ok()?;
     let answer = env
         .call_static_method(
             BRIDGE,
@@ -1024,7 +1036,7 @@ fn block_pre_dispense_call(
     let value: String = env.get_string(&JString::from(answer)).ok()?.into();
     let mut parts = value.splitn(2, '\u{1f}');
     let cancelled = parts.next()?.parse::<u8>().ok()? != 0;
-    let item = crate::natives::parse_slot(parts.next()?)?;
+    let item = parse_slot(parts.next()?)?;
     Some((cancelled, item))
 }
 
@@ -1213,7 +1225,7 @@ fn prepare_craft_call(
             JValue::Object(&uuid),
             JValue::Object(&matrix),
             JValue::Object(&result),
-            JValue::Bool(repair as u8),
+            JValue::Bool(u8::from(repair)),
         ],
     )
     .ok()?
@@ -1518,9 +1530,9 @@ fn entity_portal_call(vm: &JavaVM, event: &EntityPortalEvent) -> Option<(String,
     let Ok(portal_type) = env.new_string(event.portal_type()) else {
         return None;
     };
-    let p = event.from_position();
-    let q = event.to_position();
-    let value=env.call_static_method(BRIDGE, "fireEntityPortal", "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;DDDDLjava/lang/String;)Ljava/lang/String;", &[JValue::Object(&entity),JValue::Object(&from_world),JValue::Double(p.x),JValue::Double(p.y),JValue::Double(p.z),JValue::Object(&to_world),JValue::Double(q.x),JValue::Double(q.y),JValue::Double(q.z),JValue::Object(&portal_type)]).ok()?.l().ok()?;
+    let from = event.from_position();
+    let to = event.to_position();
+    let value=env.call_static_method(BRIDGE, "fireEntityPortal", "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;DDDDLjava/lang/String;)Ljava/lang/String;", &[JValue::Object(&entity),JValue::Object(&from_world),JValue::Double(from.x),JValue::Double(from.y),JValue::Double(from.z),JValue::Object(&to_world),JValue::Double(to.x),JValue::Double(to.y),JValue::Double(to.z),JValue::Object(&portal_type)]).ok()?.l().ok()?;
     let text: String = env.get_string((&value).into()).ok()?.into();
     if text == "!" {
         return None;
@@ -1698,6 +1710,11 @@ fn hanging_break_call(vm: &JavaVM, entity: &str, cause: &str, remover: &str) -> 
     .unwrap_or(true)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the JNI call it makes takes exactly these; grouping them into a struct \
+              would name the halves and still hand them over one by one"
+)]
 fn hanging_place_call(
     vm: &JavaVM,
     entity: &str,
@@ -1775,7 +1792,7 @@ fn block_place_call(
     vm: &JavaVM,
     player: &Arc<Player>,
     position: BlockPos,
-    item: &foton_registry::item_stack::ItemStack,
+    item: &ItemStack,
 ) -> bool {
     let Ok(mut env) = vm.attach_current_thread() else {
         return true;
@@ -1857,7 +1874,7 @@ fn death_call(
                 JValue::Object(&uuid),
                 JValue::Object(&message),
                 JValue::Object(&drops),
-                JValue::Bool(keep_inventory as u8),
+                JValue::Bool(u8::from(keep_inventory)),
             ],
         )
         .ok()?
@@ -1970,7 +1987,7 @@ fn sign_change_call(
     let cancelled = parts.next()?.parse::<u8>().ok()? != 0;
     let mut out = [String::new(), String::new(), String::new(), String::new()];
     for slot in &mut out {
-        *slot = parts.next().unwrap_or_default().to_owned();
+        parts.next().unwrap_or_default().clone_into(slot);
     }
     Some((cancelled, out))
 }
@@ -1988,7 +2005,7 @@ fn weather_change_call(vm: &JavaVM, world: &str, raining: bool) -> bool {
         "(Ljava/lang/String;Z)Z",
         &[
             JValue::Object(&JObject::from(world)),
-            JValue::Bool(raining as u8),
+            JValue::Bool(u8::from(raining)),
         ],
     )
     .ok()
@@ -2009,7 +2026,7 @@ fn thunder_change_call(vm: &JavaVM, world: &str, thundering: bool) -> bool {
         "(Ljava/lang/String;Z)Z",
         &[
             JValue::Object(&JObject::from(world)),
-            JValue::Bool(thundering as u8),
+            JValue::Bool(u8::from(thundering)),
         ],
     )
     .ok()
@@ -2018,21 +2035,19 @@ fn thunder_change_call(vm: &JavaVM, world: &str, thundering: bool) -> bool {
 }
 
 fn lightning_strike_call(vm: &JavaVM, entity: &str, world: &str, cause: &str) -> bool {
-    let mut env = match vm.attach_current_thread() {
-        Ok(env) => env,
-        Err(_) => return true,
+    // A failed crossing answers "allowed", like every other call here: a
+    // plugin host that cannot be reached must not start cancelling the world.
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return true;
     };
-    let entity = match env.new_string(entity) {
-        Ok(v) => v,
-        Err(_) => return true,
+    let Ok(entity) = env.new_string(entity) else {
+        return true;
     };
-    let world = match env.new_string(world) {
-        Ok(v) => v,
-        Err(_) => return true,
+    let Ok(world) = env.new_string(world) else {
+        return true;
     };
-    let cause = match env.new_string(cause) {
-        Ok(v) => v,
-        Err(_) => return true,
+    let Ok(cause) = env.new_string(cause) else {
+        return true;
     };
     env.call_static_method(
         BRIDGE,
@@ -2156,11 +2171,11 @@ fn block_dispense_call(
     vm: &JavaVM,
     world: &str,
     pos: BlockPos,
-    item: &foton_registry::item_stack::ItemStack,
-) -> Option<(bool, foton_registry::item_stack::ItemStack)> {
+    item: &ItemStack,
+) -> Option<(bool, ItemStack)> {
     let mut env = vm.attach_current_thread().ok()?;
     let world = env.new_string(world).ok()?;
-    let encoded = env.new_string(crate::natives::describe_slot(item)).ok()?;
+    let encoded = env.new_string(describe_slot(item)).ok()?;
     let answer = env
         .call_static_method(
             BRIDGE,
@@ -2183,7 +2198,7 @@ fn block_dispense_call(
     let value: String = env.get_string(&JString::from(answer)).ok()?.into();
     let mut parts = value.splitn(2, '\u{1f}');
     let cancelled = parts.next()?.parse::<u8>().ok()? != 0;
-    let item = crate::natives::parse_slot(parts.next().unwrap_or_default())?;
+    let item = parse_slot(parts.next().unwrap_or_default())?;
     Some((cancelled, item))
 }
 
@@ -2286,7 +2301,8 @@ fn block_ignite_call(
         .and_then(JValueGen::z)
         .unwrap_or(true)
     };
-    let result = if let Some(id) = player {
+
+    if let Some(id) = player {
         let Ok(player) = env.new_string(id.to_string()) else {
             return true;
         };
@@ -2294,8 +2310,7 @@ fn block_ignite_call(
         call(&mut env, &player)
     } else {
         call(&mut env, &JObject::null())
-    };
-    result
+    }
 }
 
 fn block_fertilize_call(vm: &JavaVM, world: &str, pos: BlockPos, player: Option<Uuid>) -> bool {
@@ -2449,10 +2464,7 @@ fn player_advancement_criterion_grant_call(
     ) else {
         return true;
     };
-    match value.z() {
-        Ok(result) => result,
-        Err(_) => true,
-    }
+    value.z().unwrap_or(true)
 }
 
 fn player_advancement_done_call(vm: &JavaVM, player: uuid::Uuid, key: &str) {
@@ -2526,7 +2538,7 @@ fn transform_call(
     vm: &JavaVM,
     entity: uuid::Uuid,
     transformed: uuid::Uuid,
-    reason: foton_core::entity::conversion::ConversionReason,
+    reason: ConversionReason,
 ) -> bool {
     let Ok(mut env) = vm.attach_current_thread() else {
         return true;
@@ -2538,17 +2550,15 @@ fn transform_call(
         return true;
     };
     let reason = match reason {
-        foton_core::entity::conversion::ConversionReason::Cured => "CURED",
-        foton_core::entity::conversion::ConversionReason::Drowned => "DROWNED",
-        foton_core::entity::conversion::ConversionReason::Frozen => "FROZEN",
-        foton_core::entity::conversion::ConversionReason::Infection => "INFECTION",
-        foton_core::entity::conversion::ConversionReason::Lightning => "LIGHTNING",
-        foton_core::entity::conversion::ConversionReason::PiglinZombification => {
-            "PIGLIN_ZOMBIFICATION"
-        }
-        foton_core::entity::conversion::ConversionReason::Poison => "POISON",
-        foton_core::entity::conversion::ConversionReason::Split => "SPLIT",
-        foton_core::entity::conversion::ConversionReason::Unknown => "UNKNOWN",
+        ConversionReason::Cured => "CURED",
+        ConversionReason::Drowned => "DROWNED",
+        ConversionReason::Frozen => "FROZEN",
+        ConversionReason::Infection => "INFECTION",
+        ConversionReason::Lightning => "LIGHTNING",
+        ConversionReason::PiglinZombification => "PIGLIN_ZOMBIFICATION",
+        ConversionReason::Poison => "POISON",
+        ConversionReason::Split => "SPLIT",
+        ConversionReason::Unknown => "UNKNOWN",
     };
     let Ok(reason) = env.new_string(reason) else {
         return true;
@@ -2572,7 +2582,7 @@ fn pre_login_call(
     vm: &JavaVM,
     name: &str,
     uuid: uuid::Uuid,
-    address: std::net::SocketAddr,
+    address: SocketAddr,
 ) -> Option<(AsyncPlayerPreLoginResult, String)> {
     let mut env = vm.attach_current_thread().ok()?;
     let name = env.new_string(name).ok()?;
@@ -2635,7 +2645,7 @@ fn piston_call(
                 JValue::Int(piston.y()),
                 JValue::Int(piston.z()),
                 JValue::Object(&direction),
-                JValue::Bool(if extending { 1 } else { 0 }),
+                JValue::Bool(u8::from(extending)),
                 JValue::Object(&blocks),
             ],
         )
@@ -2863,6 +2873,11 @@ fn spawn_location_call_named(
     Some((world, [x, y, z], (yaw, pitch)))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a portal crossing is a where-from and a where-to, each a world, a \
+              position and a rotation, plus who and why"
+)]
 fn portal_call(
     vm: &JavaVM,
     uuid: &str,
@@ -2932,7 +2947,7 @@ fn chunk_load_call(vm: &JavaVM, world: &str, x: i32, z: i32, new_chunk: bool) {
             JValue::Object(&world),
             JValue::Int(x),
             JValue::Int(z),
-            JValue::Bool(new_chunk as u8),
+            JValue::Bool(u8::from(new_chunk)),
         ],
     );
 }

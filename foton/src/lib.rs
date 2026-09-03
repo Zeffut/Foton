@@ -3,11 +3,12 @@
 //! The main library for the Foton Minecraft server.
 
 use std::{
+    env,
     error::Error,
     fmt, io,
     net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf, absolute},
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, Weak},
 };
 
 use foton_bedrock::config::BedrockConfig;
@@ -57,7 +58,7 @@ pub struct FotonServer {
     /// failure here never stops the Java server: see the log message where
     /// this is set.
     pub bedrock_supervisor: Option<Supervisor>,
-    /// Java plugin host, enabled only when FOTON_PLUGIN_DIRECTORY is set.
+    /// Java plugin host, enabled only when `FOTON_PLUGIN_DIRECTORY` is set.
     plugin_host: Option<PluginHost>,
 }
 
@@ -119,6 +120,10 @@ impl FotonServer {
     }
 
     /// Creates a new Foton server with additional commands registered atomically at startup.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one straight assembly of a server -- worlds, then registries, \n                  then the plugin host -- where each step needs what the last one \n                  built; cutting it up would only hide the order"
+    )]
     pub async fn new_with_commands(
         chunk_runtime: Arc<Runtime>,
         cancel_token: CancellationToken,
@@ -151,21 +156,21 @@ impl FotonServer {
         // registries. The host is started without a server binding; native
         // gameplay calls are bound only after Server::new_with_commands has
         // completed its registry bootstrap.
-        let plugin_host = match std::env::var_os("FOTON_PLUGIN_DIRECTORY") {
+        let plugin_host = match env::var_os("FOTON_PLUGIN_DIRECTORY") {
             None => None,
             Some(plugin_directory) => {
-                let plugin_directory = std::path::PathBuf::from(plugin_directory);
-                let java_home = std::env::var_os("FOTON_JAVA_HOME").ok_or_else(|| {
+                let plugin_directory = PathBuf::from(plugin_directory);
+                let java_home = env::var_os("FOTON_JAVA_HOME").ok_or_else(|| {
                     FotonServerError::Plugin(
                         "FOTON_JAVA_HOME is required when FOTON_PLUGIN_DIRECTORY is set".to_owned(),
                     )
                 })?;
-                let api_jar = std::env::var_os("FOTON_PLUGIN_API_JAR").map_or_else(
-                    || std::path::PathBuf::from("plugin-api/build/foton-plugin-api.jar"),
-                    std::path::PathBuf::from,
+                let api_jar = env::var_os("FOTON_PLUGIN_API_JAR").map_or_else(
+                    || PathBuf::from("plugin-api/build/foton-plugin-api.jar"),
+                    PathBuf::from,
                 );
-                let library_directory = std::env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
-                    .map(std::path::PathBuf::from);
+                let library_directory =
+                    env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY").map(PathBuf::from);
                 let host = PluginHost::start(
                     &PluginHostConfig {
                         java_home: java_home.into(),
@@ -173,7 +178,7 @@ impl FotonServer {
                         library_directory,
                         plugin_directory: plugin_directory.clone(),
                     },
-                    &std::sync::Weak::new(),
+                    &Weak::new(),
                 )
                 .map_err(|error| FotonServerError::Plugin(error.to_string()))?;
                 host.load_all_on_load(&plugin_directory)
@@ -307,10 +312,10 @@ impl FotonServer {
 
     /// Disables loaded plugins during an early or orderly shutdown.
     pub fn disable_plugins(&mut self) {
-        if let Some(host) = self.plugin_host.take() {
-            if let Err(error) = host.disable_all() {
-                log::warn!("Failed to disable plugins cleanly: {error}");
-            }
+        if let Some(host) = self.plugin_host.take()
+            && let Err(error) = host.disable_all()
+        {
+            log::warn!("Failed to disable plugins cleanly: {error}");
         }
     }
 

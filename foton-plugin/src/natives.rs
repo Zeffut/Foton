@@ -9,22 +9,36 @@
 //! World mutations remain scheduler-owned; narrowly scoped plugin registries
 //! (such as runtime recipes) expose their own synchronized write path.
 
+use std::fmt::Write;
 use std::mem;
 use std::ptr::null_mut;
 use std::str::FromStr as _;
 use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 
+use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
+use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
 use foton_core::block_entity::entities::SpawnerBlockEntity;
 use foton_core::block_entity::entities::{SignBlockEntity, SignText};
 use foton_core::boss_event::ServerBossEvent;
+use foton_core::chunk::chunk_request::ChunkRequestState;
+use foton_core::chunk::light::LightLayer;
 use foton_core::chunk::{
     chunk_request::{ChunkRequestHandle, ChunkTicketKind},
     status::ChunkStatus,
 };
+use foton_core::entity::ItemFrame;
+use foton_core::entity::LivingEntity;
+use foton_core::entity::NeutralMob;
+use foton_core::entity::PatrollingMonster;
+use foton_core::entity::Projectile;
+use foton_core::entity::SharedEntity;
+use foton_core::entity::TamableAnimal;
+use foton_core::entity::attribute::AttributeModifier;
+use foton_core::entity::attribute::AttributeModifierOperation;
 use foton_core::entity::conversion::{
     ConversionParams, ConversionReason, convert_to, replace_entity,
 };
@@ -66,22 +80,26 @@ use foton_core::entity::entities::objects::projectiles::{
     DragonFireballEntity, LargeFireballEntity, SmallFireballEntity,
 };
 use foton_core::entity::entities::objects::vehicles::{BoatEntity, RaftEntity};
-use foton_core::entity::neutral_mob::NeutralMob as _;
-use foton_core::entity::neutral_mob::NeutralMob as _;
-use foton_core::entity::projectile::Projectile as _;
+use foton_core::entity::spawn_util::spawn_entity_at;
 use foton_core::entity::spellcaster_illager::{IllagerSpell, SpellcasterIllager};
 use foton_core::entity::{
-    Animal as _, Entity, EntitySpawnReason, ItemFrame as _, LivingEntity as _, LlamaVariant,
-    Mob as _, MobEffectInstance, TamableAnimal as _, is_tamed, owner_uuid, set_owner_uuid,
-    set_tamed, start_riding_entities,
+    Entity, EntitySpawnReason, LlamaVariant, MobEffectInstance, is_tamed, owner_uuid,
+    set_owner_uuid, set_tamed, start_riding_entities,
 };
 use foton_core::inventory::container::Container;
 use foton_core::inventory::equipment::EquipmentSlot;
 use foton_core::inventory::lock::{ContainerLockGuard, ContainerRef};
+use foton_core::inventory::menu::kinds::anvil;
+use foton_core::inventory::menu::kinds::cartography;
+use foton_core::inventory::menu::kinds::crafting;
+use foton_core::inventory::menu::kinds::grindstone;
+use foton_core::inventory::menu::kinds::loom;
 use foton_core::inventory::menu::kinds::smithing;
+use foton_core::inventory::menu::kinds::stonecutter;
 use foton_core::permission::{PermissionExpr, PermissionKey, PermissionState};
 use foton_core::player::Player;
 use foton_core::player::connection::NetworkConnection;
+use foton_core::scoreboard::ScoreHolder;
 use foton_core::server::{Server, WorldCreationRequest, WorldCreationState};
 use foton_core::trading::Merchant;
 use foton_core::world::LevelReader as _;
@@ -96,6 +114,8 @@ use foton_protocol::packets::game::{
     CSetDefaultSpawnPosition, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CStopSound,
     CSystemChat, CTabList, SoundSource,
 };
+use foton_registry::attribute::AttributeRef;
+use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
@@ -106,21 +126,39 @@ use foton_registry::data_components::vanilla_components::{
     TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
 use foton_registry::entity_data::{Quaternionf, Vector3f};
+use foton_registry::entity_type::EntityTypeRef;
+use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
+use foton_registry::game_rules::GameRuleType;
+use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
     CraftingCategory, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
+use foton_registry::trading::ItemCost;
+use foton_registry::trading::MerchantOffer;
+use foton_registry::vanilla_block_entity_types::SIGN;
+use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
+use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
     vanilla_items,
 };
 use foton_registry::{stat::Stat, vanilla_custom_stats};
+use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
 use foton_utils::serial::OptionalNbt;
 use foton_utils::text::DisplayResolutor;
+use foton_utils::translations::CONTAINER_CARTOGRAPHY_TABLE;
+use foton_utils::translations::CONTAINER_CRAFTING;
+use foton_utils::translations::CONTAINER_GRINDSTONE_TITLE;
+use foton_utils::translations::CONTAINER_LOOM;
+use foton_utils::translations::CONTAINER_REPAIR;
+use foton_utils::translations::CONTAINER_STONECUTTER;
+use foton_utils::translations::CONTAINER_UPGRADE;
+use foton_utils::types::Difficulty;
 use foton_utils::types::UpdateFlags;
 use foton_utils::types::{GameType, InteractionHand};
 use foton_utils::{BlockPos, BlockStateId, WorldAabb};
@@ -133,6 +171,7 @@ use jni::sys::{
 };
 use rustc_hash::FxHashMap;
 use simdnbt::owned::NbtCompound;
+use simdnbt::owned::NbtTag;
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
@@ -326,7 +365,7 @@ extern "system" fn enchantment_can_enchant(
     )) else {
         return 0;
     };
-    enchantment.can_enchant(item) as jboolean
+    jboolean::from(enchantment.can_enchant(item))
 }
 
 fn parse_item_snbt_patch(input: &str) -> Option<NbtCompound> {
@@ -350,32 +389,21 @@ extern "system" fn merge_item_snbt(
     patch: JString<'_>,
 ) -> jstring {
     let Ok(existing) = env.get_string(&existing) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Ok(patch) = env.get_string(&patch) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Ok(mut target) = parse_snbt_compound(existing.to_str().unwrap_or_default()) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
-    let patch_text = patch.to_str().unwrap_or_default().trim();
-    // Vanilla accepts a bare compound or an item id followed by legacy SNBT.
-    let compound_text = if patch_text.starts_with('{') {
-        patch_text
-    } else {
-        let Some(open) = patch_text.find('{') else {
-            return std::ptr::null_mut();
-        };
-        if patch_text[..open].trim().parse::<Identifier>().is_err() {
-            return std::ptr::null_mut();
-        }
-        &patch_text[open..]
-    };
-    let Ok(source) = parse_snbt_compound(compound_text) else {
-        return std::ptr::null_mut();
+    // Vanilla accepts a bare compound or an item id followed by legacy SNBT,
+    // which is what `parse_item_snbt_patch` knows and what its tests cover.
+    let Some(source) = parse_item_snbt_patch(patch.to_str().unwrap_or_default()) else {
+        return null_mut();
     };
     merge_nbt_compounds(&mut target, &source);
-    let value = to_canonical_snbt(&simdnbt::owned::NbtTag::Compound(target));
+    let value = to_canonical_snbt(&NbtTag::Compound(target));
     to_java(&mut env, value)
 }
 
@@ -427,7 +455,7 @@ extern "system" fn is_tagged(
             .is_some_and(|block| REGISTRY.blocks.is_in_tag(block, &tag)),
         _ => false,
     };
-    answer as jboolean
+    jboolean::from(answer)
 }
 
 extern "system" fn tag_values(
@@ -516,7 +544,7 @@ extern "system" fn known_player_id_by_name(
         .known_players()
         .entries()
         .iter()
-        .find(|entry| entry.last_known_name().eq_ignore_ascii_case(&needle))
+        .find(|entry| entry.last_known_name().eq_ignore_ascii_case(needle))
         .map(|entry| entry.uuid().to_string());
     to_java(&mut env, id)
 }
@@ -617,18 +645,18 @@ extern "system" fn projectile_shooter(
     let owner = entity
         .as_ref()
         .downcast_ref::<LargeFireballEntity>()
-        .and_then(|e| e.owner_uuid())
+        .and_then(Projectile::owner_uuid)
         .or_else(|| {
             entity
                 .as_ref()
                 .downcast_ref::<SmallFireballEntity>()
-                .and_then(|e| e.owner_uuid())
+                .and_then(Projectile::owner_uuid)
         })
         .or_else(|| {
             entity
                 .as_ref()
                 .downcast_ref::<DragonFireballEntity>()
-                .and_then(|e| e.owner_uuid())
+                .and_then(Projectile::owner_uuid)
         });
     to_java(&mut env, owner.map(|value| value.to_string()))
 }
@@ -690,7 +718,7 @@ extern "system" fn set_hanging_facing(
         "EAST" => foton_utils::Direction::East,
         _ => return 0,
     };
-    let Some((world, entity)) = entity_by_uuid(&id) else {
+    let Some((_world, entity)) = entity_by_uuid(&id) else {
         return 0;
     };
     if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
@@ -806,12 +834,12 @@ extern "system" fn hanging_facing(
     let direction = entity
         .as_ref()
         .downcast_ref::<PaintingEntity>()
-        .map(|painting| painting.direction())
+        .map(PaintingEntity::direction)
         .or_else(|| {
             entity
                 .as_ref()
                 .downcast_ref::<ItemFrameEntity>()
-                .map(|frame| frame.direction())
+                .map(ItemFrame::direction)
         });
     let Some(direction) = direction else {
         return null_mut();
@@ -930,7 +958,7 @@ extern "system" fn send_sign_change(
     root.insert("is_waxed", 0i8);
     player.send_packet(CBlockEntityData {
         pos: BlockPos::new(x, y, z),
-        block_entity_type: foton_registry::vanilla_block_entity_types::SIGN.id() as i32,
+        block_entity_type: SIGN.id() as i32,
         nbt: OptionalNbt(Some(root)),
     });
     let _ = world;
@@ -961,7 +989,7 @@ extern "system" fn send_block_change(
     });
 }
 
-fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, foton_core::entity::SharedEntity)> {
+fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
     let server = server()?;
     for snapshot in server.worlds.snapshots() {
         let world = snapshot.world();
@@ -1017,7 +1045,7 @@ extern "system" fn experience_orb_experience(
     entity
         .as_ref()
         .downcast_ref::<ExperienceOrbEntity>()
-        .map_or(0, |orb| orb.value())
+        .map_or(0, ExperienceOrbEntity::value)
 }
 
 extern "system" fn set_experience_orb_experience(
@@ -1064,10 +1092,12 @@ extern "system" fn wolf_angry(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return 0;
     };
-    entity
-        .as_ref()
-        .downcast_ref::<WolfEntity>()
-        .is_some_and(|wolf| wolf.is_angry()) as jboolean
+    jboolean::from(
+        entity
+            .as_ref()
+            .downcast_ref::<WolfEntity>()
+            .is_some_and(NeutralMob::is_angry),
+    )
 }
 extern "system" fn set_wolf_angry(
     mut env: JNIEnv<'_>,
@@ -1293,22 +1323,22 @@ extern "system" fn entity_eject(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some((_world, entity)) = entity_by_uuid(&id) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let passengers = entity.passengers();
     if passengers.is_empty() {
-        return false as jboolean;
+        return jboolean::from(false);
     }
     for passenger in passengers {
         passenger.stop_riding();
     }
-    true as jboolean
+    jboolean::from(true)
 }
 
 extern "system" fn entity_remove_passenger(
@@ -1362,7 +1392,7 @@ extern "system" fn entity_vehicle(
     uuid: JString<'_>,
 ) -> jstring {
     let Ok(text) = env.get_string(&uuid) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Ok(id) = text
         .to_str()
@@ -1370,7 +1400,7 @@ extern "system" fn entity_vehicle(
         .and_then(|value| value.parse::<Uuid>().ok())
         .ok_or(())
     else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let vehicle = entity_by_uuid(&id)
         .and_then(|(_, entity)| entity.vehicle())
@@ -1394,7 +1424,7 @@ extern "system" fn entity_leave_vehicle(
     };
     let was_riding = entity.vehicle().is_some();
     entity.stop_riding();
-    (was_riding && entity.vehicle().is_none()) as jboolean
+    jboolean::from(was_riding && entity.vehicle().is_none())
 }
 
 extern "system" fn entity_passengers(
@@ -1403,14 +1433,14 @@ extern "system" fn entity_passengers(
     uuid: JString<'_>,
 ) -> jstring {
     let Ok(text) = env.get_string(&uuid) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Some(id) = text
         .to_str()
         .ok()
         .and_then(|value| value.parse::<Uuid>().ok())
     else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let value = entity_by_uuid(&id)
         .map(|(_, entity)| {
@@ -1432,24 +1462,24 @@ extern "system" fn entity_add_passenger(
     passenger: JString<'_>,
 ) -> jboolean {
     let Ok(vehicle) = env.get_string(&vehicle) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Ok(passenger) = env.get_string(&passenger) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let (Some(vehicle), Some(passenger)) = (
         vehicle.to_str().ok().and_then(|v| v.parse::<Uuid>().ok()),
         passenger.to_str().ok().and_then(|v| v.parse::<Uuid>().ok()),
     ) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some((_, vehicle)) = entity_by_uuid(&vehicle) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some((_, passenger)) = entity_by_uuid(&passenger) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    start_riding_entities(&passenger, &vehicle) as jboolean
+    jboolean::from(start_riding_entities(&passenger, &vehicle))
 }
 extern "system" fn entity_target(
     mut env: JNIEnv<'_>,
@@ -1511,12 +1541,14 @@ extern "system" fn entity_is_living(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.as_living_entity().is_some()) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id).is_some_and(|(_, entity)| entity.as_living_entity().is_some()),
+    )
 }
 
 extern "system" fn entity_is_fall_flying(
@@ -1530,11 +1562,11 @@ extern "system" fn entity_is_fall_flying(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| {
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| {
         entity
             .as_living_entity()
-            .is_some_and(|living| living.is_fall_flying())
-    }) as jboolean
+            .is_some_and(LivingEntity::is_fall_flying)
+    }))
 }
 
 extern "system" fn entity_is_tamed(
@@ -1553,7 +1585,7 @@ extern "system" fn entity_is_tamed(
     else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| is_tamed(entity.as_ref())) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| is_tamed(entity.as_ref())))
 }
 
 extern "system" fn set_entity_tamed(
@@ -1735,13 +1767,13 @@ extern "system" fn set_villager_memory(
     let Some(villager) = entity.downcast_ref::<VillagerEntity>() else {
         return 0;
     };
-    villager.set_memory_global_pos(
+    jboolean::from(villager.set_memory_global_pos(
         key_text.to_str().unwrap_or_default(),
         Some(foton_utils::GlobalPos::new(
             dimension,
             BlockPos::new(x, y, z),
         )),
-    ) as jboolean
+    ))
 }
 
 extern "system" fn clear_villager_memory(
@@ -1764,10 +1796,10 @@ extern "system" fn clear_villager_memory(
     let Ok(key_text) = env.get_string(&key) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(villager) = entity.downcast_ref::<VillagerEntity>() {
-            villager.set_memory_global_pos(key_text.to_str().unwrap_or_default(), None);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(villager) = entity.downcast_ref::<VillagerEntity>()
+    {
+        villager.set_memory_global_pos(key_text.to_str().unwrap_or_default(), None);
     }
 }
 
@@ -1797,17 +1829,16 @@ extern "system" fn set_villager_type(
     let key = format!("minecraft:{}", kind.to_lowercase());
     if let Some((_, entity)) = entity_by_uuid(&id) {
         if let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>() {
-            if let Ok(key) = key.parse() {
-                if let Some(kind) = REGISTRY.villager_types.by_key(&key) {
-                    villager.set_villager_type(kind);
-                }
+            if let Ok(key) = key.parse()
+                && let Some(kind) = REGISTRY.villager_types.by_key(&key)
+            {
+                villager.set_villager_type(kind);
             }
-        } else if let Some(villager) = entity.as_ref().downcast_ref::<ZombieVillagerEntity>() {
-            if let Ok(key) = key.parse() {
-                if let Some(kind) = REGISTRY.villager_types.by_key(&key) {
-                    villager.set_villager_type(kind);
-                }
-            }
+        } else if let Some(villager) = entity.as_ref().downcast_ref::<ZombieVillagerEntity>()
+            && let Ok(key) = key.parse()
+            && let Some(kind) = REGISTRY.villager_types.by_key(&key)
+        {
+            villager.set_villager_type(kind);
         }
     }
 }
@@ -1844,10 +1875,10 @@ extern "system" fn set_villager_level(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(villager) = entity.downcast_ref::<VillagerEntity>() {
-            villager.set_level(level);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(villager) = entity.downcast_ref::<VillagerEntity>()
+    {
+        villager.set_level(level);
     }
 }
 
@@ -1866,7 +1897,7 @@ extern "system" fn villager_level(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<VillagerEntity>()
-                .map(|villager| villager.villager_level())
+                .map(VillagerEntity::villager_level)
         })
         .unwrap_or(1)
 }
@@ -1883,10 +1914,10 @@ extern "system" fn set_villager_experience(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(villager) = entity.downcast_ref::<VillagerEntity>() {
-            villager.set_villager_xp(experience);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(villager) = entity.downcast_ref::<VillagerEntity>()
+    {
+        villager.set_villager_xp(experience);
     }
 }
 
@@ -1906,7 +1937,7 @@ extern "system" fn villager_experience(
             entity
                 .as_ref()
                 .downcast_ref::<VillagerEntity>()
-                .map(|villager| villager.villager_xp())
+                .map(VillagerEntity::villager_xp)
         })
         .unwrap_or(0)
 }
@@ -1946,17 +1977,16 @@ extern "system" fn set_villager_offers(
         let uses = fields[1].parse().unwrap_or(0).max(0);
         let max_uses = fields[2].parse().unwrap_or(1).max(1);
         let demand = fields[3].parse().unwrap_or(0);
-        let first = foton_registry::trading::ItemCost::new(cost_a.item(), cost_a.count());
-        let second =
-            cost_b.map(|stack| foton_registry::trading::ItemCost::new(stack.item(), stack.count()));
-        parsed.push(foton_registry::trading::MerchantOffer::with_uses(
+        let first = ItemCost::new(cost_a.item(), cost_a.count());
+        let second = cost_b.map(|stack| ItemCost::new(stack.item(), stack.count()));
+        parsed.push(MerchantOffer::with_uses(
             first, second, result, uses, max_uses, 0, 0.05, demand,
         ));
     }
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>() {
-            villager.merchant().set_offers(parsed.into());
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>()
+    {
+        villager.merchant().set_offers(parsed.into());
     }
 }
 
@@ -1971,10 +2001,10 @@ extern "system" fn reset_villager_offers(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>() {
-            villager.merchant().clear_offers();
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>()
+    {
+        villager.merchant().clear_offers();
     }
 }
 
@@ -1999,10 +2029,10 @@ extern "system" fn set_zombie_villager_profession(
     let Some(profession) = REGISTRY.villager_professions.by_key(&key) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(villager) = entity.downcast_ref::<ZombieVillagerEntity>() {
-            villager.set_profession(profession);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(villager) = entity.downcast_ref::<ZombieVillagerEntity>()
+    {
+        villager.set_profession(profession);
     }
 }
 
@@ -2111,7 +2141,7 @@ extern "system" fn area_effect_cloud_radius(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<AreaEffectCloudEntity>()
-                .map(|cloud| cloud.radius())
+                .map(AreaEffectCloudEntity::radius)
         })
         .unwrap_or(0.0)
 }
@@ -2251,7 +2281,7 @@ extern "system" fn area_effect_cloud_duration(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<AreaEffectCloudEntity>()
-                .map(|cloud| cloud.duration())
+                .map(AreaEffectCloudEntity::duration)
         })
         .unwrap_or(0)
 }
@@ -2271,7 +2301,7 @@ extern "system" fn area_effect_cloud_wait_time(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<AreaEffectCloudEntity>()
-                .map(|cloud| cloud.wait_time())
+                .map(AreaEffectCloudEntity::wait_time)
         })
         .unwrap_or(0)
 }
@@ -2291,7 +2321,7 @@ extern "system" fn area_effect_cloud_reapplication_delay(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<AreaEffectCloudEntity>()
-                .map(|cloud| cloud.reapplication_delay())
+                .map(AreaEffectCloudEntity::reapplication_delay)
         })
         .unwrap_or(0)
 }
@@ -2311,7 +2341,7 @@ extern "system" fn area_effect_cloud_radius_per_tick(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<AreaEffectCloudEntity>()
-                .map(|cloud| cloud.radius_per_tick())
+                .map(AreaEffectCloudEntity::radius_per_tick)
         })
         .unwrap_or(0.0)
 }
@@ -2331,7 +2361,7 @@ extern "system" fn area_effect_cloud_radius_on_use(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<AreaEffectCloudEntity>()
-                .map(|cloud| cloud.radius_on_use())
+                .map(AreaEffectCloudEntity::radius_on_use)
         })
         .unwrap_or(0.0)
 }
@@ -2528,7 +2558,7 @@ extern "system" fn set_firework_meta(
             ))
         })
         .collect();
-    let Ok(component) = Fireworks::new(power.clamp(0, u8::MAX as jint), explosions) else {
+    let Ok(component) = Fireworks::new(power.clamp(0, jint::from(u8::MAX)), explosions) else {
         return;
     };
     let Ok(id) = uuid.parse() else {
@@ -2556,13 +2586,15 @@ extern "system" fn fox_sitting(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .downcast_ref::<FoxEntity>()
-                .map(|fox| fox.is_sitting())
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .downcast_ref::<FoxEntity>()
+                    .map(FoxEntity::is_sitting)
+            })
+            .unwrap_or(false),
+    )
 }
 extern "system" fn set_fox_sitting(
     mut env: JNIEnv<'_>,
@@ -2576,10 +2608,10 @@ extern "system" fn set_fox_sitting(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(fox) = entity.downcast_ref::<FoxEntity>() {
-            fox.set_sitting(value != 0);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(fox) = entity.downcast_ref::<FoxEntity>()
+    {
+        fox.set_sitting(value != 0);
     }
 }
 
@@ -2739,7 +2771,7 @@ extern "system" fn slime_size(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JSt
             entity
                 .as_ref()
                 .downcast_ref::<SlimeEntity>()
-                .map(|slime| slime.cube_size())
+                .map(SlimeEntity::cube_size)
         })
         .unwrap_or(0)
 }
@@ -2795,19 +2827,21 @@ extern "system" fn creeper_powered(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .as_ref()
-                .downcast_ref::<CreeperEntity>()
-                .map(|creeper| creeper.is_powered())
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .as_ref()
+                    .downcast_ref::<CreeperEntity>()
+                    .map(CreeperEntity::is_powered)
+            })
+            .unwrap_or(false),
+    )
 }
 
 extern "system" fn set_goat_screaming(
@@ -2842,13 +2876,15 @@ extern "system" fn goat_left_horn(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .downcast_ref::<GoatEntity>()
-                .map(|goat| goat.has_left_horn())
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .downcast_ref::<GoatEntity>()
+                    .map(GoatEntity::has_left_horn)
+            })
+            .unwrap_or(false),
+    )
 }
 extern "system" fn set_goat_left_horn(
     mut env: JNIEnv<'_>,
@@ -2862,10 +2898,10 @@ extern "system" fn set_goat_left_horn(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(goat) = entity.downcast_ref::<GoatEntity>() {
-            goat.set_left_horn(value != 0);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(goat) = entity.downcast_ref::<GoatEntity>()
+    {
+        goat.set_left_horn(value != 0);
     }
 }
 extern "system" fn goat_right_horn(
@@ -2879,13 +2915,15 @@ extern "system" fn goat_right_horn(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .downcast_ref::<GoatEntity>()
-                .map(|goat| goat.has_right_horn())
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .downcast_ref::<GoatEntity>()
+                    .map(GoatEntity::has_right_horn)
+            })
+            .unwrap_or(false),
+    )
 }
 extern "system" fn set_goat_right_horn(
     mut env: JNIEnv<'_>,
@@ -2899,10 +2937,10 @@ extern "system" fn set_goat_right_horn(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(goat) = entity.downcast_ref::<GoatEntity>() {
-            goat.set_right_horn(value != 0);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(goat) = entity.downcast_ref::<GoatEntity>()
+    {
+        goat.set_right_horn(value != 0);
     }
 }
 
@@ -2939,10 +2977,10 @@ extern "system" fn set_sheep_color(
     else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(sheep) = entity.downcast_ref::<SheepEntity>() {
-            sheep.set_color(value);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(sheep) = entity.downcast_ref::<SheepEntity>()
+    {
+        sheep.set_color(value);
     }
 }
 extern "system" fn sheep_sheared(
@@ -2956,13 +2994,15 @@ extern "system" fn sheep_sheared(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .downcast_ref::<SheepEntity>()
-                .map(|sheep| sheep.is_sheared())
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .downcast_ref::<SheepEntity>()
+                    .map(SheepEntity::is_sheared)
+            })
+            .unwrap_or(false),
+    )
 }
 extern "system" fn set_sheep_sheared(
     mut env: JNIEnv<'_>,
@@ -2976,10 +3016,10 @@ extern "system" fn set_sheep_sheared(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(sheep) = entity.downcast_ref::<SheepEntity>() {
-            sheep.set_sheared(value != 0);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(sheep) = entity.downcast_ref::<SheepEntity>()
+    {
+        sheep.set_sheared(value != 0);
     }
 }
 
@@ -2989,19 +3029,21 @@ extern "system" fn goat_screaming(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .as_ref()
-                .downcast_ref::<GoatEntity>()
-                .map(GoatEntity::is_screaming_goat)
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .as_ref()
+                    .downcast_ref::<GoatEntity>()
+                    .map(GoatEntity::is_screaming_goat)
+            })
+            .unwrap_or(false),
+    )
 }
 
 extern "system" fn entity_can_pickup_items(
@@ -3015,7 +3057,7 @@ extern "system" fn entity_can_pickup_items(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.entity_can_pick_up_loot()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.entity_can_pick_up_loot()))
 }
 extern "system" fn set_entity_can_pickup_items(
     mut env: JNIEnv<'_>,
@@ -3066,19 +3108,21 @@ extern "system" fn entity_is_baby(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .as_ref()
-                .as_living_entity()
-                .map(foton_core::entity::LivingEntity::is_baby)
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .as_ref()
+                    .as_living_entity()
+                    .map(LivingEntity::is_baby)
+            })
+            .unwrap_or(false),
+    )
 }
 
 extern "system" fn enchantment_max_level(
@@ -3110,7 +3154,7 @@ extern "system" fn entity_age_lock(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_ageable_age_locked()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_ageable_age_locked()))
 }
 
 extern "system" fn set_entity_age_lock(
@@ -3154,12 +3198,12 @@ extern "system" fn pig_has_saddle(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| {
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| {
         let Some(pig) = entity.as_ref().downcast_ref::<PigEntity>() else {
             return false;
         };
@@ -3168,7 +3212,7 @@ extern "system" fn pig_has_saddle(
             saddled = stack.is(&vanilla_items::SADDLE);
         });
         saddled
-    }) as jboolean
+    }))
 }
 
 extern "system" fn pig_set_saddle(
@@ -3222,15 +3266,15 @@ extern "system" fn mount_inventory_slot(
     let mut value = None;
     if let Some(mount) = entity.as_ref().downcast_ref::<HorseEntity>() {
         mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item))
+            value = Some(describe_slot(item));
         });
     } else if let Some(mount) = entity.as_ref().downcast_ref::<NautilusEntity>() {
         mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item))
+            value = Some(describe_slot(item));
         });
     } else if let Some(mount) = entity.as_ref().downcast_ref::<ZombieNautilusEntity>() {
         mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item))
+            value = Some(describe_slot(item));
         });
     }
     to_java(&mut env, value)
@@ -3301,7 +3345,7 @@ extern "system" fn horse_inventory_slot(
     };
     let mut value = None;
     horse.with_equipment_slot(equipment_slot, &mut |item| {
-        value = Some(describe_slot(item))
+        value = Some(describe_slot(item));
     });
     to_java(&mut env, value)
 }
@@ -3347,14 +3391,16 @@ extern "system" fn entity_has_chest(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| entity.as_ref().has_carried_chest())
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| entity.as_ref().has_carried_chest())
+            .unwrap_or(false),
+    )
 }
 
 extern "system" fn entity_set_chest(
@@ -3799,7 +3845,7 @@ extern "system" fn frog_variant<'a>(
     }
 }
 
-fn panda_gene_name(gene: PandaGene) -> &'static str {
+const fn panda_gene_name(gene: PandaGene) -> &'static str {
     match gene {
         PandaGene::Normal => "normal",
         PandaGene::Lazy => "lazy",
@@ -3863,11 +3909,7 @@ extern "system" fn generate_tree(
         "CHERRY" => "cherry",
         _ => return 0,
     };
-    foton_core::behavior::blocks::vegetation::tree_grower::generate_tree(
-        &world,
-        BlockPos::new(x, y, z),
-        key,
-    ) as jboolean
+    jboolean::from(grow_tree(&world, BlockPos::new(x, y, z), key))
 }
 
 extern "system" fn set_llama_variant(
@@ -3915,7 +3957,7 @@ extern "system" fn phantom_size(
             entity
                 .as_ref()
                 .downcast_ref::<PhantomEntity>()
-                .map(|phantom| phantom.phantom_size())
+                .map(PhantomEntity::phantom_size)
         })
         .unwrap_or(0)
 }
@@ -3951,14 +3993,16 @@ extern "system" fn raider_patrol_leader<'a>(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .as_ref()
-                .as_raider()
-                .map(|raider| raider.is_patrol_leader())
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .as_ref()
+                    .as_raider()
+                    .map(PatrollingMonster::is_patrol_leader)
+            })
+            .unwrap_or(false),
+    )
 }
 
 extern "system" fn set_raider_patrol_leader(
@@ -4320,7 +4364,7 @@ extern "system" fn bee_anger(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JStr
     };
     let remaining =
         bee.persistent_anger_end_time() - bee.level().map_or(0, |world| world.game_time());
-    remaining.max(0).min(i32::MAX as i64) as jint
+    remaining.max(0).min(i64::from(i32::MAX)) as jint
 }
 
 extern "system" fn set_bee_anger(
@@ -4488,13 +4532,15 @@ extern "system" fn wolf_sitting(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return 0;
     };
-    entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .downcast_ref::<WolfEntity>()
-                .map(|wolf| wolf.is_in_sitting_pose())
-        })
-        .unwrap_or(false) as jboolean
+    jboolean::from(
+        entity_by_uuid(&id)
+            .and_then(|(_, entity)| {
+                entity
+                    .downcast_ref::<WolfEntity>()
+                    .map(TamableAnimal::is_in_sitting_pose)
+            })
+            .unwrap_or(false),
+    )
 }
 extern "system" fn set_wolf_sitting(
     mut env: JNIEnv<'_>,
@@ -4508,10 +4554,10 @@ extern "system" fn set_wolf_sitting(
     let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(wolf) = entity.downcast_ref::<WolfEntity>() {
-            wolf.set_in_sitting_pose(value != 0);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(wolf) = entity.downcast_ref::<WolfEntity>()
+    {
+        wolf.set_in_sitting_pose(value != 0);
     }
 }
 
@@ -4549,12 +4595,10 @@ extern "system" fn set_wolf_collar_color(
     if let Some(color) = foton_registry::DyeColor::VALUES
         .get(value as usize)
         .copied()
+        && let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(wolf) = entity.downcast_ref::<WolfEntity>()
     {
-        if let Some((_, entity)) = entity_by_uuid(&id)
-            && let Some(wolf) = entity.downcast_ref::<WolfEntity>()
-        {
-            wolf.set_collar_color(color);
-        }
+        wolf.set_collar_color(color);
     }
 }
 
@@ -4677,7 +4721,7 @@ extern "system" fn horse_markings<'a>(
             entity
                 .as_ref()
                 .downcast_ref::<HorseEntity>()
-                .map(|horse| horse.markings())
+                .map(HorseEntity::markings)
         })
         .map(|markings| format!("{markings:?}"));
     value
@@ -4806,7 +4850,7 @@ extern "system" fn set_block_display_block(
     }
 }
 
-fn boat_variant(name: &str) -> Option<(foton_registry::entity_type::EntityTypeRef, bool)> {
+fn boat_variant(name: &str) -> Option<(EntityTypeRef, bool)> {
     Some(match name.to_ascii_uppercase().as_str() {
         "OAK" => (&vanilla_entities::OAK_BOAT, false),
         "SPRUCE" => (&vanilla_entities::SPRUCE_BOAT, false),
@@ -4938,7 +4982,6 @@ extern "system" fn set_block_display_shadow_radius(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 extern "system" fn set_block_display_transformation(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -5176,7 +5219,7 @@ extern "system" fn entity_glowing(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.has_glowing_tag()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.has_glowing_tag()))
 }
 
 extern "system" fn set_entity_glowing(
@@ -5207,7 +5250,7 @@ extern "system" fn entity_invulnerable(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_invulnerable()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_invulnerable()))
 }
 
 extern "system" fn set_entity_invulnerable(
@@ -5238,7 +5281,7 @@ extern "system" fn entity_on_ground(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.on_ground()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.on_ground()))
 }
 
 extern "system" fn entity_in_water(
@@ -5252,7 +5295,7 @@ extern "system" fn entity_in_water(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_in_water()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_in_water()))
 }
 
 extern "system" fn entity_invisible(
@@ -5261,12 +5304,12 @@ extern "system" fn entity_invisible(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|v| Uuid::parse_str(v).ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_invisible()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_invisible()))
 }
 
 extern "system" fn entity_freeze_ticks(
@@ -5281,11 +5324,7 @@ extern "system" fn entity_freeze_ticks(
         return 0;
     };
     entity_by_uuid(&id)
-        .and_then(|(_, entity)| {
-            entity
-                .as_living_entity()
-                .map(|living| living.ticks_frozen())
-        })
+        .and_then(|(_, entity)| entity.as_living_entity().map(Entity::ticks_frozen))
         .unwrap_or(0)
 }
 
@@ -5301,10 +5340,10 @@ extern "system" fn set_entity_freeze_ticks(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(living) = entity.as_living_entity() {
-            living.set_ticks_frozen(ticks.max(0));
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(living) = entity.as_living_entity()
+    {
+        living.set_ticks_frozen(ticks.max(0));
     }
 }
 
@@ -5323,7 +5362,7 @@ extern "system" fn entity_no_damage_ticks(
         entity
             .as_ref()
             .as_living_entity()
-            .map_or(0, |living| living.no_damage_ticks())
+            .map_or(0, LivingEntity::no_damage_ticks)
     })
 }
 
@@ -5333,17 +5372,17 @@ extern "system" fn entity_sprinting(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|v| Uuid::parse_str(v).ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id).map_or(false, |(_, entity)| {
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| {
         entity
             .as_ref()
             .as_living_entity()
-            .is_some_and(|living| living.is_sprinting())
-    }) as jboolean
+            .is_some_and(LivingEntity::is_sprinting)
+    }))
 }
 
 extern "system" fn entity_swimming(
@@ -5352,12 +5391,12 @@ extern "system" fn entity_swimming(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|v| Uuid::parse_str(v).ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id).map_or(false, |(_, entity)| entity.is_swimming()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_swimming()))
 }
 
 extern "system" fn entity_is_using_item(
@@ -5366,17 +5405,17 @@ extern "system" fn entity_is_using_item(
     uuid: JString<'_>,
 ) -> jboolean {
     let Ok(text) = env.get_string(&uuid) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(id) = text.to_str().ok().and_then(|v| Uuid::parse_str(v).ok()) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
-    entity_by_uuid(&id).map_or(false, |(_, entity)| {
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| {
         entity
             .as_ref()
             .as_living_entity()
-            .is_some_and(|living| living.is_using_item())
-    }) as jboolean
+            .is_some_and(LivingEntity::is_using_item)
+    }))
 }
 
 extern "system" fn entity_clear_active_item(
@@ -5390,10 +5429,10 @@ extern "system" fn entity_clear_active_item(
     let Some(id) = text.to_str().ok().and_then(|v| Uuid::parse_str(v).ok()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(living) = entity.as_ref().as_living_entity() {
-            living.living_base().stop_using_item();
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(living) = entity.as_ref().as_living_entity()
+    {
+        living.living_base().stop_using_item();
     }
 }
 
@@ -5580,9 +5619,11 @@ extern "system" fn player_can_see_entity(
     if !Arc::ptr_eq(&player.get_world(), &entity_world) {
         return 0;
     }
-    (!entity_world
-        .entity_tracker()
-        .is_hidden_for_player(entity.id(), player.id())) as jboolean
+    jboolean::from(
+        !entity_world
+            .entity_tracker()
+            .is_hidden_for_player(entity.id(), player.id()),
+    )
 }
 
 extern "system" fn entity_eye_height(
@@ -5767,7 +5808,7 @@ extern "system" fn entity_persistent(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_persistent()) as jboolean
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| entity.is_persistent()))
 }
 
 extern "system" fn set_entity_persistent(
@@ -5798,11 +5839,11 @@ extern "system" fn entity_remove_when_far_away(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    entity_by_uuid(&id).map_or(false, |(_, entity)| {
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| {
         entity
             .as_mob()
             .is_some_and(|mob| !mob.is_persistence_required())
-    }) as jboolean
+    }))
 }
 
 extern "system" fn set_entity_remove_when_far_away(
@@ -5817,14 +5858,14 @@ extern "system" fn set_entity_remove_when_far_away(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(mob) = entity.as_mob() {
-            mob.set_persistence_required_value(remove == 0);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(mob) = entity.as_mob()
+    {
+        mob.set_persistence_required_value(remove == 0);
     }
 }
 
-fn equipment_slot_from_index(slot: jint) -> Option<EquipmentSlot> {
+const fn equipment_slot_from_index(slot: jint) -> Option<EquipmentSlot> {
     match slot {
         0 => Some(EquipmentSlot::MainHand),
         1 => Some(EquipmentSlot::OffHand),
@@ -5874,12 +5915,12 @@ extern "system" fn set_entity_drop_chance(
     let Some(slot) = equipment_slot_from_index(slot) else {
         return;
     };
-    if chance.is_finite() && chance >= 0.0 {
-        if let Some((_, entity)) = entity_by_uuid(&id) {
-            if let Some(mob) = entity.as_mob() {
-                mob.set_drop_chance(slot, chance);
-            }
-        }
+    if chance.is_finite()
+        && chance >= 0.0
+        && let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(mob) = entity.as_mob()
+    {
+        mob.set_drop_chance(slot, chance);
     }
 }
 
@@ -5897,7 +5938,7 @@ extern "system" fn arrow_potion(
     let value = entity_by_uuid(&id).and_then(|(_, entity)| {
         entity
             .downcast_ref::<ArrowEntity>()
-            .and_then(|arrow| arrow.ammo_potion_contents())
+            .and_then(ArrowEntity::ammo_potion_contents)
             .and_then(|contents| {
                 contents
                     .potion()
@@ -6048,7 +6089,7 @@ extern "system" fn set_entity_projectile_owner(
 fn mutate_villager_offer(
     uuid: uuid::Uuid,
     index: usize,
-    mutate: impl FnOnce(&mut foton_registry::trading::MerchantOffer),
+    mutate: impl FnOnce(&mut MerchantOffer),
 ) -> bool {
     let Some(server) = server() else {
         return false;
@@ -6093,7 +6134,9 @@ extern "system" fn entity_set_merchant_offer_uses(
     let Ok(index) = usize::try_from(index) else {
         return 0;
     };
-    mutate_villager_offer(uuid, index, |offer| offer.set_uses(uses)) as jboolean
+    jboolean::from(mutate_villager_offer(uuid, index, |offer| {
+        offer.set_uses(uses);
+    }))
 }
 
 extern "system" fn entity_set_merchant_offer_max_uses(
@@ -6117,7 +6160,9 @@ extern "system" fn entity_set_merchant_offer_max_uses(
     let Ok(index) = usize::try_from(index) else {
         return 0;
     };
-    mutate_villager_offer(uuid, index, |offer| offer.set_max_uses(max_uses)) as jboolean
+    jboolean::from(mutate_villager_offer(uuid, index, |offer| {
+        offer.set_max_uses(max_uses);
+    }))
 }
 
 extern "system" fn entity_set_merchant_offer_demand(
@@ -6141,7 +6186,9 @@ extern "system" fn entity_set_merchant_offer_demand(
     let Ok(index) = usize::try_from(index) else {
         return 0;
     };
-    mutate_villager_offer(uuid, index, |offer| offer.set_demand(demand)) as jboolean
+    jboolean::from(mutate_villager_offer(uuid, index, |offer| {
+        offer.set_demand(demand);
+    }))
 }
 
 extern "system" fn entity_merchant_recipes(
@@ -6150,7 +6197,7 @@ extern "system" fn entity_merchant_recipes(
     uuid: JString<'_>,
 ) -> jobjectArray {
     let Ok(text) = env.get_string(&uuid) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Ok(uuid) = text
         .to_str()
@@ -6158,10 +6205,10 @@ extern "system" fn entity_merchant_recipes(
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .ok_or(())
     else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Some(server) = server() else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     for snapshot in server.worlds.snapshots() {
         let world = snapshot.world();
@@ -6191,7 +6238,7 @@ extern "system" fn entity_merchant_recipes(
             .collect::<Vec<_>>();
         return string_array(&mut env, &values);
     }
-    std::ptr::null_mut()
+    null_mut()
 }
 
 extern "system" fn iron_golem_player_created(
@@ -6209,7 +6256,7 @@ extern "system" fn iron_golem_player_created(
         .and_then(|(_, entity)| {
             entity
                 .downcast_ref::<IronGolemEntity>()
-                .map(|golem| if golem.is_player_created() { 1 } else { 0 })
+                .map(|golem| u8::from(golem.is_player_created()))
         })
         .unwrap_or(0)
 }
@@ -6226,10 +6273,10 @@ extern "system" fn set_iron_golem_player_created(
     let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(golem) = entity.downcast_ref::<IronGolemEntity>() {
-            golem.set_player_created(value != 0);
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(golem) = entity.downcast_ref::<IronGolemEntity>()
+    {
+        golem.set_player_created(value != 0);
     }
 }
 
@@ -6263,15 +6310,7 @@ extern "system" fn entity_custom_name_visible(
     let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else {
         return 0;
     };
-    entity_by_uuid(&id)
-        .map(|(_, entity)| {
-            if entity.is_custom_name_visible() {
-                1
-            } else {
-                0
-            }
-        })
-        .unwrap_or(0)
+    entity_by_uuid(&id).map_or(0, |(_, entity)| u8::from(entity.is_custom_name_visible()))
 }
 
 extern "system" fn set_entity_custom_name(
@@ -6316,12 +6355,12 @@ extern "system" fn entity_send_message(
     let Some(id) = Uuid::parse_str(&String::from(uuid_text)).ok() else {
         return;
     };
-    if let Some((_, entity)) = entity_by_uuid(&id) {
-        if let Some(player) = entity.as_player() {
-            player.send_message(&text_components::TextComponent::plain(String::from(
-                message_text,
-            )));
-        }
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(player) = entity.as_player()
+    {
+        player.send_message(&text_components::TextComponent::plain(String::from(
+            message_text,
+        )));
     }
 }
 
@@ -6372,19 +6411,11 @@ extern "system" fn global_player_timestamp(
     }
 }
 
-extern "system" fn first_played(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jlong {
+extern "system" fn first_played(env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jlong {
     global_player_timestamp(env, uuid, true)
 }
 
-extern "system" fn last_played(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jlong {
+extern "system" fn last_played(env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jlong {
     global_player_timestamp(env, uuid, false)
 }
 
@@ -6482,14 +6513,14 @@ extern "system" fn world_can_generate_structures(
     _class: JClass<'_>,
     world_name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &world_name).is_some_and(|value| {
+    jboolean::from(world(&mut env, &world_name).is_some_and(|value| {
         value
             .chunk_map
             .world_gen_context
             .generator
             .structure_generator()
             .is_some()
-    }) as jboolean
+    }))
 }
 
 extern "system" fn world_allow_monsters(
@@ -6497,7 +6528,7 @@ extern "system" fn world_allow_monsters(
     _class: JClass<'_>,
     world_name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &world_name).is_some_and(|value| value.allow_monsters()) as jboolean
+    jboolean::from(world(&mut env, &world_name).is_some_and(|value| value.allow_monsters()))
 }
 
 extern "system" fn set_world_allow_monsters(
@@ -6516,7 +6547,7 @@ extern "system" fn world_allow_animals(
     _class: JClass<'_>,
     world_name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &world_name).is_some_and(|value| value.allow_animals()) as jboolean
+    jboolean::from(world(&mut env, &world_name).is_some_and(|value| value.allow_animals()))
 }
 
 extern "system" fn set_world_allow_animals(
@@ -6535,7 +6566,7 @@ extern "system" fn world_pvp(
     _class: JClass<'_>,
     world_name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &world_name).is_some_and(|value| value.is_pvp()) as jboolean
+    jboolean::from(world(&mut env, &world_name).is_some_and(|value| value.is_pvp()))
 }
 
 extern "system" fn set_world_pvp(
@@ -6841,7 +6872,7 @@ extern "system" fn player_attribute(
     to_java(&mut env, Some(format!("{base}|{value}")))
 }
 
-fn attribute_ref_from_name(name: &str) -> Option<foton_registry::attribute::AttributeRef> {
+fn attribute_ref_from_name(name: &str) -> Option<AttributeRef> {
     let key_name = name
         .strip_prefix("GENERIC_")
         .or_else(|| name.strip_prefix("PLAYER_"))
@@ -6913,13 +6944,9 @@ extern "system" fn add_attribute_modifier(
         return 0;
     };
     let operation = match operation.as_str() {
-        "ADD_NUMBER" => foton_core::entity::attribute::AttributeModifierOperation::AddValue,
-        "ADD_SCALAR" => {
-            foton_core::entity::attribute::AttributeModifierOperation::AddMultipliedBase
-        }
-        "MULTIPLY_SCALAR_1" => {
-            foton_core::entity::attribute::AttributeModifierOperation::AddMultipliedTotal
-        }
+        "ADD_NUMBER" => AttributeModifierOperation::AddValue,
+        "ADD_SCALAR" => AttributeModifierOperation::AddMultipliedBase,
+        "MULTIPLY_SCALAR_1" => AttributeModifierOperation::AddMultipliedTotal,
         _ => return 0,
     };
     let Some((_, entity)) = entity_by_uuid(&id) else {
@@ -6928,15 +6955,15 @@ extern "system" fn add_attribute_modifier(
     let Some(living) = entity.as_living_entity() else {
         return 0;
     };
-    living.attributes().lock().add_modifier(
+    jboolean::from(living.attributes().lock().add_modifier(
         attribute,
-        foton_core::entity::attribute::AttributeModifier {
+        AttributeModifier {
             id: modifier_id,
             amount,
             operation,
         },
         true,
-    ) as jboolean
+    ))
 }
 
 extern "system" fn remove_attribute_modifier(
@@ -6973,10 +7000,12 @@ extern "system" fn remove_attribute_modifier(
     let Some(living) = entity.as_living_entity() else {
         return 0;
     };
-    living
-        .attributes()
-        .lock()
-        .remove_modifier(attribute, &modifier_id) as jboolean
+    jboolean::from(
+        living
+            .attributes()
+            .lock()
+            .remove_modifier(attribute, &modifier_id),
+    )
 }
 
 extern "system" fn attribute_modifiers(
@@ -7012,13 +7041,9 @@ extern "system" fn attribute_modifiers(
         .iter()
         .map(|modifier| {
             let operation = match modifier.operation {
-                foton_core::entity::attribute::AttributeModifierOperation::AddValue => "ADD_NUMBER",
-                foton_core::entity::attribute::AttributeModifierOperation::AddMultipliedBase => {
-                    "ADD_SCALAR"
-                }
-                foton_core::entity::attribute::AttributeModifierOperation::AddMultipliedTotal => {
-                    "MULTIPLY_SCALAR_1"
-                }
+                AttributeModifierOperation::AddValue => "ADD_NUMBER",
+                AttributeModifierOperation::AddMultipliedBase => "ADD_SCALAR",
+                AttributeModifierOperation::AddMultipliedTotal => "MULTIPLY_SCALAR_1",
             };
             format!(
                 "{}|{}|{}|{operation}",
@@ -7102,9 +7127,7 @@ extern "system" fn player_entity_effect(
         return;
     };
     let Some(status) = (match value.to_str().unwrap_or_default() {
-        "PROTECTED_FROM_DEATH" => {
-            Some(foton_utils::entity_events::EntityStatus::ProtectedFromDeath)
-        }
+        "PROTECTED_FROM_DEATH" => Some(EntityStatus::ProtectedFromDeath),
         _ => None,
     }) else {
         return;
@@ -7129,20 +7152,20 @@ extern "system" fn advancement_display(
     key: JString<'_>,
 ) -> jobjectArray {
     let Ok(value) = env.get_string(&key) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Some(id) = value
         .to_str()
         .ok()
         .and_then(|text| text.parse::<Identifier>().ok())
     else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Some(advancement) = REGISTRY.advancements.by_key(&id) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Some(display) = advancement.display.as_ref() else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     string_array(
         &mut env,
@@ -7161,16 +7184,16 @@ extern "system" fn advancement_criteria(
     key: JString<'_>,
 ) -> jobjectArray {
     let Ok(key) = env.get_string(&key) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Ok(key) = key.to_str() else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Ok(key) = key.parse::<Identifier>() else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let Some(advancement) = REGISTRY.advancements.by_key(&key) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let values = advancement
         .criteria
@@ -7485,10 +7508,11 @@ extern "system" fn set_experience_progress(
     uuid: JString<'_>,
     progress: jfloat,
 ) {
-    if progress.is_finite() && (0.0..=1.0).contains(&progress) {
-        if let Some(player) = player(&mut env, &uuid) {
-            player.experience.lock().set_progress(progress);
-        }
+    if progress.is_finite()
+        && (0.0..=1.0).contains(&progress)
+        && let Some(player) = player(&mut env, &uuid)
+    {
+        player.experience.lock().set_progress(progress);
     }
 }
 
@@ -7553,7 +7577,12 @@ extern "system" fn shutdown(_env: JNIEnv<'_>, _class: JClass<'_>) {
 /// a plugin can tell "there is nothing here" from "this cannot be answered"
 /// rather than reading a missing armor slot as bare feet.
 fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 fn hex_decode(value: &str) -> Vec<u8> {
     (0..value.len())
@@ -7576,7 +7605,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         value.push('\u{1d}');
         value.push_str("namehex=");
         for byte in name.to_string().as_bytes() {
-            value.push_str(&format!("{byte:02x}"));
+            let _ = write!(value, "{byte:02x}");
         }
     }
     if let Some(lore) = stack.get(LORE) {
@@ -7584,7 +7613,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
             value.push('\u{1d}');
             value.push_str("lorehex=");
             for byte in line.to_string().as_bytes() {
-                value.push_str(&format!("{byte:02x}"));
+                let _ = write!(value, "{byte:02x}");
             }
         }
     }
@@ -7594,60 +7623,64 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
     }
     if let Some(model) = stack.get(ITEM_MODEL) {
         value.push('\u{1d}');
-        value.push_str(&format!(
+        let _ = write!(
+            value,
             "itemmodelhex={}",
             hex_encode(model.to_string().as_bytes())
-        ));
+        );
     }
     if let Some(style) = stack.get(TOOLTIP_STYLE) {
         value.push('\u{1d}');
-        value.push_str(&format!(
+        let _ = write!(
+            value,
             "tooltipstylehex={}",
             hex_encode(style.to_string().as_bytes())
-        ));
+        );
     }
-    if let Some(display) = stack.get(TOOLTIP_DISPLAY) {
-        if display.hide_tooltip {
-            value.push('\u{1d}');
-            value.push_str("hidetooltip");
-        }
+    if let Some(display) = stack.get(TOOLTIP_DISPLAY)
+        && display.hide_tooltip
+    {
+        value.push('\u{1d}');
+        value.push_str("hidetooltip");
     }
     if let Some(model) = stack.get(CUSTOM_MODEL_DATA) {
         for float in model.floats() {
             value.push('\u{1d}');
-            value.push_str(&format!("modelfloat={float}"));
+            let _ = write!(value, "modelfloat={float}");
         }
         for flag in model.flags() {
             value.push('\u{1d}');
-            value.push_str(&format!("modelflag={flag}"));
+            let _ = write!(value, "modelflag={flag}");
         }
         for string in model.strings() {
             value.push('\u{1d}');
-            value.push_str(&format!("modelstrhex={}", hex_encode(string.as_bytes())));
+            let _ = write!(value, "modelstrhex={}", hex_encode(string.as_bytes()));
         }
         for color in model.colors() {
             value.push('\u{1d}');
-            value.push_str(&format!("modelcolor={color}"));
+            let _ = write!(value, "modelcolor={color}");
         }
     }
     if let Some(enchantments) = stack.get(ENCHANTMENTS) {
         for (key, level) in enchantments.iter() {
             value.push('\u{1d}');
-            value.push_str(&format!(
+            let _ = write!(
+                value,
                 "enchhex={}:{}",
                 hex_encode(key.to_string().as_bytes()),
                 level
-            ));
+            );
         }
     }
     if let Some(enchantments) = stack.get(STORED_ENCHANTMENTS) {
         for (key, level) in enchantments.iter() {
             value.push('\u{1d}');
-            value.push_str(&format!(
+            let _ = write!(
+                value,
                 "storedenchhex={}:{}",
                 hex_encode(key.to_string().as_bytes()),
                 level
-            ));
+            );
         }
     }
     value
@@ -7671,6 +7704,12 @@ extern "system" fn item_translation_key(
 }
 
 /// Reads back what `describe_slot` wrote.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one flat match over every component an item can carry; the length is \
+              the component list, and splitting it would scatter one format across \
+              several functions"
+)]
 pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     let mut encoded = text.trim().split('\u{1d}');
     let text = encoded.next().unwrap_or_default();
@@ -7689,10 +7728,9 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     if let Some(encoded) = metadata
         .iter()
         .find_map(|value| value.strip_prefix("nbthex="))
+        && let Ok(raw) = String::from_utf8(hex_decode(encoded))
     {
-        if let Ok(raw) = String::from_utf8(hex_decode(encoded)) {
-            stack.set_opaque_nbt(Some(raw));
-        }
+        stack.set_opaque_nbt(Some(raw));
     }
     let damage = metadata
         .iter()
@@ -7711,7 +7749,6 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
             .collect::<Vec<_>>();
         if let Ok(name) = String::from_utf8(bytes) {
             use foton_registry::data_components::vanilla_components::CUSTOM_NAME;
-            use text_components::TextComponent;
             stack.set(CUSTOM_NAME, TextComponent::plain(name));
         }
     }
@@ -7726,36 +7763,32 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
             String::from_utf8(bytes).ok().map(TextComponent::plain)
         })
         .collect::<Vec<_>>();
-    if !lore_lines.is_empty() {
-        if let Ok(lore) = ItemLore::new(lore_lines) {
-            stack.set(LORE, lore);
-        }
+    if !lore_lines.is_empty()
+        && let Ok(lore) = ItemLore::new(lore_lines)
+    {
+        stack.set(LORE, lore);
     }
-    if metadata.iter().any(|value| *value == "unbreakable") {
+    if metadata.contains(&"unbreakable") {
         stack.set(UNBREAKABLE, ());
     }
-    if metadata.iter().any(|value| *value == "hidetooltip") {
+    if metadata.contains(&"hidetooltip") {
         stack.set(TOOLTIP_DISPLAY, TooltipDisplay::new(true));
     }
     if let Some(encoded) = metadata
         .iter()
         .find_map(|value| value.strip_prefix("tooltipstylehex="))
+        && let Ok(style) = String::from_utf8(hex_decode(encoded))
+        && let Ok(style) = style.parse()
     {
-        if let Ok(style) = String::from_utf8(hex_decode(encoded)) {
-            if let Ok(style) = style.parse() {
-                stack.set(TOOLTIP_STYLE, style);
-            }
-        }
+        stack.set(TOOLTIP_STYLE, style);
     }
     if let Some(encoded) = metadata
         .iter()
         .find_map(|value| value.strip_prefix("itemmodelhex="))
+        && let Ok(model) = String::from_utf8(hex_decode(encoded))
+        && let Ok(model) = model.parse()
     {
-        if let Ok(model) = String::from_utf8(hex_decode(encoded)) {
-            if let Ok(model) = model.parse() {
-                stack.set(ITEM_MODEL, model);
-            }
-        }
+        stack.set(ITEM_MODEL, model);
     }
     let floats = metadata
         .iter()
@@ -7787,13 +7820,12 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
         .iter()
         .find_map(|value| value.strip_prefix("model="))
         .and_then(|value| value.parse::<f32>().ok())
+        && model.is_finite()
     {
-        if model.is_finite() {
-            stack.set(
-                CUSTOM_MODEL_DATA,
-                CustomModelData::new(vec![model], Vec::new(), Vec::new(), Vec::new()),
-            );
-        }
+        stack.set(
+            CUSTOM_MODEL_DATA,
+            CustomModelData::new(vec![model], Vec::new(), Vec::new(), Vec::new()),
+        );
     }
     let mut enchantments = ItemEnchantments::empty();
     for encoded in metadata
@@ -7802,10 +7834,10 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     {
         if let Some((key, level)) = encoded.rsplit_once(':') {
             let bytes = hex_decode(key);
-            if let (Ok(name), Ok(level)) = (String::from_utf8(bytes), level.parse::<u32>()) {
-                if let Ok(key) = name.parse() {
-                    enchantments.set(key, level);
-                }
+            if let (Ok(name), Ok(level)) = (String::from_utf8(bytes), level.parse::<u32>())
+                && let Ok(key) = name.parse()
+            {
+                enchantments.set(key, level);
             }
         }
     }
@@ -7819,10 +7851,10 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     {
         if let Some((key, level)) = encoded.rsplit_once(':') {
             let bytes = hex_decode(key);
-            if let (Ok(name), Ok(level)) = (String::from_utf8(bytes), level.parse::<u32>()) {
-                if let Ok(key) = name.parse() {
-                    stored.set(key, level);
-                }
+            if let (Ok(name), Ok(level)) = (String::from_utf8(bytes), level.parse::<u32>())
+                && let Ok(key) = name.parse()
+            {
+                stored.set(key, level);
             }
         }
     }
@@ -8088,7 +8120,7 @@ extern "system" fn is_permission_set(
     u8::from(player.permission_state(&PermissionExpr::key(key)).is_some())
 }
 
-/// `foton.Native.blockState`
+/// `foton.Native.biomeKey`
 extern "system" fn biome_key(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -8097,9 +8129,6 @@ extern "system" fn biome_key(
     y: jint,
     z: jint,
 ) -> jstring {
-    let Ok(name) = env.get_string(&world_name) else {
-        return null_mut();
-    };
     let Some(world) = world(&mut env, &world_name) else {
         return null_mut();
     };
@@ -8115,15 +8144,15 @@ extern "system" fn block_piston_reaction(
     z: jint,
 ) -> jstring {
     let Some(world) = world(&mut env, &name) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let state = world.get_block_state(BlockPos::new(x, y, z));
     let value = match state.get_block().config.push_reaction {
-        foton_registry::blocks::behavior::PushReaction::Normal => "NORMAL",
-        foton_registry::blocks::behavior::PushReaction::Destroy => "BREAK",
-        foton_registry::blocks::behavior::PushReaction::Block => "BLOCK",
-        foton_registry::blocks::behavior::PushReaction::Ignore => "IGNORE",
-        foton_registry::blocks::behavior::PushReaction::PushOnly => "PUSH_ONLY",
+        PushReaction::Normal => "NORMAL",
+        PushReaction::Destroy => "BREAK",
+        PushReaction::Block => "BLOCK",
+        PushReaction::Ignore => "IGNORE",
+        PushReaction::PushOnly => "PUSH_ONLY",
     };
     to_java(&mut env, Some(value.to_owned()))
 }
@@ -8164,7 +8193,7 @@ extern "system" fn recipe_remove(
         .ok()
         .and_then(|text| text.to_str().ok()?.parse().ok())
         .is_some_and(|key| foton_registry::REGISTRY.recipes.remove(&key));
-    removed as jboolean
+    jboolean::from(removed)
 }
 
 extern "system" fn recipe_add_shapeless(
@@ -8180,53 +8209,55 @@ extern "system" fn recipe_add_shapeless(
         .ok()
         .and_then(|v| v.to_str().ok()?.parse().ok())
     else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(result_key) = env
         .get_string(&result)
         .ok()
         .and_then(|v| v.to_str().ok()?.parse().ok())
     else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(result_item) = REGISTRY.items.by_key(&result_key) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     if count <= 0 {
-        return false as jboolean;
+        return jboolean::from(false);
     }
     let Ok(length) = env.get_array_length(&ingredients) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let mut parsed = Vec::with_capacity(length as usize);
     for index in 0..length {
         let Ok(value) = env.get_object_array_element(&ingredients, index) else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         let value = JString::from(value);
         let Ok(text) = env.get_string(&value) else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         let Ok(item_key) = text.to_str().unwrap_or_default().parse::<Identifier>() else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         let Some(item) = REGISTRY.items.by_key(&item_key) else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         parsed.push(Ingredient::Item(item));
     }
     let ingredients: &'static [Ingredient] = Box::leak(parsed.into_boxed_slice());
-    REGISTRY
-        .recipes
-        .register_runtime_shapeless(ShapelessRecipe {
-            id: key,
-            category: CraftingCategory::Misc,
-            ingredients,
-            result: RecipeResult {
-                item: result_item,
-                count,
-            },
-        }) as jboolean
+    jboolean::from(
+        REGISTRY
+            .recipes
+            .register_runtime_shapeless(ShapelessRecipe {
+                id: key,
+                category: CraftingCategory::Misc,
+                ingredients,
+                result: RecipeResult {
+                    item: result_item,
+                    count,
+                },
+            }),
+    )
 }
 
 extern "system" fn recipe_add_shaped(
@@ -8243,54 +8274,54 @@ extern "system" fn recipe_add_shaped(
         .ok()
         .and_then(|v| v.to_str().ok()?.parse().ok())
     else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(result_key) = env
         .get_string(&result)
         .ok()
         .and_then(|v| v.to_str().ok()?.parse().ok())
     else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let Some(result_item) = REGISTRY.items.by_key(&result_key) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     if count <= 0 {
-        return false as jboolean;
+        return jboolean::from(false);
     }
     let Some(rows) = read_string_array(&mut env, &shape) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     if rows.is_empty() || rows.len() > 3 || rows.iter().any(|row| row.is_empty() || row.len() > 3) {
-        return false as jboolean;
+        return jboolean::from(false);
     }
     let width = rows[0].len();
     if rows.iter().any(|row| row.len() != width) {
-        return false as jboolean;
+        return jboolean::from(false);
     }
     let Some(definitions) = read_string_array(&mut env, &ingredients) else {
-        return false as jboolean;
+        return jboolean::from(false);
     };
     let mut parsed = FxHashMap::default();
     for definition in definitions {
         let Some((character, item_name)) = definition.split_once('=') else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         let mut chars = character.chars();
         let Some(character) = chars.next() else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         if chars.next().is_some() || character == ' ' {
-            return false as jboolean;
+            return jboolean::from(false);
         }
         let Ok(item_key) = item_name.parse::<Identifier>() else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         let Some(item) = REGISTRY.items.by_key(&item_key) else {
-            return false as jboolean;
+            return jboolean::from(false);
         };
         if parsed.insert(character, Ingredient::Item(item)).is_some() {
-            return false as jboolean;
+            return jboolean::from(false);
         }
     }
     let mut pattern = Vec::with_capacity(width * rows.len());
@@ -8301,12 +8332,12 @@ extern "system" fn recipe_add_shaped(
             } else if let Some(ingredient) = parsed.get(&character) {
                 pattern.push(ingredient.clone());
             } else {
-                return false as jboolean;
+                return jboolean::from(false);
             }
         }
     }
     let pattern: &'static [Ingredient] = Box::leak(pattern.into_boxed_slice());
-    REGISTRY.recipes.register_runtime_shaped(ShapedRecipe::new(
+    jboolean::from(REGISTRY.recipes.register_runtime_shaped(ShapedRecipe::new(
         key,
         CraftingCategory::Misc,
         width,
@@ -8317,7 +8348,7 @@ extern "system" fn recipe_add_shaped(
             count,
         },
         true,
-    )) as jboolean
+    )))
 }
 
 extern "system" fn recipe_list(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobjectArray {
@@ -8344,8 +8375,10 @@ extern "system" fn block_indirectly_powered(
     y: jint,
     z: jint,
 ) -> jboolean {
-    world(&mut env, &name).is_some_and(|world| world.has_neighbor_signal(BlockPos::new(x, y, z)))
-        as jboolean
+    jboolean::from(
+        world(&mut env, &name)
+            .is_some_and(|world| world.has_neighbor_signal(BlockPos::new(x, y, z))),
+    )
 }
 
 extern "system" fn block_light(
@@ -8356,14 +8389,9 @@ extern "system" fn block_light(
     y: jint,
     z: jint,
 ) -> jbyte {
-    world(&mut env, &name)
-        .map(|world| {
-            world.light_value_at(
-                foton_core::chunk::light::LightLayer::Block,
-                BlockPos::new(x, y, z),
-            ) as jbyte
-        })
-        .unwrap_or(0)
+    world(&mut env, &name).map_or(0, |world| {
+        world.light_value_at(LightLayer::Block, BlockPos::new(x, y, z)) as jbyte
+    })
 }
 
 extern "system" fn sky_light(
@@ -8374,14 +8402,9 @@ extern "system" fn sky_light(
     y: jint,
     z: jint,
 ) -> jbyte {
-    world(&mut env, &name)
-        .map(|world| {
-            world.light_value_at(
-                foton_core::chunk::light::LightLayer::Sky,
-                BlockPos::new(x, y, z),
-            ) as jbyte
-        })
-        .unwrap_or(0)
+    world(&mut env, &name).map_or(0, |world| {
+        world.light_value_at(LightLayer::Sky, BlockPos::new(x, y, z)) as jbyte
+    })
 }
 
 extern "system" fn block_passable(
@@ -8392,15 +8415,15 @@ extern "system" fn block_passable(
     y: jint,
     z: jint,
 ) -> jboolean {
-    world(&mut env, &name)
-        .map(|world| {
-            let pos = BlockPos::new(x, y, z);
+    world(&mut env, &name).map_or(jboolean::from(false), |world| {
+        let pos = BlockPos::new(x, y, z);
+        jboolean::from(
             world
                 .get_block_state(pos)
                 .get_collision_shape_at(pos)
-                .is_empty() as jboolean
-        })
-        .unwrap_or(false as jboolean)
+                .is_empty(),
+        )
+    })
 }
 
 /// Returns the item currently stored in a lectern, without discarding its book type.
@@ -8736,8 +8759,9 @@ extern "system" fn set_open_menu_slot(
     let Ok(slot) = usize::try_from(slot) else {
         return 0;
     };
-    player(&mut env, &uuid).is_some_and(|player| player.set_open_container_item(slot, stack))
-        as jboolean
+    jboolean::from(
+        player(&mut env, &uuid).is_some_and(|player| player.set_open_container_item(slot, stack)),
+    )
 }
 
 /// Native open menu type
@@ -8802,7 +8826,7 @@ extern "system" fn set_game_mode(
     }) else {
         return 0;
     };
-    player(&mut env, &uuid).is_some_and(|player| player.set_game_mode(game_mode)) as jboolean
+    jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.set_game_mode(game_mode)))
 }
 
 extern "system" fn allow_flight(
@@ -8810,7 +8834,7 @@ extern "system" fn allow_flight(
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jboolean {
-    player(&mut env, &uuid).is_some_and(|player| player.get_abilities().may_fly) as jboolean
+    jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.get_abilities().may_fly))
 }
 
 extern "system" fn is_flying(
@@ -8818,7 +8842,7 @@ extern "system" fn is_flying(
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jboolean {
-    player(&mut env, &uuid).is_some_and(|player| player.is_flying()) as jboolean
+    jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.is_flying()))
 }
 
 extern "system" fn is_sleeping_ignored(
@@ -8826,7 +8850,7 @@ extern "system" fn is_sleeping_ignored(
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jboolean {
-    player(&mut env, &uuid).is_some_and(|player| player.is_sleeping_ignored()) as jboolean
+    jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.is_sleeping_ignored()))
 }
 
 extern "system" fn set_sleeping_ignored(
@@ -8900,7 +8924,7 @@ extern "system" fn open_smithing_table(
     };
     let inventory = Arc::clone(&player.inventory);
     player.open_menu(
-        TextComponent::translated(foton_utils::translations::CONTAINER_UPGRADE.msg()),
+        TextComponent::translated(CONTAINER_UPGRADE.msg()),
         move |context| smithing(inventory, context.container_id, BlockPos::new(x, y, z)),
     );
     1
@@ -8920,14 +8944,8 @@ extern "system" fn open_loom(
     };
     let inventory = Arc::clone(&player.inventory);
     player.open_menu(
-        TextComponent::translated(foton_utils::translations::CONTAINER_LOOM.msg()),
-        move |context| {
-            foton_core::inventory::menu::kinds::loom(
-                inventory,
-                context.container_id,
-                BlockPos::new(x, y, z),
-            )
-        },
+        TextComponent::translated(CONTAINER_LOOM.msg()),
+        move |context| loom(inventory, context.container_id, BlockPos::new(x, y, z)),
     );
     1
 }
@@ -8947,8 +8965,7 @@ extern "system" fn damage_player(
         .ok()
         .and_then(|value| value.to_str().ok().and_then(|text| text.parse().ok()));
     let world = player.get_world();
-    let mut source =
-        DamageSource::environment(&foton_registry::vanilla_damage_types::PLAYER_ATTACK);
+    let mut source = DamageSource::environment(&PLAYER_ATTACK);
     if let Some(id) =
         source_id.and_then(|id| world.get_entity_by_uuid(&id).map(|entity| entity.id()))
     {
@@ -8978,9 +8995,9 @@ extern "system" fn open_cartography_table(
         return 0;
     };
     player.open_menu(
-        TextComponent::translated(foton_utils::translations::CONTAINER_CARTOGRAPHY_TABLE.msg()),
+        TextComponent::translated(CONTAINER_CARTOGRAPHY_TABLE.msg()),
         move |context| {
-            foton_core::inventory::menu::kinds::cartography(
+            cartography(
                 inventory,
                 context.container_id,
                 BlockPos::new(x, y, z),
@@ -9007,9 +9024,9 @@ extern "system" fn open_anvil(
     let inventory = Arc::clone(&player.inventory);
     let world = player.get_world();
     player.open_menu(
-        TextComponent::translated(foton_utils::translations::CONTAINER_REPAIR.msg()),
+        TextComponent::translated(CONTAINER_REPAIR.msg()),
         move |context| {
-            foton_core::inventory::menu::kinds::anvil(
+            anvil(
                 inventory,
                 context.container_id,
                 BlockPos::new(x, y, z),
@@ -9034,14 +9051,8 @@ extern "system" fn open_stonecutter(
     };
     let inventory = Arc::clone(&player.inventory);
     player.open_menu(
-        TextComponent::translated(foton_utils::translations::CONTAINER_STONECUTTER.msg()),
-        move |context| {
-            foton_core::inventory::menu::kinds::stonecutter(
-                inventory,
-                context.container_id,
-                BlockPos::new(x, y, z),
-            )
-        },
+        TextComponent::translated(CONTAINER_STONECUTTER.msg()),
+        move |context| stonecutter(inventory, context.container_id, BlockPos::new(x, y, z)),
     );
     1
 }
@@ -9060,13 +9071,13 @@ extern "system" fn open_grindstone(
     };
     let inventory = Arc::clone(&player.inventory);
     player.open_menu(
-        TextComponent::translated(foton_utils::translations::CONTAINER_GRINDSTONE_TITLE.msg()),
+        TextComponent::translated(CONTAINER_GRINDSTONE_TITLE.msg()),
         move |context| {
-            foton_core::inventory::menu::kinds::grindstone(
+            grindstone(
                 inventory,
                 context.container_id,
                 BlockPos::new(x, y, z),
-                &context.world,
+                context.world,
             )
         },
     );
@@ -9087,14 +9098,8 @@ extern "system" fn open_workbench(
     };
     let inventory = Arc::clone(&player.inventory);
     player.open_menu(
-        TextComponent::translated(foton_utils::translations::CONTAINER_CRAFTING.msg()),
-        move |context| {
-            foton_core::inventory::menu::kinds::crafting(
-                inventory,
-                context.container_id,
-                BlockPos::new(x, y, z),
-            )
-        },
+        TextComponent::translated(CONTAINER_CRAFTING.msg()),
+        move |context| crafting(inventory, context.container_id, BlockPos::new(x, y, z)),
     );
     1
 }
@@ -9419,7 +9424,7 @@ extern "system" fn max_players(_env: JNIEnv<'_>, _class: JClass<'_>) -> jint {
 }
 
 extern "system" fn server_allow_flight(_env: JNIEnv<'_>, _class: JClass<'_>) -> jboolean {
-    server().is_some_and(|value| value.config.allow_flight) as jboolean
+    jboolean::from(server().is_some_and(|value| value.config.allow_flight))
 }
 
 extern "system" fn server_default_game_mode(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstring {
@@ -9442,7 +9447,7 @@ extern "system" fn server_simulation_distance(_env: JNIEnv<'_>, _class: JClass<'
     server().map_or(10, |value| i32::from(value.config.simulation_distance))
 }
 
-extern "system" fn server_tps(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jdoubleArray {
+extern "system" fn server_tps(env: JNIEnv<'_>, _class: JClass<'_>) -> jdoubleArray {
     let Some(server) = server() else {
         return null_mut();
     };
@@ -9548,8 +9553,9 @@ extern "system" fn unload_world(
     else {
         return 0;
     };
-    server().is_some_and(|server| server.request_world_removal_with_save(key, save != 0))
-        as jboolean
+    jboolean::from(
+        server().is_some_and(|server| server.request_world_removal_with_save(key, save != 0)),
+    )
 }
 
 extern "system" fn world_names(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobjectArray {
@@ -9701,15 +9707,15 @@ extern "system" fn chunk_request_ready(
         return 0;
     };
     match handle.poll() {
-        foton_core::chunk::chunk_request::ChunkRequestState::Ready => {
+        ChunkRequestState::Ready => {
             requests.remove(&id);
             1
         }
-        foton_core::chunk::chunk_request::ChunkRequestState::Cancelled => {
+        ChunkRequestState::Cancelled => {
             requests.remove(&id);
             0
         }
-        foton_core::chunk::chunk_request::ChunkRequestState::Pending { .. } => 0,
+        ChunkRequestState::Pending { .. } => 0,
     }
 }
 
@@ -9721,7 +9727,7 @@ extern "system" fn world_chunk_loaded(
     x: jint,
     z: jint,
 ) -> jboolean {
-    world(&mut env, &name).is_some_and(|world| world.is_chunk_loaded(x, z)) as jboolean
+    jboolean::from(world(&mut env, &name).is_some_and(|world| world.is_chunk_loaded(x, z)))
 }
 
 extern "system" fn world_chunk_generated(
@@ -9731,7 +9737,7 @@ extern "system" fn world_chunk_generated(
     x: jint,
     z: jint,
 ) -> jboolean {
-    world(&mut env, &name).is_some_and(|world| world.is_chunk_generated(x, z)) as jboolean
+    jboolean::from(world(&mut env, &name).is_some_and(|world| world.is_chunk_generated(x, z)))
 }
 
 extern "system" fn set_world_spawn_ticks(
@@ -9747,21 +9753,17 @@ extern "system" fn set_world_spawn_ticks(
     let Some(world) = world(&mut env, &name) else {
         return;
     };
-    let Some(category) = category.to_str().ok().map(|v| v.to_ascii_uppercase()) else {
+    let Some(category) = category.to_str().ok().map(str::to_ascii_uppercase) else {
         return;
     };
     let category = match category.as_str() {
-        "MONSTER" => foton_registry::entity_type::MobCategory::Monster,
-        "CREATURE" | "ANIMAL" => foton_registry::entity_type::MobCategory::Creature,
-        "AMBIENT" => foton_registry::entity_type::MobCategory::Ambient,
-        "AXOLOTL" | "AXOLOTLS" => foton_registry::entity_type::MobCategory::Axolotls,
-        "WATER_CREATURE" | "WATER_ANIMAL" => {
-            foton_registry::entity_type::MobCategory::WaterCreature
-        }
-        "WATER_AMBIENT" => foton_registry::entity_type::MobCategory::WaterAmbient,
-        "UNDERGROUND_WATER_CREATURE" => {
-            foton_registry::entity_type::MobCategory::UndergroundWaterCreature
-        }
+        "MONSTER" => MobCategory::Monster,
+        "CREATURE" | "ANIMAL" => MobCategory::Creature,
+        "AMBIENT" => MobCategory::Ambient,
+        "AXOLOTL" | "AXOLOTLS" => MobCategory::Axolotls,
+        "WATER_CREATURE" | "WATER_ANIMAL" => MobCategory::WaterCreature,
+        "WATER_AMBIENT" => MobCategory::WaterAmbient,
+        "UNDERGROUND_WATER_CREATURE" => MobCategory::UndergroundWaterCreature,
         _ => return,
     };
     world.set_spawn_ticks(category, ticks);
@@ -9779,21 +9781,17 @@ extern "system" fn world_spawn_limit(
     let Some(world) = world(&mut env, &name) else {
         return 0;
     };
-    let Some(category) = category.to_str().ok().map(|v| v.to_ascii_uppercase()) else {
+    let Some(category) = category.to_str().ok().map(str::to_ascii_uppercase) else {
         return 0;
     };
     let category = match category.as_str() {
-        "MONSTER" => foton_registry::entity_type::MobCategory::Monster,
-        "CREATURE" | "ANIMAL" => foton_registry::entity_type::MobCategory::Creature,
-        "AMBIENT" => foton_registry::entity_type::MobCategory::Ambient,
-        "AXOLOTL" | "AXOLOTLS" => foton_registry::entity_type::MobCategory::Axolotls,
-        "WATER_CREATURE" | "WATER_ANIMAL" => {
-            foton_registry::entity_type::MobCategory::WaterCreature
-        }
-        "WATER_AMBIENT" => foton_registry::entity_type::MobCategory::WaterAmbient,
-        "UNDERGROUND_WATER_CREATURE" => {
-            foton_registry::entity_type::MobCategory::UndergroundWaterCreature
-        }
+        "MONSTER" => MobCategory::Monster,
+        "CREATURE" | "ANIMAL" => MobCategory::Creature,
+        "AMBIENT" => MobCategory::Ambient,
+        "AXOLOTL" | "AXOLOTLS" => MobCategory::Axolotls,
+        "WATER_CREATURE" | "WATER_ANIMAL" => MobCategory::WaterCreature,
+        "WATER_AMBIENT" => MobCategory::WaterAmbient,
+        "UNDERGROUND_WATER_CREATURE" => MobCategory::UndergroundWaterCreature,
         _ => return 0,
     };
     world
@@ -9817,18 +9815,16 @@ extern "system" fn set_world_spawn_limit(
     let category = match category
         .to_str()
         .ok()
-        .map(|v| v.to_ascii_uppercase())
+        .map(str::to_ascii_uppercase)
         .as_deref()
     {
-        Some("MONSTER") => foton_registry::entity_type::MobCategory::Monster,
-        Some("CREATURE") => foton_registry::entity_type::MobCategory::Creature,
-        Some("AMBIENT") => foton_registry::entity_type::MobCategory::Ambient,
-        Some("AXOLOTL") | Some("AXOLOTLS") => foton_registry::entity_type::MobCategory::Axolotls,
-        Some("UNDERGROUND_WATER_CREATURE") => {
-            foton_registry::entity_type::MobCategory::UndergroundWaterCreature
-        }
-        Some("WATER_CREATURE") => foton_registry::entity_type::MobCategory::WaterCreature,
-        Some("WATER_AMBIENT") => foton_registry::entity_type::MobCategory::WaterAmbient,
+        Some("MONSTER") => MobCategory::Monster,
+        Some("CREATURE") => MobCategory::Creature,
+        Some("AMBIENT") => MobCategory::Ambient,
+        Some("AXOLOTL" | "AXOLOTLS") => MobCategory::Axolotls,
+        Some("UNDERGROUND_WATER_CREATURE") => MobCategory::UndergroundWaterCreature,
+        Some("WATER_CREATURE") => MobCategory::WaterCreature,
+        Some("WATER_AMBIENT") => MobCategory::WaterAmbient,
         _ => return,
     };
     world.set_spawn_limit(category, limit);
@@ -9839,7 +9835,7 @@ extern "system" fn world_keep_spawn_in_memory(
     _class: JClass<'_>,
     name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &name).is_some_and(|w| w.keep_spawn_in_memory()) as jboolean
+    jboolean::from(world(&mut env, &name).is_some_and(|w| w.keep_spawn_in_memory()))
 }
 extern "system" fn set_world_keep_spawn_in_memory(
     mut env: JNIEnv<'_>,
@@ -9857,7 +9853,7 @@ extern "system" fn world_storm(
     _class: JClass<'_>,
     name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &name).map_or(0, |world| world.is_raining() as jboolean)
+    world(&mut env, &name).map_or(0, |world| jboolean::from(world.is_raining()))
 }
 
 extern "system" fn set_world_storm(
@@ -9876,7 +9872,7 @@ extern "system" fn world_has_bonus_chest(
     _class: JClass<'_>,
     name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &name).is_some_and(|world| world.has_bonus_chest()) as jboolean
+    jboolean::from(world(&mut env, &name).is_some_and(|world| world.has_bonus_chest()))
 }
 
 extern "system" fn world_weather_duration(
@@ -9910,10 +9906,10 @@ extern "system" fn set_world_difficulty(
         return;
     };
     let difficulty = match value.to_ascii_uppercase().as_str() {
-        "PEACEFUL" => foton_utils::types::Difficulty::Peaceful,
-        "EASY" => foton_utils::types::Difficulty::Easy,
-        "NORMAL" => foton_utils::types::Difficulty::Normal,
-        "HARD" => foton_utils::types::Difficulty::Hard,
+        "PEACEFUL" => Difficulty::Peaceful,
+        "EASY" => Difficulty::Easy,
+        "NORMAL" => Difficulty::Normal,
+        "HARD" => Difficulty::Hard,
         _ => return,
     };
     if let Some(world) = world(&mut env, &world_name) {
@@ -9947,7 +9943,7 @@ extern "system" fn world_thundering(
     _class: JClass<'_>,
     name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &name).map_or(0, |world| world.is_thundering() as jboolean)
+    world(&mut env, &name).map_or(0, |world| jboolean::from(world.is_thundering()))
 }
 
 extern "system" fn set_world_thundering(
@@ -9986,9 +9982,7 @@ extern "system" fn spawn_entity(
     let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
         return null_mut();
     };
-    let Some(entity) =
-        foton_core::entity::spawn_util::spawn_entity_at(&world, &type_key, DVec3::new(x, y, z))
-    else {
+    let Some(entity) = spawn_entity_at(&world, &type_key, DVec3::new(x, y, z)) else {
         return null_mut();
     };
     to_java(&mut env, Some(entity.uuid().to_string()))
@@ -10023,16 +10017,10 @@ extern "system" fn set_world_game_rule(
         return 0;
     };
     let parsed = match rule.value_type() {
-        foton_registry::game_rules::GameRuleType::Bool => value_text
-            .parse::<bool>()
-            .ok()
-            .map(foton_registry::game_rules::GameRuleValue::new),
-        foton_registry::game_rules::GameRuleType::Int => value_text
-            .parse::<i32>()
-            .ok()
-            .map(foton_registry::game_rules::GameRuleValue::new),
+        GameRuleType::Bool => value_text.parse::<bool>().ok().map(GameRuleValue::new),
+        GameRuleType::Int => value_text.parse::<i32>().ok().map(GameRuleValue::new),
     };
-    parsed.is_some_and(|value| world.set_erased_game_rule(rule, value)) as jboolean
+    jboolean::from(parsed.is_some_and(|value| world.set_erased_game_rule(rule, value)))
 }
 
 extern "system" fn world_game_rule_default(
@@ -10053,9 +10041,12 @@ extern "system" fn world_game_rule_default(
     let Ok(rule_key) = Identifier::from_str(&rule_text) else {
         return null_mut();
     };
-    let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
+    // The answer is the registry's default rather than this world's value, so
+    // the world is only here to be checked: asking about a world that is not
+    // loaded gets nothing back, not a number that looks like an answer.
+    if server().is_none_or(|server| server.worlds.get_owned(&world_key).is_none()) {
         return null_mut();
-    };
+    }
     let Some(rule) = foton_registry::REGISTRY.game_rules.by_key(&rule_key) else {
         return null_mut();
     };
@@ -10099,11 +10090,7 @@ extern "system" fn hopper_custom_name(
 ) -> jstring {
     let value = world(&mut env, &name)
         .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
-        .and_then(|entity| {
-            entity
-                .downcast_ref::<foton_core::block_entity::entities::HopperBlockEntity>()?
-                .custom_name()
-        })
+        .and_then(|entity| entity.downcast_ref::<HopperBlockEntity>()?.custom_name())
         .map(|text| text.to_string());
     to_java(&mut env, value)
 }
@@ -10126,9 +10113,7 @@ extern "system" fn hopper_set_custom_name(
     let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
         return;
     };
-    let Some(hopper) =
-        entity.downcast_ref::<foton_core::block_entity::entities::HopperBlockEntity>()
-    else {
+    let Some(hopper) = entity.downcast_ref::<HopperBlockEntity>() else {
         return;
     };
     hopper.set_custom_name((!value.is_empty()).then(|| TextComponent::plain(value)));
@@ -10146,11 +10131,11 @@ extern "system" fn jukebox_is_playing(
         .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
         .map(|entity| {
             entity
-                .downcast_ref::<foton_core::block_entity::entities::JukeboxBlockEntity>()
-                .is_some_and(foton_core::block_entity::entities::JukeboxBlockEntity::is_playing)
+                .downcast_ref::<JukeboxBlockEntity>()
+                .is_some_and(JukeboxBlockEntity::is_playing)
         });
     let playing = playing.unwrap_or(false);
-    if playing { 1 } else { 0 }
+    u8::from(playing)
 }
 
 extern "system" fn jukebox_record(
@@ -10315,7 +10300,7 @@ extern "system" fn sign_is_waxed(
                 .map(SignBlockEntity::is_waxed)
         })
         .unwrap_or(false);
-    if waxed { 1 } else { 0 }
+    u8::from(waxed)
 }
 
 extern "system" fn spawner_delay(
@@ -10534,7 +10519,7 @@ extern "system" fn sign_glowing(
                 .map(|sign| sign.get_text(front != 0).has_glowing_text)
         })
         .unwrap_or(false);
-    value as jboolean
+    jboolean::from(value)
 }
 
 extern "system" fn sign_set_glowing(
@@ -10740,7 +10725,7 @@ extern "system" fn set_banner_patterns(
         };
         descriptions.push((key, color));
     }
-    banner.set_pattern_descriptions(descriptions) as jboolean
+    jboolean::from(banner.set_pattern_descriptions(descriptions))
 }
 
 /// `foton.Native.worldLoadedChunkCoords`
@@ -10793,7 +10778,7 @@ extern "system" fn world_auto_save(
     _class: JClass<'_>,
     name: JString<'_>,
 ) -> jboolean {
-    world(&mut env, &name).is_some_and(|world| world.is_auto_save()) as jboolean
+    jboolean::from(world(&mut env, &name).is_some_and(|world| world.is_auto_save()))
 }
 
 /// `foton.Native.setWorldAutoSave`
@@ -10878,9 +10863,7 @@ extern "system" fn scoreboard_entry_team(
         server
             .scoreboards
             .get(world.domain())
-            .and_then(|scoreboard| {
-                scoreboard.holder_team_name(&foton_core::scoreboard::ScoreHolder::new(entry))
-            })
+            .and_then(|scoreboard| scoreboard.holder_team_name(&ScoreHolder::new(entry)))
     });
     to_java(&mut env, team)
 }
@@ -10943,11 +10926,11 @@ extern "system" fn world_border(
     name: JString<'_>,
 ) -> jdoubleArray {
     let Some(world) = world(&mut env, &name) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let (x, z, size) = world.world_border_center_size();
     let Ok(array) = env.new_double_array(3) else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let _ = env.set_double_array_region(&array, 0, &[x, z, size]);
     array.into_raw()
@@ -11079,7 +11062,7 @@ extern "system" fn create_explosion_advanced(
         return 0;
     }
     let interaction = if break_blocks != 0 {
-        world.explosion_destroy_type(&foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY)
+        world.explosion_destroy_type(&TNT_EXPLOSION_DROP_DECAY)
     } else {
         ExplosionBlockInteraction::Keep
     };
@@ -11119,8 +11102,7 @@ extern "system" fn create_explosion(
     if !power.is_finite() || power < 0.0 {
         return 0;
     }
-    let interaction =
-        world.explosion_destroy_type(&foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY);
+    let interaction = world.explosion_destroy_type(&TNT_EXPLOSION_DROP_DECAY);
     let spec = ExplosionSpec::new(None, None, None, power, false, interaction);
     world.explode(spec, glam::DVec3::new(x, y, z));
     1
@@ -13134,6 +13116,36 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setEnderChestSlot",
             "(Ljava/lang/String;ILjava/lang/String;)V",
             set_ender_chest_slot as *mut c_void,
+        ),
+        method(
+            "spellcasterSpell",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            spellcaster_spell as *mut c_void,
+        ),
+        method(
+            "setSpellcasterSpell",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_spellcaster_spell as *mut c_void,
+        ),
+        method(
+            "projectileShooter",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            projectile_shooter as *mut c_void,
+        ),
+        method(
+            "setProjectileShooter",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_projectile_shooter as *mut c_void,
+        ),
+        method(
+            "setHangingFacing",
+            "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+            set_hanging_facing as *mut c_void,
+        ),
+        method(
+            "areaEffectCloudBasePotionType",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            area_effect_cloud_base_potion_type as *mut c_void,
         ),
         method(
             "heldSlot",

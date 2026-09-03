@@ -17,6 +17,7 @@ use foton_protocol::utils::ConnectionProtocol;
 use foton_utils::Identifier;
 
 use crate::tcp_client::{ConnectionAction, ConnectionUpdate, JavaTcpClient};
+use foton_core::event::AsyncPlayerPreLoginEvent;
 
 const BRAND_PAYLOAD: [u8; 5] = *b"Foton";
 
@@ -100,11 +101,8 @@ impl JavaTcpClient {
             Ok(gameprofile) => gameprofile,
             Err(error) => return self.reject_unexpected_packet(error).await,
         };
-        let mut pre_login = foton_core::event::AsyncPlayerPreLoginEvent::new(
-            gameprofile.id,
-            gameprofile.name.clone(),
-            self.address,
-        );
+        let mut pre_login =
+            AsyncPlayerPreLoginEvent::new(gameprofile.id, gameprofile.name.clone(), self.address);
         self.server.events().fire(&mut pre_login);
         if let Some(message) = pre_login.kick_message() {
             self.kick(message.to_owned().into()).await;
