@@ -20,6 +20,12 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - uses: crate-ci/typos@v1.48.0
+      # The action above runs typos itself and does not leave the binary on
+      # the PATH, so `dev/ci.sh` -- which runs the same check as part of the
+      # whole suite -- failed instantly with "typos: command not found". The
+      # zero-second failure was the tell.
+      - name: Install typos for the suite
+        run: cargo install typos-cli --locked
       - name: Verify the full release candidate
         run: bash dev/ci.sh
 

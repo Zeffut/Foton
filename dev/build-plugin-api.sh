@@ -38,15 +38,27 @@ python3 "$REPO/dev/gen-entity-type.py" "$OUT/generated"
 python3 "$REPO/dev/gen-enchantment.py" "$OUT/generated"
 python3 "$REPO/dev/gen-potion-type.py" "$OUT/generated"
 
+# The API compiles against Adventure, Brigadier, Guava and the rest, which live
+# in plugin-api/lib. That directory is gitignored and nothing fetches it, so a
+# machine that has never had it gets a wall of "package does not exist" instead
+# of being told what is actually wrong. Say it once, plainly.
+LIBS=""
+if [ -d "$REPO/plugin-api/lib" ]; then
+  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
+fi
+if [ -z "$LIBS" ]; then
+  echo "plugin-api/lib has no jars, and the API needs them to compile." >&2
+  echo "Adventure, Brigadier, Guava, gson, slf4j and snakeyaml -- about 4 MB." >&2
+  echo "The directory is gitignored and no script populates it yet; put the jars" >&2
+  echo "there, or see design/ for how the build is meant to get them." >&2
+  exit 1
+fi
+
 # javac reads a file of sources with @, which avoids both mapfile (bash 4+,
 # and macOS ships bash 3.2) and an argument list long enough to overflow exec.
 SOURCES="$OUT/sources.txt"
 find "$SRC" "$OUT/generated" -name '*.java' | sort > "$SOURCES"
 echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
-LIBS=""
-if [ -d "$REPO/plugin-api/lib" ]; then
-  LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
-fi
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.
 javac -Xlint:all -cp "${LIBS#:}" -d "$OUT/classes" "@$SOURCES"

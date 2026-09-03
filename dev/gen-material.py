@@ -29,7 +29,13 @@ ITEMS = REPO / "foton-registry" / "build_assets" / "items.json"
 BLOCKS = REPO / "foton-registry" / "build_assets" / "blocks.json"
 SOUNDS = REPO / "foton-registry" / "build_assets" / "sound_events.json"
 CLASSES = REPO / "foton-core" / "build" / "classes.json"
-FIRE_BLOCK = REPO / "minecraft-src" / "minecraft" / "src" / "net" / "minecraft" / "world" / "level" / "block" / "FireBlock.java"
+# Which blocks catch fire, extracted once from FireBlock.setFlammable and
+# committed. The repository's CI builds this jar and does not have
+# minecraft-src -- it is a gigabyte of decompiled Mojang source and does not
+# belong in the tree -- so a build step must not read it.
+FLAMMABLE = REPO / "dev" / "flammable-blocks.json"
+FIRE_BLOCK = (REPO / "minecraft-src" / "minecraft" / "src" / "net" / "minecraft" / "world"
+              / "level" / "block" / "FireBlock.java")
 
 # Java keywords cannot be enum constants. None of the registry names is one
 # today, and a name that became one would otherwise fail to compile with a
@@ -50,8 +56,7 @@ def read():
     classes = json.loads(CLASSES.read_text(encoding="utf-8"))
     gravity_classes = {"AnvilBlock", "ColoredFallingBlock", "ConcretePowderBlock", "DragonEggBlock", "SandBlock"}
     gravity_blocks = {entry["name"] for entry in classes["blocks"] if entry.get("class") in gravity_classes}
-    fire_source = FIRE_BLOCK.read_text(encoding="utf-8")
-    burnable_blocks = {match.group(1).lower() for match in re.finditer(r"setFlammable\(Blocks\.([A-Z0-9_]+),", fire_source)}
+    burnable_blocks = set(json.loads(FLAMMABLE.read_text(encoding="utf-8"))["blocks"])
     blocks = block_data["blocks"]
     shapes = block_data["shapes"]
 
@@ -372,9 +377,30 @@ def render_sounds(found):
     return "\n".join(lines)
 
 
+def refresh_flammable():
+    """Re-extracts the flammable list from minecraft-src, when it is there.
+
+    Run when the Minecraft version changes. The build never does this: it
+    reads the committed result, so a machine without the decompiled source
+    can still produce the jar.
+    """
+    if not FIRE_BLOCK.exists():
+        raise SystemExit(f"no {FIRE_BLOCK}; minecraft-src is needed to refresh")
+    source = FIRE_BLOCK.read_text(encoding="utf-8")
+    names = sorted({match.group(1).lower()
+                    for match in re.finditer(r"setFlammable\(Blocks\.([A-Z0-9_]+),", source)})
+    current = json.loads(FLAMMABLE.read_text(encoding="utf-8"))
+    current["blocks"] = names
+    FLAMMABLE.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+    print(f"refreshed {len(names)} flammable blocks")
+
+
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == "--refresh-flammable":
+        refresh_flammable()
+        return
     if len(sys.argv) != 2:
-        raise SystemExit("usage: gen-material.py <output-directory>")
+        raise SystemExit("usage: gen-material.py <output-directory> | --refresh-flammable")
     out = pathlib.Path(sys.argv[1]) / "org" / "bukkit"
     out.mkdir(parents=True, exist_ok=True)
 
