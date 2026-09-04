@@ -152,6 +152,7 @@ Un serveur qui diverge de vanilla est un serveur cassé.
 | `PARITY.md` | le registre de parité vanilla et pourquoi les chiffres mentent |
 | `CONTRIBUTING.md` | la barre qu'un changement doit passer |
 | `REPORTING.md` | le cycle des rapports joueurs `/bug` — arrivée, et ce que fermer un rapport exige |
+| `AUDITING.md` | comment auditer tout le serveur — les cinq couches, et ce que chacune trouve vraiment |
 
 `CONFIGURATION.md` est produit par `python3 dev/gen-config-docs.py` à partir
 des schémas JSON de `package-content/`. Ne jamais l'éditer à la main : modifier le

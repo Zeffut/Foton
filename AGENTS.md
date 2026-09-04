@@ -14,6 +14,8 @@ that, and they win over the check-in wording below.
 - `CONTRIBUTING.md` — the bar a change has to clear.
 - `REPORTING.md` — the player-report loop: how a `/bug` report arrives, and
   what closing one takes.
+- `AUDITING.md` — how to sweep the whole server for defects, and what each
+  layer of the sweep is actually good for.
 - This file — the engineering rules below.
 
 ---
