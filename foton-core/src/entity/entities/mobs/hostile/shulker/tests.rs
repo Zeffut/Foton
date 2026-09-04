@@ -155,3 +155,28 @@ fn the_peek_goal_holds_no_control() {
 
     assert_eq!(goal.controls(), GoalControls::EMPTY);
 }
+
+/// A shulker never despawns, however far away everybody is.
+///
+/// Vanilla parity: `Shulker extends AbstractGolem`, and
+/// `AbstractGolem.removeWhenFarAway` returns false. That is what lets
+/// `EndCityPieces` place its sentries with a bare `addFreshEntity`, without
+/// `setPersistenceRequired`: an end city generates well ahead of any player, so
+/// anything that could despawn would be gone before it was ever seen.
+///
+/// Foton's `ShulkerEntity` had no override and fell through to `Mob`'s default,
+/// which is true for anything that is not an animal -- so every end city
+/// sentry was deleted on its first tick. That is the "no shulkers in the End"
+/// half of the report.
+#[test]
+fn a_shulker_never_despawns_however_far_away_the_players_are() {
+    init_vanilla_registry();
+    let mob = shulker();
+
+    for distance in [0.0, 128.0, 1024.0, 16_384.0] {
+        assert!(
+            !Mob::remove_when_far_away(&mob, distance * distance),
+            "a shulker {distance} blocks from anyone must still stay"
+        );
+    }
+}
