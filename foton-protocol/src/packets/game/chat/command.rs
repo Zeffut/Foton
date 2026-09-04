@@ -39,7 +39,13 @@ pub struct SChatCommandSigned {
 
 impl foton_utils::serial::ReadFrom for SChatCommandSigned {
     fn read(reader: &mut Cursor<&[u8]>) -> std::io::Result<Self> {
-        let command = String::read_prefixed_bound::<VarInt>(reader, 256)?;
+        // Vanilla parity: `ServerboundChatCommandSignedPacket` reads the
+        // command with a bare `input.readUtf()`, which is `readUtf(32767)`,
+        // exactly like the unsigned packet. Bounding this one at 256 rejected
+        // any signed command longer than that -- `/msg <player> <a long
+        // message>` is the everyday case -- and a decode failure drops the
+        // player rather than the message.
+        let command = String::read_prefixed_bound::<VarInt>(reader, 32767)?;
         let timestamp = i64::read(reader)?;
         let salt = i64::read(reader)?;
 
