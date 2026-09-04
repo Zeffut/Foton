@@ -45,6 +45,7 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 
 use crate::behavior::InteractionResult;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{Goal, GoalControls, TemptGoal, TemptNavigation};
 use crate::entity::attribute::AttributeModifier;
 use crate::entity::bucketable::{
@@ -936,6 +937,11 @@ impl Entity for SulfurCubeEntity {
 }
 
 impl LivingEntity for SulfurCubeEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

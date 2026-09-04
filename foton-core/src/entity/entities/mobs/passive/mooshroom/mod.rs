@@ -33,6 +33,7 @@ use simdnbt::{FromNbtTag as _, ToNbtTag as _};
 use uuid::Uuid;
 
 use crate::behavior::InteractionResult;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     BreedGoal, FloatGoal, FollowParentGoal, LookAtPlayerGoal, PanicGoal, RandomLookAroundGoal,
     TemptGoal, WaterAvoidingRandomStrollGoal,
@@ -522,6 +523,11 @@ impl Entity for MushroomCowEntity {
 }
 
 impl LivingEntity for MushroomCowEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn mooshroom_loot_variant(&self) -> Option<&'static str> {
         Some(self.variant().serialized_name())
     }

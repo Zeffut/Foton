@@ -34,6 +34,7 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use text_components::TextComponent;
 
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase,
 };
@@ -399,6 +400,11 @@ impl Entity for MannequinEntity {
 }
 
 impl LivingEntity for MannequinEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

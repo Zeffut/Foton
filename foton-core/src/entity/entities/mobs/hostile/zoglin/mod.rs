@@ -29,6 +29,7 @@ use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::brain::behavior::utils;
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::brain::{Activity, Brain};
@@ -222,6 +223,11 @@ impl Entity for ZoglinEntity {
 }
 
 impl LivingEntity for ZoglinEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

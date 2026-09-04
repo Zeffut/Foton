@@ -19,6 +19,7 @@ use simdnbt::owned::NbtCompound;
 
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LeapAtTargetGoal, LookAtPlayerGoal,
     MeleeAttackGoal, NearestAttackableTargetGoal, RandomLookAroundGoal,
@@ -253,6 +254,11 @@ impl Entity for SpiderEntity {
 }
 
 impl LivingEntity for SpiderEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

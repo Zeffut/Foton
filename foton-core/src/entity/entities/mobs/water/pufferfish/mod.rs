@@ -25,6 +25,7 @@ use glam::DVec3;
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{AvoidEntityGoal, Goal, GoalControls, PanicGoal, RandomSwimmingGoal};
 use crate::entity::ai::path::PathType;
 use crate::entity::ai::targeting::TargetingConditions;
@@ -413,6 +414,11 @@ impl Entity for PufferfishEntity {
 }
 
 impl LivingEntity for PufferfishEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

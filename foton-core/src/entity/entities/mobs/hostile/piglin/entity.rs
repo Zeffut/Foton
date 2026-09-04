@@ -34,6 +34,7 @@ use simdnbt::owned::NbtCompound;
 use crate::behavior::InteractionResult;
 use crate::behavior::items::{MOB_ARROW_POWER, crossbow_is_charged, perform_crossbow_attack};
 use crate::entity::Enemy;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::brain::Brain;
 use crate::entity::ai::brain::behavior::{BrainContext, CrossbowAttackHooks};
 use crate::entity::conversion::{ConversionParams, convert_to};
@@ -583,6 +584,11 @@ impl Entity for PiglinEntity {
 }
 
 impl LivingEntity for PiglinEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

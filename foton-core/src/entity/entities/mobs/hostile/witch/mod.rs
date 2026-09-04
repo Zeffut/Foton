@@ -28,6 +28,7 @@ use simdnbt::owned::NbtCompound;
 
 use crate::behavior::potion_effects;
 use crate::entity::Enemy;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     FloatGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
     NearestAttackableTargetGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal,
@@ -462,6 +463,11 @@ impl Entity for WitchEntity {
 }
 
 impl LivingEntity for WitchEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

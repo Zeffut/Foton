@@ -23,6 +23,7 @@ use simdnbt::owned::NbtCompound;
 
 use super::zombie_common;
 use crate::entity::Enemy;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
@@ -344,6 +345,11 @@ impl Entity for ZombifiedPiglinEntity {
 }
 
 impl LivingEntity for ZombifiedPiglinEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

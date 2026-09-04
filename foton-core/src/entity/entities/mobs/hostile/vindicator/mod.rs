@@ -24,6 +24,7 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 use text_components::TextComponent;
 
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::abstract_illager::{AbstractIllager, IllagerArmPose};
 use crate::entity::ai::goal::{
     FloatGoal, HoldGroundAttackGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
@@ -296,6 +297,11 @@ impl Entity for VindicatorEntity {
 }
 
 impl LivingEntity for VindicatorEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

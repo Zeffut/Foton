@@ -27,6 +27,7 @@ use uuid::Uuid;
 use crate::behavior::InteractionResult;
 use crate::enchantment_helper::{self, EnchantmentPostAttackContext};
 use crate::entity::EntityEventSource;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, MoveTowardsTargetGoal,
     NearestAttackableTargetGoal, OfferFlowerGoal, RandomLookAroundGoal,
@@ -349,6 +350,11 @@ impl Entity for IronGolemEntity {
 }
 
 impl LivingEntity for IronGolemEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

@@ -20,6 +20,7 @@ use simdnbt::owned::NbtCompound;
 
 use super::zombie_common;
 use crate::entity::Enemy;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
@@ -245,6 +246,11 @@ impl Entity for ZombieEntity {
 }
 
 impl LivingEntity for ZombieEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     /// Vanilla parity: `Zombie.getBaseExperienceReward`, which is worth reading
     /// twice -- it *mutates* `xpReward` rather than scaling the return, so a
     /// baby zombie's reward compounds if it is ever asked more than once.
