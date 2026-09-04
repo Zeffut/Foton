@@ -260,7 +260,7 @@ impl IllusionerEntity {
 /// applies the same `distance * 0.2` lob, so the aim point is the only part
 /// worth spelling out. Vanilla draws the projectile from the illusioner's
 /// quiver; Foton's mobs have none, so the arrow is a plain one.
-fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3) {
+fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3, power: f32) {
     let Some(illusioner) = mob.downcast_ref::<IllusionerEntity>() else {
         return;
     };
@@ -280,6 +280,9 @@ fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3) {
     let uncertainty =
         ARROW_UNCERTAINTY_PER_DIFFICULTY.mul_add(-f32::from(difficulty), ARROW_UNCERTAINTY_BASE);
     let arrow = ArrowEntity::shoot_at(&world, illusioner, target, ARROW_POWER, uncertainty);
+    // Vanilla parity: the `ProjectileUtil.getMobArrow(.., power, ..)`
+    // of `performRangedAttack` -- a shallower draw hits softer.
+    arrow.set_base_damage_from_mob(power);
     drop(arrow);
 
     world.play_sound_at(

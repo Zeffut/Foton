@@ -49,11 +49,14 @@ use crate::world::game_event::GameEventContext;
 /// every monster inherits and this one does not override.
 const XP_REWARD: i32 = 5;
 
-/// Ticks between shots.
+/// Ticks between shots on Hard.
 ///
-/// Vanilla parity: `Bogged.getAttackInterval`, the value `reassessWeaponGoal`
-/// installs on every difficulty below hard. A bogged is a slower archer than a
-/// skeleton, which is what its poison is paid for with.
+/// Vanilla parity: `Bogged.getHardAttackInterval`.
+const HARD_ATTACK_INTERVAL_TICKS: i32 = 50;
+
+/// Ticks between shots on every other difficulty.
+///
+/// Vanilla parity: `Bogged.getAttackInterval`.
 const ATTACK_INTERVAL_TICKS: i32 = 70;
 
 /// Range within which a bogged will loose an arrow.
@@ -142,7 +145,8 @@ impl BoggedEntity {
             goals.add_goal(3, FleeSunGoal::new(1.0));
             goals.add_goal(
                 4,
-                RangedBowAttackGoal::new(
+                RangedBowAttackGoal::by_difficulty(
+                    HARD_ATTACK_INTERVAL_TICKS,
                     ATTACK_INTERVAL_TICKS,
                     ATTACK_RADIUS,
                     BOW_APPROACH_SPEED,
@@ -230,7 +234,7 @@ impl BoggedEntity {
 ///
 /// Vanilla parity: `AbstractSkeleton.performRangedAttack` with the
 /// `Bogged.getArrow` override.
-fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3) {
+fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3, power: f32) {
     let Some(archer) = mob.downcast_ref::<BoggedEntity>() else {
         return;
     };
@@ -244,6 +248,9 @@ fn fire_arrow(mob: &dyn PathfinderMob, target: DVec3) {
     // carries none, which is why a skeleton never runs out.
     let bow = archer.get_item_in_hand(weapon_holding_hand(archer, &vanilla_items::BOW));
     let arrow = ArrowEntity::shoot_at(&world, archer, target, ARROW_POWER, ARROW_UNCERTAINTY);
+    // Vanilla parity: the `ProjectileUtil.getMobArrow(.., power, ..)`
+    // of `performRangedAttack` -- a shallower draw hits softer.
+    arrow.set_base_damage_from_mob(power);
     if bow.is(&vanilla_items::BOW) {
         arrow.set_fired_from_weapon(Some(bow));
     }
