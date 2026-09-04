@@ -65,9 +65,15 @@ diagnostic :
 - `wsl -d Ubuntu` s'exécute en tant que `zeffu`, qui ne peut pas lire `/root`.
   Passer `-u root`, sinon les checkouts y paraissent absents.
 
-Enfin, les scripts Python de `dev/` exigent `PYTHONUTF8=1` côté Windows : sans
-lui `gen-config-docs.py` meurt sur cp1252 **après** avoir ouvert sa sortie, ce
-qui vide `CONFIGURATION.md`.
+Enfin, deux pièges Python côté Windows :
+
+- **`python3` n'existe pas** : c'est le stub Microsoft Store, qui affiche une
+  publicité, n'exécute rien, et **sort avec le code 0**. Une vérification qui
+  passe par lui est donc verte sans avoir rien testé. Utiliser `python`.
+  `dev/ci.sh` résout l'interpréteur lui-même ; les autres scripts de `dev/`
+  invoquent encore `python3` en dur.
+- **`PYTHONUTF8=1` est obligatoire** : sans lui `gen-config-docs.py` meurt sur
+  cp1252 **après** avoir ouvert sa sortie, ce qui vide `CONFIGURATION.md`.
 
 ## Commandes
 
@@ -80,6 +86,7 @@ python3 dev/coverage.py     # mesure la couverture réelle par rapport à vanill
 python3 dev/gen-config-docs.py  # régénère CONFIGURATION.md depuis les schémas
 python3 dev/check-natives.py    # chaque native déclarée est enregistrée, et rien d'autre
 bash dev/bedrock-test.sh        # Geyser, identité Floodgate, persistance de l'UUID
+bash dev/reports.sh            # les rapports joueurs `/bug` encore ouverts
 ```
 
 Commandes brutes :
@@ -144,6 +151,7 @@ Un serveur qui diverge de vanilla est un serveur cassé.
 | `CONFIGURATION.md` | chaque clé de config — **généré**, voir plus bas |
 | `PARITY.md` | le registre de parité vanilla et pourquoi les chiffres mentent |
 | `CONTRIBUTING.md` | la barre qu'un changement doit passer |
+| `REPORTING.md` | le cycle des rapports joueurs `/bug` — arrivée, et ce que fermer un rapport exige |
 
 `CONFIGURATION.md` est produit par `python3 dev/gen-config-docs.py` à partir
 des schémas JSON de `package-content/`. Ne jamais l'éditer à la main : modifier le
