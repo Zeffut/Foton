@@ -6,15 +6,21 @@
 
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::item_stack::ItemStack;
-use foton_registry::{vanilla_blocks, vanilla_menu_types};
+use foton_registry::{REGISTRY, vanilla_blocks, vanilla_menu_types};
 use foton_utils::BlockPos;
 use foton_utils::locks::{IntoShared, Shared};
 
 use crate::inventory::container::{ResultContainer, SimpleContainer};
+use crate::inventory::menu::builder::SectionKind;
 use crate::inventory::prelude::*;
-use crate::inventory::slots::SmithingHandler;
+use crate::inventory::slots::{
+    SMITHING_ADDITION, SMITHING_BASE, SMITHING_TEMPLATE, SmithingHandler,
+};
 use crate::player::player_inventory::PlayerInventory;
 use crate::world::LevelReader as _;
+
+#[cfg(test)]
+mod tests;
 
 /// How many slots the table itself owns.
 const SMITHING_INPUTS: usize = 3;
@@ -27,7 +33,20 @@ pub fn smithing(inventory: Shared<PlayerInventory>, container_id: u8, block_pos:
     let handler = SmithingHandler::new(input_container.clone(), result_container.clone());
 
     let mut builder = MenuBuilder::new(&vanilla_menu_types::SMITHING, container_id);
-    let inputs = builder.section_all(&input_container);
+    // Vanilla parity: the three `mayPlace` tests of
+    // `SmithingMenu.createInputSlotDefinitions`. Without them shift-clicking
+    // fills the first free slot instead of the right one, and no recipe can
+    // match what ends up laid out.
+    let inputs = builder.section_with(
+        &input_container,
+        SMITHING_INPUTS,
+        SectionKind::restricted(|slot, stack| match slot {
+            SMITHING_TEMPLATE => REGISTRY.recipes.accepts_smithing_template(stack),
+            SMITHING_BASE => REGISTRY.recipes.accepts_smithing_base(stack),
+            SMITHING_ADDITION => REGISTRY.recipes.accepts_smithing_addition(stack),
+            _ => false,
+        }),
+    );
     let result = builder.result_slot(handler.clone());
     let player = builder.player_inventory(&inventory);
 
