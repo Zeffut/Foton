@@ -29,7 +29,9 @@ use crate::behavior::blocks::container::dispenser_block::{
 use crate::behavior::items::SpawnEggItem;
 use crate::behavior::{BLOCK_BEHAVIORS, ITEM_BEHAVIORS, pickup_waterlogged_block};
 use crate::block_entity::entities::DispenserBlockEntity;
-use crate::entity::entities::{ArrowEntity, PrimedTntEntity, SheepEntity, SulfurCubeEntity};
+use crate::entity::entities::{
+    ArrowEntity, PrimedTntEntity, SheepEntity, SmallFireballEntity, SulfurCubeEntity,
+};
 use crate::entity::{Entity, Projectile as _, next_entity_id};
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -170,6 +172,67 @@ impl DispenseItemBehavior for ArrowDispenseBehavior {
         DispenseOutcome::Acted {
             remainder: stack,
             sound_override: Some(level_events::SOUND_DISPENSER_PROJECTILE_LAUNCH),
+        }
+    }
+}
+
+/// How far in front of the face a fire charge appears.
+///
+/// Vanilla parity: the `getDispensePosition(source, 1.0, Vec3.ZERO)` of
+/// `FireChargeItem.createDispenseConfig`, which is further out and without the
+/// lift the other projectiles get.
+const FIRE_CHARGE_OFFSET: f64 = 1.0;
+
+/// Speed a dispensed fire charge leaves at.
+///
+/// Vanilla parity: `FireChargeItem.createDispenseConfig().power`.
+const FIRE_CHARGE_POWER: f32 = 1.0;
+
+/// Spread of a dispensed fire charge.
+///
+/// Vanilla parity: `FireChargeItem.createDispenseConfig().uncertainty`.
+const FIRE_CHARGE_UNCERTAINTY: f32 = 6.666_666_5;
+
+/// Shoots a small fireball out of the dispenser.
+///
+/// Vanilla parity: the `registerProjectileBehavior(Items.FIRE_CHARGE)` of
+/// `DispenseItemBehavior.bootStrap`, which builds a `ProjectileDispenseBehavior`
+/// around `FireChargeItem`.
+///
+/// `FireChargeItem.asProjectile` jitters the direction with `random.triangle`
+/// before handing the fireball over, but `ProjectileDispenseBehavior.execute`
+/// then calls `Projectile.shoot`, which overwrites the velocity outright. The
+/// jitter is unobservable, so it is not reproduced here.
+struct FireChargeDispenseBehavior;
+
+impl DispenseItemBehavior for FireChargeDispenseBehavior {
+    fn execute(&self, source: &DispenseSource<'_>, mut stack: ItemStack) -> DispenseOutcome {
+        let position = source.dispense_position(FIRE_CHARGE_OFFSET, DVec3::ZERO);
+        let fireball = Arc::new(SmallFireballEntity::new(
+            &vanilla_entities::SMALL_FIREBALL,
+            next_entity_id(),
+            position,
+            Arc::downgrade(source.world),
+        ));
+        // Vanilla parity: the `fireball.setItem(itemStack)` of
+        // `FireChargeItem.asProjectile`, which is what the client draws.
+        fireball.set_item(stack.copy_with_count(1));
+        fireball.shoot(source.normal(), FIRE_CHARGE_POWER, FIRE_CHARGE_UNCERTAINTY);
+
+        if let Err(error) = source
+            .world
+            .try_add_entity(Arc::clone(&fireball) as Arc<dyn Entity>)
+        {
+            log::debug!("dispensed fire charge rejected: {error}");
+            return DispenseOutcome::Failed(stack);
+        }
+
+        stack.shrink(1);
+        DispenseOutcome::Acted {
+            remainder: stack,
+            // Vanilla parity: the `overrideDispenseEvent(1018)` of the same
+            // config -- a dispensed fire charge roars, it does not click.
+            sound_override: Some(level_events::SOUND_BLAZE_FIREBALL),
         }
     }
 }
@@ -570,6 +633,10 @@ static DISPENSE_BEHAVIORS: LazyLock<FxHashMap<Identifier, Box<dyn DispenseItemBe
             Box::new(ArrowDispenseBehavior),
         );
         behaviors.insert(
+            vanilla_items::FIRE_CHARGE.key.clone(),
+            Box::new(FireChargeDispenseBehavior),
+        );
+        behaviors.insert(
             vanilla_items::TNT.key.clone(),
             Box::new(TntDispenseBehavior),
         );
@@ -712,6 +779,7 @@ mod tests {
             &vanilla_items::BONE_MEAL,
             &vanilla_items::FLINT_AND_STEEL,
             &vanilla_items::SHEARS,
+            &vanilla_items::FIRE_CHARGE,
         ] {
             assert!(
                 DISPENSE_BEHAVIORS.contains_key(&item.key),
@@ -785,6 +853,70 @@ mod tests {
         assert!(
             !feed_sulfur_cube(&world, target, &mut stack),
             "a cube already holding that block takes no more"
+        );
+    }
+
+    /// A dispensed fire charge is shot, not spat onto the floor.
+    ///
+    /// Vanilla registers `Items.FIRE_CHARGE` through
+    /// `DispenserBlock.registerProjectileBehavior` (`DispenseItemBehavior.bootStrap`).
+    /// With no entry it fell through to `DefaultDispenseBehavior`, which is an
+    /// item entity on the ground -- exactly what the report described.
+    #[test]
+    fn a_dispenser_shoots_a_fire_charge_rather_than_dropping_it() {
+        use foton_registry::vanilla_entities;
+
+        use crate::entity::entities::ItemEntity;
+
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("dispenser_shoots_fire_charge");
+        insert_ready_full_chunk(&world, foton_utils::ChunkPos::new(0, 0));
+        let pos = BlockPos::new(8, 64, 8);
+        let block_entity = dispenser_at(&world, pos);
+        let source = DispenseSource {
+            world: &world,
+            pos,
+            facing: Direction::East,
+            block_entity: &block_entity,
+        };
+
+        let mut stack = ItemStack::new(&vanilla_items::FIRE_CHARGE);
+        stack.set_count(2);
+        let outcome = dispense_behavior_for(&stack).execute(&source, stack);
+
+        match outcome {
+            DispenseOutcome::Acted {
+                remainder,
+                sound_override,
+            } => {
+                assert_eq!(remainder.count(), 1, "one charge left the dispenser");
+                assert_eq!(
+                    sound_override,
+                    Some(level_events::SOUND_BLAZE_FIREBALL),
+                    "a dispensed fire charge roars rather than clicking"
+                );
+            }
+            DispenseOutcome::Failed(_) => panic!("the fire charge was not dispensed"),
+        }
+
+        let search =
+            WorldAabb::from_min_max(DVec3::new(4.0, 60.0, 4.0), DVec3::new(13.0, 68.0, 13.0));
+        let fireballs = world.get_entities_in_aabb_matching(&search, |entity| {
+            entity.entity_type() == &vanilla_entities::SMALL_FIREBALL
+        });
+        assert_eq!(fireballs.len(), 1, "a small fireball should have been shot");
+        assert!(
+            fireballs[0].velocity().x > 0.0,
+            "it should be travelling the way the dispenser faces"
+        );
+        assert!(
+            world
+                .get_entities_in_aabb_matching(&search, |entity| entity
+                    .downcast_ref::<ItemEntity>()
+                    .is_some())
+                .is_empty(),
+            "nothing should have been dropped on the floor"
         );
     }
 

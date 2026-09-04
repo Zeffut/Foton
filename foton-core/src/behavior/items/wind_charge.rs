@@ -45,7 +45,8 @@ impl ItemBehavior for WindChargeItem {
     /// Not implemented: the dispenser path. Vanilla's `WindChargeItem` is a
     /// `ProjectileItem` whose `asProjectile` and `createDispenseConfig` let a
     /// dispenser fire one, with its own triangular spread and the 1051 dispense
-    /// event; Foton has no `ProjectileItem` dispense hook to hang that on.
+    /// event. Foton's dispense table has no entry for it yet, so a dispenser
+    /// throws the item instead.
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
         let player = context.player;
         let world = context.world;

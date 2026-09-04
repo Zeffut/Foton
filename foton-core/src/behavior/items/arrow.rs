@@ -17,8 +17,9 @@ use crate::entity::ENTITIES;
 /// its `potion_contents`. Foton's `ArrowEntity` stores neither a pickup stack
 /// nor the weapon it was fired from, so only the entity type travels.
 ///
-/// Foton gap: Vanilla's `ArrowItem` also implements `ProjectileItem`, which is
-/// how a dispenser shoots one. Foton has no dispense-behavior registry.
+/// Vanilla's `ArrowItem` also implements `ProjectileItem`, which is how a
+/// dispenser shoots one. Foton spells that as `ArrowDispenseBehavior` in
+/// `behavior::blocks::container::dispense_behavior`, not on this item.
 #[item_behavior]
 pub struct ArrowItem;
 
