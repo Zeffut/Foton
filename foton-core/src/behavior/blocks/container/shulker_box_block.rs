@@ -17,6 +17,7 @@ use foton_registry::item_stack::ItemStack;
 use foton_registry::item_stack_template::ItemStackTemplate;
 use foton_registry::{REGISTRY, RegistryExt as _, vanilla_block_entity_types};
 use foton_utils::{BlockPos, BlockStateId, Downcast as _, translations};
+use glam::DVec3;
 use text_components::TextComponent;
 
 use crate::behavior::InventoryAccess;
@@ -49,6 +50,27 @@ impl ShulkerBoxBlock {
     #[must_use]
     pub const fn new(block: BlockRef) -> Self {
         Self { block }
+    }
+
+    /// Empties the box into the item that represents it.
+    ///
+    /// Vanilla parity: the `itemStack.applyComponents(blockEntity.collectComponents())`
+    /// that `ShulkerBoxBlock.playerWillDestroy` and the `CONTENTS` dynamic drop
+    /// of `getDrops` both go through. Both callers here need the same stack,
+    /// and only one of them ever runs for a given break.
+    fn take_contents_into_item(&self, shulker: &ShulkerBoxBlockEntity) -> Option<ItemStack> {
+        let mut dropped = ItemStack::new(REGISTRY.items.by_key(&self.block.key)?);
+        let templates: Vec<Option<ItemStackTemplate>> = shulker
+            .take_all()
+            .iter()
+            .map(|item| ItemStackTemplate::from_stack(item).ok())
+            .collect();
+
+        if let Ok(contents) = ItemContainerContents::new(templates) {
+            dropped.set(CONTAINER, contents);
+        }
+
+        Some(dropped)
     }
 }
 
@@ -141,18 +163,43 @@ impl BlockBehavior for ShulkerBoxBlock {
         let block_entity = context.world().get_block_entity(context.pos())?;
         let shulker = block_entity.downcast_ref::<ShulkerBoxBlockEntity>()?;
 
-        let mut dropped = ItemStack::new(REGISTRY.items.by_key(&self.block.key)?);
-        let taken = shulker.take_all();
-        let templates: Vec<Option<ItemStackTemplate>> = taken
-            .iter()
-            .map(|item| ItemStackTemplate::from_stack(item).ok())
-            .collect();
+        Some(vec![self.take_contents_into_item(shulker)?])
+    }
 
-        if let Ok(contents) = ItemContainerContents::new(templates) {
-            dropped.set(CONTAINER, contents);
+    /// Hands a creative player the box they just broke, contents included.
+    ///
+    /// Vanilla parity: `ShulkerBoxBlock.playerWillDestroy`. Creative breaking
+    /// skips block loot entirely, so `get_drops` never runs and the box would
+    /// be deleted with everything in it. Vanilla answers that by spawning the
+    /// item here instead -- the one block that drops itself in creative.
+    fn player_will_destroy(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        player: &Player,
+    ) -> BlockStateId {
+        let Some(block_entity) = world.get_block_entity(pos) else {
+            return state;
+        };
+        let Some(shulker) = block_entity.downcast_ref::<ShulkerBoxBlockEntity>() else {
+            return state;
+        };
+
+        // An empty box in creative is left to vanish, exactly as vanilla's
+        // `!shulkerBoxBlockEntity.isEmpty()` decides.
+        if player.has_infinite_materials() && !shulker.is_empty() {
+            if let Some(dropped) = self.take_contents_into_item(shulker) {
+                let (x, y, z) = pos.get_center();
+                world.spawn_item(DVec3::new(x, y, z), dropped);
+            }
+        } else if let Some(container_ref) = ContainerRef::from_block_entity(block_entity.clone()) {
+            // Vanilla rolls a still-packed loot table with the breaking player,
+            // whose luck the roll uses.
+            container_ref.unpack_loot_table(Some(player));
         }
 
-        Some(vec![dropped])
+        state
     }
 
     fn new_block_entity(
@@ -195,15 +242,19 @@ impl BlockBehavior for ShulkerBoxBlock {
 
 #[cfg(test)]
 mod tests {
-    use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_items};
+    use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_items};
     use foton_utils::ChunkPos;
     use foton_utils::types::{InteractionHand, UpdateFlags};
+
+    use foton_utils::types::GameType;
+    use foton_utils::WorldAabb;
 
     use super::*;
     use crate::behavior::context::PlacementOrientation;
     use crate::behavior::init_behaviors;
     use crate::block_entity::init_block_entities;
-    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use crate::entity::entities::ItemEntity;
+    use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
 
     /// A shulker box with one diamond in it, standing in a real world.
     fn placed_box(name: &'static str, pos: BlockPos) -> Arc<World> {
@@ -300,6 +351,83 @@ mod tests {
             "the diamond did not come back"
         );
         assert_eq!(restored[5].count(), 12, "the stack changed size");
+    }
+
+    /// Every item stack lying on the ground at `pos`.
+    fn dropped_items(world: &Arc<World>, pos: BlockPos) -> Vec<ItemStack> {
+        let (x, y, z) = pos.get_center();
+        let center = DVec3::new(x, y, z);
+        world
+            .get_entities_in_aabb_matching(
+                &WorldAabb::from_min_max(center - DVec3::ONE, center + DVec3::ONE),
+                |entity| entity.entity_type() == &vanilla_entities::ITEM,
+            )
+            .iter()
+            .filter_map(|entity| entity.downcast_ref::<ItemEntity>().map(ItemEntity::get_item))
+            .collect()
+    }
+
+    /// Breaking a full box in creative still hands the box over.
+    ///
+    /// Creative skips block loot entirely, so `get_drops` never runs and the
+    /// only thing standing between the player and a deleted inventory is
+    /// `player_will_destroy`. That is the report this test exists for.
+    #[test]
+    fn a_creative_break_still_drops_the_box_with_its_contents() {
+        let pos = BlockPos::new(8, 70, 8);
+        let world = placed_box("shulker_creative_drop", pos);
+        put_diamond_in(&world, pos, 5, 12);
+
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "ShulkerTester", 1).build();
+        player.restore_game_modes(GameType::Creative, None);
+
+        let behavior = ShulkerBoxBlock::new(&vanilla_blocks::SHULKER_BOX);
+        behavior.player_will_destroy(
+            vanilla_blocks::SHULKER_BOX.default_state(),
+            &world,
+            pos,
+            &player,
+        );
+
+        let dropped = dropped_items(&world, pos);
+        assert_eq!(dropped.len(), 1, "creative should drop exactly one box");
+
+        let item = &dropped[0];
+        assert!(
+            item.is(&vanilla_items::SHULKER_BOX),
+            "the dropped item should be the box itself"
+        );
+        let carried = item
+            .get(CONTAINER)
+            .cloned()
+            .expect("the box carries its contents out of a creative break");
+        assert!(
+            carried.items().get(5).and_then(Option::as_ref).is_some(),
+            "the diamond should still be in slot five"
+        );
+    }
+
+    /// An empty box broken in creative is left to vanish, as vanilla does.
+    #[test]
+    fn a_creative_break_of_an_empty_box_drops_nothing() {
+        let pos = BlockPos::new(8, 70, 8);
+        let world = placed_box("shulker_creative_empty", pos);
+
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "ShulkerTester", 1).build();
+        player.restore_game_modes(GameType::Creative, None);
+
+        let behavior = ShulkerBoxBlock::new(&vanilla_blocks::SHULKER_BOX);
+        behavior.player_will_destroy(
+            vanilla_blocks::SHULKER_BOX.default_state(),
+            &world,
+            pos,
+            &player,
+        );
+
+        assert!(
+            dropped_items(&world, pos).is_empty(),
+            "an empty box in creative drops nothing"
+        );
     }
 
     /// Taking the loot empties the box, so nothing can be duplicated.
