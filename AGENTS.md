@@ -12,8 +12,6 @@ that, and they win over the check-in wording below.
 - `CONFIGURATION.md` — every config key, generated from the JSON schemas.
 - `PARITY.md` — the vanilla parity ledger, and why raw coverage numbers lie.
 - `CONTRIBUTING.md` — the bar a change has to clear.
-- `REPORTING.md` — the player-report loop: how a `/bug` report arrives, and
-  what closing one takes.
 - This file — the engineering rules below.
 
 ---
