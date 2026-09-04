@@ -343,3 +343,60 @@ fn an_enderman_hunts_a_nearby_endermite() {
         "an enderman standing next to an endermite should have taken it as a target"
     );
 }
+
+/// A creative player may stare all they like.
+///
+/// Vanilla runs the stare through `TargetingConditions.forCombat()`, whose
+/// combat branch ends at `Player.canBeSeenAsEnemy` --
+/// `!this.getAbilities().invulnerable` -- so a creative player is never an
+/// enemy. Foton queried the stare on its own, with no conditions at all.
+#[test]
+fn an_enderman_ignores_a_creative_player_staring_at_it() {
+    use foton_utils::types::GameType;
+
+    use crate::test_support::TestPlayerBuilder;
+
+    let world = enderman_world("enderman_ignores_creative_starer");
+    let enderman = spawn_enderman(&world);
+
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Starer", 4242).build();
+    // Five blocks due north of the enderman, looking straight at it. The goal
+    // asks the world for its nearest player, so the player has to be in the
+    // world's list and not merely constructed.
+    player
+        .base()
+        .set_position_local(DVec3::new(SPAWN.x, SPAWN.y, SPAWN.z - 5.0));
+    // The stare cone is narrow and measured against the enderman's eyes, so
+    // aim at them rather than straight ahead.
+    let rise = Entity::get_eye_y(enderman.as_ref()) - Entity::get_eye_y(player.as_ref());
+    let run = SPAWN.z - player.position().z;
+    player
+        .base()
+        .set_rotation((0.0, -rise.atan2(run).to_degrees() as f32));
+    assert!(world.players.insert(Arc::clone(&player)));
+    assert!(
+        enderman.is_being_stared_by(player.as_ref()),
+        "the test has to actually be staring for the rest to mean anything"
+    );
+
+    let mut goal = EndermanLookForPlayerGoal;
+
+    player.restore_game_modes(GameType::Survival, None);
+    assert!(
+        goal.can_use(enderman.as_ref()),
+        "a survival player staring should still anger an enderman -- if this \
+         fails the test is not staring properly and the assertion below proves \
+         nothing"
+    );
+    assert!(Mob::set_target(enderman.as_ref(), None));
+
+    player.restore_game_modes(GameType::Creative, None);
+    assert!(
+        !goal.can_use(enderman.as_ref()),
+        "a creative player staring must not anger an enderman"
+    );
+    assert!(
+        Mob::target(enderman.as_ref()).is_none(),
+        "and nothing should have been taken as a target"
+    );
+}

@@ -41,6 +41,7 @@ use crate::entity::ai::goal::{
     NearestAttackableTargetGoal, RandomLookAroundGoal, WaterAvoidingRandomStrollGoal,
     reduced_tick_delay,
 };
+use crate::entity::ai::targeting::TargetingConditions;
 use crate::entity::damage::DamageSource;
 use crate::entity::living_entity::is_looking_at;
 use crate::entity::neutral_mob::{
@@ -361,6 +362,12 @@ impl Goal for EndermanFreezeWhenLookedAt {
     }
 }
 
+/// How far the goal looks for someone staring.
+///
+/// Vanilla reads `getFollowDistance()` here; Foton has used a flat 64 since the
+/// goal was written, and this only names it.
+const AGGRO_RANGE: f64 = 64.0;
+
 /// Takes as a target whoever is staring, and whoever it is already angry at.
 ///
 /// Vanilla parity: `EnderMan.EndermanLookForPlayerGoal`.
@@ -379,8 +386,17 @@ impl Goal for EndermanLookForPlayerGoal {
             return false;
         };
 
-        let staring = world.nearest_player(mob.position(), 64.0, |player| {
-            enderman.is_being_stared_by(player) || enderman.is_angry_at(player, &world)
+        // Vanilla parity: the `startAggroTargetConditions` of
+        // `EndermanLookForPlayerGoal` -- a `TargetingConditions.forCombat()`
+        // carrying the stare test as its selector. The combat branch is what
+        // keeps a creative player out: it ends at `Player.canBeSeenAsEnemy`,
+        // false while their abilities say invulnerable. Testing the stare on
+        // its own skipped that, so looking at an enderman in creative angered
+        // it.
+        let conditions = TargetingConditions::for_combat().range(AGGRO_RANGE);
+        let staring = world.nearest_player(mob.position(), AGGRO_RANGE, |player| {
+            (enderman.is_being_stared_by(player) || enderman.is_angry_at(player, &world))
+                && conditions.test(&world, Some(mob), player)
         });
 
         let Some(player) = staring else {
@@ -605,7 +621,12 @@ impl Mob for EndermanEntity {
     /// dropped, so a calm enderman moves at its ordinary pace.
     fn set_target(&self, target: Option<&SharedEntity>) -> bool {
         let previous = self.target();
-        let changed = self.mob_base().set_target(target, |_| true);
+        // Vanilla parity: the `Mob.asValidTarget` every other mob goes
+        // through. Passing `|_| true` here also kept a target that had since
+        // switched to creative or spectator.
+        let changed = self
+            .mob_base()
+            .set_target(target, |target| self.is_valid_target(target));
         if !changed {
             return false;
         }
