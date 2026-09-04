@@ -173,6 +173,10 @@ public final class PluginHost {
         boolean enabled = false;
         JavaPlugin plugin = null;
         try {
+            File dataFolder = new File(jar.getParentFile(), descriptor.getName());
+            // Before the constructor, not after: a plugin may call getName()
+            // or getLogger() from it, and several do.
+            loader.describe(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
             Class<?> type = Class.forName(descriptor.getMain(), true, loader);
             Object instance = type.getDeclaredConstructor().newInstance();
             if (!(instance instanceof JavaPlugin candidate)) {
@@ -182,7 +186,6 @@ public final class PluginHost {
             }
             plugin = candidate;
 
-            File dataFolder = new File(jar.getParentFile(), descriptor.getName());
             loader.setPlugin(plugin);
             plugin.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
             plugin.onLoad();

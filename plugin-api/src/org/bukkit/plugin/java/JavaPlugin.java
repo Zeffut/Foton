@@ -36,7 +36,21 @@ public abstract class JavaPlugin implements Plugin {
     private final io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager lifecycleManager =
         new io.papermc.paper.plugin.lifecycle.event.FotonLifecycleEventManager();
 
-    public JavaPlugin() {}
+    /**
+     * Initializes from the loader that is loading this class, when there is
+     * one.
+     *
+     * <p>Bukkit guarantees a plugin can call {@link #getName()} or
+     * {@link #getLogger()} from its own constructor, and plugins rely on it --
+     * Geyser's Spigot bootstrap builds its logger there. Nothing outside can
+     * hand the description over in time, so the class loader that already has
+     * it does.
+     */
+    public JavaPlugin() {
+        if (getClass().getClassLoader() instanceof PluginClassLoader loader) {
+            loader.initialize(this);
+        }
+    }
 
     /** Returns the loaded plugin whose class matches the requested type. */
     public static <T extends JavaPlugin> T getPlugin(Class<T> clazz) {
@@ -57,6 +71,10 @@ public abstract class JavaPlugin implements Plugin {
     }
 
     public final void init(Server server, PluginDescriptionFile description, File dataFolder) {
+        // The class loader initializes a plugin from its constructor, and the
+        // host still calls this afterwards for anything it built itself.
+        // Re-running would register every command a second time.
+        if (this.description != null) return;
         this.server = server;
         this.description = description;
         this.dataFolder = dataFolder;

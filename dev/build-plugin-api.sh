@@ -54,7 +54,11 @@ find "$SRC" "$OUT/generated" -name '*.java' | sort > "$SOURCES"
 echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.
-javac -Xlint:all -cp "${LIBS#:}" -d "$OUT/classes" "@$SOURCES"
+# --release 21, not whatever JDK happens to be on PATH. A jar built by a
+# JDK 25 carries class file version 69, and a server on the Java 21 that
+# Paper 26.2 itself requires cannot load it -- the plugin host dies at
+# startup with an exception that names none of this.
+javac --release 21 -Xlint:all -cp "${LIBS#:}" -d "$OUT/classes" "@$SOURCES"
 
 # EssentialsX (and older Bukkit consumers) were compiled against the pre-generic BanEntry ABI, whose erased getTarget return type is String.
 # Add a default binary bridge while retaining the generic Object method.

@@ -45,6 +45,11 @@ run "cargo test --workspace"                       cargo test --workspace
 # is why Build Release failed on the runner while passing on every developer's
 # machine, where the file was left over from an earlier build.
 run "plugin api builds"                            bash dev/build-plugin-api.sh --check
+# RegisterNatives is all-or-nothing: one registered method the class does
+# not declare and no plugin loads at all, one declared method left
+# unregistered and the first plugin to call it takes an
+# UnsatisfiedLinkError. Neither shows up in a build.
+run "every native is registered"                   python3 dev/check-natives.py --quiet
 run "test counts are current"                      python3 dev/count-tests.py --check
 # Four test files sat in dev/ that nothing ran, which is the same shape as the
 # clippy note above: the checks existed and nobody was reading them.
