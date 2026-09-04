@@ -246,8 +246,8 @@ mod tests {
     use foton_utils::ChunkPos;
     use foton_utils::types::{InteractionHand, UpdateFlags};
 
-    use foton_utils::types::GameType;
     use foton_utils::WorldAabb;
+    use foton_utils::types::GameType;
 
     use super::*;
     use crate::behavior::context::PlacementOrientation;
@@ -363,7 +363,11 @@ mod tests {
                 |entity| entity.entity_type() == &vanilla_entities::ITEM,
             )
             .iter()
-            .filter_map(|entity| entity.downcast_ref::<ItemEntity>().map(ItemEntity::get_item))
+            .filter_map(|entity| {
+                entity
+                    .downcast_ref::<ItemEntity>()
+                    .map(ItemEntity::get_item)
+            })
             .collect()
     }
 
