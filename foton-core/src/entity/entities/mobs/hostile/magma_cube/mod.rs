@@ -28,6 +28,7 @@ use super::cube_common::{
     CubeState,
 };
 use crate::entity::Enemy;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{HurtByTargetGoal, NearestAttackableTargetGoal};
 use crate::entity::damage::DamageSource;
@@ -228,6 +229,11 @@ impl Entity for MagmaCubeEntity {
 }
 
 impl LivingEntity for MagmaCubeEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn cube_loot_size(&self) -> Option<i32> {
         Some(CubeLike::size(self))
     }

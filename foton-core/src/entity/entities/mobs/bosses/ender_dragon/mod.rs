@@ -49,6 +49,7 @@ use simdnbt::owned::NbtCompound;
 
 use crate::chunk::heightmap::HeightmapType;
 use crate::dimension::end::EnderDragonFight;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::node::Node;
 use crate::entity::ai::path::Path;
 use crate::entity::damage::DamageSource;
@@ -1012,6 +1013,11 @@ impl Entity for EnderDragon {
 }
 
 impl LivingEntity for EnderDragon {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

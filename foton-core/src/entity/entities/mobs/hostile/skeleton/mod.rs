@@ -21,6 +21,7 @@ use simdnbt::owned::NbtCompound;
 
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::SpawnGroupData;
 use crate::entity::ai::goal::{
     FleeSunGoal, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
@@ -225,6 +226,11 @@ impl Entity for SkeletonEntity {
 }
 
 impl LivingEntity for SkeletonEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

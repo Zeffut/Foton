@@ -32,6 +32,7 @@ use uuid::Uuid;
 
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::control::VexMoveControl;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
@@ -624,6 +625,11 @@ impl Entity for VexEntity {
 }
 
 impl LivingEntity for VexEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

@@ -45,6 +45,7 @@ use text_components::translation::TranslatedMessage;
 use uuid::Uuid;
 
 use crate::behavior::InteractionResult;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::brain::memory::{MemoryModuleType, memory_module_types};
 use crate::entity::ai::brain::sensor::GolemSensor;
 use crate::entity::ai::brain::{Brain, ScheduleAttribute};
@@ -1120,6 +1121,11 @@ impl VillagerEntity {
 }
 
 impl LivingEntity for VillagerEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

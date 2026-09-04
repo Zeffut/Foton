@@ -25,6 +25,7 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 
 use crate::behavior::InteractionResult;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::brain::Brain;
 use crate::entity::ai::path::PathType;
 use crate::entity::conversion::{ConversionParams, convert_to};
@@ -253,6 +254,11 @@ impl Entity for TadpoleEntity {
 }
 
 impl LivingEntity for TadpoleEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

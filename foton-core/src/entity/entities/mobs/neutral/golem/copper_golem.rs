@@ -41,6 +41,7 @@ use uuid::Uuid;
 use crate::behavior::InteractionResult;
 use crate::behavior::blocks::WeatherState;
 use crate::block_entity::entities::CopperGolemStatueBlockEntity;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::brain::Brain;
 use crate::entity::ai::path::PathType;
 use crate::entity::damage::DamageSource;
@@ -646,6 +647,11 @@ fn weather_state_by_name(name: &str) -> Option<WeatherState> {
 }
 
 impl LivingEntity for CopperGolemEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

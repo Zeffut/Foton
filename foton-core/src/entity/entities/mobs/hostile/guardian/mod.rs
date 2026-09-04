@@ -29,6 +29,7 @@ use super::guardian_common::{
 };
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::path::PathType;
 use crate::entity::damage::DamageSource;
 use crate::entity::mob::NavigationKind;
@@ -181,6 +182,11 @@ impl Entity for GuardianEntity {
 }
 
 impl LivingEntity for GuardianEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

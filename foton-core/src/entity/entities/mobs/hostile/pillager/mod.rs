@@ -25,6 +25,7 @@ use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 
 use crate::chunk::light::LightLayer;
 use crate::entity::InventoryCarrier;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::abstract_illager::{AbstractIllager, IllagerArmPose};
 use crate::entity::ai::goal::{
     FloatGoal, HoldGroundAttackGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
@@ -419,6 +420,11 @@ impl Entity for PillagerEntity {
 }
 
 impl LivingEntity for PillagerEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

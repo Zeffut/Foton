@@ -29,6 +29,7 @@ use crate::behavior::blocks::{
 };
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     ClimbOnTopOfPowderSnowGoal, FloatGoal, Goal, GoalControls, HurtByTargetGoal, MeleeAttackGoal,
     NearestAttackableTargetGoal, RandomStrollGoal, reduced_tick_delay,
@@ -435,6 +436,11 @@ impl Entity for SilverfishEntity {
 }
 
 impl LivingEntity for SilverfishEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

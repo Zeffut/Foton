@@ -35,6 +35,7 @@ use uuid::Uuid;
 use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, update_from_neighbour_shapes};
 use crate::block_entity::block_state_nbt;
 use crate::entity::Enemy;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{
     FloatGoal, Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, MeleeAttackGoal,
@@ -492,6 +493,11 @@ impl Entity for EndermanEntity {
 }
 
 impl LivingEntity for EndermanEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

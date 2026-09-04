@@ -30,6 +30,7 @@ use text_components::TextComponent;
 use text_components::translation::TranslatedMessage;
 
 use crate::behavior::InteractionResult;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     AvoidEntityGoal, FloatGoal, InteractGoal, LookAtPlayerGoal, MoveTowardsRestrictionGoal,
     PanicGoal, WaterAvoidingRandomStrollGoal,
@@ -366,6 +367,11 @@ impl Entity for WanderingTraderEntity {
 }
 
 impl LivingEntity for WanderingTraderEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

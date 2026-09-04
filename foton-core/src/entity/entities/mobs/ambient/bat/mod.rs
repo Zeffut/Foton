@@ -21,6 +21,7 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 
 use crate::entity::EntitySpawnReason;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::damage::DamageSource;
 use crate::entity::spawn_rules::check_bat_spawn_rules;
 use crate::entity::{
@@ -393,6 +394,11 @@ impl Entity for BatEntity {
 }
 
 impl LivingEntity for BatEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

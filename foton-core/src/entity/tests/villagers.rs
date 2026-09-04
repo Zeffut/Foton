@@ -1421,3 +1421,50 @@ fn a_villagers_biome_variant_reaches_the_trades_that_are_gated_on_it() {
         "a villager publishes its variant to the loot context"
     );
 }
+
+/// A sleeping villager tells the client which bed it is lying in.
+///
+/// The client draws a sleeping entity along the bed's facing, and falls back to
+/// the live body rotation when it never learns the bed
+/// (`LivingEntityRenderer.submit`: `bedOrientation != null ?
+/// sleepDirectionToRotation(bedOrientation) : bodyRot`). `VillagerEntity` had
+/// no `living_synced_data` override, so `set_sleeping_pos` wrote the base layer
+/// and index 14 was never sent -- and the body rotation control, which vanilla
+/// also runs while asleep, kept turning it. That is the villager spinning in
+/// bed the report describes.
+#[test]
+fn a_sleeping_villager_syncs_the_bed_it_is_in() {
+    use foton_registry::entity_data::EntityData;
+
+    /// Vanilla `LivingEntity.DATA_SLEEPING_POS_ID`.
+    const SLEEPING_POS_INDEX: u8 = 14;
+
+    let world = villager_world("villager_sleeping_pos_is_synced");
+    let bed = BlockPos::new(6, 64, 8);
+    place_bed(&world, bed);
+    let villager = spawn_villager(&world);
+
+    // Everything the spawn itself dirtied has already been accounted for.
+    let _ = Entity::pack_dirty_entity_data(villager.as_ref());
+
+    LivingEntity::start_sleeping(villager.as_ref(), bed).expect("the villager should lie down");
+    assert!(LivingEntity::is_sleeping(villager.as_ref()));
+
+    let values = Entity::pack_dirty_entity_data(villager.as_ref())
+        .expect("lying down should mark entity data dirty");
+    assert!(
+        values.iter().any(|value| value.index == SLEEPING_POS_INDEX
+            && matches!(value.value, EntityData::OptionalBlockPos(Some(pos)) if pos == bed)),
+        "the bed position has to reach the client, or it draws the villager \
+         spinning: {values:?}"
+    );
+
+    LivingEntity::stop_sleeping(villager.as_ref());
+    let values = Entity::pack_dirty_entity_data(villager.as_ref())
+        .expect("getting up should mark entity data dirty");
+    assert!(
+        values.iter().any(|value| value.index == SLEEPING_POS_INDEX
+            && matches!(value.value, EntityData::OptionalBlockPos(None))),
+        "getting up has to clear it again: {values:?}"
+    );
+}

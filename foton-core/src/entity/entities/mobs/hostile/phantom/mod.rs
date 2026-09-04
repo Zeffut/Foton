@@ -27,6 +27,7 @@ use simdnbt::owned::{NbtCompound, NbtTag};
 use crate::chunk::heightmap::HeightmapType;
 use crate::entity::Enemy;
 use crate::entity::EntitySpawnReason;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::control::{PHANTOM_INITIAL_SPEED, PhantomMoveControl};
 use crate::entity::ai::goal::{Goal, GoalControls, reduced_tick_delay};
 use crate::entity::ai::targeting::TargetingConditions;
@@ -834,6 +835,11 @@ impl Entity for PhantomEntity {
 }
 
 impl LivingEntity for PhantomEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

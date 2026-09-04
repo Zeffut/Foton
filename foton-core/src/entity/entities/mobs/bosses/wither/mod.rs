@@ -43,6 +43,7 @@ use text_components::TextComponent;
 
 use crate::boss_event::ServerBossEvent;
 use crate::entity::Enemy;
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::ai::goal::{
     Goal, GoalControls, HurtByTargetGoal, LookAtPlayerGoal, NearestAttackableTargetGoal,
     RandomLookAroundGoal, RangedAttackGoal, WaterAvoidingRandomFlyingGoal,
@@ -793,6 +794,11 @@ impl Entity for WitherBoss {
 }
 
 impl LivingEntity for WitherBoss {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn living_base(&self) -> &LivingEntityBase {
         &self.living_base
     }

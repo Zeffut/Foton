@@ -30,6 +30,7 @@ use super::cube_common::{
     self, CubeAttackGoal, CubeFloatGoal, CubeKeepOnJumpingGoal, CubeLike, CubeRandomDirectionGoal,
     CubeState,
 };
+use crate::entity::LivingEntitySyncedData;
 use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{HurtByTargetGoal, NearestAttackableTargetGoal};
 use crate::entity::damage::DamageSource;
@@ -278,6 +279,11 @@ impl Entity for SlimeEntity {
 }
 
 impl LivingEntity for SlimeEntity {
+    /// Returns synchronized data declared by vanilla `LivingEntity`.
+    fn living_synced_data(&self) -> Option<&dyn LivingEntitySyncedData> {
+        Some(&self.entity_data)
+    }
+
     fn cube_loot_size(&self) -> Option<i32> {
         Some(CubeLike::size(self))
     }
