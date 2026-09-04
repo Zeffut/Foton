@@ -26,7 +26,10 @@
 CLAUDE.md
 .env
 /minecraft-src
-.agents
+# Agent tooling scratch, except the skills the repo itself ships: an entry
+# point that is not versioned only exists on the machine that wrote it.
+.agents/*
+!.agents/skills/
 skills-lock.json
 docs
 
@@ -56,3 +59,11 @@ plugin-api/build
 
 # Ruflo tooling state, written into the working tree by the plugin's hooks.
 .claude-flow/
+
+# Claude Code local session state; the commands under .claude/ are versioned.
+.claude/proven-config.json
+.claude/.proven-config-version
+
+# Claude Code local session state; the commands under .claude/ are versioned.
+.claude/proven-config.json
+.claude/.proven-config-version
