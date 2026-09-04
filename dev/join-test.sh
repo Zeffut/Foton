@@ -25,7 +25,11 @@ RUN_DIR="$ROOT/run-offline"
 WORLD_SEED=${WORLD_SEED:-8675309}
 
 echo "=== Building ==="
-if ! cargo build 2>&1 | tail -3; then
+cargo build 2>&1 | tail -3
+# A pipeline's status is its last command's, so `if ! cargo build | tail`
+# tested `tail` and never failed. That made the branch below unreachable: a
+# broken build fell straight through and the test ran against a stale binary.
+if [ "${PIPESTATUS[0]}" -ne 0 ]; then
   echo "BUILD FAILED"
   exit 1
 fi
