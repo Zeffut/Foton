@@ -46,6 +46,13 @@ const DEFAULT_GRAVITY: f64 = 0.05;
 /// Vanilla parity: `AbstractArrow.getAirDrag`.
 const AIR_DRAG: f64 = 0.99;
 
+/// How much of its speed an arrow keeps each tick under water.
+///
+/// Vanilla parity: `AbstractArrow.getWaterInertia`. Water bites far harder
+/// than air, and an arrow that keeps the air figure under water never slows
+/// enough for gravity to beat a bubble column.
+const WATER_INERTIA: f64 = 0.6;
+
 /// Ticks a stuck arrow survives before it disappears.
 ///
 /// Vanilla parity: the 1200-tick limit in `AbstractArrow.tickDespawn`.
@@ -563,6 +570,13 @@ impl Entity for ArrowEntity {
             return;
         }
 
+        // Vanilla parity: the `if (this.isInWater()) applyInertia(getWaterInertia())`
+        // that opens the airborne branch of `AbstractArrow.tick`, before the
+        // move rather than after it.
+        if self.is_in_water() {
+            self.set_velocity(self.velocity() * WATER_INERTIA);
+        }
+
         self.check_left_owner();
         self.face_velocity();
 
@@ -575,7 +589,12 @@ impl Entity for ArrowEntity {
 
         let _ = self.move_entity(MoverType::SelfMovement, self.velocity());
         self.apply_effects_from_blocks();
-        self.set_velocity(self.velocity() * AIR_DRAG);
+        // Vanilla parity: `if (!this.isInWater()) applyInertia(getAirDrag())`.
+        // The two inertias are exclusive -- an arrow under water has already
+        // been slowed by 0.6 above and must not be slowed again.
+        if !self.is_in_water() {
+            self.set_velocity(self.velocity() * AIR_DRAG);
+        }
         self.apply_gravity();
     }
 
@@ -892,6 +911,53 @@ mod tests {
             pig.arrow_count(),
             29,
             "the living tick should let arrows fall back out"
+        );
+    }
+
+    /// Water slows an arrow far harder than air does.
+    ///
+    /// Vanilla parity: `AbstractArrow.getWaterInertia` is `0.6F` and is applied
+    /// *instead of* the `0.99F` air drag, never alongside it. Foton scaled by
+    /// 0.99 whatever the arrow was in, so an arrow never slowed enough for
+    /// gravity to beat a bubble column -- soul sand with water over it, which
+    /// is where the report came from -- and it climbed instead.
+    #[test]
+    fn an_arrow_under_water_is_slowed_by_the_water() {
+        const TICKS: usize = 5;
+
+        let world = arrow_world("arrow_water_inertia");
+        for x in 4..=15 {
+            for y in 63..=65 {
+                for z in 6..=10 {
+                    assert!(world.set_block(
+                        BlockPos::new(x, y, z),
+                        vanilla_blocks::WATER.default_state(),
+                        UpdateFlags::UPDATE_NONE,
+                    ));
+                }
+            }
+        }
+
+        let arrow = spawn_arrow(
+            &world,
+            DVec3::new(8.5, 64.5, 8.5),
+            DVec3::new(1.0, 0.0, 0.0),
+        );
+
+        for _ in 0..TICKS {
+            Entity::tick(arrow.as_ref());
+        }
+        assert!(
+            arrow.is_in_water(),
+            "the arrow has to still be under water for this to measure anything"
+        );
+
+        // 0.6^5 is about 0.078; 0.99^5 is about 0.951. Anything near the latter
+        // means the air drag is still being used under water.
+        let speed = arrow.velocity().x;
+        assert!(
+            speed < 0.3,
+            "an arrow five ticks under water should have almost stopped, but it              is still moving at {speed} blocks a tick"
         );
     }
 
