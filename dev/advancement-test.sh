@@ -21,6 +21,11 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 
+# Respect $CARGO_TARGET_DIR the way `cargo build` itself already does; see
+# the same lines in dev/join-test.sh for what hardcoding it used to cost.
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/debug/foton"
+
 PORT=25631
 RUN_DIR="$ROOT/run-advancement"
 
@@ -58,7 +63,7 @@ PID=
 start_server() {
   # stdin from /dev/null: the server reads console commands, and a background
   # process that reads a terminal is stopped by SIGTTIN instead of running.
-  nohup "$ROOT/target/debug/foton" > "server-$1.log" 2>&1 < /dev/null &
+  nohup "$BIN" > "server-$1.log" 2>&1 < /dev/null &
   PID=$!
   if ! wait_for_port; then
     echo "SERVER NEVER LISTENED ON $PORT ($1)"

@@ -33,6 +33,11 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 
+# Respect $CARGO_TARGET_DIR the way `cargo build` itself already does; see
+# the same lines in dev/join-test.sh for what hardcoding it used to cost.
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/debug/foton"
+
 PORT=25618
 RUN_DIR="$ROOT/run-warden"
 
@@ -53,7 +58,7 @@ sed -i "s/^server_port = .*/server_port = $PORT/" "$RUN_DIR/config/config.toml"
 sed -i 's/^default_groups = .*/default_groups = ["op"]/' "$RUN_DIR/config/groups.toml"
 
 cd "$RUN_DIR" || exit 1
-nohup "$ROOT/target/debug/foton" > server.log 2>&1 < /dev/null &
+nohup "$BIN" > server.log 2>&1 < /dev/null &
 PID=$!
 cleanup() {
   kill "$PID" 2>/dev/null

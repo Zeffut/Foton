@@ -17,6 +17,11 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 
+# Respect $CARGO_TARGET_DIR the way `cargo build` itself already does; see
+# the same lines in dev/join-test.sh for what hardcoding it used to cost.
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/debug/foton"
+
 PORT=25715
 RUN_DIR="$ROOT/run-bossbar"
 BAR="minecraft:foton_test"
@@ -51,7 +56,7 @@ wait_for_port() {
 
 PID=
 start_server() {
-  nohup "$ROOT/target/debug/foton" > "server-$1.log" 2>&1 < /dev/null &
+  nohup "$BIN" > "server-$1.log" 2>&1 < /dev/null &
   PID=$!
   if ! wait_for_port; then
     echo "SERVER NEVER LISTENED ON $PORT ($1)"

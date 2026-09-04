@@ -6,6 +6,11 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 
+# Respect $CARGO_TARGET_DIR the way `cargo build` itself already does; see
+# the same lines in dev/join-test.sh for what hardcoding it used to cost.
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/debug/foton"
+
 echo "=== Building ==="
 if ! cargo build 2>&1 | tail -3; then
   echo "BUILD FAILED"
@@ -15,7 +20,7 @@ fi
 mkdir -p run && cd run || exit 1
 rm -f server.log
 echo "=== Booting ==="
-nohup "$ROOT/target/debug/foton" > server.log 2>&1 &
+nohup "$BIN" > server.log 2>&1 &
 PID=$!
 
 STATUS=1
