@@ -274,6 +274,14 @@ impl Player {
     /// tracker either, because a player never tracks themselves.
     fn resend_entity_data(&self) {
         let values = self.pack_all_entity_data();
+        // `pack_all` reports every non-default value but, unlike `pack_dirty`,
+        // consumes nothing. Anything that changed while the player was being
+        // placed is in `values` *and* still dirty, so the tracker would send it
+        // again on the next tick -- and vanilla only ever sends a player their
+        // own metadata once per change, through `packDirty`. The audible case
+        // is reconnecting mid-glide: the shared flags arrived twice a tick
+        // apart and the client started two elytra sound loops.
+        drop(self.pack_dirty_entity_data());
         if values.is_empty() {
             return;
         }
@@ -443,4 +451,64 @@ pub(in crate::player) fn nullable_game_mode_id(game_mode: Option<GameType>) -> i
 /// Vanilla writes a boolean game event's value as 1.0 or 0.0.
 const fn game_event_flag(enabled: bool) -> f32 {
     if enabled { 1.0 } else { 0.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use foton_registry::init_vanilla_registry;
+    use foton_utils::ChunkPos;
+
+    use crate::behavior::init_behaviors;
+    use crate::entity::{Entity as _, next_entity_id};
+    use crate::player::Player;
+    use crate::test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk};
+    use crate::world::World;
+
+    fn gliding_player(key: &'static str) -> (Arc<World>, Arc<Player>) {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world(key);
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "Glider", next_entity_id()).build();
+        // Restoring saved flight is what a reconnect mid-glide does, and it
+        // marks the shared flags dirty.
+        player.set_fall_flying(true);
+        (world, player)
+    }
+
+    /// Sending the full set on join must consume the dirty flags with it.
+    ///
+    /// Vanilla only ever hands a player their own metadata through `packDirty`
+    /// (`ServerEntity.sendToTrackingPlayersAndSelf`), which clears as it packs.
+    /// `pack_all` does not, so the shared flags went out on the join tick and
+    /// again from the tracker on the next one -- two
+    /// `ClientboundSetEntityDataPacket`s a tick apart. The client starts an
+    /// `ElytraOnPlayerSoundInstance` on each, which is the doubled, slightly
+    /// offset elytra noise the report describes.
+    #[test]
+    fn resending_entity_data_on_join_consumes_the_dirty_flags() {
+        let (_world, player) = gliding_player("join_consumes_dirty_entity_data");
+
+        player.resend_entity_data();
+
+        assert!(
+            player.pack_dirty_entity_data().is_none(),
+            "the join already sent these values; leaving them dirty makes the \
+             tracker send them a second time on the next tick"
+        );
+    }
+
+    /// The guard for the test above: without the join, the flags really are
+    /// dirty, so the assertion there is not passing for free.
+    #[test]
+    fn starting_to_glide_marks_the_shared_flags_dirty() {
+        let (_world, player) = gliding_player("gliding_marks_data_dirty");
+
+        assert!(
+            player.pack_dirty_entity_data().is_some(),
+            "fall flying has to reach the client somehow"
+        );
+    }
 }
