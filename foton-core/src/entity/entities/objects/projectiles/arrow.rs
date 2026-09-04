@@ -13,6 +13,7 @@ use foton_registry::item_stack::ItemStack;
 use foton_registry::vanilla_entity_data::ArrowEntityData;
 use foton_registry::{sound_events, vanilla_damage_types, vanilla_entities, vanilla_items};
 use foton_utils::locks::SyncMutex;
+use foton_utils::types::Difficulty;
 use foton_utils::{DowncastType, DowncastTypeKey};
 use glam::DVec3;
 
@@ -488,6 +489,19 @@ impl ArrowEntity {
         self.state.lock().base_damage
     }
 
+    /// Sets the damage an arrow a mob loosed carries.
+    ///
+    /// Vanilla parity: `AbstractArrow.setBaseDamageFromMob`, which is how a
+    /// skeleton's draw reaches the arrow -- a half-drawn bow hurts less, and
+    /// a harder difficulty adds a little on top.
+    pub fn set_base_damage_from_mob(&self, power: f32) {
+        let difficulty = self
+            .level()
+            .map_or(Difficulty::Normal, |world| world.difficulty());
+        let spread = triangle(f64::from(difficulty as i32) * 0.11, 0.574_25);
+        self.set_base_damage(f64::from(power).mul_add(2.0, spread));
+    }
+
     /// Sets the damage this arrow deals before the speed multiplier.
     pub fn set_base_damage(&self, damage: f64) {
         self.state.lock().base_damage = damage;
@@ -769,6 +783,11 @@ impl Projectile for ArrowEntity {
             state.shake_time = SHAKE_TIME;
         }
     }
+}
+
+/// Vanilla parity: `RandomSource.triangle`.
+fn triangle(mode: f64, deviation: f64) -> f64 {
+    mode + deviation * (rand::random::<f64>() - rand::random::<f64>())
 }
 
 #[cfg(test)]
