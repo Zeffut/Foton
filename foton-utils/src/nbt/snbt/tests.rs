@@ -423,3 +423,36 @@ fn errors_match_vanilla_alternative_selection_and_cursors() {
         TextComponent::from(&translations::SNBT_PARSER_INVALID_STRING_CONTENTS)
     );
 }
+
+/// SNBT that nests deeper than vanilla allows is refused, not followed.
+///
+/// `parse_tag`, `parse_compound` and `parse_list_or_array` are mutually
+/// recursive, so `{a:{a:{a: ... }}}` costs one stack frame per byte of input.
+/// A command argument is enough to carry tens of thousands of levels, and a
+/// stack overflow is a SIGSEGV rather than a panic: nothing catches it, and the
+/// release profile aborts anyway. The whole server goes down.
+///
+/// Vanilla parity: `NbtAccounter`, built with a `maxDepth` of 512 by every
+/// reader, which throws once `depth >= maxDepth`.
+#[test]
+fn deeply_nested_snbt_is_rejected_rather_than_followed() {
+    let depth = 50_000;
+    let bomb = format!("{}{}", "{a:".repeat(depth), "}".repeat(depth));
+    let error = parse_snbt(&bomb).expect_err("a 50 000-level value must not be parsed");
+    assert_eq!(error.kind(), &SnbtErrorKind::TooDeep);
+
+    let list_bomb = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+    let error = parse_snbt(&list_bomb).expect_err("nor a 50 000-level list");
+    assert_eq!(error.kind(), &SnbtErrorKind::TooDeep);
+}
+
+/// The limit is high enough that nothing a player legitimately writes hits it.
+#[test]
+fn nesting_within_the_vanilla_limit_still_parses() {
+    let depth = 100;
+    let deep = format!("{}1{}", "{a:".repeat(depth), "}".repeat(depth));
+    assert!(
+        parse_snbt(&deep).is_ok(),
+        "a hundred levels is well inside vanilla's 512 and must still work"
+    );
+}

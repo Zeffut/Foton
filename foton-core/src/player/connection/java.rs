@@ -479,6 +479,20 @@ impl BundleBuilder {
     }
 }
 
+/// Milliseconds since the Unix epoch, saturating rather than panicking.
+///
+/// `duration_since(UNIX_EPOCH)` only fails when the wall clock is set before
+/// 1970, which a bad RTC or a container with no clock source can produce. The
+/// release profile is `panic = "abort"`, so panicking here would kill the
+/// server outright -- taking every unsaved chunk with it -- over a clock that
+/// the keep-alive logic can perfectly well treat as "time zero".
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[expect(
     clippy::struct_field_names,
     reason = "alive_ prefix is intentional to group related keep-alive fields"
@@ -555,12 +569,15 @@ impl JavaConnection {
 
     fn keep_connection_alive(&self) {
         let mut tracker = self.keep_alive_tracker.lock();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("System time before UNIX EPOCH")
-            .as_millis() as u64;
+        let now = now_millis();
 
-        if now - tracker.alive_time >= 15000 {
+        // `saturating_sub`, not `-`: the wall clock can move backwards (an NTP
+        // correction, a VM resumed from a snapshot), and in release this
+        // subtraction wraps to a colossal number that clears the 15 s gate at
+        // once. Every player with a keep-alive in flight is then dropped for
+        // "timeout" on the same tick. `handle_keep_alive` below already
+        // saturates; this side did not.
+        if now.saturating_sub(tracker.alive_time) >= 15000 {
             if tracker.alive_pending {
                 self.disconnect(translations::DISCONNECT_TIMEOUT.msg());
             } else {
@@ -580,10 +597,7 @@ impl JavaConnection {
     fn handle_keep_alive(&self, packet: SKeepAlive) {
         let mut tracker = self.keep_alive_tracker.lock();
         if tracker.alive_pending && packet.id as u64 == tracker.alive_id {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("System time before UNIX EPOCH")
-                .as_millis() as u64;
+            let now = now_millis();
 
             let time = now.saturating_sub(tracker.alive_time) as u32;
             tracker.alive_pending = false;

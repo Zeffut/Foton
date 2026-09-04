@@ -59,6 +59,11 @@ pub enum SnbtErrorKind {
     ExpectedSymbol(char),
     /// An SNBT value was required at the cursor.
     ExpectedValue,
+    /// The value nested deeper than the parser is willing to follow.
+    ///
+    /// Vanilla parity: the `NbtAccounter` depth guard, which every reader is
+    /// built with at a limit of 512.
+    TooDeep,
     /// A compound key was required at the cursor.
     ExpectedKey,
     /// A compound key was present but empty.
@@ -143,7 +148,7 @@ impl SnbtErrorKind {
             Self::ExpectedSymbol(symbol) => translations::ARGUMENT_LITERAL_INCORRECT
                 .message([symbol.to_string()])
                 .component(),
-            Self::ExpectedValue | Self::ExpectedUnquotedString => {
+            Self::TooDeep | Self::ExpectedValue | Self::ExpectedUnquotedString => {
                 TextComponent::from(&translations::SNBT_PARSER_EXPECTED_UNQUOTED_STRING)
             }
             Self::ExpectedKey | Self::ExpectedQuotedString => {
@@ -235,6 +240,7 @@ impl fmt::Display for SnbtErrorKind {
             Self::TrailingData => formatter.write_str("trailing data"),
             Self::ExpectedSymbol(symbol) => write!(formatter, "expected '{symbol}'"),
             Self::ExpectedValue => formatter.write_str("expected tag"),
+            Self::TooDeep => formatter.write_str("value nested too deeply"),
             Self::ExpectedKey => formatter.write_str("expected compound key"),
             Self::EmptyKey => formatter.write_str("compound key cannot be empty"),
             Self::ExpectedArrayElement => formatter.write_str("expected integer array element"),

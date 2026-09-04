@@ -79,10 +79,25 @@ pub fn parse_snbt_compound_argument(input: &str) -> Result<(NbtCompound, usize),
         Err(error) => Err(parser.resolve_error(error)),
     }
 }
+/// How deep a value may nest before the parser gives up.
+///
+/// Vanilla parity: `NbtAccounter`, which every vanilla reader constructs with a
+/// `maxDepth` of 512 and which throws once `depth >= maxDepth`.
+///
+/// This is not a nicety. `parse_tag`, `parse_compound` and `parse_list_or_array`
+/// are mutually recursive, so a value like `{a:{a:{a: ... }}}` costs the
+/// attacker one byte per stack frame. Without a ceiling, an SNBT argument on a
+/// single command overflows the thread stack, and a stack overflow is a SIGSEGV
+/// -- not a panic. No `catch_unwind` sees it, and the release profile is
+/// `panic = "abort"` regardless: the whole server dies.
+const MAX_DEPTH: usize = 512;
+
 struct Parser<'a> {
     input: &'a str,
     cursor: usize,
     recorded_error: Option<SnbtError>,
+    /// How many nested compounds and lists are currently open.
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -91,6 +106,7 @@ impl<'a> Parser<'a> {
             input,
             cursor: 0,
             recorded_error: None,
+            depth: 0,
         }
     }
 
@@ -168,6 +184,23 @@ impl<'a> Parser<'a> {
         Err(self.error(SnbtErrorKind::ExpectedSymbol(expected)))
     }
 
+    /// Runs `body` one nesting level deeper, refusing to go past [`MAX_DEPTH`].
+    ///
+    /// The level is closed whatever `body` returns, so an early `?` unwinds the
+    /// counter as reliably as a clean return.
+    fn nested<T>(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Result<T, SnbtError>,
+    ) -> Result<T, SnbtError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(self.error(SnbtErrorKind::TooDeep));
+        }
+        self.depth += 1;
+        let parsed = body(self);
+        self.depth -= 1;
+        parsed
+    }
+
     fn parse_tag(&mut self) -> Result<NbtTag, SnbtError> {
         self.skip_whitespace();
         let Some(ch) = self.peek() else {
@@ -185,6 +218,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_compound(&mut self) -> Result<NbtCompound, SnbtError> {
+        self.nested(Self::parse_compound_inner)
+    }
+
+    fn parse_compound_inner(&mut self) -> Result<NbtCompound, SnbtError> {
         self.expect_char('{')?;
         let mut compound = NbtCompound::new();
         if self.consume_char('}') {
@@ -226,6 +263,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_list_or_array(&mut self) -> Result<NbtTag, SnbtError> {
+        self.nested(Self::parse_list_or_array_inner)
+    }
+
+    fn parse_list_or_array_inner(&mut self) -> Result<NbtTag, SnbtError> {
         self.expect_char('[')?;
         if self.consume_char(']') {
             return Ok(NbtTag::List(NbtList::Empty));
