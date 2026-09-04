@@ -1018,6 +1018,16 @@ impl Mob for ShulkerEntity {
         &self.mob_base
     }
 
+    /// A shulker never despawns.
+    ///
+    /// Vanilla parity: `AbstractGolem.removeWhenFarAway`, which returns false
+    /// and which `Shulker` inherits. This is what lets an end city's sentries
+    /// be spawned without the persistence flag: they generate far ahead of any
+    /// player, so anything that could despawn would be gone before it was seen.
+    fn remove_when_far_away(&self, _dist_sqr: f64) -> bool {
+        false
+    }
+
     fn tick_goal_selectors(&self) {
         PathfinderMob::tick_pathfinder_goal_selectors(self);
     }
