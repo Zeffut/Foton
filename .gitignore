@@ -56,3 +56,11 @@ plugin-api/build
 
 # Ruflo tooling state, written into the working tree by the plugin's hooks.
 .claude-flow/
+
+# Agent harness configuration: commands, skills and session state. These are
+# per-operator tooling, not project source, and never belong in the repo.
+.claude/
+
+# Agent harness configuration: commands, skills and session state. These are
+# per-operator tooling, not project source, and never belong in the repo.
+.claude/
