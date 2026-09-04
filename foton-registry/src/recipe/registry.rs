@@ -169,6 +169,38 @@ impl RecipeRegistry {
             .copied()
     }
 
+    /// Returns whether any smithing recipe takes `stack` as its template.
+    ///
+    /// Vanilla parity: `RecipePropertySet.SMITHING_TEMPLATE`, which vanilla
+    /// precomputes once per recipe reload and the template slot's `mayPlace`
+    /// tests against. Foton has a dozen smithing recipes, so it walks them.
+    #[must_use]
+    pub fn accepts_smithing_template(&self, stack: &ItemStack) -> bool {
+        self.smithing_recipes
+            .iter()
+            .any(|recipe| recipe.template.test(stack))
+    }
+
+    /// Returns whether any smithing recipe upgrades `stack`.
+    ///
+    /// Vanilla parity: `RecipePropertySet.SMITHING_BASE`.
+    #[must_use]
+    pub fn accepts_smithing_base(&self, stack: &ItemStack) -> bool {
+        self.smithing_recipes
+            .iter()
+            .any(|recipe| recipe.base.test(stack))
+    }
+
+    /// Returns whether any smithing recipe upgrades *with* `stack`.
+    ///
+    /// Vanilla parity: `RecipePropertySet.SMITHING_ADDITION`.
+    #[must_use]
+    pub fn accepts_smithing_addition(&self, stack: &ItemStack) -> bool {
+        self.smithing_recipes
+            .iter()
+            .any(|recipe| recipe.addition.test(stack))
+    }
+
     /// Registers a stonecutter recipe.
     pub fn register_stonecutting(&mut self, recipe: &'static StonecuttingRecipe) {
         self.stonecutting_recipes.push(recipe);
