@@ -986,7 +986,7 @@ pub trait LivingEntity: Entity {
             self.apply_damage_knockback(source, blocked);
         }
 
-        if self.is_dead_or_dying() && self.try_death_protection(world) {
+        if self.is_dead_or_dying() && self.try_death_protection(world, source) {
             return true;
         }
         if self.is_dead_or_dying() {
@@ -1165,7 +1165,15 @@ pub trait LivingEntity: Entity {
     }
 
     /// Applies a Death Protection component before vanilla death processing.
-    fn try_death_protection(&self, world: &World) -> bool {
+    ///
+    /// Vanilla parity: `LivingEntity.checkTotemDeathProtection`.
+    fn try_death_protection(&self, world: &World, source: &DamageSource) -> bool {
+        // Vanilla parity: the first statement of that method. A totem does not
+        // save anyone from `/kill` or the void.
+        if source.bypasses_invulnerability() {
+            return false;
+        }
+
         let hand = [InteractionHand::MainHand, InteractionHand::OffHand]
             .into_iter()
             .find(|hand| self.get_item_in_hand(*hand).get(DEATH_PROTECTION).is_some());
@@ -1178,9 +1186,20 @@ pub trait LivingEntity: Entity {
             return false;
         }
         let stack = self.get_item_in_hand(hand);
-        if !self.has_infinite_materials() {
-            self.set_item_in_hand(hand, stack.copy_with_count(stack.count().saturating_sub(1)));
-        }
+        // Vanilla parity: the bare `itemStack.shrink(1)`, which has no creative
+        // branch. `copy_with_count(0)` is not empty enough: the stack still
+        // carries its item, and `ItemStack::get` reads components off the
+        // item's prototype without consulting `is_empty`, so a spent totem
+        // went on resurrecting its holder forever.
+        let remaining = stack.count().saturating_sub(1);
+        self.set_item_in_hand(
+            hand,
+            if remaining > 0 {
+                stack.copy_with_count(remaining)
+            } else {
+                ItemStack::empty()
+            },
+        );
         self.set_health(1.0);
         self.set_absorption_amount(0.0);
         self.game_event(&vanilla_game_events::ENTITY_DIE);

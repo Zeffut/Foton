@@ -361,3 +361,104 @@ fn a_hurt_player_is_not_sent_the_sound_their_client_plays_itself() {
          plays from the damage event, so they heard the hit twice"
     );
 }
+
+/// A totem saves its holder exactly once.
+///
+/// Vanilla's `checkTotemDeathProtection` does a bare `itemStack.shrink(1)`,
+/// which yields `ItemStack.EMPTY`. Foton wrote `copy_with_count(0)` instead,
+/// and that stack is `is_empty()` while still carrying its item -- and
+/// `ItemStack::get` reads components off the item prototype without consulting
+/// `is_empty`. So the spent totem still answered `Some(DEATH_PROTECTION)` and
+/// went on resurrecting its holder forever.
+#[test]
+fn a_totem_is_spent_when_it_saves_you() {
+    use crate::entity::next_entity_id;
+    use crate::player::ResetReason;
+    use crate::test_support::TestPlayerBuilder;
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::vanilla_items;
+    use foton_utils::types::InteractionHand;
+
+    init_vanilla_registry();
+    init_behaviors();
+    let world = fresh_test_world("totem_is_spent_once");
+    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Doomed", next_entity_id()).build();
+    player.base().set_position_local(DVec3::new(8.5, 64.0, 8.5));
+    // A player who was never placed counts as removed, and a removed entity is
+    // invulnerable to everything.
+    assert!(world.add_player(Arc::clone(&player), ResetReason::InitialJoin));
+    player.set_item_in_hand(
+        InteractionHand::MainHand,
+        ItemStack::new(&vanilla_items::TOTEM_OF_UNDYING),
+    );
+
+    assert!(
+        player
+            .get_item_in_hand(InteractionHand::MainHand)
+            .is(&vanilla_items::TOTEM_OF_UNDYING),
+        "the totem has to actually be in hand"
+    );
+    let lethal = DamageSource::environment(&vanilla_damage_types::GENERIC);
+    assert!(player.hurt(&world, &lethal, 1000.0));
+    assert!(
+        !LivingEntity::is_dead_or_dying(player.as_ref()),
+        "the totem should have saved them"
+    );
+    assert!(
+        player
+            .get_item_in_hand(InteractionHand::MainHand)
+            .is_empty(),
+        "and it should be gone from their hand"
+    );
+
+    // Second lethal blow, with nothing left to spend. It has to be bigger than
+    // the first: inside the damage cooldown vanilla only lets through the
+    // difference, and an equal hit is refused outright.
+    assert!(player.hurt(&world, &lethal, 2000.0));
+    assert!(
+        LivingEntity::is_dead_or_dying(player.as_ref()),
+        "a spent totem must not save them a second time"
+    );
+}
+
+/// A totem does not save you from damage that bypasses invulnerability.
+///
+/// Vanilla parity: the first statement of `checkTotemDeathProtection` --
+/// `if (killingDamage.is(DamageTypeTags.BYPASSES_INVULNERABILITY)) return false;`
+/// -- which is what keeps `/kill` and the void lethal.
+#[test]
+fn a_totem_does_not_survive_a_kill_that_bypasses_invulnerability() {
+    use crate::entity::next_entity_id;
+    use crate::player::ResetReason;
+    use crate::test_support::TestPlayerBuilder;
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::vanilla_items;
+    use foton_utils::types::InteractionHand;
+
+    init_vanilla_registry();
+    init_behaviors();
+    let world = fresh_test_world("totem_does_not_beat_kill");
+    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Killed", next_entity_id()).build();
+    player.base().set_position_local(DVec3::new(8.5, 64.0, 8.5));
+    // A player who was never placed counts as removed, and a removed entity is
+    // invulnerable to everything.
+    assert!(world.add_player(Arc::clone(&player), ResetReason::InitialJoin));
+    player.set_item_in_hand(
+        InteractionHand::MainHand,
+        ItemStack::new(&vanilla_items::TOTEM_OF_UNDYING),
+    );
+
+    assert!(player.hurt(
+        &world,
+        &DamageSource::environment(&vanilla_damage_types::GENERIC_KILL),
+        1000.0,
+    ));
+    assert!(
+        LivingEntity::is_dead_or_dying(player.as_ref()),
+        "/kill has to kill through a totem"
+    );
+}
