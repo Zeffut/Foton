@@ -25,17 +25,49 @@ public d'origine.
 
 ## Emplacement — IMPORTANT
 
-Deux checkouts existent. Celui qui compile et qui sert aujourd'hui est **macOS** :
+Deux checkouts existent, et **les deux compilent** :
 
-- **macOS** : `~/Desktop/Projets/Foton` — `cargo check --workspace` y passe.
-- **WSL2 (Ubuntu)** : `/root/Foton`, historiquement le workspace de référence — le
-  dossier y porte peut-être encore l'ancien nom, à renommer hors session.
-  Depuis Windows, ne jamais compiler côté Windows (Smart App Control bloque les
-  build scripts) ; passer par `wsl -d Ubuntu -- bash ...` et ne jamais inliner
-  `$HOME` dans une commande PowerShell (l'interpolation casse la syntaxe bash).
+- **Windows** : `C:\Users\Zeffu\Desktop\Projets\Foton`.
+- **WSL2 (Ubuntu)** : `/root/Foton` — renommé depuis `/root/SteelMC` le 2026-09-03.
 
-Les chemins WSL de ce document (`/root/FotonExtractor`, JDK sous
-`/usr/lib/jvm/...`) ne valent que pour le checkout WSL.
+Sur le checkout Windows, `cargo check`, `cargo clippy` et `cargo test` tournent
+**nativement** et plus vite qu'en passant par WSL. La version précédente de ce
+document interdisait de compiler côté Windows ; c'était faux, et l'interdiction
+a coûté du temps.
+
+Ce que Smart App Control bloque vraiment, avec `os error 4551` :
+
+- **`cargo fmt`**, toujours.
+- **les binaires de test fraîchement liés**, par intermittence — `cargo test`
+  peut passer puis se voir refuser après un rebuild, ce qui emporte aussi
+  `dev/count-tests.py`.
+
+Pour ces cas-là, et pour `typos` et `prek`, piloter WSL sur le **même** checkout
+Windows, sans dupliquer l'arbre :
+
+```
+wsl -d Ubuntu -u root -- bash -c 'cd /mnt/c/Users/Zeffu/Desktop/Projets/Foton \
+  && export CARGO_TARGET_DIR=/root/foton-target \
+  && /root/.cargo/bin/cargo fmt --all'
+```
+
+`CARGO_TARGET_DIR` est indispensable : sans lui, les artefacts Linux et MSVC se
+disputent le même `target/debug`. Les outils vivent dans `/root/.cargo/bin/` et
+ne sont **pas** sur le `PATH` ; les invoquer par chemin absolu.
+
+Trois pièges d'invocation depuis Git Bash, chacun ayant produit un faux
+diagnostic :
+
+- `wsl.exe` mange les variables de shell — une boucle `for t in a b; do ... $t`
+  s'exécute avec `$t` vide. Écrire des commandes sans variable, ou un script.
+- un chemin `/mnt/...` passé comme argument nu devient
+  `C:/Program Files/Git/mnt/...`. Le passer dans un `bash -c '...'`.
+- `wsl -d Ubuntu` s'exécute en tant que `zeffu`, qui ne peut pas lire `/root`.
+  Passer `-u root`, sinon les checkouts y paraissent absents.
+
+Enfin, les scripts Python de `dev/` exigent `PYTHONUTF8=1` côté Windows : sans
+lui `gen-config-docs.py` meurt sur cp1252 **après** avoir ouvert sa sortie, ce
+qui vide `CONFIGURATION.md`.
 
 ## Commandes
 
@@ -46,6 +78,8 @@ bash dev/smoke-test.sh      # démarre le serveur et lui parle en protocole Mine
 bash dev/join-test.sh       # fait entrer un vrai client dans le monde (login → play)
 python3 dev/coverage.py     # mesure la couverture réelle par rapport à vanilla
 python3 dev/gen-config-docs.py  # régénère CONFIGURATION.md depuis les schémas
+python3 dev/check-natives.py    # chaque native déclarée est enregistrée, et rien d'autre
+bash dev/bedrock-test.sh        # Geyser, identité Floodgate, persistance de l'UUID
 ```
 
 Commandes brutes :
@@ -62,14 +96,20 @@ prek run --all-files                    # suite pré-commit complète
 Toolchain **nightly-2026-07-23** (pinée par `rust-toolchain.toml`), edition 2024.
 Outils : `typos`, `ast-grep` (recherche/réécriture structurelle), `prek`, `gh`.
 
-**Java — deux versions, ne pas confondre :**
+**Java — trois usages, ne pas confondre :**
 
 | Usage | JDK | `JAVA_HOME` |
 |-------|-----|-------------|
 | `update-minecraft-src.sh` (GitCraft) | **25** | `/usr/lib/jvm/java-25-openjdk-amd64` |
 | FotonExtractor (Fabric Loom) | **21** | `/usr/lib/jvm/java-21-openjdk-amd64` |
+| `build-plugin-api.sh` | n'importe lequel ≥ 21 | — |
 
 GitCraft échoue avec Java 21 (`release version 25 not supported`).
+
+Le jar de l'API plugin est compilé avec `javac --release 21`, quel que soit le
+JDK qui le construit : Paper 26.2 exige Java 21, et un jar produit sans cette
+option par un JDK 25 porte la version de classe 69, qu'un serveur en Java 21 ne
+peut pas charger — l'hôte de plugins meurt alors sans rien nommer.
 
 ## Règles techniques — à respecter
 
