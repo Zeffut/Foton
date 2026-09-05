@@ -1719,3 +1719,227 @@ fn chunk_stage_hashes_inner() {
         }
     }
 }
+
+/// Does an end city actually put its shulkers in the world?
+///
+/// Report #6 said there were none in the End. Reading the path proved nothing:
+/// every link from `handle_end_city_marker` down to the proto chunk's entity
+/// storage looks right, and a defect that survives a careful reading is exactly
+/// the kind that has to be generated rather than argued about. So this generates
+/// the one end city seed 13579 places -- the same seed and the same start that
+/// `structure_starts.json` records -- and counts what its sentries left behind.
+#[cfg(test)]
+mod end_city_shulkers {
+    use std::ops::RangeInclusive;
+
+    use super::*;
+    use crate::bootstrap::init_globals_once;
+    use crate::worldgen::EndGenerator;
+    use foton_registry::vanilla_entities;
+    use foton_worldgen::biomes::BiomeSourceKind;
+
+    /// The seed both worldgen fixtures use.
+    const SEED: u64 = 13579;
+
+    /// The chunks the end city recorded for [`SEED`] occupies.
+    ///
+    /// Its start sits at chunk (-77, -35) with a bounding box of x -1255..-1179
+    /// and z -557..-478, which is these six chunks square.
+    const CITY_X: RangeInclusive<i32> = -79..=-74;
+    const CITY_Z: RangeInclusive<i32> = -35..=-30;
+
+    fn city_positions() -> Vec<(i32, i32)> {
+        CITY_X.flat_map(|x| CITY_Z.map(move |z| (x, z))).collect()
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        clippy::similar_names,
+        reason = "replays every generation stage, each with its own coordinate pair"
+    )]
+    fn end_city_places_its_shulkers() {
+        init_globals_once();
+
+        let dim_type = &vanilla_dimension_types::THE_END;
+        let min_y = dim_type.min_y;
+        let height = dim_type.height;
+        let section_count = (height / 16) as usize;
+        let min_qy = min_y >> 2;
+        let total_quarts_y = (section_count * 4) as i32;
+
+        let thread_pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .thread_name(|index| format!("end-city-shulkers-{index}"))
+                .build()
+                .expect("failed to create the end city test rayon pool"),
+        );
+        let generator: Arc<ChunkGeneratorType> = Arc::new(ChunkGeneratorType::End(
+            EndGenerator::new(None, BiomeSourceKind::end(SEED), SEED, &thread_pool),
+        ));
+        let world = create_test_world(
+            "minecraft:the_end",
+            dim_type,
+            SEED,
+            Arc::clone(&generator),
+            thread_pool,
+        );
+        let context = world.chunk_map.world_gen_context.clone();
+
+        let feature_step = GENERATION_PYRAMID.get_step_to(ChunkStatus::Features);
+        let feature_cache_radius = feature_step.direct_dependencies.get_radius() as i32;
+        let feature_carver_radius = feature_step
+            .direct_dependencies
+            .get_radius_of(ChunkStatus::Carvers) as i32;
+
+        let centers: FxHashSet<(i32, i32)> = city_positions().into_iter().collect();
+        let carver_positions = expanded_positions(&centers, feature_carver_radius);
+        let biome_positions = expanded_positions(&carver_positions, 1);
+        // Structure references scan 17x17 around every chunk that gets read.
+        let starts_positions = expanded_positions(&carver_positions, 8);
+
+        let mut chunks: FxHashMap<(i32, i32), Chunk> =
+            FxHashMap::with_capacity_and_hasher(starts_positions.len(), FxBuildHasher);
+        for &pos in &starts_positions {
+            chunks.insert(pos, empty_proto_chunk(pos, section_count, min_y, height));
+        }
+
+        for chunk in chunks.values() {
+            generator.create_structures(chunk);
+        }
+
+        // The city has to be there at all before its shulkers can be missing.
+        let city_starts: usize = city_positions()
+            .iter()
+            .filter(|pos| {
+                chunk_or_panic(&chunks, **pos)
+                    .structure_starts()
+                    .iter()
+                    .any(|(id, _)| id.to_string() == "minecraft:end_city")
+            })
+            .count();
+        assert_eq!(
+            city_starts, 1,
+            "seed {SEED} should place exactly one end city start across these chunks"
+        );
+
+        for &pos in &biome_positions {
+            generator.create_biomes(chunk_or_panic(&chunks, pos));
+        }
+
+        for &(target_x, target_z) in &sorted_positions(&carver_positions) {
+            let target_block_x = target_x * 16;
+            let target_block_z = target_z * 16;
+            for source_x in (target_x - 8)..=(target_x + 8) {
+                for source_z in (target_z - 8)..=(target_z + 8) {
+                    let Some(source_chunk) = chunks.get(&(source_x, source_z)) else {
+                        continue;
+                    };
+                    for (structure_id, start) in source_chunk.structure_starts().iter() {
+                        let Some(bb) = start.bounding_box else {
+                            continue;
+                        };
+                        if bb.intersects_xz(
+                            target_block_x,
+                            target_block_z,
+                            target_block_x + 15,
+                            target_block_z + 15,
+                        ) {
+                            chunk_or_panic(&chunks, (target_x, target_z))
+                                .structure_references_mut()
+                                .entry(structure_id.clone())
+                                .or_default()
+                                .insert(ChunkPos::new(source_x, source_z));
+                        }
+                    }
+                }
+            }
+        }
+
+        for pos in sorted_positions(&carver_positions) {
+            let chunk = chunk_or_panic(&chunks, pos);
+            let beardifier = build_test_beardifier(chunk, &chunks);
+            generator.fill_from_noise(
+                GenerationChunk::<NoisePhase>::for_test(chunk),
+                beardifier.as_ref(),
+            );
+        }
+
+        for pos in sorted_positions(&carver_positions) {
+            let chunk = chunk_or_panic(&chunks, pos);
+            let neighbor_biomes = |q: IVec3| -> u16 {
+                let cx = q.x >> 2;
+                let cz = q.z >> 2;
+                let neighbor = chunk_or_panic(&chunks, (cx, cz));
+                let local_qx = (q.x - cx * 4) as usize;
+                let local_qz = (q.z - cz * 4) as usize;
+                let qy_clamped = (q.y - min_qy).clamp(0, total_quarts_y - 1) as usize;
+                neighbor.sections.sections[qy_clamped / 4]
+                    .read()
+                    .biomes
+                    .get(local_qx, qy_clamped % 4, local_qz)
+            };
+            generator.build_surface(
+                GenerationChunk::<SurfacePhase>::for_test(chunk),
+                &neighbor_biomes,
+            );
+        }
+
+        for pos in sorted_positions(&carver_positions) {
+            let chunk = chunk_or_panic(&chunks, pos);
+            recalculate_section_counts(chunk);
+            generator.apply_carvers(GenerationChunk::<CarversPhase>::for_test(chunk));
+        }
+
+        let holders: FeatureHolderMap = Arc::new(build_feature_holders(
+            mem::take(&mut chunks),
+            &carver_positions,
+            min_y,
+            height,
+        ));
+
+        let mut generated = FxHashSet::default();
+        generate_features_for_positions(
+            &city_positions(),
+            &mut generated,
+            FeatureGenerationInputs {
+                holders: &holders,
+                context: &context,
+                generator: &generator,
+                feature_step,
+                feature_cache_radius,
+                seed: SEED,
+            },
+        );
+
+        let mut shulkers = 0;
+        for pos in city_positions() {
+            let Some(holder) = holders.get(&pos) else {
+                continue;
+            };
+            let Some(chunk) = holder.try_chunk(ChunkStatus::Carvers) else {
+                continue;
+            };
+            shulkers += chunk
+                .get_entities()
+                .iter()
+                .filter(|entity| entity.entity_type().key == vanilla_entities::SHULKER.key)
+                .count();
+        }
+
+        eprintln!(
+            "[end city] {} proto chunks, {} carver chunks, {} city chunks, {shulkers} shulkers",
+            starts_positions.len(),
+            carver_positions.len(),
+            city_positions().len(),
+        );
+
+        assert!(
+            shulkers > 0,
+            "the end city generated no shulkers: either its `Sentry` data markers \
+             never reached `spawn_end_city_shulker`, or the entity never reached \
+             the chunk"
+        );
+    }
+}
