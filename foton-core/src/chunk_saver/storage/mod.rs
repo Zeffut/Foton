@@ -618,13 +618,14 @@ impl ChunkStorage {
                 Self::warn_skipping_non_finite_entity(entity.as_ref());
                 continue;
             }
-            if seen_entity_ids.insert(entity.id()) {
-                Self::assert_unique_save_uuid(
+            if seen_entity_ids.insert(entity.id())
+                && Self::save_uuid_is_unique(
                     &mut seen_entity_uuids,
                     entity.uuid(),
                     entity.id(),
                     pos,
-                );
+                )
+            {
                 entities.push(entity);
             }
         }
@@ -635,13 +636,14 @@ impl ChunkStorage {
                 Self::warn_skipping_non_finite_entity(entity.as_ref());
                 continue;
             }
-            if seen_entity_ids.insert(entity.id()) {
-                Self::assert_unique_save_uuid(
+            if seen_entity_ids.insert(entity.id())
+                && Self::save_uuid_is_unique(
                     &mut seen_entity_uuids,
                     entity.uuid(),
                     entity.id(),
                     pos,
-                );
+                )
+            {
                 entities.push(Arc::clone(entity));
             }
         }
@@ -738,16 +740,27 @@ impl ChunkStorage {
         );
     }
 
-    fn assert_unique_save_uuid(
+    /// Whether this uuid is the first of its kind in the chunk being saved.
+    ///
+    /// This used to assert. It runs on the encoding pool, off the tick thread,
+    /// while the tick is free to mutate the entity indices -- and under
+    /// `panic = "abort"` an assertion here kills the server *during a save*,
+    /// which is the worst moment it could pick. Skipping the duplicate writes
+    /// one copy instead of none, and the non-finite-position guard right next
+    /// to it already treats a bad entity exactly that way.
+    fn save_uuid_is_unique(
         seen_uuids: &mut FxHashSet<uuid::Uuid>,
         uuid: uuid::Uuid,
         entity_id: i32,
         chunk_pos: ChunkPos,
-    ) {
-        assert!(
-            seen_uuids.insert(uuid),
-            "duplicate saveable entity uuid {uuid} while preparing chunk {chunk_pos:?} for save; latest entity id {entity_id}"
+    ) -> bool {
+        if seen_uuids.insert(uuid) {
+            return true;
+        }
+        tracing::error!(
+            "duplicate saveable entity uuid {uuid} while preparing chunk {chunk_pos:?} for save;              latest entity id {entity_id}; skipping the duplicate"
         );
+        false
     }
 
     /// Converts chunk data to persistent format.

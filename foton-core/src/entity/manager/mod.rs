@@ -1774,11 +1774,15 @@ impl WorldEntityManager {
             !state.live_by_id.contains_key(&entity_id),
             "entity id {entity_id} is already registered in the world entity manager"
         );
+        // Check before inserting, not inside the assertion. Written the other
+        // way the index is already overwritten by the time the assertion fires,
+        // so the state is corrupt whether or not anything survives the panic.
         assert!(
-            state.live_by_uuid.insert(entry.uuid, entity_id).is_none(),
+            !state.live_by_uuid.contains_key(&entry.uuid),
             "entity uuid {} is already registered in the world entity manager",
             entry.uuid
         );
+        state.live_by_uuid.insert(entry.uuid, entity_id);
         entry.section_order = Self::next_section_order(state);
         state
             .by_section
@@ -1875,11 +1879,17 @@ impl WorldEntityManager {
         if !entry.should_save() || !seen_ids.insert(entry.entity.id()) {
             return;
         }
-        assert!(
-            seen_uuids.insert(entry.uuid),
-            "duplicate saveable entity uuid {} in world entity manager",
-            entry.uuid
-        );
+        // Collected on the encoding pool while the tick thread may be moving
+        // entities between indices. Killing the process -- which is what an
+        // assertion does under `panic = "abort"` -- would lose every dirty chunk
+        // at the exact moment the server was trying to write them.
+        if !seen_uuids.insert(entry.uuid) {
+            log::error!(
+                "duplicate saveable entity uuid {} in world entity manager;                  saving the first and skipping this one",
+                entry.uuid
+            );
+            return;
+        }
         result.push(entry.entity.clone());
     }
 
