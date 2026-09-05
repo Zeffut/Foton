@@ -10,6 +10,7 @@ use std::{
     path::PathBuf,
     sync::Weak,
 };
+use zstd::bulk::decompress;
 
 use foton_utils::{ChunkPos, locks::AsyncRwLock};
 use rustc_hash::FxHashMap;
@@ -76,6 +77,14 @@ struct RegionHandle {
     /// Current file size in sectors.
     file_sectors: u32,
 }
+
+/// The most a single chunk may expand to when it is decompressed.
+///
+/// Chunks run to a few hundred kilobytes in practice, and the region format
+/// caps one at 255 sectors -- about a megabyte -- on disk. Sixty-four megabytes
+/// is far past anything legitimate while still turning a decompression bomb
+/// into a rejected chunk rather than an out-of-memory kill.
+const MAX_DECOMPRESSED_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 
 impl RegionManager {
     /// Creates a new region manager.
@@ -563,7 +572,13 @@ impl RegionManager {
         height: i32,
         level: Weak<World>,
     ) -> Result<LoadedChunk, CorruptChunkData> {
-        let data = zstd::decode_all(&compressed[..])
+        // Bounded, not `decode_all`. A zstd frame declares nothing useful about
+        // how far it expands, so an unbounded decode lets a crafted or corrupt
+        // region file -- a downloaded map, a restored backup, a truncated write
+        // -- turn a few megabytes on disk into hundreds of gigabytes in memory
+        // and take the process out. The packet decoder already caps its zlib
+        // output for exactly this reason; the disk path did not.
+        let data = decompress(&compressed[..], MAX_DECOMPRESSED_CHUNK_BYTES)
             .map_err(|error| CorruptChunkData(format!("zstd decode failed: {error}")))?;
         let persistent: PersistentChunk<'_> = wincode::deserialize(&data)
             .map_err(|error| CorruptChunkData(format!("chunk decode failed: {error}")))?;
@@ -788,6 +803,37 @@ mod tests {
             .await
             .expect("chunk table entry should be readable");
         assert!(ChunkEntry::from_bytes(bytes).is_some_and(|entry| entry.exists()));
+    }
+
+    /// A decompression bomb is refused instead of being expanded into memory.
+    ///
+    /// A zstd frame says nothing useful about how far it expands, so an
+    /// unbounded decode turns a few megabytes of region file -- a downloaded
+    /// map, a restored backup -- into as much memory as the attacker likes.
+    #[test]
+    fn a_decompression_bomb_is_refused_rather_than_expanded() {
+        // A gigabyte of zeroes compresses to a few kilobytes.
+        let bomb = zstd::encode_all(vec![0u8; 1024 * 1024 * 1024].as_slice(), 3)
+            .expect("the bomb should compress");
+        assert!(
+            bomb.len() < 1024 * 1024,
+            "the point of the test is that a small payload expands hugely, but              this one is {} bytes",
+            bomb.len()
+        );
+
+        assert!(
+            decompress(&bomb, MAX_DECOMPRESSED_CHUNK_BYTES).is_err(),
+            "a gigabyte is past the per-chunk ceiling and must be refused"
+        );
+
+        // A payload of a realistic size still round-trips.
+        let ordinary = vec![7u8; 256 * 1024];
+        let packed = zstd::encode_all(ordinary.as_slice(), 3).expect("compresses");
+        assert_eq!(
+            decompress(&packed, MAX_DECOMPRESSED_CHUNK_BYTES)
+                .expect("a normal chunk is nowhere near the ceiling"),
+            ordinary
+        );
     }
 
     #[tokio::test]
