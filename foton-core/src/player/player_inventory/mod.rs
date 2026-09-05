@@ -98,8 +98,13 @@ impl PlayerInventorySyncState {
     }
 }
 
+/// The pending open-menu work a tick still has to hand to the client.
+///
+/// It carried a `container_id` until the container-close handler stopped
+/// comparing ids -- vanilla's `handleContainerClose` reads none -- which left
+/// nothing reading it. The id is still on the menu itself for anyone who needs
+/// it; keeping a second, never-read copy here only invites the two to disagree.
 struct OpenMenuDispatch {
-    container_id: u8,
     overrides_player_slots: bool,
     top_slot_count: usize,
     menu_type: Option<String>,

@@ -219,7 +219,6 @@ impl Player {
             return Err(OpenMenuUnavailable::Unavailable);
         }
 
-        let container_id = menu.container_id();
         let overrides_player_slots = menu.overrides_player_slots();
         let Some(menu) = open_menu.menu.take() else {
             return Err(OpenMenuUnavailable::Unavailable);
@@ -238,7 +237,6 @@ impl Player {
                 .collect()
         };
         open_menu.dispatch = Some(OpenMenuDispatch {
-            container_id,
             overrides_player_slots,
             top_slot_count,
             menu_type,
@@ -607,26 +605,14 @@ impl Player {
             packet.container_id
         );
 
-        let open_menu = self.open_menu.lock();
-        let closes_open_menu = open_menu
-            .menu
-            .as_ref()
-            .is_some_and(|menu| i32::from(menu.container_id()) == packet.container_id)
-            || open_menu
-                .dispatch
-                .as_ref()
-                .is_some_and(|dispatch| i32::from(dispatch.container_id) == packet.container_id);
-        drop(open_menu);
-
-        if closes_open_menu {
-            self.do_close_container();
-            return;
-        }
-
-        if packet.container_id == i32::from(INVENTORY_MENU_CONTAINER_ID) {
-            let mut menu = self.inventory_menu.lock();
-            menu.removed(self);
-        }
+        // Vanilla parity: `handleContainerClose` is two lines and reads no id at
+        // all -- it just runs `doCloseContainer`. Gating on a match meant a
+        // client sending any other id left the menu installed server-side while
+        // its own screen was already gone: `removed` never ran, so the
+        // container's open count and its `stopOpen` side effects never fired.
+        // The id is kept for the log line, which is all vanilla would use it for.
+        let _ = packet.container_id;
+        self.do_close_container();
     }
 
     /// Handles an anvil rename packet.
@@ -718,15 +704,17 @@ impl Player {
             menu.behavior_mut()
                 .set_remote_slot_known(slot_index, &item_stack);
             menu.behavior_mut().broadcast_changes(&self.connection);
-        } else if drop && valid_data {
-            // TODO: Implement drop spam throttling
-            // For now, just drop the item
-            if !item_stack.is_empty() {
-                // TODO: Actually drop the item into the world
-                log::debug!(
-                    "Player {} would drop {:?} in creative mode",
-                    self.gameprofile.name,
-                    item_stack
+        } else if drop && valid_data && !item_stack.is_empty() {
+            // Vanilla parity: `dropSpamThrottler.increment(); player.drop(stack,
+            // true)`. This used to log that the item "would" be dropped and then
+            // discard it, so a creative player dragging a stack out of the
+            // window watched it disappear instead of hitting the ground.
+            if self.allow_creative_drop() {
+                let _ = self.drop_item(item_stack, false, true);
+            } else {
+                log::warn!(
+                    "Player {} was dropping items too fast in creative mode, ignoring.",
+                    self.gameprofile.name
                 );
             }
         }
@@ -888,7 +876,6 @@ impl Player {
                     .collect()
             };
             open_menu.dispatch = Some(OpenMenuDispatch {
-                container_id: menu.container_id(),
                 overrides_player_slots: menu.overrides_player_slots(),
                 top_slot_count,
                 menu_type,
@@ -1083,7 +1070,6 @@ impl Player {
             };
             open_menu.title = None;
             open_menu.dispatch = Some(OpenMenuDispatch {
-                container_id: menu.container_id(),
                 overrides_player_slots: menu.overrides_player_slots(),
                 top_slot_count: 0,
                 menu_type: None,
