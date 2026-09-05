@@ -972,10 +972,21 @@ impl JavaConnection {
                         Ok(packet) => {
                             if let Some(player) = self.player.upgrade()
                                 && let Err(err) = self.process_packet(packet, player, &server) {
+                                // Vanilla parity: `Connection.exceptionCaught`
+                                // disconnects on anything but a
+                                // `SkipPacketException`. Logging and carrying on
+                                // gave a client an unmetered way to write to the
+                                // server's log file, and -- worse -- it hid real
+                                // parity bugs: the chat message bound was one
+                                // byte-vs-UTF-16 mistake away from silently
+                                // dropping every accented message, and nothing
+                                // surfaced it because the failure only ever
+                                // reached this line.
                                 log::warn!(
-                                    "Failed to get packet from client {}: {err}",
+                                    "Disconnecting client {} after a packet it sent failed to decode: {err}",
                                     self.id
                                 );
+                                self.close();
                             }
                         }
                         Err(err) => {

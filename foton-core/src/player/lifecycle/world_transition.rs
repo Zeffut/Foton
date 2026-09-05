@@ -94,7 +94,7 @@ impl Player {
                 teleport_transition.rotation,
                 teleport_transition.relatives,
             ) {
-                panic!(
+                log::error!(
                     "failed to commit same-world portal teleport for player {}: {error}",
                     self.id()
                 );

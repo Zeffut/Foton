@@ -25,6 +25,21 @@ wsl -d Ubuntu -u root -- bash -c 'cd /mnt/c/Users/Zeffu/Desktop/Projets/Foton \
 `CARGO_TARGET_DIR` is not optional: without it the Linux and MSVC artifacts
 fight over the same `target/debug`.
 
+**The VM does not give memory back.** `~/.wslconfig` grants WSL a slice of
+the host -- 20 GB of 31 on this machine -- and a workspace build takes most
+of it as page cache. It is never returned while the VM lives: `echo 3 >
+/proc/sys/vm/drop_caches` empties the cache *inside* WSL and leaves
+`vmmemWSL` exactly as large on the Windows side. Only `wsl.exe --shutdown`
+hands it back, and nothing is lost as long as no build is running.
+
+This matters because a Minecraft client is 9 GB. With one open, 20 + 9 leaves
+Windows under 2 GB and `cargo test` -- the stage that links nineteen test
+binaries -- is killed by the host, over and over, with an error that says
+nothing about the real cause. Six runs died that way before the arithmetic
+was the obvious suspect. Check `Get-Process | Sort-Object WorkingSet64
+-Descending` before believing the build is at fault, shut the VM down between
+heavy runs, and lower the `memory=` line while a game is running.
+
 Two invocation traps, each of which has produced a false diagnosis:
 
 - `wsl.exe` expands `$PATH` in the *outer* shell first. The Windows PATH
@@ -155,6 +170,28 @@ Blinding is a mitigation, not a proof of constant time. If the crate ever ships
 a fix, take it. If a constant-time backend is ever considered, the two call
 sites are `foton-login/src/handlers/login.rs` (the exposed one: attacker-chosen
 ciphertext, retryable) and `foton-crypto/src/signature.rs`.
+
+## The recursion the chunk reader cannot refuse
+
+`PersistentPoolElement::List` holds a `Vec<PersistentPoolElement>`, and
+`PersistentEntity` holds a `Vec<PersistentEntity>`. Both are
+`#[derive(SchemaRead)]`, so the reader recurses once per nesting level, and
+`wincode` has no depth limit -- `grep -rn depth` over the crate returns
+nothing. A crafted or corrupt region file nests a few tens of thousands of
+levels in a few hundred compressed bytes and overflows the stack.
+
+That is worse than it sounds. A stack overflow is a SIGSEGV, so
+`clear_corrupt_chunk_if_unchanged` never runs, the slot is never quarantined,
+and the server dies again on the next start as soon as something asks for
+that chunk. `MAX_DECOMPRESSED_CHUNK_BYTES` does not help: it bounds bytes,
+and each level costs about two of them.
+
+It is unfixed on purpose. The natural fix -- a newtype on the recursive edge
+that counts depth -- means implementing `wincode`'s `SchemaRead`, which is an
+`unsafe trait`, and `AGENTS.md` allows `unsafe` only in the keyed
+`DowncastType`. So the real options are an upstream depth limit in `wincode`
+or a hand-written reader for those two types, and both are calls for the
+project to make rather than something to improvise mid-audit.
 
 ## Known limits of this method
 

@@ -671,7 +671,14 @@ impl Player {
 
         // Vanilla snaps the player back to firstGood after ServerPlayer.doTick().
         if let Err(error) = self.try_set_position(tick_position) {
-            panic!(
+            // Under `panic = "abort"` this kills the server and every dirty
+            // chunk with it. The identical failure is already a `log::warn!`
+            // twenty-four lines up in `movement`, and the entity manager
+            // rejects a move whenever the player has left `live_by_id` --
+            // a disconnect racing a tick, not an invariant the compiler
+            // holds. A desynchronized player is recoverable; a dead world
+            // is not.
+            log::error!(
                 "failed to restore player {} tick position after ai_step: {error}",
                 self.id()
             );
@@ -1655,7 +1662,14 @@ impl Entity for Player {
         let position = self.position();
         let (yaw, pitch) = self.rotation();
         if let Err(error) = self.teleport(position, yaw, pitch) {
-            panic!(
+            // Under `panic = "abort"` this kills the server and every dirty
+            // chunk with it. The identical failure is already a `log::warn!`
+            // twenty-four lines up in `movement`, and the entity manager
+            // rejects a move whenever the player has left `live_by_id` --
+            // a disconnect racing a tick, not an invariant the compiler
+            // holds. A desynchronized player is recoverable; a dead world
+            // is not.
+            log::error!(
                 "failed to synchronize player {} mounted position: {error}",
                 self.id()
             );
