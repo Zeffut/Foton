@@ -19,6 +19,7 @@ use crate::chunk::light::{
 use crate::chunk::status::ChunkStatus;
 use crate::dimension::end::EnderDragonFight;
 use crate::dimension::end::fight::PersistentEnderDragonFight;
+use crate::level_data::write_level_data;
 use crate::poi::OccupationStatus;
 use crate::portal::WorldChangeRequest;
 use crate::raid::{PersistentRaids, Raids};
@@ -182,8 +183,6 @@ use portals::{
     closest_portal_candidate, nether_portal_creation_scan_origin, nether_portal_frame_offset_pos,
 };
 use std::path::PathBuf;
-use tokio::fs;
-use tokio::fs::create_dir_all;
 
 const fn initialize_border_packet(snapshot: WorldBorderSnapshot) -> CInitializeBorder {
     CInitializeBorder {
@@ -692,16 +691,15 @@ impl World {
         let level_data_save = self.level_data.write().prepare_save();
         match level_data_save {
             Ok(Some((path, content))) => {
-                let result = async {
-                    if let Some(parent) = path.parent() {
-                        create_dir_all(parent).await?;
-                    }
-                    fs::write(&path, content).await
-                }
-                .await;
-                match result {
+                match write_level_data(&path, &content).await {
                     Ok(()) => log::info!("World {} level data saved successfully", self.key),
-                    Err(error) => log::error!("Failed to save world level data: {error}"),
+                    Err(error) => {
+                        // `prepare_save` already cleared the dirty flag, so
+                        // without this the seed, spawn and gamerules would be
+                        // dropped silently for the rest of the run.
+                        self.level_data.write().mark_dirty();
+                        log::error!("Failed to save world level data: {error}");
+                    }
                 }
             }
             Ok(None) => {}
@@ -1026,13 +1024,8 @@ impl World {
         self.chunk_map.chunk_runtime.handle().spawn(async move {
             match prepared {
                 Ok(Some((path, content))) => {
-                    if let Some(parent) = path.parent()
-                        && let Err(error) = create_dir_all(parent).await
-                    {
-                        tracing::error!(%error, "World level-data directory save failed");
-                        return;
-                    }
-                    if let Err(error) = fs::write(&path, content).await {
+                    if let Err(error) = write_level_data(&path, &content).await {
+                        world.level_data.write().mark_dirty();
                         tracing::error!(%error, "World level-data save failed");
                     }
                 }

@@ -1304,4 +1304,38 @@ mod tests {
         // Needs more than gap, append at end
         assert_eq!(header.find_free_sectors(6, 12), 12);
     }
+
+    /// A rewrite never lands on the sectors the chunk already occupies.
+    ///
+    /// Chunk saving used to reuse the old sectors whenever the new copy fit,
+    /// which destroys the only valid copy the moment the write starts. A crash
+    /// or a full disk halfway through then leaves neither the old chunk nor a
+    /// complete new one; the decode fails on the next load and the slot is
+    /// wiped for regeneration, so the terrain -- and whatever was built on it --
+    /// silently comes back as new.
+    ///
+    /// Writing to free sectors instead makes the header update the commit
+    /// point. This test pins the property that makes that safe: the allocator
+    /// treats a live entry's range as occupied, so it can never hand back the
+    /// sectors being replaced.
+    #[test]
+    fn a_rewrite_is_never_allocated_over_the_live_copy() {
+        let mut header = RegionHeader::new();
+        // One chunk occupying sectors 3..=6, i.e. four sectors.
+        let live = ChunkEntry::new(FIRST_DATA_SECTOR, 4 * SECTOR_SIZE as u32, ChunkStatus::Full);
+        header.entries[0] = live;
+        let live_start = live.sector_offset;
+        let live_end = live.sector_offset + live.sector_count();
+
+        // Every size that would previously have been written in place, plus a
+        // couple that would not, must be placed clear of the live copy.
+        for sectors_needed in 1..=6 {
+            let offset = header.find_free_sectors(sectors_needed, live_end);
+            let end = offset + sectors_needed;
+            assert!(
+                end <= live_start || offset >= live_end,
+                "a {sectors_needed}-sector rewrite was placed at {offset}..{end},                  overlapping the live copy at {live_start}..{live_end}"
+            );
+        }
+    }
 }

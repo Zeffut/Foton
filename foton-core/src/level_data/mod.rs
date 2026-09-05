@@ -540,10 +540,14 @@ impl LevelDataManager {
         let Some((path, content)) = self.prepare_save()? else {
             return Ok(());
         };
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).await?;
+        if let Err(error) = write_level_data(&path, &content).await {
+            // `prepare_save` has already cleared the dirty flag so that two
+            // concurrent saves do not both serialize. If the write then fails,
+            // nothing would ever retry it, and the seed, spawn, game time and
+            // gamerules would be lost for the rest of the run.
+            self.mark_dirty();
+            return Err(error);
         }
-        fs::write(&path, content).await?;
         log::debug!("Saved level data to {}", path.display());
         Ok(())
     }
@@ -637,6 +641,42 @@ impl LevelDataManager {
         self.data.weather.thundering = thundering;
         self.dirty = true;
     }
+}
+
+/// Publishes level data so an interrupted write cannot destroy what was there.
+///
+/// `fs::write` truncates the target before it writes, so a crash or a full disk
+/// halfway through leaves a `level.toml` that is empty or cut short. `seed` has
+/// no serde default, so the world then refuses to load at all -- the failure
+/// mode is not "lost the last few ticks" but "lost the world".
+///
+/// Writing a temporary beside it and renaming makes the publication atomic: a
+/// reader sees either the previous file or the complete new one, never a
+/// half-written one. Mirrors what `player_data_storage` already does.
+pub async fn write_level_data(path: &Path, content: &str) -> io::Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+
+    let temporary = path.with_extension("toml.tmp");
+    let mut file = fs::File::create(&temporary).await?;
+    file.write_all(content.as_bytes()).await?;
+    file.sync_all().await?;
+    drop(file);
+
+    fs::rename(&temporary, path).await?;
+
+    // Renaming is only durable once the directory entry is. Directory fsync is
+    // unix-only; the runtime check keeps the `.await` present on all platforms.
+    if cfg!(unix)
+        && let Some(parent) = path.parent()
+    {
+        fs::File::open(parent).await?.sync_all().await?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
