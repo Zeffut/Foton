@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["crystal_space_is_free"],"struct":["EndCrystalItem"]};

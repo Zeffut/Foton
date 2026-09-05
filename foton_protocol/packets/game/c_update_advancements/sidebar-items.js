@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DISPLAY_HAS_BACKGROUND","DISPLAY_HIDDEN","DISPLAY_SHOW_TOAST"],"fn":["write_display"],"struct":["AddedAdvancement","CUpdateAdvancements"]};

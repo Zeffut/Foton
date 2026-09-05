@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MEMORY_TABLE","NEVER_EXPIRE"],"enum":["MemoryStatus"],"fn":["is_saved"],"macro":[["memory_module_types",1]],"mod":["memory_module_types","nearest_visible","value","walk_target"],"struct":["Memories","MemoryModuleId","MemoryModuleType","MemorySlot"],"type":["MemoryReader"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["arrow_entity_type_for"],"struct":["ArrowItem","SpectralArrowItem"]};

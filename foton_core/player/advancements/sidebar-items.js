@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["decorated_name","now_epoch_millis"],"struct":["InventoryChange"]};

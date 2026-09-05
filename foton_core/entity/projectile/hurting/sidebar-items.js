@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AIR_INERTIA","BURN_TICKS","DEFLECTION_SCALE","INITIAL_ACCELERATION_POWER","LIQUID_INERTIA","ROTATION_SPEED"],"struct":["HurtingProjectileBase"],"trait":["HurtingProjectile"]};

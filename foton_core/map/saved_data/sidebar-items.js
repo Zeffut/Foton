@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAP_COLOR_COUNT","MAP_SIZE","MAX_SCALE","TRACKED_DECORATION_LIMIT"],"fn":["clamp_map_coordinate","is_inside_map"],"struct":["HoldingPlayer","MapItemSavedData","MapPlayerState"],"trait":["MapPlayerSource"]};

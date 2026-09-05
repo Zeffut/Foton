@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DRY_NODE_MALUS","HORIZONTAL"],"fn":["direction_index"],"struct":["SwimNodeEvaluator"]};

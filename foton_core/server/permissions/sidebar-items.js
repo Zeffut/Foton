@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["validate_player_permission_group_update"],"static":["BUILT_IN_COMMAND_BLOCK_GROUPS"]};

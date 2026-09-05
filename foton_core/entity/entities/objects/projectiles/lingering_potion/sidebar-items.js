@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SPLASH_HEIGHT","SPLASH_RANGE","SPLASH_RANGE_SQR","WATER_DAMAGE"],"struct":["LingeringPotionEntity"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["CrafterCraftEvent","InventoryClickEvent","InventoryCloseEvent","InventoryDragEvent","InventoryOpenEvent","PrepareGrindstoneEvent","PrepareItemCraftEvent"]};

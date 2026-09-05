@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DECOMPRESSED_CHUNK_BYTES"],"struct":["CorruptChunkData","PreparedChunkSave","RegionHandle","RegionManager"]};

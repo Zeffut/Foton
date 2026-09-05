@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_LEVEL","MIN_LEVEL","NEXT_LEVEL_XP_THRESHOLDS"],"fn":["can_level_up","max_xp_per_level","min_xp_per_level"]};

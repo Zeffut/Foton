@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ACTIVATION_DELAY","MINECART_GRAVITY","MINECART_GRAVITY_IN_WATER"],"fn":["perform_minecart_command"],"struct":["MinecartCommandBlockEntity"]};

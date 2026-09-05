@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["piglin"],"struct":["RememberIfHoglinWasKilled","StartAdmiringItemIfSeen","StartHuntingHoglin","StopAdmiringIfItemTooFarAway","StopAdmiringIfTiredOfTryingToReachItem","StopHoldingItemIfNoLongerAdmiring"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FORGET_PLAYER_CHANCE","SELECT_PLAYER_CHANCE"],"struct":["CatTemptGoal","CatTemptScareRule"]};

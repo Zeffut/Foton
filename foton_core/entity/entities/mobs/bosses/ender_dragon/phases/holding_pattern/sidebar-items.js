@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["STRAFE_DISTANCE_SCALE"],"struct":["DragonHoldingPatternPhase","HoldingState"]};

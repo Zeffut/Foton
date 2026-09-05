@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["component_from_nbt_bytes","component_to_nbt_bytes","domain_default_world","map_io_error","persist_map","restore_map"],"struct":["DomainMapData","MapStorage","PersistentMap","PersistentMapBanner","PersistentMapFrame","PersistentMaps"],"type":["SharedMapData"]};

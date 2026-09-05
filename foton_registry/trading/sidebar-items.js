@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TradeCostComponents"],"mod":["item_cost","merchant_offer","offer_nbt","trade_set","villager_trade"],"struct":["ItemCost","MerchantOffer","MerchantOffers","TradeCost","TradeSet","TradeSetRegistry","VillagerTrade","VillagerTradeRegistry"],"type":["TradeSetRef","VillagerTradeRef"]};

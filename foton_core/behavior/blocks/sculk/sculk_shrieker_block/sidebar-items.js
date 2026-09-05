@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SHRIEKER_EXPERIENCE","SHRIEKING","WATERLOGGED"],"struct":["SculkShriekerBlock"]};

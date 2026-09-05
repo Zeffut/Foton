@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GROW_UP_SOUND_VOLUME","MAX_TADPOLES_SPAWN_EXCLUSIVE","MIN_TADPOLES_SPAWN","TICKS_PER_FED_SECOND","TICKS_TO_BE_FROG"],"fn":["random_tadpole_position_offset","spawn_tadpoles_from_frogspawn"],"mod":["tadpole_ai"],"struct":["TadpoleEntity"]};

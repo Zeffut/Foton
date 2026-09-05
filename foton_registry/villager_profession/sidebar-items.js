@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":["FARMER_REQUESTED_ITEMS"],"struct":["VillagerProfession","VillagerProfessionRegistry"],"type":["VillagerProfessionRef"]};

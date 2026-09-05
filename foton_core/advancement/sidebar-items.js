@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["player_advancements","predicate","tree","triggers","visibility"],"static":["TRIGGER_INDEX"],"struct":["TriggerIndex"]};

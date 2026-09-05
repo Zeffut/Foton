@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AUTH_FAILURE_REQUEST_ID","FRAME_OVERHEAD","MAX_PACKET_SIZE","MAX_RESPONSE_UNITS","SERVERDATA_AUTH","SERVERDATA_AUTH_RESPONSE","SERVERDATA_EXECCOMMAND","SERVERDATA_RESPONSE_VALUE"],"fn":["decode_request","encode_response","split_response"],"struct":["RconRequest"]};

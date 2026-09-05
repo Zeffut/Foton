@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LEVEL_UP_DELAY_TICKS"],"mod":["villager_data"],"struct":["MerchantState"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_XZ_DIST","MAX_Y_DIST","VILLAGE_SEARCH_SECTION_RADIUS"],"fn":["find_section_closest_to_village","section_bottom_center"],"struct":["VillageBoundRandomStroll"]};

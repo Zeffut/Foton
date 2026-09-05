@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["USE_DURATION"],"fn":["stop_using"],"struct":["SpyglassItem"]};

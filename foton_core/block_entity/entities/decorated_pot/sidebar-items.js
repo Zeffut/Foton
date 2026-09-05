@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DECORATED_POT_SLOTS","EVENT_POT_WOBBLES"],"enum":["WobbleStyle"],"struct":["DecoratedPotBlockEntity","DecoratedPotContainer"]};

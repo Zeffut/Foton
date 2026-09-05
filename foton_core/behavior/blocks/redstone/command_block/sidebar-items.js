@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACING"],"fn":["execute_chain","perform_command","run_command_block_command"],"struct":["CommandBlock"]};

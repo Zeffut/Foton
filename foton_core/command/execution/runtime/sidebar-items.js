@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FotonExecutor","FotonModifier"],"fn":["argument","literal"],"struct":["FotonCommandRuntime"],"trait":["CustomCommandExecutor","CustomModifierExecutor"],"type":["FotonCommandContext","FotonContextChain","StandardExecutor","StandardModifier","SuspendedExecutor"]};

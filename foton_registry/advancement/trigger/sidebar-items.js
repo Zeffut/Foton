@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TriggerInstance"],"struct":["MobEffectMatch","SlotsPredicate"]};

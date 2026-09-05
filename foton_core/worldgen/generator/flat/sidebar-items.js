@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LAKES_STEP","LAKE_FEATURES","SURFACE_STRUCTURES_STEP","TOP_LAYER_MODIFICATION_STEP","UNDERGROUND_STRUCTURES_STEP"],"struct":["FlatChunkGenerator","FlatDecoration","FlatGenerationContext"]};

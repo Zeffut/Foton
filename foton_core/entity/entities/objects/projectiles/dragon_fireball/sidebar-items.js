@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLOUD_SNAP_RANGE_SQR","SPLASH_HEIGHT","SPLASH_RANGE"],"struct":["DragonFireballEntity"]};

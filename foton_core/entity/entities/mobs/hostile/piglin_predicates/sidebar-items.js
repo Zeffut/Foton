@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["is_player_holding_loved_item","is_wearing_safe_armor"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FunctionOrTag"],"fn":["parse_function_or_tag","suggest_functions"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FORWARD_ATTEMPTS","FORWARD_RETRY_DELAY","FORWARD_TIMEOUT","MAX_DESCRIPTION","REPORTS_DIR","REPORTS_FILE"],"enum":["BugCategory"],"fn":["count_lines","forward","reports_path"],"struct":["BugReport","ForwardedReport"]};

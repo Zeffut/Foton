@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SLIME_CHUNK_MAX_Y","SLIME_CHUNK_SALT","SURFACE_MAX_Y","SURFACE_MIN_Y","SURFACE_SPAWN_CHANCE"],"fn":["check_slime_spawn_rules","is_slime_chunk"],"struct":["SlimeEntity"]};

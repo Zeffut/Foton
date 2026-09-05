@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BREED_RANGE","CHILD_DELAY_MIN","CHILD_DELAY_SPREAD","MAX_DURATION","MIN_DURATION"],"struct":["AnimalMakeLove"]};

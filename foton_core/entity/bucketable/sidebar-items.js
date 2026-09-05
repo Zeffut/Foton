@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bucket_mob_pickup","load_default_data_from_bucket_tag","read_bucket_entity_data","save_default_data_to_bucket_tag","set_bucket_entity_data"],"trait":["Bucketable"]};

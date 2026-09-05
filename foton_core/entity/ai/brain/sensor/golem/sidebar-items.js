@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GOLEM_SCAN_RATE","MEMORY_TIME_TO_LIVE"],"struct":["GolemSensor"]};

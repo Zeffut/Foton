@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CALIBRATED_LISTENER_RANGE","DEFAULT_LAST_VIBRATION_FREQUENCY","LISTENER_RANGE"],"struct":["SculkSensorBlockEntity","SculkSensorVibrationUser"]};

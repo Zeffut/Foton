@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BASE_DAMAGE","DEFAULT_GRAVITY","DESPAWN_TICKS","DRAG","SHAKE_TIME","SPENT_IN_GROUND_TIME"],"enum":["TridentPickup"],"fn":["java_signum","lerp_rotation"],"struct":["ThrownTridentEntity","TridentState"]};

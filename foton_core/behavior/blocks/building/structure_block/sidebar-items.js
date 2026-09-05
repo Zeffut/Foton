@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["trigger"],"struct":["StructureBlock"]};

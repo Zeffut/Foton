@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_FUSE_TIME"],"mod":["end_crystal","primed_tnt"],"struct":["EndCrystalEntity","PrimedTntEntity"]};

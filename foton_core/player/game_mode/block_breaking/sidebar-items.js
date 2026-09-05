@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AIRBORNE_MINING_PENALTY","DIG_SPEED_PER_LEVEL"],"enum":["BlockBreakAction"],"fn":["apply_mining_speed_modifiers","dig_speed_amplification","drop_block_loot","get_destroy_progress","is_air","item_can_destroy_block","requires_correct_tool"],"struct":["BlockBreakingManager"]};

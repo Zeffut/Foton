@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AMBIENT_SOUND_CHANCE","RESPAWN_Y_OFFSET","SHAKE_OFF_FALL_DISTANCE","SHOULDER_SETTLE_TICKS"],"enum":["Shoulder"],"struct":["ShoulderEntities"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FULL_DRAW_TICKS","LOST_SIGHT_GRACE","SEEN_TIME_BEFORE_FIRING","START_BACKING_OFF_AT","STOP_BACKING_OFF_AT","STRAFE_FLIP_CHANCE","STRAFE_REVIEW_TICKS","STRAFE_STRENGTH"],"fn":["is_holding_bow"],"struct":["RangedBowAttackGoal"],"type":["FireFn"]};

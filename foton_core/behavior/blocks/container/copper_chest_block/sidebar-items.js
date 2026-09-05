@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["copper_chest_of"],"struct":["CopperChestBlock","WeatheringCopperChestBlock"],"trait":["CopperChest"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["banner_color"],"struct":["BannerItem"]};

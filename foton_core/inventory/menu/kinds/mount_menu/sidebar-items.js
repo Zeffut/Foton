@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["accepts","equipment_slots","horse_inventory","mount_menu","nautilus_inventory","open_mount_screen"],"struct":["MountEquipmentSlot","MountKind","MountMenuParts"],"type":["MountInventoryProbe"]};

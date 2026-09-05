@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MINECART_GRAVITY","MINECART_GRAVITY_IN_WATER"],"struct":["SpawnerMinecartEntity"]};

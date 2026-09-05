@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CREEPER_CLOUD_DURATION_SCALE"],"fn":["default_thunder_hit"],"mod":["area_effect_cloud","display_ui","explosives","items","lightning_bolt","marker","ominous_item_spawner","projectiles","vehicles"],"struct":["AreaEffectCloudEntity","LightningBoltEntity","MarkerEntity","OminousItemSpawnerEntity"]};

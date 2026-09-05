@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["can_item_be_in_bundle","is_persistable"],"struct":["MutableBundleContents"]};

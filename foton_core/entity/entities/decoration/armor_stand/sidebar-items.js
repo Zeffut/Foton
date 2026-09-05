@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BREAK_HEALTH","BURN_DAMAGE","DOUBLE_HIT_WINDOW_TICKS","FIRE_TICKS","FIRE_TICK_DAMAGE","FLAG_MARKER","FLAG_NO_BASE_PLATE","FLAG_SHOW_ARMS","FLAG_SMALL"],"fn":["filter_bit"],"struct":["ArmorStandEntity"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONVERSION_DELAY","MAX_ANGER"],"enum":["AngerLevel"],"fn":["suspect_entry"],"struct":["AngerManagement"]};

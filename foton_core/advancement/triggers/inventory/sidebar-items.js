@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["every_predicate_is_satisfied","inventory_changed","matches","slots_match"]};

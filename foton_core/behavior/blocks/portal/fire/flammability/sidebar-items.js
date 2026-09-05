@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_table","flammability"],"static":["SET_FLAMMABLE","TABLE"],"struct":["Flammability"]};

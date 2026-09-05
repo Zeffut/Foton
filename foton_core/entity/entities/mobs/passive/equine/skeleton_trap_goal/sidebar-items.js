@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EXTRA_HORSES","SCATTER_PUSH","SPAWN_INVULNERABILITY_TICKS","TRIGGER_RANGE"],"struct":["SkeletonTrapGoal"]};

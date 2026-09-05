@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AIR_DRAG","DEFAULT_GRAVITY","SPIT_DAMAGE"],"struct":["LlamaSpitEntity"]};

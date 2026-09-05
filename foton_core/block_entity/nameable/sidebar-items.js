@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CUSTOM_NAME_TAG"],"struct":["BlockEntityName"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TAG_INVENTORY"],"fn":["can_add_item","load_inventory","pick_up_item","save_inventory"],"trait":["InventoryCarrier"]};

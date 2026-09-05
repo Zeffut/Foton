@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ACCEPTABLE_DISTANCE_FROM_HOSTILES"],"fn":["acceptable_distance"],"struct":["VillagerHostilesSensor"]};

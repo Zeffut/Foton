@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DecodedPlayPacket","ImmediatePlayPacket","OutboundPacket","ScheduledPacketExecution","ScheduledPlayPacketKind"],"fn":["now_millis"],"struct":["BundleBuilder","JavaConnection","KeepAliveTracker","ScheduledPlayPacket"],"type":["JavaNetworkWriter"]};

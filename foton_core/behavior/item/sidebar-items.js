@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TELEPORT_ATTEMPTS"],"enum":["ItemUseAnimation"],"fn":["apply_consume_effects","apply_one_consume_effect","block_destroy_time","potion_effects","teleport_randomly"],"struct":["BucketHit","ItemBehaviorRegistry"],"trait":["DispensibleContainerItem","ItemBehavior","SignApplicator"]};

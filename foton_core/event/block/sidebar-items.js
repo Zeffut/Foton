@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["BlockBreakEvent","BlockBurnEvent","BlockDamageEvent","BlockDispenseEvent","BlockExpEvent","BlockFadeEvent","BlockFromToEvent","BlockIgniteEvent","BlockPlaceEvent","BlockPreDispenseEvent","LeavesDecayEvent","PistonEvent","SignChangeEvent"]};

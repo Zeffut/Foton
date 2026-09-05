@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COMMON_VARIANTS","COMMON_VARIANT_CHANCE"],"enum":["TropicalFishBase","TropicalFishPattern"],"struct":["TropicalFishEntity","TropicalFishVariant"]};

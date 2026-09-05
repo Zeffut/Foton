@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["foton_core",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/ops/deref/trait.DerefMut.html\" title=\"trait core::ops::deref::DerefMut\">DerefMut</a> for <a class=\"struct\" href=\"foton_core/inventory/lock/struct.LockedContainer.html\" title=\"struct foton_core::inventory::lock::LockedContainer\">LockedContainer</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/ops/deref/trait.DerefMut.html\" title=\"trait core::ops::deref::DerefMut\">DerefMut</a> for <a class=\"struct\" href=\"foton_core/chunk/section/struct.SectionWriteGuard.html\" title=\"struct foton_core::chunk::section::SectionWriteGuard\">SectionWriteGuard</a>&lt;'_&gt;",0]]],["foton_registry",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/ops/deref/trait.DerefMut.html\" title=\"trait core::ops::deref::DerefMut\">DerefMut</a> for <a class=\"struct\" href=\"foton_registry/trading/struct.MerchantOffers.html\" title=\"struct foton_registry::trading::MerchantOffers\">MerchantOffers</a>",0]]],["foton_utils",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/ops/deref/trait.DerefMut.html\" title=\"trait core::ops::deref::DerefMut\">DerefMut</a> for <a class=\"struct\" href=\"foton_utils/struct.FrontVec.html\" title=\"struct foton_utils::FrontVec\">FrontVec</a>",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[696,344,300]}

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACING","HAS_BOOK","POWERED","PULSE_SIGNAL","PULSE_TICKS"],"fn":["signal_lectern_page_change","take_book_from"],"struct":["LecternBlock"]};

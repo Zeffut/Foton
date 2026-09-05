@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SPAWN_ITEM_DELAY_MAX","SPAWN_ITEM_DELAY_MIN","TICKS_BEFORE_ABOUT_TO_SPAWN_SOUND"],"struct":["OminousItemSpawnerEntity"]};

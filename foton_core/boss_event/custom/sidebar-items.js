@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_MAX"],"fn":["bar_enum","boss_bar_io_error","domain_default_world","load_bar","pack_bar","read_bar_name"],"struct":["CustomBossEvent","CustomBossEvents","CustomBossEventsSaveSnapshot","DomainCustomBossEvents","PersistentBossBar","PersistentCustomBossEvents"]};

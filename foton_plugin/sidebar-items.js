@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HOST_CLASS","NATIVE_CLASS"],"enum":["PluginHostError"],"fn":["jars_in"],"mod":["forward","natives"],"struct":["PluginHost","PluginHostConfig"],"type":["CreateJavaVm"]};

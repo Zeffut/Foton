@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLY_MAX_XZ_RADIANS_FROM_DIR","FLY_TARGET_HEIGHT","MAX_XZ_DIST","MAX_Y_DIST","RANDOM_SWIMMABLE_POS_ATTEMPTS","SWIM_XY_DISTANCE_TIERS"],"fn":["block_center_distance_sqr","random_swimmable_pos","target_swim_pos"],"struct":["RandomStroll"],"type":["StrollGuard","TargetPicker"]};

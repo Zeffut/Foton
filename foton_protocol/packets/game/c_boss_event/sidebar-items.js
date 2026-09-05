@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BossBarColor","BossBarOverlay","BossEventOperation"],"struct":["BossBarProperties","CBossEvent"]};

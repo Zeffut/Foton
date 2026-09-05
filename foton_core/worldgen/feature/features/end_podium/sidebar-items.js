@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INNER_RIM","OUTER_RIM","PODIUM_CLEARANCE","PODIUM_PILLAR_HEIGHT","PODIUM_RADIUS"],"fn":["closer_than","drop_previous_and_set_block","location","place"]};

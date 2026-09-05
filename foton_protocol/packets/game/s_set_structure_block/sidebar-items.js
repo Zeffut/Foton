@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLAG_IGNORE_ENTITIES","FLAG_SHOW_AIR","FLAG_SHOW_BOUNDING_BOX","FLAG_STRICT","MAX_OFFSET_PER_AXIS","MAX_SIZE_PER_AXIS","MAX_STRUCTURE_METADATA_LENGTH"],"enum":["StructureUpdateType"],"fn":["clamp_offset","clamp_size"],"struct":["SSetStructureBlock"]};

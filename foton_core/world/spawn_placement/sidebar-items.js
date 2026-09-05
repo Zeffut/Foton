@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_SPAWNABLE_LIGHT_EMISSION","PLACEMENT_EXCEPTIONS"],"enum":["SpawnPlacementType"],"fn":["is_block_dangerous_for","is_collision_shape_full_block","is_redstone_conductor","is_signal_source","is_valid_empty_spawn_block","is_valid_spawn_block","spawn_placement_for"],"trait":["SpawnBlockSource"]};

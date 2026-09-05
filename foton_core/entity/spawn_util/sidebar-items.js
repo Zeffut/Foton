@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SpawnStrategy"],"fn":["is_refused_underfoot","move_to_possible_spawn_position","spawn_entity_at","try_spawn_mob"]};

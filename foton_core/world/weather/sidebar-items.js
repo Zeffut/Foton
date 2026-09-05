@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COLD_ENOUGH_TO_SNOW"],"enum":["Precipitation"],"static":["BIOME_INFO_NOISE","BIOME_TEMPERATURE_NOISE","FROZEN_BIOME_TEMPERATURE_NOISE"],"struct":["Weather"]};

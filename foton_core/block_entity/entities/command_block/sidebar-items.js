@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CommandBlockMode"],"fn":["facing_to_y_rotation","is_command_block"],"struct":["CommandBlockEntity","CommandBlockFlags"]};
