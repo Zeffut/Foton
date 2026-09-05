@@ -43,11 +43,22 @@ fn tick_passenger(
     can_tick: &mut impl FnMut(&SharedEntity) -> bool,
     visited: &mut FxHashSet<i32>,
 ) {
-    assert!(
-        visited.insert(entity.id()),
-        "cyclic passenger relationship involving entity {}",
-        entity.id()
-    );
+    if !visited.insert(entity.id()) {
+        // A cycle. `start_riding_entities` refuses to build one and vanilla
+        // guards the same way at mount time (`Entity.hasIndirectPassenger`),
+        // so reaching here means something else did -- an NBT load, `/summon`
+        // with nested `Passengers`, or a race between two mount packets.
+        //
+        // This used to be an `assert!`. Vanilla has no tick-time cycle check at
+        // all, and in release (`panic = "abort"`) that assertion killed the
+        // world tick thread and took every unsaved chunk with it. Breaking the
+        // recursion keeps the server up and leaves a trace to chase.
+        log::error!(
+            "cyclic passenger relationship involving entity {};              breaking the chain rather than the tick",
+            entity.id()
+        );
+        return;
+    }
 
     if entity.is_removed()
         || entity
