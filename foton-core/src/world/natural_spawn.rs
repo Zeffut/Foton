@@ -164,12 +164,13 @@ impl World {
                     .spawn_limit(category)
                     .unwrap_or_else(|| default_category_cap(category) as i32)
                     .max(0) as usize;
-                // Vanilla re-tests the budget for every single mob, through the
-                // `state::canSpawn` predicate it hands the spawner. Foton counts
-                // once and then spends a running budget, which matters now that
-                // one position can place a whole pack: checking only up front
-                // would let a single cycle overshoot the ceiling several times
-                // over.
+                // Deliberately stricter than vanilla, which reads the category
+                // ceiling once per tick in `getFilteredSpawningCategories` and
+                // then lets that tick overshoot it freely -- its `state::canSpawn`
+                // is the spawn-cost predicate, not the ceiling. Vanilla can afford
+                // that because it walks chunks; Foton samples a ring per player,
+                // so an unchecked cycle would place a pack at every one of its
+                // sixteen positions and blow past the ceiling in one go.
                 let mut budget = cap.saturating_sub(self.mobs_near(origin, category));
                 if budget == 0 {
                     continue;
@@ -296,17 +297,20 @@ impl World {
                     continue;
                 }
 
+                // Vanilla parity: a `getMobForSpawn` that comes back null ends the
+                // whole attempt, not just this group -- a type that cannot be built
+                // will not build on the next try either.
                 let Some(entity) =
                     ENTITIES.create(entity_type, next_entity_id(), center, Arc::downgrade(self))
                 else {
-                    break;
+                    return;
                 };
 
                 // Vanilla asks the entity type's registered predicate before creating
                 // anything. Foton has no path from a type to its behavior, so the mob is
                 // created and asked; one that answers no is dropped here, unspawned.
                 let Some(mob) = entity.as_mob() else {
-                    break;
+                    return;
                 };
                 if !mob.check_spawn_rules(self, EntitySpawnReason::Natural, candidate) {
                     continue;

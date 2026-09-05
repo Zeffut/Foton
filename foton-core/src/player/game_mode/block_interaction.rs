@@ -139,11 +139,20 @@ impl Player {
                 );
                 self.ack_block_changes_up_to(packet.sequence);
             }
+            // Vanilla parity: `handlePlayerAction` wraps both drop actions in
+            // `if (!this.player.isSpectator())`. The arm below already refuses a
+            // spectator's offhand swap, so the omission was these two alone --
+            // and a spectator has no inventory of their own to empty, so the
+            // stack they ejected came out of the world they are only watching.
             PlayerAction::DropAllItems => {
-                self.drop_from_selected(true);
+                if self.game_mode() != GameType::Spectator {
+                    self.drop_from_selected(true);
+                }
             }
             PlayerAction::DropItem => {
-                self.drop_from_selected(false);
+                if self.game_mode() != GameType::Spectator {
+                    self.drop_from_selected(false);
+                }
             }
             PlayerAction::ReleaseUseItem => {
                 self.release_using_item();

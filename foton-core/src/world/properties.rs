@@ -121,10 +121,24 @@ impl World {
     }
 
     /// Checks if a player may interact with the world at the given position.
-    /// Currently only checks if position is within world bounds.
+    ///
+    /// Vanilla parity: `ServerLevel.mayInteract`, which refuses a player outside
+    /// the world border. This gate is the one every block edit passes through --
+    /// breaking, placing, and item use all reach it -- so leaving the border out
+    /// of it let a player build straight past a border that already stopped them
+    /// from attacking across it (`entity_interaction.rs` has always checked).
+    ///
+    /// Vanilla also refuses inside the dedicated server's spawn protection
+    /// (`DedicatedServer.isUnderSpawnProtection`). Foton has no such setting yet,
+    /// so that half has nothing to consult.
     #[must_use]
-    pub const fn may_interact(&self, _player: &Player, pos: BlockPos) -> bool {
+    pub fn may_interact(&self, _player: &Player, pos: BlockPos) -> bool {
         self.is_in_valid_bounds(pos)
+            && self.world_border_snapshot().is_within_bounds_with_margin(
+                f64::from(pos.x()),
+                f64::from(pos.z()),
+                0.0,
+            )
     }
 
     /// Checks if a block's collision shape at the given position is unobstructed by entities.

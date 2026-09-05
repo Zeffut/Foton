@@ -165,7 +165,23 @@ impl DataComponentPatch {
                 .by_id(type_id)
                 .ok_or_else(|| std::io::Error::other(format!("No entry for component: {key}")))?;
 
-            // Read the component bytes into a sub-buffer
+            // Read the component bytes into a sub-buffer.
+            //
+            // The declared length is checked against what the packet actually
+            // still holds before it is allocated: `byte_len` is attacker-chosen
+            // up to `MAX_COMPONENT_BYTES`, so trusting it alone turned a dozen
+            // bytes on the wire into a two-megabyte zeroed allocation that the
+            // very next `read_exact` threw away.
+            let remaining = data
+                .get_ref()
+                .len()
+                .saturating_sub(usize::try_from(data.position()).unwrap_or(usize::MAX));
+            if byte_len > remaining {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    format!("Component claims {byte_len} bytes but only {remaining} remain"),
+                ));
+            }
             let mut buf = vec![0u8; byte_len];
             data.read_exact(&mut buf)?;
 
