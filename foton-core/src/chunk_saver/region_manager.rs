@@ -400,13 +400,26 @@ impl RegionManager {
             .find_free_sectors(sectors_needed, handle.file_sectors);
 
         // Write chunk data
-        Self::write_chunk_data(
+        let write_result = Self::write_chunk_data(
             &mut handle.file,
             sector_offset,
             &compressed,
             &mut handle.file_sectors,
         )
-        .await?;
+        .await;
+        let loaded_chunk_count = handle.loaded_chunk_count;
+        if let Err(error) = write_result {
+            // Give back a handle opened only for this save. Returning through
+            // `?` used to leave it in the map, and the cleanup that removes it
+            // sits after the write -- so a full disk during `save_all_chunks`,
+            // which touches every region in the world, leaked one open file per
+            // region until the process ran out of descriptors and could no
+            // longer open anything at all, sockets included.
+            if we_opened_region && loaded_chunk_count == 0 {
+                regions.remove(&region_pos);
+            }
+            return Err(error);
+        }
 
         // Update header entry
         handle.header.entries[index] =

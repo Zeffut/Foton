@@ -415,11 +415,18 @@ async fn shutdown_worlds(server: &Arc<Server>) {
     let players = server.get_players();
     for player in &players {
         player.close_connection();
-        assert_eq!(
-            player.remove_all_menus(),
-            MenuRemovalStatus::Complete,
-            "shutdown menu removal must run after packet processing stops"
-        );
+        // Not an assertion. This runs before `save_all_chunks`, and the release
+        // profile is `panic = "abort"`, so a menu that was still mid-callback
+        // would take the whole shutdown down with it and the world would never
+        // be written. Menu cleanup at shutdown is worth nothing next to that:
+        // report it and carry on to the save.
+        let status = player.remove_all_menus();
+        if status != MenuRemovalStatus::Complete {
+            log::error!(
+                "Menu removal for {} was still {status:?} at shutdown;                  continuing so the world is saved",
+                player.gameprofile.name
+            );
+        }
     }
 
     for world in server.worlds.values() {
