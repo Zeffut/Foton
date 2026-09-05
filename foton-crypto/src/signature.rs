@@ -4,7 +4,7 @@
 
 use rsa::pkcs1v15::SigningKey;
 use rsa::sha2::Sha256;
-use rsa::signature::{SignatureEncoding, Signer as RsaSigner, Verifier};
+use rsa::signature::{RandomizedSigner as _, SignatureEncoding, Verifier};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use sha1::Sha1;
 
@@ -75,8 +75,13 @@ impl Signer for RsaPrivateKeySigner {
         let mut collector = ByteCollector::new();
         updater.update(&mut collector)?;
 
-        // Sign the collected data
-        let signature = self.signing_key.sign(&collector.bytes);
+        // `sign_with_rng`, not `sign`. The plain call runs the private-key
+        // operation unblinded, and its duration correlates with the key the
+        // same way the login decryption did (RUSTSEC-2023-0071). Blinding is
+        // what the crate offers to mask that.
+        let signature = self
+            .signing_key
+            .sign_with_rng(&mut rand::rng(), &collector.bytes);
         Ok(signature.to_bytes().as_ref().to_vec())
     }
 }
@@ -199,6 +204,10 @@ impl SignatureOutput for ByteCollector {
 
 #[cfg(test)]
 mod tests {
+    // The library signs with blinding; these tests exercise the plain
+    // `Signer` path to check the encoding round-trips, so they need the trait.
+    use rsa::signature::Signer as _;
+
     use super::*;
     use crate::rsa_utils::generate_key_pair;
 

@@ -118,6 +118,27 @@ Note that `cargo audit` scans `Cargo.lock`, which can carry crates nothing
 builds any more. Check with `cargo tree -e all --invert <crate>` before
 concluding a vulnerability is reachable.
 
+### The one advisory that will not go away
+
+`RUSTSEC-2023-0071` (the Marvin attack) against `rsa` reports
+`patched: []` and `unaffected: []` -- no released version of the crate fixes
+it, and `0.10.0-rc.18` is the latest published. `cargo audit` will keep failing
+on it. Do not "fix" it by pinning an older version or by adding an ignore that
+hides the reasoning.
+
+What Foton does about it instead: every private-key operation goes through the
+crate's blinded API rather than the plain one. `decrypt` and `sign` pass
+`DummyRng::None` to the padding scheme, so the private-key operation runs
+unblinded and its duration correlates with the key -- which is what the attack
+recovers over the network. `decrypt_blinded` and `sign_with_rng` pass a real
+RNG, and `algorithms/rsa.rs` branches on it to blind the ciphertext before the
+private-key operation.
+
+Blinding is a mitigation, not a proof of constant time. If the crate ever ships
+a fix, take it. If a constant-time backend is ever considered, the two call
+sites are `foton-login/src/handlers/login.rs` (the exposed one: attacker-chosen
+ciphertext, retryable) and `foton-crypto/src/signature.rs`.
+
 ## Known limits of this method
 
 - **`panic = "abort"` in release** (`Cargo.toml`) means every `expect()` on a

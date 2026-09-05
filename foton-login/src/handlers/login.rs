@@ -102,12 +102,19 @@ impl JavaTcpClient {
         };
         let challenge = self.challenge.load();
 
-        let Ok(challenge_response) = self
-            .server
-            .key_store
-            .private_key
-            .decrypt(Pkcs1v15Encrypt, &packet.challenge)
-        else {
+        // `decrypt_blinded`, not `decrypt`. The plain call hands the padding
+        // scheme `DummyRng::None`, so the private-key operation runs unblinded
+        // and its duration correlates with the key -- which is exactly what
+        // RUSTSEC-2023-0071 (the Marvin attack) recovers, from the network, by
+        // timing many chosen ciphertexts against the same key. Both fields of
+        // this packet are attacker-controlled and a client may retry as often
+        // as it likes, so this is the exposed operation. The advisory has no
+        // fixed release, so blinding is the mitigation the crate itself offers.
+        let Ok(challenge_response) = self.server.key_store.private_key.decrypt_blinded(
+            &mut rand::rng(),
+            Pkcs1v15Encrypt,
+            &packet.challenge,
+        ) else {
             self.kick("Invalid key".into()).await;
             return ConnectionAction::none();
         };
@@ -117,12 +124,11 @@ impl JavaTcpClient {
             return ConnectionAction::none();
         }
 
-        let Ok(secret_key) = self
-            .server
-            .key_store
-            .private_key
-            .decrypt(Pkcs1v15Encrypt, &packet.key)
-        else {
+        let Ok(secret_key) = self.server.key_store.private_key.decrypt_blinded(
+            &mut rand::rng(),
+            Pkcs1v15Encrypt,
+            &packet.key,
+        ) else {
             self.kick("Invalid key".into()).await;
             return ConnectionAction::none();
         };
