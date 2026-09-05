@@ -45,6 +45,13 @@ const fn is_peer_hangup(kind: io::ErrorKind) -> bool {
     )
 }
 
+/// How many bytes of a frame are reserved at a time while it is being read.
+///
+/// The declared length is attacker-controlled up to `MAX_PACKET_SIZE`, so the
+/// buffer grows in steps as the bytes actually arrive rather than being sized
+/// from that claim.
+const READ_CHUNK: usize = 8 * 1024;
+
 impl<R: AsyncRead + Unpin> DecryptionReader<R> {
     /// Upgrades the reader to decrypt data.
     ///
@@ -139,12 +146,31 @@ impl<R: AsyncRead + Unpin> TCPNetworkDecoder<R> {
             Err(PacketError::OutOfBounds)?;
         }
 
-        // Read the entire packet data into a buffer
-        let mut packet_data = vec![0u8; packet_len];
-        self.reader
-            .read_exact(&mut packet_data)
-            .await
-            .map_err(|e| PacketError::Other(e.to_string()))?;
+        // Vanilla parity: `Varint21FrameDecoder` throws on a zero-length frame.
+        if packet_len == 0 {
+            Err(PacketError::OutOfBounds)?;
+        }
+
+        // Grow the buffer as the bytes actually arrive, rather than trusting the
+        // length the client declared.
+        //
+        // Vanilla never allocates on a declared length at all: netty holds the
+        // frame in an already-received `ByteBuf` and resets the reader index
+        // while `readableBytes() < length`. Foton reads from a stream, where
+        // `read_exact` *is* the wait -- but sizing the buffer up front meant four
+        // bytes on the wire bought a two-megabyte allocation, before any identity
+        // existed, on as many sockets as an attacker cared to open. Reading in
+        // steps keeps the memory proportional to what was really sent.
+        let mut packet_data: Vec<u8> = Vec::with_capacity(packet_len.min(READ_CHUNK));
+        while packet_data.len() < packet_len {
+            let next = (packet_len - packet_data.len()).min(READ_CHUNK);
+            let filled = packet_data.len();
+            packet_data.resize(filled + next, 0);
+            self.reader
+                .read_exact(&mut packet_data[filled..])
+                .await
+                .map_err(|e| PacketError::Other(e.to_string()))?;
+        }
 
         let mut cursor = io::Cursor::new(packet_data.as_slice());
 

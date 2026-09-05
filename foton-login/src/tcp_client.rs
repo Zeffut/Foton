@@ -9,6 +9,7 @@ use std::{
     io::Cursor,
     net::SocketAddr,
     sync::Arc,
+    time::Duration,
 };
 
 use crossbeam::atomic::AtomicCell;
@@ -49,6 +50,7 @@ use tokio::{
         broadcast::{self, Sender, error::RecvError},
         mpsc::{self, UnboundedReceiver, UnboundedSender, error::TryRecvError},
     },
+    time::timeout,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
@@ -56,6 +58,17 @@ use uuid::Uuid;
 use foton_bedrock::config::BedrockConfig;
 
 use crate::pre_play_state::{PacketSequenceError, PrePlayPacket, PrePlayState};
+
+/// How long a connection may stay silent before it is dropped.
+///
+/// Vanilla parity: the `new ReadTimeoutHandler(30)` that
+/// `ServerConnectionListener` puts on every accepted channel. Foton had no
+/// equivalent anywhere before the play phase, and the play phase is only
+/// covered because keep-alive disconnects an unresponsive client. That left
+/// handshake, status and login able to hold a socket, two tasks, two buffered
+/// halves and a broadcast channel open forever while sending nothing at all --
+/// and nothing existed to kick them, since bans and player caps come later.
+const PRE_PLAY_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Represents updates to the connection state.
 #[derive(Clone)]
@@ -433,7 +446,15 @@ impl JavaTcpClient {
                     () = cancel_token.cancelled() => {
                         break;
                     }
-                    packet = reader.get_raw_packet() => {
+                    packet = timeout(PRE_PLAY_READ_TIMEOUT, reader.get_raw_packet()) => {
+                        let Ok(packet) = packet else {
+                            log::debug!(
+                                "Client {id} sent nothing for {}s; closing the connection",
+                                PRE_PLAY_READ_TIMEOUT.as_secs()
+                            );
+                            cancel_token.cancel();
+                            break;
+                        };
                         match packet {
                             Ok(packet) => {
                                 match self_clone.process_packet(packet).await {
@@ -450,9 +471,20 @@ impl JavaTcpClient {
                                         }
                                     }
                                     Err(err) => {
+                                        // Vanilla closes the channel on any
+                                        // decode failure. This branch is the
+                                        // pre-authentication twin of the one in
+                                        // `player::connection::java`, and it is
+                                        // the worse of the two: nothing here has
+                                        // an identity yet, so logging and
+                                        // reading the next packet handed anyone
+                                        // an unmetered way to write to the
+                                        // server's log file. The sibling arm
+                                        // fifteen lines down already cancels.
                                         log::warn!(
-                                            "Failed to get packet from client {id}: {err}",
+                                            "Disconnecting client {id} after a packet it sent failed to decode: {err}",
                                         );
+                                        cancel_token.cancel();
                                     }
                                 }
                             }
