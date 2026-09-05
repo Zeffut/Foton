@@ -193,6 +193,30 @@ that counts depth -- means implementing `wincode`'s `SchemaRead`, which is an
 or a hand-written reader for those two types, and both are calls for the
 project to make rather than something to improvise mid-audit.
 
+## Two more the audit found and left alone
+
+Both are real, both are bounded, and both would take a worse change to fix
+than to live with. They are written down so the next pass does not spend its
+budget rediscovering them.
+
+**The chunk storage refcount has no owner.** `acquire_chunk` bumps a region's
+`loaded_chunk_count` and `release_chunk` drops it, and the unload path only
+releases `if has_chunk` -- so a generation task that acquires and then dies
+before installing anything leaks the count, and the region file stays open
+with its header unflushed until shutdown. The clean fix is an RAII guard, and
+`release_chunk` is `async`, which `Drop` cannot be; spawning a task from a
+destructor to work around that is worse than the leak. What keeps it small is
+`panic = "abort"`: in release a panicking task takes the process with it, so
+the recovery branch that leaks only exists in debug builds.
+
+**The NBT heap quota is charged after the fact.** Vanilla's `NbtAccounter`
+bills each tag while parsing and gives up partway; Foton builds the whole tree
+and then measures it, so the peak is reached before the value is rejected.
+Charging incrementally means accounting inside `simdnbt`, which is not ours.
+The exposure is bounded rather than open-ended: the wire side is capped at
+`MAX_COMPONENT_BYTES` and, since a decode failure now disconnects the way
+vanilla does, a client gets one attempt rather than a loop.
+
 ## Known limits of this method
 
 - **`panic = "abort"` in release** (`Cargo.toml`) means every `expect()` on a

@@ -666,13 +666,24 @@ impl ChunkStorage {
         };
 
         // Serialize the heightmaps required by the persisted generation status.
-        let heightmaps = chunk.heightmaps.read();
-        if full.is_some() {
-            for &heightmap_type in HeightmapType::final_types() {
-                let _ = heightmaps.get_final(heightmap_type);
+        //
+        // The read guard is scoped on purpose. Shadowing it with the persistent
+        // form -- which is what this did -- does not drop it: Rust runs no
+        // destructor for a rebound name, so the lock was held for the whole rest
+        // of the function, across `poi_storage.lock()` and then `section.read()`.
+        // That put this path in a three-lock order that `populate_poi` and the
+        // section writers take the other way round. Nothing here needs the
+        // heightmaps after the conversion, so the lock has no business outliving
+        // it.
+        let heightmaps = {
+            let heightmaps = chunk.heightmaps.read();
+            if full.is_some() {
+                for &heightmap_type in HeightmapType::final_types() {
+                    let _ = heightmaps.get_final(heightmap_type);
+                }
             }
-        }
-        let heightmaps = Self::heightmaps_to_persistent(&heightmaps, status);
+            Self::heightmaps_to_persistent(&heightmaps, status)
+        };
 
         let light = Self::light_to_persistent(&chunk.light.read());
 

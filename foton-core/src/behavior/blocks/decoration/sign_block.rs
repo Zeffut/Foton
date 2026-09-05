@@ -297,11 +297,15 @@ fn try_open_sign_editor(
         return InteractionResult::Pass;
     }
 
-    // Check 3: Player must have build permission
-    // TODO: Implement may_build check properly
-    // if !player.may_build() {
-    //     return InteractionResult::Pass;
-    // }
+    // Check 3: Player must have build permission.
+    //
+    // Vanilla parity: the `player.mayBuild()` in `SignBlock.useWithoutItem`.
+    // This function's own doc list has always named the check; it just was not
+    // performed, so an adventure-mode player could open the editor on any sign.
+    // The waxed path two functions up already reads the ability the same way.
+    if !player.abilities.lock().may_build {
+        return InteractionResult::Pass;
+    }
 
     // Determine which side the player is facing
     let is_front_text = is_facing_front_text(state, pos, player);
