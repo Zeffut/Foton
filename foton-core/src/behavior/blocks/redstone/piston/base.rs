@@ -274,8 +274,11 @@ impl PistonBaseBlock {
         let mut to_update = Vec::with_capacity(to_push.len() + to_destroy.len());
         for &pos in to_destroy.iter().rev() {
             let state = world.get_block_state(pos);
-            // TODO: Pass the block entity to loot evaluation once block-entity components and
-            // post-refactor container item slices are available, as Vanilla does here.
+            // Vanilla hands `dropResources` the block entity because its caller
+            // may have already cleared the block. Here the block is still
+            // standing, and `World::drop_resources` reads the live one itself --
+            // so a pushed shulker box keeps its contents. A stale TODO used to
+            // claim otherwise.
             world.drop_resources(state, pos);
             world.set_block(
                 pos,

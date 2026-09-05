@@ -342,12 +342,15 @@ impl Menu {
                     kind.can_drag_to(slot)
                 });
             }
+        } else if self.behavior().quickcraft().is_some() {
+            // Vanilla parity: `} else if (this.quickcraftStatus != 0) {
+            // this.resetQuickCraft(); }` is a *terminal* branch of `doClick`'s
+            // chain -- the click that interrupts a drag is spent cancelling it
+            // and nothing else. Resetting and then falling through executed that
+            // click as well, which let a crafted packet stream slip one extra
+            // action past every drag.
+            self.behavior_mut().reset_quick_craft();
         } else {
-            // Any non-quickcraft click resets an in-progress quickcraft.
-            if self.behavior().quickcraft().is_some() {
-                self.behavior_mut().reset_quick_craft();
-            }
-
             // Menu-defined click hook. A consumed click skips default handling.
             // The guard is dropped before the default arms re-lock the same containers.
             let outcome = {
