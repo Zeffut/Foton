@@ -29,6 +29,8 @@ pub(super) async fn serve(
     cancel: CancellationToken,
 ) {
     let mut authenticated = false;
+    // Set when authentication fails, so the connection closes after answering.
+    let mut reject_and_close = false;
     loop {
         let request = select! {
             () = cancel.cancelled() => break,
@@ -41,7 +43,14 @@ pub(super) async fn serve(
                 // Vanilla parity: an empty password never authenticates, even
                 // against an empty configured one -- though Foton refuses to
                 // start with one, so that case cannot arise here.
-                authenticated = !request.body.is_empty() && request.body == *password;
+                //
+                // The comparison is constant-time. Vanilla uses `String.equals`,
+                // which returns on the first differing byte and so leaks the
+                // length of the correct prefix; RCON is admin tooling rather
+                // than gameplay, so this is one of the places Foton is allowed
+                // to be stricter than vanilla.
+                authenticated =
+                    !request.body.is_empty() && constant_time_eq(&request.body, &password);
                 if authenticated {
                     log::info!("Rcon client {address} authenticated");
                     send(
@@ -53,6 +62,12 @@ pub(super) async fn serve(
                     .await
                 } else {
                     log::warn!("Rcon client {address} failed to authenticate");
+                    // Vanilla parity: `RconClient` breaks out of its read loop
+                    // on a failed auth and the `finally` closes the socket, so
+                    // a client gets one guess per connection. Staying in the
+                    // loop turned a single TCP connection into an unlimited
+                    // password oracle.
+                    reject_and_close = true;
                     send_auth_failure(&mut connection).await
                 }
             }
@@ -69,7 +84,7 @@ pub(super) async fn serve(
                 send_command_response(&mut connection, request.request_id, &message).await
             }
         };
-        if sent.is_err() {
+        if sent.is_err() || reject_and_close {
             break;
         }
     }
@@ -153,4 +168,70 @@ async fn send(
     connection
         .write_all(&encode_response(request_id, kind, payload))
         .await
+}
+
+/// Compares two secrets without leaking where they first differ.
+///
+/// Folds every byte into one accumulator so the work does not depend on the
+/// contents. Lengths are compared first and separately, which leaks only the
+/// length -- as any timing-safe primitive of this shape does.
+fn constant_time_eq(candidate: &str, expected: &str) -> bool {
+    let candidate = candidate.as_bytes();
+    let expected = expected.as_bytes();
+    if candidate.len() != expected.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (left, right) in candidate.iter().zip(expected) {
+        difference |= left ^ right;
+    }
+    difference == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::constant_time_eq;
+
+    /// The comparison still answers correctly; being timing-safe is not an
+    /// excuse for being wrong.
+    #[test]
+    fn constant_time_eq_matches_ordinary_equality() {
+        for (candidate, expected) in [
+            ("hunter2", "hunter2"),
+            ("hunter2", "hunter3"),
+            ("hunter2", "hunter22"),
+            ("hunter2", "hunter"),
+            ("", ""),
+            ("", "x"),
+            ("x", ""),
+            // Multi-byte characters must not be treated as single units.
+            ("clé", "clé"),
+            ("clé", "cle"),
+        ] {
+            assert_eq!(
+                constant_time_eq(candidate, expected),
+                candidate == expected,
+                "constant_time_eq({candidate:?}, {expected:?}) disagreed with =="
+            );
+        }
+    }
+
+    /// It compares every byte rather than stopping at the first difference.
+    ///
+    /// A password oracle is built out of the timing difference between "wrong
+    /// at byte 0" and "wrong at byte 30". This cannot measure time reliably in
+    /// a unit test, so it pins the observable proxy: the two cases do the same
+    /// amount of work because neither returns early.
+    #[test]
+    fn constant_time_eq_does_not_stop_at_the_first_difference() {
+        let expected = "a".repeat(32);
+        let differs_early = format!("Z{}", "a".repeat(31));
+        let differs_late = format!("{}Z", "a".repeat(31));
+
+        assert!(!constant_time_eq(&differs_early, &expected));
+        assert!(!constant_time_eq(&differs_late, &expected));
+        // Both are the same length as the secret, so both walk all 32 bytes.
+        assert_eq!(differs_early.len(), expected.len());
+        assert_eq!(differs_late.len(), expected.len());
+    }
 }
