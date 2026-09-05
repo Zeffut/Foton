@@ -49,6 +49,10 @@ Neigbours = "Neigbours"
 # Mojang's own typo in
 # AdvancementVisibilityEvaluator.evaluateVisiblityForUnfinishedNode.
 Visiblity = "Visiblity"
+# Mojang's own typo in NaturalSpawner.isValidSpawnPostitionForType. Citing the
+# method by its real name is the point of a parity comment, so correcting the
+# spelling here would make the reference wrong.
+Postition = "Postition"
 # Vanilla stronghold piece-type IDs (shs, shsd, shrc, ...).
 shs = "shs"
 # Vanilla carver tag name (minecraft:overworld_carver_replaceables).

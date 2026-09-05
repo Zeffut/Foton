@@ -19,9 +19,11 @@ use foton_registry::vanilla_game_rules::{SPAWN_MOBS, SPAWN_MONSTERS};
 use foton_utils::{BlockPos, WorldAabb};
 use glam::DVec3;
 
+use crate::behavior::BlockCollisionContext;
 use crate::entity::ENTITIES;
 use crate::entity::{Entity, EntitySpawnReason, SpawnGroupData, next_entity_id};
 use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
+use crate::physics::{CollisionWorld as _, WorldCollisionProvider};
 use crate::world::World;
 use crate::world::spawn_placement::spawn_placement_for;
 
@@ -258,9 +260,10 @@ impl World {
                 let center = DVec3::new(center_x, center_y, center_z);
 
                 // Vanilla refuses any position closer than 24 blocks to a player.
-                if let Some(distance_sqr) = self.nearest_player_distance_sqr(center)
-                    && distance_sqr < MIN_SPAWN_DISTANCE * MIN_SPAWN_DISTANCE
-                {
+                let nearest_player_distance_sqr = self.nearest_player_distance_sqr(center);
+                if nearest_player_distance_sqr.is_some_and(|distance_sqr| {
+                    distance_sqr < MIN_SPAWN_DISTANCE * MIN_SPAWN_DISTANCE
+                }) {
                     continue;
                 }
 
@@ -276,10 +279,11 @@ impl World {
                     break;
                 };
 
-                if !spawn_placement_for(entity_type).is_spawn_position_ok(
-                    self,
-                    candidate,
+                if !self.is_valid_spawn_position_for_type(
                     entity_type,
+                    category,
+                    candidate,
+                    nearest_player_distance_sqr,
                 ) {
                     continue;
                 }
@@ -353,6 +357,102 @@ impl World {
     /// Picks a mob of `category` from the biome's weighted spawn list.
     ///
     /// Vanilla parity: `NaturalSpawner.getRandomSpawnMobAt`.
+    /// Applies the per-mob gate vanilla runs before it builds anything.
+    ///
+    /// Vanilla parity: `NaturalSpawner.isValidSpawnPostitionForType`, in its
+    /// order. Foton previously ran only the placement type's own test, which was
+    /// survivable while one mob was placed per position. A pack walks up to
+    /// twenty blocks from where its entry was drawn, so the entry now has to be
+    /// re-checked against the biome it actually landed in, and the clearance has
+    /// to be checked at all -- four mobs at the same `y`, a few blocks apart,
+    /// were being stacked into whatever happened to be there.
+    ///
+    /// One gap remains, and it is a data one: vanilla scales the spawn box by
+    /// `EntityType.spawnDimensionsScale`, which `FotonExtractor` does not
+    /// extract.
+    /// It is `1.0` for every type but the three slimes -- `minecraft:slime` and
+    /// `minecraft:magma_cube` at `4.0`, `minecraft:sulfur_cube` at `2.0` --
+    /// which reserve room for the largest size they may roll. Until the
+    /// extractor carries it, those three are checked against their base size and
+    /// so are held to a smaller clearance than vanilla asks. Writing the three
+    /// numbers here by hand is what rule 2 forbids.
+    fn is_valid_spawn_position_for_type(
+        self: &Arc<Self>,
+        entity_type: EntityTypeRef,
+        category: MobCategory,
+        pos: BlockPos,
+        nearest_player_distance_sqr: Option<f64>,
+    ) -> bool {
+        if entity_type.mob_category == MobCategory::Misc {
+            return false;
+        }
+
+        // Vanilla parity: a mob that despawns far from players is not spawned
+        // out there either.
+        if !entity_type.can_spawn_far_from_player
+            && let Some(distance_sqr) = nearest_player_distance_sqr
+        {
+            let despawn = f64::from(category.despawn_distance());
+            if distance_sqr > despawn * despawn {
+                return false;
+            }
+        }
+
+        if !entity_type.summonable {
+            return false;
+        }
+
+        // Vanilla parity: `canSpawnMobAt`, which re-reads the biome's list at
+        // the position actually reached rather than trusting the draw.
+        if !self.biome_lists_mob(pos, category, entity_type) {
+            return false;
+        }
+
+        if !spawn_placement_for(entity_type).is_spawn_position_ok(self, pos, entity_type) {
+            return false;
+        }
+
+        self.spawn_box_is_clear(entity_type, pos)
+    }
+
+    /// Whether the biome at `pos` still offers `entity_type` for `category`.
+    fn biome_lists_mob(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        category: MobCategory,
+        entity_type: EntityTypeRef,
+    ) -> bool {
+        let Some(biome) = self.biome_at(pos) else {
+            return false;
+        };
+        let Some(candidates) = biome.spawners.get(category.name()) else {
+            return false;
+        };
+        candidates
+            .iter()
+            .any(|entry| entry.entity_type == entity_type.key)
+    }
+
+    /// Whether the mob's spawn box is free of blocks and other entities.
+    ///
+    /// Vanilla parity: the `level.noCollision(type.getSpawnAABB(...))` that
+    /// closes `isValidSpawnPostitionForType`.
+    fn spawn_box_is_clear(self: &Arc<Self>, entity_type: EntityTypeRef, pos: BlockPos) -> bool {
+        let (x, y, z) = pos.get_bottom_center();
+        let dimensions = entity_type.dimensions;
+        let aabb = WorldAabb::entity_box(
+            x,
+            y,
+            z,
+            f64::from(dimensions.half_width()),
+            f64::from(dimensions.height),
+        );
+        let collision_world = WorldCollisionProvider::new(self);
+        !collision_world.has_entity_collision(&aabb)
+            && !collision_world
+                .has_block_collision_with_context(&aabb, BlockCollisionContext::empty())
+    }
+
     /// Chooses one biome spawn entry for `pos`, weighted as vanilla weights it.
     ///
     /// Vanilla parity: `NaturalSpawner.getRandomSpawnMobAt`. The pack size

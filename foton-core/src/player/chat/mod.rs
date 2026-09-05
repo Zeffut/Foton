@@ -53,6 +53,13 @@ pub struct ChatState {
     pub message_chain: Option<SignedMessageChain>,
     chat_spam_throttler: TickThrottler,
     command_spam_throttler: TickThrottler,
+    /// Counter behind the creative-mode drop limit.
+    ///
+    /// Vanilla parity: `ServerGamePacketListenerImpl.dropSpamThrottler`, a
+    /// `TickThrottler(20, 1480)`. It lives here because this is where the
+    /// per-player throttlers already are and where the tick that decays them
+    /// already runs.
+    drop_spam_throttler: TickThrottler,
 }
 
 enum ChatSessionUpdateOutcome {
@@ -106,16 +113,35 @@ impl ChatState {
                 20,
                 command_spam_threshold_seconds.wrapping_mul(20),
             ),
+            // Vanilla parity: `new TickThrottler(20, 1480)`. Unlike the chat
+            // pair, vanilla does not make this one configurable.
+            drop_spam_throttler: TickThrottler::new(20, 1480),
         }
     }
 }
 
 impl Player {
+    /// Whether the creative drop limit still allows one more item.
+    ///
+    /// Vanilla parity: the `dropSpamThrottler.isUnderThreshold()` guard, which
+    /// increments only on the branch that lets the drop through. Keeping the
+    /// test and the increment together here is what stops a caller from
+    /// charging the counter for a drop it then refuses.
+    pub(crate) fn allow_creative_drop(&self) -> bool {
+        let mut chat = self.chat.lock();
+        if !chat.drop_spam_throttler.is_under_threshold() {
+            return false;
+        }
+        chat.drop_spam_throttler.increment();
+        true
+    }
+
     /// Decays the per player chat and command spam counters once per server tick
     pub fn tick_spam_throttlers(&self) {
         let mut chat = self.chat.lock();
         chat.chat_spam_throttler.tick();
         chat.command_spam_throttler.tick();
+        chat.drop_spam_throttler.tick();
     }
 
     const fn should_disconnect_for_rate_spam(

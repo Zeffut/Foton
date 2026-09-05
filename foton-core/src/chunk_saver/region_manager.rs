@@ -645,7 +645,19 @@ impl RegionManager {
             && let Some(mut handle) = regions.remove(&region_pos)
             && handle.header_dirty
         {
-            Self::write_header(&mut handle.file, &handle.header).await?;
+            // The header is the commit point for every chunk written into this
+            // region since it was opened. Evicting the handle before the write
+            // means a failure here -- a full disk, an I/O error -- drops the only
+            // reference to that pending commit, and `flush_all` can no longer
+            // find it to retry. The sectors are on disk but nothing points at
+            // them, so the next load reports the chunks as absent and the terrain
+            // silently regenerates over whatever the player built. Put the handle
+            // back instead.
+            if let Err(error) = Self::write_header(&mut handle.file, &handle.header).await {
+                regions.insert(region_pos, handle);
+                return Err(error);
+            }
+            handle.header_dirty = false;
         }
 
         Ok(())
@@ -713,14 +725,20 @@ impl RegionManager {
     pub async fn close_all(&self) -> io::Result<()> {
         let mut regions = self.regions.write().await;
 
+        // One failing region must not cost the others their commit: `drain`
+        // has already taken every handle, so returning early here would drop
+        // the rest unwritten. Write them all, then report the first failure.
+        let mut first_error = None;
         for (_, mut handle) in regions.drain() {
-            if handle.header_dirty {
-                Self::write_header(&mut handle.file, &handle.header).await?;
+            if handle.header_dirty
+                && let Err(error) = Self::write_header(&mut handle.file, &handle.header).await
+            {
+                first_error.get_or_insert(error);
             }
             // File handle is dropped here, closing the file
         }
 
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 }
 
