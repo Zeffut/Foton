@@ -367,6 +367,12 @@ impl AbstractHorse for CamelHuskEntity {
 }
 
 impl Mob for CamelHuskEntity {
+    /// Vanilla parity: `AbstractHorse.getMaxSpawnClusterSize`, which the husk
+    /// inherits through `Camel`.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        6
+    }
+
     /// Vanilla parity: `Mob.serverAiStep` ticks the goal selector for every
     /// mob it runs, brain-driven or not. `Mob::tick_goal_selectors` has an
     /// empty default, so leaving it out is how a registered goal set never

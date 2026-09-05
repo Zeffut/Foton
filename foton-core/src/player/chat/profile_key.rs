@@ -150,7 +150,9 @@ impl ProfilePublicKeyData {
     /// Returns `ValidationError` if the byte format is invalid or key decoding fails
     ///
     /// # Panics
-    /// Panics if slice-to-array conversion fails (should not happen due to length checks)
+    /// Panics if a slice-to-array conversion fails. The lengths are checked
+    /// first, and the two attacker-controlled ones are rejected rather than
+    /// cast, so the conversions this still performs are on fixed-width fields.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ValidationError> {
         if bytes.len() < 16 {
             return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));
@@ -171,15 +173,21 @@ impl ProfilePublicKeyData {
         if bytes.len() < offset + 4 {
             return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));
         }
-        let key_len = i32::from_be_bytes(
+        // A negative length cast straight to `usize` becomes `usize::MAX`, and
+        // release builds carry no overflow checks, so `offset + key_len` wrapped
+        // back below `bytes.len()` and let the guard pass -- then the slice
+        // panicked, which `panic = "abort"` turns into a dead server.
+        let Ok(key_len) = usize::try_from(i32::from_be_bytes(
             bytes[offset..offset + 4]
                 .try_into()
                 .expect("slice is exactly 4 bytes"),
-        ) as usize;
+        )) else {
+            return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));
+        };
         offset += 4;
 
         // Read public key
-        if bytes.len() < offset + key_len {
+        if bytes.len() < offset.saturating_add(key_len) {
             return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));
         }
         let key = public_key_from_bytes(&bytes[offset..offset + key_len])?;
@@ -189,15 +197,17 @@ impl ProfilePublicKeyData {
         if bytes.len() < offset + 4 {
             return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));
         }
-        let sig_len = i32::from_be_bytes(
+        let Ok(sig_len) = usize::try_from(i32::from_be_bytes(
             bytes[offset..offset + 4]
                 .try_into()
                 .expect("slice is exactly 4 bytes"),
-        ) as usize;
+        )) else {
+            return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));
+        };
         offset += 4;
 
         // Read signature
-        if bytes.len() < offset + sig_len {
+        if bytes.len() < offset.saturating_add(sig_len) {
             return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));
         }
         let key_signature = bytes[offset..offset + sig_len].to_vec();
@@ -381,6 +391,25 @@ mod tests {
     use uuid::Uuid;
 
     use super::{ProfilePublicKeyData, ValidationError, system_time_from_millis};
+
+    /// A negative length must be refused, not cast into `usize::MAX`.
+    ///
+    /// `-1i32 as usize` is `usize::MAX`, and release builds carry no overflow
+    /// checks, so `offset + key_len` wrapped back under `bytes.len()` and slipped
+    /// through the guard -- then the slice panicked. Under `panic = "abort"`
+    /// that is a dead server, so this stays a test rather than a comment.
+    #[test]
+    fn a_negative_length_is_refused_rather_than_wrapping() {
+        let mut bytes = vec![0u8; 12];
+        // The declared public-key length, as a big-endian -1.
+        bytes.extend_from_slice(&(-1i32).to_be_bytes());
+        bytes.extend_from_slice(&[0u8; 8]);
+
+        assert!(
+            ProfilePublicKeyData::from_bytes(&bytes).is_err(),
+            "a negative key length must come back as an error"
+        );
+    }
 
     fn signed_profile_key(
         profile_id: Uuid,

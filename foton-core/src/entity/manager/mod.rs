@@ -1117,11 +1117,18 @@ impl WorldEntityManager {
         };
 
         loop {
-            assert!(
-                visited.insert(vehicle.id()),
-                "cyclic passenger relationship involving entity {}",
-                entity.id()
-            );
+            if !visited.insert(vehicle.id()) {
+                // A cycle is corrupt state, not a reason to kill the server. In
+                // release (`panic = "abort"`) an assertion here takes the tick
+                // thread and every unsaved chunk with it -- the same trap already
+                // sprung once in `entity::ticking`. Vanilla has no such check at
+                // all, so refusing to walk further is the conservative answer.
+                log::error!(
+                    "cyclic passenger relationship involving entity {};                      treating its root vehicle as unreachable",
+                    entity.id()
+                );
+                return false;
+            }
             if vehicle.is_removed() || !vehicle.has_passenger(passenger.as_ref()) {
                 return false;
             }
@@ -1637,11 +1644,18 @@ impl WorldEntityManager {
         visited.insert(entity.id());
         let mut vehicle = entity.vehicle();
         while let Some(current) = vehicle {
-            assert!(
-                visited.insert(current.id()),
-                "cyclic passenger relationship involving entity {}",
-                entity.id()
-            );
+            if !visited.insert(current.id()) {
+                // A cycle is corrupt state, not a reason to kill the server. In
+                // release (`panic = "abort"`) an assertion here takes the tick
+                // thread and every unsaved chunk with it -- the same trap already
+                // sprung once in `entity::ticking`. Vanilla has no such check at
+                // all, so refusing to walk further is the conservative answer.
+                log::error!(
+                    "cyclic passenger relationship involving entity {};                      stopping the world-change walk at the loop",
+                    entity.id()
+                );
+                break;
+            }
             if current.is_world_change_pending() {
                 return true;
             }
@@ -1665,7 +1679,7 @@ impl WorldEntityManager {
         };
 
         if !vehicle.is_removed() && vehicle.has_passenger(entity.as_ref()) {
-            Self::assert_acyclic_vehicle_chain(entity);
+            Self::report_cyclic_vehicle_chain(entity);
             return true;
         }
 
@@ -1673,17 +1687,26 @@ impl WorldEntityManager {
         false
     }
 
-    fn assert_acyclic_vehicle_chain(entity: &SharedEntity) {
+    /// Logs a cyclic vehicle chain instead of asserting one away.
+    ///
+    /// The name says `report` and not `assert` on purpose: under
+    /// `panic = "abort"` an assertion on this path is a server kill that loses
+    /// every dirty chunk, and the cycle it guards against is reachable from an
+    /// NBT load, a `/summon` with nested `Passengers`, or a race between two
+    /// mount packets. Vanilla carries no equivalent check.
+    fn report_cyclic_vehicle_chain(entity: &SharedEntity) {
         let mut visited = FxHashSet::default();
         visited.insert(entity.id());
 
         let mut vehicle = entity.vehicle();
         while let Some(current) = vehicle {
-            assert!(
-                visited.insert(current.id()),
-                "cyclic passenger relationship involving entity {}",
-                entity.id()
-            );
+            if !visited.insert(current.id()) {
+                log::error!(
+                    "cyclic passenger relationship involving entity {}",
+                    entity.id()
+                );
+                return;
+            }
             vehicle = current.vehicle();
         }
     }

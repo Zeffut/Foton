@@ -210,7 +210,14 @@ impl ChunkMap {
                 return;
             }
 
+            // `notified()` does not enqueue the waiter: tokio only does that on
+            // the first poll, or on an explicit `enable()`. The emitter uses
+            // `notify_waiters()`, which -- unlike `notify_one()` -- stores no
+            // permit. So a publication landing between the check below and the
+            // await was dropped outright and this wait never ended.
             let progress = self.light_updates_progress_notify.notified();
+            tokio::pin!(progress);
+            progress.as_mut().enable();
             if !self.has_in_flight_light_updates() {
                 return;
             }
@@ -224,7 +231,14 @@ impl ChunkMap {
                 return;
             }
 
+            // `notified()` does not enqueue the waiter: tokio only does that on
+            // the first poll, or on an explicit `enable()`. The emitter uses
+            // `notify_waiters()`, which -- unlike `notify_one()` -- stores no
+            // permit. So a publication landing between the check below and the
+            // await was dropped outright and this wait never ended.
             let progress = self.light_updates_progress_notify.notified();
+            tokio::pin!(progress);
+            progress.as_mut().enable();
             if !self.has_in_flight_light_update_touching_chunk(chunk_pos) {
                 return;
             }

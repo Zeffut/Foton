@@ -45,7 +45,14 @@ impl LightWorkWindowGate {
         center: ChunkPos,
     ) -> LightWorkWindowReservation {
         loop {
+            // `notified()` does not enqueue the waiter: tokio only does that on
+            // the first poll, or on an explicit `enable()`. The emitter uses
+            // `notify_waiters()`, which -- unlike `notify_one()` -- stores no
+            // permit. So a publication landing between the check below and the
+            // await was dropped outright and this wait never ended.
             let released = self.released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
             if let Some(reservation) = self.try_reserve_centered(center) {
                 return reservation;
             }

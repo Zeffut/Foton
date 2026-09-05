@@ -636,9 +636,14 @@ impl ChunkHolder {
     /// Waits until the chunk has reached the given status.
     pub async fn await_chunk(&self, status: ChunkStatus) -> Option<&Chunk> {
         loop {
-            // Register before checking the state so a concurrent publication
-            // cannot land between the check and the wait.
+            // `notified()` does not enqueue the waiter: tokio only does that on
+            // the first poll, or on an explicit `enable()`. The emitter uses
+            // `notify_waiters()`, which -- unlike `notify_one()` -- stores no
+            // permit. So a publication landing between the check below and the
+            // await was dropped outright and this wait never ended.
             let notified = self.status_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
 
             if self.published_status.load(Ordering::Acquire) >= encoded_published_status(status) {
                 return self.data.get();
@@ -655,7 +660,14 @@ impl ChunkHolder {
     /// Waits until the chunk has reached the given status without reading chunk data.
     pub async fn await_chunk_status(&self, status: ChunkStatus) -> Option<ChunkStatus> {
         loop {
+            // `notified()` does not enqueue the waiter: tokio only does that on
+            // the first poll, or on an explicit `enable()`. The emitter uses
+            // `notify_waiters()`, which -- unlike `notify_one()` -- stores no
+            // permit. So a publication landing between the check below and the
+            // await was dropped outright and this wait never ended.
             let notified = self.status_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             let published = self.published_status();
             if published.is_some_and(|current| status <= current) {
                 return published;
@@ -671,7 +683,14 @@ impl ChunkHolder {
 
     async fn await_claimed_chunk_status(&self, status: ChunkStatus) -> Option<ChunkStatus> {
         loop {
+            // `notified()` does not enqueue the waiter: tokio only does that on
+            // the first poll, or on an explicit `enable()`. The emitter uses
+            // `notify_waiters()`, which -- unlike `notify_one()` -- stores no
+            // permit. So a publication landing between the check below and the
+            // await was dropped outright and this wait never ended.
             let notified = self.status_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             let published = self.published_status();
             if published.is_some_and(|current| status <= current) {
                 return published;

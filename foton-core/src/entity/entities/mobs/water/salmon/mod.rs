@@ -356,10 +356,12 @@ impl LivingEntity for SalmonEntity {
 }
 
 impl Mob for SalmonEntity {
-    /// Vanilla parity: `AbstractFish.getMaxSpawnClusterSize`; the schooling fish route it
-    /// through `getMaxSchoolSize`, which returns that same value.
+    /// Vanilla parity: `Salmon.getMaxSchoolSize`, the one override that does not
+    /// hand back `AbstractFish`'s eight. `AbstractSchoolingFish` routes
+    /// `getMaxSpawnClusterSize` through `getMaxSchoolSize`, so the salmon's five
+    /// is what the spawner reads -- the cod and the tropical fish keep eight.
     fn max_spawn_cluster_size(&self) -> i32 {
-        8
+        5
     }
 
     /// Returns whether this mob accepts where the spawner put it.
