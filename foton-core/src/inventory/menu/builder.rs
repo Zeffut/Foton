@@ -327,6 +327,15 @@ impl SectionKind {
         Self::Restricted(RestrictedRules::place_only(may_place))
     }
 
+    /// Like [`restricted`](Self::restricted), with a ceiling on how much each
+    /// slot of the section will hold.
+    pub fn capped(
+        may_place: impl Fn(usize, &ItemStack) -> bool + Send + Sync + 'static,
+        max_stack_size: impl Fn(usize) -> Option<i32> + Send + Sync + 'static,
+    ) -> Self {
+        Self::Restricted(RestrictedRules::capped(may_place, max_stack_size))
+    }
+
     /// Like [`restricted`](Self::restricted), but pickup is also gated: items
     /// only come out while `may_pickup` returns true.
     pub fn guarded(

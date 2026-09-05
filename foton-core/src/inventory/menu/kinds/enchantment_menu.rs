@@ -52,9 +52,14 @@ pub fn enchantment(
     let input = builder.section_with(
         &enchant_slots,
         2,
-        SectionKind::restricted(|slot, stack| {
-            slot != SLOT_LAPIS || stack.is(&vanilla_items::LAPIS_LAZULI)
-        }),
+        // Vanilla parity: the item slot overrides `getMaxStackSize()` to one, so
+        // a stack can never sit there and shift-clicking sixty-four books moves
+        // exactly one. The lapis slot keeps the default -- the top offer costs
+        // three lapis, and capping that slot too would make it unpayable.
+        SectionKind::capped(
+            |slot, stack| slot != SLOT_LAPIS || stack.is(&vanilla_items::LAPIS_LAZULI),
+            |slot| (slot == SLOT_ITEM).then_some(1),
+        ),
     );
     let player = builder.player_inventory(&inventory);
 
@@ -321,5 +326,67 @@ impl MenuKind for EnchantmentKind {
 
         self.recompute_offers(behavior, player);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::{init_vanilla_registry, vanilla_items};
+    use foton_utils::BlockPos;
+
+    use super::{SLOT_ITEM, SLOT_LAPIS, enchantment};
+    use crate::player::Player;
+    use crate::test_support::{TestPlayerBuilder, fresh_test_world};
+
+    /// The two slot rules vanilla puts on the enchanting table.
+    ///
+    /// Both were missing, and each cost something different: with no `mayPlace`
+    /// on the currency slot, three of any item bought an enchantment and lapis
+    /// left the economy entirely; with no ceiling on the item slot, a
+    /// shift-clicked stack of sixty-four books went in and came back as one.
+    ///
+    /// The ceiling is asserted on *both* slots on purpose. Capping the section
+    /// rather than the slot is an easy mistake and a quiet one -- the lapis slot
+    /// still looks right, and only the three-lapis offer silently becomes
+    /// unpayable. A test that checked the item slot alone would not catch it.
+    #[test]
+    fn the_table_takes_lapis_only_and_one_item_at_a_time() {
+        init_vanilla_registry();
+        let world = fresh_test_world("enchantment_slot_rules");
+        let player: Arc<Player> =
+            TestPlayerBuilder::new(Arc::clone(&world), "EnchantTester", 1).build();
+
+        let menu = enchantment(
+            Arc::clone(&player.inventory),
+            1,
+            BlockPos::new(0, 64, 0),
+            &world,
+        );
+        let slots = menu.behavior().slots();
+
+        // Vanilla: `mayPlace` returns `itemStack.is(Items.LAPIS_LAZULI)`.
+        assert!(
+            slots[SLOT_LAPIS].may_place(&ItemStack::new(&vanilla_items::LAPIS_LAZULI)),
+            "the currency slot must accept lapis"
+        );
+        assert!(
+            !slots[SLOT_LAPIS].may_place(&ItemStack::new(&vanilla_items::DIRT)),
+            "the currency slot must not accept anything else"
+        );
+
+        // Vanilla: only the item slot overrides `getMaxStackSize()` to one.
+        let guard = menu.behavior().lock_all_containers();
+        assert_eq!(
+            slots[SLOT_ITEM].get_max_stack_size(&guard),
+            1,
+            "a stack must never sit in the item slot"
+        );
+        assert!(
+            slots[SLOT_LAPIS].get_max_stack_size(&guard) >= 3,
+            "the lapis slot has to hold the three the top offer costs"
+        );
     }
 }

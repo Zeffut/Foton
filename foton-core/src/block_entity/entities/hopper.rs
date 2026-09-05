@@ -29,7 +29,7 @@ use crate::block_entity::{
     BlockEntity, BlockEntityBase, BlockEntityName, ContainerLoot, ImplicitComponentInput,
 };
 use crate::entity::entities::ItemEntity;
-use crate::entity::{RemovalReason, SharedEntity};
+use crate::entity::{Entity, RemovalReason, SharedEntity};
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{
     AttachedContainers, ContainerId, ContainerLockGuard, ContainerRef, SharedContainer,
@@ -195,16 +195,32 @@ impl HopperBlockEntity {
         }
 
         self.container.lock().set_cooldown(0);
-        self.try_move_items(world, pos, facing, enabled);
+        self.try_move_items(world, pos, facing, enabled, || {
+            self.suck_in_items(world, pos)
+        });
     }
 
     /// Pushes one item out and pulls one item in, if either is possible.
     ///
-    /// Vanilla parity: `HopperBlockEntity.tryMoveItems`. The cooldown check
-    /// vanilla repeats here is not reproduced: Foton only reaches this from the
-    /// tick, which has just cleared the cooldown.
-    fn try_move_items(&self, world: &Arc<World>, pos: BlockPos, facing: Direction, enabled: bool) {
-        if !enabled {
+    /// Vanilla parity: `HopperBlockEntity.tryMoveItems`, whose second half is a
+    /// `BooleanSupplier` so the caller decides what "pull in" means: the tick
+    /// sucks from above, while an item entity falling into the mouth hands over
+    /// just that entity.
+    ///
+    /// The cooldown check is vanilla's and is genuinely needed now. It used to
+    /// be skipped on the grounds that the tick is the only caller and has just
+    /// cleared the cooldown -- true until `entity_inside` became a second
+    /// caller, which fires whenever an item touches the hopper and would
+    /// otherwise walk straight past the cooldown.
+    fn try_move_items(
+        &self,
+        world: &Arc<World>,
+        pos: BlockPos,
+        facing: Direction,
+        enabled: bool,
+        pull_in: impl FnOnce() -> bool,
+    ) {
+        if !enabled || self.container.lock().is_on_cooldown() {
             return;
         }
 
@@ -221,7 +237,7 @@ impl HopperBlockEntity {
             changed = self.eject_items(world, pos, facing);
         }
         if !is_full {
-            changed |= self.suck_in_items(world, pos);
+            changed |= pull_in();
         }
 
         if changed {
@@ -384,6 +400,42 @@ impl HopperBlockEntity {
     fn add_item_entity(&self, entity: &SharedEntity) -> bool {
         swallow_item_entity(entity, &self.container_ref)
     }
+
+    /// Runs a hopper cycle for an item entity that just touched the mouth.
+    ///
+    /// Vanilla parity: `HopperBlockEntity.entityInside`. Waiting for the block
+    /// entity's own tick instead means an item landing just after the hopper
+    /// ticked waits a whole game tick, and the eject half this triggers never
+    /// happens at all.
+    pub(crate) fn entity_inside(
+        &self,
+        world: &Arc<World>,
+        pos: BlockPos,
+        facing: Direction,
+        enabled: bool,
+        entity: &SharedEntity,
+    ) {
+        if !intersects_suck_volume(pos, entity.as_ref()) {
+            return;
+        }
+        self.try_move_items(world, pos, facing, enabled, || self.add_item_entity(entity));
+    }
+}
+
+/// Whether `entity` overlaps the volume a hopper draws items from.
+///
+/// Vanilla parity: the `entity.getBoundingBox().move(-pos).intersects(
+/// hopper.getSuckAabb())` of `HopperBlockEntity.entityInside`.
+fn intersects_suck_volume(pos: BlockPos, entity: &dyn Entity) -> bool {
+    let suck = WorldAabb::new(
+        f64::from(pos.x()),
+        f64::from(pos.y()) + SUCK_MIN_Y,
+        f64::from(pos.z()),
+        f64::from(pos.x()) + 1.0,
+        f64::from(pos.y()) + SUCK_MAX_Y,
+        f64::from(pos.z()) + 1.0,
+    );
+    entity.bounding_box().intersects(suck)
 }
 
 /// Puts `leftover` back into the slot it was taken from.

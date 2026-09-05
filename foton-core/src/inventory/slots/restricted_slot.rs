@@ -13,12 +13,21 @@ use crate::{
 
 type MayPlace = Box<dyn Fn(usize, &ItemStack) -> bool + Send + Sync>;
 type MayPickup = Box<dyn Fn(usize, &ItemStack, &ContainerLockGuard, &Player) -> bool + Send + Sync>;
+type MaxStackSize = Box<dyn Fn(usize) -> Option<i32> + Send + Sync>;
 
 /// The predicates behind a [`RestrictedSlot`], shared by every slot of a
 /// section so a slot costs one pointer rather than one per predicate.
 pub struct RestrictedRules {
     may_place: MayPlace,
     may_pickup: Option<MayPickup>,
+    /// Per-slot ceiling, applied on top of the container's and the item's.
+    ///
+    /// Vanilla parity: the `getMaxStackSize()` some menus override on a slot.
+    /// It takes the slot index because those overrides are per slot and not per
+    /// menu: the enchanting table caps its item slot at one while leaving the
+    /// lapis slot alone, and capping both would make the three-lapis offer
+    /// impossible to pay for.
+    max_stack_size: Option<MaxStackSize>,
 }
 
 impl RestrictedRules {
@@ -28,6 +37,20 @@ impl RestrictedRules {
         Arc::new(Self {
             may_place: Box::new(may_place),
             may_pickup: None,
+            max_stack_size: None,
+        })
+    }
+
+    /// Like [`place_only`](Self::place_only), with a ceiling on how much the
+    /// slot will hold.
+    pub(crate) fn capped(
+        may_place: impl Fn(usize, &ItemStack) -> bool + Send + Sync + 'static,
+        max_stack_size: impl Fn(usize) -> Option<i32> + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            may_place: Box::new(may_place),
+            may_pickup: None,
+            max_stack_size: Some(Box::new(max_stack_size)),
         })
     }
 
@@ -41,6 +64,7 @@ impl RestrictedRules {
         Arc::new(Self {
             may_place: Box::new(may_place),
             may_pickup: Some(Box::new(may_pickup)),
+            max_stack_size: None,
         })
     }
 }
@@ -130,7 +154,12 @@ impl Slot for RestrictedSlot {
     }
 
     fn get_max_stack_size(&self, guard: &ContainerLockGuard) -> i32 {
-        self.base.get_max_stack_size(guard)
+        let base = self.base.get_max_stack_size(guard);
+        self.rules
+            .max_stack_size
+            .as_ref()
+            .and_then(|capped| capped(self.base.get_container_slot()))
+            .map_or(base, |capped| base.min(capped))
     }
 
     fn set_changed(&self, guard: &mut ContainerLockGuard) {
