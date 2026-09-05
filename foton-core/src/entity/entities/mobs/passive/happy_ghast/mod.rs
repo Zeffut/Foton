@@ -882,6 +882,11 @@ impl Animal for HappyGhastEntity {
 }
 
 impl Mob for HappyGhastEntity {
+    /// Vanilla parity: the mob's own `getMaxSpawnClusterSize`.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        1
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

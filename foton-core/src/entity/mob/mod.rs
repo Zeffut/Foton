@@ -817,6 +817,23 @@ pub trait Mob: LivingEntity + MobSource {
         check_mob_spawn_rules(world, spawn_reason, pos)
     }
 
+    /// How many mobs one natural spawn attempt may add to the world.
+    ///
+    /// Vanilla parity: `Mob.getMaxSpawnClusterSize`. The spawner stops the
+    /// whole attempt once this many mobs have joined, however many groups the
+    /// biome's `maxCount` would still allow.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        4
+    }
+
+    /// Whether the pack being spawned right now is already big enough.
+    ///
+    /// Vanilla parity: `Mob.isMaxGroupSizeReached`. Only the tropical fish
+    /// answers yes, and only when it did not roll a school.
+    fn is_max_group_size_reached(&self, _group_size: i32) -> bool {
+        false
+    }
+
     /// Last chance to shape a mob before it enters the world.
     ///
     /// Vanilla parity: `Mob.finalizeSpawn`. The returned group data is passed

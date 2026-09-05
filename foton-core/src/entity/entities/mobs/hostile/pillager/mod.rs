@@ -458,6 +458,11 @@ impl LivingEntity for PillagerEntity {
 }
 
 impl Mob for PillagerEntity {
+    /// Vanilla parity: the mob's own `getMaxSpawnClusterSize`.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        1
+    }
+
     /// Vanilla parity: `Pillager.pickUpItem`. A pillager reaches for a banner
     /// and for nothing else, which is why one never turns up carrying the sword
     /// you dropped. Vanilla's second branch asks for a white banner, which the

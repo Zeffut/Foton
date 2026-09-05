@@ -321,6 +321,12 @@ impl LivingEntity for TadpoleEntity {
 }
 
 impl Mob for TadpoleEntity {
+    /// Vanilla parity: `AbstractFish.getMaxSpawnClusterSize`; the schooling fish route it
+    /// through `getMaxSchoolSize`, which returns that same value.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        8
+    }
+
     /// Vanilla parity: `Mob.serverAiStep` ticks the goal selector for every
     /// mob it runs, brain-driven or not. `Mob::tick_goal_selectors` has an
     /// empty default, so leaving it out is how a registered goal set never
