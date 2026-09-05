@@ -1390,11 +1390,9 @@ impl Player {
             )
         };
 
-        if self.drop_item(removed.clone(), false, true).is_none() {
-            let mut inventory = self.inventory.lock();
-            let mut remainder = removed;
-            let _ = inventory.add(&mut remainder);
-        }
+        // `drop_item` puts the stack back itself now, so restoring it here too
+        // would hand the player a second copy.
+        let _ = self.drop_item(removed, false, true);
     }
 
     /// Drops an item into the world.
@@ -1451,9 +1449,21 @@ impl Player {
 
         let spawn_pos = DVec3::new(pos.x, spawn_y, pos.z);
 
-        let entity = self
+        // Vanilla's `Level.addFreshEntity` cannot refuse, so a vanilla drop always
+        // reaches the ground. Foton's can fail -- a cancelled `ItemSpawnEvent`, or
+        // a spawn position whose chunk is not Full -- and a plugin can cancel
+        // `PlayerDropItemEvent` after the fact, which Bukkit defines as "the drop
+        // did not happen" rather than "the item is gone". Both paths used to
+        // consume the stack and hand back `None`, and every caller but one throws
+        // that `None` away, so the item simply ceased to exist.
+        let undropped = item.clone();
+        let Some(entity) = self
             .get_world()
-            .spawn_item_with_velocity(spawn_pos, item, velocity)?;
+            .spawn_item_with_velocity(spawn_pos, item, velocity)
+        else {
+            self.restore_undropped_item(undropped);
+            return None;
+        };
         entity.set_pickup_delay(40);
         if thrown_from_hand {
             entity.set_thrower(self.gameprofile.id);
@@ -1463,9 +1473,35 @@ impl Player {
         world.fire_event(&mut event);
         if event.is_cancelled() {
             let _ = world.remove_entity(entity.id());
+            self.restore_undropped_item(undropped);
             return None;
         }
         Some(entity)
+    }
+
+    /// Puts back a stack the world refused to take.
+    ///
+    /// `try_lock` rather than `lock`: this runs on the failure path of a drop,
+    /// and some callers reach `drop_item` from inside inventory handling. A
+    /// missed restore is an item on the floor of the log; a deadlock is the
+    /// server. Anything that still does not fit is reported rather than dropped
+    /// silently, because a vanished stack with no trace is unanswerable when a
+    /// player asks where it went.
+    fn restore_undropped_item(&self, mut item: ItemStack) {
+        if item.is_empty() {
+            return;
+        }
+        if let Some(mut inventory) = self.inventory.try_lock() {
+            let _ = inventory.add(&mut item);
+        }
+        if !item.is_empty() {
+            log::warn!(
+                "player {} could neither drop nor store {} x{}",
+                self.gameprofile.name,
+                item.item().key,
+                item.count()
+            );
+        }
     }
 
     /// Returns true if the player can drop items.
