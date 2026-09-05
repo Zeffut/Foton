@@ -23,6 +23,7 @@ use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionRes
 use crate::block_entity::entities::HopperBlockEntity;
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntity, BlockEntityTicker};
 use crate::entity::ai::path::PathComputationType;
+use crate::entity::{Entity, InsideBlockEffectCollector};
 use crate::inventory::container::calculate_redstone_signal_from_container;
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::menu::kinds::hopper;
@@ -86,6 +87,40 @@ fn push_items_tick(
 }
 
 impl BlockBehavior for HopperBlock {
+    /// Vanilla parity: `HopperBlock.entityInside`, which forwards to
+    /// `HopperBlockEntity.entityInside`.
+    ///
+    /// Without it a hopper only ever notices an item on its own block-entity
+    /// tick, so something landing in the mouth just after that tick waits a
+    /// whole game tick, and the eject half of the cycle this is meant to
+    /// trigger never runs at all.
+    fn entity_inside(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        entity: &dyn Entity,
+        _effect_collector: &mut InsideBlockEffectCollector,
+        _is_precise: bool,
+    ) {
+        let Some(item) = world.get_entity_by_id(entity.id()) else {
+            return;
+        };
+        let Some(block_entity) = world.get_block_entity(pos) else {
+            return;
+        };
+        let Some(hopper) = block_entity.downcast_ref::<HopperBlockEntity>() else {
+            return;
+        };
+        hopper.entity_inside(
+            world,
+            pos,
+            state.get_value(FACING),
+            state.get_value(ENABLED),
+            &item,
+        );
+    }
+
     /// Vanilla parity: `HopperBlock.getStateForPlacement`. A hopper placed
     /// against a floor or ceiling points straight down rather than sideways.
     fn get_state_for_placement(&self, context: &BlockPlaceContext<'_>) -> Option<BlockStateId> {

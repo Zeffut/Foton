@@ -40,7 +40,19 @@ pub fn grindstone(
     let handler = GrindstoneHandler::new(input_container.clone(), result_container.clone());
 
     let mut builder = MenuBuilder::new(&vanilla_menu_types::GRINDSTONE, container_id);
-    let inputs = builder.section_all(&input_container);
+    // Vanilla parity: both grindstone input slots override `mayPlace` to
+    // `itemStack.isDamageableItem() || EnchantmentHelper.hasAnyEnchantments(...)`.
+    // Nothing is lost today without it -- the result path refuses any input with
+    // a count above one, which is what keeps two stones from collapsing into a
+    // stack of two -- but that guard is the only thing standing between this
+    // menu and an item-loss bug, and it is not the guard vanilla relies on.
+    let inputs = builder.section_with(
+        &input_container,
+        2,
+        SectionKind::restricted(|_, stack| {
+            stack.is_damageable_item() || stack.has_any_enchantments()
+        }),
+    );
     let result = builder.result_slot(handler.clone());
     let player = builder.player_inventory(&inventory);
 

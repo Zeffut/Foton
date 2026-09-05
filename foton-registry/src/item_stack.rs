@@ -581,6 +581,23 @@ impl ItemStack {
         self.get(ENCHANTMENTS)
     }
 
+    /// Whether the stack carries any enchantment at all.
+    ///
+    /// Vanilla parity: `EnchantmentHelper.hasAnyEnchantments`, which reads
+    /// *both* components rather than choosing between them. That is the
+    /// difference from [`get_enchantments_for_crafting`](Self::get_enchantments_for_crafting),
+    /// which picks one by item type: an enchanted book has empty `ENCHANTMENTS`
+    /// and a full `STORED_ENCHANTMENTS`, so anything asking "is this enchanted?"
+    /// through the crafting accessor would answer correctly for a book and
+    /// wrongly for a book-shaped edge case, and vice versa.
+    #[must_use]
+    pub fn has_any_enchantments(&self) -> bool {
+        let non_empty = |levels: Option<&ItemEnchantments>| {
+            levels.is_some_and(|levels| !levels.levels.is_empty())
+        };
+        non_empty(self.get(ENCHANTMENTS)) || non_empty(self.get(STORED_ENCHANTMENTS))
+    }
+
     /// Vanilla `EnchantmentHelper.getEnchantmentsForCrafting`: enchanted books
     /// expose `STORED_ENCHANTMENTS` to crafting operations, while every other
     /// item exposes `ENCHANTMENTS`.
