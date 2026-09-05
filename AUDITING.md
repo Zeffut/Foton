@@ -63,6 +63,23 @@ naming pattern and tread on each other in parallel.
 Read `dev/all-tests.sh` for the list; it is the closest thing to a definition
 of "does Foton work".
 
+**Run these from a native filesystem, not through `/mnt/c`.** The run directory
+is created next to the checkout, so a Windows checkout driven from WSL puts the
+whole world through the 9p bridge. Config generation that takes about four
+seconds on `/root` takes minutes there, and the scripts' own timeouts start
+firing. Use the WSL checkout for this layer.
+
+**Kill leftover servers first.** An interrupted run keeps its port, and the next
+server exits immediately with
+
+    Server startup failed: failed to bind to server port 25565: Address already in use
+
+while the test's client waits for a server that is already gone. The symptom is
+a test that hangs with an empty log, which looks like a server bug and is not
+one. Use `pkill -f "debug/fo[t]on"` — note the bracket, or the pattern matches
+the shell running it and kills that instead, which is the same self-matching
+trap as `pgrep` above.
+
 ## Layer 3 — vanilla parity
 
 ```bash
