@@ -356,6 +356,12 @@ impl LivingEntity for SalmonEntity {
 }
 
 impl Mob for SalmonEntity {
+    /// Vanilla parity: `AbstractFish.getMaxSpawnClusterSize`; the schooling fish route it
+    /// through `getMaxSchoolSize`, which returns that same value.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        8
+    }
+
     /// Returns whether this mob accepts where the spawner put it.
     ///
     /// Vanilla parity: `WaterAnimal::checkSurfaceWaterAnimalSpawnRules`,

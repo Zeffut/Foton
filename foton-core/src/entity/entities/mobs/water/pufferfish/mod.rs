@@ -469,6 +469,12 @@ impl LivingEntity for PufferfishEntity {
 }
 
 impl Mob for PufferfishEntity {
+    /// Vanilla parity: `AbstractFish.getMaxSpawnClusterSize`; the schooling fish route it
+    /// through `getMaxSchoolSize`, which returns that same value.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        8
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }

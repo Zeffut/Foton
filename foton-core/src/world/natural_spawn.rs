@@ -20,7 +20,7 @@ use foton_utils::{BlockPos, WorldAabb};
 use glam::DVec3;
 
 use crate::entity::ENTITIES;
-use crate::entity::{Entity, EntitySpawnReason, next_entity_id};
+use crate::entity::{Entity, EntitySpawnReason, SpawnGroupData, next_entity_id};
 use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
 use crate::world::World;
 use crate::world::spawn_placement::spawn_placement_for;
@@ -38,6 +38,12 @@ const MAX_SPAWN_DISTANCE: f64 = 128.0;
 /// Candidate positions tried per category, per player, each spawn cycle.
 const ATTEMPTS_PER_PLAYER: u32 = 16;
 
+/// Groups attempted at one sampled position.
+///
+/// Vanilla parity: the `for (groupCount = 0; groupCount < 3; groupCount++)` of
+/// `NaturalSpawner.spawnCategoryForPosition`.
+const GROUPS_PER_POSITION: u32 = 3;
+
 /// Ticks between spawn cycles.
 ///
 /// Vanilla runs the spawner every tick over many chunks; Foton samples fewer
@@ -53,12 +59,18 @@ const SPAWN_INTERVAL_TICKS: u64 = 20;
 /// were placed when the chunk was made rather than spawned later.
 const PERSISTENT_SPAWN_INTERVAL_TICKS: u64 = 400;
 
-/// Monsters allowed within the sampling radius of one player.
+/// Chunks covered by the box [`World::mobs_near`] counts mobs in.
 ///
-/// Every other category's budget is derived from this one, so that the ratios
-/// between categories stay vanilla's even though the absolute figure is Foton's
-/// own. See [`default_category_cap`].
-const MONSTER_CAP_PER_PLAYER: i32 = 24;
+/// The box is `MAX_SPAWN_DISTANCE` in every direction, so 256 blocks on a side,
+/// so sixteen chunks on a side.
+const SAMPLED_CHUNK_COUNT: i32 = 16 * 16;
+
+/// Vanilla's reference area for a category budget.
+///
+/// Vanilla parity: `NaturalSpawner.MAGIC_NUMBER`, seventeen chunks squared.
+/// `maxInstancesPerChunk` is a count per that area, not per chunk, which is why
+/// dividing by it is what turns the category figure into a density.
+const SPAWN_CAP_REFERENCE_CHUNKS: i32 = 17 * 17;
 
 /// Categories the spawner populates, in vanilla's declaration order.
 ///
@@ -76,18 +88,37 @@ const SPAWNABLE_CATEGORIES: [MobCategory; 7] = [
 
 /// Returns how many mobs of `category` may live in one player's spawn ring.
 ///
-/// Vanilla scales `MobCategory.getMaxInstancesPerChunk` by the number of
-/// spawnable chunks around the players. Foton samples a fixed ring instead, so
-/// the per-chunk density becomes a flat local budget: the monster figure is the
-/// one Foton already used, and every other category keeps vanilla's ratio to
-/// it. That is what makes a ring hold far more zombies than squid.
+/// Vanilla parity: `SpawnState.canSpawnForCategoryGlobal` allows
+/// `maxInstancesPerChunk * spawnableChunkCount / MAGIC_NUMBER` mobs across
+/// every chunk that can spawn. That is a density, and Foton applies the same
+/// density to the box it actually counts in.
+///
+/// The figure this replaced was a flat twenty-four monsters, which is 0.12 per
+/// chunk against vanilla's 0.24 -- half the ceiling. In the End that is plainly
+/// visible, because the enderman is the whole monster table there and nothing
+/// else takes up the slack.
 fn default_category_cap(category: MobCategory) -> usize {
     let max = category.max_instances_per_chunk();
     if max <= 0 {
         return 0;
     }
-    let scaled = max * MONSTER_CAP_PER_PLAYER / MobCategory::Monster.max_instances_per_chunk();
+    let scaled = max * SAMPLED_CHUNK_COUNT / SPAWN_CAP_REFERENCE_CHUNKS;
     scaled.max(1) as usize
+}
+
+/// Rolls how many mobs one group asks for, from the biome entry's own counts.
+///
+/// Vanilla parity: the `max = spawnerData.minCount() + random.nextInt(1 +
+/// spawnerData.maxCount() - spawnerData.minCount())` of
+/// `NaturalSpawner.spawnCategoryForPosition`.
+///
+/// These two counts sit in every biome file and were parsed into
+/// [`SpawnerData`] all along; the spawner simply never read them and spawned
+/// one mob per success. The End states `minCount: 4, maxCount: 4` for the
+/// enderman, so a quarter of the endermen vanilla places were appearing.
+fn roll_pack_size(min_count: i32, max_count: i32) -> i32 {
+    let span = (max_count - min_count).max(0) + 1;
+    min_count + rand::random_range(0..span)
 }
 
 impl World {
@@ -133,12 +164,22 @@ impl World {
                     .spawn_limit(category)
                     .unwrap_or_else(|| default_category_cap(category) as i32)
                     .max(0) as usize;
-                if self.mobs_near(origin, category) >= cap {
+                // Vanilla re-tests the budget for every single mob, through the
+                // `state::canSpawn` predicate it hands the spawner. Foton counts
+                // once and then spends a running budget, which matters now that
+                // one position can place a whole pack: checking only up front
+                // would let a single cycle overshoot the ceiling several times
+                // over.
+                let mut budget = cap.saturating_sub(self.mobs_near(origin, category));
+                if budget == 0 {
                     continue;
                 }
                 for _ in 0..ATTEMPTS_PER_PLAYER {
+                    if budget == 0 {
+                        break;
+                    }
                     if let Some(pos) = self.pick_spawn_position(origin) {
-                        self.try_spawn_at(pos, category);
+                        self.try_spawn_at(pos, category, &mut budget);
                     }
                 }
             }
@@ -183,90 +224,142 @@ impl World {
         Some(BlockPos::new(x, y, z))
     }
 
-    /// Spawns one mob of `category` at `pos` when every rule allows it.
+    /// Fills one sampled position with a pack, the way vanilla fills a chosen one.
     ///
-    /// Vanilla parity: `NaturalSpawner.spawnCategoryForPosition`, in the same
-    /// order: reject the position, pick the mob, then ask the mob.
-    fn try_spawn_at(self: &Arc<Self>, pos: BlockPos, category: MobCategory) {
-        let (center_x, center_y, center_z) = pos.get_bottom_center();
-        let center = DVec3::new(center_x, center_y, center_z);
+    /// Vanilla parity: `NaturalSpawner.spawnCategoryForPosition`. Three groups
+    /// are attempted at the position. Each draws one biome entry, takes its pack
+    /// size from that entry, and walks a short random offset per mob so the pack
+    /// lands as a cluster. `group_data` is threaded from each mob to the next,
+    /// which is what lets a pack share one variant or one leader.
+    ///
+    /// `budget` is the category's remaining headroom and is spent as mobs join,
+    /// standing in for the running count vanilla keeps in `SpawnState`.
+    fn try_spawn_at(self: &Arc<Self>, pos: BlockPos, category: MobCategory, budget: &mut usize) {
+        let mut cluster_size = 0;
 
-        // Vanilla refuses any position closer than 24 blocks to a player.
-        if let Some(distance_sqr) = self.nearest_player_distance_sqr(center)
-            && distance_sqr < MIN_SPAWN_DISTANCE * MIN_SPAWN_DISTANCE
-        {
-            return;
-        }
+        for _ in 0..GROUPS_PER_POSITION {
+            let mut x = pos.x();
+            let mut z = pos.z();
+            let mut entry: Option<(EntityTypeRef, i32, i32)> = None;
+            let mut group_data: Option<SpawnGroupData> = None;
+            let mut group_size = 0;
+            // Vanilla opens with a one-to-four budget and replaces it with the
+            // biome entry's own count the moment an entry is drawn.
+            let mut remaining = (rand::random::<f32>() * 4.0).ceil() as i32;
+            let mut attempt = 0;
 
-        let Some(entity_type) = self.pick_mob_for(pos, category) else {
-            return;
-        };
+            while attempt < remaining {
+                attempt += 1;
+                x += rand::random_range(0..6) - rand::random_range(0..6);
+                z += rand::random_range(0..6) - rand::random_range(0..6);
+                let candidate = BlockPos::new(x, pos.y(), z);
+                let (center_x, center_y, center_z) = candidate.get_bottom_center();
+                let center = DVec3::new(center_x, center_y, center_z);
 
-        if !spawn_placement_for(entity_type).is_spawn_position_ok(self, pos, entity_type) {
-            return;
-        }
+                // Vanilla refuses any position closer than 24 blocks to a player.
+                if let Some(distance_sqr) = self.nearest_player_distance_sqr(center)
+                    && distance_sqr < MIN_SPAWN_DISTANCE * MIN_SPAWN_DISTANCE
+                {
+                    continue;
+                }
 
-        let mut pre_spawn = PreCreatureSpawnEvent::new(
-            self.key.to_string(),
-            center.x,
-            center.y,
-            center.z,
-            entity_type.key.to_string(),
-            "Natural".to_owned(),
-        );
-        self.fire_event(&mut pre_spawn);
-        if pre_spawn.is_cancelled() {
-            return;
-        }
-        let Some(entity) =
-            ENTITIES.create(entity_type, next_entity_id(), center, Arc::downgrade(self))
-        else {
-            return;
-        };
+                if entry.is_none() {
+                    let Some(drawn) = self.pick_spawner_entry(candidate, category) else {
+                        break;
+                    };
+                    let (_, min_count, max_count) = drawn;
+                    remaining = roll_pack_size(min_count, max_count);
+                    entry = Some(drawn);
+                }
+                let Some((entity_type, _, _)) = entry else {
+                    break;
+                };
 
-        // Vanilla asks the entity type's registered predicate before creating
-        // anything. Foton has no path from a type to its behavior, so the mob is
-        // created and asked; one that answers no is dropped here, unspawned.
-        let Some(mob) = entity.as_mob() else {
-            return;
-        };
-        if !mob.check_spawn_rules(self, EntitySpawnReason::Natural, pos) {
-            return;
-        }
+                if !spawn_placement_for(entity_type).is_spawn_position_ok(
+                    self,
+                    candidate,
+                    entity_type,
+                ) {
+                    continue;
+                }
 
-        // Vanilla parity: `NaturalSpawner.spawnCategoryForPosition` finalizes the
-        // mob before it joins the world, which is what gives it its biome variant
-        // and its spawn-time attributes. Foton spawns one mob at a time rather
-        // than a pack, so there is no group data to thread from a previous mob.
-        let _ = mob.finalize_spawn(self, EntitySpawnReason::Natural, None);
+                let mut pre_spawn = PreCreatureSpawnEvent::new(
+                    self.key.to_string(),
+                    center.x,
+                    center.y,
+                    center.z,
+                    entity_type.key.to_string(),
+                    "Natural".to_owned(),
+                );
+                self.fire_event(&mut pre_spawn);
+                if pre_spawn.is_cancelled() {
+                    continue;
+                }
 
-        let mut spawn_event = CreatureSpawnEvent::new(
-            entity.uuid(),
-            self.key.to_string(),
-            entity.position().x,
-            entity.position().y,
-            entity.position().z,
-            "Natural".to_owned(),
-        );
-        self.begin_pending_spawn(Arc::clone(&entity));
-        self.fire_event(&mut spawn_event);
-        self.end_pending_spawn(&entity.uuid());
-        if spawn_event.is_cancelled() {
-            return;
-        }
-        if let Err(error) = self.try_add_entity(Arc::clone(&entity)) {
-            log::debug!("natural spawn rejected: {error}");
+                let Some(entity) =
+                    ENTITIES.create(entity_type, next_entity_id(), center, Arc::downgrade(self))
+                else {
+                    break;
+                };
+
+                // Vanilla asks the entity type's registered predicate before creating
+                // anything. Foton has no path from a type to its behavior, so the mob is
+                // created and asked; one that answers no is dropped here, unspawned.
+                let Some(mob) = entity.as_mob() else {
+                    break;
+                };
+                if !mob.check_spawn_rules(self, EntitySpawnReason::Natural, candidate) {
+                    continue;
+                }
+
+                group_data = mob.finalize_spawn(self, EntitySpawnReason::Natural, group_data);
+
+                let mut spawn_event = CreatureSpawnEvent::new(
+                    entity.uuid(),
+                    self.key.to_string(),
+                    entity.position().x,
+                    entity.position().y,
+                    entity.position().z,
+                    "Natural".to_owned(),
+                );
+                self.begin_pending_spawn(Arc::clone(&entity));
+                self.fire_event(&mut spawn_event);
+                self.end_pending_spawn(&entity.uuid());
+                if spawn_event.is_cancelled() {
+                    continue;
+                }
+                if let Err(error) = self.try_add_entity(Arc::clone(&entity)) {
+                    log::debug!("natural spawn rejected: {error}");
+                    continue;
+                }
+
+                cluster_size += 1;
+                group_size += 1;
+                *budget -= 1;
+                if *budget == 0 || cluster_size >= mob.max_spawn_cluster_size() {
+                    return;
+                }
+                if mob.is_max_group_size_reached(group_size) {
+                    break;
+                }
+            }
         }
     }
 
     /// Picks a mob of `category` from the biome's weighted spawn list.
     ///
     /// Vanilla parity: `NaturalSpawner.getRandomSpawnMobAt`.
-    fn pick_mob_for(
+    /// Chooses one biome spawn entry for `pos`, weighted as vanilla weights it.
+    ///
+    /// Vanilla parity: `NaturalSpawner.getRandomSpawnMobAt`. The pack size
+    /// travels with the entry: vanilla reads `minCount`/`maxCount` off the very
+    /// entry it just drew, and spawning one mob where the biome asked for four
+    /// is what made the End look empty.
+    fn pick_spawner_entry(
         self: &Arc<Self>,
         pos: BlockPos,
         category: MobCategory,
-    ) -> Option<EntityTypeRef> {
+    ) -> Option<(EntityTypeRef, i32, i32)> {
         let biome = self.biome_at(pos)?;
         let candidates: &Vec<SpawnerData> = biome.spawners.get(category.name())?;
 
@@ -281,7 +374,8 @@ impl World {
             if roll < 0 {
                 // Only entity types Foton actually implements can spawn; the rest
                 // are skipped until their entity exists.
-                return REGISTRY.entity_types.by_key(&entry.entity_type);
+                let entity_type = REGISTRY.entity_types.by_key(&entry.entity_type)?;
+                return Some((entity_type, entry.min_count, entry.max_count));
             }
         }
         None
@@ -329,6 +423,49 @@ mod tests {
         for category in SPAWNABLE_CATEGORIES {
             let gated = !category.is_friendly();
             assert_eq!(gated, category == MobCategory::Monster);
+        }
+    }
+
+    #[test]
+    fn pack_size_honors_the_biome_entry() {
+        // The End asks for `minCount: 4, maxCount: 4` endermen. A spawner that
+        // ignores the entry and places one mob per success -- which is what
+        // Foton did -- puts a quarter of vanilla's endermen in the world, and
+        // the enderman is the whole monster table there.
+        for _ in 0..64 {
+            assert_eq!(roll_pack_size(4, 4), 4);
+        }
+
+        // A range still has to stay inside itself, both ends included.
+        let mut seen_low = false;
+        let mut seen_high = false;
+        for _ in 0..512 {
+            let rolled = roll_pack_size(1, 4);
+            assert!(
+                (1..=4).contains(&rolled),
+                "pack size {rolled} escaped the entry's range"
+            );
+            seen_low |= rolled == 1;
+            seen_high |= rolled == 4;
+        }
+        assert!(seen_low && seen_high, "the range's ends are unreachable");
+    }
+
+    #[test]
+    fn budgets_match_vanillas_density() {
+        // Vanilla allows `maxInstancesPerChunk` mobs per 289 chunks. Foton
+        // counts mobs in a fixed box instead of walking chunks, so the budget
+        // has to carry that same density across -- the flat twenty-four
+        // monsters this replaced was half of it, and half a ceiling is what a
+        // player reads as an empty world.
+        for category in SPAWNABLE_CATEGORIES {
+            let vanilla = f64::from(category.max_instances_per_chunk())
+                / f64::from(SPAWN_CAP_REFERENCE_CHUNKS);
+            let foton = default_category_cap(category) as f64 / f64::from(SAMPLED_CHUNK_COUNT);
+            assert!(
+                (foton - vanilla).abs() < 0.01,
+                "{category:?} holds {foton:.3} mobs per chunk against vanilla's {vanilla:.3}"
+            );
         }
     }
 

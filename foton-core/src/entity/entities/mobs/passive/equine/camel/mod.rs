@@ -338,6 +338,11 @@ impl AbstractHorse for CamelEntity {
 }
 
 impl Mob for CamelEntity {
+    /// Vanilla parity: `AbstractHorse.getMaxSpawnClusterSize`.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        6
+    }
+
     /// Vanilla parity: `Mob.serverAiStep` ticks the goal selector for every
     /// mob it runs, brain-driven or not. `Mob::tick_goal_selectors` has an
     /// empty default, so leaving it out is how a registered goal set never

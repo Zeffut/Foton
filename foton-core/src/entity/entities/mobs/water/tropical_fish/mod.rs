@@ -6,6 +6,7 @@
 //! ten take one of twenty-two named combinations; the tenth is rolled freely
 //! out of the full two thousand seven hundred and change.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use foton_macros::entity_behavior;
@@ -346,6 +347,12 @@ pub struct TropicalFishEntity {
     living_base: LivingEntityBase,
     mob_base: MobBase,
     entity_data: SyncMutex<TropicalFishEntityData>,
+    /// Whether this fish rolled into a shoal rather than a lone variant.
+    ///
+    /// Vanilla parity: `TropicalFish.isSchool`, which starts true, is cleared
+    /// by the one-in-ten lone roll in `finalizeSpawn`, and is read only by
+    /// `isMaxGroupSizeReached`. Vanilla never saves it.
+    is_school: AtomicBool,
 }
 
 // SAFETY: This key is owned by Foton and uniquely identifies `TropicalFishEntity`.
@@ -408,6 +415,7 @@ impl TropicalFishEntity {
             living_base,
             mob_base,
             entity_data: SyncMutex::new(entity_data),
+            is_school: AtomicBool::new(true),
         }
     }
 
@@ -600,6 +608,18 @@ impl LivingEntity for TropicalFishEntity {
 }
 
 impl Mob for TropicalFishEntity {
+    /// Vanilla parity: `AbstractFish.getMaxSpawnClusterSize`, which the
+    /// schooling fish reach through `getMaxSchoolSize`.
+    fn max_spawn_cluster_size(&self) -> i32 {
+        8
+    }
+
+    /// Vanilla parity: `TropicalFish.isMaxGroupSizeReached`. A fish that rolled
+    /// the lone variant ends the pack at one.
+    fn is_max_group_size_reached(&self, _group_size: i32) -> bool {
+        !self.is_school.load(Ordering::Relaxed)
+    }
+
     fn mob_base(&self) -> &MobBase {
         &self.mob_base
     }
@@ -643,9 +663,7 @@ impl Mob for TropicalFishEntity {
                 )
             }
             _ => {
-                // Vanilla also clears `isSchool` here, which only feeds
-                // `isMaxGroupSizeReached`; Foton has no `AbstractSchoolingFish`,
-                // so a lone fish is simply not carried in the group data.
+                self.is_school.store(false, Ordering::Relaxed);
                 let variant = TropicalFishVariant::new(
                     TropicalFishPattern::VALUES
                         [rand::random_range(0..TropicalFishPattern::VALUES.len())],
