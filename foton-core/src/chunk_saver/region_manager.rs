@@ -194,11 +194,16 @@ impl RegionManager {
     }
 
     /// Writes the header to disk.
+    ///
+    /// This is the commit point of a chunk save: until the header names the new
+    /// sectors, the old copy is what a reload finds. It is fsynced for the same
+    /// reason a database fsyncs its commit record.
     async fn write_header(file: &mut File, header: &RegionHeader) -> io::Result<()> {
         file.seek(io::SeekFrom::Start(FILE_HEADER_SIZE as u64))
             .await?;
         file.write_all(&header.to_bytes()).await?;
         file.flush().await?;
+        file.sync_all().await?;
         Ok(())
     }
 
@@ -322,6 +327,11 @@ impl RegionManager {
         }
 
         file.flush().await?;
+        // `flush` only pushes the userspace buffer into the kernel. The header
+        // that will point at these sectors is fsynced separately, and the two
+        // orderings only mean anything if the data is durable first -- so this
+        // one is a real fsync.
+        file.sync_all().await?;
         Ok(())
     }
 
@@ -369,18 +379,25 @@ impl RegionManager {
             regions.get_mut(&region_pos).expect("just inserted")
         };
 
-        // Find space for the chunk
+        // Find space for the chunk.
+        //
+        // Never reuse the sectors the chunk already occupies, even when the new
+        // copy would fit. Overwriting in place destroys the only valid copy the
+        // moment the write starts: a crash, a full disk or an OOM kill halfway
+        // through leaves neither the old chunk nor a complete new one, the
+        // decode fails on the next load, and `clear_corrupt_chunk_if_unchanged`
+        // then wipes the slot so the world silently regenerates the terrain --
+        // taking whatever the player built there with it.
+        //
+        // Writing to free sectors instead makes the header update the commit
+        // point: until it lands, the old copy is intact and a reload finds it.
+        // Nothing has to reclaim the old sectors either, because
+        // `find_free_sectors` derives occupancy from the header entries, so they
+        // become free as soon as the entry stops pointing at them.
         let sectors_needed = compressed.len().div_ceil(SECTOR_SIZE) as u32;
-        let old_entry = handle.header.entries[index];
-
-        // Try to reuse existing space if it fits
-        let sector_offset = if old_entry.exists() && old_entry.sector_count() >= sectors_needed {
-            old_entry.sector_offset
-        } else {
-            handle
-                .header
-                .find_free_sectors(sectors_needed, handle.file_sectors)
-        };
+        let sector_offset = handle
+            .header
+            .find_free_sectors(sectors_needed, handle.file_sectors);
 
         // Write chunk data
         Self::write_chunk_data(
