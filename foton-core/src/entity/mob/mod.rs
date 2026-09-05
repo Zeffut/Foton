@@ -1605,6 +1605,24 @@ pub trait Mob: LivingEntity + MobSource {
                 return;
             }
 
+            // Vanilla parity: `Leashable.tickLeash` wraps everything below in
+            // `leashHolder.level() == entity.level()`. Without it a mob left
+            // behind at a portal keeps doing leash physics against a holder in
+            // another dimension: it measures a 3D distance between coordinates
+            // from two different worlds, plays LEAD_BREAK at the holder's
+            // position but in its own world, and -- worst -- reaches into the
+            // holder's velocity from this world's tick thread while the other
+            // world is ticking it on its own.
+            //
+            // Only a demonstrated mismatch stops the tick. Vanilla entities
+            // always have a level; Foton's is a `Weak` that may be gone, and a
+            // detached entity is not evidence of a different dimension.
+            if let (Some(world), Some(holder_world)) = (self.level(), holder.level())
+                && !Arc::ptr_eq(&world, &holder_world)
+            {
+                return;
+            }
+
             let distance_to = self.leash_distance_to(holder.as_ref());
             self.when_leashed_to(holder.as_ref());
             let angular_momentum_before_distance_action = self.leash_angular_momentum();
