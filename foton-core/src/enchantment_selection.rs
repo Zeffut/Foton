@@ -189,7 +189,15 @@ pub fn select_enchantment(
 #[must_use]
 pub fn apply_enchantments(item: &ItemStack, rolled: &[EnchantmentInstance]) -> ItemStack {
     let mut result = if item.is(&vanilla_items::BOOK) {
-        ItemStack::new(&vanilla_items::ENCHANTED_BOOK)
+        // Vanilla parity: `itemStack.transmuteCopy(Items.ENCHANTED_BOOK)`, which
+        // carries the count and the component patch across. Building a bare
+        // stack instead returned a single blank book, so a named book lost its
+        // name and anything past the first book of a stack ceased to exist.
+        ItemStack::with_count_and_patch(
+            &vanilla_items::ENCHANTED_BOOK,
+            item.count(),
+            item.components_patch().clone(),
+        )
     } else {
         item.clone()
     };

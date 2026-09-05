@@ -250,7 +250,6 @@ impl HopperBlockEntity {
             return false;
         }
 
-        let game_time = world.game_time();
         for slot in 0..HOPPER_SLOTS {
             if guard
                 .get(own_id)
@@ -265,14 +264,7 @@ impl HopperBlockEntity {
             else {
                 continue;
             };
-            let leftover = add_item(
-                &mut guard,
-                Some(own_id),
-                &targets,
-                moved,
-                Some(direction),
-                game_time,
-            );
+            let leftover = add_item(&mut guard, Some(own_id), &targets, moved, Some(direction));
 
             if leftover.is_empty() {
                 mark_changed(&mut guard, &targets);
@@ -292,7 +284,7 @@ impl HopperBlockEntity {
         let above = pos.above();
         let sources = attached_containers_at(world, above);
         if !sources.is_empty() {
-            return self.take_from_containers(world, &sources);
+            return take_from_containers_into(&sources, &self.container_ref);
         }
 
         if is_blocked_above(world, above) {
@@ -306,11 +298,6 @@ impl HopperBlockEntity {
         }
         false
     }
-
-    /// Pulls one item down out of the container above.
-    fn take_from_containers(&self, world: &Arc<World>, sources: &[ContainerRef]) -> bool {
-        take_from_containers_into(world, sources, &self.container_ref)
-    }
 }
 
 /// Pulls one item down out of any of `sources` into `destination`.
@@ -319,7 +306,6 @@ impl HopperBlockEntity {
 /// slot the downward face exposes. Free rather than a method because the
 /// hopper minecart is a hopper too and owns no block entity.
 pub(crate) fn take_from_containers_into(
-    world: &Arc<World>,
     sources: &[ContainerRef],
     destination: &ContainerRef,
 ) -> bool {
@@ -330,7 +316,6 @@ pub(crate) fn take_from_containers_into(
 
         let own_id = destination.container_id();
         let own: AttachedContainers = smallvec![destination.clone()];
-        let game_time = world.game_time();
 
         for source in sources {
             let source_id = source.container_id();
@@ -352,7 +337,7 @@ pub(crate) fn take_from_containers_into(
                 else {
                     continue;
                 };
-                let leftover = add_item(&mut guard, Some(source_id), &own, moved, None, game_time);
+                let leftover = add_item(&mut guard, Some(source_id), &own, moved, None);
 
                 if leftover.is_empty() {
                     guard.set_changed(source_id);
@@ -381,7 +366,7 @@ pub(crate) fn swallow_item_entity(entity: &SharedEntity, destination: &Container
 
     let own: AttachedContainers = smallvec![destination.clone()];
     let mut guard = ContainerLockGuard::lock_all(&own);
-    let leftover = add_item(&mut guard, None, &own, stack, None, 0);
+    let leftover = add_item(&mut guard, None, &own, stack, None);
     drop(guard);
 
     if leftover.is_empty() {
@@ -482,7 +467,6 @@ fn add_item(
     targets: &[ContainerRef],
     mut stack: ItemStack,
     direction: Option<Direction>,
-    game_time: i64,
 ) -> ItemStack {
     for target in targets {
         let target_id = target.container_id();
@@ -497,7 +481,7 @@ fn add_item(
             if stack.is_empty() {
                 return stack;
             }
-            stack = try_move_in_item(guard, from, target_id, stack, slot, direction, game_time);
+            stack = try_move_in_item(guard, from, target_id, stack, slot, direction);
         }
     }
 
@@ -514,7 +498,6 @@ fn try_move_in_item(
     mut stack: ItemStack,
     slot: usize,
     direction: Option<Direction>,
-    game_time: i64,
 ) -> ItemStack {
     let Some(target) = guard.get(target_id) else {
         return stack;
@@ -556,7 +539,7 @@ fn try_move_in_item(
     };
 
     if moved && was_empty {
-        set_receiving_hopper_cooldown(guard, target_id, source_ticked_game_time, game_time);
+        set_receiving_hopper_cooldown(guard, target_id, source_ticked_game_time);
     }
 
     stack
@@ -571,7 +554,6 @@ fn set_receiving_hopper_cooldown(
     guard: &mut ContainerLockGuard,
     target_id: ContainerId,
     source_ticked_game_time: Option<i64>,
-    game_time: i64,
 ) {
     let Some(hopper) = guard.get_typed_mut::<HopperContainer>(target_id) else {
         return;
@@ -579,8 +561,17 @@ fn set_receiving_hopper_cooldown(
     if hopper.is_on_custom_cooldown() {
         return;
     }
-    let skipped_ticks =
-        i32::from(source_ticked_game_time.is_some_and(|source_time| game_time >= source_time));
+    // Vanilla parity: `hopperBlockEntity.tickedGameTime >= fromHopper.tickedGameTime`.
+    // The comparison is against the *receiver's* own last tick, not the world
+    // clock. Using the clock made it always true -- the source writes
+    // `ticked_game_time = world.game_time()` at the top of its own tick -- so
+    // every hopper fed by a hopper restarted at seven instead of eight. That
+    // asymmetry, which only skips a tick when the receiver has already run this
+    // game tick, is what sets the throughput of hopper chains and the period of
+    // hopper clocks.
+    let skipped_ticks = i32::from(
+        source_ticked_game_time.is_some_and(|source_time| hopper.ticked_game_time >= source_time),
+    );
     hopper.set_cooldown(MOVE_ITEM_SPEED - skipped_ticks);
 }
 
@@ -622,15 +613,15 @@ pub fn insert_into_containers_at(
     }
 
     let mut guard = ContainerLockGuard::lock_all(&targets);
-    let leftover = add_item(
-        &mut guard,
-        None,
-        &targets,
-        stack,
-        Some(face),
-        world.game_time(),
-    );
-    if leftover.is_empty() {
+    let offered = stack.count();
+    let leftover = add_item(&mut guard, None, &targets, stack, Some(face));
+    // Vanilla parity: `tryMoveInItem` calls `container.setChanged()` on every
+    // successful move, not only a complete one. `set_changed` both marks the
+    // chunk unsaved and refreshes the comparator reading the container, so a
+    // partial insert -- which is what a crafter pushing a full result stack into
+    // an almost-full chest produces -- left the comparator stale and the items
+    // out of the next save.
+    if leftover.count() < offered {
         mark_changed(&mut guard, &targets);
     }
     Some(leftover)
@@ -655,7 +646,7 @@ pub(crate) fn suck_into_at(
     );
     let sources = attached_containers_at(world, above);
     if !sources.is_empty() {
-        return take_from_containers_into(world, &sources, destination);
+        return take_from_containers_into(&sources, destination);
     }
 
     for entity in items_around(world, level_pos) {
@@ -877,7 +868,6 @@ mod tests {
             &targets,
             ItemStack::new(&vanilla_items::DIRT),
             None,
-            0,
         );
 
         assert!(leftover.is_empty());
@@ -905,7 +895,6 @@ mod tests {
             &targets,
             ItemStack::new(&vanilla_items::STONE),
             None,
-            0,
         );
 
         assert!(leftover.is_empty());
@@ -932,7 +921,6 @@ mod tests {
             &targets,
             ItemStack::with_count(&vanilla_items::STONE, 5),
             None,
-            0,
         );
 
         assert_eq!(leftover.count(), 5);
@@ -959,7 +947,6 @@ mod tests {
             &targets,
             ItemStack::new(&vanilla_items::DIRT),
             None,
-            0,
         );
 
         assert!(leftover.is_empty());
@@ -1082,37 +1069,51 @@ mod tests {
         assert!(!container.inventory_full());
     }
 
-    /// Vanilla parity: the cooldown shortcut of `HopperBlockEntity.tryMoveInItem`,
-    /// which is what keeps a vertical chain of hoppers moving at full speed
-    /// instead of stalling every other transfer.
-    #[test]
-    fn a_receiving_hopper_loses_a_tick_when_its_feeder_already_ticked() {
-        init_vanilla_registry();
+    /// Builds a locked receiver whose own last tick is `receiver_ticked`.
+    fn locked_receiver(receiver_ticked: i64) -> (ContainerRef, AttachedContainers) {
         let receiver: ContainerRef = Arc::new(SyncMutex::new(HopperContainer {
             items: vec![ItemStack::empty(); HOPPER_SLOTS],
             cooldown_time: 0,
-            ticked_game_time: 0,
+            ticked_game_time: receiver_ticked,
         }))
         .into();
         let refs: AttachedContainers = smallvec![receiver.clone()];
+        (receiver, refs)
+    }
+
+    fn cooldown_after(receiver_ticked: i64, source_ticked: Option<i64>) -> i32 {
+        let (receiver, refs) = locked_receiver(receiver_ticked);
         let mut guard = ContainerLockGuard::lock_all(&refs);
+        set_receiving_hopper_cooldown(&mut guard, receiver.container_id(), source_ticked);
+        guard
+            .get_typed::<HopperContainer>(receiver.container_id())
+            .expect("locked")
+            .cooldown_time
+    }
 
-        set_receiving_hopper_cooldown(&mut guard, receiver.container_id(), Some(40), 40);
-        assert_eq!(
-            guard
-                .get_typed::<HopperContainer>(receiver.container_id())
-                .expect("locked")
-                .cooldown_time,
-            MOVE_ITEM_SPEED - 1
-        );
+    /// Vanilla parity: the cooldown shortcut of `HopperBlockEntity.tryMoveInItem`.
+    ///
+    /// The comparison is `hopperBlockEntity.tickedGameTime >=
+    /// fromHopper.tickedGameTime` -- the *receiver's* last tick against the
+    /// source's, not the world clock against the source's. Reading the clock
+    /// made it always true, because the source writes its `ticked_game_time`
+    /// from that same clock at the top of its own tick, so every hopper fed by
+    /// a hopper restarted at seven. This asymmetry sets the throughput of hopper
+    /// chains and the period of hopper clocks, so it is worth pinning down.
+    #[test]
+    fn a_receiving_hopper_only_loses_a_tick_when_it_has_already_ticked() {
+        init_vanilla_registry();
 
-        set_receiving_hopper_cooldown(&mut guard, receiver.container_id(), None, 40);
-        assert_eq!(
-            guard
-                .get_typed::<HopperContainer>(receiver.container_id())
-                .expect("locked")
-                .cooldown_time,
-            MOVE_ITEM_SPEED
-        );
+        // The receiver already ran this game tick: vanilla shortens its wait.
+        assert_eq!(cooldown_after(40, Some(40)), MOVE_ITEM_SPEED - 1);
+        assert_eq!(cooldown_after(41, Some(40)), MOVE_ITEM_SPEED - 1);
+
+        // The receiver has not run yet, so it keeps the full cooldown -- this is
+        // the case the world clock got wrong.
+        assert_eq!(cooldown_after(0, Some(40)), MOVE_ITEM_SPEED);
+        assert_eq!(cooldown_after(39, Some(40)), MOVE_ITEM_SPEED);
+
+        // Fed by something that is not a hopper: no shortcut at all.
+        assert_eq!(cooldown_after(40, None), MOVE_ITEM_SPEED);
     }
 }

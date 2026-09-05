@@ -45,7 +45,17 @@ pub fn enchantment(
     let enchant_slots = SimpleContainer::new(2).into_shared();
     let mut builder = MenuBuilder::new(&vanilla_menu_types::ENCHANTMENT, container_id);
 
-    let input = builder.section_all(&enchant_slots);
+    // Vanilla parity: `EnchantmentMenu`'s second slot overrides `mayPlace` to
+    // `itemStack.is(Items.LAPIS_LAZULI)`. Without it the currency check below --
+    // which only ever counted -- accepted three of anything, and enchanting cost
+    // no lapis at all.
+    let input = builder.section_with(
+        &enchant_slots,
+        2,
+        SectionKind::restricted(|slot, stack| {
+            slot != SLOT_LAPIS || stack.is(&vanilla_items::LAPIS_LAZULI)
+        }),
+    );
     let player = builder.player_inventory(&inventory);
 
     // Vanilla parity: costs, then the seed, then the three enchantment clues,
@@ -267,20 +277,23 @@ impl MenuKind for EnchantmentKind {
             )
         };
 
-        // Vanilla charges one lapis per offer row and the row's level cost,
-        // which is why the third offer costs three lapis and thirty levels.
-        let lapis_cost = i32::try_from(slot).unwrap_or(0) + 1;
+        // Vanilla parity: `int enchantmentCost = buttonId + 1`, which is both the
+        // lapis charged *and* the levels charged -- one, two or three. The row's
+        // `costs[buttonId]` is only ever a gate: the player must have that many
+        // levels to click the row, but it is never what they pay. Charging it
+        // made the bottom offer cost thirty levels instead of three.
+        let enchantment_cost = i32::try_from(slot).unwrap_or(0) + 1;
         let cost = self.cost_values[slot];
         let free = player.has_infinite_materials();
 
-        if !free && (lapis.is_empty() || lapis.count() < lapis_cost) {
+        if !free && (lapis.is_empty() || lapis.count() < enchantment_cost) {
             return false;
         }
         if cost <= 0 || item.is_empty() {
             return false;
         }
         let level = player.experience.lock().level();
-        if !free && (level < lapis_cost || level < cost) {
+        if !free && (level < enchantment_cost || level < cost) {
             return false;
         }
 
@@ -297,13 +310,13 @@ impl MenuKind for EnchantmentKind {
             slots.set_item(SLOT_ITEM, enchanted);
             let mut remaining = lapis;
             if !free {
-                remaining.set_count(remaining.count() - lapis_cost);
+                remaining.set_count(remaining.count() - enchantment_cost);
             }
             slots.set_item(SLOT_LAPIS, remaining);
         }
 
         if !free {
-            player.on_enchantment_performed(cost);
+            player.on_enchantment_performed(enchantment_cost);
         }
 
         self.recompute_offers(behavior, player);
