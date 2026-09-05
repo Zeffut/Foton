@@ -137,13 +137,25 @@ impl World {
         let spawn_monsters = self.get_game_rule(&SPAWN_MONSTERS);
         let spawn_persistent = tick_count.is_multiple_of(PERSISTENT_SPAWN_INTERVAL_TICKS);
 
+        // One snapshot per cycle, not one walk of the player index per candidate.
+        // `nearest_player_distance_sqr` goes through `iter_players`, which locks
+        // the order list, collects it into a fresh `Vec<Uuid>` and then looks each
+        // player up by uuid -- and the pack spawner asks for the nearest player
+        // once per mob it tries, so that walk went from sixteen times a cycle to
+        // several hundred. Vanilla calls `getNearestPlayer` just as often; what it
+        // does not do is rebuild the player list to answer.
+        //
+        // Spectators are excluded here for the same reason
+        // `nearest_player_distance_sqr` excludes them.
         let mut player_positions = Vec::new();
         self.players.iter_players(|_, player| {
-            player_positions.push(player.position());
+            if !player.is_spectator() {
+                player_positions.push(player.position());
+            }
             true
         });
 
-        for origin in player_positions {
+        for &origin in &player_positions {
             for category in SPAWNABLE_CATEGORIES {
                 // Vanilla parity: `NaturalSpawner.getFilteredSpawningCategories`
                 // drops the monsters when `doMobSpawning` is off, and drops the
@@ -182,7 +194,7 @@ impl World {
                         break;
                     }
                     if let Some(pos) = self.pick_spawn_position(origin) {
-                        self.try_spawn_at(pos, category, &mut budget);
+                        self.try_spawn_at(pos, category, &player_positions, &mut budget);
                     }
                 }
             }
@@ -237,7 +249,13 @@ impl World {
     ///
     /// `budget` is the category's remaining headroom and is spent as mobs join,
     /// standing in for the running count vanilla keeps in `SpawnState`.
-    fn try_spawn_at(self: &Arc<Self>, pos: BlockPos, category: MobCategory, budget: &mut usize) {
+    fn try_spawn_at(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        category: MobCategory,
+        player_positions: &[DVec3],
+        budget: &mut usize,
+    ) {
         let mut cluster_size = 0;
 
         for _ in 0..GROUPS_PER_POSITION {
@@ -260,7 +278,10 @@ impl World {
                 let center = DVec3::new(center_x, center_y, center_z);
 
                 // Vanilla refuses any position closer than 24 blocks to a player.
-                let nearest_player_distance_sqr = self.nearest_player_distance_sqr(center);
+                let nearest_player_distance_sqr = player_positions
+                    .iter()
+                    .map(|player| player.distance_squared(center))
+                    .min_by(f64::total_cmp);
                 if nearest_player_distance_sqr.is_some_and(|distance_sqr| {
                     distance_sqr < MIN_SPAWN_DISTANCE * MIN_SPAWN_DISTANCE
                 }) {
