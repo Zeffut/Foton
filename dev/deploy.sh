@@ -55,8 +55,15 @@ command -v musl-gcc >/dev/null || apt-get install -y -qq musl-tools >/dev/null 2
 cargo build --locked --release --target x86_64-unknown-linux-musl \
   --features stand-alone,deadlock_detection || exit 1
 
-BIN=target/x86_64-unknown-linux-musl/release/foton
-[ -s "$BIN" ] || { echo "no binary was produced"; exit 1; }
+# Respect $CARGO_TARGET_DIR the way `cargo build` itself does, exactly as
+# dev/join-test.sh already has to. Hardcoding ./target is not merely wrong for
+# anyone who redirects the build -- it is dangerous here, because a stale
+# ./target left over from an earlier unredirected build satisfies the check
+# below and gets shipped. The fingerprint further down would then faithfully
+# report the fingerprint of the wrong binary.
+TARGET_DIR="${CARGO_TARGET_DIR:-$REPO/target}"
+BIN="$TARGET_DIR/x86_64-unknown-linux-musl/release/foton"
+[ -s "$BIN" ] || { echo "no binary was produced at $BIN"; exit 1; }
 SUM=$(sha256sum "$BIN" | cut -c1-16)
 echo "fingerprint: $SUM   size: $(du -h "$BIN" | cut -f1)"
 

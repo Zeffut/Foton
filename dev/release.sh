@@ -12,7 +12,11 @@ cd "$(dirname "$0")/.." || exit 1
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
-OUT=target/release-artifacts
+# Respect $CARGO_TARGET_DIR the way `cargo build` itself does. Hardcoding
+# ./target ships whatever an earlier unredirected build left there, which for a
+# release means publishing a binary that is not the tag it claims to be.
+TARGET_DIR="${CARGO_TARGET_DIR:-$(pwd)/target}"
+OUT="$TARGET_DIR/release-artifacts"
 say() { printf '\n\033[1m>>> %s\033[0m\n' "$1"; }
 die() { printf '\033[31merror:\033[0m %s\n' "$1" >&2; exit 1; }
 
@@ -64,7 +68,7 @@ case "$(uname -s)" in
   Linux)  HOST_NAME="foton-linux-$HOST_ARCH" ;;
   *) die "unsupported build host: $(uname -s)" ;;
 esac
-cp target/release/foton "$OUT/$HOST_NAME"
+cp "$TARGET_DIR/release/foton" "$OUT/$HOST_NAME"
 
 say "Building the static Linux binary in a container"
 if docker info >/dev/null 2>&1; then
