@@ -176,7 +176,7 @@ impl Player {
             packet_rotation,
             relatives,
         ) {
-            panic!(
+            log::error!(
                 "failed to synchronize player {} spawn position: {error}",
                 self.id()
             );

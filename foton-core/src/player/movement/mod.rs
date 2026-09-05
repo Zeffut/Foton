@@ -327,7 +327,7 @@ impl Player {
 
         if self.move_entity(MoverType::Player, move_delta).is_none() {
             if let Err(error) = self.teleport(start_pos, target_yaw, target_pitch) {
-                panic!(
+                log::error!(
                     "failed to correct rejected player {} movement: {error}",
                     self.id()
                 );
