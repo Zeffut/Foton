@@ -141,6 +141,22 @@ impl Server {
             return;
         }
 
+        // Vanilla parity: the `players.size() >= getMaxPlayers()` arm of
+        // `PlayerList.canPlayerLogin`. `max_players` reached only two places
+        // before this -- the number `/list` prints and the `max` field of the
+        // status ping -- so the server advertised a limit it never applied and
+        // accepted players without end.
+        //
+        // Vanilla also lets an operator through when their entry carries
+        // `bypassesPlayerLimit`. Foton's operator data has no such flag, and
+        // inventing one here would be inventing vanilla data, so the cap holds
+        // for everyone until the flag is extracted.
+        if self.player_count() >= self.config.max_players as usize {
+            self.release_player_admission(uuid, PlayerAdmissionState::Joining);
+            player.disconnect("The server is full");
+            return;
+        }
+
         let state = match state {
             Ok(state) => state,
             Err(error) => {

@@ -510,6 +510,8 @@ impl Server {
     #[must_use]
     pub fn player_sample(&self) -> Vec<(String, String)> {
         const MAX_SAMPLE: usize = 12;
+        /// Vanilla parity: the name half of `MinecraftServer.ANONYMOUS_PLAYER_PROFILE`.
+        const ANONYMOUS_PLAYER_NAME: &str = "Anonymous Player";
 
         let players = self.get_players();
         if players.is_empty() {
@@ -524,13 +526,27 @@ impl Server {
             0
         };
 
+        // Vanilla parity: `player.allowsListing() ? player.nameAndId() :
+        // ANONYMOUS_PLAYER_PROFILE`, the anonymous profile being the nil UUID
+        // and "Anonymous Player". The flag is the client's own "Allow Server
+        // Listings" option, and Foton parsed it, stored it, and then never read
+        // it -- so a player who turned it off still had their name and their
+        // real Mojang UUID handed to any anonymous ping, and repeated pings walk
+        // the random offset until the whole list is enumerated.
         let mut sample: Vec<(String, String)> = players[offset..offset + sample_size]
             .iter()
             .map(|p| {
-                (
-                    p.gameprofile.name.clone(),
-                    p.gameprofile.id.hyphenated().to_string(),
-                )
+                if p.allows_listing() {
+                    (
+                        p.gameprofile.name.clone(),
+                        p.gameprofile.id.hyphenated().to_string(),
+                    )
+                } else {
+                    (
+                        ANONYMOUS_PLAYER_NAME.to_owned(),
+                        Uuid::nil().hyphenated().to_string(),
+                    )
+                }
             })
             .collect();
 

@@ -461,6 +461,15 @@ impl Player {
         self.client_information.lock().main_hand
     }
 
+    /// Whether the player agreed to appear in the server list.
+    ///
+    /// Vanilla parity: `ServerPlayer.allowsListing`, backing the client's
+    /// "Allow Server Listings" option.
+    #[must_use]
+    pub fn allows_listing(&self) -> bool {
+        self.client_information.lock().allows_listing
+    }
+
     /// Damages the item in `hand`, and announces it if the item breaks.
     ///
     /// Vanilla parity: `ItemStack.hurtAndBreak(int, LivingEntity,

@@ -153,7 +153,12 @@ impl NetworkConnection for RecordingConnection {
 
 fn test_runtime_config() -> Arc<RuntimeConfig> {
     Arc::new(RuntimeConfig {
-        max_players: 1,
+        // Vanilla's default, and deliberately not the `1` this used to hold.
+        // That was a harmless placeholder for as long as nothing compared
+        // `max_players` to the number of players online -- which was the bug.
+        // Now that the cap is enforced, a one-player limit silently refuses the
+        // second player of every multi-player test.
+        max_players: 20,
         view_distance: 2,
         simulation_distance: 2,
         max_chained_neighbor_updates: 1_000_000,

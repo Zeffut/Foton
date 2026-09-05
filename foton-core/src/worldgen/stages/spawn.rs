@@ -195,22 +195,53 @@ fn place_pack(
 
             let pos = top_non_colliding_pos(region, world, x, z, entity_type);
             if placement.is_spawn_position_ok(region, pos, entity_type) {
-                let position =
-                    glam::DVec3::new(f64::from(x) + 0.5, f64::from(pos.y()), f64::from(z) + 0.5);
-                if let Some(entity) = ENTITIES.create(
+                // Vanilla parity: `Mth.clamp((double)x, xo + width, xo + 16 - width)`.
+                // The integer coordinate, with no half-block offset, pushed in by
+                // half the mob's hitbox so it is not born straddling the chunk
+                // border. Adding 0.5 instead put every animal a half block off
+                // vanilla's, and let one land across the edge.
+                let width = f64::from(entity_type.dimensions.width);
+                let west_edge = f64::from(min_x);
+                let north_edge = f64::from(min_z);
+                let fx = f64::from(x).clamp(west_edge + width, west_edge + 16.0 - width);
+                let fz = f64::from(z).clamp(north_edge + width, north_edge + 16.0 - width);
+                let position = glam::DVec3::new(fx, f64::from(pos.y()), fz);
+
+                // Vanilla parity: a `create` that yields nothing is a `continue`,
+                // which skips the scatter at the bottom of this loop. Falling
+                // through to it instead spent four `nextInt(5)` draws vanilla
+                // never spends, and every later pack in the chunk landed
+                // somewhere else.
+                let Some(entity) = ENTITIES.create(
                     entity_type,
                     next_entity_id(),
                     position,
                     Arc::downgrade(world),
-                ) {
-                    entity.set_rotation((random.next_f32() * 360.0, 0.0));
-                    if let Some(mob) = entity.as_mob() {
-                        group_data = mob.finalize_spawn(
-                            world,
-                            EntitySpawnReason::ChunkGeneration,
-                            group_data,
-                        );
-                    }
+                ) else {
+                    continue;
+                };
+
+                entity.set_rotation((random.next_f32() * 360.0, 0.0));
+
+                // Vanilla parity: `entity instanceof Mob mob &&
+                // mob.checkSpawnRules(...) && mob.checkSpawnObstruction(...)`.
+                // A mob answering no is dropped unplaced and the attempt is
+                // retried -- and unlike the guards above this one falls through
+                // to the scatter, so the draws stay in step.
+                //
+                // Two gates vanilla runs *before* creating are still missing:
+                // `level.noCollision(type.getSpawnAABB(fx, y, fz))` and the
+                // static `SpawnPlacements.checkSpawnRules(..., CHUNK_GENERATION,
+                // ...)`. Both need collision queries against a `WorldGenRegion`,
+                // which has no `CollisionWorld` implementation yet. Their
+                // `continue` means the draw sequence still parts from vanilla's
+                // on a position those two would have refused.
+                let Some(mob) = entity.as_mob() else {
+                    continue;
+                };
+                if mob.check_spawn_rules(world, EntitySpawnReason::ChunkGeneration, pos) {
+                    group_data =
+                        mob.finalize_spawn(world, EntitySpawnReason::ChunkGeneration, group_data);
                     let _ = region.add_fresh_entity(entity);
                     placed = true;
                 }
