@@ -594,9 +594,15 @@ silverfish when its carrier is hurt, Wind Charged produces no gust burst on
 death, Weaving lays no cobwebs, Oozing drops no slimes. The trial-chamber and
 ominous-vault reward loop is decorative without them.
 
-**`PathNavigation.canMoveDirectly` is missing.** Vanilla short-circuits the node
-walk when the straight line is clear; the base class returns false, but the
-flying, water-bound and amphibious navigations all override it. Bees, parrots,
-phantoms, vexes, fish, dolphins, turtles, guardians and frogs therefore follow
-their path node by node and move more raggedly than vanilla. Land mobs are
-unaffected.
+**`PathNavigation.canMoveDirectly` is wired for two of vanilla's three
+overrides.** Vanilla short-circuits the node walk when the straight line is
+clear: the base class returns false, and the flying, water-bound and amphibious
+navigations override it. Foton now carries the flying and water-bound halves --
+`NavigationTickContext` takes the predicate, `PathNavigation` consults it before
+the distance-and-direction test, and `tick_path_navigation_target` supplies it
+from the mob's `NavigationKind` -- so bees, parrots, phantoms, vexes, fish,
+dolphins and guardians cut corners the way they should. The amphibious override
+has nothing to attach to: `NavigationKind` has `Ground`, `Flying` and
+`WaterBound` and no amphibious kind, so turtles and frogs still walk their path
+node by node. Land mobs are unaffected either way, which is vanilla's own
+behaviour.

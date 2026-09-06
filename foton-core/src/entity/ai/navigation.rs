@@ -26,12 +26,20 @@ pub struct NavigationPathRequest<'a> {
     pub reach_range: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NavigationTickContext {
+#[derive(Clone, Copy)]
+pub struct NavigationTickContext<'a> {
     pub mob_position: DVec3,
     pub mob_bounding_box_width: f64,
     pub mob_speed: f32,
     pub game_time: i64,
+    /// Answers vanilla `PathNavigation.canMoveDirectly` for this mob.
+    ///
+    /// `PathNavigation` itself returns false and only the flying, water-bound
+    /// and amphibious navigations override it, so this is `None` for anything
+    /// that walks. It is a callback rather than a flag because the answer
+    /// depends on the destination, and resolving it needs the world and the
+    /// mob's own navigation kind -- neither of which the navigation state owns.
+    pub can_move_directly: Option<&'a dyn Fn(DVec3, DVec3) -> bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -433,7 +441,7 @@ impl PathNavigation {
         self.done = false;
     }
 
-    pub fn next_move_target(&mut self, context: NavigationTickContext) -> Option<(DVec3, f64)> {
+    pub fn next_move_target(&mut self, context: NavigationTickContext<'_>) -> Option<(DVec3, f64)> {
         if self.done {
             return None;
         }
@@ -453,7 +461,7 @@ impl PathNavigation {
 
     pub fn next_move_target_without_path_update(
         &mut self,
-        context: NavigationTickContext,
+        context: NavigationTickContext<'_>,
         on_ground: bool,
     ) -> Option<(DVec3, f64)> {
         if self.done {
@@ -547,7 +555,10 @@ impl PathNavigation {
         block_center(pos).distance_squared(middle_pos) < distance * distance
     }
 
-    fn next_path_move_target(&mut self, context: NavigationTickContext) -> Option<(DVec3, f64)> {
+    fn next_path_move_target(
+        &mut self,
+        context: NavigationTickContext<'_>,
+    ) -> Option<(DVec3, f64)> {
         {
             let Some(path) = self.path.as_mut() else {
                 self.done = true;
@@ -575,7 +586,7 @@ impl PathNavigation {
             let should_cut_corner = path
                 .next_node()
                 .is_some_and(|node| can_cut_corner(node.path_type))
-                && should_target_next_node_in_direction(path, context.mob_position);
+                && should_target_next_node_in_direction(path, &context);
             if is_close_enough_to_current_node || should_cut_corner {
                 path.advance();
             }
@@ -661,7 +672,8 @@ impl PathNavigation {
     }
 }
 
-fn should_target_next_node_in_direction(path: &Path, mob_position: DVec3) -> bool {
+fn should_target_next_node_in_direction(path: &Path, context: &NavigationTickContext<'_>) -> bool {
+    let mob_position = context.mob_position;
     let next_node_index = path.next_node_index();
     if next_node_index + 1 >= path.node_count() {
         return false;
@@ -673,6 +685,17 @@ fn should_target_next_node_in_direction(path: &Path, mob_position: DVec3) -> boo
     let current_node = block_bottom_center(current_node_pos);
     if mob_position.distance_squared(current_node) >= 4.0 {
         return false;
+    }
+
+    // Vanilla takes the shortcut the moment the straight line to the node is
+    // clear, before it bothers comparing distances and directions. Without it a
+    // bee or a fish walks its path node by node and moves more raggedly than it
+    // should.
+    if let Some(can_move_directly) = context.can_move_directly
+        && let Some(next_entity_pos) = path.next_entity_pos(context.mob_bounding_box_width)
+        && can_move_directly(mob_position, next_entity_pos)
+    {
+        return true;
     }
 
     let Some(next_node_pos) = path.node_pos(next_node_index + 1) else {
@@ -725,7 +748,10 @@ mod tests {
     use foton_utils::{BlockPos, BlockStateId, WorldAabb};
     use glam::DVec3;
 
-    use super::{NavigationPathRequest, NavigationTickContext, PathNavigation};
+    use super::{
+        NavigationPathRequest, NavigationTickContext, PathNavigation,
+        should_target_next_node_in_direction,
+    };
     use crate::behavior::init_behaviors;
     use crate::entity::ai::node::Node;
     use crate::entity::ai::path::{Path, PathType, PathfindingMalus};
@@ -789,12 +815,13 @@ mod tests {
         node
     }
 
-    fn tick_context(mob_position: DVec3) -> NavigationTickContext {
+    fn tick_context(mob_position: DVec3) -> NavigationTickContext<'static> {
         NavigationTickContext {
             mob_position,
             mob_bounding_box_width: 0.9,
             mob_speed: 0.25,
             game_time: 0,
+            can_move_directly: None,
         }
     }
 
@@ -802,12 +829,13 @@ mod tests {
         mob_position: DVec3,
         mob_speed: f32,
         game_time: i64,
-    ) -> NavigationTickContext {
+    ) -> NavigationTickContext<'static> {
         NavigationTickContext {
             mob_position,
             mob_bounding_box_width: 0.9,
             mob_speed,
             game_time,
+            can_move_directly: None,
         }
     }
 
@@ -879,6 +907,50 @@ mod tests {
         navigation.set_can_path_to_targets_below_surface(true);
 
         assert!(navigation.can_path_to_targets_below_surface());
+    }
+
+    #[test]
+    fn a_clear_line_advances_the_path_the_geometry_alone_would_hold() {
+        // Vanilla's `shouldTargetNextNodeInDirection` takes the shortcut as soon
+        // as `canMoveDirectly` says the straight line is clear, before it
+        // compares distances and directions. Only the flying, water-bound and
+        // amphibious navigations override that method, which is why a bee or a
+        // fish should cut a corner a pig has to walk around.
+        let path = Path::new(
+            vec![
+                Node::new(0, 64, 0),
+                Node::new(1, 64, 0),
+                Node::new(2, 64, 0),
+            ],
+            BlockPos::new(2, 64, 0),
+            true,
+        );
+        // Standing short of the node, heading towards it: the direction test
+        // below refuses this, so any `true` here comes from the shortcut.
+        let mob_position = DVec3::new(-0.4, 64.0, 0.5);
+
+        let mut walking = tick_context(mob_position);
+        walking.can_move_directly = None;
+        assert!(
+            !should_target_next_node_in_direction(&path, &walking),
+            "a walker still has to reach the node"
+        );
+
+        let clear = |_: DVec3, _: DVec3| true;
+        let mut flying = tick_context(mob_position);
+        flying.can_move_directly = Some(&clear);
+        assert!(
+            should_target_next_node_in_direction(&path, &flying),
+            "a clear line lets the flier skip ahead"
+        );
+
+        let blocked = |_: DVec3, _: DVec3| false;
+        let mut obstructed = tick_context(mob_position);
+        obstructed.can_move_directly = Some(&blocked);
+        assert!(
+            !should_target_next_node_in_direction(&path, &obstructed),
+            "a blocked line falls back to the geometry"
+        );
     }
 
     #[test]
