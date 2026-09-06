@@ -21,7 +21,8 @@ use crate::enchantment_helper::{self, EnchantmentDamageContext};
 use crate::entity::damage::DamageSource;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, Projectile,
-    ProjectileBase, ProjectileDeflection, RemovalReason, SharedEntity, next_entity_id,
+    ProjectileBase, ProjectileDeflection, ProjectileHit, RemovalReason, SharedEntity,
+    next_entity_id,
 };
 use crate::event::Event as _;
 use crate::event::ProjectileLaunchEvent;
@@ -588,11 +589,38 @@ impl Entity for ArrowEntity {
         self.check_left_owner();
         self.face_velocity();
 
-        if let Some(hit) = self.get_hit_result_on_move_vector() {
-            self.hit_target_or_deflect_self(&hit);
-            if !self.is_alive() {
-                return;
+        // Vanilla parity: the entity half of `AbstractArrow.stepMoveAndHit`.
+        // Vanilla collects *every* body on the segment and hits them in order,
+        // which is the only reason Piercing goes through a line of mobs in one
+        // tick instead of one body per tick. A non-piercing arrow needs no
+        // special case: it discards itself on its first hit, and
+        // `hit_targets_or_deflect_self` stops as soon as it is not alive.
+        //
+        // Where this still differs from vanilla: vanilla's loop drives the
+        // arrow's position itself, stepping to each hit in turn. Foton keeps
+        // its own `move_entity` afterwards, so the block half of the same
+        // method is handled by the mover rather than by this call.
+        let Some(block_hit) = self.clip_move_vector() else {
+            return;
+        };
+        let segment_end = if block_hit.is_miss() {
+            self.position() + self.velocity()
+        } else {
+            block_hit.location
+        };
+        let entity_hits = self.find_hit_entities(segment_end);
+        if entity_hits.is_empty() {
+            if !block_hit.is_miss() {
+                self.hit_target_or_deflect_self(&ProjectileHit::Block {
+                    location: block_hit.location,
+                    hit: block_hit,
+                });
             }
+        } else {
+            self.hit_targets_or_deflect_self(&entity_hits);
+        }
+        if !self.is_alive() {
+            return;
         }
 
         let _ = self.move_entity(MoverType::SelfMovement, self.velocity());
@@ -1152,6 +1180,40 @@ mod tests {
         assert!(
             !arrow.can_hit_entity(pig.as_ref()),
             "a body the shot has already passed through is not a target again"
+        );
+    }
+    #[test]
+    fn a_piercing_arrow_goes_through_a_line_of_bodies_in_one_tick() {
+        // `AbstractArrow.stepMoveAndHit` collects *every* body on the segment
+        // and `hitTargetsOrDeflectSelf` hits them in order. Foton used to take
+        // the nearest hit only, so a Piercing arrow crossed a line of mobs one
+        // body per tick -- which reads in-game as the arrow stalling, and lets
+        // the second mob's i-frames run out before it is ever reached.
+        let world = arrow_world("piercing_arrow_crosses_a_line");
+        let arrow = spawn_arrow(
+            &world,
+            DVec3::new(0.5, 64.0, 0.5),
+            DVec3::new(6.0, 0.0, 0.0),
+        );
+        arrow.set_pierce_level(3);
+
+        let near = spawn_pig(&world, DVec3::new(2.5, 64.0, 0.5));
+        let far = spawn_pig(&world, DVec3::new(4.5, 64.0, 0.5));
+        let near_health = near.get_health();
+        let far_health = far.get_health();
+
+        arrow.tick();
+
+        assert!(near.get_health() < near_health, "the near body must be hit");
+        assert!(
+            far.get_health() < far_health,
+            "the far body must be hit in the same tick, not the next one"
+        );
+
+        let pierced = arrow.state.lock().piercing_ignore_entity_ids.clone();
+        assert!(
+            pierced.contains(&near.id()) && pierced.contains(&far.id()),
+            "both bodies must be recorded so the arrow cannot re-hit them"
         );
     }
 }
