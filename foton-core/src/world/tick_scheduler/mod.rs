@@ -351,12 +351,28 @@ impl ChunkTickContainer {
             .then(|| state.lists.fluid().has_tick(pos, fluid))
     }
 
-    pub(crate) fn snapshot(&self, current_tick: i64) -> Option<ScheduledTickSnapshot> {
-        let packing = {
+    /// Packs both queues for persistence, relative to the tick the world is on.
+    ///
+    /// `current_tick` is a closure, and it is read *under the same lock the
+    /// lists are read under*, on purpose. Reading the clock first and locking
+    /// second shifted every persisted delay by one: the collect half of the
+    /// tick takes this lock to drain its due ticks, and the clock advances
+    /// before it does -- so a save that read the clock, lost the race to a
+    /// tick, and then read the lists was measuring post-collect lists against
+    /// a pre-collect clock. Under the lock, any ordering where the lists have
+    /// already lost their due ticks is one where the clock has already moved
+    /// past them.
+    pub(crate) fn snapshot(
+        &self,
+        current_tick: impl FnOnce() -> i64,
+    ) -> Option<ScheduledTickSnapshot> {
+        let (packing, current_tick) = {
             let state = self.state.lock();
-            (state.lifecycle != ChunkTickContainerLifecycle::Finalized)
-                .then(|| state.lists.packing_snapshot())
-        }?;
+            if state.lifecycle == ChunkTickContainerLifecycle::Finalized {
+                return None;
+            }
+            (state.lists.packing_snapshot(), current_tick())
+        };
         Some(packing.pack(current_tick))
     }
 }

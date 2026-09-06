@@ -223,6 +223,51 @@ impl World {
         batch.is_some_and(|batch| batch.contains(pos, fluid))
     }
 
+    /// The block ticks this tick has drained but not yet run, for `pos`.
+    ///
+    /// Persistence needs these. The collect half removes them from their
+    /// container, so between then and their execution they live only in the
+    /// batch -- and vanilla never has to ask, because `ChunkMap.save` calls
+    /// `SerializableChunkData.copyOf` on the server thread and is therefore
+    /// atomic with respect to the tick. Foton's chunk serialization runs off
+    /// the tick thread, so a save landing mid-execution would otherwise write a
+    /// chunk that lost them.
+    pub(crate) fn pending_block_ticks_in_chunk(&self, pos: ChunkPos) -> Vec<super::BlockTick> {
+        let batch = self
+            .scheduled_block_ticks_this_tick
+            .lock()
+            .as_ref()
+            .map(Arc::clone);
+        batch.map_or_else(Vec::new, |batch| {
+            batch
+                .not_yet_started()
+                .iter()
+                .filter(|tick| ChunkPos::from_block_pos(tick.pos) == pos)
+                .copied()
+                .collect()
+        })
+    }
+
+    /// The fluid ticks this tick has drained but not yet run, for `pos`.
+    ///
+    /// See [`Self::pending_block_ticks_in_chunk`]; the fluid phase runs after
+    /// the block phase and has the same window.
+    pub(crate) fn pending_fluid_ticks_in_chunk(&self, pos: ChunkPos) -> Vec<super::FluidTick> {
+        let batch = self
+            .scheduled_fluid_ticks_this_tick
+            .lock()
+            .as_ref()
+            .map(Arc::clone);
+        batch.map_or_else(Vec::new, |batch| {
+            batch
+                .not_yet_started()
+                .iter()
+                .filter(|tick| ChunkPos::from_block_pos(tick.pos) == pos)
+                .copied()
+                .collect()
+        })
+    }
+
     pub(crate) fn begin_scheduled_block_tick_batch(
         &self,
         ticks: Vec<super::BlockTick>,

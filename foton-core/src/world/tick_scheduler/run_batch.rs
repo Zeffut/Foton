@@ -37,6 +37,18 @@ impl<T: TickKey> ScheduledTickRunBatch<T> {
         self.next_index.store(index + 1, AtomicOrdering::Relaxed);
     }
 
+    /// The ticks in this batch that have not started yet.
+    ///
+    /// `next_index` is the executor's cursor, so everything at or after it is
+    /// still owed. Everything before it has already run and its effects are in
+    /// the world, which is exactly why persistence must include the first group
+    /// and must not include the second.
+    #[must_use]
+    pub(crate) fn not_yet_started(&self) -> &[ScheduledTick<T>] {
+        let next_index = self.next_index.load(AtomicOrdering::Relaxed);
+        self.ticks.get(next_index..).unwrap_or(&[])
+    }
+
     #[must_use]
     pub(crate) fn contains(&self, pos: BlockPos, tick_type: T) -> bool {
         let initial_index = self.next_index.load(AtomicOrdering::Relaxed);

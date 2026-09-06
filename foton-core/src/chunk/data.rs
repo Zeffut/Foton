@@ -1335,7 +1335,7 @@ mod tests {
 
         proto.schedule_block_tick(pos, &vanilla_blocks::DIRT, TickPriority::Normal);
 
-        let Some(snapshot) = proto.scheduled_ticks.snapshot(0) else {
+        let Some(snapshot) = proto.scheduled_ticks.snapshot(|| 0) else {
             panic!("proto chunk scheduled ticks should remain available");
         };
         let Some(tick) = snapshot.block.first() else {
