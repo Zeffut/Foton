@@ -53,8 +53,8 @@ pub use entity::{
     EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
     EntityPortalEvent, EntityPushedByEntityAttackEvent, EntityRegainHealthEvent,
     EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTargetEvent, EntityTransformEvent,
-    ExpBottleEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent, LightningStrikeEvent,
-    PreCreatureSpawnEvent, ProjectileLaunchEvent,
+    ExpBottleEvent, ExplosionPrimeEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent,
+    LightningStrikeEvent, PreCreatureSpawnEvent, ProjectileLaunchEvent,
 };
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{

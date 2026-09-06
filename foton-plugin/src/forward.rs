@@ -17,6 +17,7 @@ use crate::natives::parse_slot;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
+use foton_core::event::ExplosionPrimeEvent;
 use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
     BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
@@ -398,6 +399,14 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<BlockFadeEvent, _>(owner(), move |event| {
         if !block_fade_call(&jvm, event.world(), event.position()) {
             event.set_cancelled(true);
+        }
+    });
+    let jvm = Arc::clone(&vm);
+    events.on::<ExplosionPrimeEvent, _>(owner(), move |event| {
+        match explosion_prime_call(&jvm, event.entity(), event.radius(), event.fire()) {
+            None => {}
+            Some(radius) if radius < 0.0 => event.set_cancelled(true),
+            Some(radius) => event.set_radius(radius),
         }
     });
     let jvm = Arc::clone(&vm);
@@ -2385,6 +2394,25 @@ fn block_fade_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+/// The radius a listener left, negative when one refused, or `None` when the
+/// bridge could not be reached -- which leaves the blast exactly as it was.
+fn explosion_prime_call(vm: &JavaVM, entity: uuid::Uuid, radius: f32, fire: bool) -> Option<f32> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let entity = env.new_string(entity.to_string()).ok()?;
+    env.call_static_method(
+        BRIDGE,
+        "fireExplosionPrime",
+        "(Ljava/lang/String;FZ)F",
+        &[
+            JValue::Object(&entity),
+            JValue::Float(radius),
+            JValue::Bool(u8::from(fire)),
+        ],
+    )
+    .and_then(JValueGen::f)
+    .ok()
 }
 
 fn block_grow_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
