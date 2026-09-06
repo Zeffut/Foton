@@ -791,6 +791,13 @@ impl FeatureDecorationRunner {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn tree_foliage_should_skip_location(
         random: &mut WorldgenRandom,
         foliage_placer: &FoliagePlacer,

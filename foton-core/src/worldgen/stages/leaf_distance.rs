@@ -96,6 +96,13 @@ impl LeafSolveBounds {
 static LEAF_DISTANCE_STATE_INFO: LazyLock<Box<[LeafDistanceStateInfo]>> =
     LazyLock::new(build_leaf_distance_state_info);
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the solver fills its own cache and queue for this chunk before reading either back"
+    )
+)]
 pub(super) fn resolve_generated_leaf_distances(workset: &LightWorkset, holder: &ChunkHolder) {
     let pending_leaf_ticks = pending_leaf_tick_positions(holder);
     if pending_leaf_ticks.is_empty() {
@@ -152,6 +159,13 @@ pub(super) fn resolve_generated_leaf_distances(workset: &LightWorkset, holder: &
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the solver fills its own cache and queue for this chunk before reading either back"
+    )
+)]
 fn pending_leaf_tick_positions(holder: &ChunkHolder) -> Vec<BlockPos> {
     let Some(chunk) = holder.try_chunk(ChunkStatus::InitializeLight) else {
         panic!("generated leaf-distance resolution requires InitializeLight");
@@ -167,6 +181,13 @@ fn pending_leaf_tick_positions(holder: &ChunkHolder) -> Vec<BlockPos> {
         .collect()
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the solver fills its own cache and queue for this chunk before reading either back"
+    )
+)]
 fn plan_leaf_distance_updates(
     center: ChunkPos,
     min_y: i32,
@@ -274,6 +295,13 @@ fn plan_leaf_distance_updates(
     updates
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the solver fills its own cache and queue for this chunk before reading either back"
+    )
+)]
 fn leaf_distance_state_info(state: BlockStateId) -> LeafDistanceStateInfo {
     let Some(&info) = LEAF_DISTANCE_STATE_INFO.get(state.0 as usize) else {
         panic!("invalid block state id {} in leaf-distance solver", state.0);

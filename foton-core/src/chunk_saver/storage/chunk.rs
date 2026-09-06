@@ -263,6 +263,13 @@ impl ChunkStorage {
     }
 
     /// Converts a runtime section to persistent format.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a section leaves worldgen building mode before it is ever persisted"
+        )
+    )]
     pub(super) fn section_to_persistent(
         section: &SectionHolder,
         builder: &mut ChunkBuilder,
@@ -326,6 +333,13 @@ impl ChunkStorage {
     }
 
     /// Converts runtime biome data to persistent format.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a section leaves worldgen building mode before it is ever persisted"
+        )
+    )]
     pub(super) fn biomes_to_persistent(
         biomes: &PalettedContainer<u16, 4>,
         builder: &mut ChunkBuilder,

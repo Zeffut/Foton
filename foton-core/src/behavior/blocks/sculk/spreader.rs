@@ -950,6 +950,13 @@ fn valid_movement_pos(
 }
 
 /// Vanilla `ChargeCursor.getRandomizedNonCornerNeighbourOffsets`.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "a block's property set is fixed by its own definition, and this reads a face that definition gives it; the counted directions come from the same fixed set"
+    )
+)]
 fn randomized_non_corner_neighbor_offsets(random: &mut WorldgenRandom) -> Vec<BlockPos> {
     let mut offsets = Vec::with_capacity(18);
     for z in -1..=1 {
@@ -973,6 +980,13 @@ fn randomized_non_corner_neighbor_offsets(random: &mut WorldgenRandom) -> Vec<Bl
 }
 
 /// Vanilla `Direction.allShuffled`.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "a block's property set is fixed by its own definition, and this reads a face that definition gives it; the counted directions come from the same fixed set"
+    )
+)]
 fn shuffled_directions(random: &mut WorldgenRandom) -> [Direction; 6] {
     let mut directions = Direction::ALL;
     for i in (1..directions.len()).rev() {

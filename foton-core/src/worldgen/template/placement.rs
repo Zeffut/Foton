@@ -702,6 +702,13 @@ impl StructureTemplate {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(super) fn palette(
         &self,
         settings: &StructurePlaceSettings<'_>,

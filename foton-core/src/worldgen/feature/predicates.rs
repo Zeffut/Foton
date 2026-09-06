@@ -14,6 +14,13 @@ impl FeatureDecorationRunner {
             .is_none_or(|predicate| Self::test_block_predicate(level, registry, predicate, origin))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(super) fn biome_allows_feature(
         region: &impl WorldGenLevel,
         registry: &Registry,

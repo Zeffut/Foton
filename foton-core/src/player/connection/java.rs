@@ -262,6 +262,13 @@ impl ScheduledPlayPacket {
     ///
     /// Split out of `handle` because the match there is long enough already;
     /// these all reach the same open menu and belong together.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     fn handle_menu(kind: ScheduledPlayPacketKind, player: &Arc<Player>) {
         match kind {
             ScheduledPlayPacketKind::ContainerButtonClick(packet) => {
@@ -294,6 +301,13 @@ impl ScheduledPlayPacket {
     ///
     /// Split out of `handle` for the same reason as [`Self::handle_menu`]: they
     /// share a permission gate and belong together.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     fn handle_gamemaster_block(kind: ScheduledPlayPacketKind, player: &Arc<Player>) {
         match kind {
             ScheduledPlayPacketKind::SetCommandBlock(packet) => {

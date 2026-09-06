@@ -288,6 +288,13 @@ impl AttributeMap {
     /// that is missing from the generated vanilla registry.
     // TODO: Add AttributeSupplier for lazy instantiation when mob entities are implemented
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the value was constructed, locked or registered by this same call a few lines up"
+        )
+    )]
     pub fn new_for_entity(entity_type: EntityTypeRef) -> Self {
         let attr_count = REGISTRY.attributes.len();
         let mut instances = Vec::with_capacity(attr_count);
@@ -342,6 +349,13 @@ impl AttributeMap {
     /// missing attributes; using this keeps required living attributes from
     /// silently falling back to unrelated defaults.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the value was constructed, locked or registered by this same call a few lines up"
+        )
+    )]
     pub fn required_value(&self, attribute: AttributeRef) -> f64 {
         let Some(value) = self.get_value(attribute) else {
             panic!("required attribute {} is missing", attribute.key);

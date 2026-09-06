@@ -93,6 +93,13 @@ pub(crate) struct WorldGenChunkRef<'a> {
 }
 
 impl WorldGenChunkRef<'_> {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "worldgen only ever raises a chunk's published status, and this reads it after the raise"
+        )
+    )]
     fn published_status(self) -> ChunkStatus {
         let Some(status) = self.holder.published_status() else {
             panic!("worldgen chunk data cannot lose its published status");
@@ -310,6 +317,13 @@ impl<'a> WorldGenRegion<'a> {
     /// Panics if the chunk is outside this step's direct dependencies, if the requested
     /// status is higher than the dependency contract, or if the holder has not reached
     /// the declared status. Those cases indicate a chunk-pyramid or scheduler bug.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the index was produced by this same layout a few lines up, and the slot it names is filled before it is read"
+        )
+    )]
     pub(crate) fn chunk(
         &self,
         chunk_x: i32,
@@ -328,6 +342,13 @@ impl<'a> WorldGenRegion<'a> {
         chunk
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the index was produced by this same layout a few lines up, and the slot it names is filled before it is read"
+        )
+    )]
     fn with_cached_chunk<R>(
         &self,
         chunk_x: i32,
@@ -684,6 +705,13 @@ impl<'a> WorldGenRegion<'a> {
         })
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the index was produced by this same layout a few lines up, and the slot it names is filled before it is read"
+        )
+    )]
     fn cached_proto_height_at(
         &self,
         proto: &Chunk,
@@ -727,6 +755,13 @@ impl<'a> WorldGenRegion<'a> {
         height
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "priming inserts every heightmap type the caller asks for, and this reads back the same list"
+        )
+    )]
     fn proto_heightmap_columns(proto: &Chunk, heightmap_type: HeightmapType) -> Box<[i32; 256]> {
         {
             let heightmaps = proto.heightmaps.read();
@@ -749,6 +784,13 @@ impl<'a> WorldGenRegion<'a> {
         Self::copy_heightmap_columns(heightmap, proto.min_y())
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the index was produced by this same layout a few lines up, and the slot it names is filled before it is read"
+        )
+    )]
     fn invalidate_cached_worldgen_heightmaps(&self, chunk_x: i32, chunk_z: i32) {
         let Some(cache_index) = self.chunk_cache_index(chunk_x, chunk_z) else {
             return;
@@ -768,6 +810,13 @@ impl<'a> WorldGenRegion<'a> {
         columns
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a step's write radius and its dependency list are declared together in GENERATION_PYRAMID, so a position inside the radius always has a declared dependency"
+        )
+    )]
     fn writable_chunk_for_pos(
         &self,
         pos: BlockPos,
@@ -804,6 +853,13 @@ impl<'a> WorldGenRegion<'a> {
         Some((chunk_x, chunk_z, status))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a step's write radius and its dependency list are declared together in GENERATION_PYRAMID, so a position inside the radius always has a declared dependency"
+        )
+    )]
     fn dependency_chunk_for_pos(&self, pos: BlockPos, action: &str) -> (i32, i32, ChunkStatus) {
         let chunk_x = SectionPos::block_to_section_coord(pos.x());
         let chunk_z = SectionPos::block_to_section_coord(pos.z());
@@ -827,6 +883,13 @@ impl<'a> WorldGenRegion<'a> {
         if dx > dz { dx as usize } else { dz as usize }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "section counts come from the world height the region was built with"
+        )
+    )]
     fn biome_quart_y_indices(min_y: i32, section_count: usize, quart_y: i32) -> (usize, usize) {
         let Some(total_quart_y) = section_count.checked_mul(4) else {
             panic!("Worldgen chunk section count {section_count} overflows biome quart range");
@@ -961,6 +1024,13 @@ impl<'region, 'world, 'profile> WorldGenBulkSectionAccess<'region, 'world, 'prof
         })
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "worldgen only ever raises a chunk's published status, and this reads it after the raise"
+        )
+    )]
     fn set_bulk_block_state(
         holder: &ChunkHolder,
         section: &mut ChunkSection,
@@ -1009,6 +1079,13 @@ impl<'region, 'world, 'profile> WorldGenBulkSectionAccess<'region, 'world, 'prof
 
     /// Returns whether a section-local write would be allowed for this position.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the index was produced by this same layout a few lines up, and the slot it names is filled before it is read"
+        )
+    )]
     fn chunk(
         &mut self,
         chunk_x: i32,
@@ -1153,6 +1230,13 @@ impl OreLevelAccess for WorldGenBulkSectionAccess<'_, '_, '_> {
     ///
     /// This is only suitable for ore paths that do not need neighbor reads while deciding
     /// whether the replacement is allowed.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a step's write radius and its dependency list are declared together in GENERATION_PYRAMID, so a position inside the radius always has a declared dependency"
+        )
+    )]
     fn replace_ore_target_block_state(
         &mut self,
         pos: BlockPos,
@@ -1210,6 +1294,13 @@ impl OreLevelAccess for WorldGenBulkSectionAccess<'_, '_, '_> {
     }
 
     /// Replaces already-filtered ore target positions that all belong to one section.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a step's write radius and its dependency list are declared together in GENERATION_PYRAMID, so a position inside the radius always has a declared dependency"
+        )
+    )]
     fn replace_ore_target_block_states_in_section(
         &mut self,
         chunk_x: i32,
@@ -1306,6 +1397,13 @@ impl OreLevelAccess for WorldGenBulkSectionAccess<'_, '_, '_> {
         placed
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a step's write radius and its dependency list are declared together in GENERATION_PYRAMID, so a position inside the radius always has a declared dependency"
+        )
+    )]
     fn set_ore_block_state(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
         let ore_profile = self.ore_profile;
         let started_at = ore_profile.map(|_| Instant::now());

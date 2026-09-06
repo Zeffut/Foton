@@ -82,6 +82,13 @@ where
     }
 
     /// Returns completions for the end of a parsed command input.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     pub(crate) fn completion_suggestions(
         &self,
         parse: &ParseResults<'_, S, R>,
@@ -316,6 +323,13 @@ where
         best
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     fn parse_node(
         &self,
         node_id: NodeId,

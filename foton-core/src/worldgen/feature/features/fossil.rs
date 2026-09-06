@@ -18,6 +18,13 @@ const VANILLA_ROTATIONS: [Rotation; 4] = [
 ];
 
 impl FeatureDecorationRunner {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(in crate::worldgen::feature) fn place_fossil_feature(
         region: &impl WorldGenLevel,
         registry: &Registry,
@@ -122,6 +129,13 @@ impl FeatureDecorationRunner {
         true
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn load_fossil_template(registry: &Registry, key: &Identifier) -> StructureTemplate {
         match StructureTemplate::load_vanilla(registry, key) {
             Ok(template) => template,
@@ -129,6 +143,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn structure_processors<'a>(
         registry: &'a Registry,
         key: &Identifier,

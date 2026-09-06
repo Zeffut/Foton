@@ -44,6 +44,13 @@ impl MossyCarpetBlock {
     }
 
     /// Vanilla `MossyCarpetBlock.getPropertyForFace`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a block's property set is fixed by its own definition, and this reads a face that definition gives it; the counted directions come from the same fixed set"
+        )
+    )]
     pub(crate) const fn wall_property(direction: Direction) -> &'static EnumProperty<WallSide> {
         match direction {
             Direction::North => NORTH_WALL,

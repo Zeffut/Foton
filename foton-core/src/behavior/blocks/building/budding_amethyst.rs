@@ -64,6 +64,13 @@ impl BlockBehavior for BuddingAmethystBlock {
         Some(self.block.default_state())
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a block's property set is fixed by its own definition, and this reads a face that definition gives it; the counted directions come from the same fixed set"
+        )
+    )]
     fn random_tick(&self, _state: BlockStateId, world: &Arc<World>, pos: BlockPos) {
         if rand::random_range(0..5) == 0 {
             let direction = Direction::random();

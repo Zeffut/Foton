@@ -31,6 +31,13 @@ fn command(dispatcher_root: NodeId) -> CommandNodeBuilder<CommandSource, FotonCo
 struct ReturnValue;
 
 impl CustomCommandExecutor<CommandSource> for ReturnValue {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     fn run(
         &self,
         source: Arc<CommandSource>,
@@ -64,6 +71,13 @@ impl CustomCommandExecutor<CommandSource> for ReturnFail {
 struct ReturnRun;
 
 impl CustomModifierExecutor<CommandSource> for ReturnRun {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     fn apply(
         &self,
         original_source: Arc<CommandSource>,

@@ -59,6 +59,13 @@ struct ProfileLookupResponse {
 /// Resolves one online-mode profile through the configured service.
 ///
 /// The caller handles local caches, offline mode, and name validation first.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::unreachable,
+        reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+    )
+)]
 pub async fn lookup_online_profile(
     client: &reqwest::Client,
     profile_server: Option<&str>,

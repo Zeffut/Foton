@@ -281,6 +281,13 @@ impl PaintingEntity {
     }
 
     /// Vanilla parity: `HangingEntity.recalculateBoundingBox`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the value was constructed, locked or registered by this same call a few lines up"
+        )
+    )]
     fn recalculate_position(&self) {
         let block_pos = *self.block_pos.lock();
         let (direction, variant) = {

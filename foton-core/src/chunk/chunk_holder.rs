@@ -90,6 +90,13 @@ pub(crate) struct TickingReadinessSnapshot(u64);
 
 impl TickingReadinessSnapshot {
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     pub(crate) const fn readiness(self) -> TickingReadiness {
         match self.0 & 0b11 {
             0 => TickingReadiness::Unready,
@@ -1093,6 +1100,13 @@ impl ChunkHolder {
         Some(true)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     async fn apply_generated_step(
         holder: Arc<Self>,
         step: &'static ChunkStep,
@@ -1132,6 +1146,13 @@ impl ChunkHolder {
         .await;
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     fn claim_status_work(self: &Arc<Self>, status: ChunkStatus) -> Option<StatusWorkClaim> {
         let status_index = status.get_index();
         let parent_index = status.parent().map_or(usize::MAX, ChunkStatus::get_index);
@@ -1213,6 +1234,13 @@ impl ChunkHolder {
     ///
     /// # Panics
     /// Panics if no chunk has been installed or Full runtime initialization repeats.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     pub(crate) fn upgrade_to_full(&self) {
         if self.published_status() == Some(ChunkStatus::Full) {
             return;
@@ -1335,6 +1363,13 @@ impl ChunkHolder {
     }
 
     /// Registers tick queues before Full status becomes observable to watchers.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     fn register_full_chunk_ticks(&self) {
         let Some(chunk) = self.data.get() else {
             panic!("Full status must have installed chunk data");

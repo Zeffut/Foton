@@ -68,6 +68,13 @@ struct ExecuteIfFunction {
 }
 
 impl CustomModifierExecutor<CommandSource> for ExecuteIfFunction {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     fn apply(
         &self,
         original_source: Arc<CommandSource>,

@@ -181,6 +181,13 @@ impl GlowItemFrameEntity {
         world.update_neighbor_for_output_signal(*self.block_pos.lock(), &vanilla_blocks::AIR);
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the value was constructed, locked or registered by this same call a few lines up"
+        )
+    )]
     fn recalculate_position(&self) {
         let block_pos = *self.block_pos.lock();
         let direction = *self.entity_data.lock().hanging_entity().direction.get();

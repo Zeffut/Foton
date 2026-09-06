@@ -31,6 +31,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(super) fn sample_block_state_provider(
         level: &dyn LevelReader,
         registry: &Registry,
@@ -104,6 +111,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(super) fn set_int_property_by_name(
         registry: &Registry,
         state: BlockStateId,
@@ -171,6 +185,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(super) fn sample_dual_noise_provider(
         registry: &Registry,
         provider: &DualNoiseProvider,
@@ -256,6 +277,13 @@ impl FeatureDecorationRunner {
         (placement_value * state_count as f64) as usize
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(super) fn random_block_state_from_data_list(
         registry: &Registry,
         random: &mut WorldgenRandom,

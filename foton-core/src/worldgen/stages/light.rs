@@ -17,6 +17,13 @@ use foton_utils::SectionPos;
 
 use super::leaf_distance::resolve_generated_leaf_distances;
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the pyramid hands this stage a chunk at the status it declares"
+    )
+)]
 pub(crate) fn initialize(
     _context: Arc<WorldGenContext>,
     _step: &ChunkStep,
@@ -60,6 +67,13 @@ pub(crate) fn load(
     publish_light_updates(&context, LightLayer::Block, block_updates);
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the pyramid hands this stage a chunk at the status it declares, and the light engine only reports a workset the pyramid could not have built"
+    )
+)]
 fn run_light_stage(
     cache: &StaticCache2D<Arc<ChunkHolder>>,
     holder: &ChunkHolder,
@@ -117,6 +131,13 @@ fn run_light_stage(
     (sky_updates, block_result.updated_sections)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the pyramid hands this stage a chunk at the status it declares, and the light engine only reports a workset the pyramid could not have built"
+    )
+)]
 fn run_loaded_light_stage(
     cache: &StaticCache2D<Arc<ChunkHolder>>,
     holder: &ChunkHolder,

@@ -206,6 +206,13 @@ impl FeatureDecorationRunner {
         clippy::too_many_arguments,
         reason = "keeps the vanilla ore candidate loop monomorphized without hiding state"
     )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn collect_ore_candidates<const PROFILE: bool>(
         sections: &mut impl OreLevelAccess,
         registry: &Registry,
@@ -477,6 +484,13 @@ impl FeatureDecorationRunner {
         })
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(in crate::worldgen::feature) fn is_air_block_state(
         registry: &Registry,
         state: BlockStateId,
@@ -595,6 +609,13 @@ impl ResolvedOreTargets {
             .find_map(|target| target.matches_block_id(block_id).then_some(target.state))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn block_id_for_state(registry: &Registry, state: BlockStateId) -> usize {
         let Some(&block_id) = registry.blocks.state_to_block_id.get(state.0 as usize) else {
             panic!("ore feature received invalid block state id {}", state.0);

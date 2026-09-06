@@ -39,6 +39,13 @@ impl FeatureDecorationRunner {
         Self::VANILLA_HORIZONTAL_DIRECTIONS[random.next_i32_bounded(4) as usize]
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the shuffle length is a const generic fixed by the caller, far below i32::MAX"
+        )
+    )]
     pub(super) fn shuffled_directions<const N: usize>(
         random: &mut WorldgenRandom,
         mut directions: [Direction; N],
@@ -136,6 +143,13 @@ impl FeatureDecorationRunner {
     /// Vanilla parity: `ChunkGenerator`'s `generationSettingsGetter`, which the
     /// flat generator points at `FlatLevelGeneratorSettings.adjustGenerationSettings`.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(crate) fn with_features(sources: Vec<BiomeFeatures>) -> Self {
         let mut source_biome_ids = FxHashSet::default();
         let mut unique_sources = Vec::new();
@@ -165,6 +179,13 @@ impl FeatureDecorationRunner {
 
     /// Resolves a biome's own placed-feature keys into registry entries.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(crate) fn registered_features(
         biome: BiomeRef,
         registry: &Registry,
@@ -384,6 +405,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "decoration steps and feature indices are counted from extracted lists far below i32::MAX"
+        )
+    )]
     pub(super) fn set_structure_seed(
         random: &mut WorldgenRandom,
         decoration_seed: i64,
@@ -402,6 +430,13 @@ impl FeatureDecorationRunner {
     #[expect(
         clippy::too_many_arguments,
         reason = "mirrors vanilla's decoration loop state without hiding generation inputs"
+    )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "decoration steps and feature indices are counted from extracted lists far below i32::MAX"
+        )
     )]
     pub(super) fn place_features_for_step(
         region: &WorldGenRegion<'_>,

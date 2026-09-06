@@ -377,6 +377,13 @@ impl Sections {
     /// Writes multiple blocks in one column, holding each section's write guard
     /// across all writes to that section. Most efficient when blocks are grouped
     /// by section (e.g. descending `relative_y` from a top-to-bottom scan).
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub fn write_column_blocks(&self, x: usize, z: usize, blocks: &[(usize, BlockStateId)]) {
         const DIM: usize = BlockPalette::SIZE;
         debug_assert!(x < DIM);
@@ -408,6 +415,13 @@ impl Sections {
     /// tracking) so writes are O(1) stores. Per-write goes through a flat
     /// `&mut [V]` view of the cube — bypasses the 3-arm `set` match and the
     /// unused old-value load. `recalculate_counts` finalizes.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub fn write_block_batch(&self, blocks: &[(usize, usize, usize, BlockStateId)]) {
         const DIM: usize = BlockPalette::SIZE;
         let mut i = 0;
@@ -639,6 +653,13 @@ impl ChunkSection {
         self.recalculate_counts_from_palette(Self::block_state_section_counts);
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     fn recalculate_counts_from_palette(
         &mut self,
         mut counts_for_state: impl FnMut(BlockStateId) -> BlockStateSectionCounts,

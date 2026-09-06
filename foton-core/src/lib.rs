@@ -9,6 +9,7 @@
 // is scoped to `not(test)` on purpose -- a panicking test is how a test reports
 // a failure, while a panicking server is how a world is lost.
 #![cfg_attr(not(test), warn(clippy::expect_used))]
+#![cfg_attr(not(test), warn(clippy::panic, clippy::unreachable, clippy::todo))]
 // Rustdoc infers `Send`/`Sync` for private types too, and the command tree
 // behind `FunctionLibrary` nests deep enough to blow the default limit of 128
 // once the workspace unifies every feature. The compiler itself is fine; only

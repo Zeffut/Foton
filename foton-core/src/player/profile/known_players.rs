@@ -19,6 +19,13 @@ impl KnownPlayer {
     /// Foton persists the expiration instant directly in UTC instead of
     /// vanilla's locale-formatted date, while retaining its one-month lifetime.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     pub fn new(uuid: Uuid, last_known_name: impl Into<String>) -> Self {
         let now = Utc::now();
         let Some(expiration) = now.checked_add_months(Months::new(1)) else {

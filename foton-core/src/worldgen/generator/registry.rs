@@ -505,6 +505,13 @@ fn dimension_type_by_key(key: &Identifier) -> Result<DimensionTypeRef, String> {
         .ok_or_else(|| format!("unknown dimension type {key}"))
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+    )
+)]
 fn validated_dimension_type_by_key(key: &Identifier) -> DimensionTypeRef {
     match dimension_type_by_key(key) {
         Ok(dimension_type) => dimension_type,
@@ -512,6 +519,13 @@ fn validated_dimension_type_by_key(key: &Identifier) -> DimensionTypeRef {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+    )
+)]
 fn fixed_generator_dimension_type(generator: &Identifier) -> DimensionTypeRef {
     if generator == &Identifier::vanilla_static("overworld") {
         &OVERWORLD

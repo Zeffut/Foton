@@ -28,6 +28,13 @@ impl FeatureDecorationRunner {
         false
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "vines attach to the five faces the block has properties for; the downward arm exists only to make the match exhaustive"
+        )
+    )]
     pub(in crate::worldgen::feature) fn vine_state_for_face(direction: Direction) -> BlockStateId {
         let vine = vanilla_blocks::VINE.default_state();
         match direction {

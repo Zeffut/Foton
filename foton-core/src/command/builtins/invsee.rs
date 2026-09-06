@@ -255,6 +255,13 @@ impl MenuKind for InvseeMenuKind {
 }
 
 impl InvseeMenuKind {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     fn snapshot_inventory_before_click(&mut self, guard: &ContainerLockGuard) {
         if !self.modify {
             return;
@@ -265,6 +272,13 @@ impl InvseeMenuKind {
         self.inventory_before_click = Some(array::from_fn(|slot| inventory.get_item(slot).clone()));
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     fn queue_changed_target_inventory(&mut self, guard: &ContainerLockGuard) {
         let Some(previous) = self.inventory_before_click.take() else {
             return;

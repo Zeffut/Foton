@@ -254,6 +254,13 @@ impl<V: Hash + Eq + Copy + Default + Debug, const DIM: usize> PalettedContainer<
     ///
     /// Allocates a `Cube` if currently `Homogeneous`. For `Heterogeneous` it
     /// reuses the existing cube allocation.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the strategy and the variant are chosen together a few lines up, so the other variants cannot be the one in hand"
+        )
+    )]
     pub fn enter_building_mode(&mut self) {
         match self {
             Self::Building(_) => {}
@@ -294,6 +301,13 @@ impl<V: Hash + Eq + Copy + Default + Debug, const DIM: usize> PalettedContainer<
     /// Finalizes a [`Self::Building`] container back to `Homogeneous` or
     /// `Heterogeneous` by scanning the cube once and constructing the palette.
     /// No-op if not in build mode.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the strategy and the variant are chosen together a few lines up, so the other variants cannot be the one in hand"
+        )
+    )]
     pub fn finalize_building(&mut self) {
         if !matches!(self, Self::Building(_)) {
             return;
@@ -344,6 +358,13 @@ impl<V: Hash + Eq + Copy + Default + Debug, const DIM: usize> PalettedContainer<
         clippy::missing_panics_doc,
         clippy::unwrap_used,
         reason = "position() is guaranteed to exist: palette was built from the cube's own values"
+    )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the strategy and the variant are chosen together a few lines up, so the other variants cannot be the one in hand"
+        )
     )]
     pub fn write(&self, writer: &mut impl Write) -> Result<()>
     where
@@ -406,6 +427,13 @@ impl<V: Hash + Eq + Copy + Default + Debug, const DIM: usize> PalettedContainer<
         Ok(())
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the strategy and the variant are chosen together a few lines up, so the other variants cannot be the one in hand"
+        )
+    )]
     fn calculate_strategy(count: usize) -> (u8, PaletteMode) {
         if DIM == 16 {
             // Block states

@@ -129,6 +129,13 @@ static WORLD_SURFACE_OPACITY_MASK_BY_STATE: LazyLock<Box<[u8]>> =
 static HEIGHTMAP_OPACITY_MASK_BY_STATE: LazyLock<Box<[u8]>> =
     LazyLock::new(build_state_opacity_masks);
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "opacity masks are built once from the registry at startup, over the same id space they are indexed by"
+    )
+)]
 fn build_world_surface_opacity_masks() -> Box<[u8]> {
     let mut masks = Vec::with_capacity(REGISTRY.blocks.state_to_block_lookup.len());
     for (state_index, &block) in REGISTRY.blocks.state_to_block_lookup.iter().enumerate() {
@@ -145,6 +152,13 @@ fn build_world_surface_opacity_masks() -> Box<[u8]> {
     masks.into_boxed_slice()
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "opacity masks are built once from the registry at startup, over the same id space they are indexed by"
+    )
+)]
 fn build_state_opacity_masks() -> Box<[u8]> {
     let mut masks = Vec::with_capacity(REGISTRY.blocks.state_to_block_lookup.len());
     for (state_index, &block) in REGISTRY.blocks.state_to_block_lookup.iter().enumerate() {
@@ -174,6 +188,13 @@ fn build_state_opacity_masks() -> Box<[u8]> {
 }
 
 #[inline]
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "opacity masks are built once from the registry at startup, over the same id space they are indexed by"
+    )
+)]
 fn heightmap_opacity_mask(state: BlockStateId, requested_mask: u8) -> u8 {
     let world_surface_mask =
         HeightmapType::WORLD_SURFACE_MASK | HeightmapType::WORLD_SURFACE_WG_MASK;
@@ -495,6 +516,13 @@ impl ChunkHeightmaps {
     /// # Panics
     /// Panics if a worldgen type is requested or the final map is missing.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "priming inserts every heightmap type the caller asks for, and this reads back the same list"
+        )
+    )]
     pub fn get_final(&self, heightmap_type: HeightmapType) -> &Heightmap {
         if matches!(
             heightmap_type,
@@ -513,6 +541,13 @@ impl ChunkHeightmaps {
     /// # Panics
     /// Panics if a worldgen type is requested or the final map is missing.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "priming inserts every heightmap type the caller asks for, and this reads back the same list"
+        )
+    )]
     pub fn get_final_mut(&mut self, heightmap_type: HeightmapType) -> &mut Heightmap {
         if matches!(
             heightmap_type,
@@ -546,6 +581,13 @@ impl ChunkHeightmaps {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "priming inserts every heightmap type the caller asks for, and this reads back the same list"
+        )
+    )]
     fn set_primed_height(
         &mut self,
         heightmap_type: HeightmapType,

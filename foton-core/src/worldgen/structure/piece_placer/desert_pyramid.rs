@@ -128,6 +128,13 @@ impl StructurePiecePlacer {
             .then_with(|| left.x().cmp(&right.x()))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn shuffle_block_positions(positions: &mut [BlockPos], random: &mut impl Random) {
         for i in (1..positions.len()).rev() {
             let Ok(bound) = i32::try_from(i + 1) else {
@@ -721,6 +728,13 @@ impl<L: WorldGenLevel> DesertPyramidPlacer<'_, L> {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+    )
+)]
 const fn direction_2d_data_value(direction: Direction) -> usize {
     match direction {
         Direction::South => 0,

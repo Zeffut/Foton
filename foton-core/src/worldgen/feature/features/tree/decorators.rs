@@ -736,6 +736,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn random_tree_decorator_direction(
         random: &mut WorldgenRandom,
         directions: &[Direction],
@@ -756,6 +763,13 @@ impl FeatureDecorationRunner {
         positions
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn shuffle_tree_positions(random: &mut WorldgenRandom, positions: &mut [BlockPos]) {
         for i in (1..positions.len()).rev() {
             let Ok(bound) = i32::try_from(i + 1) else {

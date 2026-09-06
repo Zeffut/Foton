@@ -135,6 +135,13 @@ impl WorldTickSchedulerState {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a scheduled-tick container is registered before any deadline refers to it, and deregistered only after the last one"
+        )
+    )]
     fn take_due(&mut self, kind: TickKind, current_tick: i64) -> Vec<ActiveTickContainer> {
         let mut due = Vec::new();
         while let Some((trigger_tick, packed)) = self.deadlines(kind).first().copied() {
@@ -505,6 +512,13 @@ impl WorldTickScheduler {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a scheduled-tick container is registered before any deadline refers to it, and deregistered only after the last one"
+        )
+    )]
     fn collect_ticks<T: TickKey>(
         &self,
         kind: TickKind,

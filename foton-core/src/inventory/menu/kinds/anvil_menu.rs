@@ -137,6 +137,13 @@ impl AnvilKind {
         clippy::too_many_lines,
         reason = "mirrors Vanilla's ordered createResult flow in one auditable calculation"
     )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the menu validates its layout for coverage and overlap before any cell is used, and a slot keeps the concrete storage it was built with"
+        )
+    )]
     pub(crate) fn create_result(
         &mut self,
         behavior: &mut MenuBehavior,

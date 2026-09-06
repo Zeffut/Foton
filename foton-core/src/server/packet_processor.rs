@@ -597,6 +597,13 @@ where
         })
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a lane is inserted before it is scheduled and removed only after its last packet, so the bookkeeping never outlives it"
+        )
+    )]
     fn start_next(
         state: &mut PacketQueueState<K, T>,
         before_sequence: Option<u64>,
@@ -720,6 +727,13 @@ where
         selected
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a lane is inserted before it is scheduled and removed only after its last packet, so the bookkeeping never outlives it"
+        )
+    )]
     fn finish_one(&self, key: K, execution: ScheduledPacketExecution, admission_bytes: usize) {
         let mut state = self.state.lock();
         assert!(state.active > 0, "packet work accounting underflow");

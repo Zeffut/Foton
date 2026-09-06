@@ -455,6 +455,13 @@ impl FeatureDecorationRunner {
         directions
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn shuffle_multiface_directions(random: &mut WorldgenRandom, directions: &mut [Direction]) {
         for i in (1..directions.len()).rev() {
             let Ok(bound) = i32::try_from(i + 1) else {

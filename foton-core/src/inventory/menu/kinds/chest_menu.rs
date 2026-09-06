@@ -84,6 +84,13 @@ const CHEST_HALF_SLOTS: usize = 27;
 /// # Panics
 /// Panics if `rows` is 0 or greater than 6.
 #[must_use]
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the menu validates its layout for coverage and overlap before any cell is used, and a slot keeps the concrete storage it was built with"
+    )
+)]
 pub fn menu_type_for_rows(rows: usize) -> MenuTypeRef {
     match rows {
         1 => &vanilla_menu_types::GENERIC_9X1,

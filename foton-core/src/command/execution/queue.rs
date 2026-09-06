@@ -667,6 +667,13 @@ where
 ///
 /// Vanilla parity: `BuildContexts.execute`, shared by the queued entry action
 /// and by the unbound entry a loaded function keeps for each of its lines.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::unreachable,
+        reason = "the context chain is built and consumed by this same call, and a stage that modifies always has a follower"
+    )
+)]
 fn build_contexts<S>(
     context: &mut CommandExecutionContext<S>,
     frame: Frame,
@@ -850,6 +857,13 @@ impl<S> EntryAction<S> for ExecuteAction<S>
 where
     S: ExecutionCommandSource,
 {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the context chain is built and consumed by this same call, and a stage that modifies always has a follower"
+        )
+    )]
     fn execute(self: Box<Self>, context: &mut CommandExecutionContext<S>, frame: Frame) {
         let Self {
             chain,

@@ -2854,6 +2854,13 @@ pub trait LivingEntity: Entity {
     }
 
     /// Runs vanilla's equippable `ItemStack.interactLivingEntity` branch.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the value was constructed, locked or registered by this same call a few lines up"
+        )
+    )]
     fn interact_living_entity_with_equippable(
         &self,
         player: &Player,

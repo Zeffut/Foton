@@ -21,6 +21,13 @@ impl FeatureDecorationRunner {
         BIOME_INFO_NOISE.get_value(x, z)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(super) fn biome_at_block(
         region: &impl WorldGenLevel,
         registry: &Registry,

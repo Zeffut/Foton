@@ -169,6 +169,13 @@ impl FullChunkRef<'_> {
         FullChunkRef { chunk }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     fn runtime(&self) -> &FullChunkRuntime {
         let Some(runtime) = self.chunk.full_runtime() else {
             panic!("Full chunk view was exposed without initialized runtime state");
@@ -267,6 +274,13 @@ impl Chunk {
     /// Panics if this chunk's light-section count does not match its world height.
     ///
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     pub(crate) fn promote_to_full(&self) -> FullChunkPromotion<'_> {
         let proto_chunk = self;
         // Generation-only caches are never retained by a Full chunk. Carvers normally
@@ -805,6 +819,13 @@ impl FullChunkRef<'_> {
 
     /// Schedules through the world index, or through local pre-publication
     /// storage when this chunk has no live world (as in focused unit tests).
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     pub(crate) fn schedule_block_tick(
         &self,
         pos: BlockPos,
@@ -840,6 +861,13 @@ impl FullChunkRef<'_> {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     pub(crate) fn schedule_fluid_tick(
         &self,
         pos: BlockPos,
@@ -876,6 +904,13 @@ impl FullChunkRef<'_> {
     }
 
     /// Takes an owned persistence snapshot without exposing live scheduler data.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a holder only reaches this after publishing the status it names, and the pyramid never lowers one"
+        )
+    )]
     pub(crate) fn scheduled_tick_snapshot(&self) -> ScheduledTickSnapshot {
         let current_tick = self.get_level().map_or(0, |world| world.game_time());
         let result = self
@@ -1770,6 +1805,13 @@ impl FullChunkRef<'_> {
         );
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the loader validates light and section sizes against each other before a chunk gets here, and nothing resizes either afterwards"
+        )
+    )]
     pub(crate) fn refresh_light_emptiness_maps(&self) {
         if let Err(error) = self
             .chunk

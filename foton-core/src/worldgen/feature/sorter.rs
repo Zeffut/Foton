@@ -23,6 +23,13 @@ pub(crate) enum FeatureEntry {
 }
 
 impl FeatureEntry {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     fn identity(&self) -> FeatureIdentity {
         match self {
             Self::Registered(feature) => {
@@ -189,6 +196,13 @@ impl FeatureSorter {
     }
 
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     fn from_sorted_features(sorted_features: &[FeatureVertex], sources: &[BiomeFeatures]) -> Self {
         let Some(max_step) = sorted_features.iter().map(|feature| feature.step).max() else {
             return Self {

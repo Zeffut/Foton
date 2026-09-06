@@ -41,6 +41,13 @@ impl ChunkSkyLightSources {
     ///
     /// Panics when the supplied world height cannot form a valid light-section range.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub fn for_valid_world_height(min_y: i32, height: i32) -> Self {
         match Self::new(min_y, height) {
             Ok(sources) => sources,
