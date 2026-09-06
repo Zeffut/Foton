@@ -334,6 +334,39 @@ impl Scoreboard {
         self.state.read().teams.keys().cloned().collect()
     }
 
+    /// Removes a team and every membership pointing at it.
+    ///
+    /// Vanilla parity: `Scoreboard.removeTeam`, which calls `removeTeam` for
+    /// each member first. Leaving the memberships behind would make
+    /// `@e[team=<gone>]` keep matching, and re-creating the name would silently
+    /// inherit the old roster.
+    pub fn remove_team(&self, team: &ScoreboardTeam) -> bool {
+        let mut state = self.state.write();
+        if state.teams.remove(team.name()).is_none() {
+            return false;
+        }
+        state
+            .holder_teams
+            .retain(|_, assigned| assigned != team.name());
+        drop(state);
+        self.mark_dirty();
+        true
+    }
+
+    /// Removes a holder from whatever team it is on.
+    ///
+    /// Vanilla parity: `Scoreboard.removePlayerFromTeam`. Returns whether the
+    /// holder was on one.
+    pub fn remove_holder_from_team(&self, holder: &ScoreHolder) -> bool {
+        let mut state = self.state.write();
+        if state.holder_teams.remove(holder.name()).is_none() {
+            return false;
+        }
+        drop(state);
+        self.mark_dirty();
+        true
+    }
+
     /// Returns a team's options, or vanilla's defaults if it does not exist.
     #[must_use]
     pub fn team_options(&self, team: &ScoreboardTeam) -> TeamOptions {
@@ -961,6 +994,45 @@ mod tests {
             scoreboard.holder_team_name(&ScoreHolder::new("alice".to_owned())),
             Some("red".to_owned()),
             "membership must survive the load too"
+        );
+    }
+    #[test]
+    fn removing_a_team_takes_its_memberships_with_it() {
+        // `Scoreboard.removeTeam` calls `removeTeam` for each member first.
+        // Leaving them behind would keep `@e[team=<gone>]` matching, and
+        // re-creating the name would silently inherit the old roster --
+        // which is the kind of thing that only shows up on a live server.
+        let scoreboard = Scoreboard::new();
+        let Ok(red) = scoreboard.add_team("red") else {
+            panic!("the red team should be created");
+        };
+        let alice = ScoreHolder::new("alice".to_owned());
+        scoreboard
+            .add_holder_to_team(&alice, &red)
+            .expect("alice should join red");
+
+        assert!(scoreboard.remove_team(&red));
+        assert!(scoreboard.team("red").is_none(), "the team must be gone");
+        assert_eq!(
+            scoreboard.holder_team_name(&alice),
+            None,
+            "the membership must go with the team"
+        );
+
+        let Ok(red_again) = scoreboard.add_team("red") else {
+            panic!("the name should be free again");
+        };
+        assert!(
+            scoreboard.team_entries(&red_again).is_empty(),
+            "a re-created team must not inherit the old roster"
+        );
+        assert!(
+            scoreboard.remove_team(&red_again),
+            "removing an existing team reports that it did something"
+        );
+        assert!(
+            !scoreboard.remove_team(&red_again),
+            "removing it twice reports that the second call changed nothing"
         );
     }
 }

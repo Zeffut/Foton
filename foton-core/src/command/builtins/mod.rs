@@ -28,6 +28,7 @@ mod setblock;
 mod setworldspawn;
 mod stop;
 mod summon;
+pub(crate) mod team;
 mod teleport;
 mod tellraw;
 mod tick;
@@ -91,6 +92,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(setworldspawn::registration())?;
     builder.register(stop::registration())?;
     builder.register(summon::registration())?;
+    builder.register(team::registration())?;
     builder.register(teleport::registration())?;
     builder.register(tellraw::registration())?;
     builder.register(tick::registration())?;
@@ -171,6 +173,7 @@ mod tests {
                 "setworldspawn",
                 "stop",
                 "summon",
+                "team",
                 "teleport",
                 "tp",
                 "tellraw",
