@@ -27,13 +27,14 @@ use super::{
     required_projection_from_persistent, rotation_from_persistent, rotation_to_persistent,
     ruined_portal_placement_from_persistent, ruined_portal_placement_to_persistent,
 };
+use crate::chunk_saver::nesting::MAX_NESTING_DEPTH;
 
 impl ChunkStorage {
     pub(super) fn jigsaw_piece_data_to_persistent(
         data: &JigsawPieceData,
     ) -> PersistentJigsawPieceData {
         PersistentJigsawPieceData {
-            pool_element: Self::pool_element_to_persistent(&data.pool_element),
+            pool_element: Self::pool_element_to_persistent(&data.pool_element, 0),
             position: [data.position.x, data.position.y, data.position.z],
             rotation: rotation_to_persistent(data.rotation),
             liquid_settings: liquid_settings_to_persistent(data.liquid_settings),
@@ -783,7 +784,28 @@ impl ChunkStorage {
         }
     }
 
-    pub(super) fn pool_element_to_persistent(element: &PoolElement) -> PersistentPoolElement {
+    /// Converts a pool element for storage, refusing to nest past what the
+    /// reader accepts.
+    ///
+    /// The ceiling is not decoration on this side. Writing a tree deeper than
+    /// [`MAX_NESTING_DEPTH`] produces a chunk the reader will refuse, and a
+    /// refused chunk is quarantined and regenerated -- so an over-deep pool
+    /// element would cost the column, not just the element. Truncating to
+    /// `Empty` keeps the rest of the chunk loadable.
+    pub(super) fn pool_element_to_persistent(
+        element: &PoolElement,
+        depth: u32,
+    ) -> PersistentPoolElement {
+        // `>=`, not `>`: unlike a passenger, which is dropped outright, the
+        // element this returns is still wrapped in a `Nested` by its parent, so
+        // refusing one level later would spend a wrapper the reader will not.
+        if depth >= MAX_NESTING_DEPTH {
+            tracing::warn!(
+                "Pool element nests deeper than {MAX_NESTING_DEPTH}; storing the rest as empty"
+            );
+            return PersistentPoolElement::Empty;
+        }
+
         match element {
             PoolElement::Single {
                 location,
@@ -817,7 +839,7 @@ impl ChunkStorage {
             } => PersistentPoolElement::List {
                 elements: elements
                     .iter()
-                    .map(|element| Nested(Self::pool_element_to_persistent(element)))
+                    .map(|element| Nested(Self::pool_element_to_persistent(element, depth + 1)))
                     .collect(),
                 projection: projection_to_persistent(Some(*projection)),
             },
