@@ -365,6 +365,7 @@ enum EntityPersistenceMode {
     DimensionTransition,
 }
 
+use super::nesting::Nested;
 use super::ram_only::RamOnlyStorage;
 use super::region_manager::RegionManager;
 use super::{

@@ -383,7 +383,7 @@ fn runtime_entity_passengers_save_nested_and_load_flattened_for_registration() {
     );
     assert_eq!(prepared.persistent.entities[0].passengers.len(), 1);
     assert_eq!(
-        prepared.persistent.entities[0].passengers[0].uuid,
+        prepared.persistent.entities[0].passengers[0].0.uuid,
         *passenger_uuid.as_bytes()
     );
 

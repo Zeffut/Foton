@@ -1,7 +1,7 @@
 use super::{
     BlockPos, ChunkPos, ChunkStorage, DesertPyramidPieceData, FortressPieceData, IVec3,
     JigsawJunction, JigsawPieceData, JungleTemplePieceData, MineshaftPieceKind,
-    MineshaftPiecePayload, OceanMonumentChildPiece, OceanMonumentChildPieceKind,
+    MineshaftPiecePayload, Nested, OceanMonumentChildPiece, OceanMonumentChildPieceKind,
     OceanMonumentPieceData, OceanMonumentRoomData, PackedChunkPos, PersistentBoundingBox,
     PersistentDesertPyramidPieceData, PersistentJigsawJunction, PersistentJigsawPieceData,
     PersistentJungleTemplePieceData, PersistentMineshaftPieceData, PersistentMineshaftPieceKind,
@@ -817,7 +817,7 @@ impl ChunkStorage {
             } => PersistentPoolElement::List {
                 elements: elements
                     .iter()
-                    .map(Self::pool_element_to_persistent)
+                    .map(|element| Nested(Self::pool_element_to_persistent(element)))
                     .collect(),
                 projection: projection_to_persistent(Some(*projection)),
             },
@@ -858,7 +858,7 @@ impl ChunkStorage {
             } => PoolElement::List {
                 elements: elements
                     .iter()
-                    .map(Self::persistent_to_pool_element)
+                    .map(|element| Self::persistent_to_pool_element(&element.0))
                     .collect(),
                 projection: required_projection_from_persistent(*projection),
             },

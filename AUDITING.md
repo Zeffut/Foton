@@ -171,27 +171,62 @@ a fix, take it. If a constant-time backend is ever considered, the two call
 sites are `foton-login/src/handlers/login.rs` (the exposed one: attacker-chosen
 ciphertext, retryable) and `foton-crypto/src/signature.rs`.
 
-## The recursion the chunk reader cannot refuse
+## The recursion the chunk reader could not refuse, and the number that lied
 
 `PersistentPoolElement::List` holds a `Vec<PersistentPoolElement>`, and
 `PersistentEntity` holds a `Vec<PersistentEntity>`. Both are
-`#[derive(SchemaRead)]`, so the reader recurses once per nesting level, and
+`#[derive(SchemaRead)]`, so the reader recursed once per nesting level, and
 `wincode` has no depth limit -- `grep -rn depth` over the crate returns
-nothing. A crafted or corrupt region file nests a few tens of thousands of
-levels in a few hundred compressed bytes and overflows the stack.
+nothing. A crafted or corrupt region file nests tens of thousands of levels in
+a few hundred compressed bytes and overflowed the stack.
 
 That is worse than it sounds. A stack overflow is a SIGSEGV, so
-`clear_corrupt_chunk_if_unchanged` never runs, the slot is never quarantined,
-and the server dies again on the next start as soon as something asks for
-that chunk. `MAX_DECOMPRESSED_CHUNK_BYTES` does not help: it bounds bytes,
-and each level costs about two of them.
+`clear_corrupt_chunk_if_unchanged` never ran, the slot was never quarantined,
+and the server died again on the next start as soon as something asked for
+that chunk. `MAX_DECOMPRESSED_CHUNK_BYTES` did not help: it bounds bytes, and
+each level costs thirteen of them.
 
-It is unfixed on purpose. The natural fix -- a newtype on the recursive edge
-that counts depth -- means implementing `wincode`'s `SchemaRead`, which is an
-`unsafe trait`, and `AGENTS.md` allows `unsafe` only in the keyed
-`DowncastType`. So the real options are an upstream depth limit in `wincode`
-or a hand-written reader for those two types, and both are calls for the
-project to make rather than something to improvise mid-audit.
+**It is fixed, and fixing it cost one `unsafe impl`.** Every road led there:
+`wincode`'s `SchemaRead` and `SchemaWrite` are `unsafe trait`s, the derive has
+no `with`-style attribute to interpose a schema type, and a hand-written reader
+is the same `unsafe impl` with more surface. So `chunk_saver::nesting::Nested`
+is a newtype on the two recursive edges whose entire body is *count a level,
+forward to the inner schema*. It is transparent on the wire, so no saved world
+changed meaning. `AGENTS.md` now names it as the second approved `unsafe` site,
+next to the keyed `DowncastType`, with the condition that widening it past
+delegation ends the approval.
+
+**The number is the part worth remembering.** The obvious ceiling was vanilla's
+512, from `NbtAccounter.MAX_STACK_DEPTH`, and it would have been a stack
+overflow dressed as a limit. Vanilla's NBT frames are a hundred bytes or so;
+a derived `SchemaRead` frame here is kilobytes. Measured on the 2 MiB stack
+tokio gives a worker, a debug build decodes 96 levels and overflows at 128 --
+so a 512 ceiling never fires, and the guard would have been decoration.
+
+The ceiling is **32**, and it comes from the data rather than from vanilla's
+constant: the deepest `list_pool_element` nesting in the whole of vanilla's
+built-in datapacks is **1**, measured across every JSON in
+`foton-utils/build_assets/builtin_datapacks` and `minecraft-src`. 32 is
+thirty-two times the deepest real value and a third of the measured debug
+ceiling, which leaves the frames already on the stack when the recursion starts
+their own room. The trade-off is named rather than hidden: a world that really
+did stack more than 32 riders loses that chunk's entities on load, which is the
+price of not dying to a signal no handler can catch.
+
+Measuring the read path also found the half nobody had looked at. **The save
+path recursed too, with no guard at all** -- `entity_to_persistent` walks
+`entity.passengers()`, and `wincode::serialize` on the way out overflows the
+same 2 MiB stack between 128 and 256 levels. A player who stacked a few hundred
+entities with `/ride` killed the server at the next autosave, without any
+corrupt file involved. It now stops at the same ceiling and logs what it
+dropped, because writing a chain the reader will refuse saves a chunk that can
+never be loaded again.
+
+Three regression tests hold it: the bomb is refused rather than decoded, a
+chain exactly on the ceiling still decodes *on a thread with production's
+stack size*, and a refusal gives its depth budget back so one bad chunk cannot
+poison the good ones after it on the same worker thread.
+
 
 ## Two more the audit found and left alone
 

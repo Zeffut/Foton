@@ -32,6 +32,7 @@ use foton_utils::{BoundingBox, Identifier, PackedChunkPos};
 use glam::IVec3;
 use wincode::{SchemaRead, SchemaWrite};
 
+use super::nesting::Nested;
 use crate::chunk::status::ChunkStatus;
 
 /// Magic bytes for region file identification: "STLR" (Foton Region)
@@ -508,7 +509,10 @@ pub struct PersistentEntity {
     /// Type-specific NBT data from `save_additional`.
     pub nbt_data: Vec<u8>,
     /// Direct passengers nested under this entity.
-    pub passengers: Vec<PersistentEntity>,
+    ///
+    /// `Nested` is transparent on the wire and spends a level of the read
+    /// depth budget, so a crafted file cannot recurse the reader off the stack.
+    pub passengers: Vec<Nested<PersistentEntity>>,
 }
 
 /// A scheduled tick stored with a chunk.
@@ -1099,8 +1103,8 @@ pub enum PersistentPoolElement {
     },
     /// Group of sub-elements.
     List {
-        /// Sub-elements.
-        elements: Vec<PersistentPoolElement>,
+        /// Sub-elements. `Nested` bounds the read depth; see [`Nested`].
+        elements: Vec<Nested<PersistentPoolElement>>,
         /// Projection mode: 0 = rigid, 1 = terrain matching.
         projection: i8,
     },
