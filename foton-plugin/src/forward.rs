@@ -21,15 +21,15 @@ use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
     BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
     BlockFertilizeEvent, BlockFromToEvent, BlockIgniteEvent, BlockPlaceEvent,
-    BlockPreDispenseEvent, ChunkLoadEvent, CommandEvent, CrafterCraftEvent, CreatureSpawnEvent,
-    EntityChangeBlockEvent, EntityDamageByEntityEvent, EntityDeathEvent, EntityExplodeEvent,
-    EntityMountEvent, EntityPickupItemEvent, EntityPortalEvent, EntityPushedByEntityAttackEvent,
-    EntityRegainHealthEvent, EntityRemoveFromWorldEvent, EntityResurrectEvent,
-    EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent, HangingBreakEvent,
-    HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
-    InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent, PistonEvent,
-    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
-    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
+    BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, CommandEvent, CrafterCraftEvent,
+    CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent, EntityDeathEvent,
+    EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent, EntityPortalEvent,
+    EntityPushedByEntityAttackEvent, EntityRegainHealthEvent, EntityRemoveFromWorldEvent,
+    EntityResurrectEvent, EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent,
+    HangingBreakEvent, HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent,
+    InventoryDragEvent, InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent,
+    PistonEvent, PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent,
+    PlayerBucketEmptyEvent, PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
     PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
     PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
     PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginEvent, PlayerMoveEvent,
@@ -397,6 +397,12 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<BlockFadeEvent, _>(owner(), move |event| {
         if !block_fade_call(&jvm, event.world(), event.position()) {
+            event.set_cancelled(true);
+        }
+    });
+    let jvm = Arc::clone(&vm);
+    events.on::<BlockSpreadEvent, _>(owner(), move |event| {
+        if !block_spread_call(&jvm, event.world(), event.position(), event.source()) {
             event.set_cancelled(true);
         }
     });
@@ -2359,6 +2365,31 @@ fn block_fade_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
             JValue::Int(pos.x()),
             JValue::Int(pos.y()),
             JValue::Int(pos.z()),
+        ],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
+}
+
+fn block_spread_call(vm: &JavaVM, world: &str, pos: BlockPos, source: BlockPos) -> bool {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let Ok(world) = env.new_string(world) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireBlockSpread",
+        "(Ljava/lang/String;IIIIII)Z",
+        &[
+            JValue::Object(&world),
+            JValue::Int(pos.x()),
+            JValue::Int(pos.y()),
+            JValue::Int(pos.z()),
+            JValue::Int(source.x()),
+            JValue::Int(source.y()),
+            JValue::Int(source.z()),
         ],
     )
     .and_then(JValueGen::z)
