@@ -619,6 +619,20 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    /** A block is spreading onto a neighbour. Returns false when refused. */
+    public static boolean fireBlockSpread(String world, int x, int y, int z,
+            int sourceX, int sourceY, int sourceZ) {
+        FotonWorld level = new FotonWorld(world);
+        org.bukkit.block.Block target = new FotonBlock(level, x, y, z);
+        org.bukkit.event.block.BlockSpreadEvent event =
+                new org.bukkit.event.block.BlockSpreadEvent(
+                        target,
+                        new FotonBlock(level, sourceX, sourceY, sourceZ),
+                        target.getState());
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     public static boolean fireLeavesDecay(String world, int x, int y, int z) {
         org.bukkit.event.block.LeavesDecayEvent event =
             new org.bukkit.event.block.LeavesDecayEvent(new FotonBlock(new FotonWorld(world), x, y, z));

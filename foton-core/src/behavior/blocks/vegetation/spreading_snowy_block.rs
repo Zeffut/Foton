@@ -6,6 +6,7 @@
 //! fifteen levels of light, which is why grass survives an unlit cave but not a
 //! slab laid on top of it.
 
+use crate::event::{BlockSpreadEvent, Event as _};
 use std::sync::Arc;
 
 use foton_registry::blocks::BlockRef;
@@ -99,6 +100,15 @@ pub(super) fn random_tick(
         if world.get_block_state(test_pos).get_block() == base_block
             && can_propagate(spread_state, world.as_ref(), test_pos)
         {
+            // Bukkit's `BlockSpreadEvent`, which extends `BlockFormEvent`, so a
+            // listener on either hears this. Plot protections cancel it: grass
+            // wandering across a border rewrites blocks nobody placed.
+            let mut event = BlockSpreadEvent::new(world.key.to_string(), test_pos, pos);
+            world.fire_event(&mut event);
+            if event.is_cancelled() {
+                continue;
+            }
+
             let snowy = is_snowy_setting(world.get_block_state(test_pos.above()));
             world.set_block(
                 test_pos,

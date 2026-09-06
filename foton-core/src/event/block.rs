@@ -106,6 +106,64 @@ pub struct BlockFadeEvent {
     cancelled: bool,
 }
 
+/// A block is about to spread itself onto a neighboring position.
+///
+/// Bukkit's `BlockSpreadEvent`, which extends `BlockFormEvent` -- so a listener
+/// registered for the wider one hears this too. Grass and mycelium creeping
+/// across dirt are the cases plugins actually cancel: a plot protection that
+/// let grass wander across a border would rewrite blocks nobody placed.
+pub struct BlockSpreadEvent {
+    world: String,
+    /// Where the new block would appear.
+    position: BlockPos,
+    /// The block doing the spreading.
+    source: BlockPos,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for BlockSpreadEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_spread");
+}
+impl Event for BlockSpreadEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+impl BlockSpreadEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    pub fn new(world: impl Into<String>, position: BlockPos, source: BlockPos) -> Self {
+        Self {
+            world: world.into(),
+            position,
+            source,
+            cancelled: false,
+        }
+    }
+
+    /// Which world this happened in.
+    #[must_use]
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+
+    /// Where the new block would appear.
+    #[must_use]
+    pub const fn position(&self) -> BlockPos {
+        self.position
+    }
+
+    /// The block it is spreading from.
+    #[must_use]
+    pub const fn source(&self) -> BlockPos {
+        self.source
+    }
+
+    /// Refuses the spread; the neighbour keeps whatever it was.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// Leaves are about to decay naturally.
 pub struct LeavesDecayEvent {
     world: String,
