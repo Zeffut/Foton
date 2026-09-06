@@ -84,6 +84,40 @@ use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 
 use super::Event;
 
+/// A chunk finished generating.
+///
+/// Bukkit's `ChunkPopulateEvent`, and distinct from a load: it fires only for
+/// terrain that was made rather than read back, which is what a plugin seeding
+/// its own features into fresh chunks is waiting for.
+pub struct ChunkPopulateEvent {
+    world: String,
+    position: ChunkPos,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for ChunkPopulateEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/chunk_populate");
+}
+impl Event for ChunkPopulateEvent {}
+impl ChunkPopulateEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    pub fn new(world: impl Into<String>, position: ChunkPos) -> Self {
+        Self {
+            world: world.into(),
+            position,
+        }
+    }
+    /// Which world this happened in.
+    #[must_use]
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+    /// Where it happened.
+    #[must_use]
+    pub const fn position(&self) -> ChunkPos {
+        self.position
+    }
+}
+
 /// A chunk is being unloaded.
 ///
 /// Not cancellable, and Bukkit dropped its cancel too: by the time anything can

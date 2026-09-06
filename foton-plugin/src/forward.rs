@@ -22,22 +22,23 @@ use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
     BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
     BlockFertilizeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
-    BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, ChunkUnloadEvent, CommandEvent,
-    CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
-    EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
-    EntityPortalEvent, EntityPushedByEntityAttackEvent, EntityRegainHealthEvent,
-    EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTransformEvent, ExpBottleEvent,
-    FoodLevelChangeEvent, HangingBreakEvent, HangingPlaceEvent, InventoryClickEvent,
-    InventoryCloseEvent, InventoryDragEvent, InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent,
-    LightningStrikeEvent, PistonEvent, PlayerAdvancementCriterionGrantEvent,
-    PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent, PlayerBucketFillEvent, PlayerChatEvent,
-    PlayerClientLoadedWorldEvent, PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent,
-    PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent, PlayerInteractEntityEvent,
-    PlayerInteractEvent, PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
-    PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent,
-    PlayerQuitEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent,
-    PortalCreateEvent, PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent,
-    ServerTickEvent, SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
+    BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent,
+    CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent,
+    EntityDamageByEntityEvent, EntityDeathEvent, EntityExplodeEvent, EntityMountEvent,
+    EntityPickupItemEvent, EntityPortalEvent, EntityPushedByEntityAttackEvent,
+    EntityRegainHealthEvent, EntityRemoveFromWorldEvent, EntityResurrectEvent,
+    EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent, HangingBreakEvent,
+    HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
+    InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent, PistonEvent,
+    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
+    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
+    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
+    PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
+    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginEvent, PlayerMoveEvent,
+    PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
+    PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
+    SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
@@ -857,6 +858,16 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         ) {
             event.set_spawn(world, position, rotation);
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<ChunkPopulateEvent, _>(owner(), move |event| {
+        chunk_populate_call(
+            &jvm,
+            event.world(),
+            event.position().0.x,
+            event.position().0.y,
+        );
     });
 
     let jvm = Arc::clone(&vm);
@@ -3316,6 +3327,21 @@ fn portal_call(
     let pitch = fields.next()?.parse().ok()?;
     Some((false, world, glam::DVec3::new(x, y, z), (yaw, pitch)))
 }
+fn chunk_populate_call(vm: &JavaVM, world: &str, x: i32, z: i32) {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return;
+    };
+    let Ok(world) = env.new_string(world) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        BRIDGE,
+        "fireChunkPopulate",
+        "(Ljava/lang/String;II)V",
+        &[JValue::Object(&world), JValue::Int(x), JValue::Int(z)],
+    );
+}
+
 fn chunk_unload_call(vm: &JavaVM, world: &str, x: i32, z: i32) {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return;

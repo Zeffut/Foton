@@ -174,7 +174,7 @@ pub use weather::Precipitation;
 pub(crate) use worldgen_level::WorldGenLevel;
 
 use crate::entity::RemovalReason::Discarded;
-use crate::event::{ChunkLoadEvent, Event};
+use crate::event::{ChunkLoadEvent, ChunkPopulateEvent, Event};
 use foton_registry::entity_type::MobCategory;
 #[cfg(test)]
 use level_effects::sound_is_within_range;
@@ -820,7 +820,22 @@ impl World {
             if loaded_before.contains(&(pos.0.x, pos.0.y)) {
                 continue;
             }
-            self.fire_event(&mut ChunkLoadEvent::new(self.key.to_string(), pos, false));
+            // `isNewChunk` used to be a hardcoded false, so a plugin seeding
+            // ores into fresh terrain never ran. The holder knows, because
+            // storage told it whether the chunk existed.
+            let generated = self
+                .chunk_map
+                .chunks
+                .read_sync(&pos, |_, holder| holder.take_freshly_generated())
+                .unwrap_or(false);
+            self.fire_event(&mut ChunkLoadEvent::new(
+                self.key.to_string(),
+                pos,
+                generated,
+            ));
+            if generated {
+                self.fire_event(&mut ChunkPopulateEvent::new(self.key.to_string(), pos));
+            }
         }
 
         if runs_normally {
