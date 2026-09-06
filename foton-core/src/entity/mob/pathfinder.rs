@@ -17,7 +17,30 @@ use crate::entity::ai::walk::{
 };
 use crate::entity::{Entity, LivingEntity, SharedEntity};
 use crate::physics::WorldCollisionProvider;
-use crate::world::{LevelReader, World};
+use crate::world::{ClipBlockShape, ClipFluid, LevelReader, World};
+
+/// Returns whether a mob can go straight from `start` to `stop`.
+///
+/// Vanilla parity: `PathNavigation.isClearForMovementBetween`, which aims at
+/// the middle of the mob's height at the destination and asks whether a
+/// collider clip reaches it without hitting anything.
+fn is_clear_for_movement_between(
+    world: &World,
+    mob_height: f64,
+    start: DVec3,
+    stop: DVec3,
+    blocked_by_fluids: bool,
+) -> bool {
+    let to = DVec3::new(stop.x, stop.y + mob_height * 0.5, stop.z);
+    let fluid = if blocked_by_fluids {
+        ClipFluid::Any
+    } else {
+        ClipFluid::None
+    };
+    world
+        .clip(start, to, ClipBlockShape::Collider, fluid)
+        .is_miss()
+}
 
 pub(super) fn tick_path_navigation_target<M: Mob + ?Sized>(
     mob: &M,
@@ -37,11 +60,35 @@ pub(super) fn tick_path_navigation_target<M: Mob + ?Sized>(
         } else {
             ground_navigation_temp_mob_pos(mob, world.as_ref(), navigation.can_float())
         };
+        // Vanilla parity: `PathNavigation.canMoveDirectly` is false in the base
+        // class, and the flying navigation overrides it with
+        // `blockedByFluids = true` while the water-bound one passes false.
+        // Foton has no amphibious navigation kind, so the third override has
+        // nothing to attach to yet.
+        let direct_move_fluids = match mob.as_pathfinder_mob().map(PathfinderMob::navigation_kind) {
+            Some(NavigationKind::Flying) => Some(true),
+            Some(NavigationKind::WaterBound { .. }) => Some(false),
+            Some(NavigationKind::Ground) | None => None,
+        };
+        let mob_height = mob.bounding_box().height();
+        let clear_line = |start: DVec3, stop: DVec3| {
+            direct_move_fluids.is_some_and(|blocked_by_fluids| {
+                is_clear_for_movement_between(world, mob_height, start, stop, blocked_by_fluids)
+            })
+        };
+        let can_move_directly: Option<&dyn Fn(DVec3, DVec3) -> bool> =
+            if direct_move_fluids.is_some() {
+                Some(&clear_line)
+            } else {
+                None
+            };
+
         let context = NavigationTickContext {
             mob_position,
             mob_bounding_box_width: mob.bounding_box().width(),
             mob_speed: mob.get_speed(),
             game_time,
+            can_move_directly,
         };
         let next_target = if can_update_path {
             navigation.next_move_target(context)
