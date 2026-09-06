@@ -48,6 +48,13 @@ impl Fluid {
     /// blocks store a single block id plus a level property, so state decoding
     /// resolves the correct fluid variant from extracted fluid relationship data.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     pub fn source_variant(&'static self) -> FluidRef {
         let Some(source_key) = &self.source_fluid else {
             return self;
@@ -64,6 +71,13 @@ impl Fluid {
 
     /// Returns this fluid's flowing variant.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     pub fn flowing_variant(&'static self) -> FluidRef {
         let Some(flowing_key) = &self.flowing_fluid else {
             return self;

@@ -116,6 +116,13 @@ pub struct PortalResult {
     clippy::too_many_lines,
     reason = "inlines vanilla's setup → size → rotation → mirror → placement pipeline"
 )]
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::unreachable,
+        reason = "the heightmap predicate this passes never reports an opaque hit, so only the Height arm can be reached"
+    )
+)]
 pub fn find_generation_point(
     rng: &mut LegacyRandom,
     chunk_x: i32,

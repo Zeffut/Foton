@@ -118,6 +118,13 @@ impl BlockStateExt for BlockStateId {
         self.get_ticking_metadata().is_air()
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     fn get_ticking_metadata(&self) -> BlockStateTickingMetadata {
         let Some(metadata) = REGISTRY.blocks.get_ticking_metadata(*self) else {
             panic!("invalid block state id {}", self.0);

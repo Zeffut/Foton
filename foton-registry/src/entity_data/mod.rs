@@ -238,6 +238,13 @@ impl VillagerData {
 }
 
 /// Selects a villager profession by numeric registry order, preserving the fallback when empty.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "vanilla itself sends this over the wire as a signed byte, so a registry that overflows it could not be sent at all"
+    )
+)]
 pub(crate) fn random_villager_profession_id(
     random: &mut impl foton_utils::random::Random,
     profession_count: usize,

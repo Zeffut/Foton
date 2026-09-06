@@ -315,6 +315,13 @@ impl JavaTcpClient {
 
     /// Starts a task that will send packets to the client from the outgoing packet queue.
     /// This task will run until the client is closed or the cancellation token is cancelled.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "this task is only started for a connection this file built as PlayerConnection::Java; the other arm exists to keep the match exhaustive"
+        )
+    )]
     pub fn start_outgoing_packet_task(
         self: &Arc<Self>,
         mut sender_recv: UnboundedReceiver<OutboundPacket>,
@@ -439,6 +446,13 @@ impl JavaTcpClient {
 
     /// Starts a task that will receive packets from the client.
     /// This task will run until the client is closed or the cancellation token is cancelled.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "this task is only started for a connection this file built as PlayerConnection::Java; the other arm exists to keep the match exhaustive"
+        )
+    )]
     pub fn start_incoming_packet_task(
         self: &Arc<Self>,
         mut reader: TCPNetworkDecoder<BufReader<OwnedReadHalf>>,

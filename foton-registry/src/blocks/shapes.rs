@@ -456,6 +456,13 @@ use super::properties::Direction;
 ///
 /// The shape must be non-empty; panics otherwise.
 #[must_use]
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "an empty shape has no bounding box to give; callers pick a shape from the block that has one"
+    )
+)]
 pub fn bounding_box(shape: VoxelShape) -> BlockLocalAabb {
     match shape.bounds() {
         Some(bounds) => bounds,

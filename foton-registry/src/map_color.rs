@@ -148,6 +148,13 @@ impl Brightness {
     /// # Panics
     /// Panics outside `0..=3`, matching vanilla's `checkPositionIndex`.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "brightness ids are a closed set of four, and the caller derives them from a two-bit field"
+        )
+    )]
     pub const fn from_id(id: u8) -> Self {
         match id {
             0 => Self::Low,

@@ -166,6 +166,18 @@ fn java_double_string(value: f64) -> String {
     clippy::fn_params_excessive_bools,
     reason = "shared Java float formatting parameters"
 )]
+// The four panics below all rest on the same fact: these strings come from
+// Rust's own `{:e}` formatting, which always emits a mantissa, an `e` and a
+// decimal exponent, and the search always finds a length that round-trips
+// because it starts from the full-precision form that does. None of them reads
+// anything from outside this function.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "these inspect Rust's own scientific formatting, whose shape is fixed by the standard library"
+    )
+)]
 fn java_floating_string(
     negative: bool,
     nan: bool,

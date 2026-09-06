@@ -269,6 +269,13 @@ pub struct FortressPiece {
 }
 
 /// Matches `BoundingBox.orientBox`.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::unreachable,
+        reason = "fortress pieces are placed on the horizontal plane; the vertical arms exist only to make the match exhaustive"
+    )
+)]
 fn orient_box(foot: IVec3, off: IVec3, size: IVec3, dir: Direction) -> BoundingBox {
     let s = size - IVec3::ONE;
     match dir {
@@ -291,6 +298,13 @@ fn orient_box(foot: IVec3, off: IVec3, size: IVec3, dir: Direction) -> BoundingB
 }
 
 /// Matches `StructurePiece.makeBoundingBox`: width rotates with the direction axis.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::unreachable,
+        reason = "fortress pieces are placed on the horizontal plane; the vertical arms exist only to make the match exhaustive"
+    )
+)]
 fn make_bounding_box(
     pos: IVec3,
     dir: Direction,

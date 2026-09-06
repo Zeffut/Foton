@@ -156,6 +156,13 @@ impl ItemRegistry {
     }
 
     /// Registers the vanilla `BlockItem` association used by `Block.asItem()`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     pub fn register_block_item(&mut self, block: BlockRef, item: ItemRef) {
         assert!(
             self.allows_registering,

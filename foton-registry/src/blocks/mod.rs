@@ -581,6 +581,13 @@ impl BlockRegistry {
         self.blocks_by_key.get(&block.key).copied()
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     fn block_index(&self, block: BlockRef) -> usize {
         let Some(id) = self.try_block_index(block) else {
             panic!("Block not found");
@@ -836,6 +843,13 @@ impl BlockRegistry {
     }
 
     // Panics if that property isn't supposed to be on this block.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     pub fn set_property<P: Property>(
         &self,
         id: BlockStateId,

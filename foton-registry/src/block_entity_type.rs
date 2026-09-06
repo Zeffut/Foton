@@ -42,6 +42,13 @@ impl BlockEntityTypeRegistry {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     pub fn register(&mut self, block_entity_type: BlockEntityTypeRef) -> usize {
         assert!(
             self.allows_registering,

@@ -447,6 +447,28 @@ system that compiles.
   not eighteen annotations but four accessors on `ContainerLockGuard`, after
   which the eighteen call sites had no `expect` at all.
 
+- **`panic!` was the other half of the `expect` problem, and it is now denied in
+  eleven crates of twelve.** `expect_used` says nothing about `panic!`,
+  `unreachable!` or `todo!`, which under `panic = "abort"` kill the server just
+  as dead -- one of them sits on the chunk *save* path, where dying costs
+  exactly the chunks being written. Measured before adopting: six crates had
+  none at all, `foton-utils` and `foton-protocol` four each, `foton-worldgen`
+  ten, `foton-registry` thirty-nine. All annotated or fixed.
+
+  `foton-core` has **249**, and they are concentrated: 69 in
+  `worldgen/feature/configured.rs`, 20 in `worldgen/region.rs`, 11 each in
+  `worldgen/stages/light.rs` and `leaf_distance.rs`. That is a pass of its own,
+  and the measurement above is the head start.
+
+  Two process notes, both earned the hard way in the same sitting. Attaching
+  `clippy::panic` and `clippy::unreachable` together "to be safe" left thirteen
+  expectations unfulfilled, and the compiler said so -- an annotation wider than
+  the thing it justifies will one day cover a site that deserved to be caught.
+  And eleven crates were checked with `cargo clippy -p <crate> --lib` in debug
+  while the gate is `cargo clippy -r --workspace --all-targets --all-features`;
+  two `unreachable!` in `foton-login` walked straight through the gap. Verify
+  with the command that decides, not a narrower one.
+
 - **`clippy::indexing_slicing` is not the answer to unchecked indexing, and it
   was measured rather than guessed.** The corrupt-region-file panic this audit
   fixed was an unchecked `runtime_palette[index]` sitting next to an `expect`,

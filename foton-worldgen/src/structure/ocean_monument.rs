@@ -336,6 +336,13 @@ impl RoomGraph {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the room grid is built with every connection filled before anything reads one"
+        )
+    )]
     fn connection(&self, room: usize, direction: Direction) -> usize {
         let Some(connection) = self.rooms[room].connections[direction_index(direction)] else {
             panic!(
@@ -553,6 +560,13 @@ fn add_room(rooms: &mut Vec<RoomDefinition>, index: i32) -> usize {
     room
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the grid is fully populated before any room is looked up"
+    )
+)]
 fn room_at(room_grid: &[Option<usize>; GRID_SIZE], room_index: i32) -> usize {
     let Some(room) = room_grid[room_index as usize] else {
         panic!("ocean monument missing generated room {room_index}");
@@ -560,6 +574,13 @@ fn room_at(room_grid: &[Option<usize>; GRID_SIZE], room_index: i32) -> usize {
     room
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the room grid is built with every connection filled before anything reads one"
+    )
+)]
 fn connected_room(rooms: &[RoomDefinition], room: usize, direction: Direction) -> usize {
     let Some(connection) = rooms[room].connections[direction_index(direction)] else {
         panic!(
@@ -841,6 +862,13 @@ fn push_room_child(
     });
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "monument rooms are laid out on the horizontal plane; the vertical arms exist only to make the match exhaustive"
+    )
+)]
 fn make_room_bounding_box(
     orientation: Direction,
     room_index: i32,
