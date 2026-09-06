@@ -986,14 +986,19 @@ pub trait LivingEntity: Entity {
             self.apply_damage_knockback(source, blocked);
         }
 
-        if self.is_dead_or_dying() && self.try_death_protection(world, source) {
-            return true;
-        }
+        // Vanilla parity: the totem check is a branch *inside* the
+        // `isDeadOrDying()` arm, and the method keeps going afterwards. Returning
+        // early on a saved life skipped everything below -- the last damage
+        // source was never recorded, so the death message and the combat tracker
+        // lost the hit that nearly killed the player, and neither hurt trigger
+        // fired.
         if self.is_dead_or_dying() {
-            if took_full_damage {
-                self.play_death_sound();
+            if !self.try_death_protection(world, source) {
+                if took_full_damage {
+                    self.play_death_sound();
+                }
+                self.die(source);
             }
-            self.die(source);
         } else if took_full_damage {
             self.play_hurt_sound(source);
         }
@@ -1258,6 +1263,27 @@ pub trait LivingEntity: Entity {
         }
     }
 
+    /// Where the hit came from, with vanilla's fallback.
+    ///
+    /// Vanilla parity: `DamageSource.getSourcePosition` returns the explicit
+    /// position when one was set and the *direct entity's own position*
+    /// otherwise. Foton read the field raw, and most hand-built sources never
+    /// set it -- the hoglin, the ravager, the bee's sting, the guardian's beam
+    /// and its thorns, the creaking heart, `/damage`. With no position,
+    /// `blocking_angle_to` answers "directly behind" and no shield ever blocks
+    /// them, while `damage_knockback_direction` answers zero and the victim is
+    /// thrown in a random direction instead of away from what hit them.
+    fn source_position_of(&self, source: &DamageSource) -> Option<DVec3> {
+        if let Some(position) = source.source_position {
+            return Some(position);
+        }
+        let direct_entity_id = source.direct_entity_id?;
+        let world = self.level()?;
+        world
+            .get_entity_by_id(direct_entity_id)
+            .map(|entity| entity.position())
+    }
+
     /// Returns the horizontal direction used by vanilla damage knockback.
     fn damage_knockback_direction(&self, source: &DamageSource) -> (f64, f64) {
         if let Some(direct_entity_id) = source.direct_entity_id
@@ -1271,7 +1297,7 @@ pub trait LivingEntity: Entity {
             return (-xd, -zd);
         }
 
-        let Some(source_position) = source.source_position else {
+        let Some(source_position) = self.source_position_of(source) else {
             return (0.0, 0.0);
         };
 
@@ -2510,7 +2536,7 @@ pub trait LivingEntity: Entity {
     /// Vanilla parity: the angle `LivingEntity.applyItemBlocking` measures. A
     /// hit with no position at all counts as coming from directly behind.
     fn blocking_angle_to(&self, source: &DamageSource) -> f64 {
-        let Some(source_position) = source.source_position else {
+        let Some(source_position) = self.source_position_of(source) else {
             return f64::from(PI);
         };
         let view_vector = self.calculate_view_vector(0.0, self.y_head_rot());

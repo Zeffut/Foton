@@ -573,3 +573,30 @@ a furnace has no behavior. These scripts can:
   what was in it.
 
 Every entry above gets one before it is called done.
+
+## Gaps the fifth audit wave found and named
+
+These are missing behaviour rather than wrong behaviour, so they belong here
+rather than in a fix. Each was read against the vanilla source, not recalled.
+
+**Arrows have no `canHitEntity`.** `AbstractArrow` caps its victims at
+`pierceLevel + 1`, keeps a `piercingIgnoreEntityIds` set, and refuses a target
+its shooter cannot harm. Foton's arrow overrides none of that and the projectile
+layer returns only the nearest hit, so a Piercing arrow strikes at most one
+entity per tick instead of the whole line, is never consumed by its quota, and
+re-hits what it just went through -- the second hit is refused by i-frames,
+which sends it down the `deflect(Reverse)` branch. It also crosses team
+protection in PvP, because `canHarmPlayer` is never consulted.
+
+**`MobEffect.onMobHurt` and `onMobRemoved` are not wired.** `apply_effect_tick`
+is the only effect hook, so four effects do nothing: Infested spawns no
+silverfish when its carrier is hurt, Wind Charged produces no gust burst on
+death, Weaving lays no cobwebs, Oozing drops no slimes. The trial-chamber and
+ominous-vault reward loop is decorative without them.
+
+**`PathNavigation.canMoveDirectly` is missing.** Vanilla short-circuits the node
+walk when the straight line is clear; the base class returns false, but the
+flying, water-bound and amphibious navigations all override it. Bees, parrots,
+phantoms, vexes, fish, dolphins, turtles, guardians and frogs therefore follow
+their path node by node and move more raggedly than vanilla. Land mobs are
+unaffected.

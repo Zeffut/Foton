@@ -3669,12 +3669,37 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
 
     /// Returns the invulnerability every entity has, living or not.
     ///
+    /// Whether the hit came from a player in creative mode.
+    ///
+    /// Vanilla parity: `DamageSource.isCreativePlayer`, which is the third term
+    /// of `isInvulnerableToBase`. Without it an entity carrying
+    /// `Invulnerable:1b` -- a map's armor stand, anything placed by command --
+    /// could not be killed even by a creative player, which vanilla allows.
+    fn source_is_creative_player(&self, source: &DamageSource) -> bool {
+        let Some(causing_entity_id) = source.causing_entity_id else {
+            return false;
+        };
+        let Some(world) = self.level() else {
+            return false;
+        };
+        world
+            .get_entity_by_id(causing_entity_id)
+            .and_then(|entity| {
+                entity
+                    .as_player()
+                    .map(|player| player.abilities.lock().instabuild)
+            })
+            .unwrap_or(false)
+    }
+
     /// Vanilla parity: `Entity.isInvulnerableToBase`. The two callers that are
     /// not living entities are the ender dragon's hitboxes, which consult it
     /// before handing the hit to the dragon.
     fn is_invulnerable_to_base(&self, source: &DamageSource) -> bool {
         self.is_removed()
-            || self.is_invulnerable() && !source.bypasses_invulnerability()
+            || self.is_invulnerable()
+                && !source.bypasses_invulnerability()
+                && !self.source_is_creative_player(source)
             || source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FIRE) && self.fire_immune()
             || source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FALL)
                 && self.is_fall_damage_immune()
