@@ -694,6 +694,17 @@ impl Projectile for ArrowEntity {
     /// the data it would read. `PARITY.md` records it as a team-system gap
     /// rather than an arrow one.
     fn can_hit_entity(&self, entity: &dyn Entity) -> bool {
+        // Vanilla parity: the team clause that opens `AbstractArrow.canHitEntity`
+        // -- a shot from one player at another is refused outright when their
+        // team forbids friendly fire, before any of the ordinary checks.
+        if let Some(target) = entity.as_player()
+            && let Some(owner) = self.get_owner()
+            && let Some(shooter) = owner.as_player()
+            && !shooter.can_harm_player(target)
+        {
+            return false;
+        }
+
         if !self.projectile_can_hit_entity(entity) {
             return false;
         }

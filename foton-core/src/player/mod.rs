@@ -135,6 +135,7 @@ use crate::player::player_data::{PersistentEnderPearl, PersistentRootVehicle};
 use crate::player::player_inventory::{
     MenuItemDisposition, MenuRemovalStatus, PlayerInventory, PlayerInventorySyncState,
 };
+use crate::scoreboard::ScoreHolder;
 use crate::server::{
     Server,
     jobs::{JobPoll, ServerJob, ServerJobContext},
@@ -1185,6 +1186,37 @@ impl Player {
             .expect("player must not outlive server")
     }
 
+    /// Returns this player's scoreboard team name, if any.
+    ///
+    /// Vanilla parity: `Player.getTeam`, which reads the scoreboard rather than
+    /// anything stored on the entity.
+    #[must_use]
+    pub fn team_name(&self) -> Option<String> {
+        let world = self.get_world();
+        let server = self.server();
+        let scoreboard = server.scoreboards.get(world.domain())?;
+        scoreboard.holder_team_name(&ScoreHolder::new(self.gameprofile.name.clone()))
+    }
+
+    /// Returns whether this player's team lets them hurt `target`.
+    ///
+    /// Vanilla parity: `Player.canHarmPlayer`. No team means yes, a different
+    /// team means yes, and the same team defers to the team's
+    /// `allowFriendlyFire`. A domain with no scoreboard answers yes, which is
+    /// vanilla's no-team branch.
+    #[must_use]
+    pub fn can_harm_player(&self, target: &Self) -> bool {
+        let world = self.get_world();
+        let server = self.server();
+        let Some(scoreboard) = server.scoreboards.get(world.domain()) else {
+            return true;
+        };
+        scoreboard.can_harm(
+            &ScoreHolder::new(self.gameprofile.name.clone()),
+            &ScoreHolder::new(target.gameprofile.name.clone()),
+        )
+    }
+
     /// Fires an event on this player's server, if they have one.
     ///
     /// [`Self::server`] panics without one, and a player built without a
@@ -1523,6 +1555,21 @@ impl Player {
 impl Entity for Player {
     fn base(&self) -> &EntityBase {
         &self.base
+    }
+
+    /// Vanilla parity: `Entity.isAlliedTo`, which is team *identity* and
+    /// nothing else -- `Team.isAlliedTo` is `this == other`. It is a different
+    /// question from [`Self::can_harm_player`], which additionally consults
+    /// `allowFriendlyFire`; two players on a friendly-fire team are allies who
+    /// may still shoot each other.
+    fn is_allied_to(&self, other: &dyn Entity) -> bool {
+        let Some(other) = other.as_player() else {
+            return false;
+        };
+        let Some(team) = self.team_name() else {
+            return false;
+        };
+        other.team_name() == Some(team)
     }
 
     fn entity_type(&self) -> EntityTypeRef {
