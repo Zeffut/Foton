@@ -605,6 +605,14 @@ impl JavaTcpClient {
 
         match packet.id {
             status::S_STATUS_REQUEST => {
+                let sequence_result = self.pre_play_state.lock().begin_status_request();
+                if let Err(error) = sequence_result {
+                    // Answering the second request is what makes the socket an
+                    // amplifier, so the connection goes, exactly as vanilla's
+                    // `hasRequestedStatus` branch does.
+                    self.reject_unexpected_packet(error).await;
+                    return Ok(());
+                }
                 self.handle_status_request().await;
             }
             status::S_PING_REQUEST => {

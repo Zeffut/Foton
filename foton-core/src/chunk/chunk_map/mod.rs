@@ -85,6 +85,7 @@ mod scheduled_ticks;
 #[cfg(test)]
 use light_update_state::PendingLightUpdates;
 use light_update_state::{InFlightLightUpdates, LightUpdateState, PendingChunkLightUpdates};
+use light_updates::LIGHT_PROPAGATION_TICK_BUDGET;
 
 const GENERATION_THREAD_MULTIPLE: usize = 2;
 // Vanilla applies this limit independently to block ticks and fluid ticks.
@@ -728,7 +729,7 @@ impl ChunkMap {
         reason = "block and light packet construction share the same holder drain"
     )]
     pub fn broadcast_changed_chunks(&self) {
-        self.propagate_queued_light_changes();
+        self.propagate_queued_light_changes_within(Some(LIGHT_PROPAGATION_TICK_BUDGET));
 
         let holders = {
             let mut guard = self.chunks_to_broadcast.lock();

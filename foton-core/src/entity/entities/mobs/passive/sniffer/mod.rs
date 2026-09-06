@@ -258,10 +258,17 @@ impl SnifferEntity {
     /// five times before giving up.
     #[must_use]
     pub fn calculate_dig_position(&self) -> Option<BlockPos> {
+        let world = self.level()?;
         (0..DIG_POSITION_TRIES).find_map(|index| {
             let range = DIG_POSITION_BASE_RANGE + DIG_POSITION_RANGE_STEP * index;
             let target = land_random_pos(self, range, DIG_POSITION_VERTICAL_RANGE)?;
-            let position = BlockPos::containing(target.x, target.y, target.z).below();
+            // Vanilla filters the position it landed on, before stepping down to
+            // the block it would actually dig.
+            let landed = BlockPos::containing(target.x, target.y, target.z);
+            if !world.is_block_within_world_border(landed) {
+                return None;
+            }
+            let position = landed.below();
             self.can_dig_at(position).then_some(position)
         })
     }

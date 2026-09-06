@@ -14,9 +14,18 @@ use uuid::Uuid;
 use crate::behavior::init_behaviors;
 use crate::block_entity::init_block_entities;
 use crate::chunk::chunk_ticket_manager::{ChunkTicket, ChunkTicketLevel};
+use crate::entity::{
+    ENTITIES, EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest, init_entities,
+};
 use crate::entity::{EntityBase, entities::ItemEntity, entities::PigEntity};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
-use crate::test_support::{fresh_test_world, insert_ready_full_chunk, test_world};
+use crate::player::ResetReason;
+use crate::test_support::{
+    TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk, test_world,
+};
+use simdnbt::borrow::read_compound as read_borrowed_compound;
+use simdnbt::owned::NbtCompound;
+use std::io::Cursor;
 
 const FIRST_HALF: BlockLocalAabb = BlockLocalAabb::new(0.0, 0.0, 0.0, 0.5, 1.0, 1.0);
 const SECOND_HALF: BlockLocalAabb = BlockLocalAabb::new(0.5, 0.0, 0.0, 1.0, 1.0, 1.0);
@@ -651,4 +660,59 @@ fn keep_spawn_in_memory_toggle_updates_world_state() {
     assert!(!world.keep_spawn_in_memory());
     world.set_keep_spawn_in_memory(true);
     assert!(world.keep_spawn_in_memory());
+}
+
+#[test]
+fn a_player_joins_over_an_entity_that_stole_their_uuid() {
+    // `ServerLevel.addPlayer` expects a UUID collision and force-adds: it warns,
+    // un-rides whatever holds the UUID, discards it, then adds the player.
+    // Foton panicked instead, and `/summon pig ~ ~ ~ {UUID:[I;...]}` carrying an
+    // offline player's UUID is enough to reach it -- the mob is saved with the
+    // world, so the crash came back on every login attempt, and under the release
+    // profile's `panic = "abort"` each one took the dirty chunks with it.
+    let world = fresh_test_world("player_uuid_stolen_by_entity");
+    init_entities();
+    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+    let uuid = Uuid::from_u128(0x1234_5678_9abc_def0);
+
+    let mut bytes = Vec::new();
+    NbtCompound::new().write(&mut bytes);
+    let borrowed = read_borrowed_compound(&mut Cursor::new(&bytes))
+        .unwrap_or_else(|error| panic!("test nbt should reborrow: {error}"));
+    let impostor = ENTITIES.create_and_load_or_raw(
+        EntityLoadRequest {
+            entity_type: &vanilla_entities::PIG,
+            position: DVec3::new(8.0, 64.0, 8.0),
+            uuid,
+            velocity: DVec3::ZERO,
+            rotation: (0.0, 0.0),
+            fall_distance: 0.0,
+            fire_freeze: EntityFireFreezeState::new(),
+            on_ground: true,
+            save_data: EntityBaseSaveData::new(),
+            world: Arc::downgrade(&world),
+        },
+        &borrowed,
+    );
+    world
+        .try_add_entity(Arc::clone(&impostor))
+        .unwrap_or_else(|error| panic!("the impostor should join the world: {error}"));
+
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Displaced", 900)
+        .uuid(uuid)
+        .build();
+
+    assert!(
+        world.add_player(Arc::clone(&player), ResetReason::InitialJoin),
+        "the player must be admitted, not the server killed"
+    );
+    assert!(
+        impostor.is_removed(),
+        "the entity holding the UUID must be discarded"
+    );
+    assert_eq!(
+        world.get_entity_by_uuid(&uuid).map(|entity| entity.id()),
+        Some(player.id()),
+        "the UUID must now resolve to the player"
+    );
 }

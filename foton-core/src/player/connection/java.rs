@@ -515,6 +515,8 @@ pub struct JavaConnection {
     player: Weak<Player>,
     keep_alive_tracker: SyncMutex<KeepAliveTracker>,
     latency: SyncMutex<u32>,
+    /// Play packet ids already reported as unhandled on this connection.
+    unhandled_packet_ids: SyncMutex<Vec<i32>>,
 }
 
 impl JavaConnection {
@@ -542,6 +544,7 @@ impl JavaConnection {
                 alive_id: 0,
             }),
             latency: SyncMutex::new(0),
+            unhandled_packet_ids: SyncMutex::new(Vec::new()),
         }
     }
 
@@ -952,8 +955,40 @@ impl JavaConnection {
                     .lock()
                     .on_chunk_batch_received_by_client(packet.desired_chunks_per_tick);
             }
-            ImmediatePlayPacket::Unknown(id) => log::info!("play packet id {id} is not known"),
+            ImmediatePlayPacket::Unknown(id) => self.report_unhandled_play_packet(id),
         }
+    }
+
+    /// Reports a serverbound play packet id that no handler claims, once each.
+    ///
+    /// Vanilla throws `DecoderException` on an unknown id and drops the
+    /// connection (`IdDispatchCodec.decode`), because vanilla has a handler for
+    /// every id it defines. Foton does not: `lock_difficulty`,
+    /// `pick_item_from_entity`, `place_recipe`, both recipe-book packets,
+    /// `entity_tag_query` and `teleport_to_entity` are all sent by ordinary
+    /// clients and none of them is handled here, so kicking would punish a
+    /// player for pressing a button Foton has not implemented yet.
+    ///
+    /// What could not stay is the reporting. `Unknown` is an immediate packet,
+    /// so it never passes `PacketProcessor::schedule` and is not counted
+    /// against the per-player outstanding budget; one `info!` per packet let
+    /// any player fill the log as fast as the socket allowed, and filled it
+    /// during ordinary play besides. One line per id per connection keeps the
+    /// signal and removes the firehose.
+    fn report_unhandled_play_packet(&self, id: i32) {
+        /// Enough for every unimplemented vanilla id; beyond that the client is
+        /// inventing ids, and there is nothing left to learn from listing them.
+        const MAX_REPORTED_IDS: usize = 32;
+
+        {
+            let mut reported = self.unhandled_packet_ids.lock();
+            if reported.len() >= MAX_REPORTED_IDS || reported.contains(&id) {
+                return;
+            }
+            reported.push(id);
+        }
+
+        log::debug!("Client {} sent unhandled play packet id {id}", self.id);
     }
 
     /// Listens for packets from the client.

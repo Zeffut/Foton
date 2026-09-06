@@ -53,6 +53,10 @@ impl SpawnBlockSource for WorldGenRegion<'_> {
     fn spawn_block_state(&self, pos: BlockPos) -> BlockStateId {
         self.block_state(pos)
     }
+
+    fn spawn_within_world_border(&self, pos: BlockPos) -> bool {
+        self.is_block_within_world_border(pos)
+    }
 }
 
 pub(crate) fn generate(

@@ -47,9 +47,8 @@ impl World {
     /// start downwards on each attempt, which is what lets a shrieker in a cave hand its
     /// warden the floor rather than the ceiling.
     ///
-    /// Not implemented: the `checkCollisions` argument and the world-border bounds test.
-    /// The one caller in Foton -- the sculk shrieker -- passes `false` for the first, and
-    /// the second only differs outside the border.
+    /// Not implemented: the `checkCollisions` argument. The one caller in Foton -- the
+    /// sculk shrieker -- passes `false` for it.
     #[must_use]
     #[expect(
         clippy::too_many_arguments,
@@ -69,6 +68,9 @@ impl World {
             let dx = rand::random_range(-spawn_range_xz..=spawn_range_xz);
             let dz = rand::random_range(-spawn_range_xz..=spawn_range_xz);
             let search_start = start.offset(dx, spawn_range_y, dz);
+            if !self.is_block_within_world_border(search_start) {
+                continue;
+            }
             let Some(spawn_pos) =
                 possible_spawn_position(self, spawn_range_y, search_start, strategy)
             else {

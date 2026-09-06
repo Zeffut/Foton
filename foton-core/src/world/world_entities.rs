@@ -90,9 +90,60 @@ impl World {
             .add_live_entity(entity.clone(), EntityOwnership::External)
         {
             Ok(lifecycle) => lifecycle,
-            Err(error) => panic!("failed to register player entity: {error}"),
+            Err(error) => {
+                // Vanilla expects this and force-adds anyway: `ServerLevel.addPlayer`
+                // warns, un-rides whatever already holds the UUID, discards it, then
+                // adds the player. Panicking here turned a `/summon zombie ~ ~ ~
+                // {UUID:[I;...]}` carrying an offline player's UUID into a crash on
+                // that player's next login -- and because the mob is saved with the
+                // world, into the same crash on every login after that, each one
+                // taking the release profile's `panic = "abort"` and every dirty
+                // chunk with it.
+                log::warn!(
+                    "Force-added player with duplicate UUID {}: {error}",
+                    player.uuid()
+                );
+                self.discard_entity_holding_player_uuid(player);
+                match self
+                    .entity_manager()
+                    .add_live_entity(entity, EntityOwnership::External)
+                {
+                    Ok(lifecycle) => lifecycle,
+                    Err(error) => {
+                        log::error!(
+                            "Failed to register player entity even after clearing the duplicate UUID: {error}"
+                        );
+                        return;
+                    }
+                }
+            }
         };
         self.apply_entity_lifecycle_changes(lifecycle);
+    }
+
+    /// Discards whatever entity already holds this player's UUID.
+    ///
+    /// Vanilla parity: the head of `ServerLevel.addPlayer`, including its
+    /// `Entity.unRide` -- eject passengers, then dismount. Removal is
+    /// synchronous: `set_removed` runs the level callback, which takes the entry
+    /// out of the manager, so the caller's retry sees a free UUID.
+    fn discard_entity_holding_player_uuid(&self, player: &Arc<Player>) {
+        let Some(existing) = self.get_entity_by_uuid(&player.uuid()) else {
+            return;
+        };
+        if existing.id() == player.id() {
+            // Already this player's own entry; discarding it would remove the
+            // player we are trying to add.
+            return;
+        }
+
+        if existing.is_vehicle() {
+            existing.eject_passengers();
+        }
+        if existing.is_passenger() {
+            existing.stop_riding();
+        }
+        existing.set_removed(RemovalReason::Discarded);
     }
 
     fn unride_player_for_removal(&self, player: &Player, store_root_vehicle: bool) {
