@@ -1312,6 +1312,58 @@ impl PlayerCustomPayloadEvent {
     }
 }
 
+/// Emitted when a client reports it has finished loading its world.
+///
+/// Vanilla parity: the arrival of `ServerboundPlayerLoadedPacket`. It is the
+/// first moment the client is genuinely in the world rather than on a loading
+/// screen, which is why plugins wait for it before sending anything visual.
+pub struct PlayerClientLoadedWorldEvent {
+    player: Arc<Player>,
+    from_networking: bool,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for PlayerClientLoadedWorldEvent {
+    const TYPE_KEY: DowncastTypeKey =
+        DowncastTypeKey::new("foton:event/player_client_loaded_world");
+}
+impl Event for PlayerClientLoadedWorldEvent {}
+impl PlayerClientLoadedWorldEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player: Arc<Player>, from_networking: bool) -> Self {
+        Self {
+            player,
+            from_networking,
+            cancelled: false,
+        }
+    }
+
+    /// Who finished loading.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+
+    /// Whether the client said so, rather than the server assuming it.
+    #[must_use]
+    pub const fn is_from_networking(&self) -> bool {
+        self.from_networking
+    }
+
+    /// Whether a plugin refused the server's response to the packet.
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Refuses the server's response. The client has already loaded; this only
+    /// suppresses what Foton would have sent back.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// Emitted when a client changes its language preference.
 pub struct PlayerLocaleChangeEvent {
     player: Arc<Player>,

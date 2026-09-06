@@ -189,6 +189,57 @@ anyone would have guessed: plugin lifecycle, then `org.bukkit` itself, then
 entities, commands, player events, the scheduler, configuration, inventories,
 and only then blocks.
 
+## Where the ledger stands
+
+Measured, not estimated, and reproducible without the corpus:
+
+    python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar
+
+The corpus is not committed -- a few hundred megabytes of other people's jars --
+so that command crosses the *committed* ledger against the built API jar
+instead. Of the 2487 members that at least two of the 59 scanned plugins
+reference, **2478 resolve**. Sixty did not when the cross-check was first run.
+
+The nine that remain are decisions rather than work, and each is a different
+kind of decision:
+
+- **Five cannot exist.** `PaperAdventure.asVanilla(Component)` returns
+  `net.minecraft.network.chat.Component`. The signature itself names a class
+  that only Mojang's server has. No amount of API closes this.
+
+- **Three are declined on their failure mode.** `MavenLibraryResolver` needs the
+  `org.eclipse.aether` types, and they could be written. But a resolver that
+  resolves nothing lets the plugin load and then die later on a
+  `NoClassDefFoundError` for the library it believed it had -- failing late
+  without a cause, where refusing at bootstrap fails early with one. Shipping
+  stub classes into a namespace we do not own would also break any plugin
+  carrying the real aether. If Foton ever resolves Maven dependencies for real,
+  this becomes work; until then it is a worse answer than the error.
+
+- **One is data nobody here has.** `Effect.getId()` wants Bukkit's own mapping
+  from its enum names to vanilla's `LevelEvent` ids. The names diverge --
+  Bukkit's `CLICK1` is vanilla's `SOUND_DISPENSER_DISPENSE` -- so the table is
+  not derivable from `minecraft-src`, and there is no Bukkit source in the
+  repository. Writing thirty-seven ids from memory is exactly the invented data
+  `AGENTS.md` forbids.
+
+**What the number does not say.** 99% of the ledger is not 99% of the
+ecosystem. The ledger is 59 plugins, and eighteen of them reach past the API
+into server internals -- so the ceiling this document opens with, around seventy
+percent, still stands and is unaffected by anything above. Moving past the
+ledger needs a *larger corpus*, which means fetching more plugin jars and
+re-running `--write`; it does not need more implementation against this one.
+
+**And a resolving member is not a working one.** Some of what was added answers
+honestly and does nothing: `World.setBiome` records no biome, `Bukkit.createMap`
+hands back an id with no map behind it, `WatchdogThread.tick` has nothing to
+reset. Each says so in its own javadoc rather than leaving it to be discovered.
+The reason they exist anyway is narrow and worth stating: a listener class names
+every event type in its method signatures, and a plugin whose listener mentions
+one missing class fails to register *all* of its handlers. The absent class
+costs the plugin what it could do; the present one costs only what it never
+could.
+
 ## Staging
 
 **Stage 1 — the event system.** Native, in Rust, with Bukkit's semantics as the

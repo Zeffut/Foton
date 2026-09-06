@@ -481,6 +481,14 @@ public final class EventBridge {
         return event.getQuitMessage();
     }
 
+    /** The client finished loading its world. Returns false when cancelled. */
+    public static boolean fireClientLoadedWorld(String uuid, boolean fromNetworking) {
+        io.papermc.paper.event.player.PlayerClientLoadedWorldEvent event =
+                new io.papermc.paper.event.player.PlayerClientLoadedWorldEvent(player(uuid), fromNetworking);
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     /** A player spoke. Returns the message, or null when a plugin stopped it. */
     public static void fireLocaleChange(String uuid, String oldLocale, String locale) {
         dispatch(new org.bukkit.event.player.PlayerLocaleChangeEvent(player(uuid), oldLocale, locale));

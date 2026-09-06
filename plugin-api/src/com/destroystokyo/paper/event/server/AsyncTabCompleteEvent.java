@@ -11,9 +11,20 @@ import org.bukkit.event.HandlerList;
 public class AsyncTabCompleteEvent extends Event implements Cancellable {
     public static final class Completion {
         private final String completion;
-        private Completion(String completion) { this.completion = completion == null ? "" : completion; }
+        private Completion(String completion) { this(completion, null); }
+        private final net.kyori.adventure.text.Component tooltip;
+        private Completion(String completion, net.kyori.adventure.text.Component tooltip) {
+            this.completion = completion == null ? "" : completion;
+            this.tooltip = tooltip;
+        }
         public static Completion completion(String value) { return new Completion(value); }
+        /** A completion with the tooltip the client shows beside it. */
+        public static Completion completion(String value, net.kyori.adventure.text.Component tooltip) {
+            return new Completion(value, tooltip);
+        }
         public String getCompletion() { return completion; }
+        /** The tooltip, or null when the completion carries none. */
+        public net.kyori.adventure.text.Component tooltip() { return tooltip; }
     }
     private final CommandSender sender;
     private final String buffer;

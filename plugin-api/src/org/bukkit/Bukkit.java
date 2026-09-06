@@ -280,6 +280,29 @@ public final class Bukkit {
         return key == null || type == null ? null : new Tag<>(key, type, registry);
     }
 
+    /** Every tag in a registry.
+     *
+     * <p>Empty rather than null: Bukkit's contract is an iterable, and plugins
+     * loop it without checking. Foton resolves a tag when asked for one by key
+     * -- see {@link #getTag} -- but does not enumerate a registry's tags, so
+     * the honest answer to "all of them" is none rather than a wrong list. */
+    /** Allocates a map for a world.
+     *
+     * <p>Foton has no map storage, so the view it hands back carries an id and
+     * nothing behind it. A plugin gets an object instead of a
+     * NullPointerException, and nothing appears on a map item -- which is the
+     * truth about maps here, not a promise about them. */
+    public static org.bukkit.map.MapView createMap(org.bukkit.World world) {
+        return new foton.FotonMapView(nextMapId.incrementAndGet());
+    }
+
+    private static final java.util.concurrent.atomic.AtomicInteger nextMapId =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    public static <T extends Keyed> Iterable<Tag<T>> getTags(String registry, Class<T> type) {
+        return java.util.Collections.emptyList();
+    }
+
     public static int broadcast(net.kyori.adventure.text.Component message) {
         if (message == null || server == null) return 0;
         int count = 0;

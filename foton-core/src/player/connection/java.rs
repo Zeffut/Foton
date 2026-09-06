@@ -39,6 +39,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError}
 use tokio_util::sync::CancellationToken;
 
 use crate::command::{handle_client_request, sender::CommandSender};
+use crate::event::PlayerClientLoadedWorldEvent;
 use crate::event::PlayerCommandPreprocessEvent;
 use crate::player::Player;
 use crate::player::connection::NetworkConnection;
@@ -366,7 +367,15 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::MoveVehicle(packet) => player.handle_move_vehicle(packet),
             ScheduledPlayPacketKind::PlayerLoaded => {
                 if player.mark_client_loaded_from_network() {
-                    player.send_inventory_to_remote();
+                    // Paper fires here rather than on the first world send:
+                    // this is the first moment the client is in the world
+                    // instead of on a loading screen. Cancelling suppresses
+                    // what we send back, not the load, which already happened.
+                    let mut loaded = PlayerClientLoadedWorldEvent::new(Arc::clone(&player), true);
+                    player.fire_event(&mut loaded);
+                    if !loaded.is_cancelled() {
+                        player.send_inventory_to_remote();
+                    }
                 }
             }
             ScheduledPlayPacketKind::ChatCommand(packet) => {

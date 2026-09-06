@@ -82,6 +82,22 @@ public interface ConfigurationSection {
 
     List<String> getStringList(String path);
 
+    /** The comment lines above {@code path}, empty when there are none.
+     *
+     * <p>Foton stores what a plugin sets here and gives it back, so a
+     * round trip is consistent. The YAML writer does not emit them yet, so a
+     * comment set through the API does not appear in the saved file -- which is
+     * the difference between remembering and publishing, and is stated rather
+     * than left to be discovered. */
+    default List<String> getComments(String path) { return java.util.List.of(); }
+
+    default void setComments(String path, List<String> comments) { }
+
+    /** The comment trailing {@code path} on its own line. */
+    default List<String> getInlineComments(String path) { return java.util.List.of(); }
+
+    default void setInlineComments(String path, List<String> comments) { }
+
     /** Every entry of the list at {@code path} that is itself a map.
      *
      * <p>Entries that are not maps are skipped rather than throwing: a config

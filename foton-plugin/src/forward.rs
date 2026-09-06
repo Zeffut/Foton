@@ -28,13 +28,14 @@ use foton_core::event::{
     HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
     InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent, PistonEvent,
     PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
-    PlayerBucketFillEvent, PlayerChatEvent, PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent,
-    PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent, PlayerInteractEntityEvent,
-    PlayerInteractEvent, PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
-    PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent,
-    PlayerQuitEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent,
-    PortalCreateEvent, PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent,
-    ServerTickEvent, SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
+    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
+    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
+    PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
+    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginEvent, PlayerMoveEvent,
+    PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
+    PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
+    SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::player::Player;
 use foton_core::server::Server;
@@ -936,6 +937,17 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
             Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerClientLoadedWorldEvent, _>(owner(), move |event| {
+        if !client_loaded_world_call(
+            &jvm,
+            event.player().gameprofile.id,
+            event.is_from_networking(),
+        ) {
+            event.set_cancelled(true);
         }
     });
 
@@ -2455,6 +2467,30 @@ fn block_damage_call(vm: &JavaVM, player: uuid::Uuid, world: &str, pos: BlockPos
     .ok()
     .and_then(|value| value.z().ok())
     .unwrap_or(true)
+}
+
+/// Returns false when a plugin cancelled, or when the bridge could not be
+/// reached -- a JVM that cannot answer is not a plugin saying yes.
+fn client_loaded_world_call(vm: &JavaVM, player: uuid::Uuid, from_networking: bool) -> bool {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let Ok(player) = env.new_string(player.to_string()) else {
+        return true;
+    };
+    let result = env.call_static_method(
+        BRIDGE,
+        "fireClientLoadedWorld",
+        "(Ljava/lang/String;Z)Z",
+        &[
+            JValue::Object(&player),
+            JValue::Bool(u8::from(from_networking)),
+        ],
+    );
+    match result {
+        Ok(value) => value.z().unwrap_or(true),
+        Err(_) => true,
+    }
 }
 
 fn locale_change_call(vm: &JavaVM, player: uuid::Uuid, old_locale: &str, new_locale: &str) {
