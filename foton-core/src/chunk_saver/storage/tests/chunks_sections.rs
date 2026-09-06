@@ -1,8 +1,17 @@
 use super::*;
 
+/// A status that disagrees with the chunk's runtime state is refused, not fatal.
+///
+/// This used to assert, and the test used to expect the panic. But
+/// `save_all_chunks` walks the *live* chunk map without the
+/// `UNLOADING -> PREPARING` latch the unload path takes, so a chunk promoted to
+/// Full between the caller reading its status and this check reaches exactly
+/// this mismatch -- and under `panic = "abort"` that killed the server in the
+/// middle of a save, losing every dirty chunk. The refusal still has to happen;
+/// it just returns instead of aborting, and the chunk stays dirty for the next
+/// round.
 #[test]
-#[should_panic(expected = "persisted chunk status must match its Full runtime state")]
-fn chunk_save_rejects_full_status_for_proto_data() {
+fn chunk_save_refuses_full_status_for_proto_data() {
     init_vanilla_registry();
 
     let chunk = Chunk::new(
@@ -12,7 +21,15 @@ fn chunk_save_rejects_full_status_for_proto_data() {
         16,
         Weak::new(),
     );
-    let _ = ChunkStorage::prepare_chunk_save(&chunk, ChunkStatus::Full, &[], true);
+
+    assert!(
+        ChunkStorage::prepare_chunk_save(&chunk, ChunkStatus::Full, &[], true).is_none(),
+        "a Full status over proto data must produce no payload"
+    );
+    assert!(
+        ChunkStorage::prepare_chunk_save(&chunk, ChunkStatus::Empty, &[], true).is_some(),
+        "the matching status must still save, or the guard is refusing everything"
+    );
 }
 
 #[test]

@@ -84,7 +84,16 @@ fn set_block(
 
             (block_state_id, nbt)
         }
-        BlockPredicate::Tag { .. } => unreachable!(),
+        // The block-state parser refuses tags now, so this arm should not be
+        // reachable -- but an `unreachable!()` that turns out to be reachable is
+        // a dead server under `panic = "abort"`, and this one was: the argument
+        // shared the predicate parser, which accepts `#`. An error costs the
+        // player a message; the panic cost everyone the world.
+        BlockPredicate::Tag { .. } => {
+            return Err(CommandSyntaxError::dynamic(
+                "A block tag cannot be placed; name a single block.",
+            ));
+        }
     };
 
     // World the player is in

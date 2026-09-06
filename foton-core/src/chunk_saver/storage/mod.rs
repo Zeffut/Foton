@@ -574,11 +574,20 @@ impl ChunkStorage {
         runtime_entities: &[SharedEntity],
         force: bool,
     ) -> Option<PreparedChunkSave> {
-        assert_eq!(
-            status == ChunkStatus::Full,
-            chunk.full_runtime().is_some(),
-            "persisted chunk status must match its Full runtime state"
-        );
+        // A mismatch means the chunk was promoted to Full between the caller
+        // reading its status and this point. That is a real race on the
+        // `save_all_chunks` path, which walks the *live* chunk map without the
+        // `UNLOADING -> PREPARING` latch the unload path takes -- and under
+        // `panic = "abort"` an assertion here kills the server during a save,
+        // taking every dirty chunk with it. Skipping this one chunk leaves it
+        // dirty for the next round instead.
+        if (status == ChunkStatus::Full) != chunk.full_runtime().is_some() {
+            log::error!(
+                "chunk {:?} changed status while it was being prepared for saving;                  leaving it for the next round",
+                chunk.pos
+            );
+            return None;
+        }
         if !force && !chunk.is_dirty() {
             return None;
         }
@@ -658,7 +667,12 @@ impl ChunkStorage {
             // Proto ticks are pending, so Vanilla ignores the current game
             // time when serializing their already-relative delays.
             let Some(snapshot) = chunk.scheduled_ticks.snapshot(0) else {
-                panic!("Proto chunk scheduled-tick container was finalized before saving");
+                // Same race, same reasoning: the container was finalized by a
+                // promotion running alongside this save.
+                log::error!(
+                    "chunk {pos:?} had its proto tick container finalized while it was                      being prepared for saving; leaving it for the next round"
+                );
+                return None;
             };
             let bt = Self::block_ticks_to_persistent(snapshot.block, pos);
             let ft = Self::fluid_ticks_to_persistent(snapshot.fluid, pos);

@@ -1,14 +1,14 @@
 use super::world_tick_workers::{WorldTickWorkerError, WorldTickWorkers};
 use super::{
-    Arc, CCommandSuggestions, CHUNK_SENDING_TPS, COMMAND_DATA_AUTOSAVE_INTERVAL,
-    COMMAND_REQUESTS_PER_TICK, COMMAND_RESUMPTIONS_PER_TICK, CancellationToken, ChunkPos,
-    ChunkSender, CommandExecutionContext, CommandExecutionOwner, CommandRequest,
-    CommandResultCallback, CommandSender, CommandSource, Duration, EncodedChunk,
-    ExecutionCommandSource, ExecutionStop, GameTickTaskGuard, Instant, JoinSet, NetworkConnection,
-    PendingCommandExecutionQueue, Player, SEND_PLAYER_INFO_INTERVAL, SLOW_CHUNK_TICK_THRESHOLD,
-    Server, StringReader, SuggestionError, Suggestions, TAB_LIST_UPDATE_INTERVAL, TabListTickStats,
-    ThreadPool, World, WorldRemovalRequest, command_suggestions_packet, configured_packet_workers,
-    sleep, spawn_blocking,
+    AUTOSAVE_INTERVAL, Arc, CCommandSuggestions, CHUNK_SENDING_TPS, COMMAND_REQUESTS_PER_TICK,
+    COMMAND_RESUMPTIONS_PER_TICK, CancellationToken, ChunkPos, ChunkSender,
+    CommandExecutionContext, CommandExecutionOwner, CommandRequest, CommandResultCallback,
+    CommandSender, CommandSource, Duration, EncodedChunk, ExecutionCommandSource, ExecutionStop,
+    GameTickTaskGuard, Instant, JoinSet, NetworkConnection, PendingCommandExecutionQueue, Player,
+    SEND_PLAYER_INFO_INTERVAL, SLOW_CHUNK_TICK_THRESHOLD, Server, StringReader, SuggestionError,
+    Suggestions, TAB_LIST_UPDATE_INTERVAL, TabListTickStats, ThreadPool, World,
+    WorldRemovalRequest, command_suggestions_packet, configured_packet_workers, sleep,
+    spawn_blocking,
 };
 use crate::command::functions::CommandFunction;
 use crate::event::{CommandEvent, ServerTickEvent};
@@ -98,7 +98,7 @@ impl Server {
             }
         };
         let mut next_tick_time = Instant::now();
-        let mut next_command_data_autosave = Instant::now() + COMMAND_DATA_AUTOSAVE_INTERVAL;
+        let mut next_command_data_autosave = Instant::now() + AUTOSAVE_INTERVAL;
         let mut player_info_ticks = 0_u64;
         let mut pending_command_executions = PendingCommandExecutionQueue::<CommandSource>::new();
         let mut player_disconnect_saves = JoinSet::new();
@@ -246,8 +246,22 @@ impl Server {
             .then(|| TabListTickStats::capture(&tick_manager))
     }
 
-    async fn autosave_command_data(&self) {
-        tracing::debug!("Command data autosave started");
+    async fn autosave_command_data(self: &Arc<Self>) {
+        tracing::debug!("Autosave started");
+
+        // Vanilla parity: `MinecraftServer.autoSave` runs
+        // `saveEverything(true, false, false)` -- chunks, level data and players
+        // -- every 6000 ticks. Foton's timer only ever covered the command-owned
+        // data below, so nothing else was written until a chunk unloaded, a
+        // player disconnected, or the server shut down cleanly. Around spawn
+        // (`keep_spawn_in_memory`) and inside any player's radius chunks never
+        // unload at all, so a long session could reach the end of the day having
+        // written nothing, and any unclean stop took the lot.
+        for world in self.worlds.values() {
+            world.request_save();
+        }
+        self.request_save_players();
+
         let results = self.save_command_data().await;
         match results.scoreboards {
             Ok(saved) => tracing::debug!(saved, "Domain scoreboard autosave completed"),
@@ -288,7 +302,7 @@ impl Server {
         } else {
             tracing::warn!("Skipping command data autosave while the previous save runs");
         }
-        *next_autosave = Instant::now() + COMMAND_DATA_AUTOSAVE_INTERVAL;
+        *next_autosave = Instant::now() + AUTOSAVE_INTERVAL;
     }
 
     fn tick_pending_command_executions(

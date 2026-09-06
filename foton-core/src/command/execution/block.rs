@@ -80,6 +80,21 @@ pub(super) fn parse_block_predicate(
     parse_concrete_block_predicate(reader)
 }
 
+/// Parses a block state, refusing a tag.
+///
+/// Vanilla parity: `BlockStateArgument` goes through
+/// `BlockStateParser.parseForBlock`, which has no tag branch at all -- only
+/// `BlockPredicateArgument` accepts `#`. Sharing the predicate parser between
+/// the two meant `/setblock ~ ~ ~ #minecraft:wool` parsed, reached a
+/// `BlockPredicate::Tag` the command could not use, and hit an `unreachable!()`
+/// -- a dead server, under `panic = "abort"`, for anyone allowed to run
+/// `/setblock`.
+pub(super) fn parse_block_state(
+    reader: &mut StringReader<'_>,
+) -> Result<BlockPredicate, CommandSyntaxError> {
+    parse_concrete_block_predicate(reader)
+}
+
 fn parse_concrete_block_predicate(
     reader: &mut StringReader<'_>,
 ) -> Result<BlockPredicate, CommandSyntaxError> {
