@@ -3332,3 +3332,74 @@ fn damage_command_records_by_entity_as_the_responsible_player() {
         }
     });
 }
+
+#[test]
+fn a_duplicate_login_displaces_the_session_holding_the_uuid_instead_of_being_refused() {
+    // Vanilla settles a UUID collision in the newcomer's favor:
+    // `ServerLoginPacketListenerImpl` calls
+    // `PlayerList.disconnectAllPlayersWithProfile`, which kicks the incumbent
+    // with `multiplayer.disconnect.duplicate_login`, and parks the login in
+    // `WAITING_FOR_DUPE_DISCONNECT` until the UUID frees. Foton refused the
+    // newcomer, so quitting and coming straight back -- inside the asynchronous
+    // disconnect save -- answered "You are already connected to this server".
+    let world = fresh_test_world("duplicate_login_displaces_incumbent");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+
+    runtime.block_on(async {
+        let storage_root = test_storage_root("duplicate-login-displaces-incumbent");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+
+        let uuid = Uuid::from_u128(0x5151);
+        let incumbent =
+            test_player_with_uuid_and_packets(&server, Arc::clone(&world), uuid, "Incumbent", 1).0;
+        assert!(server.online_players.insert(Arc::clone(&incumbent)));
+
+        let newcomer =
+            test_player_with_uuid_and_packets(&server, Arc::clone(&world), uuid, "Newcomer", 2).0;
+        assert!(
+            !server.reserve_player_join(&newcomer),
+            "the raw reservation must still refuse while the UUID is taken"
+        );
+
+        let reserving = {
+            let server = Arc::clone(&server);
+            let newcomer = Arc::clone(&newcomer);
+            tokio::spawn(async move { server.reserve_player_join_over_duplicate(&newcomer).await })
+        };
+
+        // Stand in for the tick safe point that finishes the incumbent's
+        // teardown once it has been kicked.
+        sleep(Duration::from_millis(120)).await;
+        assert!(
+            server
+                .online_players
+                .remove_player_sync(&incumbent)
+                .is_some(),
+            "the incumbent should still have been online to remove"
+        );
+
+        let Ok(reserved) = reserving.await else {
+            panic!("the reservation task should not panic");
+        };
+        assert!(
+            reserved,
+            "the newcomer must get the slot once the incumbent has left"
+        );
+        assert_eq!(
+            server.player_admissions.lock().get(&uuid).copied(),
+            Some(PlayerAdmissionState::Joining),
+            "the newcomer must hold the admission"
+        );
+    });
+}

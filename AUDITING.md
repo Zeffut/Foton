@@ -309,7 +309,7 @@ order is a global lexicographic order on (z, x), so two overlapping windows
 would acquire their shared chunks in the same relative order. Any narrowing has
 to preserve both properties.
 
-## Two more the audit proved and did not close
+## One the audit proved and did not close
 
 **An entity cannot be teleported into a chunk the entity manager does not
 track.** `WorldEntityManager::can_move_manager_owned_to_chunk` requires the
@@ -326,24 +326,6 @@ no entry risks a double-add when that chunk loads, or an entity never saved when
 it unloads. Closing it properly means either a load ticket on the destination
 (vanilla's `TicketType.POST_TELEPORT`) or a real unloaded-section state, and
 neither is a change to make without understanding what the manager promises.
-
-**A duplicate login refuses the newcomer where vanilla kicks the incumbent.**
-`reserve_player_join` fails if the UUID is already in `player_admissions` or
-`online_players`, and the player is told "You are already connected to this
-server"; `login.rs` still carries the `//TODO: Check for duplicate player UUID
-or name` where the check belongs. Vanilla calls
-`PlayerList.disconnectAllPlayersWithProfile`, parks the login in
-`WAITING_FOR_DUPE_DISCONNECT`, and lets the new session in once the old one is
-gone.
-
-The severe half of this is already gone: connections are ticked per connection
-now rather than per world-resident player, so a client that dies without a FIN
-is timed out within thirty seconds whatever world it belongs to, and no ghost
-holds a UUID forever. What is left is a window -- quit and reconnect before the
-asynchronous disconnect save finishes, and the relog is refused. Fixing it means
-making the login path wait on another session's teardown, which is a new
-asynchronous state on the most concurrency-sensitive path in the server, and it
-deserves its own change rather than a tail-end addition to an audit pass.
 
 ## The one that needs an architecture change, not a fix
 
