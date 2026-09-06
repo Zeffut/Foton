@@ -22,6 +22,12 @@ pub enum RemovalReason {
     ChangedWorld,
     /// Entity is persisted inside a player `RootVehicle` payload.
     StoredWithPlayer,
+    /// Entity left with the player who owned it, on disconnect.
+    ///
+    /// Vanilla parity: `Entity.RemovalReason.UNLOADED_WITH_PLAYER`, which like
+    /// `CHANGED_DIMENSION` neither destroys nor saves -- the data leaves with
+    /// the player file instead of the world.
+    UnloadedWithPlayer,
 }
 
 impl RemovalReason {
@@ -34,8 +40,9 @@ impl RemovalReason {
     /// Returns true if the entity should be saved when removed.
     ///
     /// In vanilla, only `UnloadedToChunk` saves - the entity persists in chunk storage.
-    /// `ChangedWorld` and `StoredWithPlayer` do not save because the entity
-    /// is retained by another owner instead of current-world entity storage.
+    /// `ChangedWorld`, `StoredWithPlayer` and `UnloadedWithPlayer` do not save
+    /// because the entity is retained by another owner instead of current-world
+    /// entity storage.
     #[must_use]
     pub const fn should_save(self) -> bool {
         matches!(self, Self::UnloadedToChunk)

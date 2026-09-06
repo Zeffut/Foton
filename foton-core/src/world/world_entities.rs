@@ -230,6 +230,7 @@ impl World {
             let domain = self.domain().to_owned();
             let player_data = PersistentPlayerData::from_player(&player);
             player.store_ender_pearls_with_player();
+            player.set_removed(RemovalReason::UnloadedWithPlayer);
             return (player, domain, player_data);
         };
         let domain = self.domain().to_owned();
@@ -246,6 +247,17 @@ impl World {
         self.entity_tracker().on_player_leave(&player);
 
         self.player_area_map.on_player_leave(&player);
+
+        // Vanilla parity: `PlayerList.remove` finishes with
+        // `ServerLevel.removePlayerImmediately(player, UNLOADED_WITH_PLAYER)`,
+        // which is `player.remove(reason)`. Foton took the player out of the
+        // manager without ever marking them removed, so `Entity::is_alive` kept
+        // answering true and every mob holding them as a target kept hunting a
+        // player who had left -- indefinitely, since goals like `beg` and
+        // `follow_player_ridden_entity` hold a strong `Arc<Player>`. It goes
+        // last: `unregister_player_entity` has already swapped in the null
+        // callback, so this only sets the flag.
+        player.set_removed(RemovalReason::UnloadedWithPlayer);
         (player, domain, player_data)
     }
 

@@ -191,6 +191,10 @@ fn teleport_to_entity(
     let rotation = destination.rotation();
     ensure_same_domain_targets(targets, &target_world)?;
 
+    // A teleport can be refused -- the entity manager will not move an entity it
+    // owns into a chunk it does not track -- and reporting every target as moved
+    // told the operator the opposite of what happened.
+    let mut moved = Vec::with_capacity(targets.len());
     for target in targets {
         let transition = TeleportTransition {
             target_world: Arc::clone(&target_world),
@@ -203,11 +207,13 @@ fn teleport_to_entity(
             as_passenger: false,
             post_transition: TeleportPostTransition::do_nothing(),
         };
-        perform_teleport(context.source(), target, transition, None);
+        if perform_teleport(context.source(), target, transition, None) {
+            moved.push(Arc::clone(target));
+        }
     }
 
-    send_entity_success(context.source(), targets, destination.as_ref());
-    target_count(targets)
+    send_entity_success(context.source(), &moved, destination.as_ref());
+    target_count(&moved)
 }
 
 fn teleport_to_position(
@@ -223,6 +229,7 @@ fn teleport_to_position(
     let resolved_rotation = rotation.map(|rotation| rotation.rotation(source));
     ensure_same_domain_targets(targets, source.world())?;
 
+    let mut moved = Vec::with_capacity(targets.len());
     for target in targets {
         let same_world = target
             .level()
@@ -249,11 +256,13 @@ fn teleport_to_position(
             as_passenger: false,
             post_transition: TeleportPostTransition::do_nothing(),
         };
-        perform_teleport(source, target, transition, facing.as_ref());
+        if perform_teleport(source, target, transition, facing.as_ref()) {
+            moved.push(Arc::clone(target));
+        }
     }
 
-    send_position_success(source, targets, position);
-    target_count(targets)
+    send_position_success(source, &moved, position);
+    target_count(&moved)
 }
 
 enum TeleportFacing {
@@ -269,7 +278,7 @@ fn perform_teleport(
     target: &SharedEntity,
     transition: TeleportTransition,
     facing: Option<&TeleportFacing>,
-) {
+) -> bool {
     if let Some(player) = target.as_player() {
         if player.is_sleeping() {
             player.stop_sleeping();
@@ -279,7 +288,7 @@ fn perform_teleport(
         });
     }
     if change_entity_world(Arc::clone(target), &transition).is_none() {
-        return;
+        return false;
     }
 
     // Vanilla applies command post-effects through the original target reference.
@@ -304,6 +313,7 @@ fn perform_teleport(
     if let Some(pathfinder) = target.as_pathfinder_mob() {
         pathfinder.mob_base().navigation().lock().stop();
     }
+    true
 }
 
 fn ensure_spawnable_position(position: DVec3) -> Result<(), CommandSyntaxError> {
