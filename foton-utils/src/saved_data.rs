@@ -126,6 +126,37 @@ pub struct SavedDataManager {
     data_dir: Option<PathBuf>,
 }
 
+/// Publishes `bytes` at `path` by renaming a fully written temporary over it.
+///
+/// A plain write truncates the destination first, so anything that interrupts it
+/// -- a crash, a full disk, a kill -- leaves a short or empty file where a good
+/// one was. These files are rewritten every autosave on a live server, so that
+/// window comes round every five minutes, and an empty `scoreboard.toml` parses
+/// as a perfectly valid empty scoreboard: the loss would be silent. `level.toml`
+/// and the player store already publish this way; this is the same pattern.
+async fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let temporary = path.with_extension("tmp");
+    let mut file = fs::File::create(&temporary).await?;
+    file.write_all(bytes).await?;
+    file.sync_all().await?;
+    drop(file);
+    fs::rename(&temporary, path).await
+}
+
+/// Blocking twin of [`write_atomically`], for the shutdown path.
+fn write_atomically_sync(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write as _;
+
+    let temporary = path.with_extension("tmp");
+    let mut file = sync_fs::File::create(&temporary)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    sync_fs::rename(&temporary, path)
+}
+
 impl SavedDataManager {
     /// Creates saved-data storage rooted at `world_dir/data`.
     ///
@@ -220,7 +251,7 @@ impl SavedDataManager {
         bytes.extend_from_slice(&name.magic);
         bytes.extend_from_slice(&name.version.to_le_bytes());
         bytes.extend_from_slice(&payload);
-        sync_fs::write(path, bytes)
+        write_atomically_sync(&path, &bytes)
     }
 
     /// Saves a typed saved-data value.
@@ -237,7 +268,7 @@ impl SavedDataManager {
 
         let content = toml::to_string_pretty(data)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        fs::write(path, content).await
+        write_atomically(&path, content.as_bytes()).await
     }
 
     fn path_for(&self, name: SavedDataName) -> Option<PathBuf> {

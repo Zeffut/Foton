@@ -128,9 +128,11 @@ const TAB_LIST_UPDATE_INTERVAL: u64 = 20;
 /// Interval in ticks between player info broadcasts (600 ticks = 30 seconds).
 /// Matches vanilla `PlayerList.SEND_PLAYER_INFO_INTERVAL`.
 const SEND_PLAYER_INFO_INTERVAL: u64 = 600;
-/// Wall-clock interval between saves of command-owned persistent server data.
-/// Matches vanilla's intended five-minute autosave cadence.
-const COMMAND_DATA_AUTOSAVE_INTERVAL: Duration = Duration::from_secs(300);
+/// Wall-clock interval between autosaves.
+///
+/// Vanilla parity: `MinecraftServer.AUTOSAVE_INTERVAL`, 6000 ticks, which is
+/// five minutes at twenty ticks per second.
+const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Copy)]
 struct TabListTickStats {

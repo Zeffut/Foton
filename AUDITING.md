@@ -217,6 +217,29 @@ The exposure is bounded rather than open-ended: the wire side is capped at
 `MAX_COMPONENT_BYTES` and, since a decode failure now disconnects the way
 vanilla does, a client gets one attempt rather than a loop.
 
+## Two the audit found and left to the project to decide
+
+**A chunk that fails to decode is erased and regenerated.** `load_chunk` treats
+any decode error as corruption: it blanks the header entry, fsyncs, and returns
+`Ok(None)`, so worldgen fills the hole. Vanilla is lenient instead -- `NbtUtils`
+turns an unknown block into air and drops an unknown property, and the rest of
+the chunk survives.
+
+The strictness is deliberate: two tests name it,
+`unknown_referenced_block_state_is_corruption_instead_of_air_recovery` and its
+biome twin. What no test covers is the *erasure* that follows. Together they
+mean a registry drift -- a block gaining or losing a property between versions
+-- destroys the world chunk by chunk, on disk, irreversibly. Reversing the
+decode strictness is a design call, not an audit fix; separating "refuse to
+load" from "delete what is on disk" is the smaller question worth asking first.
+
+**A `FORMAT_VERSION` bump discards every region file.** Opening a region whose
+version is not the current one renames it to `.srg.v<n>.bak` and creates an
+empty replacement. No reader for an earlier version exists, and nothing can
+reintroduce the `.bak`. The twenty-two increments so far have each made every
+existing world unreadable, announced only by a `warn!` per region. That may be
+the right trade while the format still moves, but the code nowhere says so.
+
 ## Known limits of this method
 
 - **`panic = "abort"` in release** (`Cargo.toml`) means every `expect()` on a

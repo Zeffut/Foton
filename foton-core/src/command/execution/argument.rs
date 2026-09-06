@@ -6,7 +6,7 @@ use super::{
     BiomeOrTag, BlockPredicate, CommandArgumentSource, Coordinates, IntRange, ItemPredicate,
     ScoreHolderArgument, StructureOrTagKey, WorldArgument,
     biome::{parse_biome_or_tag, suggest_biomes},
-    block::{parse_block_predicate, suggest_blocks},
+    block::{parse_block_predicate, parse_block_state, suggest_blocks},
     coordinates::{parse_block_pos, parse_rotation, parse_vec3, suggest_coordinates},
     function::{FunctionOrTag, parse_function_or_tag, suggest_functions},
     item::{parse_item_stack, suggest_item_stack},
@@ -905,7 +905,7 @@ unit_argument_parser!(
     "foton:command/parser/block_state",
     BlockPredicate,
     parse | reader,
-    _source | { parse_block_predicate(reader) },
+    _source | { parse_block_state(reader) },
     suggest | _context,
     _builder | {},
     protocol(ProtocolArgumentType::BlockState, None)
