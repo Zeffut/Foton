@@ -244,6 +244,22 @@ impl BorderExtent {
         }
     }
 
+    /// The size the collision and damage bounds are measured from.
+    ///
+    /// Vanilla's server-side `getMinX()`/`getMaxX()` call the partial-tick form
+    /// with `deltaPartialTick = 0`, and `Mth.lerp(0, previousSize, size)` is
+    /// `previousSize`. The client interpolates the same lerp forward across the
+    /// tick, so measuring the server's wall from `size` instead puts it a whole
+    /// lerp step ahead of the wall the player sees -- on a 500-to-50 shrink over
+    /// 100 ticks, more than two blocks of pushback and damage before the visible
+    /// border arrives.
+    const fn bounds_size(self) -> f64 {
+        match self {
+            Self::Static { size } => size,
+            Self::Moving { previous_size, .. } => previous_size,
+        }
+    }
+
     const fn lerp_time(self) -> i64 {
         match self {
             Self::Static { .. } => 0,
@@ -339,7 +355,9 @@ impl WorldBorder {
     pub(crate) fn snapshot(&self) -> WorldBorderSnapshot {
         let old_size = self.extent.size();
         let new_size = self.extent.lerp_target();
-        let half_size = old_size / 2.0;
+        // `old_size` is what the packet carries, and the client lerps from it.
+        // The server's own bounds are the same lerp evaluated at delta zero.
+        let half_size = self.extent.bounds_size() / 2.0;
         let absolute_max = f64::from(self.absolute_max_size);
         WorldBorderSnapshot {
             center_x: self.center_x,
@@ -775,6 +793,29 @@ mod tests {
         assert_f64_eq(second_tick.new_size, 20.0);
         assert_eq!(second_tick.lerp_time, 0);
         assert_eq!(second_tick.status, BorderStatus::Stationary);
+    }
+
+    #[test]
+    fn moving_border_bounds_lag_one_lerp_step_behind_the_announced_size() {
+        let mut border = default_border();
+        border
+            .lerp_size_between(20.0, 10.0, 2)
+            .expect("valid border lerp");
+
+        border.tick();
+        let mid = border.snapshot();
+        // The packet carries the size the client lerps toward.
+        assert_f64_eq(mid.old_size, 15.0);
+        // The wall the server enforces is the same lerp at delta zero, which is
+        // the size the client is lerping *from* -- vanilla `getMaxX(0.0F)`.
+        assert_f64_eq(mid.max_x, 10.0);
+        assert_f64_eq(mid.min_x, -10.0);
+
+        border.tick();
+        let finished = border.snapshot();
+        assert_f64_eq(finished.old_size, 10.0);
+        assert_f64_eq(finished.max_x, 5.0);
+        assert_f64_eq(finished.min_x, -5.0);
     }
 
     #[test]

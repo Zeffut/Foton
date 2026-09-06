@@ -63,13 +63,16 @@ impl ReadFrom for DataComponentPatch {
         let added_count = read_component_count(data, "added")?;
         let removed_count = read_component_count(data, "removed")?;
 
-        log::info!("Reading DataComponentPatch: added={added_count}, removed={removed_count}");
-
         let mut patch = Self::new();
 
-        // Read added components
-        for i in 0..added_count {
-            let pos_before = data.position();
+        // Read added components. Nothing here logs: this loop runs once per
+        // component of every item stack a client sends, and vanilla's
+        // `DataComponentPatch.STREAM_CODEC` is silent for the same reason. The
+        // debug traces that used to sit here cost two log lines per wire byte
+        // -- a two-megabyte creative-slot packet full of empty `unbreakable`
+        // components produced four million lines and some two hundred megabytes
+        // of formatted strings, for a few kilobytes on the wire.
+        for _ in 0..added_count {
             let type_id = read_non_negative_varint(data, "component type id")?;
 
             let key = REGISTRY
@@ -80,20 +83,12 @@ impl ReadFrom for DataComponentPatch {
                 })?
                 .clone();
 
-            log::info!("  [{i}] Reading component {key} (id={type_id}) at pos {pos_before}");
-
             let entry = REGISTRY
                 .data_components
                 .by_id(type_id)
                 .ok_or_else(|| std::io::Error::other(format!("No entry for component: {key}")))?;
 
-            let component_data = entry.read_network(data).map_err(|e| {
-                log::error!("    Failed to read component {key}: {e}");
-                e
-            })?;
-
-            let pos_after = data.position();
-            log::info!("    Read {} bytes for {key}", pos_after - pos_before);
+            let component_data = entry.read_network(data)?;
 
             patch
                 .entries

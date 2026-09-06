@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::*;
 
 #[test]
@@ -239,5 +241,58 @@ fn pending_chunk_light_updates_sort_empty_section_changes_deterministically() {
                 empty: true,
             },
         ]
+    );
+}
+
+#[test]
+fn light_propagation_budget_defers_the_rest_but_always_advances_one_task() {
+    let world = fresh_test_world("light_propagation_tick_budget");
+    let chunk_map = &world.chunk_map;
+    // Far enough apart that no two cache windows overlap, so the work gate
+    // never blocks a task and the budget is the only thing deferring anything.
+    let centers = [
+        ChunkPos::new(0, 0),
+        ChunkPos::new(8, 0),
+        ChunkPos::new(16, 0),
+    ];
+    {
+        let mut light_updates = chunk_map.light_updates.lock();
+        for center in centers {
+            light_updates.pending.queue_change(
+                center,
+                BlockPos::new(center.0.x * 16, 64, center.0.y * 16),
+                true,
+                None,
+            );
+        }
+    }
+
+    // An exhausted budget must still let one task through, or a burst larger
+    // than the budget would never drain at all.
+    chunk_map.propagate_queued_light_changes_within(Some(Duration::ZERO));
+
+    let remaining = {
+        let light_updates = chunk_map.light_updates.lock();
+        centers
+            .iter()
+            .filter(|center| light_updates.pending.chunks.contains_key(center))
+            .count()
+    };
+    assert_eq!(
+        remaining, 2,
+        "one task should have run and the other two stayed queued"
+    );
+    assert_eq!(
+        chunk_map.light_updates.lock().pending.next_center(),
+        Some(centers[1]),
+        "deferred tasks keep their arrival order"
+    );
+
+    chunk_map.propagate_queued_light_changes_within(Some(Duration::ZERO));
+    chunk_map.propagate_queued_light_changes_within(Some(Duration::ZERO));
+
+    assert!(
+        chunk_map.light_updates.lock().pending.is_empty(),
+        "repeated budgeted passes must eventually drain the queue"
     );
 }

@@ -176,14 +176,64 @@ pub fn vanilla_nbt_heap_size(tag: &NbtTag) -> Option<u64> {
     }
 }
 
+/// Charges a list without materializing it.
+///
+/// `NbtList::as_nbt_tags` deep-clones every element it hands back, so measuring
+/// a list through it cloned the whole subtree once per nesting level: a two
+/// megabyte `custom_data` component of 511 nested lists ending in a byte array
+/// peaked near a gigabyte of live heap, and the packet was rejected afterwards
+/// anyway. Vanilla never has this problem because `NbtAccounter` charges each
+/// tag as it is parsed rather than measuring a finished tree.
+///
+/// Every charge below is the one `vanilla_nbt_heap_size` gives the same tag, so
+/// the quota itself is unchanged.
 fn vanilla_nbt_list_heap_size(list: &NbtList) -> Option<u64> {
-    let values = list.as_nbt_tags();
-    let count = u64::try_from(values.len()).ok()?;
-    let mut size = 36_u64.checked_add(4_u64.checked_mul(count)?)?;
-    for value in &values {
-        size = size.checked_add(vanilla_nbt_heap_size(value)?)?;
-    }
-    Some(size)
+    let (count, elements) = match list {
+        NbtList::Empty => (0, Some(0)),
+        NbtList::Byte(values) => (values.len(), fixed_elements(values.len(), 9)),
+        NbtList::Short(values) => (values.len(), fixed_elements(values.len(), 10)),
+        NbtList::Int(values) => (values.len(), fixed_elements(values.len(), 12)),
+        NbtList::Float(values) => (values.len(), fixed_elements(values.len(), 12)),
+        NbtList::Long(values) => (values.len(), fixed_elements(values.len(), 16)),
+        NbtList::Double(values) => (values.len(), fixed_elements(values.len(), 16)),
+        NbtList::ByteArray(arrays) => (
+            arrays.len(),
+            sum_sizes(arrays.iter().map(|array| sized_array(24, 1, array.len()))),
+        ),
+        NbtList::IntArray(arrays) => (
+            arrays.len(),
+            sum_sizes(arrays.iter().map(|array| sized_array(24, 4, array.len()))),
+        ),
+        NbtList::LongArray(arrays) => (
+            arrays.len(),
+            sum_sizes(arrays.iter().map(|array| sized_array(24, 8, array.len()))),
+        ),
+        NbtList::String(values) => (
+            values.len(),
+            sum_sizes(values.iter().map(|value| sized_string(36, value.as_str()))),
+        ),
+        NbtList::List(lists) => (
+            lists.len(),
+            sum_sizes(lists.iter().map(vanilla_nbt_list_heap_size)),
+        ),
+        NbtList::Compound(compounds) => (
+            compounds.len(),
+            sum_sizes(compounds.iter().map(vanilla_nbt_compound_heap_size)),
+        ),
+    };
+
+    let count = u64::try_from(count).ok()?;
+    36_u64
+        .checked_add(4_u64.checked_mul(count)?)?
+        .checked_add(elements?)
+}
+
+fn fixed_elements(count: usize, per_element: u64) -> Option<u64> {
+    u64::try_from(count).ok()?.checked_mul(per_element)
+}
+
+fn sum_sizes(mut sizes: impl Iterator<Item = Option<u64>>) -> Option<u64> {
+    sizes.try_fold(0_u64, |total, size| total.checked_add(size?))
 }
 
 fn vanilla_nbt_compound_heap_size(compound: &NbtCompound) -> Option<u64> {
@@ -296,6 +346,7 @@ fn unwrap_list_wrapper(tag: NbtTag) -> NbtTag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use simdnbt::Mutf8String;
 
     fn compound(entries: impl IntoIterator<Item = (&'static str, NbtTag)>) -> NbtTag {
         let mut compound = NbtCompound::new();
@@ -418,5 +469,51 @@ mod tests {
         raw.insert("a", 2);
 
         assert_eq!(vanilla_nbt_heap_size(&NbtTag::Compound(raw)), Some(168));
+    }
+
+    #[test]
+    fn list_heap_size_charges_exactly_what_the_same_tags_charge() {
+        // `vanilla_nbt_list_heap_size` no longer goes through `as_nbt_tags`,
+        // because that clones the whole subtree once per nesting level and made
+        // a two-megabyte component cost a gigabyte of heap just to measure. It
+        // charges each element type by hand now, and a hand transcription is
+        // exactly the kind of thing that drifts -- so every variant is pinned
+        // here against the per-tag function it replaced. `as_nbt_tags` is the
+        // oracle, which is safe on data this small.
+        let mut nested_compound = NbtCompound::new();
+        nested_compound.insert("k", 1);
+
+        let lists = [
+            NbtList::Empty,
+            NbtList::Byte(vec![1, 2, 3]),
+            NbtList::Short(vec![1, 2]),
+            NbtList::Int(vec![1, 2, 3, 4]),
+            NbtList::Float(vec![1.0, 2.0]),
+            NbtList::Long(vec![1, 2]),
+            NbtList::Double(vec![1.0]),
+            NbtList::ByteArray(vec![vec![1, 2, 3], vec![]]),
+            NbtList::IntArray(vec![vec![1, 2], vec![3]]),
+            NbtList::LongArray(vec![vec![1]]),
+            NbtList::String(vec![
+                Mutf8String::from_string("hello".to_owned()),
+                Mutf8String::from_string("e\u{301} and \u{1f600}".to_owned()),
+            ]),
+            NbtList::List(vec![NbtList::Byte(vec![1]), NbtList::Empty]),
+            NbtList::Compound(vec![nested_compound]),
+        ];
+
+        for list in lists {
+            let tags = list.as_nbt_tags();
+            let count = u64::try_from(tags.len()).expect("test list fits in u64");
+            let expected = tags.iter().try_fold(36 + 4 * count, |total, tag| {
+                total.checked_add(vanilla_nbt_heap_size(tag)?)
+            });
+
+            assert_eq!(
+                vanilla_nbt_list_heap_size(&list),
+                expected,
+                "list variant {list:?} charges a different size than its tags"
+            );
+        }
     }
 }

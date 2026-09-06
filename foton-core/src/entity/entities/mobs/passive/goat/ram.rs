@@ -314,11 +314,14 @@ impl PrepareRamNearestTarget {
     }
 
     /// Vanilla parity: `GoatAi.RAM_TARGET_CONDITIONS`.
-    ///
-    /// The world-border clause is left out: Foton's border is not reachable
-    /// from a brain behavior, the same gap the warden's target search carries.
     fn is_rammable(world: &Arc<World>, target: &dyn LivingEntity) -> bool {
         if target.entity_type() == &vanilla_entities::GOAT {
+            return false;
+        }
+        if !world
+            .world_border_snapshot()
+            .is_within_bounds(target.bounding_box())
+        {
             return false;
         }
         if target.entity_type() == &vanilla_entities::ARMOR_STAND {

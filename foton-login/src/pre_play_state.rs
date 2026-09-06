@@ -58,6 +58,7 @@ impl Display for PrePlayPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrePlayPacket {
     ClientIntention,
+    StatusRequest,
     Hello,
     Key,
     LoginAcknowledged,
@@ -69,6 +70,7 @@ impl Display for PrePlayPacket {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::ClientIntention => formatter.write_str("client intention"),
+            Self::StatusRequest => formatter.write_str("status request"),
             Self::Hello => formatter.write_str("hello packet"),
             Self::Key => formatter.write_str("key packet"),
             Self::LoginAcknowledged => formatter.write_str("login acknowledgement"),
@@ -101,7 +103,10 @@ enum LoginState {
 #[derive(Debug)]
 enum State {
     Handshake,
-    Status,
+    /// Server-list ping. `answered` is vanilla's `hasRequestedStatus`.
+    Status {
+        answered: bool,
+    },
     Login(LoginState),
     Configuration {
         phase: ConfigurationPhase,
@@ -130,7 +135,7 @@ impl PrePlayState {
     pub(crate) const fn phase(&self) -> PrePlayPhase {
         match &self.state {
             State::Handshake => PrePlayPhase::Handshake,
-            State::Status => PrePlayPhase::Status,
+            State::Status { .. } => PrePlayPhase::Status,
             State::Login(LoginState::Hello) => PrePlayPhase::Login(LoginPhase::Hello),
             State::Login(LoginState::Key { .. }) => PrePlayPhase::Login(LoginPhase::Key),
             State::Login(LoginState::Authenticating) => {
@@ -153,7 +158,7 @@ impl PrePlayState {
         }
 
         self.state = match protocol {
-            ConnectionProtocol::Status => State::Status,
+            ConnectionProtocol::Status => State::Status { answered: false },
             ConnectionProtocol::Login => State::Login(LoginState::Hello),
             _ => return Err(self.unexpected(PrePlayPacket::ClientIntention)),
         };
@@ -163,7 +168,10 @@ impl PrePlayState {
     pub(crate) const fn expect(&self, packet: PrePlayPacket) -> Result<(), PacketSequenceError> {
         let expected = matches!(
             (&self.state, packet),
-            (State::Login(LoginState::Hello), PrePlayPacket::Hello)
+            (
+                State::Status { answered: false },
+                PrePlayPacket::StatusRequest
+            ) | (State::Login(LoginState::Hello), PrePlayPacket::Hello)
                 | (State::Login(LoginState::Key { .. }), PrePlayPacket::Key)
                 | (
                     State::Login(LoginState::ProtocolSwitching { .. }),
@@ -189,6 +197,19 @@ impl PrePlayState {
         } else {
             Err(self.unexpected(packet))
         }
+    }
+
+    /// Accepts the one status request a connection is allowed.
+    ///
+    /// Vanilla drops the connection on the second
+    /// (`ServerStatusPacketListenerImpl.handleStatusRequest`), because a status
+    /// request is two bytes on the wire and its answer carries the MOTD, the
+    /// player sample and a base64 favicon -- unauthenticated, and worth
+    /// thousands of times what it costs to ask for.
+    pub(crate) fn begin_status_request(&mut self) -> Result<(), PacketSequenceError> {
+        self.expect(PrePlayPacket::StatusRequest)?;
+        self.state = State::Status { answered: true };
+        Ok(())
     }
 
     pub(crate) fn wait_for_key(

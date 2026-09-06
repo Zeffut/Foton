@@ -237,6 +237,15 @@ impl<'a> WorldGenRegion<'a> {
         self.context.min_y()
     }
 
+    /// Returns whether `pos` lies inside the world border.
+    ///
+    /// Vanilla parity: `WorldGenRegion.getWorldBorder`, which forwards to the
+    /// level, so mobs placed while a chunk is generated obey the same border as
+    /// mobs placed at runtime.
+    pub(crate) fn is_block_within_world_border(&self, pos: BlockPos) -> bool {
+        self.context.world().is_block_within_world_border(pos)
+    }
+
     /// Returns the world height.
     #[must_use]
     pub const fn height(&self) -> i32 {

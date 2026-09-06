@@ -787,8 +787,6 @@ impl Player {
         }
         self.flush_dirty_advancements();
         self.tick_time_statistics();
-
-        self.connection.tick();
     }
 
     /// Ticks the death animation timer.

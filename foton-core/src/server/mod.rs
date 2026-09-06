@@ -133,6 +133,17 @@ const SEND_PLAYER_INFO_INTERVAL: u64 = 600;
 /// Vanilla parity: `MinecraftServer.AUTOSAVE_INTERVAL`, 6000 ticks, which is
 /// five minutes at twenty ticks per second.
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(300);
+/// How far the tick loop may fall behind before it stops trying to catch up.
+///
+/// Vanilla parity: `MinecraftServer.OVERLOADED_THRESHOLD_NANOS`, one second.
+const OVERLOADED_THRESHOLD: Duration = Duration::from_secs(1);
+/// Minimum spacing between two "can't keep up" warnings.
+///
+/// Vanilla parity: `MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS`. In
+/// vanilla this also rate-limits the catch-up itself -- the debt is dropped
+/// only on a tick where the warning is allowed to fire -- so the two must stay
+/// bound together here as well.
+const OVERLOADED_WARNING_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy)]
 struct TabListTickStats {

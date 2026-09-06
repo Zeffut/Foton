@@ -33,11 +33,22 @@ use std::ptr;
 pub trait SpawnBlockSource {
     /// Returns the block at `pos`.
     fn spawn_block_state(&self, pos: BlockPos) -> BlockStateId;
+
+    /// Returns whether `pos` is inside the world border.
+    ///
+    /// Vanilla reaches this through `LevelReader.getWorldBorder()`, which
+    /// `WorldGenRegion` forwards to its level, so the test applies during chunk
+    /// generation exactly as it does at runtime.
+    fn spawn_within_world_border(&self, pos: BlockPos) -> bool;
 }
 
 impl SpawnBlockSource for Arc<World> {
     fn spawn_block_state(&self, pos: BlockPos) -> BlockStateId {
         self.get_block_state(pos)
+    }
+
+    fn spawn_within_world_border(&self, pos: BlockPos) -> bool {
+        self.is_block_within_world_border(pos)
     }
 }
 
@@ -143,9 +154,13 @@ pub fn spawn_placement_for(entity_type: EntityTypeRef) -> SpawnPlacementType {
 impl SpawnPlacementType {
     /// Returns whether a mob of `entity_type` fits at `pos`.
     ///
-    /// Vanilla parity: `SpawnPlacementType.isSpawnPositionOk`. The world-border
-    /// test vanilla runs first is left to the caller, which already has to
-    /// reject positions for being too near or too far from a player.
+    /// Vanilla parity: `SpawnPlacementType.isSpawnPositionOk`.
+    ///
+    /// The world-border test comes first, as it does in all three of vanilla's
+    /// restricted placements; `NO_RESTRICTIONS` is the one that skips it. It
+    /// used to be left to the caller, and no caller ran it -- natural spawning,
+    /// worldgen population and raid waves all placed mobs outside a shrunken
+    /// border, where they took border damage on arrival.
     #[must_use]
     pub fn is_spawn_position_ok(
         self,
@@ -153,6 +168,10 @@ impl SpawnPlacementType {
         pos: BlockPos,
         entity_type: EntityTypeRef,
     ) -> bool {
+        if !matches!(self, Self::NoRestrictions) && !level.spawn_within_world_border(pos) {
+            return false;
+        }
+
         match self {
             Self::NoRestrictions => true,
             Self::InWater => {

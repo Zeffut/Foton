@@ -2,11 +2,52 @@
 //!
 //! Handles authentication with Mojang's session servers for online mode.
 
+use std::sync::OnceLock;
+use std::time::Duration;
+
 use foton_core::player::GameProfile;
 use reqwest::{StatusCode, Url};
 use thiserror::Error;
 
 const DEFAULT_AUTH_SERVER: &str = "https://sessionserver.mojang.com/session/minecraft/hasJoined";
+
+/// Connect and read timeouts for a session-server call.
+///
+/// `reqwest`'s default client has neither, and this call sits on the login
+/// path: `tcp_client` wraps only `get_raw_packet` in `PRE_PLAY_READ_TIMEOUT`,
+/// so an unbounded request here holds the connection task, its socket and its
+/// buffers open forever, past shutdown, with nothing to interrupt it. A session
+/// server that accepts the TCP connection and then answers nothing is enough --
+/// so is a misconfigured `auth_server` pointing at a black hole.
+///
+/// The five seconds match what the rest of the workspace already gives an
+/// identity service (`server::service_keys`, `player::profile::lookup`), and
+/// three attempts still fit inside a client's own login patience.
+const AUTH_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The one HTTP client every session-server call goes through.
+///
+/// `reqwest::get` builds a fresh client per call, which means a fresh TLS
+/// handshake and connection pool for every login.
+static AUTH_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn auth_client() -> Result<&'static reqwest::Client, AuthError> {
+    if let Some(client) = AUTH_CLIENT.get() {
+        return Ok(client);
+    }
+
+    // Building a client fails only when the TLS backend cannot initialize,
+    // which is indistinguishable from the session service being unreachable
+    // as far as the joining player is concerned.
+    let client = reqwest::Client::builder()
+        .connect_timeout(AUTH_CONNECT_TIMEOUT)
+        .read_timeout(AUTH_READ_TIMEOUT)
+        .build()
+        .map_err(|_| AuthError::FailedResponse)?;
+
+    Ok(AUTH_CLIENT.get_or_init(|| client))
+}
 
 /// An error that can occur during Mojang authentication.
 #[derive(Error, Debug)]
@@ -67,10 +108,11 @@ pub async fn mojang_authenticate(
 ) -> Result<GameProfile, AuthError> {
     let auth_url = build_auth_url(auth_server, username, server_hash)?;
 
+    let client = auth_client()?;
     let mut last_error = AuthError::FailedResponse;
 
     for _ in 0..MAX_RETRIES {
-        let Ok(response) = reqwest::get(auth_url.clone()).await else {
+        let Ok(response) = client.get(auth_url.clone()).send().await else {
             last_error = AuthError::FailedResponse;
             continue;
         };

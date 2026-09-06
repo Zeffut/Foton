@@ -4,11 +4,11 @@ use super::{
     COMMAND_RESUMPTIONS_PER_TICK, CancellationToken, ChunkPos, ChunkSender,
     CommandExecutionContext, CommandExecutionOwner, CommandRequest, CommandResultCallback,
     CommandSender, CommandSource, Duration, EncodedChunk, ExecutionCommandSource, ExecutionStop,
-    GameTickTaskGuard, Instant, JoinSet, NetworkConnection, PendingCommandExecutionQueue, Player,
-    SEND_PLAYER_INFO_INTERVAL, SLOW_CHUNK_TICK_THRESHOLD, Server, StringReader, SuggestionError,
-    Suggestions, TAB_LIST_UPDATE_INTERVAL, TabListTickStats, ThreadPool, World,
-    WorldRemovalRequest, command_suggestions_packet, configured_packet_workers, sleep,
-    spawn_blocking,
+    GameTickTaskGuard, Instant, JoinSet, NetworkConnection, OVERLOADED_THRESHOLD,
+    OVERLOADED_WARNING_INTERVAL, PendingCommandExecutionQueue, Player, SEND_PLAYER_INFO_INTERVAL,
+    SLOW_CHUNK_TICK_THRESHOLD, Server, StringReader, SuggestionError, Suggestions,
+    TAB_LIST_UPDATE_INTERVAL, TabListTickStats, ThreadPool, World, WorldRemovalRequest,
+    command_suggestions_packet, configured_packet_workers, sleep, spawn_blocking,
 };
 use crate::command::functions::CommandFunction;
 use crate::event::{CommandEvent, ServerTickEvent};
@@ -98,6 +98,9 @@ impl Server {
             }
         };
         let mut next_tick_time = Instant::now();
+        // `None` is vanilla's zero-initialized `lastOverloadWarningNanos`: the
+        // first overload is always allowed to report and to drop its debt.
+        let mut last_overload_warning: Option<Instant> = None;
         let mut next_command_data_autosave = Instant::now() + AUTOSAVE_INTERVAL;
         let mut player_info_ticks = 0_u64;
         let mut pending_command_executions = PendingCommandExecutionQueue::<CommandSource>::new();
@@ -125,15 +128,40 @@ impl Server {
 
             if should_sprint_this_tick {
                 next_tick_time = Instant::now();
+                last_overload_warning = Some(next_tick_time);
             } else {
+                let tick_duration = Duration::from_nanos(nanoseconds_per_tick);
                 let now = Instant::now();
+
+                // A tick that overran leaves `next_tick_time` in the past, and
+                // the loop then runs flat out until it has paid the whole debt
+                // back -- replaying every missed tick, so mobs, redstone,
+                // growth and the day cycle all fast-forward, and on a server
+                // that is merely slow the debt never stops growing. Vanilla
+                // gives up on the debt instead, and says so.
+                let behind = now.saturating_duration_since(next_tick_time);
+                let may_warn = last_overload_warning.is_none_or(|last| {
+                    next_tick_time.saturating_duration_since(last)
+                        >= OVERLOADED_WARNING_INTERVAL + 100 * tick_duration
+                });
+                if behind > OVERLOADED_THRESHOLD + 20 * tick_duration && may_warn {
+                    let ticks_behind = behind.as_nanos() / u128::from(nanoseconds_per_tick.max(1));
+                    log::warn!(
+                        "Can't keep up! Is the server overloaded? Running {}ms or {ticks_behind} ticks behind",
+                        behind.as_millis()
+                    );
+                    next_tick_time +=
+                        tick_duration * u32::try_from(ticks_behind).unwrap_or(u32::MAX);
+                    last_overload_warning = Some(next_tick_time);
+                }
+
                 if now < next_tick_time {
                     tokio::select! {
                         () = cancel_token.cancelled() => break,
                         () = sleep(next_tick_time - now) => {}
                     }
                 }
-                next_tick_time += Duration::from_nanos(nanoseconds_per_tick);
+                next_tick_time += tick_duration;
             }
 
             if cancel_token.is_cancelled() {
@@ -165,6 +193,7 @@ impl Server {
                 break;
             }
             self.process_world_removals(&mut world_tick_workers);
+            self.tick_player_connections();
             player_info_ticks += 1;
             if player_info_ticks > SEND_PLAYER_INFO_INTERVAL {
                 let _span = tracing::trace_span!("broadcast_latency").entered();
@@ -232,6 +261,26 @@ impl Server {
                 log::error!("Command data autosave task failed during shutdown: {error}");
             }
         }
+    }
+
+    /// Ticks every online player's connection, world membership or not.
+    ///
+    /// Vanilla parity: `MinecraftServer.tickConnection` ->
+    /// `ServerConnectionListener.tick`, which walks its own connection list and
+    /// not the player list. That distinction is the whole point of the call.
+    /// Foton ticked the connection from `Player::tick`, which only runs for a
+    /// player some world still ticks -- so a player who reached the End credits,
+    /// and whom `show_end_credits` removes from the world, stopped being sent
+    /// keep-alives and stopped being timed out. A client whose link then died
+    /// without a FIN left its socket, both halves of the connection task and the
+    /// whole `Player` alive until restart, with the name still in the tab list;
+    /// and because a duplicate login is refused while the ghost holds the UUID,
+    /// the person behind it could never get back in either.
+    fn tick_player_connections(&self) {
+        self.online_players().iter_players(|_, player| {
+            player.connection.tick();
+            true
+        });
     }
 
     fn record_tick_and_capture_tab_stats(

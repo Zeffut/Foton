@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use super::{
     Arc, BlockPos, ChunkHolder, ChunkMap, ChunkPos, ChunkStatus, InFlightLightUpdates,
     LightCacheLayout, LightCacheSetupRadius, LightLayer, LightSectionEmptinessChange,
@@ -5,6 +7,21 @@ use super::{
     propagate_block_light_changes_with_empty_sections,
     propagate_sky_light_changes_with_empty_sections,
 };
+
+/// Wall-clock budget for propagating queued light changes inside one game tick.
+///
+/// Vanilla never propagates light on its tick thread: `ThreadedLevelLightEngine`
+/// hands the work to a consecutive executor and bounds each pass to 1000 tasks
+/// (`runUpdate`). Foton propagates inline, so an unbounded drain makes the tick
+/// last as long as the burst that fed it -- a wide `/fill`, an explosion, a
+/// piston chain -- and every player freezes for that whole time.
+///
+/// The bound is wall clock rather than a task count because the cost of one
+/// task is not knowable in advance: a task is a whole chunk's queued changes,
+/// which may be one block or the entire column. Ten milliseconds leaves four
+/// fifths of a 50 ms tick to everything else, and tasks past the budget stay
+/// queued in arrival order for the next tick.
+pub(super) const LIGHT_PROPAGATION_TICK_BUDGET: Duration = Duration::from_millis(10);
 
 impl ChunkMap {
     /// Records a block change at the given position.
@@ -77,31 +94,49 @@ impl ChunkMap {
 
     /// Drains all queued light updates and runs one scoped propagation per changed chunk.
     pub fn propagate_queued_light_changes(&self) {
+        self.propagate_queued_light_changes_within(None);
+    }
+
+    /// Propagates queued light changes, optionally stopping once `budget` elapses.
+    ///
+    /// Tasks left unprocessed -- because the budget ran out, or because another
+    /// workset already holds an overlapping cache window -- are put back at the
+    /// front of the queue in arrival order and run on a later pass. The first
+    /// task of a pass always runs, so a task that costs more than the whole
+    /// budget still makes progress instead of being deferred forever.
+    pub(super) fn propagate_queued_light_changes_within(&self, budget: Option<Duration>) {
         let Some((tasks, in_flight_updates)) = self.drain_pending_light_updates() else {
             return;
         };
 
-        let mut blocked_tasks = Vec::new();
+        let started = Instant::now();
+        let mut propagated = 0_usize;
+        let mut deferred_tasks = Vec::new();
         for (center, task) in tasks {
             if task.is_empty() {
+                continue;
+            }
+            if propagated > 0 && budget.is_some_and(|budget| started.elapsed() >= budget) {
+                deferred_tasks.push((center, task));
                 continue;
             }
             let Some(light_work_window_reservation) =
                 self.light_work_window_gate.try_reserve_centered(center)
             else {
-                blocked_tasks.push((center, task));
+                deferred_tasks.push((center, task));
                 continue;
             };
 
             self.propagate_queued_light_change(center, task);
             drop(light_work_window_reservation);
+            propagated += 1;
         }
 
-        if !blocked_tasks.is_empty() {
+        if !deferred_tasks.is_empty() {
             self.light_updates
                 .lock()
                 .pending
-                .prepend_drained(blocked_tasks);
+                .prepend_drained(deferred_tasks);
         }
         drop(in_flight_updates);
     }

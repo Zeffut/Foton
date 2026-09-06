@@ -271,6 +271,71 @@ ticket -- under a fresh UUID that only `chunkRequestReady` can retire, while the
 only poller for it is unreferenced code; a plugin calling it directly pins a
 chunk for the life of the server.
 
+## The light engine is not vanilla's, and two findings depend on knowing that
+
+Foton's sky and block light are a port of `ScalableLux`, not of vanilla's
+`SkyLightEngine`. Both produce the same light -- `chunk_stage_hashes` compares
+the actual light bytes of generated chunks against vanilla references -- but
+they get there by different means, and an auditor who assumes vanilla's design
+will file two bugs that are not bugs.
+
+**`ChunkSkyLightSources` is maintained and never read in production.** Every
+block change whose light properties differ calls `update_sky_light_sources`,
+which takes a write lock and may rescan the column; the only readers of
+`get_lowest_source_y` are tests, `chunk_stage_hashes` among them (that module is
+`#[cfg(test)]`). In vanilla the cache is load-bearing: `SkyLightEngine.checkNode`
+reads `getLowestSourceY` to decide whether a node is a source at all. In a
+`ScalableLux` port nothing needs it.
+
+Deleting it would be the wrong conclusion. The worldgen parity test compares
+Foton's cached source Y against vanilla's own, column by column, for every
+generated chunk -- that is real parity coverage of a vanilla structure, and it
+only exists because the cache is kept current. The cost is bounded: `update`
+returns immediately when the changed block sits below the column's current
+source edge, which is the common case underground. Keep it, and know why it is
+there.
+
+**A light workset write-locks 25 chunks where 9 are editable.**
+`with_light_edit` takes `light_mut()` on every slot of the 5x5 cache window,
+though propagation can only write within the inner 3x3. Narrowing it to nine
+write locks and sixteen read locks is a genuine optimization and was left
+undone: it is a contention change, not a correctness one, and it would be made
+blind -- nothing here has been profiled.
+
+There is no deadlock in the current shape, and that is not an accident.
+`LightWorkWindowGate` excludes overlapping cache windows outright, so two
+worksets never hold locks on the same chunk. Even without the gate the slot
+order is a global lexicographic order on (z, x), so two overlapping windows
+would acquire their shared chunks in the same relative order. Any narrowing has
+to preserve both properties.
+
+## The one that needs an architecture change, not a fix
+
+Chunk serialization does not run on the world's tick thread, and one window in
+the tick makes that visible. `ChunkMap::tick_game` calls
+`collect_scheduled_block_ticks` and `execute_scheduled_block_ticks` as two
+statements; the collect half already removes the due ticks from their
+`ChunkTickContainer`, so between the two they exist only in a local `Vec`.
+`World::request_save` meanwhile spawns `save_all_chunks` on the chunk runtime,
+and `ChunkTickContainer::snapshot` reads only the containers. A save that lands
+in that window writes a chunk with neither the pending ticks nor the state
+changes they were about to make.
+
+Vanilla cannot reach this state: `ChunkMap.save` calls
+`SerializableChunkData.copyOf` synchronously on the server thread, and only the
+disk write is asynchronous, so serialization is atomic with respect to
+`ServerLevel.tick`.
+
+The damage is bounded, which is why this is documented rather than fixed. The
+executing tick marks the chunk dirty again immediately afterwards, so the next
+save corrects the file; the bad write only survives if the process dies before
+that -- a crash, a `kill -9`, a power cut. Closing it properly means moving
+chunk serialization onto the tick thread or gating it behind a tick barrier,
+which is an architecture change and not an audit fix. A smaller sibling sits in
+the same place and could be fixed on its own: `FullChunkRef::scheduled_tick_snapshot`
+reads `world.game_time()` before it takes the container lock, so a tick landing
+between the two shifts every persisted `delay` by one.
+
 ## Known limits of this method
 
 - **`panic = "abort"` in release** (`Cargo.toml`) means every `expect()` on a

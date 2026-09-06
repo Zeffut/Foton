@@ -270,10 +270,6 @@ impl WardenEntity {
     }
 
     /// Vanilla parity: `Warden.canTargetEntity`.
-    ///
-    /// Not implemented: the world-border bounds check. Foton's border is reachable from
-    /// the world but not as a bounding-box test on an arbitrary entity, and a warden that
-    /// ignores the border only differs outside it.
     #[must_use]
     pub fn can_target_entity(&self, entity: Option<&dyn Entity>) -> bool {
         let Some(entity) = entity else {
@@ -288,11 +284,17 @@ impl WardenEntity {
         {
             return false;
         }
+        let Some(world) = self.level() else {
+            return false;
+        };
         !self.is_allied_to(entity)
             && entity.entity_type() != &vanilla_entities::ARMOR_STAND
             && entity.entity_type() != &vanilla_entities::WARDEN
             && !living.is_invulnerable()
             && !living.is_dead_or_dying()
+            && world
+                .world_border_snapshot()
+                .is_within_bounds(living.bounding_box())
     }
 
     /// Vanilla parity: `Warden.setAttackTarget`.
