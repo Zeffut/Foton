@@ -129,7 +129,14 @@ impl ShapedRecipe {
         for y in 0..self.height {
             for x in 0..self.width {
                 let pattern_x = if mirrored { self.width - 1 - x } else { x };
-                let ingredient = &self.pattern[y * self.width + pattern_x];
+                // Indexed rather than sliced: a recipe registered through the
+                // plugin API is not this crate's to trust, and a pattern shorter
+                // than `width * height` used to abort the server from inside a
+                // player's crafting grid. A malformed recipe simply does not
+                // match now.
+                let Some(ingredient) = self.pattern.get(y * self.width + pattern_x) else {
+                    return false;
+                };
                 let input_item = input.get(x, y);
 
                 if !ingredient.test(input_item) {

@@ -8292,11 +8292,23 @@ extern "system" fn recipe_add_shaped(
     let Some(rows) = read_string_array(&mut env, &shape) else {
         return jboolean::from(false);
     };
-    if rows.is_empty() || rows.len() > 3 || rows.iter().any(|row| row.is_empty() || row.len() > 3) {
+    // Widths are counted in characters, because that is what the pattern below
+    // is filled with. Counting bytes here instead let a non-ASCII key -- which
+    // every guard accepted, since the character resolves fine -- record a
+    // `width` larger than the pattern it describes. Nothing failed at
+    // registration: the panic came later, out of `matches_at`, in the crafting
+    // loop of whichever player happened to lay out two items in a row of three,
+    // with nothing left to point at the plugin that caused it.
+    if rows.is_empty()
+        || rows.len() > 3
+        || rows
+            .iter()
+            .any(|row| row.is_empty() || row.chars().count() > 3)
+    {
         return jboolean::from(false);
     }
-    let width = rows[0].len();
-    if rows.iter().any(|row| row.len() != width) {
+    let width = rows[0].chars().count();
+    if rows.iter().any(|row| row.chars().count() != width) {
         return jboolean::from(false);
     }
     let Some(definitions) = read_string_array(&mut env, &ingredients) else {

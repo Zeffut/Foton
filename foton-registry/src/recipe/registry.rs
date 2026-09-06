@@ -82,7 +82,6 @@ impl RecipeRegistry {
 
     /// Registers a plugin-owned shaped recipe after the vanilla registry froze.
     pub fn register_runtime_shaped(&self, recipe: ShapedRecipe) -> bool {
-        let recipe = Box::leak(Box::new(recipe));
         if self.contains_key(&recipe.id) {
             return false;
         }
@@ -90,13 +89,17 @@ impl RecipeRegistry {
         if recipes.iter().any(|existing| existing.id == recipe.id) {
             return false;
         }
-        recipes.push(recipe);
+        // Leak only once the recipe is actually kept. Leaking first meant a
+        // registration that was then refused as a duplicate leaked anyway, and
+        // a `&'static` is never freed -- so a plugin re-registering its recipes
+        // on every reload, or looping on a name already taken, grew the process
+        // without bound.
+        recipes.push(Box::leak(Box::new(recipe)));
         true
     }
 
     /// Registers a plugin-owned shapeless recipe after the vanilla registry froze.
     pub fn register_runtime_shapeless(&self, recipe: ShapelessRecipe) -> bool {
-        let recipe = Box::leak(Box::new(recipe));
         if self.contains_key(&recipe.id) {
             return false;
         }
@@ -104,7 +107,12 @@ impl RecipeRegistry {
         if recipes.iter().any(|existing| existing.id == recipe.id) {
             return false;
         }
-        recipes.push(recipe);
+        // Leak only once the recipe is actually kept. Leaking first meant a
+        // registration that was then refused as a duplicate leaked anyway, and
+        // a `&'static` is never freed -- so a plugin re-registering its recipes
+        // on every reload, or looping on a name already taken, grew the process
+        // without bound.
+        recipes.push(Box::leak(Box::new(recipe)));
         true
     }
 
