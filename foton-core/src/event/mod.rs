@@ -65,11 +65,12 @@ pub use lectern::PlayerTakeLecternBookEvent;
 pub use player::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent,
     PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
-    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent, PlayerCustomPayloadEvent,
-    PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent, PlayerInteractEntityEvent,
-    PlayerInteractEvent, PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
-    PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent,
-    PlayerQuitEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent,
+    PlayerBucketFillEvent, PlayerChangedWorldEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
+    PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent,
+    PlayerGameModeChangeEvent, PlayerInteractEntityEvent, PlayerInteractEvent,
+    PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginEvent,
+    PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerRespawnEvent, PlayerSpawnLocationEvent,
 };
 pub use server::ServerTickEvent;
 pub use world::{ChunkLoadEvent, PortalCreateEvent, ThunderChangeEvent, WeatherChangeEvent};

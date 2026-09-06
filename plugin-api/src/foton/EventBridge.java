@@ -496,6 +496,24 @@ public final class EventBridge {
         return completions == null ? new String[0] : completions.toArray(new String[0]);
     }
 
+    /** A game mode is about to change. Returns false when a plugin refused. */
+    public static boolean fireGameModeChange(String uuid, String mode) {
+        org.bukkit.GameMode parsed;
+        try { parsed = org.bukkit.GameMode.valueOf(mode.toUpperCase(java.util.Locale.ROOT)); }
+        catch (IllegalArgumentException unknown) { return true; }
+        org.bukkit.event.player.PlayerGameModeChangeEvent event =
+                new org.bukkit.event.player.PlayerGameModeChangeEvent(player(uuid), parsed);
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
+    /** A player has moved between worlds. Reports a move already made. */
+    public static void fireChangedWorld(String uuid, String fromWorld) {
+        org.bukkit.World from = org.bukkit.Bukkit.getWorld(fromWorld);
+        if (from == null) return;
+        dispatch(new org.bukkit.event.player.PlayerChangedWorldEvent(player(uuid), from));
+    }
+
     /** The client finished loading its world. Returns false when cancelled. */
     public static boolean fireClientLoadedWorld(String uuid, boolean fromNetworking) {
         io.papermc.paper.event.player.PlayerClientLoadedWorldEvent event =

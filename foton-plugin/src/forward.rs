@@ -38,6 +38,7 @@ use foton_core::event::{
     PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
     SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
+use foton_core::event::{PlayerChangedWorldEvent, PlayerGameModeChangeEvent};
 use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
@@ -939,6 +940,26 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             Answer::Nothing => event.set_message(None),
             Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerGameModeChangeEvent, _>(owner(), move |event| {
+        if !game_mode_change_call(
+            &jvm,
+            event.player().gameprofile.id,
+            event.new_game_mode().name(),
+        ) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerChangedWorldEvent, _>(owner(), move |event| {
+        changed_world_call(
+            &jvm,
+            event.player().gameprofile.id,
+            &event.from().key.to_string(),
+        );
     });
 
     let jvm = Arc::clone(&vm);
@@ -2483,6 +2504,46 @@ fn block_damage_call(vm: &JavaVM, player: uuid::Uuid, world: &str, pos: BlockPos
     .ok()
     .and_then(|value| value.z().ok())
     .unwrap_or(true)
+}
+
+/// Returns false only when a plugin actually refused: an unreachable bridge
+/// has not objected, and treating it as a refusal would freeze every game mode
+/// change the moment the JVM stopped answering.
+fn game_mode_change_call(vm: &JavaVM, player: uuid::Uuid, mode: &str) -> bool {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let Ok(player) = env.new_string(player.to_string()) else {
+        return true;
+    };
+    let Ok(mode) = env.new_string(mode) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireGameModeChange",
+        "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&player), JValue::Object(&mode)],
+    )
+    .map_or(true, |value| value.z().unwrap_or(true))
+}
+
+fn changed_world_call(vm: &JavaVM, player: uuid::Uuid, from_world: &str) {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return;
+    };
+    let Ok(player) = env.new_string(player.to_string()) else {
+        return;
+    };
+    let Ok(from_world) = env.new_string(from_world) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        BRIDGE,
+        "fireChangedWorld",
+        "(Ljava/lang/String;Ljava/lang/String;)V",
+        &[JValue::Object(&player), JValue::Object(&from_world)],
+    );
 }
 
 /// What the plugin layer did with a completion request.
