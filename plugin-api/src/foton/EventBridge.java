@@ -813,6 +813,11 @@ public final class EventBridge {
             + result.getZ() + "|" + result.getYaw() + "|" + result.getPitch();
     }
 
+    public static void fireChunkUnload(String world, int x, int z) {
+        dispatch(new org.bukkit.event.world.ChunkUnloadEvent(
+                new FotonChunk(new FotonWorld(world), x, z)));
+    }
+
     public static void fireChunkLoad(String world, int x, int z, boolean newlyGenerated) {
         dispatch(new org.bukkit.event.world.ChunkLoadEvent(new FotonChunk(new FotonWorld(world), x, z), newlyGenerated));
     }

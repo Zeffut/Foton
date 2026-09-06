@@ -7,7 +7,7 @@ use super::{
     SectionPos, SharedEntity, SharedGameEventListener, SyncMutex, World, WorldAabb,
     WorldChangeRequest, block_entity_ticker, mem, next_entity_id, vanilla_entities,
 };
-use crate::event::{EntityRemoveFromWorldEvent, ItemSpawnEvent};
+use crate::event::{ChunkUnloadEvent, EntityRemoveFromWorldEvent, ItemSpawnEvent};
 
 pub(super) struct NavigatingMobTracker {
     ids: SyncMutex<FxHashSet<i32>>,
@@ -332,6 +332,11 @@ impl World {
     }
 
     pub(crate) fn on_entity_chunk_unload_start(self: &Arc<Self>, pos: ChunkPos) {
+        // Before the entities leave, so a listener still sees what was in the
+        // chunk. Bukkit's `ChunkUnloadEvent` is not cancellable and neither is
+        // this: the unload is already under way.
+        self.fire_event(&mut ChunkUnloadEvent::new(self.key.to_string(), pos));
+
         let result = self.entity_manager.begin_chunk_unload(pos);
         self.apply_entity_lifecycle_changes(EntityLifecycleChanges {
             tracking_started: Vec::new(),
