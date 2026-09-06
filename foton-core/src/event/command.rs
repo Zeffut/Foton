@@ -64,3 +64,90 @@ impl CommandEvent {
         self.handled = handled;
     }
 }
+
+/// Somebody asked for tab completions, before the server computed any.
+///
+/// Vanilla has no equivalent; this is Paper's `AsyncTabCompleteEvent`, and it
+/// exists so a plugin can complete a command the Brigadier tree has never heard
+/// of -- the same reason [`CommandEvent`] exists. A listener that supplies
+/// completions and marks the event handled replaces the server's answer
+/// entirely; one that only adds to the list is ignored unless it says so.
+///
+/// Paper fires this off the main thread, which is what the `Async` in its name
+/// promises. Foton fires it on the command-request phase of the tick instead.
+/// The difference is visible to a listener that blocks: here that costs tick
+/// time rather than nothing.
+pub struct AsyncTabCompleteEvent {
+    player: Option<Arc<Player>>,
+    buffer: String,
+    completions: Vec<String>,
+    handled: bool,
+    cancelled: bool,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type
+// within the process.
+unsafe impl DowncastType for AsyncTabCompleteEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/async_tab_complete");
+}
+
+impl Event for AsyncTabCompleteEvent {}
+
+impl AsyncTabCompleteEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player: Option<Arc<Player>>, buffer: String) -> Self {
+        Self {
+            player,
+            buffer,
+            completions: Vec::new(),
+            handled: false,
+            cancelled: false,
+        }
+    }
+
+    /// Who is completing, when it was a player.
+    #[must_use]
+    pub const fn player(&self) -> Option<&Arc<Player>> {
+        self.player.as_ref()
+    }
+
+    /// Everything typed so far, leading slash included.
+    #[must_use]
+    pub fn buffer(&self) -> &str {
+        &self.buffer
+    }
+
+    /// The completions a listener supplied.
+    #[must_use]
+    pub fn completions(&self) -> &[String] {
+        &self.completions
+    }
+
+    /// Replaces the completions a listener has supplied so far.
+    pub fn set_completions(&mut self, completions: Vec<String>) {
+        self.completions = completions;
+    }
+
+    /// Whether a listener means its completions to replace the server's.
+    #[must_use]
+    pub const fn is_handled(&self) -> bool {
+        self.handled
+    }
+
+    /// Claims the completion, so the server does not compute its own.
+    pub const fn set_handled(&mut self, handled: bool) {
+        self.handled = handled;
+    }
+
+    /// Whether a listener refused the completion outright.
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Refuses the completion; the player is offered nothing.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}

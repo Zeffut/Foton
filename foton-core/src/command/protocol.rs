@@ -35,6 +35,31 @@ pub(crate) fn command_suggestions_packet(
     CCommandSuggestions::new(transaction_id, start, length, entries)
 }
 
+/// Packs completions a plugin supplied, replacing the server's own.
+///
+/// The replaced range is the last word of the buffer, which is what the client
+/// swaps out. Taking the whole buffer instead would have the client replace the
+/// command name along with the argument being typed.
+pub(crate) fn plugin_suggestions_packet(
+    transaction_id: i32,
+    buffer: &str,
+    completions: &[String],
+) -> CCommandSuggestions {
+    let start = buffer
+        .rfind(' ')
+        .map_or(0, |space| buffer[..=space].encode_utf16().count());
+    // Bounded by the same 32,500-byte serverbound limit as the tree's own
+    // suggestions, so the UTF-16 indices fit the packet's signed VarInts.
+    let start = i32::try_from(start).unwrap_or(0);
+    let length = i32::try_from(buffer.encode_utf16().count()).unwrap_or(0) - start;
+    let entries = completions
+        .iter()
+        .take(MAX_COMMAND_SUGGESTIONS)
+        .map(|completion| SuggestionEntry::new(completion.as_str()))
+        .collect();
+    CCommandSuggestions::new(transaction_id, start, length.max(0), entries)
+}
+
 /// A filtered Brigadier graph could not be represented by the vanilla packet.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub(crate) enum CommandTreeProjectionError {

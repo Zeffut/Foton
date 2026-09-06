@@ -15,6 +15,7 @@ use crate::natives;
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
 use foton_core::entity::conversion::ConversionReason;
+use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
 use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
@@ -937,6 +938,21 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
             Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<AsyncTabCompleteEvent, _>(owner(), move |event| {
+        let Some(player) = event.player() else {
+            return;
+        };
+        match tab_complete_call(&jvm, player.gameprofile.id, event.buffer()) {
+            TabCompleteAnswer::Untouched => {}
+            TabCompleteAnswer::Refused => event.set_cancelled(true),
+            TabCompleteAnswer::Claimed(completions) => {
+                event.set_completions(completions);
+                event.set_handled(true);
+            }
         }
     });
 
@@ -2467,6 +2483,56 @@ fn block_damage_call(vm: &JavaVM, player: uuid::Uuid, world: &str, pos: BlockPos
     .ok()
     .and_then(|value| value.z().ok())
     .unwrap_or(true)
+}
+
+/// What the plugin layer did with a completion request.
+enum TabCompleteAnswer {
+    /// No listener took it; the server should answer for itself.
+    Untouched,
+    /// A listener refused; the player is offered nothing.
+    Refused,
+    /// A listener supplied the whole answer.
+    Claimed(Vec<String>),
+}
+
+/// Asks the plugin layer for completions.
+///
+/// An unreachable bridge answers `Untouched` rather than `Refused`: a JVM that
+/// cannot be asked has not refused, and treating it as a refusal would turn a
+/// bridge failure into silently broken tab completion.
+fn tab_complete_call(vm: &JavaVM, player: uuid::Uuid, buffer: &str) -> TabCompleteAnswer {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return TabCompleteAnswer::Untouched;
+    };
+    let Ok(player) = env.new_string(player.to_string()) else {
+        return TabCompleteAnswer::Untouched;
+    };
+    let Ok(buffer) = env.new_string(buffer) else {
+        return TabCompleteAnswer::Untouched;
+    };
+    let Ok(value) = env.call_static_method(
+        BRIDGE,
+        "fireAsyncTabComplete",
+        "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+        &[JValue::Object(&player), JValue::Object(&buffer)],
+    ) else {
+        return TabCompleteAnswer::Untouched;
+    };
+    let Ok(array) = value.l() else {
+        return TabCompleteAnswer::Untouched;
+    };
+    if array.is_null() {
+        return TabCompleteAnswer::Untouched;
+    }
+    let array = jni::objects::JObjectArray::from(array);
+    let Some(completions) = natives::read_string_array(&mut env, &array) else {
+        return TabCompleteAnswer::Untouched;
+    };
+    if completions.is_empty() {
+        TabCompleteAnswer::Refused
+    } else {
+        TabCompleteAnswer::Claimed(completions)
+    }
 }
 
 /// Returns false when a plugin cancelled, or when the bridge could not be

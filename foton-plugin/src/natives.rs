@@ -340,7 +340,10 @@ fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
     array.into_raw()
 }
 
-fn read_string_array(env: &mut JNIEnv<'_>, array: &JObjectArray<'_>) -> Option<Vec<String>> {
+pub(crate) fn read_string_array(
+    env: &mut JNIEnv<'_>,
+    array: &JObjectArray<'_>,
+) -> Option<Vec<String>> {
     let length = env.get_array_length(array).ok()?;
     let mut values = Vec::with_capacity(length as usize);
     for index in 0..length {
