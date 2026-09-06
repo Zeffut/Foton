@@ -1,5 +1,6 @@
 //! Crop block implementation (wheat, carrots, potatoes, beetroot).
 
+use crate::event::{BlockGrowEvent, Event as _};
 use std::sync::Arc;
 
 use foton_macros::block_behavior;
@@ -148,6 +149,15 @@ pub trait CropLike {
             let growth_chance = (CROP_GROWTH_CHANCE_BASE / growth_speed) as u32 + 1;
 
             if rand::random::<u32>().is_multiple_of(growth_chance) {
+                // Per successful advance, not per random tick: a plugin
+                // counting growth wants the stage change, and a farm freeze
+                // wants to refuse this one rather than every tick that missed.
+                let mut event = BlockGrowEvent::new(world.key.to_string(), pos);
+                world.fire_event(&mut event);
+                if event.is_cancelled() {
+                    return;
+                }
+
                 let new_state = self.get_state_for_age(age + 1);
                 world.set_block(pos, new_state, UpdateFlags::UPDATE_CLIENTS);
             }

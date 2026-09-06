@@ -43,8 +43,8 @@ pub mod world;
 
 pub use block::{
     BlockBreakEvent, BlockBurnEvent, BlockDamageEvent, BlockDispenseEvent, BlockExpEvent,
-    BlockFadeEvent, BlockFromToEvent, BlockIgniteEvent, BlockPlaceEvent, BlockPreDispenseEvent,
-    BlockSpreadEvent, LeavesDecayEvent, PistonEvent, SignChangeEvent,
+    BlockFadeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
+    BlockPreDispenseEvent, BlockSpreadEvent, LeavesDecayEvent, PistonEvent, SignChangeEvent,
 };
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
