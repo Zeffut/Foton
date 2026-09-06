@@ -372,6 +372,26 @@ the same place and could be fixed on its own: `FullChunkRef::scheduled_tick_snap
 reads `world.game_time()` before it takes the container lock, so a tick landing
 between the two shifts every persisted `delay` by one.
 
+## The layer this audit kept skipping
+
+Twelve changes went in against `cargo check`, `cargo clippy` and 5438 unit
+tests, and none of that starts the server. Four of them could not be proven that
+way at all: connections are ticked per connection now rather than per
+world-resident player, so every online player's keep-alive depends on a call
+that moved; a duplicate login displaces the incumbent from inside the task that
+`queue_player_join` already spawned, which moved the reservation off the
+synchronous path; a packet that will not encode disconnects its client instead
+of aborting; and the compression threshold is clamped on the way to
+`CLoginCompression`. All four sit on the path a client walks to enter the world,
+and all four are invisible to layer 1.
+
+`dev/smoke-test.sh` and `dev/join-test.sh` are ten minutes and they answer it:
+a real client reaching `JOIN STATUS: OK`, with compression negotiated, an entity
+id assigned and its chunks delivered. Run them before believing a green CI on
+anything that touches login, connections or packet sending. `PARITY.md` opens by
+saying a system that exists is not a system that works; the same is true of a
+system that compiles.
+
 ## Known limits of this method
 
 - **`panic = "abort"` in release** (`Cargo.toml`) means every `expect()` on a
@@ -426,6 +446,17 @@ between the two shifts every persisted `delay` by one.
   eighteen inventory slot methods each repeated the same one, and the answer was
   not eighteen annotations but four accessors on `ContainerLockGuard`, after
   which the eighteen call sites had no `expect` at all.
+
+- **`clippy::indexing_slicing` is not the answer to unchecked indexing, and it
+  was measured rather than guessed.** The corrupt-region-file panic this audit
+  fixed was an unchecked `runtime_palette[index]` sitting next to an `expect`,
+  and `expect_used` could not see it -- which suggests turning the indexing lint
+  on next. Do not: it reports 101 sites in `foton-utils` alone, the smallest
+  crate that has any, and unlike `expect`, most indexing here is provably in
+  bounds by construction -- fixed-size arrays reached through masked indices,
+  chunk-local coordinates already `& 15`. The signal would be buried. The class
+  is real but the lint cannot isolate it; the place to look is any `[]` on a
+  length that came from a file or a packet.
 
 - **A stack overflow is not a panic.** It is a SIGSEGV, so no `catch_unwind`
   and no abort handler sees it. Recursive parsers need an explicit depth
