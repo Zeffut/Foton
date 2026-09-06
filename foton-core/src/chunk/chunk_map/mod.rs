@@ -748,6 +748,22 @@ impl ChunkMap {
             let min_y = holder.min_y();
             holder.clear_broadcast_queued();
 
+            // Vanilla parity: `ServerChunkCache` resolves `getTickingChunk()`
+            // and only calls `broadcastChanges` when it is there, so a holder
+            // that is no longer ticking keeps its change filters and publishes
+            // them on a later pass. Draining first and checking afterwards threw
+            // them away: a light section marked while the chunk was Full, and
+            // demoted before this pass ran, lost its update for good -- the
+            // content revision had already moved, so nothing would resend it
+            // until some later change touched the same section.
+            //
+            // Clearing the queued flag stays above the guard, exactly as vanilla
+            // clears its broadcast list every tick: the holder leaves this round
+            // either way and is re-queued by the next change.
+            let Some(chunk) = holder.try_chunk(ChunkStatus::Full) else {
+                continue;
+            };
+
             let light_changes = holder.take_changed_light_sections();
             // Take all pending changes from this chunk holder
             let changes_by_section = holder.take_changed_blocks();
@@ -758,9 +774,7 @@ impl ChunkMap {
                 continue;
             }
 
-            if has_publishable_light_changes
-                && let Some(chunk) = holder.try_chunk(ChunkStatus::Full)
-            {
+            if has_publishable_light_changes {
                 let tracking_players = world.get_light_packet_tracking_players(chunk_pos);
                 if !tracking_players.is_empty() {
                     let light_data = {

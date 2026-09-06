@@ -276,8 +276,22 @@ chunk for the life of the server.
 - **`panic = "abort"` in release** (`Cargo.toml`) means every `expect()` on a
   live path is a server kill with no unwinding, so `shutdown_worlds()` never
   runs and dirty chunks are lost. Treat any reachable `expect` as a data-loss
-  bug, not a style problem. Note that clippy is configured with
-  `clippy::unwrap_used` but not `expect_used`, so `expect` is not linted.
+  bug, not a style problem.
+
+  `Cargo.toml` sets `unwrap_used = "warn"` and CI runs clippy with
+  `-D warnings`, so `unwrap` is effectively denied. `expect_used` is not set at
+  all, and the workspace holds roughly 1400 `.expect()` calls -- 423 of them in
+  `foton-core` files that contain no test module, so those are production sites.
+  Most are surely provable invariants, but the class is unlit and unaudited, and
+  the audit that measured this also found two live ones: `chunk_sender` aborted
+  the server on a chunk packet too large to encode, on a rayon worker, while the
+  identical error two files away was already a warning and a skipped packet.
+
+  This is the clearest thing the tooling cannot see. Every one of `dev/ci.sh`'s
+  ten stages passed green over that `expect` for the whole audit. Turning
+  `expect_used` on would fail CI on all 423 at once; the project already uses
+  `#[expect(..., reason = "...")]` elsewhere, which is the lever for adopting it
+  a crate at a time.
 - **A stack overflow is not a panic.** It is a SIGSEGV, so no `catch_unwind`
   and no abort handler sees it. Recursive parsers need an explicit depth
   ceiling; vanilla uses 512 (`NbtAccounter`).

@@ -121,9 +121,16 @@ impl ChunkSender {
 
     /// Encodes and sends a packet through the connection.
     fn send_packet<P: ClientPacket>(connection: &PlayerConnection, packet: P) {
-        let encoded =
+        // `from_bare` refuses a payload past `MAX_PACKET_SIZE`, and under
+        // `panic = "abort"` an `expect` here ends the server. The light-update
+        // path in `chunk_map` already treats the identical error as a dropped
+        // packet and a warning; there is no reason this one should be fatal.
+        let Ok(encoded) =
             EncodedPacket::from_bare(packet, connection.compression(), ConnectionProtocol::Play)
-                .expect("Failed to encode packet");
+        else {
+            log::warn!("Failed to encode a chunk-sender packet; dropping it");
+            return;
+        };
         connection.send_encoded(encoded);
     }
 
@@ -198,7 +205,15 @@ impl ChunkSender {
                     let revision_before = holder.packet_content_revision();
                     let chunk = holder.try_full_chunk()?;
 
-                    let packet = EncodedPacket::from_bare(
+                    // A chunk packet carries every section, the heightmaps, the
+                    // light arrays and the NBT of every block entity in the
+                    // column, so a chunk dense with signs, banners or command
+                    // blocks can pass `MAX_PACKET_SIZE` -- and without
+                    // compression that ceiling is only two megabytes. This runs
+                    // on a rayon worker, where `panic = "abort"` makes one
+                    // oversized chunk the end of the server. Skipping the chunk
+                    // leaves that one column unsent, which is survivable.
+                    let Ok(packet) = EncodedPacket::from_bare(
                         CLevelChunkWithLight {
                             x: pos.0.x,
                             z: pos.0.y,
@@ -207,8 +222,10 @@ impl ChunkSender {
                         },
                         compression,
                         ConnectionProtocol::Play,
-                    )
-                    .expect("Failed to encode chunk packet");
+                    ) else {
+                        log::warn!("Failed to encode chunk packet for {pos:?}; skipping it");
+                        return None;
+                    };
                     let revision_after = holder.packet_content_revision();
                     if revision_before != revision_after
                         || holder.ticking_readiness_snapshot() != prepared.readiness
