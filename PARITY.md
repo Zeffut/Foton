@@ -590,17 +590,48 @@ the arrow lands, so one that is picked up and shot again starts over.
 
 Two halves are still missing, and they belong to other systems.
 
-The team clause needs `Player.canHarmPlayer`, which reads the shooter's
-scoreboard team and its `allowFriendlyFire` flag. Foton's `ScoreboardTeam`
-carries a name and nothing else -- no ally relation, no options -- and
-`Entity::is_allied_to` answers `false` for everything. Writing the test would
-mean inventing the data it reads, so this is a team-system gap rather than an
-arrow one.
+Both are now closed.
 
-The projectile layer still returns only the nearest hit per tick, so a Piercing
-arrow passes through a line of mobs one body per tick rather than all at once.
-Vanilla splits this at `findHitEntities`/`getManyEntityHitResult`; Foton has the
-single-hit form only.
+**The team clause is wired.** `ScoreboardTeam` carried a name and nothing else,
+so `Entity::is_allied_to` answered `false` for everything and an arrow between
+team-mates behaved as though friendly fire were always on. Teams now carry
+`allowFriendlyFire` and `seeFriendlyInvisibles` -- vanilla's two behavioral
+options, both defaulting the way `PlayerTeam`'s constructor does -- and
+`Player::can_harm_player` reproduces `canHarmPlayer`'s three branches: no team
+is yes, a different team is yes, the same team defers to the flag.
+
+`is_allied_to` is implemented as a *separate* question, because vanilla writes
+it as one: `Team.isAlliedTo` is `this == other`, pure team identity with no
+reference to the flag. Two players on a friendly-fire team are allies who may
+still shoot each other, and conflating the two would have made the mace spare
+team-mates it should smash.
+
+What is still missing is the `/team` command and the `CSetPlayerTeam` packet:
+teams are reachable through the scoreboard API the `@e[team=]` selector already
+uses, but an operator cannot create or modify one in game, and clients see no
+team color or prefix. That is a command-and-protocol gap now, not a data one.
+
+Persisted scoreboards written before options existed hold `"teams": [...]`, and
+`deny_unknown_fields` leaves no room for a parallel field, so `teams` is read by
+a deserializer that accepts either shape. An old team loads with vanilla's
+defaults, which is what it behaved like. A test pins it, because the failure
+mode is a world losing its teams at startup.
+
+**Piercing no longer costs a tick per body.** The projectile layer returned only
+the nearest hit per tick, so a Piercing arrow crossed a line of mobs one body at
+a time -- which reads in game as the arrow stalling, and lets the second mob's
+invulnerability lapse before it is reached. `get_many_entity_hit_result` is
+vanilla's `getManyEntityHitResult`, written the way vanilla writes it rather
+than as an extension of the single-hit sibling: the exact box is clipped first
+and the margin is only a fallback, and that fallback then clips towards the
+entity's center and stops at the first block, so a target behind a wall is not
+hit through it because the margin reached past a corner.
+
+Non-piercing arrows need no special case -- one discards itself on its first
+hit, so `hit_targets_or_deflect_self` stops on `is_alive`, which is vanilla's
+own mechanism. What still differs: vanilla's `stepMoveAndHit` loop drives the
+arrow's position, stepping to each hit in turn, while Foton keeps its own
+`move_entity`, so the block half of that method is the mover's work.
 
 **`MobEffect.onMobHurt` and `onMobRemoved` are wired.** They used not to be,
 which left four effects doing nothing and made the trial-chamber and

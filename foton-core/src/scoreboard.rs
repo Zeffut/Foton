@@ -121,12 +121,63 @@ struct ObjectiveState {
     read_only: bool,
 }
 
+/// The options a team carries beyond its name.
+///
+/// Vanilla parity: the settable fields of `PlayerTeam`. Only the two that
+/// change behaviour rather than presentation are stored so far; both default
+/// the way vanilla's constructor does, so a team created and never modified
+/// behaves like `/team add` with no `modify`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TeamOptions {
+    /// `PlayerTeam.allowFriendlyFire`, vanilla default `true`.
+    pub allow_friendly_fire: bool,
+    /// `PlayerTeam.seeFriendlyInvisibles`, vanilla default `true`.
+    pub see_friendly_invisibles: bool,
+}
+
+impl Default for TeamOptions {
+    fn default() -> Self {
+        Self {
+            allow_friendly_fire: true,
+            see_friendly_invisibles: true,
+        }
+    }
+}
+
+/// Reads `teams` whether it was written as a set of names or a map of options.
+///
+/// Every scoreboard saved before team options existed holds a JSON array, and
+/// `deny_unknown_fields` gives no room to add a parallel field, so refusing the
+/// old shape would fail the load and cost the world its teams. An old team
+/// deserializes with vanilla's defaults, which is what it behaved like.
+fn deserialize_teams<'de, D>(deserializer: D) -> Result<BTreeMap<String, TeamOptions>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum TeamsRepr {
+        Named(BTreeSet<String>),
+        WithOptions(BTreeMap<String, TeamOptions>),
+    }
+
+    Ok(match TeamsRepr::deserialize(deserializer)? {
+        TeamsRepr::Named(names) => names
+            .into_iter()
+            .map(|name| (name, TeamOptions::default()))
+            .collect(),
+        TeamsRepr::WithOptions(teams) => teams,
+    })
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct PersistentScoreboard {
     objectives: BTreeMap<String, ObjectiveState>,
     scores: BTreeMap<String, BTreeMap<String, ScoreboardScore>>,
-    teams: BTreeSet<String>,
+    #[serde(deserialize_with = "deserialize_teams")]
+    teams: BTreeMap<String, TeamOptions>,
     holder_teams: BTreeMap<String, String>,
 }
 
@@ -254,7 +305,11 @@ impl Scoreboard {
         let name = name.into();
         ensure_team_name(&name)?;
         let mut state = self.state.write();
-        if !state.teams.insert(name.clone()) {
+        if state
+            .teams
+            .insert(name.clone(), TeamOptions::default())
+            .is_some()
+        {
             return Err(ScoreboardError::DuplicateTeam(name));
         }
         self.mark_dirty();
@@ -267,7 +322,7 @@ impl Scoreboard {
         self.state
             .read()
             .teams
-            .contains(name)
+            .contains_key(name)
             .then(|| ScoreboardTeam {
                 name: name.to_owned(),
             })
@@ -276,14 +331,67 @@ impl Scoreboard {
     /// Returns team names in stable order.
     #[must_use]
     pub fn team_names(&self) -> Vec<String> {
-        self.state.read().teams.iter().cloned().collect()
+        self.state.read().teams.keys().cloned().collect()
+    }
+
+    /// Returns a team's options, or vanilla's defaults if it does not exist.
+    #[must_use]
+    pub fn team_options(&self, team: &ScoreboardTeam) -> TeamOptions {
+        self.state
+            .read()
+            .teams
+            .get(team.name())
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Replaces a team's options.
+    ///
+    /// Vanilla parity: what `/team modify` writes. Returns whether the team
+    /// existed; a missing team is not an error here for the same reason
+    /// `team_options` answers with defaults -- the caller that cares checks
+    /// [`Self::team`] first.
+    pub fn set_team_options(&self, team: &ScoreboardTeam, options: TeamOptions) -> bool {
+        let mut state = self.state.write();
+        let Some(stored) = state.teams.get_mut(team.name()) else {
+            return false;
+        };
+        if *stored == options {
+            return true;
+        }
+        *stored = options;
+        drop(state);
+        self.mark_dirty();
+        true
+    }
+
+    /// Returns whether two holders are on one team, and whether it lets them
+    /// hurt each other.
+    ///
+    /// Vanilla parity: `Player.canHarmPlayer` -- no team means yes, a different
+    /// team means yes, and the same team defers to `allowFriendlyFire`.
+    #[must_use]
+    pub fn can_harm(&self, attacker: &ScoreHolder, target: &ScoreHolder) -> bool {
+        let state = self.state.read();
+        let Some(attacker_team) = state.holder_teams.get(attacker.name()) else {
+            return true;
+        };
+        if state.holder_teams.get(target.name()) != Some(attacker_team) {
+            return true;
+        }
+        state
+            .teams
+            .get(attacker_team)
+            .copied()
+            .unwrap_or_default()
+            .allow_friendly_fire
     }
 
     /// Returns score holders currently assigned to a team in stable order.
     #[must_use]
     pub fn team_entries(&self, team: &ScoreboardTeam) -> Vec<String> {
         let state = self.state.read();
-        if !state.teams.contains(team.name()) {
+        if !state.teams.contains_key(team.name()) {
             return Vec::new();
         }
         state
@@ -312,7 +420,7 @@ impl Scoreboard {
     ) -> Result<(), ScoreboardError> {
         ensure_holder_name(holder.name())?;
         let mut state = self.state.write();
-        if !state.teams.contains(team.name()) {
+        if !state.teams.contains_key(team.name()) {
             return Err(ScoreboardError::MissingTeam(team.name().to_owned()));
         }
         if state
@@ -460,7 +568,7 @@ fn validate_persistent_scoreboard(state: &PersistentScoreboard) -> Result<(), Sc
     for name in state.objectives.keys() {
         ensure_objective_name(name)?;
     }
-    for name in &state.teams {
+    for name in state.teams.keys() {
         ensure_team_name(name)?;
     }
     for (holder, scores) in &state.scores {
@@ -473,7 +581,7 @@ fn validate_persistent_scoreboard(state: &PersistentScoreboard) -> Result<(), Sc
     }
     for (holder, team) in &state.holder_teams {
         ensure_holder_name(holder)?;
-        if !state.teams.contains(team) {
+        if !state.teams.contains_key(team) {
             return Err(ScoreboardError::MissingTeam(team.clone()));
         }
     }
@@ -616,7 +724,7 @@ mod tests {
 
     use super::{
         AsyncMutex, DomainScoreboards, PersistentScoreboard, ScoreHolder, Scoreboard,
-        ScoreboardError,
+        ScoreboardError, TeamOptions,
     };
 
     #[test]
@@ -768,6 +876,91 @@ mod tests {
                 .expect("beta scoreboard should exist")
                 .objective("kills")
                 .is_none()
+        );
+    }
+    #[test]
+    fn friendly_fire_follows_the_three_branches_vanilla_has() {
+        // `Player.canHarmPlayer`: no team is yes, a different team is yes, and
+        // the same team defers to `allowFriendlyFire`. Foton answered `false`
+        // to every ally question before teams carried any options, so an arrow
+        // between team-mates behaved as though friendly fire were always on.
+        let scoreboard = Scoreboard::new();
+        let Ok(red) = scoreboard.add_team("red") else {
+            panic!("the red team should be created");
+        };
+        let Ok(blue) = scoreboard.add_team("blue") else {
+            panic!("the blue team should be created");
+        };
+        let alice = ScoreHolder::new("alice".to_owned());
+        let bob = ScoreHolder::new("bob".to_owned());
+        let carol = ScoreHolder::new("carol".to_owned());
+
+        assert!(
+            scoreboard.can_harm(&alice, &bob),
+            "a player on no team may hurt anyone"
+        );
+
+        scoreboard
+            .add_holder_to_team(&alice, &red)
+            .expect("alice should join red");
+        scoreboard
+            .add_holder_to_team(&carol, &blue)
+            .expect("carol should join blue");
+        assert!(
+            scoreboard.can_harm(&alice, &carol),
+            "different teams may hurt each other"
+        );
+
+        scoreboard
+            .add_holder_to_team(&bob, &red)
+            .expect("bob should join red");
+        assert!(
+            scoreboard.can_harm(&alice, &bob),
+            "vanilla creates a team with friendly fire on"
+        );
+
+        assert!(scoreboard.set_team_options(
+            &red,
+            TeamOptions {
+                allow_friendly_fire: false,
+                ..TeamOptions::default()
+            },
+        ));
+        assert!(
+            !scoreboard.can_harm(&alice, &bob),
+            "the same team with friendly fire off refuses the hit"
+        );
+        assert!(
+            scoreboard.can_harm(&alice, &carol),
+            "turning red's friendly fire off says nothing about hitting blue"
+        );
+    }
+
+    #[test]
+    fn a_scoreboard_saved_before_teams_had_options_still_loads() {
+        // Every world saved before this change holds `"teams": [...]`, and
+        // `deny_unknown_fields` leaves no room for a parallel field -- so
+        // refusing the old shape would fail the load and cost the world its
+        // teams. An old team must come back with vanilla's defaults, which is
+        // what it behaved like.
+        let old = r#"{"objectives":{},"scores":{},"teams":["red"],"holder_teams":{"alice":"red"}}"#;
+        let persistent: PersistentScoreboard =
+            serde_json::from_str(old).expect("a pre-options scoreboard must still deserialize");
+        let Ok(scoreboard) = Scoreboard::from_persistent(persistent) else {
+            panic!("a pre-options scoreboard must still be valid");
+        };
+
+        let Some(red) = scoreboard.team("red") else {
+            panic!("the team must survive the load");
+        };
+        assert!(
+            scoreboard.team_options(&red).allow_friendly_fire,
+            "a team from before options existed behaves as vanilla's default"
+        );
+        assert_eq!(
+            scoreboard.holder_team_name(&ScoreHolder::new("alice".to_owned())),
+            Some("red".to_owned()),
+            "membership must survive the load too"
         );
     }
 }
