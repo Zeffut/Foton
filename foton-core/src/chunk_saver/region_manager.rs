@@ -385,7 +385,15 @@ impl RegionManager {
         } else {
             let handle = self.open_region(region_pos).await?;
             regions.insert(region_pos, handle);
-            regions.get_mut(&region_pos).expect("just inserted")
+            #[cfg_attr(
+                not(test),
+                expect(
+                    clippy::expect_used,
+                    reason = "inserted on the line above; the entry API cannot be used here because opening a region awaits"
+                )
+            )]
+            let handle = regions.get_mut(&region_pos).expect("just inserted");
+            handle
         };
 
         // Find space for the chunk.
@@ -611,7 +619,15 @@ impl RegionManager {
             // open_region creates the file if it doesn't exist
             let handle = self.open_region(region_pos).await?;
             regions.insert(region_pos, handle);
-            regions.get_mut(&region_pos).expect("just inserted")
+            #[cfg_attr(
+                not(test),
+                expect(
+                    clippy::expect_used,
+                    reason = "inserted on the line above; the entry API cannot be used here because opening a region awaits"
+                )
+            )]
+            let handle = regions.get_mut(&region_pos).expect("just inserted");
+            handle
         };
 
         // Check if chunk exists

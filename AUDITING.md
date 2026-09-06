@@ -367,36 +367,48 @@ between the two shifts every persisted `delay` by one.
   `expect` because `unwrap` was closed to them, and that is what makes the lint
   impossible to switch on workspace-wide in one move.
 
-  Ten of the twelve crates now carry
-  `#![cfg_attr(not(test), warn(clippy::expect_used))]`: `foton-math`,
-  `foton-crypto`, `foton-protocol`, `foton-bedrock`, `foton-plugin`,
-  `foton-login`, `foton-worldgen`, `foton-utils`, `foton-registry` and the
-  `foton` binary. The `not(test)` scope is
-  the point -- a panicking test is how a test reports, a panicking server is how
-  a world is lost -- and it costs one wrinkle: a bare `#[expect]` inside those
-  crates is unfulfilled in the test build, so a justified site needs
+  **Every crate now carries** `#![cfg_attr(not(test), warn(clippy::expect_used))]`,
+  and CI runs clippy with `-D warnings`, so a reachable `expect` in production
+  code fails the build. The one exception is `foton-macros`, deliberately: it is
+  a proc-macro crate, its `expect`s run inside the compiler, and
+  `panic = "abort"` has no bearing there.
+
+  The `not(test)` scope is what made this possible at all. The workspace holds
+  some 1400 `.expect()` calls because `unwrap_used` was already denied and the
+  tests had to write *something*; demanding the lint of test code would mean
+  rewriting hundreds of call sites for no safety gained, since a panicking test
+  is how a test reports and a panicking server is how a world is lost. It costs
+  one wrinkle worth knowing: a bare `#[expect(clippy::expect_used)]` is
+  unfulfilled in the test build, so a justified site needs
   `#[cfg_attr(not(test), expect(clippy::expect_used, reason = "..."))]`.
-  `foton-macros` is deliberately excluded: it is a proc-macro crate, its
-  `expect`s run at compile time, and `panic = "abort"` has no bearing there.
 
-  Turning the lint on found what counting could not. The crate-by-crate `grep`
-  that produced the 423 figure classified `foton-math`, `foton-crypto`,
-  `foton-protocol` and `foton-bedrock` as having no production `expect` at all;
-  the lint found five. Across twenty-five sites in ten crates, **eight were live
-  defects** rather than provable invariants: `tcp_client` aborting on a status
-  response too large to encode (the same class as `chunk_sender` one pass
-  earlier), a compression threshold above `i32::MAX` killing the server at the
-  first login, `StructurePiece::ignores` panicking on a rayon worker over a
-  block state its caller supplied, the same block-state panic three more times
-  in `BlockRegistry` (including in `try_get_property`, whose `try_` prefix
-  already promised an answer instead of a panic), a console `read()` that
-  aborted the process when stdin was closed, and `char_pos` panicking on an
-  empty input line.
+  Ninety-six production sites, **fourteen of them live defects**. The recurring
+  one is worth naming because it appeared nine times in three different crates:
+  `EncodedPacket::from_bare(...).expect(...)` on a send path. `from_bare`
+  refuses anything past `MAX_PACKET_SIZE`, and a container of written books or a
+  command tree grown by plugins gets there, so every one of those was a player
+  able to kill the server by opening a chest. Vanilla does not die on this --
+  `PacketEncoder.encode` throws, `Connection.exceptionCaught` drops that one
+  connection -- and that is what they all do now.
 
-  That is roughly a third, and it is the argument for the lint rather than for
-  more counting: every one of these sat under a green CI.
+  The rest: a compression threshold above `i32::MAX` killing the server at the
+  first login; four separate `by_state_id(id).expect("Invalid state ID")` panics
+  on ids the caller supplies, one of them inside `try_get_property`, whose
+  `try_` prefix already promised an answer instead of a panic; a console
+  `read()` that aborted when stdin was closed; `char_pos` panicking on an empty
+  input line; and chunk loading panicking on a truncated or corrupt region file,
+  where the function already returned `io::Result` and the loader already knew
+  what to do with a chunk it could not read.
 
-  `foton-core` is what is left -- 423 sites, more than all the others together.
+  Two lessons are worth keeping. **Do not count `.expect()` with grep** -- the
+  crate-by-crate count that guided three earlier passes was wrong three times,
+  twice too low and once by a factor of six, because "files with no
+  `#[cfg(test)]` module" is not the same question as "code compiled outside
+  tests". And **a repeated `expect` is an invariant asking for a name**:
+  eighteen inventory slot methods each repeated the same one, and the answer was
+  not eighteen annotations but four accessors on `ContainerLockGuard`, after
+  which the eighteen call sites had no `expect` at all.
+
 - **A stack overflow is not a panic.** It is a SIGSEGV, so no `catch_unwind`
   and no abort handler sees it. Recursive parsers need an explicit depth
   ceiling; vanilla uses 512 (`NbtAccounter`).

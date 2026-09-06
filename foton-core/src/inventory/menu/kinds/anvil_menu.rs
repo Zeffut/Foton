@@ -237,6 +237,13 @@ impl AnvilKind {
                         existing_level.max(level)
                     };
 
+                    #[cfg_attr(
+                        not(test),
+                        expect(
+                            clippy::expect_used,
+                            reason = "the identifier was just read off the item's own enchantment list, which the registry produced"
+                        )
+                    )]
                     let enchantment = REGISTRY
                         .enchantments
                         .by_key(&ident)

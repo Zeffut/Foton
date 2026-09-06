@@ -443,6 +443,10 @@ impl MapItemSavedData {
         }
         self.carried_by
             .push(HoldingPlayer::new(uuid, name.to_owned()));
+        #[cfg_attr(
+            not(test),
+            expect(clippy::expect_used, reason = "a holder was pushed on the line above")
+        )]
         self.carried_by
             .last_mut()
             .expect("a holder was just pushed")

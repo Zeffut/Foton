@@ -209,6 +209,13 @@ impl MessageCache {
             let old_entry = self.full_cache.get(i).cloned();
 
             // Take most recent from deque (from back)
+            #[cfg_attr(
+                not(test),
+                expect(
+                    clippy::expect_used,
+                    reason = "the loop condition above is that the deque is not empty"
+                )
+            )]
             let new_entry = deque
                 .pop_back()
                 .expect("deque should not be empty due to loop condition");

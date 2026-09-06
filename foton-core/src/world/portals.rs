@@ -77,6 +77,13 @@ impl World {
         to_nether: bool,
     ) -> Option<BlockPos> {
         let radius = if to_nether { 16 } else { 128 };
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "a vanilla POI type is registered by the generated registry data"
+            )
+        )]
         let nether_portal_type = vanilla_poi_types::NETHER_PORTAL
             .try_id()
             .expect("vanilla nether portal POI type should be registered");

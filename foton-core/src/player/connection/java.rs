@@ -464,11 +464,18 @@ impl BundleBuilder {
 
     /// Adds a packet to the bundle.
     ///
-    /// # Panics
-    /// Panics if the packet fails to encode.
+    /// A packet that will not encode is dropped with a warning. The builder has
+    /// no connection to disconnect the way the send paths do, and losing one
+    /// packet out of a bundle is a smaller wrong than taking the server with
+    /// it: `from_bare` refuses anything past `MAX_PACKET_SIZE`, which a
+    /// container full of written books can reach.
     pub fn add<P: ClientPacket>(&mut self, packet: P) {
-        let encoded = EncodedPacket::from_bare(packet, self.compression, ConnectionProtocol::Play)
-            .expect("Failed to encode packet");
+        let Ok(encoded) =
+            EncodedPacket::from_bare(packet, self.compression, ConnectionProtocol::Play)
+        else {
+            log::warn!("Dropping a bundled packet that failed to encode");
+            return;
+        };
         self.packets.push(encoded);
     }
 
@@ -649,12 +656,23 @@ impl JavaConnection {
 
     /// Sends a packet to the client.
     ///
-    /// # Panics
-    /// - If the packet fails to be encoded.
-    /// - If the packet fails to be sent through the channel.
+    /// A packet that will not encode disconnects that client, which is what
+    /// vanilla does: `PacketEncoder.encode` throws, `Connection.exceptionCaught`
+    /// catches it and drops the connection. It used to abort the whole server
+    /// instead, and `from_bare` refuses anything past `MAX_PACKET_SIZE` -- a
+    /// container of written books or a command tree grown by plugins gets
+    /// there.
     pub fn send_packet<P: ClientPacket>(&self, packet: P) {
-        let packet = EncodedPacket::from_bare(packet, self.compression, ConnectionProtocol::Play)
-            .expect("Failed to encode packet");
+        let Ok(packet) =
+            EncodedPacket::from_bare(packet, self.compression, ConnectionProtocol::Play)
+        else {
+            log::warn!(
+                "Client {}: disconnecting, a packet for it could not be encoded",
+                self.id
+            );
+            self.close();
+            return;
+        };
         if self
             .outgoing_packets
             .send(OutboundPacket::Packet(packet))

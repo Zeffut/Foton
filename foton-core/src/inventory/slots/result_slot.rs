@@ -50,36 +50,31 @@ impl Slot for ResultSlot {
 
     fn get_item<'a>(&self, guard: &'a ContainerLockGuard) -> &'a ItemStack {
         guard
-            .get(self.result_container().container_id())
-            .expect("failed to get item from result container")
+            .container(self.result_container().container_id())
             .get_item(0)
     }
 
     fn get_item_mut<'a>(&self, guard: &'a mut ContainerLockGuard) -> &'a mut ItemStack {
         guard
-            .get_mut(self.result_container().container_id())
-            .expect("failed to get item mutabily from result container")
+            .container_mut(self.result_container().container_id())
             .get_item_mut(0)
     }
 
     fn set_item(&self, guard: &mut ContainerLockGuard, stack: ItemStack) {
         guard
-            .get_mut(self.result_container().container_id())
-            .expect("failed to get item mutabily from result container")
+            .container_mut(self.result_container().container_id())
             .set_item(0, stack);
     }
 
     fn get_max_stack_size(&self, guard: &ContainerLockGuard) -> i32 {
         guard
-            .get(self.result_container().container_id())
-            .expect("result container not locked")
+            .container(self.result_container().container_id())
             .get_max_stack_size()
     }
 
     fn set_changed(&self, guard: &mut ContainerLockGuard) {
         guard
-            .get_mut(self.result_container().container_id())
-            .expect("result container not locked")
+            .container_mut(self.result_container().container_id())
             .set_changed();
     }
 

@@ -28,6 +28,13 @@ pub(crate) fn generate(
         let chunk_x = q.x >> 2;
         let chunk_z = q.z >> 2;
         let neighbor = cache.get(chunk_x, chunk_z);
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the generation pyramid publishes this status before the stage that consumes it runs"
+            )
+        )]
         let neighbor_chunk = neighbor
             .try_chunk(ChunkStatus::Biomes)
             .expect("Neighbor not at Biomes status");

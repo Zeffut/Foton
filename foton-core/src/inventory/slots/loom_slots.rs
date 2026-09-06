@@ -219,9 +219,7 @@ impl ResultHandler for LoomHandler {
 
     fn update_result(&self, guard: &mut ContainerLockGuard) {
         let result = self.compute(guard);
-        let container = guard
-            .get_typed_mut::<ResultContainer>(self.result_id())
-            .expect("result container not locked");
+        let container = guard.container_typed_mut::<ResultContainer>(self.result_id());
         container.set_item(0, result);
         container.set_changed();
     }
@@ -235,9 +233,7 @@ impl ResultHandler for LoomHandler {
         _player: &Player,
     ) -> Option<ItemStack> {
         {
-            let container = guard
-                .get_typed_mut::<SimpleContainer>(self.input_id())
-                .expect("input container not locked");
+            let container = guard.container_typed_mut::<SimpleContainer>(self.input_id());
             container.remove_item(LOOM_BANNER, 1);
             container.remove_item(LOOM_DYE, 1);
             container.set_changed();

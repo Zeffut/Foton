@@ -153,6 +153,13 @@ impl ProfilePublicKeyData {
     /// Panics if a slice-to-array conversion fails. The lengths are checked
     /// first, and the two attacker-controlled ones are rejected rather than
     /// cast, so the conversions this still performs are on fixed-width fields.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the length guard above covers every fixed-width field this reads; see the Panics note"
+        )
+    )]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ValidationError> {
         if bytes.len() < 16 {
             return Err(ValidationError::CryptoError(CryptError::InvalidKeyFormat));

@@ -31,6 +31,13 @@ pub(crate) fn generate(
 }
 
 fn collect_structure_references(holder: &ChunkHolder) -> (i32, i32, StructureReferencesForNoise) {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the generation pyramid publishes this status before the stage that consumes it runs"
+        )
+    )]
     let chunk = holder
         .try_chunk(ChunkStatus::Biomes)
         .expect("Chunk not found at status Biomes");

@@ -284,6 +284,13 @@ impl SurfaceSystem {
     ///
     /// # Panics
     /// Panics if `biome_id` does not correspond to a registered biome.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "biome ids reaching surface rules come from the biome source, which reads the same registry"
+        )
+    )]
     fn get_temperature(&self, biome_id: u16, block_y: i32, xz: &mut TemperatureXzCache) -> f32 {
         let biome = REGISTRY
             .biomes

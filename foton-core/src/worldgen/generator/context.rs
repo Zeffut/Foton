@@ -91,6 +91,13 @@ impl WorldGenContext {
     /// # Panics
     /// Panics if the world has been dropped.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "worldgen only runs while its world is alive; the Weak exists to break the chunk-to-world cycle, not to outlive it"
+        )
+    )]
     pub fn world(&self) -> Arc<World> {
         self.world.upgrade().expect("World has been dropped")
     }

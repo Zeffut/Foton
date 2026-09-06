@@ -106,6 +106,13 @@ pub struct BlockBehaviorLock(OnceLock<BlockBehaviorRegistry>);
 impl Deref for BlockBehaviorLock {
     type Target = BlockBehaviorRegistry;
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a Deref cannot report a failure, and init_globals fills every registry before anything reads it"
+        )
+    )]
     fn deref(&self) -> &Self::Target {
         self.0.get().expect("Block behaviors not initialized")
     }
@@ -117,6 +124,13 @@ pub struct ItemBehaviorLock(OnceLock<ItemBehaviorRegistry>);
 impl Deref for ItemBehaviorLock {
     type Target = ItemBehaviorRegistry;
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a Deref cannot report a failure, and init_globals fills every registry before anything reads it"
+        )
+    )]
     fn deref(&self) -> &Self::Target {
         self.0.get().expect("Item behaviors not initialized")
     }

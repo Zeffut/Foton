@@ -91,7 +91,7 @@ impl ResultHandler for AnvilResultHandler {
         }
 
         let input_id = ContainerId::from_arc(&self.input_container);
-        let input = guard.get_mut(input_id).expect("input container not locked");
+        let input = guard.container_mut(input_id);
 
         input.set_item(0, ItemStack::empty());
 
@@ -124,8 +124,7 @@ impl ResultHandler for AnvilResultHandler {
 
         input.set_changed();
         guard
-            .get_mut(ContainerId::from_arc(&self.result_container))
-            .expect("container not locked")
+            .container_mut(ContainerId::from_arc(&self.result_container))
             .set_changed();
         None
     }
