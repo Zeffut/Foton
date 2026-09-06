@@ -417,7 +417,21 @@ impl ChunkStorage {
         let structure_starts = Self::persistent_to_structure_starts(&persistent.structure_starts);
         let structure_references =
             Self::persistent_to_structure_references(&persistent.structure_references);
-        let light = Self::persistent_to_light(&persistent.light, min_y, height, status);
+        let mut light = Self::persistent_to_light(&persistent.light, min_y, height, status);
+        // `Chunk::from_disk` refreshes the emptiness maps and panics if the
+        // section count the light storage was sized for -- from the world's own
+        // height -- disagrees with the sections this file supplied. A chunk
+        // saved under a different world height, or a truncated one, reaches it,
+        // and aborting on chunk load takes every other dirty chunk with it.
+        // Refreshing here first turns that into the load error this function
+        // already returns, and leaves the call inside `from_disk` with nothing
+        // left to fail on.
+        if let Err(error) = light.refresh_emptiness_maps_from_sections(&sections) {
+            return Err(Self::invalid_chunk_data(format!(
+                "chunk light data does not match its {} sections: {error:?}",
+                sections.sections.len()
+            )));
+        }
         let mut heightmaps =
             Self::persistent_to_heightmaps(&persistent.heightmaps, status, min_y, height);
         heightmaps.prime_from_sections(

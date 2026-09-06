@@ -455,10 +455,31 @@ system that compiles.
   none at all, `foton-utils` and `foton-protocol` four each, `foton-worldgen`
   ten, `foton-registry` thirty-nine. All annotated or fixed.
 
-  `foton-core` has **249**, and they are concentrated: 69 in
-  `worldgen/feature/configured.rs`, 20 in `worldgen/region.rs`, 11 each in
-  `worldgen/stages/light.rs` and `leaf_distance.rs`. That is a pass of its own,
-  and the measurement above is the head start.
+  `foton-core` has **303** -- the 249 first counted missed the `unreachable!`
+  half, the same grep mistake this file warns about twice. They are
+  concentrated: 69 in `worldgen/feature/configured.rs`, 20 in
+  `worldgen/region.rs`, 11 each in `worldgen/stages/light.rs` and
+  `leaf_distance.rs`. That is a pass of its own, and the measurement is its
+  head start.
+
+  The 57 sites outside worldgen were read first, on the reasoning that a panic
+  over extracted feature data shows up on the first generated chunk while one on
+  a save, load or network path waits for a player. Exactly one was reachable
+  from input the server does not control, and it is fixed: `Chunk::from_disk`
+  refreshed the light emptiness maps and panicked when the section count the
+  light storage was sized for -- from the world's height -- disagreed with the
+  sections the file supplied. A chunk saved under a different world height, or a
+  truncated one, aborted the server mid-load and took every other dirty chunk
+  with it. `try_persistent_to_chunk` now refreshes first and returns the load
+  error it already had.
+
+  The other 56 are internal invariants: command-chain state, packet-lane
+  bookkeeping, heightmap types. One of them is a lead rather than a chore --
+  `inventory/menu/mod.rs` repeats "the explicitly locked player inventory must
+  be present" seven times, which is the same shape as the eighteen slot methods
+  that turned into four accessors on `ContainerLockGuard`. A repeated assertion
+  is an invariant asking for a name, and naming it is worth more than seven
+  annotations.
 
   Two process notes, both earned the hard way in the same sitting. Attaching
   `clippy::panic` and `clippy::unreachable` together "to be safe" left thirteen
