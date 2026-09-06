@@ -107,12 +107,16 @@ impl<W: AsyncWrite + Unpin> TCPNetworkEncoder<W> {
     ///
     /// # Panics
     /// - If the stream is already encrypted.
-    /// - If the key is invalid.
     pub fn set_encryption(&mut self, key: &[u8; 16]) {
         if matches!(self.writer, EncryptionWriter::Encrypt(_)) {
             panic!("Cannot upgrade a stream that already has a cipher!");
         }
-        let cipher = Aes128Cfb8Enc::new_from_slices(key, key).expect("invalid key");
+        // `new_from_slices` is the fallible constructor because it takes
+        // slices of unknown length. AES-128-CFB8 wants sixteen bytes of key
+        // and sixteen of IV, and `key` is a `[u8; 16]`, so the sizes are
+        // already settled by the type: `new` takes the sized arrays and
+        // cannot fail, which retires the `expect` rather than excusing it.
+        let cipher = Aes128Cfb8Enc::new(key.into(), key.into());
         replace_with::replace_with_or_abort(&mut self.writer, |encoder| encoder.upgrade(cipher));
     }
 

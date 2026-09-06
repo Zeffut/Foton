@@ -38,8 +38,24 @@ impl PerlinSimplexNoise {
         let octave_set: BTreeSet<i32> = octaves.iter().copied().collect();
         assert!(!octave_set.is_empty(), "Need some octaves");
 
-        // SAFETY: assert above guarantees non-empty
+        // The assert above is the guard: a `BTreeSet` proven non-empty has both
+        // a first and a last. The octave lists come from extracted vanilla
+        // data, so an empty one is broken input rather than a reachable state.
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the assert above proves the set is non-empty"
+            )
+        )]
         let first_octave = *octave_set.first().expect("non-empty octave set");
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the assert above proves the set is non-empty"
+            )
+        )]
         let last_octave = *octave_set.last().expect("non-empty octave set");
         let high_freq_octaves = last_octave;
         let total = (last_octave - first_octave + 1) as usize;

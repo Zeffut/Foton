@@ -219,17 +219,16 @@ impl JavaTcpClient {
 
     /// Sends the successful login response.
     ///
-    /// # Panics
-    /// This function will panic if the compression threshold cannot be converted to an i32.
     pub(crate) async fn send_login_finished(&self, profile: &GameProfile) -> ConnectionAction {
         let mut action = ConnectionAction::none();
         if let Some(compression) = self.server.config.compression {
+            // The threshold is a `NonZeroU32` and the packet field is an `i32`,
+            // so a configured value above `i32::MAX` has no wire form at all.
+            // Vanilla's `network-compression-threshold` is an int and cannot
+            // reach that; clamping keeps a mistyped config from aborting the
+            // server on the first login, which is what this used to do.
             self.send_bare_packet_now(CLoginCompression::new(
-                compression
-                    .threshold
-                    .get()
-                    .try_into()
-                    .expect("Failed to convert compression threshold to i32"),
+                i32::try_from(compression.threshold.get()).unwrap_or(i32::MAX),
             ))
             .await;
             self.compression.store(Some(compression));

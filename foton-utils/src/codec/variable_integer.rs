@@ -53,6 +53,13 @@ impl VarInt {
     pub fn set_in_front(self, vec: &mut FrontVec, varint_size: usize) {
         // No heap allocation :)
         let mut buf = [0; Self::MAX_SIZE];
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the buffer is MAX_SIZE bytes and a VarInt is never longer, so the cursor cannot run out"
+            )
+        )]
         self.write(&mut Cursor::new(&mut buf[..]))
             .expect("writing to a buffer should not fail");
         vec.set_in_front(&buf[..varint_size]);

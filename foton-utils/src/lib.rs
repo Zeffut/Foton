@@ -2,6 +2,12 @@
 //!
 //! This crate contains a collection of utilities used by the Foton Minecraft server.
 
+// The release profile sets `panic = "abort"`, so an `expect` a running server
+// can reach is not a style question: it kills the process without unwinding,
+// `shutdown_worlds()` never runs, and every dirty chunk goes with it. The lint
+// is scoped to `not(test)` on purpose -- a panicking test is how a test reports
+// a failure, while a panicking server is how a world is lost.
+#![cfg_attr(not(test), warn(clippy::expect_used))]
 #![feature(const_trait_impl, const_cmp, derive_const, array_try_from_fn)]
 
 /// axis

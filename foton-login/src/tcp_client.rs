@@ -249,13 +249,23 @@ impl JavaTcpClient {
 
     /// Sends a packet immediately, without queuing.
     ///
-    /// # Panics
-    /// This function will panic if the packet cannot be encoded. Should never happen.
+    /// A packet that will not encode is dropped with a warning rather than
+    /// taken as an invariant violation: `from_bare` refuses anything past
+    /// `MAX_PACKET_SIZE`, and the status response carries an operator-supplied
+    /// MOTD and favicon. The same call in `chunk_sender` already answers a
+    /// too-large packet this way, and under the release profile's
+    /// `panic = "abort"` the alternative is killing the server from the login
+    /// path.
     pub async fn send_bare_packet_now<P: ClientPacket>(&self, packet: P) {
         let compression = self.compression.load();
         let protocol = self.protocol.load();
-        let packet = EncodedPacket::from_bare(packet, compression, protocol)
-            .expect("Failed to encode packet");
+        let Ok(packet) = EncodedPacket::from_bare(packet, compression, protocol) else {
+            log::warn!(
+                "Client {}: dropping a packet that failed to encode",
+                self.id
+            );
+            return;
+        };
 
         if let Err(err) = Self::write_network_packet(&self.network_writer, &packet).await
             && !self.cancel_token.is_cancelled()

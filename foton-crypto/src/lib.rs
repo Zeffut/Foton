@@ -4,6 +4,13 @@
 //! This module implements the cryptographic primitives needed for Minecraft's
 //! signed chat system, including RSA key pair generation, `SHA256withRSA` signing,
 //! and signature verification.
+// The release profile sets `panic = "abort"`, so an `expect` a running server
+// can reach is not a style question: it kills the process without unwinding,
+// `shutdown_worlds()` never runs, and every dirty chunk goes with it. This
+// crate's production code carries none, and the lint keeps it that way. It is
+// scoped to `not(test)` on purpose -- a panicking test is how a test reports a
+// failure, while a panicking server is how a world is lost.
+#![cfg_attr(not(test), warn(clippy::expect_used))]
 #![expect(
     missing_docs,
     reason = "crypto has a small public surface pending API documentation"
@@ -11,7 +18,6 @@
 #![expect(
     clippy::absolute_paths,
     clippy::manual_let_else,
-    clippy::missing_panics_doc,
     reason = "crypto code keeps direct error-path tests and small explicit RSA type paths"
 )]
 #![cfg_attr(
