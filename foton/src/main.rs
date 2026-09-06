@@ -1,5 +1,11 @@
 //! Main entry point for the Foton Minecraft server.
 #![feature(thread_id_value)]
+// The release profile sets `panic = "abort"`, so an `expect` a running server
+// can reach is not a style question: it kills the process without unwinding,
+// `shutdown_worlds()` never runs, and every dirty chunk goes with it. The lint
+// is scoped to `not(test)` on purpose -- a panicking test is how a test reports
+// a failure, while a panicking server is how a world is lost.
+#![cfg_attr(not(test), warn(clippy::expect_used))]
 
 use std::backtrace::{Backtrace, BacktraceStatus};
 use std::num::NonZero;
@@ -43,6 +49,13 @@ where
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use tracing_opentelemetry::OpenTelemetryLayer;
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "jaeger is an opt-in feature configured before the server exists; a misconfigured exporter should stop the start, and there is no world yet to lose"
+        )
+    )]
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .build()

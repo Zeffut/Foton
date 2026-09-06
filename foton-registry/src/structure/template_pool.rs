@@ -104,6 +104,13 @@ impl JigsawOrientation {
     /// Both the front and top directions are rotated, matching vanilla's
     /// `BlockState.rotate(rotation)` for jigsaw blocks.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "rotating a valid front-and-top pair always yields another valid pair"
+        )
+    )]
     pub const fn rotate(self, rotation: Rotation) -> Self {
         let front = rotation.rotate(self.front_direction());
         let top = rotation.rotate(self.top_direction());

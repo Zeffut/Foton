@@ -154,6 +154,13 @@ pub fn init_vanilla_registry_with(register: impl FnOnce(&mut Registry)) -> bool 
 impl Deref for RegistryLock {
     type Target = Registry;
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a Deref cannot report a failure, and `init_globals` fills the registry before anything reads it"
+        )
+    )]
     fn deref(&self) -> &Self::Target {
         self.0.get().expect("Registry not init")
     }
@@ -168,6 +175,13 @@ pub trait RegistryEntry: PartialEq + 'static {
 
     /// # Panics
     /// Panics if the entry is not registered.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the panic is documented above and try_id is the fallible form"
+        )
+    )]
     fn id(&self) -> usize {
         self.try_id().expect("entry not found in registry")
     }
