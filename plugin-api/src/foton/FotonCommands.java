@@ -23,10 +23,33 @@ public final class FotonCommands implements Commands {
     }
     private final CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
     public CommandDispatcher<CommandSourceStack> getDispatcher() { return dispatcher; }
+    @SuppressWarnings("unchecked")
     public Set<LiteralCommandNode<CommandSourceStack>> register(LiteralCommandNode<CommandSourceStack> node) {
-        dispatcher.getRoot().addChild(node);
+        LiteralCommandNode<CommandSourceStack> registered = node;
+
+        // Paper's `CommandRegisteredEvent`, which exists so a listener can
+        // *replace* the node -- wrapping it to add a permission check or a
+        // suggestion provider is the usual reason. The event carries
+        // `LiteralCommandNode<?>` because that is Paper's own signature, so a
+        // listener can hand back a node built for a different source type; a
+        // cast that fails costs that one replacement rather than the command.
+        com.destroystokyo.paper.event.brigadier.CommandRegisteredEvent event =
+                new com.destroystokyo.paper.event.brigadier.CommandRegisteredEvent(
+                        node.getLiteral(), node);
+        EventBridge.dispatch(event);
+        LiteralCommandNode<?> replacement = event.getLiteral();
+        if (replacement != null && replacement != node) {
+            try {
+                registered = (LiteralCommandNode<CommandSourceStack>) replacement;
+            } catch (ClassCastException wrongSourceType) {
+                System.out.println("[commands] a listener replaced /" + node.getLiteral()
+                    + " with a node built for another source type; keeping the original");
+            }
+        }
+
+        dispatcher.getRoot().addChild(registered);
         Set<LiteralCommandNode<CommandSourceStack>> result = new HashSet<>();
-        result.add(node);
+        result.add(registered);
         return result;
     }
     public Set<LiteralCommandNode<CommandSourceStack>> register(
