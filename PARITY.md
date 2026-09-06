@@ -606,10 +606,20 @@ reference to the flag. Two players on a friendly-fire team are allies who may
 still shoot each other, and conflating the two would have made the mace spare
 team-mates it should smash.
 
-What is still missing is the `/team` command and the `CSetPlayerTeam` packet:
-teams are reachable through the scoreboard API the `@e[team=]` selector already
-uses, but an operator cannot create or modify one in game, and clients see no
-team color or prefix. That is a command-and-protocol gap now, not a data one.
+`/team` exists and reaches all of it: `list`, `add`, `remove`, `empty`, `join`,
+`leave`, and `modify <team> friendlyFire|seeFriendlyInvisibles`, with the
+refuse-a-no-op behaviour vanilla has and its own translation strings.
+`remove_team` drops the memberships that pointed at the team, the way
+`Scoreboard.removeTeam` does -- leaving them would keep `@e[team=<gone>]`
+matching and let a re-created name inherit the old roster.
+
+What is deliberately absent is the presentation half: `displayName`, `color`,
+`prefix`, `suffix`, `nametagVisibility`, `deathMessageVisibility` and
+`collisionRule`. Every one of those exists to reach a client through
+`CSetPlayerTeam`, which Foton does not send, so accepting them would store data
+nothing can observe and report a success that changes nothing on screen. They
+are left out until the packet exists rather than accepted and dropped -- which
+makes this a protocol gap now, not a command or a data one.
 
 Persisted scoreboards written before options existed hold `"teams": [...]`, and
 `deny_unknown_fields` leaves no room for a parallel field, so `teams` is read by
