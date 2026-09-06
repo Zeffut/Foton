@@ -82,6 +82,10 @@ public class ItemStack implements Cloneable {
     /** Stores a typed Paper data component on this stack. */
     public <T> void setData(io.papermc.paper.datacomponent.DataComponentType.Valued<T> type, T value) {
         if (type == null) throw new IllegalArgumentException("type");
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
+            durability = value instanceof Number number ? (short) number.intValue() : 0;
+            return;
+        }
         if (value == null) dataComponents.remove(type); else dataComponents.put(type, value);
         if (type == io.papermc.paper.datacomponent.DataComponentTypes.CUSTOM_MODEL_DATA && value instanceof io.papermc.paper.datacomponent.item.CustomModelData model) {
             ItemMeta copy = getItemMeta();
@@ -91,7 +95,30 @@ public class ItemStack implements Cloneable {
         }
     }
     @SuppressWarnings("unchecked")
-    public <T> T getData(io.papermc.paper.datacomponent.DataComponentType<T> type) { return (T) dataComponents.get(type); }
+    public <T> T getData(io.papermc.paper.datacomponent.DataComponentType<T> type) {
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
+            return (T) Integer.valueOf(durability);
+        }
+        return (T) dataComponents.get(type);
+    }
+
+    /** Reads a valued component. Same answer as the wider overload; Paper
+     * declares both, and a plugin compiled against the `Valued` one needs that
+     * exact signature to resolve. */
+    @SuppressWarnings("unchecked")
+    public <T> T getData(io.papermc.paper.datacomponent.DataComponentType.Valued<T> type) {
+        return getData((io.papermc.paper.datacomponent.DataComponentType<T>) type);
+    }
+
+    /** Removes a component, returning the stack to its default for it. */
+    public void unsetData(io.papermc.paper.datacomponent.DataComponentType<?> type) {
+        if (type == null) return;
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
+            durability = 0;
+            return;
+        }
+        dataComponents.remove(type);
+    }
 
     /** Legacy numeric item id; modern materials intentionally do not expose one. */
     @Deprecated

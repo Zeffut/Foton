@@ -241,6 +241,24 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
         return getBlockAt(x, y, z).getBiome();
     }
 
+    /** Replaces the biome at these block coordinates.
+     *
+     * <p>Foton has no native for writing a biome, so this records nothing yet
+     * -- said here rather than left to be found, because a silent no-op that
+     * plugins believe is worse than one they can read about. The read side
+     * ({@link #getBiome(int, int, int)}) is real. */
+    default void setBiome(int x, int y, int z, org.bukkit.block.Biome biome) { }
+
+    default void setBiome(Location location, org.bukkit.block.Biome biome) {
+        if (location != null) setBiome(location.getBlockX(), location.getBlockY(), location.getBlockZ(), biome);
+    }
+
+    /** The biome provider a custom generator supplied, or null for none.
+     *
+     * <p>Null is the answer for every vanilla-generated world, which is what
+     * Bukkit returns too -- a provider exists only when a plugin installed one. */
+    default org.bukkit.generator.BiomeProvider getBiomeProvider() { return null; }
+
     default org.bukkit.block.Biome getBiome(Location location) {
         return getBiome(location.getBlockX(), location.getBlockY(), location.getBlockZ());
     }

@@ -15,6 +15,36 @@ import java.util.Set;
  */
 public class MemorySection implements ConfigurationSection {
     protected final Map<String, Object> map = new LinkedHashMap<>();
+    /** Comments by path. Kept beside the values rather than in them, so a
+     * comment never becomes a key and `getValues` never hands one back. */
+    private final Map<String, java.util.List<String>> comments = new LinkedHashMap<>();
+    private final Map<String, java.util.List<String>> inlineComments = new LinkedHashMap<>();
+
+    @Override
+    public java.util.List<String> getComments(String path) {
+        java.util.List<String> stored = comments.get(path);
+        return stored == null ? java.util.List.of() : java.util.List.copyOf(stored);
+    }
+
+    @Override
+    public void setComments(String path, java.util.List<String> value) {
+        if (path == null) return;
+        if (value == null || value.isEmpty()) comments.remove(path);
+        else comments.put(path, java.util.List.copyOf(value));
+    }
+
+    @Override
+    public java.util.List<String> getInlineComments(String path) {
+        java.util.List<String> stored = inlineComments.get(path);
+        return stored == null ? java.util.List.of() : java.util.List.copyOf(stored);
+    }
+
+    @Override
+    public void setInlineComments(String path, java.util.List<String> value) {
+        if (path == null) return;
+        if (value == null || value.isEmpty()) inlineComments.remove(path);
+        else inlineComments.put(path, java.util.List.copyOf(value));
+    }
     private final Configuration root;
     private final ConfigurationSection parent;
     private final String path;
