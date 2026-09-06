@@ -496,42 +496,92 @@ def report_covered(api_jar, top):
         print(f"  {row['plugins']:3d}  {row['member']}")
 
 
-def report_events(source_root, top):
-    """Which events plugins listen for that nothing here ever fires.
+def report_events(source_root, api_jar, top):
+    """Which events plugins listen for that no listener could ever receive.
 
     A member that resolves is not a member that works, and for events the gap is
     total: a listener registers fine against an event class the server never
     constructs, and then simply never runs. `--covered` cannot see this -- the
-    class is present, so it counts as covered -- which is why this is a separate
-    question asked of the source rather than of the jar.
+    class is present, so it counts as covered.
+
+    Subclasses count. `EventBridge.dispatch` selects handlers with
+    `isAssignableFrom`, so a listener registered for `EntityDamageEvent`
+    receives every `EntityDamageByEntityEvent` too, and calling the base class
+    unfired would be measuring a gap that is not there. The hierarchy comes from
+    the built jar, because that is what the dispatcher will actually walk.
 
     Constructed-anywhere is the test, not constructed-in-one-file: events are
-    fired from the plugin host, the event bridge and the Rust forwarding layer,
-    and looking at only one of those undercounts. It is still a floor rather
-    than a proof -- an event constructed on a path nothing reaches counts as
-    fired here.
+    fired from the plugin host, the event bridge and the Rust forwarding layer.
+    It is still a floor rather than a proof -- an event constructed on a path
+    nothing reaches counts as fired here.
     """
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     wanted = [row for row in ledger["events"] if row["event"].endswith("Event")]
 
+    # An event is built in more ways than `new`. `FotonLifecycle` supplies a
+    # `ReloadableRegistrarEvent` as a lambda, and counting only constructor
+    # calls reported the most-listened-for event of all as never fired -- which
+    # would have sent the work at something already done. So the test is
+    # "mentioned in a file other than its own, outside an import": loose enough
+    # to catch a lambda or a factory, and loose enough to over-count a type that
+    # is merely referenced. Over-counting hides a gap; under-counting invents
+    # one, and only the second wastes a day.
+    sources = {
+        path: path.read_text(encoding="utf-8", errors="replace")
+        for path in pathlib.Path(source_root).rglob("*.java")
+    }
     constructed = set()
-    for path in pathlib.Path(source_root).rglob("*.java"):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        for match in re.finditer(r"new\s+(?:[A-Za-z0-9_.]*\.)?([A-Za-z0-9_]+Event)\s*\(", text):
-            constructed.add(match.group(1))
+    for path, text in sources.items():
+        own = path.stem
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("import ") or stripped.startswith("package "):
+                continue
+            for match in re.finditer(r"\b([A-Za-z0-9_]+Event)\b", line):
+                name = match.group(1)
+                if name != own:
+                    constructed.add(name)
+
+    # Every ancestor of every constructed event, so a base class counts as
+    # reachable when something builds one of its descendants.
+    parents = {}
+    with zipfile.ZipFile(api_jar) as archive:
+        for entry in archive.namelist():
+            if not entry.endswith(".class"):
+                continue
+            try:
+                name, supertypes, _ = declares(archive.read(entry))
+            except (NotAClassFile, struct.error, KeyError, IndexError):
+                continue
+            if name:
+                parents[name.rsplit("/", 1)[-1]] = [
+                    parent.rsplit("/", 1)[-1] for parent in supertypes
+                ]
+
+    reachable = set()
+    for name in constructed:
+        pending = [name]
+        seen = set()
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            reachable.add(current)
+            pending.extend(parents.get(current, ()))
 
     silent = []
     for row in wanted:
         simple = row["event"].rsplit("/", 1)[-1]
-        if simple not in constructed:
+        if simple not in reachable:
             silent.append((row["plugins"], simple))
     silent.sort(reverse=True)
 
     fired = len(wanted) - len(silent)
     print(f"event types plugins listen for: {len(wanted)}")
-    print(f"fired somewhere in {source_root}: {fired} "
+    print(f"a listener could receive: {fired} "
           f"({100 * fired // max(len(wanted), 1)}%)")
-    print(f"never constructed: {len(silent)}")
+    print(f"nothing constructs, directly or as a subclass: {len(silent)}")
     if not silent:
         return
     print()
@@ -568,7 +618,9 @@ def main():
     args = parser.parse_args()
 
     if args.events:
-        report_events(args.events, args.top)
+        if not args.covered:
+            parser.error("--events needs --covered <jar> for the class hierarchy")
+        report_events(args.events, args.covered, args.top)
         return
 
     if args.covered:

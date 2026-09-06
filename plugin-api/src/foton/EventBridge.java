@@ -496,6 +496,14 @@ public final class EventBridge {
         return completions == null ? new String[0] : completions.toArray(new String[0]);
     }
 
+    /** A hotbar slot is about to change. Returns false when a plugin refused. */
+    public static boolean fireItemHeld(String uuid, int previous, int current) {
+        org.bukkit.event.player.PlayerItemHeldEvent event =
+                new org.bukkit.event.player.PlayerItemHeldEvent(player(uuid), previous, current);
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     /** A game mode is about to change. Returns false when a plugin refused. */
     public static boolean fireGameModeChange(String uuid, String mode) {
         org.bukkit.GameMode parsed;
