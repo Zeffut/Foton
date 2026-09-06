@@ -481,6 +481,21 @@ public final class EventBridge {
         return event.getQuitMessage();
     }
 
+    /** Somebody asked for completions. Returns the list a listener claimed,
+     * an empty array when one refused outright, or null when none took it --
+     * which is the difference between "offer nothing" and "let the server
+     * answer", and collapsing the two would silently disable tab completion. */
+    public static String[] fireAsyncTabComplete(String uuid, String buffer) {
+        com.destroystokyo.paper.event.server.AsyncTabCompleteEvent event =
+                new com.destroystokyo.paper.event.server.AsyncTabCompleteEvent(
+                        player(uuid), buffer, new java.util.ArrayList<>());
+        dispatch(event);
+        if (event.isCancelled()) return new String[0];
+        if (!event.isHandled()) return null;
+        java.util.List<String> completions = event.getCompletions();
+        return completions == null ? new String[0] : completions.toArray(new String[0]);
+    }
+
     /** The client finished loading its world. Returns false when cancelled. */
     public static boolean fireClientLoadedWorld(String uuid, boolean fromNetworking) {
         io.papermc.paper.event.player.PlayerClientLoadedWorldEvent event =

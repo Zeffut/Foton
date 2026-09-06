@@ -8,10 +8,11 @@ use super::{
     OVERLOADED_WARNING_INTERVAL, PendingCommandExecutionQueue, Player, SEND_PLAYER_INFO_INTERVAL,
     SLOW_CHUNK_TICK_THRESHOLD, Server, StringReader, SuggestionError, Suggestions,
     TAB_LIST_UPDATE_INTERVAL, TabListTickStats, ThreadPool, World, WorldRemovalRequest,
-    command_suggestions_packet, configured_packet_workers, sleep, spawn_blocking,
+    command_suggestions_packet, configured_packet_workers, plugin_suggestions_packet, sleep,
+    spawn_blocking,
 };
 use crate::command::functions::CommandFunction;
-use crate::event::{CommandEvent, ServerTickEvent};
+use crate::event::{AsyncTabCompleteEvent, CommandEvent, ServerTickEvent};
 use foton_utils::Identifier;
 use std::mem::take;
 use tokio::sync::oneshot::{Receiver, channel};
@@ -511,6 +512,24 @@ impl Server {
         transaction_id: i32,
         input: &str,
     ) {
+        // Paper's `AsyncTabCompleteEvent`, fired before the tree is consulted:
+        // a plugin's command is not in the Brigadier tree and never will be, so
+        // completing one is only possible ahead of the server's own answer.
+        let mut event = AsyncTabCompleteEvent::new(Some(Arc::clone(player)), input.to_owned());
+        self.events.fire(&mut event);
+        if event.is_cancelled() {
+            player.send_packet(CCommandSuggestions::new(transaction_id, 0, 0, Vec::new()));
+            return;
+        }
+        if event.is_handled() {
+            player.send_packet(plugin_suggestions_packet(
+                transaction_id,
+                input,
+                event.completions(),
+            ));
+            return;
+        }
+
         let suggestions =
             self.build_command_suggestions(CommandSender::Player(Arc::clone(player)), input);
         match suggestions {

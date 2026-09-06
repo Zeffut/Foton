@@ -46,7 +46,7 @@ pub use block::{
     BlockFadeEvent, BlockFromToEvent, BlockIgniteEvent, BlockPlaceEvent, BlockPreDispenseEvent,
     LeavesDecayEvent, PistonEvent, SignChangeEvent,
 };
-pub use command::CommandEvent;
+pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use entity::{
     BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,

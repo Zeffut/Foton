@@ -24,6 +24,7 @@ import argparse
 import collections
 import json
 import pathlib
+import re
 import struct
 import sys
 import zipfile
@@ -495,6 +496,50 @@ def report_covered(api_jar, top):
         print(f"  {row['plugins']:3d}  {row['member']}")
 
 
+def report_events(source_root, top):
+    """Which events plugins listen for that nothing here ever fires.
+
+    A member that resolves is not a member that works, and for events the gap is
+    total: a listener registers fine against an event class the server never
+    constructs, and then simply never runs. `--covered` cannot see this -- the
+    class is present, so it counts as covered -- which is why this is a separate
+    question asked of the source rather than of the jar.
+
+    Constructed-anywhere is the test, not constructed-in-one-file: events are
+    fired from the plugin host, the event bridge and the Rust forwarding layer,
+    and looking at only one of those undercounts. It is still a floor rather
+    than a proof -- an event constructed on a path nothing reaches counts as
+    fired here.
+    """
+    ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
+    wanted = [row for row in ledger["events"] if row["event"].endswith("Event")]
+
+    constructed = set()
+    for path in pathlib.Path(source_root).rglob("*.java"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in re.finditer(r"new\s+(?:[A-Za-z0-9_.]*\.)?([A-Za-z0-9_]+Event)\s*\(", text):
+            constructed.add(match.group(1))
+
+    silent = []
+    for row in wanted:
+        simple = row["event"].rsplit("/", 1)[-1]
+        if simple not in constructed:
+            silent.append((row["plugins"], simple))
+    silent.sort(reverse=True)
+
+    fired = len(wanted) - len(silent)
+    print(f"event types plugins listen for: {len(wanted)}")
+    print(f"fired somewhere in {source_root}: {fired} "
+          f"({100 * fired // max(len(wanted), 1)}%)")
+    print(f"never constructed: {len(silent)}")
+    if not silent:
+        return
+    print()
+    print(f"by audience -- plugins that listen and would never be called, top {top}:")
+    for plugins, simple in silent[:top]:
+        print(f"  {plugins:3d}  {simple}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -511,11 +556,20 @@ def main():
         help="measure a built API jar against the corpus instead of ranking it",
     )
     parser.add_argument(
+        "--events",
+        type=pathlib.Path,
+        help="which listened-for events nothing in this source tree fires",
+    )
+    parser.add_argument(
         "--covered",
         type=pathlib.Path,
         help="measure a built API jar against the committed ledger, no corpus needed",
     )
     args = parser.parse_args()
+
+    if args.events:
+        report_events(args.events, args.top)
+        return
 
     if args.covered:
         report_covered(args.covered, args.top)
