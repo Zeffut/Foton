@@ -813,6 +813,15 @@ public final class EventBridge {
             + result.getZ() + "|" + result.getYaw() + "|" + result.getPitch();
     }
 
+    /** A crop is about to advance a stage. Returns false when refused. */
+    public static boolean fireBlockGrow(String world, int x, int y, int z) {
+        org.bukkit.block.Block block = new FotonBlock(new FotonWorld(world), x, y, z);
+        org.bukkit.event.block.BlockGrowEvent event =
+                new org.bukkit.event.block.BlockGrowEvent(block, block.getState());
+        dispatch(event);
+        return !event.isCancelled();
+    }
+
     public static void fireChunkUnload(String world, int x, int z) {
         dispatch(new org.bukkit.event.world.ChunkUnloadEvent(
                 new FotonChunk(new FotonWorld(world), x, z)));

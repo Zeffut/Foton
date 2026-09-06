@@ -106,6 +106,53 @@ pub struct BlockFadeEvent {
     cancelled: bool,
 }
 
+/// A crop or plant is about to advance a growth stage.
+///
+/// Bukkit's `BlockGrowEvent`. Farm plugins cancel it to freeze a display
+/// field, and growth-multiplier plugins read it to know a tick landed --
+/// which is why it fires per successful advance rather than per random tick.
+pub struct BlockGrowEvent {
+    world: String,
+    position: BlockPos,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for BlockGrowEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/block_grow");
+}
+impl Event for BlockGrowEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+impl BlockGrowEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    pub fn new(world: impl Into<String>, position: BlockPos) -> Self {
+        Self {
+            world: world.into(),
+            position,
+            cancelled: false,
+        }
+    }
+
+    /// Which world this happened in.
+    #[must_use]
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+
+    /// The block that would grow.
+    #[must_use]
+    pub const fn position(&self) -> BlockPos {
+        self.position
+    }
+
+    /// Refuses the growth; the crop stays at the stage it was.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// A block is about to spread itself onto a neighboring position.
 ///
 /// Bukkit's `BlockSpreadEvent`, which extends `BlockFormEvent` -- so a listener

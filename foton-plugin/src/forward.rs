@@ -20,7 +20,7 @@ use foton_core::event::EntityTargetEvent;
 use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
     BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
-    BlockFertilizeEvent, BlockFromToEvent, BlockIgniteEvent, BlockPlaceEvent,
+    BlockFertilizeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
     BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, ChunkUnloadEvent, CommandEvent,
     CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
     EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
@@ -397,6 +397,12 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<BlockFadeEvent, _>(owner(), move |event| {
         if !block_fade_call(&jvm, event.world(), event.position()) {
+            event.set_cancelled(true);
+        }
+    });
+    let jvm = Arc::clone(&vm);
+    events.on::<BlockGrowEvent, _>(owner(), move |event| {
+        if !block_grow_call(&jvm, event.world(), event.position()) {
             event.set_cancelled(true);
         }
     });
@@ -2369,6 +2375,28 @@ fn block_fade_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
     env.call_static_method(
         BRIDGE,
         "fireBlockFade",
+        "(Ljava/lang/String;III)Z",
+        &[
+            JValue::Object(&world),
+            JValue::Int(pos.x()),
+            JValue::Int(pos.y()),
+            JValue::Int(pos.z()),
+        ],
+    )
+    .and_then(JValueGen::z)
+    .unwrap_or(true)
+}
+
+fn block_grow_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let Ok(world) = env.new_string(world) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireBlockGrow",
         "(Ljava/lang/String;III)Z",
         &[
             JValue::Object(&world),
