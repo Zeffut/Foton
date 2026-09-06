@@ -260,16 +260,26 @@ bytes while its pattern was filled in characters -- was fixed at the cause, and
 `ShapedRecipe::matches_at` now indexes through `get` as well, because a recipe
 arriving from a plugin is not the registry's to trust.
 
-Two boundary findings are left open and are worth knowing about. A failed JNI
-call leaves the Java exception pending: `jni`'s `check_exception!` returns
-`Err(JavaException)` without calling `ExceptionClear`, and `forward.rs` swallows
-that `Err` at some sixty sites, so a later JNI call runs with an exception still
-set. It is made reachable by `EventBridge.handlers` being a plain `HashMap` of
-plain `ArrayList`s, mutated from async plugin tasks and iterated from the tick.
-And `Native.requestChunk` stores a `ChunkRequestHandle` -- which pins a chunk
-ticket -- under a fresh UUID that only `chunkRequestReady` can retire, while the
-only poller for it is unreferenced code; a plugin calling it directly pins a
-chunk for the life of the server.
+The pending-exception finding is closed. `jni`'s `check_exception!` turns a
+Java exception into `Err(Error::JavaException)` and leaves the exception itself
+set on the thread -- it does not call `ExceptionClear` -- and every call in
+`forward.rs` swallows its `Err`, because an event bridge has nobody to report
+to. Nothing else cleared it either, so the next JNI call on that thread ran with
+the previous one's exception pending, which JNI documents as undefined for most
+functions: a plugin whose handler threw once looked broken everywhere
+afterwards.
+
+The fix is worth describing because the shape of the problem suggested a worse
+one. Seventy sites swallow an error, but all seventy-one callbacks pass through
+one attach, so `BridgeEnv` wraps the `AttachGuard` and clears any pending
+exception when the scope ends -- describing it first, since the stack trace is
+the only thing that names the handler that threw, and it goes to the JVM's own
+error channel. One place instead of seventy.
+
+One boundary finding is still open: `Native.requestChunk` stores a
+`ChunkRequestHandle` -- which pins a chunk ticket -- under a fresh UUID that only
+`chunkRequestReady` can retire, while the only poller for it is unreferenced
+code. A plugin calling it directly pins a chunk for the life of the server.
 
 ## The light engine is not vanilla's, and two findings depend on knowing that
 

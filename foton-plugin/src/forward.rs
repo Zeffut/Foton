@@ -41,9 +41,10 @@ use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
 use foton_utils::text::DisplayResolutor;
 use foton_utils::{BlockPos, Identifier};
-use jni::JavaVM;
 use jni::objects::{JObject, JString, JValue, JValueGen};
+use jni::{AttachGuard, JNIEnv, JavaVM};
 use std::net::SocketAddr;
+use std::ops::{Deref, DerefMut};
 use text_components::TextComponent;
 use uuid::Uuid;
 
@@ -57,6 +58,59 @@ const SCHEDULER: &str = "foton/FotonScheduler";
 const MESSENGER: &str = "foton/FotonMessenger";
 
 /// Who these subscriptions belong to, so unloading takes them with it.
+/// An attached JNI thread that never leaves a Java exception pending.
+///
+/// `jni`'s `check_exception!` turns a pending exception into
+/// `Err(Error::JavaException)` and leaves the exception itself set on the
+/// thread -- it does not call `ExceptionClear`. Every call in this file
+/// swallows its `Err`, because an event bridge has nobody to report to, so
+/// nothing else clears it either: the next JNI call on that thread runs with
+/// the previous one's exception still pending. JNI documents that as undefined
+/// for most functions, and in practice it makes the following call fail for a
+/// reason that has nothing to do with it -- a plugin whose handler throws once
+/// then looks broken everywhere.
+///
+/// Clearing on scope exit puts the reset at the one place every callback passes
+/// through, instead of at the seventy that swallow an error.
+struct BridgeEnv<'local> {
+    guard: AttachGuard<'local>,
+}
+
+impl<'local> BridgeEnv<'local> {
+    fn attach(vm: &'local JavaVM) -> Option<Self> {
+        Some(Self {
+            guard: vm.attach_current_thread().ok()?,
+        })
+    }
+}
+
+impl<'local> Deref for BridgeEnv<'local> {
+    type Target = JNIEnv<'local>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
+impl DerefMut for BridgeEnv<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard
+    }
+}
+
+impl Drop for BridgeEnv<'_> {
+    fn drop(&mut self) {
+        if !self.guard.exception_check().unwrap_or(false) {
+            return;
+        }
+        // Describe before clearing: the stack trace is the only thing that says
+        // which plugin handler threw, and it goes to the JVM's own error
+        // channel where a plugin author will look for it.
+        let _ = self.guard.exception_describe();
+        let _ = self.guard.exception_clear();
+    }
+}
+
 fn owner() -> Identifier {
     Identifier::from_foton("plugins")
 }
@@ -523,7 +577,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<EntityMountEvent, _>(owner(), move |event| {
-        let Ok(mut env) = jvm.attach_current_thread() else {
+        let Some(mut env) = BridgeEnv::attach(&jvm) else {
             return;
         };
         let (Ok(entity), Ok(vehicle)) = (
@@ -550,7 +604,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<ExpBottleEvent, _>(owner(), move |event| {
-        let Ok(mut env) = jvm.attach_current_thread() else {
+        let Some(mut env) = BridgeEnv::attach(&jvm) else {
             return;
         };
         let Ok(entity) = env.new_string(event.entity().to_string()) else {
@@ -912,7 +966,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<BlockExpEvent, _>(owner(), move |event| {
-        let Ok(mut env) = jvm.attach_current_thread() else {
+        let Some(mut env) = BridgeEnv::attach(&jvm) else {
             return;
         };
         let Ok(world) = env.new_string(event.world()) else {
@@ -1010,7 +1064,7 @@ fn block_pre_dispense_call(
     slot: usize,
     item: &ItemStack,
 ) -> Option<(bool, ItemStack)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let world = env.new_string(world).ok()?;
     let encoded = env.new_string(describe_slot(item)).ok()?;
     let answer = env
@@ -1050,7 +1104,7 @@ pub(crate) fn unsubscribe(server: &Arc<Server>) {
 
 /// A component as the plain text a Bukkit plugin expects a message to be.
 fn world_call(vm: &JavaVM, method: &str, world: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(world) = env.new_string(world) else {
@@ -1086,7 +1140,7 @@ enum Answer {
 /// Calls a bridge method that takes a player and a message and returns one.
 fn string_call(vm: &JavaVM, method: &str, uuid: &str, message: Option<&str>) -> Answer {
     let reach = || -> Option<Option<String>> {
-        let mut env = vm.attach_current_thread().ok()?;
+        let mut env = BridgeEnv::attach(vm)?;
         let uuid = env.new_string(uuid).ok()?;
         let message: JString<'_> = match message {
             Some(text) => env.new_string(text).ok()?,
@@ -1117,7 +1171,7 @@ fn string_call(vm: &JavaVM, method: &str, uuid: &str, message: Option<&str>) -> 
 }
 
 fn chat_call(vm: &JavaVM, uuid: &str, message: &str) -> Option<(String, Vec<Uuid>)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let message = env.new_string(message).ok()?;
     let answer = env
@@ -1147,7 +1201,7 @@ fn chat_call(vm: &JavaVM, uuid: &str, message: &str) -> Option<(String, Vec<Uuid
 }
 
 fn login_call(vm: &JavaVM, uuid: &str) -> Option<String> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let answer = env
         .call_static_method(
@@ -1168,7 +1222,7 @@ fn login_call(vm: &JavaVM, uuid: &str) -> Option<String> {
 }
 
 fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player_uuid) else {
@@ -1185,7 +1239,7 @@ fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
 }
 
 fn interact_entity_call(vm: &JavaVM, player_uuid: &str, entity_uuid: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(player) = env.new_string(player_uuid) else {
@@ -1211,9 +1265,7 @@ fn prepare_craft_call(
     result: &str,
     repair: bool,
 ) -> Option<String> {
-    let Ok(mut env) = vm.attach_current_thread() else {
-        return None;
-    };
+    let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(player_uuid).ok()?;
     let matrix = env.new_string(matrix).ok()?;
     let result = env.new_string(result).ok()?;
@@ -1246,9 +1298,7 @@ fn crafter_craft_call(
     result: &str,
     remaining: &str,
 ) -> Option<String> {
-    let Ok(mut env) = vm.attach_current_thread() else {
-        return None;
-    };
+    let mut env = BridgeEnv::attach(vm)?;
     let world = env.new_string(world).ok()?;
     let recipe = env.new_string(recipe).ok()?;
     let result = env.new_string(result).ok()?;
@@ -1273,7 +1323,7 @@ fn inventory_click_call(
     click: &str,
     raw_slot: i32,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player_uuid) else {
@@ -1305,7 +1355,7 @@ fn inventory_click_call(
 }
 
 fn inventory_open_call(vm: &JavaVM, player_uuid: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player_uuid) else {
@@ -1322,7 +1372,7 @@ fn inventory_open_call(vm: &JavaVM, player_uuid: &str) -> bool {
 }
 
 fn entity_target_call(vm: &JavaVM, entity_uuid: &str, target_uuid: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity_uuid) else {
@@ -1342,7 +1392,7 @@ fn entity_target_call(vm: &JavaVM, entity_uuid: &str, target_uuid: &str) -> bool
 }
 
 fn entity_death_call(vm: &JavaVM, entity: Uuid) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(uuid) = env.new_string(entity.to_string()) else {
@@ -1357,7 +1407,7 @@ fn entity_death_call(vm: &JavaVM, entity: Uuid) {
 }
 
 fn entity_resurrect_call(vm: &JavaVM, entity: Uuid) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(entity.to_string()) else {
@@ -1379,7 +1429,7 @@ fn player_take_lectern_book_call(
     world: &str,
     position: BlockPos,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player.to_string()) else {
@@ -1411,7 +1461,7 @@ fn inventory_drag_call(
     old_cursor: &str,
     drag_type: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player_uuid) else {
@@ -1442,7 +1492,7 @@ fn inventory_drag_call(
 }
 
 fn remove_call(vm: &JavaVM, entity: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1465,7 +1515,7 @@ fn item_spawn_call(
     z: f64,
     item: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1495,7 +1545,7 @@ fn item_spawn_call(
 }
 
 fn pickup_call(vm: &JavaVM, entity: &str, item: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1515,9 +1565,7 @@ fn pickup_call(vm: &JavaVM, entity: &str, item: &str) -> bool {
 }
 
 fn entity_portal_call(vm: &JavaVM, event: &EntityPortalEvent) -> Option<(String, glam::DVec3)> {
-    let Ok(mut env) = vm.attach_current_thread() else {
-        return None;
-    };
+    let mut env = BridgeEnv::attach(vm)?;
     let Ok(entity) = env.new_string(event.entity().to_string()) else {
         return None;
     };
@@ -1553,7 +1601,7 @@ fn pre_creature_spawn_call(
     entity_type: &str,
     reason: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -1590,7 +1638,7 @@ fn creature_spawn_call(
     z: f64,
     reason: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1620,7 +1668,7 @@ fn creature_spawn_call(
 }
 
 fn regain_health_call(vm: &JavaVM, entity: &str, amount: f32) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1637,7 +1685,7 @@ fn regain_health_call(vm: &JavaVM, entity: &str, amount: f32) -> bool {
 }
 
 fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(damager) = env.new_string(damager) else {
@@ -1664,7 +1712,7 @@ fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
 }
 
 fn pushed_by_entity_attack_call(vm: &JavaVM, entity: &str, pushed_by: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1684,7 +1732,7 @@ fn pushed_by_entity_attack_call(vm: &JavaVM, entity: &str, pushed_by: &str) -> b
 }
 
 fn hanging_break_call(vm: &JavaVM, entity: &str, cause: &str, remover: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1725,7 +1773,7 @@ fn hanging_place_call(
     z: i32,
     face: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -1763,7 +1811,7 @@ fn hanging_place_call(
 /// A failed crossing answers `true`: a plugin host that cannot be reached must
 /// not silently start cancelling the world's block changes.
 fn block_call(vm: &JavaVM, method: &str, player: &Arc<Player>, position: BlockPos) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player.gameprofile.id.to_string()) else {
@@ -1794,7 +1842,7 @@ fn block_place_call(
     position: BlockPos,
     item: &ItemStack,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player.gameprofile.id.to_string()) else {
@@ -1827,7 +1875,7 @@ fn block_place_call(
 }
 
 fn from_to_call(vm: &JavaVM, world: &str, block: BlockPos, to_block: BlockPos) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -1858,7 +1906,7 @@ fn death_call(
     drops: &str,
     keep_inventory: bool,
 ) -> Option<(Option<String>, String)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let message = match message {
         Some(value) => env.new_string(value).ok()?,
@@ -1893,7 +1941,7 @@ fn death_call(
 }
 
 fn inventory_close_call(vm: &JavaVM, uuid: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(uuid) = env.new_string(uuid) else {
@@ -1915,7 +1963,7 @@ fn player_open_sign_call(
     front_side: bool,
     cause: PlayerOpenSignCause,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(uuid) = env.new_string(uuid.to_string()) else {
@@ -1956,7 +2004,7 @@ fn sign_change_call(
     position: BlockPos,
     lines: &[String; 4],
 ) -> Option<(bool, [String; 4])> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let world = env.new_string(world).ok()?;
     let encoded = lines.join("\u{1f}");
@@ -1993,7 +2041,7 @@ fn sign_change_call(
 }
 
 fn weather_change_call(vm: &JavaVM, world: &str, raining: bool) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2014,7 +2062,7 @@ fn weather_change_call(vm: &JavaVM, world: &str, raining: bool) -> bool {
 }
 
 fn thunder_change_call(vm: &JavaVM, world: &str, thundering: bool) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2037,7 +2085,7 @@ fn thunder_change_call(vm: &JavaVM, world: &str, thundering: bool) -> bool {
 fn lightning_strike_call(vm: &JavaVM, entity: &str, world: &str, cause: &str) -> bool {
     // A failed crossing answers "allowed", like every other call here: a
     // plugin host that cannot be reached must not start cancelling the world.
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity) else {
@@ -2071,7 +2119,7 @@ fn explode_call(
     blocks: &[BlockPos],
     explosion_result: &str,
 ) -> Option<(bool, Vec<BlockPos>)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let entity = env.new_string(entity).ok()?;
     let world = env.new_string(world).ok()?;
     let encoded = blocks
@@ -2123,7 +2171,7 @@ fn block_explode_call(
     source: BlockPos,
     blocks: &[BlockPos],
 ) -> Option<(bool, Vec<BlockPos>)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let world = env.new_string(world).ok()?;
     let encoded = blocks
         .iter()
@@ -2173,7 +2221,7 @@ fn block_dispense_call(
     pos: BlockPos,
     item: &ItemStack,
 ) -> Option<(bool, ItemStack)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let world = env.new_string(world).ok()?;
     let encoded = env.new_string(describe_slot(item)).ok()?;
     let answer = env
@@ -2203,7 +2251,7 @@ fn block_dispense_call(
 }
 
 fn block_burn_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2225,7 +2273,7 @@ fn block_burn_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
 }
 
 fn block_fade_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2247,7 +2295,7 @@ fn block_fade_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
 }
 
 fn leaves_decay_call(vm: &JavaVM, world: &str, pos: BlockPos) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2275,7 +2323,7 @@ fn block_ignite_call(
     cause: &str,
     player: Option<Uuid>,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2314,7 +2362,7 @@ fn block_ignite_call(
 }
 
 fn block_fertilize_call(vm: &JavaVM, world: &str, pos: BlockPos, player: Option<Uuid>) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2352,7 +2400,7 @@ fn entity_change_block_call(
     pos: BlockPos,
     to: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity.to_string()) else {
@@ -2383,7 +2431,7 @@ fn entity_change_block_call(
 }
 
 fn block_damage_call(vm: &JavaVM, player: uuid::Uuid, world: &str, pos: BlockPos) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(player) = env.new_string(player.to_string()) else {
@@ -2410,7 +2458,7 @@ fn block_damage_call(vm: &JavaVM, player: uuid::Uuid, world: &str, pos: BlockPos
 }
 
 fn locale_change_call(vm: &JavaVM, player: uuid::Uuid, old_locale: &str, new_locale: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(player) = env.new_string(player.to_string()) else {
@@ -2440,7 +2488,7 @@ fn player_advancement_criterion_grant_call(
     key: &str,
     criterion: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(player) = env.new_string(player.to_string()) else {
@@ -2468,7 +2516,7 @@ fn player_advancement_criterion_grant_call(
 }
 
 fn player_advancement_done_call(vm: &JavaVM, player: uuid::Uuid, key: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(player) = env.new_string(player.to_string()) else {
@@ -2486,7 +2534,7 @@ fn player_advancement_done_call(vm: &JavaVM, player: uuid::Uuid, key: &str) {
 }
 
 fn player_fish_call(vm: &JavaVM, player: uuid::Uuid, hook: uuid::Uuid, state: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(player) = env.new_string(player.to_string()) else {
@@ -2514,7 +2562,7 @@ fn player_fish_call(vm: &JavaVM, player: uuid::Uuid, hook: uuid::Uuid, state: &s
 }
 
 fn projectile_launch_call(vm: &JavaVM, shooter: uuid::Uuid, projectile: uuid::Uuid) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(shooter) = env.new_string(shooter.to_string()) else {
@@ -2540,7 +2588,7 @@ fn transform_call(
     transformed: uuid::Uuid,
     reason: ConversionReason,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(entity) = env.new_string(entity.to_string()) else {
@@ -2584,7 +2632,7 @@ fn pre_login_call(
     uuid: uuid::Uuid,
     address: SocketAddr,
 ) -> Option<(AsyncPlayerPreLoginResult, String)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let name = env.new_string(name).ok()?;
     let uuid = env.new_string(uuid.to_string()).ok()?;
     let address = env.new_string(address.ip().to_string()).ok()?;
@@ -2625,7 +2673,7 @@ fn piston_call(
     extending: bool,
     blocks: &[BlockPos],
 ) -> Option<(bool, Vec<BlockPos>)> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let world = env.new_string(world).ok()?;
     let direction = env.new_string(direction).ok()?;
     let encoded = blocks
@@ -2674,7 +2722,7 @@ fn piston_call(
 }
 
 fn food_level_call(vm: &JavaVM, player: &str, level: i32) -> Option<i32> {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return Some(level);
     };
     let Ok(player) = env.new_string(player) else {
@@ -2692,7 +2740,7 @@ fn food_level_call(vm: &JavaVM, player: &str, level: i32) -> Option<i32> {
 }
 
 fn player_drop_call(vm: &JavaVM, player: &str, item: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(player) = env.new_string(player) else {
@@ -2712,7 +2760,7 @@ fn player_drop_call(vm: &JavaVM, player: &str, item: &str) -> bool {
 }
 
 fn player_bucket_empty_call(vm: &JavaVM, player: &str, bucket: &str) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(player) = env.new_string(player) else {
@@ -2738,7 +2786,7 @@ fn player_bucket_fill_call(
     pos: BlockPos,
     bucket: &str,
 ) -> bool {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
     let Ok(player) = env.new_string(player) else {
@@ -2768,7 +2816,7 @@ fn player_bucket_fill_call(
 }
 
 fn player_item_break_call(vm: &JavaVM, player: &str, item: &str) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let (Ok(player), Ok(item)) = (env.new_string(player), env.new_string(item)) else {
@@ -2828,9 +2876,7 @@ fn spawn_location_call_named(
     rotation: (f32, f32),
     anchor_spawn: bool,
 ) -> Option<(String, [f64; 3], (f32, f32))> {
-    let Ok(mut env) = vm.attach_current_thread() else {
-        return None;
-    };
+    let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let encoded = format!(
         "{}|{}|{}|{}|{}|{}",
@@ -2889,7 +2935,7 @@ fn portal_call(
     to_rotation: (f32, f32),
     cause: &str,
 ) -> Option<(bool, String, glam::DVec3, (f32, f32))> {
-    let mut env = vm.attach_current_thread().ok()?;
+    let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let encoded = format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
@@ -2933,7 +2979,7 @@ fn portal_call(
     Some((false, world, glam::DVec3::new(x, y, z), (yaw, pitch)))
 }
 fn chunk_load_call(vm: &JavaVM, world: &str, x: i32, z: i32, new_chunk: bool) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(world) = env.new_string(world) else {
@@ -2954,7 +3000,7 @@ fn chunk_load_call(vm: &JavaVM, world: &str, x: i32, z: i32, new_chunk: bool) {
 
 fn portal_create_call(vm: &JavaVM, world: &str, blocks: &str) -> Option<Vec<BlockPos>> {
     let fallback = || parse_portal_positions(blocks);
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return fallback();
     };
     let Ok(world) = env.new_string(world) else {
@@ -3025,7 +3071,7 @@ fn move_call(
     from: glam::DVec3,
     to: glam::DVec3,
 ) -> MoveAnswer {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return MoveAnswer::Unreachable;
     };
     let Ok(uuid) = env.new_string(uuid) else {
@@ -3082,7 +3128,7 @@ fn move_call(
 /// times a second helps nobody -- so it runs nothing this tick and tries again
 /// on the next.
 fn drain_scheduler(vm: &JavaVM) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     // The answer is how many task bodies ran. Nothing here needs it; the
@@ -3097,7 +3143,7 @@ fn drain_scheduler(vm: &JavaVM) {
 /// typed on a server whose plugin host had stopped responding.
 fn command_call(vm: &JavaVM, uuid: &str, line: &str) -> bool {
     let reach = || -> Option<bool> {
-        let mut env = vm.attach_current_thread().ok()?;
+        let mut env = BridgeEnv::attach(vm)?;
         let uuid = env.new_string(uuid).ok()?;
         let line = env.new_string(line).ok()?;
         env.call_static_method(
@@ -3115,7 +3161,7 @@ fn command_call(vm: &JavaVM, uuid: &str, line: &str) -> bool {
 
 /// Delivers one opaque client payload to the Bukkit channel registry.
 fn plugin_message_call(vm: &JavaVM, uuid: &str, channel: &str, payload: &[u8]) {
-    let Ok(mut env) = vm.attach_current_thread() else {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
         return;
     };
     let Ok(uuid) = env.new_string(uuid) else {
