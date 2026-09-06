@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunk_saver::nesting::MAX_NESTING_DEPTH;
 
 #[test]
 fn structure_persistence_filters_empty_starts_and_sorts_entries() {
@@ -726,5 +727,30 @@ fn template_processor_list_roundtrips_ruined_portal_processors() {
             TemplateMarkerHandling::WoodlandMansion
         )),
         TemplateMarkerHandling::WoodlandMansion,
+    );
+}
+
+#[test]
+fn a_pool_element_too_deep_to_read_back_is_never_written() {
+    // The reader refuses past the nesting ceiling, and a refused chunk is
+    // quarantined and regenerated -- so a writer that can emit something the
+    // reader rejects costs the whole column, not just the element. This is the
+    // round-trip property stated directly: whatever the writer produces, the
+    // reader takes.
+    let mut element = PoolElement::Empty;
+    for _ in 0..(MAX_NESTING_DEPTH * 2) {
+        element = PoolElement::List {
+            elements: vec![element],
+            projection: Projection::Rigid,
+        };
+    }
+
+    let persistent = ChunkStorage::pool_element_to_persistent(&element, 0);
+    let encoded = wincode::serialize(&persistent).expect("the truncated tree should encode");
+    let decoded = wincode::deserialize_exact::<PersistentPoolElement>(&encoded);
+
+    assert!(
+        decoded.is_ok(),
+        "the writer must not produce a tree its own reader refuses"
     );
 }

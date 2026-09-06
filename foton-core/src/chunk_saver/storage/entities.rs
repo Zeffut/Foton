@@ -154,6 +154,11 @@ impl ChunkStorage {
         // The reader refuses a chain deeper than this, so writing one would
         // save a chunk that can never be loaded again -- and building it
         // recurses the same way the reader does, which is its own way to die.
+        //
+        // `>`, not `>=`, and the difference from `pool_element_to_persistent`
+        // is real: refusing here drops the passenger outright, so no `Nested`
+        // wrapper is spent on it, while an over-deep pool element still comes
+        // back as an `Empty` its parent wraps.
         if depth > MAX_NESTING_DEPTH {
             tracing::warn!(
                 uuid = ?entity.uuid(),

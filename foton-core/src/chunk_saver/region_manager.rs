@@ -40,6 +40,11 @@ impl fmt::Display for CorruptChunkData {
     }
 }
 
+/// How many corrupt copies one chunk slot may accumulate before the oldest ones
+/// are simply kept and no further copy is written. Bounds the disk cost of a
+/// slot that goes corrupt, regenerates, and goes corrupt again.
+const MAX_QUARANTINED_COPIES_PER_SLOT: u32 = 16;
+
 /// Manages region files with seek-based chunk access.
 ///
 /// Only keeps region headers (8KB each) in memory, not chunk data.
@@ -287,10 +292,26 @@ impl RegionManager {
     }
 
     /// Where a chunk's bytes are put before its slot is cleared.
-    fn quarantine_path(&self, region_pos: RegionPos, index: usize) -> PathBuf {
-        self.base_path
-            .join("corrupt")
-            .join(format!("{}.{index}.chunk", region_pos.filename()))
+    ///
+    /// Never returns a path that already holds a copy. A cleared slot is
+    /// refilled by worldgen, so the *second* time an index goes corrupt the
+    /// bytes are regenerated terrain -- overwriting the first copy would trade
+    /// the player's build for a hillside. The first copy wins, and later ones
+    /// queue up beside it.
+    async fn free_quarantine_path(&self, region_pos: RegionPos, index: usize) -> Option<PathBuf> {
+        let directory = self.base_path.join("corrupt");
+        let stem = format!("{}.{index}", region_pos.filename());
+        for attempt in 0..MAX_QUARANTINED_COPIES_PER_SLOT {
+            let path = if attempt == 0 {
+                directory.join(format!("{stem}.chunk"))
+            } else {
+                directory.join(format!("{stem}.{attempt}.chunk"))
+            };
+            if !fs::try_exists(&path).await.unwrap_or(false) {
+                return Some(path);
+            }
+        }
+        None
     }
 
     /// Copies a chunk's raw bytes aside so clearing its slot destroys nothing.
@@ -307,7 +328,14 @@ impl RegionManager {
         index: usize,
         entry: ChunkEntry,
     ) {
-        let path = self.quarantine_path(region_pos, index);
+        let Some(path) = self.free_quarantine_path(region_pos, index).await else {
+            tracing::error!(
+                region = %region_pos.filename(),
+                index,
+                "Chunk failed to decode and already has {MAX_QUARANTINED_COPIES_PER_SLOT} copies                  set aside; keeping those and clearing the slot"
+            );
+            return;
+        };
         let outcome = async {
             let bytes = Self::read_chunk_data(file, entry.sector_offset, entry.size_bytes).await?;
             if let Some(parent) = path.parent() {
@@ -1180,6 +1208,44 @@ mod tests {
         assert_eq!(
             kept, payload,
             "the copy must be the bytes that were on disk, not a rewrite of them"
+        );
+
+        // A cleared slot is refilled by worldgen, so a second corruption at the
+        // same index carries regenerated terrain. Overwriting would trade the
+        // player's build for a hillside.
+        write_test_region(&directory, pos, b"second payload", 14)
+            .await
+            .expect("test region should be rewritten");
+        let manager = RegionManager::new(&directory);
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should reopen")
+        );
+        assert!(
+            manager
+                .load_chunk(pos, 0, 16, Weak::new(), &test_thread_pool())
+                .await
+                .expect("the second corrupt chunk also reports as absent")
+                .is_none()
+        );
+        assert_eq!(
+            fs::read(&quarantined)
+                .await
+                .expect("the first copy must still be there"),
+            payload,
+            "the first copy is the valuable one and must not be overwritten"
+        );
+        assert!(
+            fs::try_exists(
+                directory
+                    .join("corrupt")
+                    .join(format!("{}.{index}.1.chunk", region_pos.filename()))
+            )
+            .await
+            .unwrap_or(false),
+            "the second copy must be set aside next to the first"
         );
 
         manager
