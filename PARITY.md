@@ -579,14 +579,28 @@ Every entry above gets one before it is called done.
 These are missing behaviour rather than wrong behaviour, so they belong here
 rather than in a fix. Each was read against the vanilla source, not recalled.
 
-**Arrows have no `canHitEntity`.** `AbstractArrow` caps its victims at
-`pierceLevel + 1`, keeps a `piercingIgnoreEntityIds` set, and refuses a target
-its shooter cannot harm. Foton's arrow overrides none of that and the projectile
-layer returns only the nearest hit, so a Piercing arrow strikes at most one
-entity per tick instead of the whole line, is never consumed by its quota, and
-re-hits what it just went through -- the second hit is refused by i-frames,
-which sends it down the `deflect(Reverse)` branch. It also crosses team
-protection in PvP, because `canHarmPlayer` is never consulted.
+**Arrows have `canHitEntity`, minus its team clause.** `AbstractArrow` caps its
+victims at `pierceLevel + 1`, keeps a `piercingIgnoreEntityIds` set, and refuses
+a target its shooter cannot harm. Foton's arrow now overrides
+`Projectile::can_hit_entity` and carries the set: a piercing shot no longer
+re-hits the body it just went through -- which used to be refused by i-frames
+instead and sent down the `deflect(Reverse)` branch -- and the quota now spends
+the arrow after `pierce_level + 1` bodies. `resetPiercedEntities` clears it when
+the arrow lands, so one that is picked up and shot again starts over.
+
+Two halves are still missing, and they belong to other systems.
+
+The team clause needs `Player.canHarmPlayer`, which reads the shooter's
+scoreboard team and its `allowFriendlyFire` flag. Foton's `ScoreboardTeam`
+carries a name and nothing else -- no ally relation, no options -- and
+`Entity::is_allied_to` answers `false` for everything. Writing the test would
+mean inventing the data it reads, so this is a team-system gap rather than an
+arrow one.
+
+The projectile layer still returns only the nearest hit per tick, so a Piercing
+arrow passes through a line of mobs one body per tick rather than all at once.
+Vanilla splits this at `findHitEntities`/`getManyEntityHitResult`; Foton has the
+single-hit form only.
 
 **`MobEffect.onMobHurt` and `onMobRemoved` are wired.** They used not to be,
 which left four effects doing nothing and made the trial-chamber and

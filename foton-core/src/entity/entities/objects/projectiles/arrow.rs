@@ -129,6 +129,13 @@ struct ArrowState {
     fired_from_ammo: Option<ItemStack>,
     /// Effects the arrow hands to whatever it hits.
     effects: Vec<MobEffectInstance>,
+    /// Entities this shot has already gone through.
+    ///
+    /// Vanilla parity: `AbstractArrow.piercingIgnoreEntityIds`. It is what
+    /// stops a piercing arrow from hitting the same body twice on its way
+    /// past, and what its pierce quota is counted against. A `Vec` rather than
+    /// a set because it never holds more than `pierce_level + 1` entries.
+    piercing_ignore_entity_ids: Vec<i32>,
 }
 
 impl ArrowState {
@@ -141,6 +148,7 @@ impl ArrowState {
             fired_from_weapon: None,
             fired_from_ammo: None,
             effects: Vec::new(),
+            piercing_ignore_entity_ids: Vec::new(),
         }
     }
 }
@@ -648,6 +656,26 @@ impl Projectile for ArrowEntity {
         &self.projectile_base
     }
 
+    /// Vanilla parity: `AbstractArrow.canHitEntity`.
+    ///
+    /// Only the piercing half is here. Vanilla's other clause refuses a shot
+    /// from one player at another when `canHarmPlayer` says no, and that reads
+    /// the shooter's scoreboard team and its friendly-fire flag. Foton's
+    /// `ScoreboardTeam` carries a name and nothing else -- no ally relation, no
+    /// `allowFriendlyFire` -- so the test cannot be written without inventing
+    /// the data it would read. `PARITY.md` records it as a team-system gap
+    /// rather than an arrow one.
+    fn can_hit_entity(&self, entity: &dyn Entity) -> bool {
+        if !self.projectile_can_hit_entity(entity) {
+            return false;
+        }
+        !self
+            .state
+            .lock()
+            .piercing_ignore_entity_ids
+            .contains(&entity.id())
+    }
+
     /// Damages the entity in proportion to the arrow's speed.
     ///
     /// Vanilla parity: `AbstractArrow.onHitEntity`. Damage is
@@ -688,6 +716,23 @@ impl Projectile for ArrowEntity {
         let mut damage = (speed * arrow_damage)
             .clamp(0.0, f64::from(i32::MAX))
             .ceil() as i32;
+
+        // Vanilla parity: the pierce bookkeeping of `AbstractArrow.onHitEntity`,
+        // between the damage and the crit roll. The quota is what ends a
+        // piercing shot -- `pierce_level + 1` bodies and it is spent -- and
+        // recording the id is what keeps `can_hit_entity` from letting the
+        // arrow strike the same one again on the way through.
+        if self.pierce_level() > 0 {
+            let mut state = self.state.lock();
+            let quota = usize::try_from(self.pierce_level()).unwrap_or(0) + 1;
+            if state.piercing_ignore_entity_ids.len() >= quota {
+                drop(state);
+                self.set_removed(RemovalReason::Discarded);
+                return;
+            }
+            state.piercing_ignore_entity_ids.push(target.id());
+        }
+
         // Vanilla parity: a critical arrow rolls a bonus in `[0, damage/2 + 2)`.
         if self.is_crit_arrow() {
             damage = damage.saturating_add(rand::random_range(0..damage / 2 + 2));
@@ -800,6 +845,10 @@ impl Projectile for ArrowEntity {
             let mut state = self.state.lock();
             state.life = 0;
             state.shake_time = SHAKE_TIME;
+            // Vanilla parity: `resetPiercedEntities`, which closes
+            // `onHitBlock` right after the pierce level is zeroed. A landed
+            // arrow that is picked up and shot again starts its quota over.
+            state.piercing_ignore_entity_ids.clear();
         }
     }
 }
@@ -823,6 +872,8 @@ mod tests {
     use crate::entity::{Entity, LivingEntity, RemovalReason, SharedEntity, next_entity_id};
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
     use crate::world::World;
+
+    use crate::entity::projectile::Projectile as _;
 
     use super::{ArrowEntity, SHAKE_TIME};
 
@@ -1066,6 +1117,41 @@ mod tests {
         assert!(
             pig.remaining_fire_ticks() > 0,
             "a burning arrow should set what it hits on fire"
+        );
+    }
+
+    #[test]
+    fn a_piercing_arrow_refuses_a_body_it_has_already_gone_through() {
+        // `AbstractArrow.canHitEntity` refuses anything in
+        // `piercingIgnoreEntityIds`. Without it a piercing arrow re-hits what
+        // it just went through: the second hit is refused by i-frames instead,
+        // which sends it down the deflect branch rather than carrying on.
+        let world = arrow_world("piercing_arrow_ignores_pierced_bodies");
+        let arrow = spawn_arrow(
+            &world,
+            DVec3::new(0.5, 64.0, 0.5),
+            DVec3::new(1.0, 0.0, 0.0),
+        );
+        let pig: SharedEntity = Arc::new(PigEntity::new(
+            &vanilla_entities::PIG,
+            next_entity_id(),
+            DVec3::new(4.5, 64.0, 0.5),
+            Arc::downgrade(&world),
+        ));
+        world
+            .try_add_entity(Arc::clone(&pig))
+            .expect("the test chunk is loaded, so the pig should attach");
+
+        assert!(
+            arrow.can_hit_entity(pig.as_ref()),
+            "an arrow that has hit nothing may hit the pig"
+        );
+
+        arrow.state.lock().piercing_ignore_entity_ids.push(pig.id());
+
+        assert!(
+            !arrow.can_hit_entity(pig.as_ref()),
+            "a body the shot has already passed through is not a target again"
         );
     }
 }
