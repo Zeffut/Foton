@@ -286,6 +286,51 @@ impl RegionManager {
         Ok(())
     }
 
+    /// Where a chunk's bytes are put before its slot is cleared.
+    fn quarantine_path(&self, region_pos: RegionPos, index: usize) -> PathBuf {
+        self.base_path
+            .join("corrupt")
+            .join(format!("{}.{index}.chunk", region_pos.filename()))
+    }
+
+    /// Copies a chunk's raw bytes aside so clearing its slot destroys nothing.
+    ///
+    /// Best effort on purpose: if the copy cannot be written, the slot is still
+    /// cleared, because a chunk that cannot be decoded and cannot be quarantined
+    /// would otherwise fail the same way on every single load forever. What is
+    /// not acceptable is *silently* destroying it, which is what this exists to
+    /// stop.
+    async fn quarantine_chunk_bytes(
+        &self,
+        file: &mut File,
+        region_pos: RegionPos,
+        index: usize,
+        entry: ChunkEntry,
+    ) {
+        let path = self.quarantine_path(region_pos, index);
+        let outcome = async {
+            let bytes = Self::read_chunk_data(file, entry.sector_offset, entry.size_bytes).await?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).await?;
+            }
+            fs::write(&path, &bytes).await?;
+            io::Result::Ok(bytes.len())
+        }
+        .await;
+
+        match outcome {
+            Ok(len) => tracing::warn!(
+                path = %path.display(),
+                bytes = len,
+                "Chunk failed to decode; its bytes were copied aside before the slot was cleared"
+            ),
+            Err(error) => tracing::error!(
+                path = %path.display(),
+                "Chunk failed to decode and could not be copied aside ({error}); clearing the slot anyway"
+            ),
+        }
+    }
+
     async fn clear_corrupt_chunk_if_unchanged(
         &self,
         region_pos: RegionPos,
@@ -301,6 +346,12 @@ impl RegionManager {
         if handle.header.entries[index] != expected_entry {
             return Ok(false);
         }
+
+        // Clearing the slot lets worldgen refill the column, which is how the
+        // server stays usable -- but the bytes it replaces are the only copy of
+        // whatever a player built there. Keep them.
+        self.quarantine_chunk_bytes(&mut handle.file, region_pos, index, expected_entry)
+            .await;
 
         handle.header.entries[index] = ChunkEntry::empty();
         if let Err(error) = Self::write_header(&mut handle.file, &handle.header).await {
@@ -1078,6 +1129,63 @@ mod tests {
             .expect("status byte should remain readable");
         assert_eq!(status[0], u8::MAX);
 
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+    #[tokio::test]
+    async fn a_chunk_that_fails_to_decode_is_copied_aside_before_its_slot_is_cleared() {
+        // Clearing the slot is what keeps the server usable, but the bytes it
+        // replaces are the only copy of whatever a player built in that column.
+        // The nesting ceiling made this reachable on purpose rather than only by
+        // disk corruption, so losing them silently is no longer theoretical.
+        let directory = test_directory("quarantine-corrupt");
+        let pos = ChunkPos::new(0, 0);
+        let payload = b"payload must not be decoded";
+        write_test_region(&directory, pos, payload, payload.len() as u32)
+            .await
+            .expect("test region should be written");
+
+        let manager = RegionManager::new(&directory);
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should open")
+        );
+        let loaded = manager
+            .load_chunk(pos, 0, 16, Weak::new(), &test_thread_pool())
+            .await
+            .expect("a corrupt chunk reports as absent, not as an error");
+        assert!(
+            loaded.is_none(),
+            "the corrupt slot must not produce a chunk"
+        );
+        assert!(
+            !manager.chunk_exists(pos).await.expect("slot should answer"),
+            "the corrupt slot must be cleared so worldgen can refill the column"
+        );
+
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let index = RegionHeader::chunk_index(
+            RegionPos::local_chunk_pos(pos.0.x, pos.0.y).0,
+            RegionPos::local_chunk_pos(pos.0.x, pos.0.y).1,
+        );
+        let quarantined = directory
+            .join("corrupt")
+            .join(format!("{}.{index}.chunk", region_pos.filename()));
+        let kept = fs::read(&quarantined)
+            .await
+            .expect("the bytes must be copied aside before the slot is cleared");
+        assert_eq!(
+            kept, payload,
+            "the copy must be the bytes that were on disk, not a rewrite of them"
+        );
+
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
         fs::remove_dir_all(directory)
             .await
             .expect("test directory should be removable");

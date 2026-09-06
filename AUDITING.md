@@ -252,21 +252,34 @@ The exposure is bounded rather than open-ended: the wire side is capped at
 `MAX_COMPONENT_BYTES` and, since a decode failure now disconnects the way
 vanilla does, a client gets one attempt rather than a loop.
 
-## Two the audit found and left to the project to decide
+## One the audit decided, and one still for the project
 
-**A chunk that fails to decode is erased and regenerated.** `load_chunk` treats
-any decode error as corruption: it blanks the header entry, fsyncs, and returns
-`Ok(None)`, so worldgen fills the hole. Vanilla is lenient instead -- `NbtUtils`
-turns an unknown block into air and drops an unknown property, and the rest of
-the chunk survives.
+**A chunk that fails to decode is no longer erased -- it is copied aside.**
+`load_chunk` still treats any decode error as corruption: it blanks the header
+entry, fsyncs, and returns `Ok(None)`, so worldgen fills the hole. Vanilla is
+lenient instead -- `NbtUtils` turns an unknown block into air and drops an
+unknown property, and the rest of the chunk survives.
 
 The strictness is deliberate: two tests name it,
 `unknown_referenced_block_state_is_corruption_instead_of_air_recovery` and its
-biome twin. What no test covers is the *erasure* that follows. Together they
-mean a registry drift -- a block gaining or losing a property between versions
--- destroys the world chunk by chunk, on disk, irreversibly. Reversing the
-decode strictness is a design call, not an audit fix; separating "refuse to
-load" from "delete what is on disk" is the smaller question worth asking first.
+biome twin. What no test covered was the *erasure* that followed. Together they
+meant a registry drift -- a block gaining or losing a property between versions
+-- destroyed the world chunk by chunk, on disk, irreversibly.
+
+This file asked the smaller question first: separate "refuse to load" from
+"delete what is on disk". That is now answered.
+`clear_corrupt_chunk_if_unchanged` copies the chunk's raw bytes to
+`<region dir>/corrupt/<region>.<index>.chunk` before it clears the slot, and
+says so at `warn!`. The copy is best-effort by design -- a chunk that can
+neither be decoded nor copied still gets cleared, because otherwise it fails
+identically on every load forever -- but the silent destruction is gone. The
+cost of a false positive is now a column to restore by hand instead of a column
+destroyed, which is what made the nesting ceiling safe enough to adopt: a
+refusal there is a decode failure, and it would otherwise have taken the
+player's build with the riders.
+
+Reversing the decode *strictness* is still a design call and still open. It is
+now a smaller one, because being strict no longer costs anything irreversible.
 
 **A `FORMAT_VERSION` bump discards every region file.** Opening a region whose
 version is not the current one renames it to `.srg.v<n>.bak` and creates an
@@ -372,13 +385,34 @@ into unloaded terrain moves nothing. Vanilla's
 
 Only half of that was fixed. `/tp` used to report every target as teleported
 whatever happened, so the operator was told the opposite of the truth; it now
-counts and announces the ones that actually moved. The move itself was left
-alone on purpose: presence of the key in `chunk_visibility` is how the manager
-knows which chunks it owns entities in, and letting an entity into a chunk with
-no entry risks a double-add when that chunk loads, or an entity never saved when
-it unloads. Closing it properly means either a load ticket on the destination
-(vanilla's `TicketType.POST_TELEPORT`) or a real unloaded-section state, and
-neither is a change to make without understanding what the manager promises.
+counts and announces the ones that actually moved.
+
+The move itself is still refused, and a later pass established *why* it cannot
+be a patch -- the first answer this file gave was wrong. It said to copy
+vanilla's `TicketType.POST_TELEPORT`; **that ticket does not exist in 26.2**.
+`TicketType.java` registers `PLAYER_SPAWN`, `SPAWN_SEARCH`, `DRAGON`,
+`PLAYER_LOADING`, `PLAYER_SIMULATION`, `FORCED`, `PORTAL`, `ENDER_PEARL` and
+`UNKNOWN`, and nothing for teleports. Vanilla tickets nothing here: `onMove`
+always moves, `chunkVisibility` returns `HIDDEN` by default for a chunk with no
+entry, and `updateStatus` merely calls `stopTracking`. The entity stays in
+`sectionStorage`, and `autoSave` writes it out -- for a `HIDDEN` chunk by
+calling `processChunkUnload`, which is the case it exists to handle.
+
+The reason Foton cannot copy that is one line of its own design, stated in
+`chunk_saver/format.rs`: *"Unlike vanilla which stores entities in separate
+region files, Foton stores entities inline with chunk data for simplicity."*
+Vanilla can write an entity in a hidden chunk because its `EntityPersistentStorage`
+is a separate file that needs nothing from the chunk. Writing one here means
+writing the whole chunk record, which needs the chunk's blocks, which is exactly
+what is not loaded. `saveable_entities_outside_chunks` already measures the
+consequence and logs it, so the hazard is instrumented rather than hypothetical.
+
+So the choice is real and it is a project's, not a patch's: either the teleport
+becomes asynchronous and holds a load ticket on the destination until the chunk
+arrives, or entity storage is separated from chunk storage the way vanilla has
+it. The portal path is not a precedent for the first --
+`TeleportPostTransition::place_portal_ticket` runs *after* the transition, and
+portals only work because the portal search has already loaded the destination.
 
 ## The one that needs an architecture change, not a fix
 
