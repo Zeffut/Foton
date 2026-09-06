@@ -873,7 +873,8 @@ pub use living_entity::LivingEntity;
 pub(crate) use living_entity::barter_loot_items;
 pub use manager::{
     AddEntityError, ChunkEntityLoadResult, EntityLifecycleChanges, EntityMoveError,
-    EntityMoveUpdate, EntityOwnership, EntityVisibility, WorldEntityManager,
+    EntityMoveUpdate, EntityOwnership, EntityVisibility, InboundChunkReservation,
+    WorldEntityManager,
 };
 pub use mob::{Mob, MobBase, MoveControlKind, NavigationKind, PathfinderMob};
 pub use movement_sync::{

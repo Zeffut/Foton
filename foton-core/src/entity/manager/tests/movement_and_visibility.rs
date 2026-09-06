@@ -595,3 +595,69 @@ fn passenger_tick_snapshots_old_position_and_rotation_before_ride_tick() {
     assert_eq!(passenger.base().old_rotation(), (60.0, 5.0));
     assert_eq!(passenger.rotation(), (135.0, 15.0));
 }
+
+#[test]
+fn a_reserved_destination_accepts_the_move_a_bare_one_refuses() {
+    // The gate used to ask "is this chunk loaded right now?", so
+    // `/tp @e[type=pig] 5000 64 5000` moved nothing at all. What it actually
+    // needs to know is whether the chunk will have a holder, and a teleport
+    // ticket answers that -- the reservation is the manager's side of the same
+    // promise. Vanilla needs neither, because its entity data lives in separate
+    // region files and an entity in an unloaded section is written anyway.
+    let manager = WorldEntityManager::new();
+    load_chunk(&manager, ChunkPos::new(0, 0));
+
+    let first = entity(1, 1, DVec3::new(1.0, 64.0, 1.0));
+    assert!(
+        manager
+            .add_live_entity(first.clone(), EntityOwnership::ManagerOwned)
+            .is_ok()
+    );
+
+    let destination = ChunkPos::new(1, 0);
+    let new_position = DVec3::new(17.0, 64.0, 1.0);
+    assert!(
+        manager.validate_move(first.id(), new_position).is_err(),
+        "without a reservation the destination is still refused"
+    );
+
+    manager.reserve_inbound_chunk(destination);
+    assert!(
+        manager.validate_move(first.id(), new_position).is_ok(),
+        "a reserved destination is one the chunk map has promised to deliver"
+    );
+    first.base().set_position_local(new_position);
+    assert!(manager.commit_move(first.id(), new_position).is_ok());
+    assert_eq!(manager.live_entities_in_chunk(destination).len(), 1);
+
+    // Two teleports into one chunk must not have the first release cancel the
+    // second promise.
+    manager.reserve_inbound_chunk(destination);
+    manager.release_inbound_chunk(destination);
+    let second = entity(2, 2, DVec3::new(1.0, 64.0, 2.0));
+    assert!(
+        manager
+            .add_live_entity(second.clone(), EntityOwnership::ManagerOwned)
+            .is_ok()
+    );
+    assert!(
+        manager
+            .validate_move(second.id(), DVec3::new(18.0, 64.0, 2.0))
+            .is_ok(),
+        "the outstanding reservation still stands"
+    );
+
+    manager.release_inbound_chunk(destination);
+    let third = entity(3, 3, DVec3::new(1.0, 64.0, 3.0));
+    assert!(
+        manager
+            .add_live_entity(third.clone(), EntityOwnership::ManagerOwned)
+            .is_ok()
+    );
+    assert!(
+        manager
+            .validate_move(third.id(), DVec3::new(19.0, 64.0, 3.0))
+            .is_err(),
+        "once the last reservation is gone the gate closes again"
+    );
+}

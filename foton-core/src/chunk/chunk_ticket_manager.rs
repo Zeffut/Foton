@@ -21,6 +21,15 @@ const MAX_LEVEL_RAW: u8 = FULL_CHUNK_LEVEL_RAW + RADIUS_AROUND_FULL_CHUNK;
 pub(crate) const PORTAL_TICKET_RADIUS: u8 = 3;
 const PORTAL_TICKET_TIMEOUT_TICKS: i64 = 300;
 pub(crate) const ENDER_PEARL_TICKET_TIMEOUT_TICKS: u32 = 40;
+/// How long a teleport holds its destination loaded.
+///
+/// Foton-specific, and it has to be: vanilla has no teleport ticket because it
+/// does not need one -- its entity storage is separate from chunk storage, so
+/// an entity dropped in an unloaded section is written anyway. Foton stores
+/// entities inside the chunk record, so the destination has to actually arrive
+/// for the teleported entity to be saved at all. Long enough for a cold load
+/// off disk, short enough that a stray `/tp` does not pin terrain.
+pub(crate) const TELEPORT_TICKET_TIMEOUT_TICKS: u32 = 100;
 const ENDER_PEARL_TICKET_RADIUS: u8 = 2;
 
 /// A chunk ticket level.
@@ -364,6 +373,16 @@ impl TimedChunkTickets {
         self.add_or_reset(TimedChunkTicketKind::Spawn, pos, spawn_ticket(), i64::MAX)
     }
 
+    /// Adds or refreshes the ticket that holds a teleport destination.
+    pub(crate) fn add_teleport_ticket(&mut self, pos: ChunkPos) -> Option<ChunkTicket> {
+        self.add_or_reset(
+            TimedChunkTicketKind::Teleport,
+            pos,
+            teleport_ticket(),
+            i64::from(TELEPORT_TICKET_TIMEOUT_TICKS),
+        )
+    }
+
     pub(crate) fn add_ender_pearl_ticket(&mut self, pos: ChunkPos) -> Option<ChunkTicket> {
         self.add_or_reset(
             TimedChunkTicketKind::EnderPearl,
@@ -514,7 +533,7 @@ impl TimedChunkTicket {
                 chunk_z: self.pos.0.y,
                 ticks_left: i64::MAX,
             }),
-            TimedChunkTicketKind::EnderPearl => None,
+            TimedChunkTicketKind::EnderPearl | TimedChunkTicketKind::Teleport => None,
         }
     }
 }
@@ -524,6 +543,7 @@ enum TimedChunkTicketKind {
     Portal,
     Spawn,
     EnderPearl,
+    Teleport,
 }
 
 #[must_use]
@@ -538,6 +558,11 @@ const fn spawn_ticket() -> ChunkTicket {
 
 const fn ender_pearl_ticket() -> ChunkTicket {
     ChunkTicket::simulated_full_chunks(ENDER_PEARL_TICKET_RADIUS)
+}
+
+/// Holds a teleport destination just long enough to arrive and be saved.
+const fn teleport_ticket() -> ChunkTicket {
+    ChunkTicket::simulated_full_chunks(1)
 }
 
 /// A level change for a chunk position.

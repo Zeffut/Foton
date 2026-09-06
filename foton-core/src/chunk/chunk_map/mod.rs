@@ -1430,6 +1430,20 @@ impl ChunkMap {
             self.add_chunk_ticket(chunk, ticket);
         }
     }
+
+    /// Holds a teleport destination loaded so what lands there can be saved.
+    ///
+    /// Vanilla has no equivalent, and the reason is a storage difference rather
+    /// than an oversight: its entity data lives in its own region files, so an
+    /// entity teleported into an unloaded section is written regardless. Foton
+    /// stores entities inside the chunk record, so a destination that never
+    /// loads is a destination whose entities are never written.
+    pub(crate) fn place_teleport_ticket(&self, chunk: ChunkPos) {
+        let ticket = self.timed_chunk_tickets.lock().add_teleport_ticket(chunk);
+        if let Some(ticket) = ticket {
+            self.add_chunk_ticket(chunk, ticket);
+        }
+    }
 }
 
 #[cfg(test)]
