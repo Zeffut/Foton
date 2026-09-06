@@ -7,6 +7,8 @@ use super::{
     player_can_change_difficulty, shapes, vanilla_attributes,
 };
 use crate::behavior::blocks::PowderSnowBlock;
+use crate::event::PlayerGameModeChangeEvent;
+use std::sync::Arc;
 
 const SURVIVAL_DEFAULT_BLOCK_INTERACTION_RANGE: f64 = 4.5;
 
@@ -14,8 +16,18 @@ impl Player {
     /// Sets the player's game mode and notifies the client.
     ///
     /// Returns `true` if the game mode was changed, `false` if the player was already in the requested game mode.
-    pub fn set_game_mode(&self, gamemode: GameType) -> bool {
+    pub fn set_game_mode(self: &Arc<Self>, gamemode: GameType) -> bool {
         let was_spectator = self.game_mode() == GameType::Spectator;
+
+        // Before anything is applied, so a listener refuses the change rather
+        // than having to undo it. Bukkit's `PlayerGameModeChangeEvent`; vanilla
+        // has no hook here at all.
+        let mut event = PlayerGameModeChangeEvent::new(Arc::clone(self), gamemode);
+        self.fire_event(&mut event);
+        if event.is_cancelled() {
+            return false;
+        }
+
         if !self.change_game_mode_state(gamemode) {
             return false;
         }

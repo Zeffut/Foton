@@ -387,8 +387,11 @@ impl AsyncPlayerPreLoginEvent {
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use text_components::TextComponent;
 
+use foton_utils::types::GameType;
+
 use super::Event;
 use crate::player::Player;
+use crate::world::World;
 use foton_registry::item_stack::ItemStack;
 use foton_utils::Identifier;
 
@@ -1361,6 +1364,90 @@ impl PlayerClientLoadedWorldEvent {
     /// suppresses what Foton would have sent back.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
+    }
+}
+
+/// Emitted before a player's game mode changes.
+///
+/// Vanilla parity: there is none -- vanilla has no hook here. This is Bukkit's
+/// `PlayerGameModeChangeEvent`, and it fires before anything is applied so a
+/// listener can refuse the change rather than undo it afterwards.
+pub struct PlayerGameModeChangeEvent {
+    player: Arc<Player>,
+    new_game_mode: GameType,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for PlayerGameModeChangeEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_game_mode_change");
+}
+impl Event for PlayerGameModeChangeEvent {}
+impl PlayerGameModeChangeEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player: Arc<Player>, new_game_mode: GameType) -> Self {
+        Self {
+            player,
+            new_game_mode,
+            cancelled: false,
+        }
+    }
+
+    /// Whose game mode is changing.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+
+    /// The mode they are about to be put in.
+    #[must_use]
+    pub const fn new_game_mode(&self) -> GameType {
+        self.new_game_mode
+    }
+
+    /// Whether a plugin refused the change.
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Refuses the change; the player stays in the mode they were in.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
+/// Emitted after a player has moved between worlds.
+///
+/// Bukkit's `PlayerChangedWorldEvent`, and after rather than before on purpose:
+/// it reports a move that has happened, which is why it carries the world left
+/// behind and cannot be cancelled. The refusable hook is the teleport itself.
+pub struct PlayerChangedWorldEvent {
+    player: Arc<Player>,
+    from: Arc<World>,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for PlayerChangedWorldEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_changed_world");
+}
+impl Event for PlayerChangedWorldEvent {}
+impl PlayerChangedWorldEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player: Arc<Player>, from: Arc<World>) -> Self {
+        Self { player, from }
+    }
+
+    /// Who moved.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+
+    /// The world they left. The one they are in is on the player.
+    #[must_use]
+    pub const fn from(&self) -> &Arc<World> {
+        &self.from
     }
 }
 

@@ -1,6 +1,6 @@
 use super::*;
 use crate::advancement::triggers;
-use crate::event::PlayerPortalEvent;
+use crate::event::{PlayerChangedWorldEvent, PlayerPortalEvent};
 use crate::portal::TeleportTransitionCause::{EndGateway, EndPortal, NetherPortal};
 
 impl Player {
@@ -122,6 +122,13 @@ impl Player {
             // `enteredNetherPosition`, and Foton does not record where a player
             // entered the nether, so the distance it measures has no origin.
             triggers::world::changed_dimension(self, &current_world.key, &new_world_key);
+
+            // After, not before: Bukkit's `PlayerChangedWorldEvent` reports a
+            // move that has happened, which is why it carries the world left
+            // behind and cannot be refused. The refusable hook is the teleport.
+            let mut changed =
+                PlayerChangedWorldEvent::new(Arc::clone(self), Arc::clone(&current_world));
+            self.fire_event(&mut changed);
         }
         self.apply_post_teleport_transition(&teleport_transition.post_transition);
         true
