@@ -1165,6 +1165,13 @@ impl Player {
     }
 
     /// Returns the server this player belongs to.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a player is owned by the server's player list, so it cannot outlive it; the Weak breaks the cycle rather than allowing one"
+        )
+    )]
     pub(crate) fn server(&self) -> Arc<Server> {
         self.server
             .upgrade()

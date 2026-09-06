@@ -390,10 +390,19 @@ impl MenuBehavior {
     }
 
     /// Encodes and sends a packet through the connection.
+    ///
+    /// A packet that will not encode disconnects that client, the way vanilla's
+    /// `PacketEncoder` does, instead of aborting the server. This is the menu
+    /// path, so it is exactly where an oversized packet shows up: a container
+    /// of written books is enough to pass `MAX_PACKET_SIZE`.
     fn send_packet<P: ClientPacket>(connection: &Arc<PlayerConnection>, packet: P) {
-        let encoded =
+        let Ok(encoded) =
             EncodedPacket::from_bare(packet, connection.compression(), ConnectionProtocol::Play)
-                .expect("Failed to encode packet");
+        else {
+            log::warn!("Disconnecting a client whose menu packet could not be encoded");
+            connection.close();
+            return;
+        };
         connection.send_encoded(encoded);
     }
 

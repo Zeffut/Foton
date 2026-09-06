@@ -45,17 +45,13 @@ impl Slot for NormalSlot {
 
     fn get_item<'a>(&self, guard: &'a ContainerLockGuard) -> &'a ItemStack {
         let (container, index) = self.backing();
-        guard
-            .get(container.container_id())
-            .expect("container not locked")
-            .get_item(index)
+        guard.container(container.container_id()).get_item(index)
     }
 
     fn get_item_mut<'a>(&self, guard: &'a mut ContainerLockGuard) -> &'a mut ItemStack {
         let (container, index) = self.backing();
         guard
-            .get_mut(container.container_id())
-            .expect("container not locked")
+            .container_mut(container.container_id())
             .get_item_mut(index)
     }
 
@@ -73,6 +69,13 @@ impl Slot for NormalSlot {
             return ItemStack::empty();
         }
         let (container, index) = self.backing();
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "a menu locks every container its slots reference; a slot outside that set is a construction error"
+            )
+        )]
         guard
             .remove_item(container.container_id(), index, amount)
             .expect("container not locked")
@@ -93,8 +96,7 @@ impl Slot for NormalSlot {
     fn get_max_stack_size(&self, guard: &ContainerLockGuard) -> i32 {
         let (container, _) = self.backing();
         guard
-            .get(container.container_id())
-            .expect("container not locked")
+            .container(container.container_id())
             .get_max_stack_size()
     }
 }

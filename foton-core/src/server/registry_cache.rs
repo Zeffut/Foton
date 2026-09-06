@@ -168,6 +168,13 @@ fn compress_packet<P: ClientPacket>(
 /// # Panics
 /// This function will panic if the compression fails.
 #[must_use]
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::expect_used,
+        reason = "this builds the registry cache while the server starts, from data the server generated; there is no world yet to lose"
+    )
+)]
 pub fn build_compressed_packets(
     registry_packets: Vec<CRegistryData>,
     tags_packet: CUpdateTags,

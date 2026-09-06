@@ -287,6 +287,13 @@ impl ChunkStorage {
                     .collect();
 
                 // Pack block indices (indices into section-local palette)
+                #[cfg_attr(
+                    not(test),
+                    expect(
+                        clippy::expect_used,
+                        reason = "this is the heterogeneous arm, which exists only for a palette of two or more"
+                    )
+                )]
                 let bits = bits_for_palette_len(palette.len())
                     .expect("Heterogeneous section should have palette length >= 2");
                 let indices: Vec<u32> = data
@@ -336,6 +343,13 @@ impl ChunkStorage {
                     .map(|(biome_id, _)| builder.ensure_biome(*biome_id))
                     .collect();
 
+                #[cfg_attr(
+                    not(test),
+                    expect(
+                        clippy::expect_used,
+                        reason = "this is the heterogeneous arm, which exists only for a palette of two or more"
+                    )
+                )]
                 let bits = bits_for_palette_len(palette.len())
                     .expect("Heterogeneous biome data should have palette length >= 2");
                 let indices: Vec<u32> = data
@@ -667,9 +681,27 @@ impl ChunkStorage {
                 for plane in &mut cube {
                     for row in plane {
                         for cell in row {
-                            *cell = runtime_palette[indices.next().expect(
-                                "this should never fail, we know the iterator is long enough",
-                            ) as usize];
+                            // Both of these read a region file. A truncated
+                            // `block_data` runs the index iterator dry, and a
+                            // corrupt one names a palette entry that is not
+                            // there; either used to abort the server, which
+                            // under `panic = "abort"` takes every other dirty
+                            // chunk with it. The function already returns
+                            // `io::Result`, and the chunk loader already knows
+                            // what to do with a chunk it cannot read.
+                            let Some(index) = indices.next() else {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "section block data holds fewer than the 4096 indices a section needs",
+                                ));
+                            };
+                            let Some(&state) = runtime_palette.get(index as usize) else {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    format!("section block index {index} is outside its palette"),
+                                ));
+                            };
+                            *cell = state;
                         }
                     }
                 }
@@ -704,9 +736,19 @@ impl ChunkStorage {
                 for plane in &mut cube {
                     for row in plane {
                         for cell in row {
-                            *cell = runtime_palette[indices.next().expect(
-                                "this should never fail, we know the iterator is long enough",
-                            ) as usize];
+                            let Some(index) = indices.next() else {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "section biome data holds fewer than the 64 indices a section needs",
+                                ));
+                            };
+                            let Some(&biome) = runtime_palette.get(index as usize) else {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    format!("section biome index {index} is outside its palette"),
+                                ));
+                            };
+                            *cell = biome;
                         }
                     }
                 }

@@ -632,6 +632,13 @@ impl PointOfInterestStorage {
                     let Some(poi_type_id) = registry.type_id_for_state(state_id) else {
                         continue;
                     };
+                    #[cfg_attr(
+                        not(test),
+                        expect(
+                            clippy::expect_used,
+                            reason = "the id was just read out of a POI state this same registry produced"
+                        )
+                    )]
                     let poi_type = registry
                         .by_id(poi_type_id)
                         .expect("POI type ID from state lookup must be valid");
@@ -673,6 +680,13 @@ impl PointOfInterestStorage {
         }
 
         if let Some(type_id) = new_poi {
+            #[cfg_attr(
+                not(test),
+                expect(
+                    clippy::expect_used,
+                    reason = "the id was just read out of a POI state this same registry produced"
+                )
+            )]
             let poi_type = registry
                 .by_id(type_id)
                 .expect("POI type ID from state lookup must be valid");

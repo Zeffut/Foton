@@ -102,16 +102,12 @@ impl ResultHandler for CraftingHandler {
     }
 
     fn update_result(&self, guard: &mut ContainerLockGuard) {
-        let crafting = guard
-            .get_typed::<CraftingContainer>(self.crafting_id())
-            .expect("crafting container not locked");
+        let crafting = guard.container_typed::<CraftingContainer>(self.crafting_id());
 
         let result_stack = recipe_manager::find_recipe(crafting, self.is_2x2())
             .map_or_else(ItemStack::empty, |r| r.assemble());
 
-        let result_container = guard
-            .get_typed_mut::<ResultContainer>(self.result_id())
-            .expect("result container not locked");
+        let result_container = guard.container_typed_mut::<ResultContainer>(self.result_id());
         result_container.set_item(0, result_stack);
         result_container.set_changed();
     }
@@ -124,24 +120,19 @@ impl ResultHandler for CraftingHandler {
         let mut remainder_overflow: Vec<ItemStack> = Vec::new();
 
         let remainders_and_positioned = {
-            let crafting = guard
-                .get_typed::<CraftingContainer>(self.crafting_id())
-                .expect("crafting container not locked");
+            let crafting = guard.container_typed::<CraftingContainer>(self.crafting_id());
             recipe_manager::get_remaining_items(crafting, self.is_2x2())
         };
 
         let Some((remainders, positioned)) = remainders_and_positioned else {
             guard
-                .get_typed_mut::<ResultContainer>(self.result_id())
-                .expect("result container not locked")
+                .container_typed_mut::<ResultContainer>(self.result_id())
                 .set_item(0, ItemStack::empty());
             return None;
         };
 
         {
-            let crafting = guard
-                .get_typed_mut::<CraftingContainer>(self.crafting_id())
-                .expect("crafting container not locked");
+            let crafting = guard.container_typed_mut::<CraftingContainer>(self.crafting_id());
 
             let input = &positioned.input;
 

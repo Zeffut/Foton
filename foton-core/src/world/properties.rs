@@ -370,6 +370,13 @@ impl World {
         hasher.update(seed.to_be_bytes());
         let result = hasher.finalize();
         // SHA-256 always produces 32 bytes, so taking 8 bytes always succeeds
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "SHA-256 finalizes to 32 bytes, so the first eight are always there"
+            )
+        )]
         let bytes: [u8; 8] = result[0..8].try_into().expect("SHA-256 produces 32 bytes");
         i64::from_be_bytes(bytes)
     }

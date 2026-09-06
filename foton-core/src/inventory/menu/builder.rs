@@ -213,6 +213,13 @@ impl DataSlot {
             behavior.instance(),
             "DataSlot used with a MenuBehavior it does not belong to"
         );
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the assert above proves this data slot belongs to this behavior"
+            )
+        )]
         behavior
             .get_data(self.index)
             .expect("DataSlot index is always valid for its own menu")
@@ -534,8 +541,7 @@ impl MenuBuilder {
     /// The container's size, read under a short lock.
     fn container_size(container: &ContainerRef) -> usize {
         ContainerLockGuard::lock_all(slice::from_ref(container))
-            .get(container.container_id())
-            .expect("container was just locked")
+            .container(container.container_id())
             .get_container_size()
     }
 

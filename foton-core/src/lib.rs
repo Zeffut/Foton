@@ -3,6 +3,12 @@
 //! The core library for the Foton Minecraft server. Handles everything related to the PLAY state.
 
 #![feature(try_as_dyn)]
+// The release profile sets `panic = "abort"`, so an `expect` a running server
+// can reach is not a style question: it kills the process without unwinding,
+// `shutdown_worlds()` never runs, and every dirty chunk goes with it. The lint
+// is scoped to `not(test)` on purpose -- a panicking test is how a test reports
+// a failure, while a panicking server is how a world is lost.
+#![cfg_attr(not(test), warn(clippy::expect_used))]
 // Rustdoc infers `Send`/`Sync` for private types too, and the command tree
 // behind `FunctionLibrary` nests deep enough to blow the default limit of 128
 // once the workspace unifies every feature. The compiler itself is fine; only

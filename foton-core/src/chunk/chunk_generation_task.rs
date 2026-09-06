@@ -322,6 +322,13 @@ impl ChunkGenerationTask {
             self.needs_generation.store(true, Ordering::Relaxed);
             ChunkStatus::Empty
         } else {
+            #[cfg_attr(
+                not(test),
+                expect(
+                    clippy::expect_used,
+                    reason = "the generation task owns its schedule and only advances it while a next status exists"
+                )
+            )]
             self.scheduled_status
                 .lock()
                 .expect("Scheduled status missing")

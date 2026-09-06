@@ -169,16 +169,20 @@ impl Player {
     /// This is a generic helper that encodes the packet and delegates to the
     /// connection's `send_encoded` method, enabling object-safe packet sending.
     ///
-    /// # Panics
-    ///
-    /// Panics if the packet fails to encode.
+    /// A packet that will not encode disconnects that client, which is what
+    /// vanilla does: `PacketEncoder.encode` throws and
+    /// `Connection.exceptionCaught` drops the connection. It used to abort the
+    /// whole server.
     pub fn send_packet<P: ClientPacket>(&self, packet: P) {
-        let encoded = EncodedPacket::from_bare(
+        let Ok(encoded) = EncodedPacket::from_bare(
             packet,
             self.connection.compression(),
             ConnectionProtocol::Play,
-        )
-        .expect("Failed to encode packet");
+        ) else {
+            log::warn!("Disconnecting a client whose packet could not be encoded");
+            self.connection.close();
+            return;
+        };
         self.connection.send_encoded(encoded);
     }
 

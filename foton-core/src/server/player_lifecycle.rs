@@ -562,6 +562,13 @@ impl Server {
     /// Returns the server default world or if not exists the first world.
     /// # Panics
     /// if no world exists on this server crisis is there!
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a running server always holds at least one world; the doc above says as much"
+        )
+    )]
     pub fn overworld(&self) -> Arc<World> {
         self.worlds.server_default_world().unwrap_or_else(|| {
             self.worlds

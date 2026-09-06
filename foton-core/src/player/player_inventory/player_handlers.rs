@@ -888,6 +888,13 @@ impl Player {
         match menu.screen_opener() {
             ScreenOpener::Screen => self.send_packet(COpenScreen {
                 container_id: i32::from(menu.container_id()),
+                #[cfg_attr(
+                    not(test),
+                    expect(
+                        clippy::expect_used,
+                        reason = "open_menu only accepts menus that declare a type; the screen opener follows from the same declaration"
+                    )
+                )]
                 menu_type: menu
                     .menu_type()
                     .expect("a menu opened via open_menu must declare a menu type"),

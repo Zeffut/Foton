@@ -367,6 +367,48 @@ impl ContainerLockGuard {
             .map(|(_, guard)| &mut **guard as &mut dyn Container)
     }
 
+    /// A container this guard is holding, for a caller that cannot fail.
+    ///
+    /// The `Slot` trait hands back `&ItemStack` and `&mut ItemStack`, so a slot
+    /// has no way to report a container its guard does not hold -- and it never
+    /// should: a menu locks every container its own slots reference, so a slot
+    /// asking for one outside that set is a menu built wrong, not a runtime
+    /// condition. Naming the invariant once here keeps it out of the eighteen
+    /// slot methods that used to repeat it.
+    ///
+    /// # Panics
+    /// If the container is not one this guard locked.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a menu locks every container its slots reference; a slot outside that set is a construction error"
+        )
+    )]
+    #[must_use]
+    pub fn container(&self, id: impl Into<ContainerId>) -> &dyn Container {
+        let id = id.into();
+        self.get(id)
+            .expect("slot container is not locked by this guard")
+    }
+
+    /// The mutable half of [`Self::container`].
+    ///
+    /// # Panics
+    /// If the container is not one this guard locked.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a menu locks every container its slots reference; a slot outside that set is a construction error"
+        )
+    )]
+    pub fn container_mut(&mut self, id: impl Into<ContainerId>) -> &mut dyn Container {
+        let id = id.into();
+        self.get_mut(id)
+            .expect("slot container is not locked by this guard")
+    }
+
     /// Mirrors a container's own `setItem` call.
     ///
     /// Vanilla block-entity containers call `BlockEntity::setChanged` from
@@ -456,6 +498,49 @@ impl ContainerLockGuard {
         T: Container + DowncastType,
     {
         self.get_mut(id)?.downcast_mut::<T>()
+    }
+
+    /// The typed form of [`Self::container`].
+    ///
+    /// Same invariant, and one more besides: a menu that locks a container by
+    /// id also knows its concrete type, so the downcast is settled at the same
+    /// place the lock was taken.
+    ///
+    /// # Panics
+    /// If the container is not locked by this guard, or is not a `T`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a menu locks every container its slots reference and knows their types; either failure is a construction error"
+        )
+    )]
+    #[must_use]
+    pub fn container_typed<T>(&self, id: impl Into<ContainerId>) -> &T
+    where
+        T: Container + DowncastType,
+    {
+        self.get_typed::<T>(id)
+            .expect("slot container is not locked by this guard, or is not the expected type")
+    }
+
+    /// The mutable half of [`Self::container_typed`].
+    ///
+    /// # Panics
+    /// If the container is not locked by this guard, or is not a `T`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a menu locks every container its slots reference and knows their types; either failure is a construction error"
+        )
+    )]
+    pub fn container_typed_mut<T>(&mut self, id: impl Into<ContainerId>) -> &mut T
+    where
+        T: Container + DowncastType,
+    {
+        self.get_typed_mut::<T>(id)
+            .expect("slot container is not locked by this guard, or is not the expected type")
     }
 
     /// Gets mutable access to two distinct concrete containers.

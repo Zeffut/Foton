@@ -1407,6 +1407,13 @@ impl ChunkHolder {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::expect_used,
+        reason = "the two halves of this channel outlive each other by construction; a vanished sender means the rayon task itself already aborted"
+    )
+)]
 fn rayon_spawn<F, R>(thread_pool: &rayon::ThreadPool, func: F) -> impl Future<Output = R>
 where
     F: FnOnce() -> R + Send + 'static,

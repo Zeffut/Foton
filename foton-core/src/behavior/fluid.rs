@@ -14,6 +14,13 @@ pub struct FluidBehaviorLock(pub OnceLock<FluidBehaviorRegistry>);
 impl Deref for FluidBehaviorLock {
     type Target = FluidBehaviorRegistry;
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "a Deref cannot report a failure, and init_globals fills every registry before anything reads it"
+        )
+    )]
     fn deref(&self) -> &Self::Target {
         self.0.get().expect("Fluid behaviors not initialized")
     }

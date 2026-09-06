@@ -400,6 +400,19 @@ impl<'a> ChunkBuilder<'a> {
     }
 
     /// Ensures a block state exists in the chunk's palette, returning its index.
+    ///
+    /// Unlike the load path, this reads ids out of a live section: every one of
+    /// them came from the registry by way of worldgen, a command or the plugin
+    /// API. An id the registry does not know here means memory that is already
+    /// wrong, and quietly writing air into the player's world would be a worse
+    /// answer to that than stopping.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "ids come from live sections, which are only ever filled from the registry"
+        )
+    )]
     fn ensure_block_state(&mut self, block_id: BlockStateId) -> u16 {
         // Get block and properties from registry
         let block = self
@@ -426,6 +439,13 @@ impl<'a> ChunkBuilder<'a> {
     }
 
     /// Ensures a biome exists in the chunk's palette, returning its index.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "ids come from live sections, which are only ever filled from the registry"
+        )
+    )]
     fn ensure_biome(&mut self, biome_id: u16) -> u16 {
         // Get biome identifier from registry
         let biome = self

@@ -18,6 +18,13 @@ pub(crate) fn generate_starts(
     _cache: &Arc<StaticCache2D<Arc<ChunkHolder>>>,
     holder: Arc<ChunkHolder>,
 ) {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the generation pyramid publishes this status before the stage that consumes it runs"
+        )
+    )]
     let chunk = holder
         .try_chunk(ChunkStatus::Empty)
         .expect("Chunk not found at status Empty");
@@ -75,6 +82,13 @@ pub(crate) fn generate_references(
     }
 
     if !references.is_empty() {
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the generation pyramid publishes this status before the stage that consumes it runs"
+            )
+        )]
         let target_chunk = holder
             .try_chunk(ChunkStatus::StructureStarts)
             .expect("Chunk not found");

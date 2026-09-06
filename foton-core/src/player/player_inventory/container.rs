@@ -30,6 +30,13 @@ const fn slot_to_equipment(slot: usize) -> Option<EquipmentSlot> {
 /// Panics if `index` is not an equipment index. Menu sections restrict
 /// themselves to [`PlayerInventory::ARMOR_TOP_DOWN`] and
 /// [`PlayerInventory::SLOT_OFFHAND`], so this is unreachable from them.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::expect_used,
+        reason = "the doc above records why the armor sections never reach a non-armor index"
+    )
+)]
 pub(crate) const fn armor_equipment(index: usize) -> EquipmentSlot {
     slot_to_equipment(index).expect("armor sections only cover armor indices")
 }

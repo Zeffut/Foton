@@ -923,8 +923,7 @@ impl<'a> GridPlacer<'a> {
         use crate::inventory::lock::ContainerLockGuard;
 
         let size = ContainerLockGuard::lock_all(slice::from_ref(container))
-            .get(container.container_id())
-            .expect("container was just locked")
+            .container(container.container_id())
             .get_container_size();
         match mapping {
             SlotMapping::Offset(offset) => assert!(
@@ -1036,6 +1035,13 @@ impl MenuBuilder {
             match cell {
                 Cell::Empty => unreachable!("coverage was checked before flushing"),
                 Cell::Painted(_) => {
+                    #[cfg_attr(
+                        not(test),
+                        expect(
+                            clippy::expect_used,
+                            reason = "a painted cell is only produced where a filler was supplied"
+                        )
+                    )]
                     let container = filler
                         .as_ref()
                         .expect("filler exists when cells are painted");
@@ -1056,12 +1062,26 @@ impl MenuBuilder {
                             self.push_section_slot(slot, container, container_index);
                         }
                         PlacementKind::Result { slot, container } => {
+                            #[cfg_attr(
+                                not(test),
+                                expect(
+                                    clippy::expect_used,
+                                    reason = "each result placement is built with exactly one slot and consumed once"
+                                )
+                            )]
                             let slot = slot
                                 .take()
                                 .expect("each result placement maps to exactly one slot");
                             self.push_section_slot(Box::new(slot), container, 0);
                         }
                         PlacementKind::Slots { slots, .. } => {
+                            #[cfg_attr(
+                                not(test),
+                                expect(
+                                    clippy::expect_used,
+                                    reason = "every cell of a slots placement is filled when the placement is built, and taken once"
+                                )
+                            )]
                             let slot = slots[rect.local_index(x, y)]
                                 .take()
                                 .expect("each grid cell maps to exactly one slot");

@@ -826,7 +826,19 @@ impl ChunkSection {
     /// Writes the chunk section to a writer.
     ///
     /// # Panics
-    /// - If the writer fails to write.
+    /// Never in practice. The writer is a `Cursor<Vec<u8>>`, whose `Vec` grows
+    /// to take whatever it is given, so none of the four writes below has a
+    /// failure to report; the section is here because the calls return
+    /// `io::Result` and the lint cannot see through the writer's type. The
+    /// reason on the attribute covers the whole body for the same cause: it is
+    /// the writer that makes it true, not anything about a particular field.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "writing to an in-memory Cursor<Vec<u8>> cannot fail"
+        )
+    )]
     pub fn write(&self, writer: &mut Cursor<Vec<u8>>) {
         self.non_empty_block_count
             .write(writer)
