@@ -186,6 +186,14 @@ pub struct ChunkHolder {
     save_lifecycle: AtomicU8,
     /// The highest status that generation is allowed to reach.
     highest_allowed_status: AtomicU8,
+    /// Whether this chunk was generated rather than read back from disk.
+    ///
+    /// Known only inside `apply_empty_step`, where storage says whether the
+    /// chunk existed, and needed much later by the tick loop's chunk-load
+    /// diff. Bukkit's `ChunkLoadEvent.isNewChunk` is the reason it has to
+    /// travel: it was answering false for every chunk, so a plugin seeding
+    /// ores into fresh terrain never ran.
+    freshly_generated: AtomicBool,
     /// The minimum Y coordinate of the world.
     min_y: i32,
     /// The total height of the world.
@@ -258,6 +266,13 @@ impl Drop for ChunkSavePreparationGuard {
 }
 
 impl ChunkHolder {
+    /// Whether this chunk was generated in this session rather than read from
+    /// disk. Answers once: the first reader takes the flag, because the chunk
+    /// is only new the first time anything asks.
+    pub fn take_freshly_generated(&self) -> bool {
+        self.freshly_generated.swap(false, Ordering::Relaxed)
+    }
+
     /// Gets the chunk position.
     pub const fn get_pos(&self) -> ChunkPos {
         self.pos
@@ -321,6 +336,7 @@ impl ChunkHolder {
             active_save_dependencies: AtomicUsize::new(0),
             save_lifecycle: AtomicU8::new(SAVE_LIFECYCLE_ACTIVE),
             highest_allowed_status: AtomicU8::new(highest_allowed_status),
+            freshly_generated: AtomicBool::new(false),
             min_y,
             height,
             has_changed_sections: AtomicBool::new(false),

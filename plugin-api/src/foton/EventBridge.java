@@ -833,6 +833,11 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    public static void fireChunkPopulate(String world, int x, int z) {
+        dispatch(new org.bukkit.event.world.ChunkPopulateEvent(
+                new FotonChunk(new FotonWorld(world), x, z)));
+    }
+
     public static void fireChunkUnload(String world, int x, int z) {
         dispatch(new org.bukkit.event.world.ChunkUnloadEvent(
                 new FotonChunk(new FotonWorld(world), x, z)));

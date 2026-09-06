@@ -74,7 +74,8 @@ pub use player::{
 };
 pub use server::ServerTickEvent;
 pub use world::{
-    ChunkLoadEvent, ChunkUnloadEvent, PortalCreateEvent, ThunderChangeEvent, WeatherChangeEvent,
+    ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent, PortalCreateEvent, ThunderChangeEvent,
+    WeatherChangeEvent,
 };
 
 /// Something that happened, which a listener may observe and possibly stop.
