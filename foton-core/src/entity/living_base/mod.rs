@@ -2270,5 +2270,7 @@ fn tick_raid_omen<E: LivingEntity + ?Sized>(world: &World, entity: &E) -> bool {
     false
 }
 
+mod mob_effect_hooks;
+
 #[cfg(test)]
 mod tests;

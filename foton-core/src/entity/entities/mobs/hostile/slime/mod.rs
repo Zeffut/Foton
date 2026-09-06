@@ -88,6 +88,15 @@ unsafe impl DowncastType for SlimeEntity {
 }
 
 impl SlimeEntity {
+    /// Sizes a freshly spawned slime, for a spawner outside the cube mobs.
+    ///
+    /// `CubeLike` is private to this corner of the tree and widening it would
+    /// drag `CubeState` out with it, so the one thing an outside caller needs
+    /// -- vanilla's `slime.setSize(size, true)` -- is exposed on its own.
+    pub(crate) fn set_spawn_size(&self, size: i32) {
+        CubeLike::set_size(self, size, true);
+    }
+
     /// Returns vanilla `AbstractCubeMob.getSize`.
     ///
     /// Public because `Frog.canEat` asks for it: `#minecraft:frog_food` holds

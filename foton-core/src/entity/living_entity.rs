@@ -1011,6 +1011,15 @@ pub trait LivingEntity: Entity {
             let game_time = self.level().map_or(0, |world| world.game_time());
             self.living_base()
                 .record_last_damage_source(source, game_time);
+
+            // Vanilla parity: `LivingEntity.hurtServer` walks the active
+            // effects here, in the same `success` branch that records the
+            // damage source. Infested is the only one that answers.
+            if let Some(world) = self.level() {
+                for effect in self.active_mob_effects() {
+                    effect.on_mob_hurt(&world, self);
+                }
+            }
         }
 
         self.fire_hurt_triggers(world, source, original_damage, damage, blocked);
@@ -1608,7 +1617,24 @@ pub trait LivingEntity: Entity {
         let death_time = self.living_base().increment_death_time();
         if death_time >= DEATH_DURATION && !self.is_removed() {
             self.broadcast_entity_event(EntityStatus::Poof);
+            self.trigger_on_death_mob_effects(RemovalReason::Killed);
             self.set_removed(RemovalReason::Killed);
+        }
+    }
+
+    /// Vanilla parity: `LivingEntity.triggerOnDeathMobEffects`.
+    ///
+    /// Vanilla runs this from its `remove` override, before the entity actually
+    /// leaves, which is why the gust, the cobwebs and the slimes all appear
+    /// where the body was rather than a tick later at nowhere. It also means
+    /// they land when the corpse disappears, not when the health hits zero --
+    /// a second apart, and visible.
+    fn trigger_on_death_mob_effects(&self, reason: RemovalReason) {
+        let Some(world) = self.level() else {
+            return;
+        };
+        for effect in self.active_mob_effects() {
+            effect.on_mob_removed(&world, self, reason);
         }
     }
 

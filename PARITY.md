@@ -588,11 +588,27 @@ re-hits what it just went through -- the second hit is refused by i-frames,
 which sends it down the `deflect(Reverse)` branch. It also crosses team
 protection in PvP, because `canHarmPlayer` is never consulted.
 
-**`MobEffect.onMobHurt` and `onMobRemoved` are not wired.** `apply_effect_tick`
-is the only effect hook, so four effects do nothing: Infested spawns no
-silverfish when its carrier is hurt, Wind Charged produces no gust burst on
-death, Weaving lays no cobwebs, Oozing drops no slimes. The trial-chamber and
-ominous-vault reward loop is decorative without them.
+**`MobEffect.onMobHurt` and `onMobRemoved` are wired.** They used not to be,
+which left four effects doing nothing and made the trial-chamber and
+ominous-vault reward loop decorative. `MobEffectInstance` now carries both, and
+all four are implemented: Infested spawns one or two silverfish on a tenth of
+the hits its carrier takes, Wind Charged bursts a three-to-five-strength gust on
+death, Weaving lays two or three cobwebs where a player or a griefing-allowed
+mob falls, and Oozing drops slimes clamped by `maxEntityCramming`.
+
+Two details are easy to get wrong and are pinned rather than trusted. Neither
+spawner calls `finalizeSpawn`, because finalizing a slime rolls its size at
+random and would discard the `setSize(2, true)` the effect exists to perform.
+And `Mth.clamp(0, maxEntityCramming - nearbySlimes, numberRequested)` reads as
+though the room left were the bound, but the signature is
+`clamp(value, min, max)`: the value is `0`. Reading it the other way gives
+twenty-four slimes on a default world instead of two, so
+`number_of_slimes_to_spawn` is a separate function with its own test, the way
+vanilla marks the same method `@VisibleForTesting`.
+
+The hooks fire from `default_tick_death`, before the entity is removed, which is
+where vanilla puts them -- so the gust and the slimes land where the body was,
+and a second after the health hit zero rather than at the same moment.
 
 **`PathNavigation.canMoveDirectly` is wired for two of vanilla's three
 overrides.** Vanilla short-circuits the node walk when the straight line is
