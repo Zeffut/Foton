@@ -3,6 +3,7 @@
 //! Vanilla parity: `PrimedTnt`. Lit TNT becomes an entity that falls, skids on
 //! landing, and detonates when its fuse runs out.
 
+use crate::event::{Event as _, ExplosionPrimeEvent};
 use std::sync::{Arc, Weak};
 
 use foton_macros::entity_behavior;
@@ -159,6 +160,17 @@ impl PrimedTntEntity {
     /// entity's feet and leaves no fire.
     fn explode(&self, world: &Arc<World>) {
         let power = self.state.lock().explosion_power;
+
+        // Bukkit's `ExplosionPrimeEvent`. TNT and creepers are the two things
+        // it fires for, and the radius is read back so a plugin can soften a
+        // blast rather than repair what it broke.
+        let mut event = ExplosionPrimeEvent::new(self.uuid(), power, false);
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
+        let power = event.radius();
+
         let position = self.position();
         let center = DVec3::new(
             position.x,

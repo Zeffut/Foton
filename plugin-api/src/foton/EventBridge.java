@@ -813,6 +813,17 @@ public final class EventBridge {
             + result.getZ() + "|" + result.getYaw() + "|" + result.getPitch();
     }
 
+    /** An explosive is about to go off. Returns the radius a listener left,
+     * or a negative number when one refused -- the sign carries the refusal so
+     * a cancelled blast and a zero-radius one stay distinguishable. */
+    public static float fireExplosionPrime(String uuid, float radius, boolean fire) {
+        org.bukkit.event.entity.ExplosionPrimeEvent event =
+                new org.bukkit.event.entity.ExplosionPrimeEvent(
+                        new FotonEntity(java.util.UUID.fromString(uuid)), radius, fire);
+        dispatch(event);
+        return event.isCancelled() ? -1.0f : event.getRadius();
+    }
+
     /** A crop is about to advance a stage. Returns false when refused. */
     public static boolean fireBlockGrow(String world, int x, int y, int z) {
         org.bukkit.block.Block block = new FotonBlock(new FotonWorld(world), x, y, z);

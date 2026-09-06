@@ -3,6 +3,7 @@
 //! Vanilla parity: `Creeper` and `SwellGoal`. A creeper stalks the player in
 //! silence, swells while it is close enough, and detonates when the fuse fills.
 
+use crate::event::{Event as _, ExplosionPrimeEvent};
 use std::sync::Weak;
 
 use foton_macros::entity_behavior;
@@ -249,6 +250,18 @@ impl CreeperEntity {
         };
         let multiplier = if self.is_powered() { 2.0 } else { 1.0 };
         let radius = f32::from(*self.explosion_radius.lock());
+
+        // Bukkit's `ExplosionPrimeEvent`, before the blast is computed. The
+        // radius comes back out because that is how a plugin softens creepers
+        // -- repairing the crater afterwards is not the same thing.
+        let mut event = ExplosionPrimeEvent::new(self.uuid(), radius * multiplier, false);
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            self.set_removed(RemovalReason::Killed);
+            return;
+        }
+        let radius = event.radius();
+        let multiplier = 1.0;
         // A creeper is its own cause: vanilla's `getIndirectSourceEntity`
         // returns the source unchanged when it is a living entity.
         world.explode(

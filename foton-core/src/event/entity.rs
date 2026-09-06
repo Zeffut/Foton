@@ -9,6 +9,73 @@ use uuid::Uuid;
 use super::Event;
 use crate::entity::conversion::ConversionReason;
 
+/// An explosive is about to go off.
+///
+/// Bukkit's `ExplosionPrimeEvent`, fired for TNT and creepers just before the
+/// blast is computed. A listener may change the radius or turn fire on, which
+/// is why those are read back rather than only reported -- a plugin that halves
+/// creeper damage does it here rather than by repairing the crater afterwards.
+pub struct ExplosionPrimeEvent {
+    entity: Uuid,
+    radius: f32,
+    fire: bool,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for ExplosionPrimeEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/explosion_prime");
+}
+impl Event for ExplosionPrimeEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+impl ExplosionPrimeEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(entity: Uuid, radius: f32, fire: bool) -> Self {
+        Self {
+            entity,
+            radius,
+            fire,
+            cancelled: false,
+        }
+    }
+
+    /// The entity that is exploding.
+    #[must_use]
+    pub const fn entity(&self) -> Uuid {
+        self.entity
+    }
+
+    /// The blast radius, after any listener has changed it.
+    #[must_use]
+    pub const fn radius(&self) -> f32 {
+        self.radius
+    }
+
+    /// Replaces the blast radius.
+    pub const fn set_radius(&mut self, radius: f32) {
+        self.radius = radius;
+    }
+
+    /// Whether the blast sets fires, after any listener has changed it.
+    #[must_use]
+    pub const fn fire(&self) -> bool {
+        self.fire
+    }
+
+    /// Turns the blast's fire on or off.
+    pub const fn set_fire(&mut self, fire: bool) {
+        self.fire = fire;
+    }
+
+    /// Refuses the explosion; nothing goes off.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// Fired when a living entity would die but has a death-protection item.
 #[derive(Debug)]
 pub struct EntityResurrectEvent {
