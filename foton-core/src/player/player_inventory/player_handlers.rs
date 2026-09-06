@@ -1242,10 +1242,27 @@ impl Player {
         }
         if open_menu.dispatch.is_none() {
             drop(open_menu);
-            self.inventory_menu
-                .lock()
-                .behavior_mut()
-                .broadcast_changes(&self.connection);
+            // `try_lock`, because a plugin reaches here from inside an event we
+            // fire while already holding this very mutex.
+            //
+            // `handle_container_click`'s "no external menu" branch locks
+            // `inventory_menu` and then fires `InventoryClickEvent` under it, and
+            // the most ordinary Bukkit handler there is --
+            // `e.setCancelled(true); player.updateInventory();` -- comes straight
+            // back here. `parking_lot::Mutex` is not reentrant, so a plain `lock`
+            // was a self-deadlock on the tick thread: the whole server frozen,
+            // for every player, by a handler nobody would look at twice.
+            //
+            // Skipping loses nothing. The click path that holds the lock sends
+            // the client its full state as it finishes, on both the cancelled
+            // branch and the ordinary one, which is exactly what
+            // `updateInventory` asks for. The dispatch protocol that keeps
+            // external menus out of this trap does not cover the player's own
+            // inventory menu.
+            let Some(mut menu) = self.inventory_menu.try_lock() else {
+                return;
+            };
+            menu.behavior_mut().broadcast_changes(&self.connection);
         }
     }
 
