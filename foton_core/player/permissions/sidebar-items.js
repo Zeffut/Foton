@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GAME_MASTER_PERMISSION"],"struct":["PlayerPermissionState"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLEE_ATTEMPTS","FLEE_HORIZONTAL_RANGE","FLEE_VERTICAL_RANGE"],"enum":["AvoidSource"],"struct":["SetWalkTargetAwayFrom"]};

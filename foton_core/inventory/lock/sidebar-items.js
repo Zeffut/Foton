@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["ContainerId","ContainerLockGuard","ContainerOwner","ContainerRef","LockedContainer"],"type":["AttachedContainers","ContainerChangedCallback","SharedContainer"]};

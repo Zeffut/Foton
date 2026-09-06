@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["APPROACH_SWING_HEIGHT","APPROACH_SWING_RADIUS","LANDED_DISTANCE_SQR","TAKEOFF_PODIUM_RADIUS"],"fn":["closer_to_center_than"],"struct":["ApproachState","DragonLandingApproachPhase","DragonLandingPhase","DragonTakeoffPhase","TakeoffState"]};

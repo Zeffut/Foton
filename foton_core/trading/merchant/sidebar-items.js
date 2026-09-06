@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["open_trading_screen"],"trait":["Merchant"]};

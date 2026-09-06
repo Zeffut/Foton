@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EmptySound"],"fn":["empty_contents","filled_bucket_primary_pos","filled_bucket_success_stack","filled_bucket_target","play_empty_sound_and_event","try_place_fluid","use_empty_bucket","use_filled_bucket"],"struct":["BucketItem","FilledBucketTarget"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GLOW_AMPLIFIER","GLOW_DURATION"],"fn":["check_raid","command","glow_raiders","raid_here","registration","set_omen","source_player","spawn_leader","start_raid","stop_raid"]};

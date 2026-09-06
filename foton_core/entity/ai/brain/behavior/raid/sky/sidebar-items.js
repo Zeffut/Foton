@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["OUTDOOR_ATTEMPTS","OUTDOOR_HORIZONTAL_SPREAD","OUTDOOR_VERTICAL_SPREAD"],"fn":["has_no_blocks_above","outdoor_position"],"struct":["MoveToSkySeeingSpot"]};

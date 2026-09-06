@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["WITHER_DURATION_TICKS"],"struct":["WitherRoseBlock"]};

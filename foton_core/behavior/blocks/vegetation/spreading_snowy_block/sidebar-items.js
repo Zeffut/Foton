@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FULLY_DAMPENED","MIN_SPREAD_LIGHT"],"fn":["can_propagate","can_stay_alive","random_tick"]};

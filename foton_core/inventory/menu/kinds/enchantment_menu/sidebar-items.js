@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SLOT_ITEM","SLOT_LAPIS"],"fn":["clamp_to_i16","enchantment"],"struct":["EnchantmentKind"]};

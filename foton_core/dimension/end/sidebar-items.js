@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["fight","respawn_stage"]};

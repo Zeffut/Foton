@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["adjacent_chunks_ticking","block_center","distance_between_in_blocks","is_occluded"],"struct":["VibrationListener"]};

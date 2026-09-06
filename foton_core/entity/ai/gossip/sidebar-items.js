@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DISCARD_THRESHOLD"],"enum":["GossipType","ReputationEventType"],"struct":["EntityGossips","GossipContainer","GossipEntry"]};

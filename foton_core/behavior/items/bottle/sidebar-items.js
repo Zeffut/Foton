@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["water_bottle"],"struct":["BottleItem"]};

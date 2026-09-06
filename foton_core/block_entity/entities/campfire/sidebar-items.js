@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BURN_COOL_SPEED","CAMPFIRE_SLOTS","COOKING_TIMES_NBT_KEY","COOKING_TOTAL_TIMES_NBT_KEY","ITEMS_NBT_KEY","ITEM_SLOT_NBT_KEY"],"struct":["CampfireBlockEntity","CampfireCooking"]};

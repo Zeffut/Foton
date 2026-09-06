@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ADVANCE_CHANCE","BONEMEAL_SUCCESS_CHANCE","MIN_LIGHT","STAGE"],"struct":["SaplingBlock"]};

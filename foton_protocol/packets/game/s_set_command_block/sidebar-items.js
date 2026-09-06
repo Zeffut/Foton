@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLAG_AUTOMATIC","FLAG_CONDITIONAL","FLAG_TRACK_OUTPUT","MAX_COMMAND_LENGTH"],"struct":["SSetCommandBlock"]};

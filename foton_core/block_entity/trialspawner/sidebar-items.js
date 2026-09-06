@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DELAY_BEFORE_EJECT_AFTER_KILLING_LAST_MOB","TIME_BETWEEN_EACH_EJECTION"],"enum":["FlameParticle","PlayerDetector"],"mod":["player_detector","spawner","state","state_data"],"struct":["FullConfig","TrialSpawner","TrialSpawnerStateData"],"trait":["TrialSpawnerStateAccessor","TrialSpawnerStateExt"]};

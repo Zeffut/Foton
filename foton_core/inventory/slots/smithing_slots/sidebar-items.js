@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SMITHING_ADDITION","SMITHING_BASE","SMITHING_TEMPLATE"],"fn":["smithing_result"],"struct":["SmithingHandler"]};

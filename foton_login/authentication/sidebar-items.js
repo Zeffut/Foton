@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AUTH_CONNECT_TIMEOUT","AUTH_READ_TIMEOUT","DEFAULT_AUTH_SERVER","MAX_RETRIES"],"enum":["AuthError","TextureError"],"fn":["auth_client","build_auth_url","mojang_authenticate","signed_bytes_be_to_hex"],"static":["AUTH_CLIENT"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ACCURACY_DEVIATION","HORIZONTAL_SPAWN_DROP","VERTICAL_SPAWN_DROP"],"fn":["create_filled_result","on_container_destroyed","player_pov_hit_source_fluid","spawn_item_toward","triangle"]};

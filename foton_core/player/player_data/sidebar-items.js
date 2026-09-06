@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PLAYER_DATA_VERSION"],"fn":["stat_value_id","stat_value_key","warden_spawn_tracker_fields"],"struct":["PersistentAbilities","PersistentAdvancement","PersistentCriterion","PersistentEnderPearl","PersistentPlayerData","PersistentRootVehicle","PersistentSlot","PersistentStatistic"]};

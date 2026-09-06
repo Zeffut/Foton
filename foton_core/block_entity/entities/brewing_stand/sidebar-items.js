@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BOTTLE_SLOTS","BREWING_STAND_SLOTS","SLOT_FIRST_BOTTLE","SLOT_FUEL","SLOT_INGREDIENT"],"fn":["clamp_to_i16"],"static":["HAS_BOTTLE","SLOTS_FOR_DOWN","SLOTS_FOR_SIDES","SLOTS_FOR_UP"],"struct":["BrewingStandBlockEntity","BrewingStandContainer","BrewingStandDataSlots"]};

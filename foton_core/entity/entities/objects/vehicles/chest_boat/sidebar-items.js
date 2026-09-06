@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHEST_BOAT_PASSENGERS","CHEST_BOAT_ROWS","CHEST_BOAT_SLOTS"],"macro":[["chest_boat_body",1],["open_chest_impl",1]],"struct":["ChestBoatEntity","ChestRaftEntity"]};

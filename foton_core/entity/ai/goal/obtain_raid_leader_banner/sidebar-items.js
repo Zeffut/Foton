@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["APPROACH_SPEED","PICKUP_DISTANCE","SEARCH_HEIGHT","UNREACHABLE_TIMEOUT"],"struct":["ObtainRaidLeaderBannerGoal"]};

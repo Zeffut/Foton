@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACING"],"fn":["analog_output_signal"],"macro":[["furnace_variant",1]],"struct":["AbstractFurnaceBlock","BlastFurnaceBlock","FurnaceBlock","SmokerBlock"]};

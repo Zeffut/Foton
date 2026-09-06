@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ARRIVED_DISTANCE_SQR","CHARGE_RECOVERY_TIME","LOST_DISTANCE_SQR"],"struct":["ChargeState","DragonChargePlayerPhase"]};

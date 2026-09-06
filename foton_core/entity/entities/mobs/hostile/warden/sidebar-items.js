@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["anger","behaviors","entity","spawn_tracker","warden_ai"]};

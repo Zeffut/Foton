@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["merchant_menu"],"struct":["MerchantKind"]};

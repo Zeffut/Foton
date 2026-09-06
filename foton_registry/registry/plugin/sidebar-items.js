@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PluginEnchantmentRegistrationError"],"fn":["drain_plugin_enchantments","empty_effects_nbt","pending","queue_plugin_enchantment","register_queued_plugin_enchantments","slot_group"],"static":["PENDING_ENCHANTMENTS"],"struct":["PluginEnchantmentDefinition"]};

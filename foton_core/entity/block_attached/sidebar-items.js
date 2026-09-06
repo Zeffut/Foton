@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["caused_by_entity","drop_would_be_wasted"],"trait":["BlockAttached"]};

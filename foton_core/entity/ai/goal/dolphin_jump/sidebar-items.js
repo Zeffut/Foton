@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLAT_ARC_SPEED_SQR","JUMP_FORWARD","JUMP_UP","LEVEL_PITCH","PITCH_LEVEL_LERP","STEPS_TO_CHECK"],"fn":["rot_lerp","wrap_degrees"],"struct":["DolphinJumpGoal"]};

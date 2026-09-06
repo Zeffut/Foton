@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BASE_EXPERIENCE","BOTTLE_GRAVITY","EXPERIENCE_ROLL","SPLASH_COLOR"],"struct":["ExperienceBottleEntity"]};

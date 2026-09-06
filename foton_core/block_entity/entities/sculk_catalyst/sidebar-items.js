@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LISTENER_RADIUS","PULSE","PULSE_TICKS"],"struct":["CatalystListener","SculkCatalystBlockEntity"]};

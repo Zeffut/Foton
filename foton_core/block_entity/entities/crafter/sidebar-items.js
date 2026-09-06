@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CRAFTER_DATA_SLOTS","CRAFTER_HEIGHT","CRAFTER_SLOTS","CRAFTER_WIDTH","SLOT_DISABLED","SLOT_ENABLED"],"struct":["CrafterBlockEntity","CrafterContainer","CrafterDataSlots"]};

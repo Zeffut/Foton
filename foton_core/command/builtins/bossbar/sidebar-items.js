@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["boss_bar","command","create_bar","format_list","get_max","get_players","get_value","get_visible","list_bars","player_list","registration","remove_bar","set_color","set_max","set_name","set_players","set_style","set_subcommands","set_value","set_visible","source_boss_bars","unchanged","unknown_bar"]};

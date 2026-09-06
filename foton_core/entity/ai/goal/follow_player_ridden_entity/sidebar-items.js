@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHASE_SPEED","LEAD_DISTANCE","LEAD_SPEED","RECALC_INTERVAL_TICKS","SEARCH_RANGE","SWITCH_TO_CHASING_DISTANCE","SWITCH_TO_LEADING_DISTANCE"],"enum":["Stage"],"struct":["FollowPlayerRiddenEntityGoal"],"type":["VehicleFilter"]};

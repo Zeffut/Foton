@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ATTACK_TARGET_DURATION","BABY_ATTACK_DAMAGE","BABY_DIMENSIONS","BABY_PASSENGER_ATTACHMENTS","XP_REWARD"],"mod":["zoglin_ai"],"struct":["ZoglinEntity","ZoglinState"]};

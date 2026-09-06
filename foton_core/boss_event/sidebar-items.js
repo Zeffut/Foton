@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["custom"],"struct":["BossEvent","ServerBossEvent","ServerBossEventState"]};

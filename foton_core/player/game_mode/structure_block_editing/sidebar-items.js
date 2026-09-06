@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["identifier_or_empty","send_block_entity_update"]};

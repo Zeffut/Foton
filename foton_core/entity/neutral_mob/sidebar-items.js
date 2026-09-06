@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TAG_ANGER_END_TIME","TAG_ANGRY_AT"],"fn":["is_valid_player_target","player_can_be_angered_at","read_persistent_anger","resolve_anger_target","write_persistent_anger"],"struct":["PersistentAnger"],"trait":["NeutralMob"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BUG_REPORT_ACTION","CATEGORY_KEY","DESCRIPTION_KEY"],"fn":["bug_dialog","category_input","description_input","show_bug_dialog","submit_button","text"]};

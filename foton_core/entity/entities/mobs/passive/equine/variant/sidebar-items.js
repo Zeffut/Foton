@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["HorseMarkings","HorseVariant"],"fn":["pack_type_variant","with_variant"]};

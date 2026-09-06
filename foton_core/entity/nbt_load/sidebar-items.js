@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BASE_FIELDS","MAX_LOADED_HORIZONTAL_POSITION","MAX_LOADED_MOTION","MAX_LOADED_VERTICAL_POSITION"],"fn":["clamp_loaded_motion","entity_type_from_nbt","load_entity_save_data","load_live_entity","read_custom_name","read_entity_nbt","read_flag","read_int","read_rotation","read_tags","read_vec3d"],"struct":["EntityNbtLoad"]};

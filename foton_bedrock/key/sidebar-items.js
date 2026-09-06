@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BEDROCK_DIR","KEY_FILE","KEY_LENGTH"],"fn":["create_restricted","init_shared","key_path","load_or_create","read_key","shared"],"static":["SHARED_KEY"]};

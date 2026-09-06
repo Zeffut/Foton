@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLOAT_SPEED_MODIFIER","MAX_ATTEMPTS","SEARCH_SPAN","TOO_CLOSE_SQR","TOO_FAR_SQR"],"fn":["choose_random_position","choose_random_position_with_restriction","is_good_target","suitable_fly_to_position"],"struct":["RandomFloatAroundGoal"]};

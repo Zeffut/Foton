@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SKELETON_HORSE_BABY_DIMENSIONS","SKELETON_HORSE_BABY_PASSENGER_ATTACHMENTS","TRAP_MAX_LIFE","WATER_SLOW_DOWN"],"struct":["SkeletonHorseEntity","SkeletonHorseState"]};

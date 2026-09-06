@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DUPLICATE_LOGIN_POLL_INTERVAL","DUPLICATE_LOGIN_TEARDOWN_TIMEOUT"],"enum":["PlayerAdmissionState"],"struct":["PendingPlayerDisconnect","PendingPlayerJoin","PlayerDisconnectQueue","PlayerJoinQueue"]};

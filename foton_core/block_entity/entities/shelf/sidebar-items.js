@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ALIGN_ITEMS_TO_BOTTOM_NBT_KEY","ITEMS_NBT_KEY","ITEM_SLOT_NBT_KEY","SHELF_SLOTS"],"struct":["ShelfBlockEntity","ShelfContainer"]};

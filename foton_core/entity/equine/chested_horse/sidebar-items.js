@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHESTED_INVENTORY_COLUMNS"],"trait":["AbstractChestedHorse"]};

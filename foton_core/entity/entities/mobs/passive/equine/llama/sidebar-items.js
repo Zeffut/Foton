@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LLAMA_BABY_DIMENSIONS","LLAMA_BABY_PASSENGER_ATTACHMENTS","LLAMA_BABY_SCALE","LLAMA_MAX_TEMPER","LLAMA_REQUIRED_PATH_LENGTH","WOLF_FOLLOW_DISTANCE_SCALE","WOLF_SEARCH_INTERVAL"],"fn":["add_llama_goals","configure_llama_navigation","spit_at_target"],"struct":["LlamaEntity","LlamaHurtByTargetGoal"]};

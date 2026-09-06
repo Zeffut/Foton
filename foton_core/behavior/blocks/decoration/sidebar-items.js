@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["banner_block","bell_block","cake_block","candle_block","candle_cake_block","chain_block","copper_golem_statue_block","decorated_pot_block","dried_ghast_block","end_rod_block","flower_pot_block","lantern_block","sign_block","skull_block","torch_block","weathering_lantern_block","wither_summon"]};

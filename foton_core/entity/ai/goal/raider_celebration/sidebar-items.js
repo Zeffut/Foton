@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["JUMP_INTERVAL","SHOUT_INTERVAL"],"struct":["RaiderCelebrationGoal"]};

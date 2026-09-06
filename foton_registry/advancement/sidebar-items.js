@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AdvancementType"],"fn":["decode_icon"],"mod":["predicate","progress","registry","trigger"],"struct":["Advancement","AdvancementIcon","AdvancementRequirements","AdvancementRewards","Criterion","DisplayInfo"]};

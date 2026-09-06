@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["command","command_failed","create_entity","load_entity_tree","registration","summon_entity"]};

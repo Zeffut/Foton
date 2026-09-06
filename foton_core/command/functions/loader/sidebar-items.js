@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FUNCTION_DIRECTORY","FUNCTION_EXTENSION","FUNCTION_TAG_DIRECTORY"],"enum":["RawTagEntry"],"fn":["collect","collect_functions","collect_tags","default_required","pack_directories","read_sorted_directories","read_sorted_entries","resource_files"],"struct":["DatapackContents","DatapackInfo","FunctionSource","RawTagFile","TagEntry"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["armor_stand","mannequin"],"struct":["ArmorStandEntity","MannequinEntity"]};

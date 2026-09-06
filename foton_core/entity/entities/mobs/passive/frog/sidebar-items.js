@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EATING_SOUND_VOLUME","FALL_DAMAGE_REDUCTION","MAX_HEAD_Y_ROT","STEP_SOUND_VOLUME","SWIM_DRAG","SWIM_MOVE_CONTROL"],"fn":["cube_mob_size"],"mod":["frog_ai"],"struct":["FrogEntity"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":["BY_BIOME"],"struct":["VillagerType","VillagerTypeRegistry"],"type":["VillagerTypeRef"]};

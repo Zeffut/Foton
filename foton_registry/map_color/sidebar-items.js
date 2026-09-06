@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Brightness"],"struct":["MapColor"]};

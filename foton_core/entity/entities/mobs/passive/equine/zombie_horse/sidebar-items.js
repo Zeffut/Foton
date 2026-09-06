@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BASE_JUMP_STRENGTH","BASE_SPEED","PER_RANDOM_JUMP_STRENGTH","PER_RANDOM_SPEED","SPEED_FACTOR","ZOMBIE_HORSE_BABY_DIMENSIONS","ZOMBIE_HORSE_BABY_PASSENGER_ATTACHMENTS"],"fn":["generate_zombie_horse_jump_strength","generate_zombie_horse_speed"],"struct":["ZombieHorseEntity"]};

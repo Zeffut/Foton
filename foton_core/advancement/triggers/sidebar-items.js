@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["fire"],"mod":["entity","inventory","item","world"]};

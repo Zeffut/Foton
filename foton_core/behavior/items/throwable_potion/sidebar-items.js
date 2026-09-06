@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PITCH_OFFSET","SHOOT_POWER","THROW_VOLUME"],"fn":["throw_pitch","throw_potion"],"struct":["LingeringPotionItem","SplashPotionItem"],"trait":["ThrownPotion"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AIR_GRAVITY","DAMAGE_CAUGHT_FISH","DAMAGE_FROM_GROUND","DAMAGE_HOOKED_ENTITY","DAMAGE_HOOKED_ITEM","DAMAGE_NOTHING","INERTIA","MAX_DISTANCE_TO_OWNER_SQR","MAX_GROUNDED_LIFE","MAX_OUT_OF_WATER_TIME"],"enum":["FishHookState","OpenWaterType"],"fn":["java_signum","next_float","next_int","triangle"],"struct":["FishingHookEntity","HookState"]};

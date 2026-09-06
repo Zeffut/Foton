@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["looked_at_point"],"struct":["BoatItem"]};

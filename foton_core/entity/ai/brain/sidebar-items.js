@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BRAIN_NBT_KEY","NO_SCHEDULE_UPDATE_YET","SCHEDULE_UPDATE_INTERVAL"],"mod":["activity","behavior","context","memory","position_tracker","sensor"],"struct":["ActivityData","ActivityState","Brain","BrainRuntime","ScheduledBehavior","ScheduledSensor"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BELL_RING_CHANCE","RING_BELL_FROM_DISTANCE"],"struct":["ReactToBell","RingBell"]};

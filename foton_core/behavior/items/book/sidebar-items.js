@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["open_item_gui"],"struct":["WritableBookItem","WrittenBookItem"]};

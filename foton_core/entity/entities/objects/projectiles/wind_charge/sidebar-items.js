@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BURST_KNOCKBACK","BURST_RADIUS","NO_DEFLECT_TICKS"],"struct":["WindChargeEntity"]};

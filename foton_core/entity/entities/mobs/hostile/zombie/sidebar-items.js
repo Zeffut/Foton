@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ATTACK_SPEED_MODIFIER","LOOK_AT_PLAYER_RANGE","STROLL_SPEED_MODIFIER","XP_REWARD"],"struct":["ZombieEntity"]};
