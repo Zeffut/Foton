@@ -45,8 +45,8 @@ use crate::chunk::{
 };
 use crate::entity::SharedEntity;
 use crate::world::tick_scheduler::{
-    BlockTickList, ChunkTickContainer, FluidTickList, ScheduledTickSnapshot, TickPriority,
-    TickSchedulerError,
+    BlockTickList, ChunkTickContainer, FluidTickList, SavedTick, ScheduledTickSnapshot,
+    TickPriority, TickSchedulerError,
 };
 use crate::world::{World, game_event::GameEventListenerCount};
 use foton_worldgen::structure::{StructureReferenceMap, StructureStartMap};
@@ -912,16 +912,53 @@ impl FullChunkRef<'_> {
         )
     )]
     pub(crate) fn scheduled_tick_snapshot(&self) -> ScheduledTickSnapshot {
-        let current_tick = self.get_level().map_or(0, |world| world.game_time());
+        let level = self.get_level();
         let result = self
             .chunk
             .scheduled_tick_container()
-            .snapshot(current_tick)
+            .snapshot(|| level.as_ref().map_or(0, |world| world.game_time()))
             .ok_or(TickSchedulerError::MissingContainer(self.chunk.pos));
-        match result {
+        let mut snapshot = match result {
             Ok(snapshot) => snapshot,
             Err(error) => panic!("Full chunk scheduled-tick ownership invariant failed: {error:?}"),
+        };
+
+        // The containers are not the whole truth mid-tick. The collect half
+        // drains the due ticks before the execute half runs them, so a save
+        // that lands in between would write a chunk that lost every one of
+        // them -- and unlike vanilla, whose `ChunkMap.save` is atomic with
+        // respect to the tick, nothing here stops that save from landing.
+        //
+        // Only the ticks that have *not started* are added: the executor's
+        // cursor says which those are, and the ones before it have already put
+        // their effects in the world. Adding those would re-run them on load;
+        // omitting these loses them outright. Delay zero, because they were due
+        // this tick.
+        if let Some(world) = level {
+            snapshot.block.extend(
+                world
+                    .pending_block_ticks_in_chunk(self.chunk.pos)
+                    .into_iter()
+                    .map(|tick| SavedTick {
+                        tick_type: tick.tick_type,
+                        pos: tick.pos,
+                        delay: 0,
+                        priority: tick.priority,
+                    }),
+            );
+            snapshot.fluid.extend(
+                world
+                    .pending_fluid_ticks_in_chunk(self.chunk.pos)
+                    .into_iter()
+                    .map(|tick| SavedTick {
+                        tick_type: tick.tick_type,
+                        pos: tick.pos,
+                        delay: 0,
+                        priority: tick.priority,
+                    }),
+            );
         }
+        snapshot
     }
 
     /// Fills the vanilla skylight-source cache from current section contents.

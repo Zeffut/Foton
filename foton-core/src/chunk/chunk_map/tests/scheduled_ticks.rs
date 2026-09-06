@@ -115,3 +115,66 @@ fn registered_full_chunks_use_active_order_for_equal_explicit_tick_heads() {
         [second_tick_pos, first_tick_pos]
     );
 }
+
+#[test]
+fn a_save_landing_mid_tick_keeps_the_ticks_that_have_not_run_yet() {
+    // The collect half drains the due ticks from their container before the
+    // execute half runs them. Vanilla is safe from this because `ChunkMap.save`
+    // is atomic with respect to the tick; Foton serializes off the tick thread,
+    // so a save in that window used to write a chunk with neither the pending
+    // ticks nor the changes they were about to make -- and only a crash before
+    // the next save made it permanent, which is exactly the case nobody sees
+    // coming.
+    init_vanilla_registry();
+    init_behaviors();
+    let world = fresh_test_world("save_during_scheduled_tick_execution");
+    let chunk_pos = ChunkPos::new(0, 0);
+    let first = BlockPos::new(1, 64, 1);
+    let second = BlockPos::new(2, 64, 1);
+    let holder = insert_ready_full_chunk(&world, chunk_pos);
+    world.level_data.write().set_game_time(10);
+    world.schedule_block_tick(first, &vanilla_blocks::STONE, 0, TickPriority::Normal);
+    world.schedule_block_tick(second, &vanilla_blocks::STONE, 0, TickPriority::Normal);
+
+    let collected = world.begin_scheduled_tick_phase(10, MAX_SCHEDULED_TICKS_PER_TICK);
+    assert_eq!(collected.ticks.len(), 2, "both ticks are due this tick");
+    let Some(chunk) = holder.try_full_chunk() else {
+        panic!("the test chunk should be Full");
+    };
+    assert!(
+        chunk.scheduled_tick_snapshot().block.is_empty(),
+        "the container really is empty once the collect half has run"
+    );
+
+    let batch = world.begin_scheduled_block_tick_batch(collected.ticks);
+    let positions = chunk
+        .scheduled_tick_snapshot()
+        .block
+        .iter()
+        .map(|tick| tick.pos)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        positions,
+        vec![first, second],
+        "a save mid-tick must still write the ticks that have not run"
+    );
+
+    batch.start(0);
+    let positions = chunk
+        .scheduled_tick_snapshot()
+        .block
+        .iter()
+        .map(|tick| tick.pos)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        positions,
+        vec![second],
+        "a tick that has already run must not be written again -- its effects are in the chunk"
+    );
+
+    world.end_scheduled_block_tick_batch(&batch);
+    assert!(
+        chunk.scheduled_tick_snapshot().block.is_empty(),
+        "once the phase is over the container is the whole truth again"
+    );
+}

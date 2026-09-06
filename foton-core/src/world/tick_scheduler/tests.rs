@@ -185,7 +185,7 @@ fn proto_pending_scheduling_is_linearized_with_full_promotion() {
         };
         assert!(promoted);
 
-        let Some(snapshot) = container.snapshot(0) else {
+        let Some(snapshot) = container.snapshot(|| 0) else {
             panic!("promoted scheduled-tick container should remain available");
         };
         match block_result {

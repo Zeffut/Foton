@@ -687,7 +687,7 @@ impl ChunkStorage {
         } else {
             // Proto ticks are pending, so Vanilla ignores the current game
             // time when serializing their already-relative delays.
-            let Some(snapshot) = chunk.scheduled_ticks.snapshot(0) else {
+            let Some(snapshot) = chunk.scheduled_ticks.snapshot(|| 0) else {
                 // Same race, same reasoning: the container was finalized by a
                 // promotion running alongside this save.
                 log::error!(

@@ -414,32 +414,53 @@ it. The portal path is not a precedent for the first --
 `TeleportPostTransition::place_portal_ticket` runs *after* the transition, and
 portals only work because the portal search has already loaded the destination.
 
-## The one that needs an architecture change, not a fix
+## The one that looked like an architecture change and was not
 
 Chunk serialization does not run on the world's tick thread, and one window in
-the tick makes that visible. `ChunkMap::tick_game` calls
+the tick made that visible. `ChunkMap::tick_game` calls
 `collect_scheduled_block_ticks` and `execute_scheduled_block_ticks` as two
 statements; the collect half already removes the due ticks from their
-`ChunkTickContainer`, so between the two they exist only in a local `Vec`.
+`ChunkTickContainer`, so between the two they exist only in the batch.
 `World::request_save` meanwhile spawns `save_all_chunks` on the chunk runtime,
-and `ChunkTickContainer::snapshot` reads only the containers. A save that lands
-in that window writes a chunk with neither the pending ticks nor the state
-changes they were about to make.
+and `ChunkTickContainer::snapshot` read only the containers. A save landing in
+that window wrote a chunk with neither the pending ticks nor the state changes
+they were about to make.
 
 Vanilla cannot reach this state: `ChunkMap.save` calls
 `SerializableChunkData.copyOf` synchronously on the server thread, and only the
 disk write is asynchronous, so serialization is atomic with respect to
-`ServerLevel.tick`.
+`ServerLevel.tick`. Notably vanilla does *not* solve it by packing its in-flight
+set -- `LevelChunkTicks.pack` reads `tickQueue` and the unpacked `pendingTicks`
+and never touches `LevelTicks.toRunThisTick`. Its correctness comes from the
+barrier, not from the contents.
 
-The damage is bounded, which is why this is documented rather than fixed. The
-executing tick marks the chunk dirty again immediately afterwards, so the next
-save corrects the file; the bad write only survives if the process dies before
-that -- a crash, a `kill -9`, a power cut. Closing it properly means moving
-chunk serialization onto the tick thread or gating it behind a tick barrier,
-which is an architecture change and not an audit fix. A smaller sibling sits in
-the same place and could be fixed on its own: `FullChunkRef::scheduled_tick_snapshot`
-reads `world.game_time()` before it takes the container lock, so a tick landing
-between the two shifts every persisted `delay` by one.
+**The fix was neither the barrier nor a rewrite.** The batch already existed on
+the world -- `begin_scheduled_block_tick_batch` registers it so
+`willTickThisTick` queries can see it -- and it already carried the executor's
+cursor. `scheduled_tick_snapshot` now appends the batch entries **at or after
+that cursor** for the chunk being written. The cursor is what makes it exact
+rather than a trade: everything before it has already run and its effects are in
+the chunk, so adding those would re-run them on load; everything at or after it
+has not run, so omitting those loses them outright. A test pins both halves,
+because getting only the first half right looks identical until a crash.
+
+Two things are still true and worth keeping. The drain and the batch
+registration are separate operations, so a save landing exactly between them
+still misses that tick -- a window of two adjacent statements rather than an
+entire execution phase. Closing it means holding the batch lock across the
+drain, which is a change to the tick loop's structure and was not worth the
+risk for the remaining nanoseconds. And a tick that is *executing* while the
+snapshot reads sections can still be seen half-applied; that is the generic
+non-atomicity of reading state off the tick thread, not this bug.
+
+The smaller sibling named here is fixed too. `FullChunkRef::scheduled_tick_snapshot`
+read `world.game_time()` *before* taking the container lock, so a tick landing
+between the two shifted every persisted `delay` by one. `snapshot` now takes the
+clock as a closure and calls it under the same lock the lists are read under.
+That is sound rather than merely narrower: the collect half takes that lock, and
+the clock advances before it does, so any ordering where the lists have already
+lost their due ticks is one where the clock has already moved past them.
+
 
 ## The layer this audit kept skipping
 
