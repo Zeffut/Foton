@@ -277,6 +277,13 @@ impl FromNbtTag for ItemStackTemplate {
 }
 
 impl HashComponent for ItemStackTemplate {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         let mut entries = Vec::with_capacity(3);
         push_hash_entry(&mut entries, "id", self.item.key.to_string().compute_hash());

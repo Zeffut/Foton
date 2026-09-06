@@ -472,6 +472,13 @@ impl NbtPredicate {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     pub(crate) fn to_nbt_tag_ref(&self) -> NbtTag {
         let Some(snbt) = to_canonical_snbt(&NbtTag::Compound(self.tag.clone())) else {
             panic!("normalized NBT predicate became malformed");
@@ -506,6 +513,13 @@ impl ReadFrom for NbtPredicate {
 }
 
 impl HashComponent for NbtPredicate {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         let NbtTag::String(value) = self.to_nbt_tag_ref() else {
             unreachable!("NBT predicate codec always writes a string");
@@ -681,6 +695,13 @@ impl ReadFrom for AdventureModePredicate {
 }
 
 impl ToNbtTag for AdventureModePredicate {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     fn to_nbt_tag(self) -> NbtTag {
         if self.predicates.len() == 1 {
             return self.predicates[0].to_nbt_tag_ref();

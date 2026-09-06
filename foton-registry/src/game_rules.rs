@@ -265,6 +265,13 @@ impl<T: GameRuleValueType> ErasedGameRule for GameRule<T> {
             .is_some_and(|value| self.validates(value))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the discriminator and the payload are set together by the registration that made this entry"
+        )
+    )]
     fn serialize_erased_value(&self, value: &GameRuleValue) -> Value {
         let Some(value) = value.downcast_ref::<T>() else {
             panic!("stored value type does not match game rule {}", self.key);
@@ -276,6 +283,13 @@ impl<T: GameRuleValueType> ErasedGameRule for GameRule<T> {
         (self.codec.deserialize)(value).map(GameRuleValue::new)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the discriminator and the payload are set together by the registration that made this entry"
+        )
+    )]
     fn erased_command_result(&self, value: &GameRuleValue) -> i32 {
         let Some(value) = value.downcast_ref::<T>() else {
             panic!("stored value type does not match game rule {}", self.key);
@@ -379,6 +393,13 @@ impl GameRuleValues {
 
     /// Gets the typed value of a game rule.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the discriminator and the payload are set together by the registration that made this entry"
+        )
+    )]
     pub fn get<T: GameRuleValueType>(&self, rule: &GameRule<T>, registry: &GameRuleRegistry) -> T {
         let value = self.get_erased(rule, registry);
         let Some(value) = value.downcast_ref::<T>() else {
@@ -404,6 +425,13 @@ impl GameRuleValues {
 
     /// Gets a type-erased value for a dynamically selected rule.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the discriminator and the payload are set together by the registration that made this entry"
+        )
+    )]
     pub fn get_erased(
         &self,
         rule: &dyn ErasedGameRule,
@@ -450,6 +478,13 @@ impl GameRuleValues {
         self.set_erased(rule, value, registry)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     fn rule_id(rule: &dyn ErasedGameRule, registry: &GameRuleRegistry) -> usize {
         let Some(id) = registry.id_from_key(rule.key()) else {
             panic!("game rule {} is not registered", rule.key());

@@ -58,6 +58,13 @@ impl<R: AsyncRead + Unpin> DecryptionReader<R> {
     /// # Panics
     /// - If the reader is already decrypting data.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the only caller checks the same condition first and refuses there; this arm is the type making that check enforceable"
+        )
+    )]
     pub fn upgrade(self, cipher: Aes128Cfb8Dec) -> Self {
         match self {
             Self::None(stream) => Self::Decrypt(Box::new(StreamDecryptor::new(cipher, stream))),
@@ -112,6 +119,13 @@ impl<R: AsyncRead + Unpin> TCPNetworkDecoder<R> {
     ///
     /// # Panics
     /// - If the reader is already decrypting data.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "refusing to re-key a live stream is a programming error, and the Panics note above says so"
+        )
+    )]
     pub fn set_encryption(&mut self, key: &[u8; 16]) {
         if matches!(self.reader, DecryptionReader::Decrypt(_)) {
             panic!("Cannot upgrade a stream that already has a cipher!");

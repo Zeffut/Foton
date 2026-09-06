@@ -293,6 +293,13 @@ impl ConsumeEffectCodec for ApplyStatusEffectsConsumeEffect {
         Self::new(effects, optional_f32(compound.get("probability"), 1.0)?).ok()
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     fn write_fields(&self, compound: &mut NbtCompound) {
         compound.insert(
             "effects",
@@ -576,6 +583,13 @@ fn read_persistent<T: ConsumeEffectCodec>(
     T::read_fields(compound).map(|value| Box::new(value) as Box<dyn ErasedConsumeEffect>)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the discriminator and the payload are set together by the registration that made this entry"
+    )
+)]
 fn write_persistent<T: ConsumeEffectCodec>(
     value: &dyn ErasedConsumeEffect,
     compound: &mut NbtCompound,
@@ -602,6 +616,13 @@ fn write_network<T: ConsumeEffectCodec>(
         .write_network(writer)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the discriminator and the payload are set together by the registration that made this entry"
+    )
+)]
 fn hash_fields<T: ConsumeEffectCodec>(
     value: &dyn ErasedConsumeEffect,
     entries: &mut Vec<HashEntry>,

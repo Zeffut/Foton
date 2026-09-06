@@ -35,6 +35,13 @@ impl<W: AsyncWrite + Unpin> EncryptionWriter<W> {
     /// # Panics
     /// - If the writer is already encrypting data.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the only caller checks the same condition first and refuses there; this arm is the type making that check enforceable"
+        )
+    )]
     pub fn upgrade(self, cipher: Aes128Cfb8Enc) -> Self {
         match self {
             Self::None(stream) => Self::Encrypt(Box::new(StreamEncryptor::new(cipher, stream))),
@@ -107,6 +114,13 @@ impl<W: AsyncWrite + Unpin> TCPNetworkEncoder<W> {
     ///
     /// # Panics
     /// - If the stream is already encrypted.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "refusing to re-key a live stream is a programming error, and the Panics note above says so"
+        )
+    )]
     pub fn set_encryption(&mut self, key: &[u8; 16]) {
         if matches!(self.writer, EncryptionWriter::Encrypt(_)) {
             panic!("Cannot upgrade a stream that already has a cipher!");

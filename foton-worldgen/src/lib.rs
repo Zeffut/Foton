@@ -6,6 +6,7 @@
 // is scoped to `not(test)` on purpose -- a panicking test is how a test reports
 // a failure, while a panicking server is how a world is lost.
 #![cfg_attr(not(test), warn(clippy::expect_used))]
+#![cfg_attr(not(test), warn(clippy::panic, clippy::unreachable, clippy::todo))]
 #![feature(portable_simd)]
 
 extern crate self as foton_worldgen;

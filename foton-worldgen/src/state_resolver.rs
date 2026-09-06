@@ -13,6 +13,13 @@ impl WorldgenStateResolver {
     /// # Panics
     /// Panics if the block is not in the registry or if the state properties are invalid.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "worldgen data comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub fn block_state_from_data(
         registry: &Registry,
         data: &shared_structs::BlockStateData,
@@ -51,6 +58,13 @@ impl WorldgenStateResolver {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "worldgen data comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     fn block_state_from_parts<'a>(
         registry: &Registry,
         block: BlockRef,

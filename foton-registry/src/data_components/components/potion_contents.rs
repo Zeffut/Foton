@@ -87,6 +87,13 @@ impl PotionContents {
         self.potion.is_some_and(|p| p.value().key == potion.key) && self.custom_effects.is_empty()
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     fn to_nbt_tag_ref(&self) -> NbtTag {
         let mut compound = NbtCompound::new();
         if let Some(potion) = self.potion {

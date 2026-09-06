@@ -147,6 +147,13 @@ impl AdvancementIcon {
         })
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "registry entries are built together at startup; an id one of them cannot resolve means the generated data is inconsistent"
+        )
+    )]
     fn resolve_item(&self) -> ItemRef {
         let key = Identifier::from_str(self.item_id).unwrap_or_else(|_| {
             panic!(

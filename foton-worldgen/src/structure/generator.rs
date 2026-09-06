@@ -425,6 +425,13 @@ pub fn squared_distance(a: BlockPos, b: BlockPos) -> i64 {
     dx * dx + dy * dy + dz * dz
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "worldgen data comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+    )
+)]
 fn validate_structure_sets(structure_sets: &[(Identifier, StructureSet)]) {
     for (set_key, set) in structure_sets {
         assert!(
@@ -495,6 +502,13 @@ fn validate_structure_sets(structure_sets: &[(Identifier, StructureSet)]) {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "worldgen data comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+    )
+)]
 fn validate_structure_assets(
     structure_sets: &[(Identifier, StructureSet)],
     structure_data: &FxHashMap<Identifier, StructureRef>,
@@ -888,6 +902,13 @@ impl StructureGenerator {
         self.ring_positions.get(set_key).map(Vec::as_slice)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a structure set that excludes itself is malformed extracted data, and the chain names the cycle"
+        )
+    )]
     fn is_structure_chunk_for_set(
         &self,
         set_key: &Identifier,

@@ -299,6 +299,13 @@ impl<T: PropertyEnum> EnumProperty<T> {
 }
 
 impl<T: const PartialEq + PropertyEnum + 'static> EnumProperty<T> {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the value comes from this property's own possible-values list, which is what the index is built from"
+        )
+    )]
     pub const fn get_internal_index_const(&self, value: &T) -> usize {
         let mut i = 0;
         while i < self.possible_values.len() {

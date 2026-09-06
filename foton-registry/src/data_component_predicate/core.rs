@@ -156,6 +156,13 @@ impl DataComponentPredicateData {
         Some(Self::any(component))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the discriminator and the payload are set together by the registration that made this entry"
+        )
+    )]
     fn to_nbt_value(&self) -> NbtTag {
         match (self.discriminator, self.value.as_deref()) {
             (PredicateDiscriminator::Concrete(predicate_type), Some(value)) => {
@@ -166,6 +173,13 @@ impl DataComponentPredicateData {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the discriminator and the payload are set together by the registration that made this entry"
+        )
+    )]
     fn hash_value(&self, hasher: &mut ComponentHasher) {
         match (self.discriminator, self.value.as_deref()) {
             (PredicateDiscriminator::Concrete(predicate_type), Some(value)) => {
@@ -251,6 +265,13 @@ fn read_predicate<T: DataComponentPredicateCodec>(
     T::from_nbt_value(tag).map(|value| Box::new(value) as Box<dyn ErasedDataComponentPredicate>)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the discriminator and the payload are set together by the registration that made this entry"
+    )
+)]
 fn write_predicate<T: DataComponentPredicateCodec>(
     value: &dyn ErasedDataComponentPredicate,
 ) -> NbtTag {
@@ -260,6 +281,13 @@ fn write_predicate<T: DataComponentPredicateCodec>(
     value.to_nbt_value()
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "the discriminator and the payload are set together by the registration that made this entry"
+    )
+)]
 fn hash_predicate<T: DataComponentPredicateCodec>(
     value: &dyn ErasedDataComponentPredicate,
     hasher: &mut ComponentHasher,
@@ -369,6 +397,13 @@ impl DataComponentExactPredicate {
             .all(|(entry, value)| stack.get_effective_value_raw(&entry.key) == Some(value))
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     fn to_nbt_value(&self) -> NbtTag {
         let mut compound = NbtCompound::new();
         for (entry, value) in &self.values {
@@ -411,6 +446,13 @@ impl ReadFrom for DataComponentExactPredicate {
 }
 
 impl HashComponent for DataComponentExactPredicate {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+        )
+    )]
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         let mut entries = Vec::new();
         for (entry, value) in &self.values {

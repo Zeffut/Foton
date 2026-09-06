@@ -770,6 +770,13 @@ fn read_count(data: &mut Cursor<&[u8]>, max: Option<usize>) -> Result<usize> {
     Ok(count)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::unreachable,
+        reason = "the codec that produced this value is the one reading it back, so its shape is settled a few lines up"
+    )
+)]
 fn template_list_nbt(items: &[ItemStackTemplate]) -> NbtTag {
     if items.is_empty() {
         return NbtTag::List(NbtList::Empty);

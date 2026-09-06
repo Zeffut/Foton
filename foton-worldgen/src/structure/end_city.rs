@@ -40,6 +40,13 @@ fn template_size(templates: &Templates, name: &str) -> Option<IVec3> {
     templates.get(&id).map(|t| IVec3::from(t.size))
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "worldgen data comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+    )
+)]
 fn piece_bb(templates: &Templates, piece: &EndCityPiece) -> BoundingBox {
     let size = template_size(templates, &piece.template_name)
         .unwrap_or_else(|| panic!("missing end_city template: {}", piece.template_name));
