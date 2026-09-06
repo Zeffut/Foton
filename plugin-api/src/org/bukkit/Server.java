@@ -15,6 +15,25 @@ import org.bukkit.scheduler.BukkitScheduler;
 
 /** What a plugin asks the server for. */
 public interface Server {
+    /** The server's help index.
+     *
+     * <p>Empty rather than absent: plugins register help topics into it at
+     * enable time and read it back for their own `/help`, so returning null
+     * would fail them at load rather than leave them with nothing to show. */
+    org.bukkit.help.HelpMap getHelpMap();
+
+    /** Sends a component to every online player and the console.
+     *
+     * <p>Serialized to plain text on the way out, because the broadcast path
+     * underneath takes a string. A plugin that formats its announcement keeps
+     * the words and loses the colors, which is the lesser of the two wrongs
+     * available until the broadcast native carries components. */
+    default void sendMessage(net.kyori.adventure.text.Component message) {
+        if (message == null) return;
+        broadcastMessage(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+                .plainText().serialize(message));
+    }
+
     /** Returns the datapacks discovered by the active resource reload. */
     default io.papermc.paper.datapack.DatapackManager getDatapackManager() {
         return foton.FotonDatapackManager.INSTANCE;

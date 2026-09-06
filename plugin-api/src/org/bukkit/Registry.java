@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.stream.Stream;
 import org.bukkit.enchantments.Enchantment;
 
-/** Read-only Bukkit registry view backed by Steel's generated values. */
+/** Read-only Bukkit registry view backed by Foton's generated values. */
 public interface Registry<T extends Keyed> {
     T get(NamespacedKey key);
 
@@ -20,6 +20,16 @@ public interface Registry<T extends Keyed> {
     default NamespacedKey getKeyOrThrow(T value) {
         return Objects.requireNonNull(value, "value").getKey();
     }
+
+    Registry<org.bukkit.entity.EntityType> ENTITY_TYPE = new Registry<>() {
+        @Override public org.bukkit.entity.EntityType get(NamespacedKey key) { if (key == null) return null; for (org.bukkit.entity.EntityType value : org.bukkit.entity.EntityType.values()) if (key.equals(value.getKey())) return value; return null; }
+        @Override public Stream<org.bukkit.entity.EntityType> stream() { return Arrays.stream(org.bukkit.entity.EntityType.values()); }
+    };
+
+    Registry<org.bukkit.Sound> SOUNDS = new Registry<>() {
+        @Override public org.bukkit.Sound get(NamespacedKey key) { if (key == null) return null; for (org.bukkit.Sound value : org.bukkit.Sound.values()) if (key.equals(value.getKey())) return value; return null; }
+        @Override public Stream<org.bukkit.Sound> stream() { return Arrays.stream(org.bukkit.Sound.values()); }
+    };
 
     Registry<org.bukkit.Art> ART = new Registry<>() {
         @Override public org.bukkit.Art get(NamespacedKey key) { if (key == null) return null; for (org.bukkit.Art value : org.bukkit.Art.values()) if (value.getKey().equals(key)) return value; return null; }

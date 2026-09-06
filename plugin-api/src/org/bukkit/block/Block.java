@@ -44,6 +44,13 @@ public interface Block extends org.bukkit.metadata.Metadatable {
     boolean isEmpty();
     default PistonMoveReaction getPistonMoveReaction() { return PistonMoveReaction.NORMAL; }
     default boolean isPassable() { return foton.Native.blockPassable(getWorld().getName(), getX(), getY(), getZ()); }
+    /** The light a mob-spawning or crop-growth check would read here:
+     * whichever of sky and block light is brighter, which is how vanilla's
+     * `getRawBrightness` combines them. */
+    default byte getLightLevel() {
+        return (byte) Math.max(getLightFromSky(), getLightFromBlocks());
+    }
+
     default byte getLightFromBlocks() { return 0; }
     default byte getLightFromSky() { return 0; }
     default boolean isBlockIndirectlyPowered() { return false; }

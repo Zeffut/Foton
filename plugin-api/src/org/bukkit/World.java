@@ -16,6 +16,15 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     default WorldType getWorldType() { return WorldType.NORMAL; }
     default Difficulty getDifficulty() { return Difficulty.NORMAL; }
     default void setDifficulty(Difficulty difficulty) { }
+    /** Resends a chunk to every player who can see it.
+     *
+     * <p>Bukkit deprecated this because a modern server keeps clients in step
+     * on its own, and plugins that still call it are usually working around
+     * something that no longer happens. Answering false says the refresh did
+     * not need doing, which is the truth here. */
+    @Deprecated
+    default boolean refreshChunk(int x, int z) { return false; }
+
     default boolean hasBonusChest() { return foton.Native.worldHasBonusChest(getName()); }
     default boolean getPVP() { return true; }
     default boolean getAllowMonsters() { return true; }
@@ -218,11 +227,44 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     }
 
     default void playSound(Location location, Sound sound, float volume, float pitch) {
-        if (location != null) playSound(location, sound == null ? null : sound.getKey(), volume, pitch);
+        if (location != null) playSound(location, sound == null ? null : sound.key(), volume, pitch);
     }
     default void playSound(org.bukkit.entity.Entity entity, Sound sound, float volume, float pitch) {
         if (entity != null) playSound(entity.getLocation(), sound, volume, pitch);
     }
+    /** The biome at these block coordinates.
+     *
+     * <p>Delegates to the block rather than duplicating the lookup: biomes are
+     * stored per four-block cell and the block already resolves that, so a
+     * second path here would be a second chance to round it differently. */
+    default org.bukkit.block.Biome getBiome(int x, int y, int z) {
+        return getBlockAt(x, y, z).getBiome();
+    }
+
+    default org.bukkit.block.Biome getBiome(Location location) {
+        return getBiome(location.getBlockX(), location.getBlockY(), location.getBlockZ());
+    }
+
+    /** Living entities within {@code radius} of {@code location}. */
+    default java.util.Collection<org.bukkit.entity.LivingEntity> getNearbyLivingEntities(
+            Location location, double radius) {
+        java.util.ArrayList<org.bukkit.entity.LivingEntity> found = new java.util.ArrayList<>();
+        for (org.bukkit.entity.Entity entity : getNearbyEntities(location, radius, radius, radius)) {
+            if (entity instanceof org.bukkit.entity.LivingEntity living) found.add(living);
+        }
+        return found;
+    }
+
+    /** Particles with offsets, an extra value and particle-specific data.
+     *
+     * <p>The widest overload Bukkit has. `data` carries the thing the particle
+     * needs and nothing else can express -- a `DustOptions` for redstone, an
+     * `ItemStack` for item crack -- and is ignored by particles that take none. */
+    default void spawnParticle(Particle particle, Location location, int count,
+            double offsetX, double offsetY, double offsetZ, double extra, Object data) {
+        spawnParticle(particle, location, count, offsetX, offsetY, offsetZ, extra);
+    }
+
     default void spawnParticle(Particle particle, Location location, int count) {
         spawnParticle(particle, location, count, 0, 0, 0, 0);
     }
@@ -236,7 +278,7 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     }
     default void playSound(Location location, String sound, float volume, float pitch) { }
     default void playSound(Location location, Sound sound, SoundCategory category, float volume, float pitch) {
-        if (location != null) playSound(location, sound == null ? null : sound.getKey(), category, volume, pitch);
+        if (location != null) playSound(location, sound == null ? null : sound.key(), category, volume, pitch);
     }
     default void playSound(Location location, String sound, SoundCategory category, float volume, float pitch) { }
 

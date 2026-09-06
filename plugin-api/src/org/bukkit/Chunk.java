@@ -24,5 +24,12 @@ public interface Chunk extends org.bukkit.persistence.PersistentDataHolder, org.
             if (filter == null || filter.test(state)) result.add(state);
         return result;
     }
+    /** Whether the server currently holds this chunk.
+     *
+     * <p>Distinct from {@link #isGenerated()} only in vanilla, where a chunk can
+     * exist on disk without being resident; here both answer the same question
+     * because a chunk Foton can hand out is a chunk it has. */
+    default boolean isLoaded() { return getWorld().isChunkLoaded(getX(), getZ()); }
+
     default boolean isGenerated() { return getWorld().isChunkLoaded(getX(), getZ()); }
 }

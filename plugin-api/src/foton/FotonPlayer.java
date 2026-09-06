@@ -416,7 +416,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume,
             float pitch) {
-        playSound(at, sound == null ? null : sound.getKey(), volume, pitch);
+        playSound(at, sound == null ? null : sound.key(), volume, pitch);
     }
 
     @Override
@@ -432,7 +432,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound,
             org.bukkit.SoundCategory category, float volume, float pitch) {
-        playSound(at, sound == null ? null : sound.getKey(), category, volume, pitch);
+        playSound(at, sound == null ? null : sound.key(), category, volume, pitch);
     }
 
     @Override

@@ -82,6 +82,21 @@ public interface ConfigurationSection {
 
     List<String> getStringList(String path);
 
+    /** Every entry of the list at {@code path} that is itself a map.
+     *
+     * <p>Entries that are not maps are skipped rather than throwing: a config
+     * is user-written, and one malformed line should cost that line, not the
+     * whole list. */
+    default List<java.util.Map<?, ?>> getMapList(String path) {
+        java.util.ArrayList<java.util.Map<?, ?>> result = new java.util.ArrayList<>();
+        List<?> raw = getList(path);
+        if (raw == null) return result;
+        for (Object entry : raw) {
+            if (entry instanceof java.util.Map<?, ?> map) result.add(map);
+        }
+        return result;
+    }
+
     List<Integer> getIntegerList(String path);
 
     List<Double> getDoubleList(String path);

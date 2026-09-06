@@ -7,6 +7,15 @@ import org.bukkit.command.CommandSender;
 
 /** Anything in a world that has a position. */
 public interface Entity extends CommandSender, org.bukkit.persistence.PersistentDataHolder, org.bukkit.metadata.Metadatable {
+    /** Distance fallen since the entity was last on the ground.
+     *
+     * <p>Declared here rather than only on {@code LivingEntity} because
+     * plugins reference it through {@code Entity} -- an arrow's or a boat's
+     * fall distance is as real as a zombie's. */
+    default float getFallDistance() { return 0.0f; }
+
+    default void setFallDistance(float distance) { }
+
     default org.bukkit.event.entity.EntityDamageEvent getLastDamageCause() { return null; }
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
 

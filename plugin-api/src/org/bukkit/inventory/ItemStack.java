@@ -276,6 +276,36 @@ public class ItemStack implements Cloneable {
      * That is a trap, it is Bukkit's trap, and behaving differently here would
      * make plugins written against it silently wrong instead.
      */
+    /** Whether this stack holds nothing.
+     *
+     * <p>Air or a non-positive count. Plugins use it instead of the
+     * {@code == null || getType() == Material.AIR} dance, and getting it wrong
+     * the other way -- reporting a real stack as empty -- silently deletes
+     * items in inventory code. */
+    public boolean isEmpty() {
+        return type == null || type == Material.AIR || getAmount() <= 0;
+    }
+
+    /** Edits this stack's meta in place.
+     *
+     * <p>The reason Paper added it: {@link #getItemMeta()} hands back a copy,
+     * so the get-modify-set dance is three statements and forgetting the third
+     * is the single most common Bukkit mistake. Returns whether the meta was
+     * applied -- false when the stack cannot carry meta at all. */
+    public boolean editMeta(java.util.function.Consumer<? super ItemMeta> edit) {
+        if (edit == null || isEmpty()) return false;
+        ItemMeta working = getItemMeta();
+        if (working == null) return false;
+        edit.accept(working);
+        return setItemMeta(working);
+    }
+
+    /** The stack's display name as a component, or null when it has none. */
+    public net.kyori.adventure.text.Component displayName() {
+        ItemMeta current = getItemMeta();
+        return current == null ? null : current.displayName();
+    }
+
     public ItemMeta getItemMeta() {
         return meta == null ? emptyMeta() : meta.clone();
     }

@@ -464,9 +464,45 @@ def report_gap(corpus, api_jar, top):
         print(f"    {plugins:3d}  {member}")
 
 
+def report_covered(api_jar, top):
+    """How much of the committed ledger the built API jar can already answer.
+
+    The corpus is not committed, so `--gap` needs a few hundred megabytes of
+    other people's jars to say anything. This asks the same question of the
+    ledger instead, which is committed: every member at least two of the scanned
+    plugins referenced, crossed against what the jar declares. It is the number
+    to quote and the number to move, and it needs nothing but the repository.
+    """
+    ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
+    api = provided(api_jar)
+    missing = []
+    for row in ledger["api_members"]:
+        owner, _, member = row["member"].partition("#")
+        if member not in api.get(owner, ()):
+            missing.append(row)
+
+    total = len(ledger["api_members"])
+    covered = total - len(missing)
+    print(f"ledger: {total} members referenced by at least "
+          f"{ledger['api_members_kept_at_least']} of {ledger['plugins_scanned']} plugins")
+    print(f"covered by the built API: {covered} ({100 * covered // max(total, 1)}%)")
+    print(f"missing: {len(missing)}")
+    if not missing:
+        return
+    print()
+    print(f"by audience -- plugins that reference each, top {top}:")
+    for row in sorted(missing, key=lambda row: -row["plugins"])[:top]:
+        print(f"  {row['plugins']:3d}  {row['member']}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("corpus", type=pathlib.Path, help="directory of plugin jars")
+    parser.add_argument(
+        "corpus",
+        type=pathlib.Path,
+        nargs="?",
+        help="directory of plugin jars; not needed with --covered",
+    )
     parser.add_argument("--write", action="store_true", help="update the committed ledger")
     parser.add_argument("--top", type=int, default=30, help="how many members to print")
     parser.add_argument(
@@ -474,7 +510,19 @@ def main():
         type=pathlib.Path,
         help="measure a built API jar against the corpus instead of ranking it",
     )
+    parser.add_argument(
+        "--covered",
+        type=pathlib.Path,
+        help="measure a built API jar against the committed ledger, no corpus needed",
+    )
     args = parser.parse_args()
+
+    if args.covered:
+        report_covered(args.covered, args.top)
+        return
+
+    if args.corpus is None:
+        parser.error("a corpus directory is required unless --covered is given")
 
     if args.gap:
         report_gap(args.corpus, args.gap, args.top)
