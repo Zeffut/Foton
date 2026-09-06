@@ -473,8 +473,19 @@ system that compiles.
   with it. `try_persistent_to_chunk` now refreshes first and returns the load
   error it already had.
 
-  The other 56 are internal invariants: command-chain state, packet-lane
-  bookkeeping, heightmap types. One of them is a lead rather than a chore --
+  The worldgen bulk was sampled rather than left unknown, and it splits in two.
+  Sixty-nine of the 69 in `worldgen/feature/configured.rs` are one sentence --
+  `panic!("<feature> placer received wrong configured feature kind")` -- a
+  single genuine invariant, since the registry pairs each placer with its own
+  config type; one reason covers all of them honestly. The rest are varied:
+  bulk-section cache indices in `region.rs`, coordinate conversions and missing
+  chunks in the stages, registry lookups in `runner.rs`. Those need reading one
+  at a time, which is why they are a pass and not a chore -- an annotation is
+  only worth having if its reason is true, and 180 judgments made in one sitting
+  is where that stops being so.
+
+  The other 56 non-worldgen sites are internal invariants: command-chain state,
+  packet-lane bookkeeping, heightmap types. One of them is a lead rather than a chore --
   `inventory/menu/mod.rs` repeats "the explicitly locked player inventory must
   be present" seven times, which is the same shape as the eighteen slot methods
   that turned into four accessors on `ContainerLockGuard`. A repeated assertion
