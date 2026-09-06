@@ -58,6 +58,13 @@ struct BuildEntry {
 }
 
 /// Build the bounding box for a set of child nodes.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::expect_used,
+        reason = "the loop above writes every index, and the R-tree never builds a node without children"
+    )
+)]
 fn build_parameter_space(children: &[RTreeNode]) -> [Parameter; PARAMETER_COUNT] {
     let mut bounds: [Option<Parameter>; PARAMETER_COUNT] = [None; PARAMETER_COUNT];
     for child in children {
@@ -134,6 +141,13 @@ fn build_tree(entries: &mut [BuildEntry]) -> RTreeNode {
     }
 
     // Build subtrees from the saved buckets (entries in the order sorted by best_dim)
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the dimension loop above always records a best bucket"
+        )
+    )]
     let buckets = best_buckets.expect("should have found at least one dimension");
 
     // Compute bounding box for each bucket, pair with entries for sorting
@@ -147,6 +161,13 @@ fn build_tree(entries: &mut [BuildEntry]) -> RTreeNode {
                     bounds[dim] = Some(e.parameter_space[dim].span_with(bounds[dim].as_ref()));
                 }
             }
+            #[cfg_attr(
+                not(test),
+                expect(
+                    clippy::expect_used,
+                    reason = "the loop above writes every index, and a bucket is never empty"
+                )
+            )]
             let ps = bounds.map(|b| b.expect("bounds should be initialized"));
             (ps, bucket_entries)
         })
@@ -233,6 +254,13 @@ fn snapshot_buckets(entries: &[BuildEntry]) -> (i64, Vec<Vec<BuildEntry>>) {
                 bounds[d] = Some(e.parameter_space[d].span_with(bounds[d].as_ref()));
             }
         }
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the loop above writes every index, and a bucket is never empty"
+            )
+        )]
         let ps = bounds.map(|b| b.expect("bounds should be initialized"));
         total_cost += cost(&ps);
         buckets.push(bucket);
@@ -440,6 +468,13 @@ impl<T> ParameterList<T> {
     ///
     /// Panics if the R-Tree search fails to find any matching value.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the search always visits the root, which always holds a value"
+        )
+    )]
     pub fn find_value(&self, target: &TargetPoint) -> &T {
         let target_array = target.to_parameter_array();
         let root = &self.nodes[0];
@@ -501,6 +536,13 @@ impl<T> ParameterList<T> {
             &mut best_dist,
             &mut best_idx,
         );
+        #[cfg_attr(
+            not(test),
+            expect(
+                clippy::expect_used,
+                reason = "the search always visits the root, which always holds a value"
+            )
+        )]
         let result_idx = best_idx.expect("R-Tree search should always find a value") as usize;
 
         *cache = Some(result_idx);

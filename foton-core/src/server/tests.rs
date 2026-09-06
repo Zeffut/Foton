@@ -267,7 +267,7 @@ async fn test_server_with_worlds(
         config,
         permission_groups,
         cancel_token: CancellationToken::new(),
-        key_store: KeyStore::create(),
+        key_store: KeyStore::create().expect("test server should build encryption keys"),
         registry_cache,
         worlds,
         online_players: PlayerMap::new(),

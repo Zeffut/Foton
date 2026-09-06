@@ -362,19 +362,34 @@ between the two shifts every persisted `delay` by one.
   bug, not a style problem.
 
   `Cargo.toml` sets `unwrap_used = "warn"` and CI runs clippy with
-  `-D warnings`, so `unwrap` is effectively denied. `expect_used` is not set at
-  all, and the workspace holds roughly 1400 `.expect()` calls -- 423 of them in
-  `foton-core` files that contain no test module, so those are production sites.
-  Most are surely provable invariants, but the class is unlit and unaudited, and
-  the audit that measured this also found two live ones: `chunk_sender` aborted
-  the server on a chunk packet too large to encode, on a rayon worker, while the
-  identical error two files away was already a warning and a skipped packet.
+  `-D warnings`, so `unwrap` is effectively denied -- which is exactly why the
+  workspace holds roughly 1400 `.expect()` calls. The tests were written with
+  `expect` because `unwrap` was closed to them, and that is what makes the lint
+  impossible to switch on workspace-wide in one move.
 
-  This is the clearest thing the tooling cannot see. Every one of `dev/ci.sh`'s
-  ten stages passed green over that `expect` for the whole audit. Turning
-  `expect_used` on would fail CI on all 423 at once; the project already uses
-  `#[expect(..., reason = "...")]` elsewhere, which is the lever for adopting it
-  a crate at a time.
+  Eight of the twelve crates now carry
+  `#![cfg_attr(not(test), warn(clippy::expect_used))]`: `foton-math`,
+  `foton-crypto`, `foton-protocol`, `foton-bedrock`, `foton-plugin`,
+  `foton-login`, `foton-worldgen` and `foton-utils`. The `not(test)` scope is
+  the point -- a panicking test is how a test reports, a panicking server is how
+  a world is lost -- and it costs one wrinkle: a bare `#[expect]` inside those
+  crates is unfulfilled in the test build, so a justified site needs
+  `#[cfg_attr(not(test), expect(clippy::expect_used, reason = "..."))]`.
+  `foton-macros` is deliberately excluded: it is a proc-macro crate, its
+  `expect`s run at compile time, and `panic = "abort"` has no bearing there.
+
+  Turning the lint on found what counting could not. The crate-by-crate `grep`
+  that produced the 423 figure classified `foton-math`, `foton-crypto`,
+  `foton-protocol` and `foton-bedrock` as having no production `expect` at all;
+  the lint found five, and three of the thirteen it surfaced across the eight
+  crates were live defects rather than provable invariants -- `tcp_client`
+  aborting on a status response too large to encode (the same class as
+  `chunk_sender` one pass earlier), a compression threshold above `i32::MAX`
+  killing the server at the first login, and a structure piece panicking on a
+  rayon worker over a block state its caller supplied.
+
+  `foton-core` (423), `foton-registry` (76) and the `foton` binary (54) are the
+  ones left. They are the bulk, and they are next.
 - **A stack overflow is not a panic.** It is a SIGSEGV, so no `catch_unwind`
   and no abort handler sees it. Recursive parsers need an explicit depth
   ceiling; vanilla uses 512 (`NbtAccounter`).

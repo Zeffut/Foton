@@ -1094,7 +1094,8 @@ impl Server {
             chunk_runtime,
             permission_groups,
             cancel_token,
-            key_store: KeyStore::create(),
+            key_store: KeyStore::create()
+                .map_err(|error| format!("Failed to create the server encryption keys: {error}"))?,
             worlds,
             world_save_path: resolved_worlds.save_path.clone(),
             online_players: PlayerMap::new(),

@@ -28,7 +28,18 @@ const TABLE_MASK: i64 = 0xFFFF;
 
 /// The `Mth.SIN` table (one entry per 2π / 65536 radians, float-valued).
 static SIN_TABLE: LazyLock<Box<[f32; TABLE_LEN]>> = LazyLock::new(|| {
-    // Box on the heap to keep the binary's .bss section small.
+    // Box on the heap to keep the binary's .bss section small, and to keep the
+    // 256 KB array off whichever thread happens to touch the `LazyLock` first.
+    // `try_into` is the only conversion from a boxed slice to a boxed array and
+    // it is fallible by signature; the vec two lines up is built with exactly
+    // `TABLE_LEN` elements, so the length it checks is the length it was given.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the vec is built with exactly TABLE_LEN elements, so the array conversion cannot fail"
+        )
+    )]
     let mut table: Box<[f32; TABLE_LEN]> = vec![0.0_f32; TABLE_LEN]
         .into_boxed_slice()
         .try_into()

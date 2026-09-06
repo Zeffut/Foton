@@ -1,6 +1,8 @@
 //! This module contains the `KeyStore` struct, which is used to store the server's encryption keys.
 use rsa::{RsaPrivateKey, RsaPublicKey};
 
+use crate::CryptError;
+
 /// A struct that stores the server's encryption keys.
 pub struct KeyStore {
     /// The server's private key.
@@ -11,26 +13,32 @@ pub struct KeyStore {
 
 impl KeyStore {
     /// Creates a new `KeyStore`.
-    #[must_use]
-    pub fn create() -> Self {
+    ///
+    /// Both steps used to panic. Neither is provably infallible -- RSA key
+    /// generation can fail, and so can DER encoding -- so they are reported
+    /// instead: this runs once while the server is starting, and a startup
+    /// that cannot make its keys should say so and stop, not abort.
+    ///
+    /// # Errors
+    /// When RSA key generation fails, or the public key cannot be encoded.
+    pub fn create() -> Result<Self, CryptError> {
         log::debug!("Creating encryption keys...");
-        let private_key = Self::generate_private_key();
+        let private_key = Self::generate_private_key()?;
 
         let public_key = RsaPublicKey::from(&private_key);
-        let public_key_der =
-            crate::public_key_to_bytes(&public_key).expect("Failed to encode public key");
+        let public_key_der = crate::public_key_to_bytes(&public_key)?;
 
-        Self {
+        Ok(Self {
             private_key,
             public_key_der,
-        }
+        })
     }
 
-    fn generate_private_key() -> RsaPrivateKey {
+    fn generate_private_key() -> Result<RsaPrivateKey, CryptError> {
         // Found out that OsRng is faster than rand::thread_rng here
         let mut rng = rand::rng();
 
-        RsaPrivateKey::new(&mut rng, 1024).expect("Failed to generate a key")
+        Ok(RsaPrivateKey::new(&mut rng, 1024)?)
     }
 }
 
@@ -40,7 +48,7 @@ mod tests {
 
     #[test]
     fn public_key_der_round_trips() {
-        let ks = KeyStore::create();
+        let ks = KeyStore::create().unwrap();
         let decoded = crate::public_key_from_bytes(&ks.public_key_der).unwrap();
         assert_eq!(decoded, RsaPublicKey::from(&ks.private_key));
     }

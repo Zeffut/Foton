@@ -177,17 +177,19 @@ impl StructureBlockIgnore {
     ///
     /// # Panics
     ///
-    /// Panics if the given block state ID is not registered in the blocks registry.
+    /// A state the registry does not know is ignored by nothing: it is not the
+    /// structure block and it is not air, which is the answer both arms would
+    /// have reached anyway had the lookup succeeded on some other block. This
+    /// used to panic, on a rayon worker, over a value the caller supplies.
     #[must_use]
     pub fn ignores(self, registry: &Registry, state: BlockStateId) -> bool {
+        let Some(block) = registry.blocks.by_state_id(state) else {
+            return false;
+        };
         match self {
             Self::None => false,
-            Self::StructureBlock => {
-                registry.blocks.by_state_id(state).expect("invalid state")
-                    == &vanilla_blocks::STRUCTURE_BLOCK
-            }
+            Self::StructureBlock => block == &vanilla_blocks::STRUCTURE_BLOCK,
             Self::StructureAndAir => {
-                let block = registry.blocks.by_state_id(state).expect("invalid state");
                 block == &vanilla_blocks::STRUCTURE_BLOCK || block == &vanilla_blocks::AIR
             }
         }
