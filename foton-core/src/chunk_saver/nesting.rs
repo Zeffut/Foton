@@ -44,9 +44,13 @@ use wincode::{ReadError, ReadResult, SchemaRead, SchemaWrite, WriteResult};
 /// a third of the measured debug ceiling, which leaves the frames already on
 /// the stack when the recursion starts their own room.
 ///
-/// The trade-off is named rather than hidden: a world that really did stack
-/// more than 32 riders loses that chunk's entities on load. That is the price
-/// of not dying to a SIGSEGV that no handler can catch.
+/// The trade-off is named rather than hidden, and it is bigger than it looks:
+/// a refusal is a decode failure, and a decode failure clears the slot so
+/// worldgen refills the column -- so a world that really did stack more than 32
+/// riders loses that column, not just its riders. That is why
+/// `quarantine_chunk_bytes` exists: the bytes are copied aside first, so the
+/// cost is a column to restore by hand rather than one destroyed. The price is
+/// still worth paying against a SIGSEGV that no handler can catch.
 pub(super) const MAX_NESTING_DEPTH: u32 = 32;
 
 thread_local! {
