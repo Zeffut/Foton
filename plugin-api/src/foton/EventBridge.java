@@ -116,6 +116,33 @@ public final class EventBridge {
      * surveyed do -- an event a plugin defines reaches other plugins' handlers
      * by exactly this path.
      */
+    /** Guards against a `ServerExceptionEvent` listener that throws.
+     *
+     * <p>Reporting an exception happens inside the catch of the dispatch loop,
+     * so a listener that fails while being told about a failure would report
+     * that, and so on. One level deep is enough to be useful; deeper is a stack
+     * overflow dressed as diagnostics. */
+    private static final ThreadLocal<Boolean> REPORTING = ThreadLocal.withInitial(() -> false);
+
+    /** Tells listeners that a plugin threw, the way Paper's
+     * `ServerExceptionEvent` does. */
+    private static void reportException(org.bukkit.plugin.Plugin plugin, String where,
+            Throwable error) {
+        if (Boolean.TRUE.equals(REPORTING.get())) return;
+        REPORTING.set(true);
+        try {
+            String message = (plugin == null ? "a plugin" : plugin.getName())
+                    + " threw in " + where;
+            dispatch(new com.destroystokyo.paper.event.server.ServerExceptionEvent(
+                    new com.destroystokyo.paper.exception.ServerPluginException(
+                            message, error, plugin)));
+        } catch (Throwable ignored) {
+            // A failure while reporting a failure is not worth a third attempt.
+        } finally {
+            REPORTING.set(false);
+        }
+    }
+
     public static void dispatch(Object event) {
         List<Handler> list = new ArrayList<>();
         for (Map.Entry<Class<?>, List<Handler>> entry : handlers.entrySet()) {
@@ -140,6 +167,7 @@ public final class EventBridge {
                 // error message.
                 System.out.println("[events] " + handler.plugin.getName() + " threw in "
                     + handler.name() + ": " + rootOf(error));
+                reportException(handler.plugin, handler.name(), error);
             }
         }
     }
