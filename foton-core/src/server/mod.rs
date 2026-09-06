@@ -33,7 +33,8 @@ use crate::command::{
     COMMAND_REQUESTS_PER_TICK, COMMAND_RESUMPTIONS_PER_TICK, CommandCompletion, CommandDispatcher,
     CommandQueueFull, CommandRegistry, CommandRequest, CommandRequestQueue,
     PendingCommandExecutionQueue, client_permission_event, command_suggestions_packet,
-    command_tree_packet, create_registered_dispatcher, plugin_suggestions_packet,
+    command_tree_packet, command_tree_packet_without, create_registered_dispatcher,
+    plugin_suggestions_packet, visible_root_names,
 };
 use crate::config::{
     ResolvedWorldConfig, RuntimeConfig, StorageSelection, WorldsConfig, validate_login_security,

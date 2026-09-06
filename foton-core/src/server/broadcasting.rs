@@ -2,11 +2,12 @@ use super::{
     Arc, CEntityEvent, CSystemChat, CTabList, CTickingState, CTickingStep, Color, CommandSender,
     CommandSource, DisplayResolutor, Entity, Modifier, Player, Server, SprintReport,
     TabListTickStats, TextComponent, Uuid, client_permission_event, command_tree_packet,
-    translations,
+    command_tree_packet_without, translations, visible_root_names,
 };
 
-use crate::event::{EventBus, PlayerJoinEvent, PlayerQuitEvent};
+use crate::event::{EventBus, PlayerCommandSendEvent, PlayerJoinEvent, PlayerQuitEvent};
 use crate::world::PlayerMap;
+use rustc_hash::FxHashSet;
 
 impl Server {
     /// Logs and broadcasts a system chat message to online players.
@@ -218,7 +219,35 @@ impl Server {
         let source = CommandSource::new(CommandSender::Player(shared_player), server);
         let commands = {
             let dispatcher = self.command_dispatcher.read();
-            command_tree_packet(&dispatcher, &source)
+            // Bukkit's `PlayerCommandSendEvent`: a listener removes root names
+            // to keep a command out of this player's list. Hiding is not
+            // forbidding -- a command dropped here still runs if typed, which
+            // is what permission plugins rely on to shorten the list without
+            // changing who may use what.
+            let names = match visible_root_names(&dispatcher, &source) {
+                Ok(names) => names,
+                Err(error) => {
+                    tracing::error!(
+                        player = %player.gameprofile.name,
+                        %error,
+                        "failed to list the player's root commands"
+                    );
+                    return;
+                }
+            };
+            let offered = names.len();
+            let mut event = PlayerCommandSendEvent::new(Arc::clone(player), names.clone());
+            self.events().fire(&mut event);
+            if event.commands().len() == offered {
+                command_tree_packet(&dispatcher, &source)
+            } else {
+                let kept = event.commands().iter().cloned().collect::<FxHashSet<_>>();
+                let hidden = names
+                    .into_iter()
+                    .filter(|name| !kept.contains(name))
+                    .collect::<FxHashSet<_>>();
+                command_tree_packet_without(&dispatcher, &source, &hidden)
+            }
         };
         match commands {
             Ok(commands) => player.send_packet(commands),

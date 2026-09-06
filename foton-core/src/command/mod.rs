@@ -25,7 +25,8 @@ pub(crate) use builtins::{
     create_registered_dispatcher, gamemode::handle_client_request, player_can_change_difficulty,
 };
 pub(crate) use protocol::{
-    command_suggestions_packet, command_tree_packet, plugin_suggestions_packet,
+    command_suggestions_packet, command_tree_packet, command_tree_packet_without,
+    plugin_suggestions_packet, visible_root_names,
 };
 pub use queue::CommandQueueFull;
 pub(crate) use queue::{

@@ -38,7 +38,9 @@ use foton_core::event::{
     PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
     SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
-use foton_core::event::{PlayerChangedWorldEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent};
+use foton_core::event::{
+    PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
+};
 use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
@@ -939,6 +941,14 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
             Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerCommandSendEvent, _>(owner(), move |event| {
+        if let Some(kept) = command_send_call(&jvm, event.player().gameprofile.id, event.commands())
+        {
+            event.set_commands(kept);
         }
     });
 
@@ -2516,6 +2526,40 @@ fn block_damage_call(vm: &JavaVM, player: uuid::Uuid, world: &str, pos: BlockPos
     .ok()
     .and_then(|value| value.z().ok())
     .unwrap_or(true)
+}
+
+/// The command names a listener left in the list, or `None` when it left them
+/// alone -- which the caller reads as "keep the tree already built".
+///
+/// An unreachable bridge answers `None` too: a JVM that cannot be asked has not
+/// hidden anything, and treating silence as an empty list would send a player
+/// no commands at all.
+fn command_send_call(vm: &JavaVM, player: uuid::Uuid, commands: &[String]) -> Option<Vec<String>> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let player = env.new_string(player.to_string()).ok()?;
+    let class = env.find_class("java/lang/String").ok()?;
+    let empty = env.new_string("").ok()?;
+    let length = i32::try_from(commands.len()).ok()?;
+    let array = env.new_object_array(length, &class, &empty).ok()?;
+    for (index, command) in commands.iter().enumerate() {
+        let value = env.new_string(command).ok()?;
+        let index = i32::try_from(index).ok()?;
+        env.set_object_array_element(&array, index, &value).ok()?;
+    }
+    let value = env
+        .call_static_method(
+            BRIDGE,
+            "fireCommandSend",
+            "(Ljava/lang/String;[Ljava/lang/String;)[Ljava/lang/String;",
+            &[JValue::Object(&player), JValue::Object(&array)],
+        )
+        .ok()?;
+    let kept = value.l().ok()?;
+    if kept.is_null() {
+        return None;
+    }
+    let kept = jni::objects::JObjectArray::from(kept);
+    natives::read_string_array(&mut env, &kept)
 }
 
 /// Returns false only when a plugin actually refused. An unreachable bridge

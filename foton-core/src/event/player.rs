@@ -1510,6 +1510,46 @@ impl PlayerItemHeldEvent {
     }
 }
 
+/// Emitted before the command list is sent to a player.
+///
+/// Bukkit's `PlayerCommandSendEvent`. A listener removes root command names to
+/// hide them from that player's completion and help, which is how permission
+/// plugins keep a command out of the client's list without also making it
+/// unrunnable -- hiding and forbidding are separate decisions.
+pub struct PlayerCommandSendEvent {
+    player: Arc<Player>,
+    commands: Vec<String>,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for PlayerCommandSendEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_command_send");
+}
+impl Event for PlayerCommandSendEvent {}
+impl PlayerCommandSendEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player: Arc<Player>, commands: Vec<String>) -> Self {
+        Self { player, commands }
+    }
+
+    /// Who is about to receive the list.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+
+    /// The root command names still in the list.
+    #[must_use]
+    pub fn commands(&self) -> &[String] {
+        &self.commands
+    }
+
+    /// Replaces the list with what a listener left in it.
+    pub fn set_commands(&mut self, commands: Vec<String>) {
+        self.commands = commands;
+    }
+}
+
 /// Emitted when a client changes its language preference.
 pub struct PlayerLocaleChangeEvent {
     player: Arc<Player>,
