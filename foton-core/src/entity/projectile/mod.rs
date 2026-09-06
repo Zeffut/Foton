@@ -486,6 +486,20 @@ pub trait Projectile: Entity + ProjectileEventSource {
         false
     }
 
+    /// Clips this tick's movement against the world, ignoring entities.
+    ///
+    /// Vanilla parity: the `clipIncludingBorder(new ClipContext(...))` that
+    /// `AbstractArrow.tick` computes before handing it to `stepMoveAndHit`.
+    /// A miss still reports a location, but callers must use the movement's
+    /// own end point instead -- which is what `get_hit_result_on_move_vector`
+    /// does one function below.
+    fn clip_move_vector(&self) -> Option<ClipHitResult> {
+        let world = self.level()?;
+        let from = self.position();
+        let to = from + self.velocity();
+        Some(world.clip_including_border(from, to, ClipBlockShape::Collider, ClipFluid::None))
+    }
+
     /// Casts the move vector and returns the nearest block/entity hit (vanilla
     /// `ProjectileUtil.getHitResultOnMoveVector` with `this::canHitEntity`).
     fn get_hit_result_on_move_vector(&self) -> Option<ProjectileHit> {
@@ -520,6 +534,58 @@ pub trait Projectile: Entity + ProjectileEventSource {
             });
         }
         None
+    }
+
+    /// Every entity between here and `to`, nearest first.
+    ///
+    /// Vanilla parity: `AbstractArrow.findHitEntities`. The single-hit
+    /// [`Self::get_hit_result_on_move_vector`] answers what a projectile that
+    /// stops on contact needs; this answers what a piercing one needs, which is
+    /// the whole line in one tick rather than one body per tick.
+    fn find_hit_entities(&self, to: DVec3) -> Vec<EntityHitResult> {
+        let Some(world) = self.level() else {
+            return Vec::new();
+        };
+        let from = self.position();
+        let delta = self.velocity();
+        let search_box = self.bounding_box().expand_towards(delta).inflate(1.0);
+        let margin = compute_margin(self.tick_count());
+        let self_id = self.id();
+
+        let mut hits = get_many_entity_hit_result(
+            world.as_ref(),
+            from,
+            to,
+            search_box,
+            margin,
+            false,
+            |entity| entity.id() != self_id && self.can_hit_entity(entity),
+        );
+        hits.sort_by(|left, right| {
+            from.distance_squared(left.entity.position())
+                .total_cmp(&from.distance_squared(right.entity.position()))
+        });
+        hits
+    }
+
+    /// Hits each target in turn until one deflects or the projectile dies.
+    ///
+    /// Vanilla parity: `AbstractArrow.hitTargetsOrDeflectSelf`. Stopping on the
+    /// first deflection is what keeps a non-piercing arrow single-hit without a
+    /// special case -- it discards itself in `on_hit_entity`, so `is_alive`
+    /// ends the loop after one body.
+    fn hit_targets_or_deflect_self(&self, hits: &[EntityHitResult]) -> ProjectileDeflection {
+        for hit in hits {
+            let deflection =
+                self.hit_target_or_deflect_self(&ProjectileHit::Entity(EntityHitResult {
+                    entity: Arc::clone(&hit.entity),
+                    location: hit.location,
+                }));
+            if !self.is_alive() || deflection != ProjectileDeflection::None {
+                return deflection;
+            }
+        }
+        ProjectileDeflection::None
     }
 
     /// Vanilla `Projectile.hitTargetOrDeflectSelf`.
@@ -771,6 +837,72 @@ fn get_entity_hit_result(
     }
 
     nearest
+}
+
+/// Collects every entity the segment `from -> to` passes through.
+///
+/// Vanilla parity: `ProjectileUtil.getManyEntityHitResult`. Vanilla writes this
+/// deliberately unlike its single-hit sibling, and the difference is kept:
+/// the single-hit form inflates by the margin and clips once, while this one
+/// clips the *exact* box first and only falls back to the margin when that
+/// misses -- and the fallback then checks that the entity is actually reachable
+/// from the margin hit rather than behind a wall.
+fn get_many_entity_hit_result(
+    world: &World,
+    from: DVec3,
+    to: DVec3,
+    search_box: WorldAabb,
+    margin: f64,
+    include_from_entity: bool,
+    predicate: impl Fn(&dyn Entity) -> bool,
+) -> Vec<EntityHitResult> {
+    let mut hits = Vec::new();
+
+    for entity in world.get_entities_in_aabb(&search_box) {
+        if !predicate(entity.as_ref()) {
+            continue;
+        }
+        let entity_box = entity.bounding_box();
+
+        if include_from_entity && entity_box.contains(from) {
+            hits.push(EntityHitResult {
+                entity,
+                location: from,
+            });
+            continue;
+        }
+
+        if let Some(location) = clip_segment(entity_box, from, to) {
+            hits.push(EntityHitResult { entity, location });
+            continue;
+        }
+
+        if margin <= 0.0 {
+            continue;
+        }
+        let Some(outside) = clip_segment(entity_box.inflate(margin), from, to) else {
+            continue;
+        };
+
+        // Vanilla clips from the margin hit towards the entity's center and
+        // stops at the first block, so a target behind a wall is not hit
+        // through it just because the margin reached past the corner.
+        let mut towards = entity_box.center();
+        let block_hit = world.clip_including_border(
+            outside,
+            towards,
+            ClipBlockShape::Collider,
+            ClipFluid::None,
+        );
+        if !block_hit.is_miss() {
+            towards = block_hit.location;
+        }
+        if let Some(location) = clip_segment(entity_box, outside, towards) {
+            hits.push(EntityHitResult { entity, location });
+        }
+    }
+
+    hits
 }
 
 /// Clips the segment `from -> to` against `aabb`, returning the entry point.
