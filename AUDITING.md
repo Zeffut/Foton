@@ -375,44 +375,51 @@ order is a global lexicographic order on (z, x), so two overlapping windows
 would acquire their shared chunks in the same relative order. Any narrowing has
 to preserve both properties.
 
-## One the audit proved and did not close
+## One the audit proved, misdiagnosed twice, and then closed
 
-**An entity cannot be teleported into a chunk the entity manager does not
-track.** `WorldEntityManager::can_move_manager_owned_to_chunk` requires the
+**An entity could not be teleported into a chunk the entity manager did not
+track.** `WorldEntityManager::can_move_manager_owned_to_chunk` required the
 destination in `chunk_visibility`, so `/tp @e[type=pig,limit=1] 5000 64 5000`
-into unloaded terrain moves nothing. Vanilla's
+into unloaded terrain moved nothing. Vanilla's
 `PersistentEntitySectionManager.Callback.onMove` never refuses a move.
 
-Only half of that was fixed. `/tp` used to report every target as teleported
-whatever happened, so the operator was told the opposite of the truth; it now
-counts and announces the ones that actually moved.
+The first diagnosis said to copy vanilla's `TicketType.POST_TELEPORT`. **That
+ticket does not exist in 26.2** -- `TicketType.java` registers `PLAYER_SPAWN`,
+`SPAWN_SEARCH`, `DRAGON`, `PLAYER_LOADING`, `PLAYER_SIMULATION`, `FORCED`,
+`PORTAL`, `ENDER_PEARL` and `UNKNOWN`, and nothing for teleports. Vanilla
+tickets nothing here: `chunkVisibility` returns `HIDDEN` by default, the entity
+stays in `sectionStorage`, and `autoSave` writes it out by calling
+`processChunkUnload` for exactly that case.
 
-The move itself is still refused, and a later pass established *why* it cannot
-be a patch -- the first answer this file gave was wrong. It said to copy
-vanilla's `TicketType.POST_TELEPORT`; **that ticket does not exist in 26.2**.
-`TicketType.java` registers `PLAYER_SPAWN`, `SPAWN_SEARCH`, `DRAGON`,
-`PLAYER_LOADING`, `PLAYER_SIMULATION`, `FORCED`, `PORTAL`, `ENDER_PEARL` and
-`UNKNOWN`, and nothing for teleports. Vanilla tickets nothing here: `onMove`
-always moves, `chunkVisibility` returns `HIDDEN` by default for a chunk with no
-entry, and `updateStatus` merely calls `stopTracking`. The entity stays in
-`sectionStorage`, and `autoSave` writes it out -- for a `HIDDEN` chunk by
-calling `processChunkUnload`, which is the case it exists to handle.
+The second diagnosis said Foton therefore needed vanilla's storage layout --
+`chunk_saver/format.rs` says it plainly: *"Unlike vanilla which stores entities
+in separate region files, Foton stores entities inline with chunk data for
+simplicity."* Vanilla can write an entity in a hidden chunk because its
+`EntityPersistentStorage` needs nothing from the chunk; writing one here needs
+the chunk's blocks. True, and still not the whole picture.
 
-The reason Foton cannot copy that is one line of its own design, stated in
-`chunk_saver/format.rs`: *"Unlike vanilla which stores entities in separate
-region files, Foton stores entities inline with chunk data for simplicity."*
-Vanilla can write an entity in a hidden chunk because its `EntityPersistentStorage`
-is a separate file that needs nothing from the chunk. Writing one here means
-writing the whole chunk record, which needs the chunk's blocks, which is exactly
-what is not loaded. `saveable_entities_outside_chunks` already measures the
-consequence and logs it, so the hazard is instrumented rather than hypothetical.
+**What was actually wrong was the question the gate asked.** It asked "is this
+chunk loaded right now?" when what it needed was "will this chunk have a
+holder?" -- and a chunk ticket answers the second. The machinery for the rest
+already existed and was verified rather than assumed:
+`apply_chunk_visibility_change` iterates `by_section`, so an entity sitting in a
+not-yet-visible chunk is picked up the moment the chunk becomes visible, and
+`begin_chunk_unload` then saves it with the column.
 
-So the choice is real and it is a project's, not a patch's: either the teleport
-becomes asynchronous and holds a load ticket on the destination until the chunk
-arrives, or entity storage is separated from chunk storage the way vanilla has
-it. The portal path is not a precedent for the first --
-`TeleportPostTransition::place_portal_ticket` runs *after* the transition, and
-portals only work because the portal search has already loaded the destination.
+So `/tp` places a teleport ticket on the destination and holds an
+`InboundChunkReservation` across the move; the gate accepts a reserved chunk.
+The reservation is counted, not a flag, because two teleports into one chunk
+must not have the first release cancel the second promise, and it is RAII
+because the move can fail on several paths and a missed release would wedge the
+gate open. `on_chunk_loaded` clears the reservations for a chunk that has
+arrived, since there is nothing left to stand in for.
+
+The ticket is a deliberate Foton-only addition, and the reason is the storage
+difference above rather than an oversight in vanilla: vanilla does not need one
+because its entities are written whether or not the chunk is there. The residual
+is a window, not a gap -- between the move and the chunk's arrival, a crash
+loses that entity, where before the teleport simply never happened.
+
 
 ## The one that looked like an architecture change and was not
 
@@ -619,6 +626,16 @@ system that compiles.
   chunk-local coordinates already `& 15`. The signal would be buried. The class
   is real but the lint cannot isolate it; the place to look is any `[]` on a
   length that came from a file or a packet.
+
+- **Check what sits above the line you are inserting before.** Four times in
+  one sitting, a new function was written directly above an existing one and
+  landed *between* that function and the attribute or doc comment that belonged
+  to it -- twice stealing a `///` block, twice orphaning a
+  `#[cfg_attr(not(test), expect(...))]` so the lint it justified fired and the
+  expectation went unfulfilled. The compiler caught every one, which is the only
+  reason this is a note and not a defect; it is still four rebuilds. An anchor
+  for a text insertion has to include whatever is attached to it upwards, not
+  just the signature line that is easy to match.
 
 - **A guard on one side of a format is half a guard, and the missing half is
   usually worse than no guard at all.** The nesting ceiling was added to the

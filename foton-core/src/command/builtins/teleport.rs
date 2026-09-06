@@ -3,7 +3,7 @@
 use std::{slice, sync::Arc};
 
 use foton_protocol::packets::game::{CSetCamera, RelativeMovement};
-use foton_utils::{BlockPos, Identifier, translations};
+use foton_utils::{BlockPos, ChunkPos, Identifier, translations};
 use glam::DVec3;
 use text_components::TextComponent;
 
@@ -16,7 +16,10 @@ use super::super::{
     registration::CommandRegistration,
 };
 use crate::{
-    entity::{Entity, EntityAnchor, LivingEntity as _, SharedEntity, change_entity_world},
+    entity::{
+        Entity, EntityAnchor, InboundChunkReservation, LivingEntity as _, SharedEntity,
+        change_entity_world,
+    },
     portal::{TeleportPostTransition, TeleportTransition, TeleportTransitionCause},
     world::World,
 };
@@ -287,7 +290,22 @@ fn perform_teleport(
             camera_id: player.id(),
         });
     }
-    if change_entity_world(Arc::clone(target), &transition).is_none() {
+
+    // The entity manager refuses a manager-owned move into a chunk it does not
+    // track, which used to make `/tp @e[type=pig] 5000 64 5000` move nothing at
+    // all. The gate's real question is "will this chunk have a holder?", so a
+    // ticket answers it: the destination is held loaded, the reservation lets
+    // the move through in the meantime, and the chunk's arrival is what makes
+    // the teleported entity tickable and -- because Foton stores entities
+    // inside the chunk record -- saveable.
+    let destination = ChunkPos::from_block_pos(BlockPos::from(transition.position));
+    let world = Arc::clone(&transition.target_world);
+    world.chunk_map.place_teleport_ticket(destination);
+    let reservation = InboundChunkReservation::hold(&world, destination);
+
+    let moved = change_entity_world(Arc::clone(target), &transition).is_some();
+    drop(reservation);
+    if !moved {
         return false;
     }
 

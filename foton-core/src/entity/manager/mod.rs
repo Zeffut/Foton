@@ -12,6 +12,8 @@ use foton_utils::Downcast as _;
 use foton_utils::locks::SyncRwLock;
 use foton_utils::{ChunkPos, PackedSectionPos, SectionPos, WorldAabb};
 use glam::DVec3;
+
+use crate::world::World;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use uuid::Uuid;
@@ -421,6 +423,14 @@ struct ManagerState {
     by_section: BTreeMap<PackedSectionPos, OrderedEntityIds>,
     by_spatial_cell: FxHashMap<EntitySpatialCell, OrderedEntityIds>,
     by_chunk: FxHashMap<ChunkPos, FxHashSet<i32>>,
+    /// Chunks a teleport has ticketed and that are therefore on their way.
+    ///
+    /// The move gate really asks "will this chunk have a holder?", and until
+    /// now it answered with "is it loaded right now?", which refused every
+    /// teleport into terrain nobody had visited. A ticket makes the first
+    /// question answerable: the chunk is coming, so an entity may be put there
+    /// and will be ticked and saved the moment it arrives.
+    inbound_chunks: FxHashMap<ChunkPos, usize>,
     unloading_by_chunk: FxHashMap<ChunkPos, Vec<EntityEntry>>,
     save_pending_by_chunk: FxHashMap<ChunkPos, Vec<EntityEntry>>,
     tick_list: EntityTickList,
@@ -532,6 +542,27 @@ impl WorldEntityManager {
         self.state.read().chunk_visibility.contains_key(&pos)
     }
 
+    /// Declares that a ticket is holding `pos` on its way in.
+    ///
+    /// Counted rather than a set: two teleports into one chunk must not have
+    /// the first one's release cancel the second one's guarantee. Paired with
+    /// [`Self::release_inbound_chunk`].
+    pub fn reserve_inbound_chunk(&self, pos: ChunkPos) {
+        *self.state.write().inbound_chunks.entry(pos).or_insert(0) += 1;
+    }
+
+    /// Drops one claim on `pos` made by [`Self::reserve_inbound_chunk`].
+    pub fn release_inbound_chunk(&self, pos: ChunkPos) {
+        let mut state = self.state.write();
+        let Some(count) = state.inbound_chunks.get_mut(&pos) else {
+            return;
+        };
+        *count -= 1;
+        if *count == 0 {
+            state.inbound_chunks.remove(&pos);
+        }
+    }
+
     /// Marks a chunk as loaded and reactivates retained unloading entities.
     pub fn on_chunk_loaded(&self, pos: ChunkPos) -> ChunkEntityLoadResult {
         let mut state = self.state.write();
@@ -539,6 +570,9 @@ impl WorldEntityManager {
             .chunk_visibility
             .entry(pos)
             .or_insert(EntityVisibility::Hidden);
+        // The chunk arrived; the reservations that were standing in for it have
+        // nothing left to promise.
+        state.inbound_chunks.remove(&pos);
 
         let mut result = ChunkEntityLoadResult::default();
         if let Some(entries) = state.unloading_by_chunk.remove(&pos) {
@@ -1103,6 +1137,7 @@ impl WorldEntityManager {
         new_chunk: ChunkPos,
     ) -> bool {
         state.chunk_visibility.contains_key(&new_chunk)
+            || state.inbound_chunks.contains_key(&new_chunk)
             || (entry.entity.is_passenger()
                 && Self::has_live_loaded_root_vehicle(state, &entry.entity))
     }
@@ -2024,3 +2059,31 @@ impl Default for WorldEntityManager {
 
 #[cfg(test)]
 mod tests;
+
+/// Holds an entity-manager reservation on a chunk a ticket is bringing in.
+///
+/// The reservation and its release have to be paired, and the move between them
+/// can fail on any of several paths, so this is RAII rather than two calls --
+/// the shape that a missed early return cannot break.
+pub struct InboundChunkReservation {
+    world: Arc<World>,
+    pos: ChunkPos,
+}
+
+impl InboundChunkReservation {
+    /// Reserves `pos` until the returned guard is dropped.
+    #[must_use]
+    pub fn hold(world: &Arc<World>, pos: ChunkPos) -> Self {
+        world.entity_manager().reserve_inbound_chunk(pos);
+        Self {
+            world: Arc::clone(world),
+            pos,
+        }
+    }
+}
+
+impl Drop for InboundChunkReservation {
+    fn drop(&mut self) {
+        self.world.entity_manager().release_inbound_chunk(self.pos);
+    }
+}
