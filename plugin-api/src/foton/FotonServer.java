@@ -341,6 +341,12 @@ public final class FotonServer implements Server {
         return null;
     }
 
+    /** One help map for the server's life: plugins register topics into it at
+     * enable time, and a fresh one per call would drop every registration. */
+    private final org.bukkit.help.HelpMap helpMap = new FotonHelpMap();
+
+    @Override public org.bukkit.help.HelpMap getHelpMap() { return helpMap; }
+
     @Override
     public int broadcastMessage(String message) {
         return Native.broadcast(message);

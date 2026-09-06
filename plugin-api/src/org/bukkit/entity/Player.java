@@ -119,6 +119,17 @@ public interface Player extends HumanEntity {
     default boolean canSee(Player other) { return other != null && other.isOnline(); }
     default void hidePlayer(Player player) { }
     default void showPlayer(Player player) { }
+
+    /** Hides a player from this one on behalf of a plugin.
+     *
+     * <p>The plugin argument is how Bukkit refcounts visibility: two plugins
+     * hiding the same player must both show them again before they reappear.
+     * Foton does not refcount yet, so the argument is accepted and the
+     * single-argument behavior applies -- which is the same answer as long as
+     * one plugin is doing the hiding, and a link error otherwise. */
+    default void hidePlayer(org.bukkit.plugin.Plugin plugin, Player player) { hidePlayer(player); }
+
+    default void showPlayer(org.bukkit.plugin.Plugin plugin, Player player) { showPlayer(player); }
     int getLevel();
     default int getFoodLevel() { return 20; }
     default void setFoodLevel(int level) { }
@@ -149,6 +160,9 @@ public interface Player extends HumanEntity {
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);
     void setPlayerListHeaderFooter(String header, String footer);
+    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count) {
+        spawnParticle(particle, location, count, null);
+    }
     default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, Object data) { }
 
     void sendActionBar(String message);

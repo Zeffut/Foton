@@ -16,5 +16,14 @@ public interface BlockData {
     String getAsString();
     default BlockData clone() { return new SimpleBlockData(getAsString()); }
     default String getAsString(boolean hideUnspecified) { return getAsString(); }
+    /** A detached block state holding this data.
+     *
+     * <p>Detached in the Bukkit sense: it belongs to no world and no position
+     * until something places it, which is why plugins build one to stamp a
+     * shape somewhere rather than to read one. */
+    default org.bukkit.block.BlockState createBlockState() {
+        return foton.FotonBlockState.detached(this);
+    }
+
     default boolean matches(BlockData other) { return other != null && getMaterial() == other.getMaterial() && getAsString().equalsIgnoreCase(other.getAsString()); }
 }

@@ -19,6 +19,15 @@ public class FotonBlockState implements BlockState {
     private BlockData data;
     private final FotonPersistentDataContainer persistentData = new FotonPersistentDataContainer();
 
+    /** A state that belongs to no world yet.
+     *
+     * <p>Bukkit's {@code BlockData.createBlockState}: a shape a plugin builds
+     * to stamp somewhere later. Everything positional answers null or zero
+     * until it is placed, and {@code update} has nothing to write back to. */
+    public static FotonBlockState detached(BlockData data) {
+        return new FotonBlockState(null, data);
+    }
+
     protected FotonBlockState(Block block, BlockData data) {
         this.block = block;
         this.data = data;
@@ -50,27 +59,27 @@ public class FotonBlockState implements BlockState {
 
     @Override
     public Location getLocation() {
-        return block.getLocation();
+        return block == null ? null : block.getLocation();
     }
 
     @Override
     public World getWorld() {
-        return block.getWorld();
+        return block == null ? null : block.getWorld();
     }
 
     @Override
     public int getX() {
-        return block.getX();
+        return block == null ? 0 : block.getX();
     }
 
     @Override
     public int getY() {
-        return block.getY();
+        return block == null ? 0 : block.getY();
     }
 
     @Override
     public int getZ() {
-        return block.getZ();
+        return block == null ? 0 : block.getZ();
     }
 
     @Override
@@ -80,6 +89,9 @@ public class FotonBlockState implements BlockState {
 
     @Override
     public boolean update(boolean force) {
+        if (block == null) {
+            return false;
+        }
         World world = block.getWorld();
         if (world == null || data == null) {
             return false;
@@ -98,6 +110,7 @@ public class FotonBlockState implements BlockState {
 
     @Override
     public String toString() {
-        return "FotonBlockState{" + data.getAsString() + " at " + block + "}";
+        return "FotonBlockState{" + (data == null ? "null" : data.getAsString())
+                + (block == null ? " (detached)" : " at " + block) + "}";
     }
 }

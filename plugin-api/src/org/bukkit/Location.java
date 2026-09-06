@@ -69,6 +69,36 @@ public class Location implements Cloneable {
         this.z = value;
     }
 
+    /** Paper's short accessor. Same value as {@link #getX()}; plugins written
+     * against Paper use whichever reads better at the call site, so both have
+     * to resolve. */
+    public double x() {
+        return x;
+    }
+
+    /** Paper's short accessor for {@link #getY()}. */
+    public double y() {
+        return y;
+    }
+
+    /** Paper's short accessor for {@link #getZ()}. */
+    public double z() {
+        return z;
+    }
+
+    /** The center of the block containing this point, keeping yaw and pitch.
+     *
+     * <p>Center means +0.5 on every axis from the block corner, including Y --
+     * Bukkit's {@code toCenterLocation} does not special-case the vertical the
+     * way {@code toBlockLocation} callers often expect. */
+    public Location toCenterLocation() {
+        Location centered = clone();
+        centered.setX(getBlockX() + 0.5);
+        centered.setY(getBlockY() + 0.5);
+        centered.setZ(getBlockZ() + 0.5);
+        return centered;
+    }
+
     public Location set(double x, double y, double z) {
         this.x = x; this.y = y; this.z = z; return this;
     }

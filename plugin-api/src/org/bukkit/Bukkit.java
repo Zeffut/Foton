@@ -144,12 +144,19 @@ public final class Bukkit {
     }
     public static org.bukkit.entity.Entity getEntity(UUID id) { return server.getEntity(id); }
     public static org.bukkit.entity.EntityFactory getEntityFactory() { return new foton.FotonEntityFactory(); }
-    /** Steel runs entity work on the owning server thread, so a live entity is owned here. */
+    /** Foton runs entity work on the owning server thread, so a live entity is owned here. */
     public static boolean isOwnedByCurrentRegion(org.bukkit.entity.Entity entity) {
         return entity != null && entity.isValid();
     }
     public static boolean isOwnedByCurrentRegion(org.bukkit.World world, int chunkX, int chunkZ) {
         return server.isOwnedByCurrentRegion(world, chunkX, chunkZ);
+    }
+    public static boolean isOwnedByCurrentRegion(Location location) {
+        return location != null && location.getWorld() != null
+                && isOwnedByCurrentRegion(location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4);
+    }
+    public static boolean isOwnedByCurrentRegion(org.bukkit.block.Block block) {
+        return block != null && isOwnedByCurrentRegion(block.getLocation());
     }
     public static org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder holder, int size) {
         return new foton.FotonCustomInventory(holder, size, "");
