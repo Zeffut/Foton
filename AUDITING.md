@@ -599,7 +599,34 @@ system that compiles.
   is real but the lint cannot isolate it; the place to look is any `[]` on a
   length that came from a file or a packet.
 
+- **A guard on one side of a format is half a guard, and the missing half is
+  usually worse than no guard at all.** The nesting ceiling was added to the
+  reader and to the entity writer in one commit, and the pool-element writer was
+  missed. That is not a smaller version of the same bug: a reader-only ceiling
+  refuses bad input, while a writer that can emit past it *creates* input its
+  own reader refuses -- and here a refused chunk is quarantined and regenerated,
+  so the gap cost the whole column. Whenever a limit is added to a serialized
+  format, the question is not "is the limit right" but "can anything on the
+  write side exceed it".
+
+  The test that caught it states the property rather than comparing the
+  constants: *whatever the writer produces, the reader takes*. It found an
+  off-by-one that reading the code twice had not, because the two sides are
+  genuinely asymmetric -- refusing a passenger drops it and spends no wrapper,
+  while an over-deep pool element still returns an `Empty` that its parent
+  wraps. Two correct answers, `>` and `>=`, and no way to see that by comparing
+  ceilings.
+
+- **The chunk-storage refcount analysis above was re-checked, and it holds.**
+  Every exit from `apply_empty_step` after a successful `acquire_chunk` was
+  enumerated: the two cancellation paths release, and both `None` returns inside
+  `apply_existing_empty_step` release before returning. The leak really is
+  confined to a task dying mid-flight, which `panic = "abort"` makes a release
+  impossibility. Worth recording that it was verified rather than assumed --
+  a residual nobody re-checks slowly becomes a residual nobody believes.
+
 - **A stack overflow is not a panic.** It is a SIGSEGV, so no `catch_unwind`
   and no abort handler sees it. Recursive parsers need an explicit depth
-  ceiling; vanilla uses 512 (`NbtAccounter`).
+  ceiling -- but vanilla's 512 (`NbtAccounter`) is a number about *vanilla's*
+  frames. Measure your own before borrowing it; ours overflow at 128.
 - Coverage percentages say nothing about correctness. See `PARITY.md`.
