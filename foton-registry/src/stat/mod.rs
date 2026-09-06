@@ -94,6 +94,13 @@ impl Stat {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::expect_used,
+        reason = "entries reaching this come from generated registry data, which is registered by construction"
+    )
+)]
 fn id_of(entry: &impl RegistryEntry) -> usize {
     entry
         .try_id()

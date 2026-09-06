@@ -96,6 +96,13 @@ pub trait BlockStateExt {
 }
 
 impl BlockStateExt for BlockStateId {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "the trait returns a BlockRef and has no sentinel to answer with; every id reaching it comes from the registry itself"
+        )
+    )]
     fn get_block(&self) -> BlockRef {
         REGISTRY
             .blocks

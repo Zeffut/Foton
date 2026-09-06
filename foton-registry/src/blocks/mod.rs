@@ -617,9 +617,14 @@ impl BlockRegistry {
             .copied()
     }
 
+    /// A state the registry does not know has no properties to report, which
+    /// is the same answer as a block that carries none. This used to panic on
+    /// an id its own caller supplies.
     #[must_use]
     pub fn get_properties(&self, id: BlockStateId) -> Vec<(&'static str, &'static str)> {
-        let block = self.by_state_id(id).expect("Invalid state ID");
+        let Some(block) = self.by_state_id(id) else {
+            return Vec::new();
+        };
 
         // If block has no properties, return empty vec
         if block.properties.is_empty() {
@@ -781,7 +786,17 @@ impl BlockRegistry {
             .product()
     }
 
-    // Panics if that property isn't supposed to be on this block.
+    /// # Panics
+    /// If the property is not one this block carries. That is a programming
+    /// error at the call site, not a runtime condition -- use
+    /// [`Self::try_get_property`] where the answer is genuinely in doubt.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "asking a block for a property it does not have is a call-site error; try_get_property is the fallible form"
+        )
+    )]
     pub fn get_property<P: Property>(&self, id: BlockStateId, property: &P) -> P::Value {
         self.try_get_property(id, property)
             .expect("Property not found on this block")
@@ -794,7 +809,9 @@ impl BlockRegistry {
         id: BlockStateId,
         property: &P,
     ) -> Option<P::Value> {
-        let block = self.by_state_id(id).expect("Invalid state ID");
+        // The `try_` prefix already promises an answer rather than a panic;
+        // an unknown state is simply a state that does not carry the property.
+        let block = self.by_state_id(id)?;
 
         // Find the property index in the block's property list
         let property_index = block
@@ -825,7 +842,11 @@ impl BlockRegistry {
         property: &P,
         value: P::Value,
     ) -> BlockStateId {
-        let block = self.by_state_id(id).expect("Invalid state ID");
+        // Nothing can be set on a state the registry does not know, so it comes
+        // back unchanged rather than taking the server down.
+        let Some(block) = self.by_state_id(id) else {
+            return id;
+        };
 
         // Find the property index in the block's property list
         let property_index = block

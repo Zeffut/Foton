@@ -47,13 +47,19 @@ impl Output {
     pub const fn is_at_end(&self) -> bool {
         self.pos == self.length
     }
+    /// Byte offset of the `pos`-th character, and how many bytes it takes.
+    ///
+    /// A position past the end answers the end of the text with nothing to
+    /// skip, which is what every caller wants there: they use the pair as an
+    /// insertion point, so `(len, 0)` appends. It used to panic instead, and
+    /// an empty input line was enough to reach it -- `replace_push` asks for
+    /// `pos.saturating_sub(1)`, which is `0` when the line is empty, and the
+    /// zeroth character of an empty string does not exist.
     pub fn char_pos(&self, pos: usize) -> (usize, usize) {
-        let (pos, char) = self
-            .text
-            .char_indices()
-            .nth(pos)
-            .expect("Character position out of range!");
-        (pos, char.len_utf8())
+        let Some((offset, char)) = self.text.char_indices().nth(pos) else {
+            return (self.text.len(), 0);
+        };
+        (offset, char.len_utf8())
     }
     pub fn visible_input_width() -> usize {
         super::terminal_width().saturating_sub(4).max(1)

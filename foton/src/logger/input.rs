@@ -47,7 +47,14 @@ impl CommandLogger {
                 }
 
                 if let Ok(true) = poll(Duration::from_millis(50)) {
-                    let event = read().expect("Event bug; Cannot read event.");
+                    // A console read fails when there is no console to read:
+                    // stdin closed, or the server started under a service
+                    // manager with it redirected. That is a reason to stop
+                    // reading input, not to abort the process.
+                    let Ok(event) = read() else {
+                        log::warn!("Console input closed; stopping the input reader");
+                        break;
+                    };
                     // On Windows, crossterm sends both Press and Release events.
                     // Only handle Press events to avoid duplicate input.
                     match event {

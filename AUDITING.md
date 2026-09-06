@@ -367,10 +367,11 @@ between the two shifts every persisted `delay` by one.
   `expect` because `unwrap` was closed to them, and that is what makes the lint
   impossible to switch on workspace-wide in one move.
 
-  Eight of the twelve crates now carry
+  Ten of the twelve crates now carry
   `#![cfg_attr(not(test), warn(clippy::expect_used))]`: `foton-math`,
   `foton-crypto`, `foton-protocol`, `foton-bedrock`, `foton-plugin`,
-  `foton-login`, `foton-worldgen` and `foton-utils`. The `not(test)` scope is
+  `foton-login`, `foton-worldgen`, `foton-utils`, `foton-registry` and the
+  `foton` binary. The `not(test)` scope is
   the point -- a panicking test is how a test reports, a panicking server is how
   a world is lost -- and it costs one wrinkle: a bare `#[expect]` inside those
   crates is unfulfilled in the test build, so a justified site needs
@@ -381,15 +382,21 @@ between the two shifts every persisted `delay` by one.
   Turning the lint on found what counting could not. The crate-by-crate `grep`
   that produced the 423 figure classified `foton-math`, `foton-crypto`,
   `foton-protocol` and `foton-bedrock` as having no production `expect` at all;
-  the lint found five, and three of the thirteen it surfaced across the eight
-  crates were live defects rather than provable invariants -- `tcp_client`
-  aborting on a status response too large to encode (the same class as
-  `chunk_sender` one pass earlier), a compression threshold above `i32::MAX`
-  killing the server at the first login, and a structure piece panicking on a
-  rayon worker over a block state its caller supplied.
+  the lint found five. Across twenty-five sites in ten crates, **eight were live
+  defects** rather than provable invariants: `tcp_client` aborting on a status
+  response too large to encode (the same class as `chunk_sender` one pass
+  earlier), a compression threshold above `i32::MAX` killing the server at the
+  first login, `StructurePiece::ignores` panicking on a rayon worker over a
+  block state its caller supplied, the same block-state panic three more times
+  in `BlockRegistry` (including in `try_get_property`, whose `try_` prefix
+  already promised an answer instead of a panic), a console `read()` that
+  aborted the process when stdin was closed, and `char_pos` panicking on an
+  empty input line.
 
-  `foton-core` (423), `foton-registry` (76) and the `foton` binary (54) are the
-  ones left. They are the bulk, and they are next.
+  That is roughly a third, and it is the argument for the lint rather than for
+  more counting: every one of these sat under a green CI.
+
+  `foton-core` is what is left -- 423 sites, more than all the others together.
 - **A stack overflow is not a panic.** It is a SIGSEGV, so no `catch_unwind`
   and no abort handler sees it. Recursive parsers need an explicit depth
   ceiling; vanilla uses 512 (`NbtAccounter`).
