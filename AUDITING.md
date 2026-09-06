@@ -276,10 +276,18 @@ exception when the scope ends -- describing it first, since the stack trace is
 the only thing that names the handler that threw, and it goes to the JVM's own
 error channel. One place instead of seventy.
 
-One boundary finding is still open: `Native.requestChunk` stores a
-`ChunkRequestHandle` -- which pins a chunk ticket -- under a fresh UUID that only
-`chunkRequestReady` can retire, while the only poller for it is unreferenced
-code. A plugin calling it directly pins a chunk for the life of the server.
+The other boundary finding is closed too, differently. `Native.requestChunk`
+stored a `ChunkRequestHandle` -- which pins a chunk ticket and releases it on
+drop -- under a fresh UUID that only `chunkRequestReady` could retire, so a
+plugin that asked and never polled, or that was unloaded mid-poll, pinned a
+chunk for the life of the server. Entries now carry the time they were made and
+both natives sweep anything older than a minute.
+
+The minute is a judgment, not a transcription, and the code says so. There is
+no vanilla counterpart to check it against: the polling shape is Foton's own,
+where Paper hands back a future that releases on completion or cancellation
+without the plugin having to come back. Being wrong costs a plugin a second
+request; doing nothing costs a chunk forever.
 
 ## The light engine is not vanilla's, and two findings depend on knowing that
 

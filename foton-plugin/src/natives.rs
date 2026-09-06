@@ -15,6 +15,7 @@ use std::ptr::null_mut;
 use std::str::FromStr as _;
 use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
+use std::time::{Duration, Instant};
 
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
@@ -183,7 +184,24 @@ use uuid::Uuid;
 static SERVER: OnceLock<SyncRwLock<Weak<Server>>> = OnceLock::new();
 
 /// Outstanding asynchronous Bukkit chunk requests, retained until Full status.
-static CHUNK_REQUESTS: OnceLock<SyncMutex<FxHashMap<Uuid, ChunkRequestHandle>>> = OnceLock::new();
+///
+/// The `Instant` is when the request was made. A handle holds a chunk ticket
+/// and only releases it when it is dropped, and the only thing that drops one
+/// is a plugin polling `chunkRequestReady` until it answers -- so a plugin that
+/// asks and never polls, or that is unloaded mid-poll, used to pin a chunk for
+/// the life of the server. Requests older than the timeout are swept whenever
+/// either native runs.
+static CHUNK_REQUESTS: OnceLock<SyncMutex<FxHashMap<Uuid, (Instant, ChunkRequestHandle)>>> =
+    OnceLock::new();
+
+/// How long an unpolled chunk request keeps its ticket.
+///
+/// There is no vanilla counterpart to weigh this against -- the polling shape is
+/// Foton's own, where Paper hands back a future that releases on completion or
+/// cancellation. A request that has been ready for a minute without anyone
+/// asking is one nobody is waiting for, and the cost of being wrong is that a
+/// plugin has to ask again, against the cost of pinning a chunk forever.
+const ABANDONED_CHUNK_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Non-persistent bars created through Bukkit, keyed by the opaque handle Java owns.
 static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = OnceLock::new();
@@ -247,8 +265,25 @@ fn server() -> Option<Arc<Server>> {
     SERVER.get().and_then(|slot| slot.read().upgrade())
 }
 
-fn chunk_requests() -> &'static SyncMutex<FxHashMap<Uuid, ChunkRequestHandle>> {
+fn chunk_requests() -> &'static SyncMutex<FxHashMap<Uuid, (Instant, ChunkRequestHandle)>> {
     CHUNK_REQUESTS.get_or_init(|| SyncMutex::new(FxHashMap::default()))
+}
+
+/// Drops chunk requests nobody has polled inside the timeout.
+///
+/// Dropping the handle is what releases its tickets, so removing the entry is
+/// the whole release. Both natives call this before doing their own work, which
+/// bounds the damage a plugin that stops polling can do to the requests it made
+/// since it last called in.
+fn sweep_abandoned_chunk_requests(requests: &mut FxHashMap<Uuid, (Instant, ChunkRequestHandle)>) {
+    let now = Instant::now();
+    requests.retain(|id, (requested_at, _)| {
+        let alive = now.duration_since(*requested_at) < ABANDONED_CHUNK_REQUEST_TIMEOUT;
+        if !alive {
+            log::warn!("Releasing chunk request {id}: no plugin polled it within the timeout");
+        }
+        alive
+    });
 }
 
 fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
@@ -9695,7 +9730,11 @@ extern "system" fn request_chunk(
         .chunk_map
         .request_chunk(pos, ChunkStatus::Full, ChunkTicketKind::Command);
     let id = Uuid::new_v4();
-    chunk_requests().lock().insert(id, handle);
+    {
+        let mut requests = chunk_requests().lock();
+        sweep_abandoned_chunk_requests(&mut requests);
+        requests.insert(id, (Instant::now(), handle));
+    }
     to_java(&mut env, Some(id.to_string()))
 }
 
@@ -9715,7 +9754,8 @@ extern "system" fn chunk_request_ready(
         return 0;
     };
     let mut requests = chunk_requests().lock();
-    let Some(handle) = requests.get(&id) else {
+    sweep_abandoned_chunk_requests(&mut requests);
+    let Some((_, handle)) = requests.get(&id) else {
         return 0;
     };
     match handle.poll() {

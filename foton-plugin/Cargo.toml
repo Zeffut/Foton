@@ -18,6 +18,10 @@ glam.workspace = true
 text_components.workspace = true
 uuid.workspace = true
 jni = "0.21"
+# The only thing this crate says out loud: a chunk request released because
+# nobody polled it. A plugin author whose request vanished has nothing else
+# to go on.
+log.workspace = true
 libloading = "0.8"
 rustc-hash.workspace = true
 simdnbt.workspace = true
