@@ -15,7 +15,7 @@ use crate::behavior::init_behaviors;
 use crate::block_entity::init_block_entities;
 use crate::chunk::chunk_ticket_manager::{ChunkTicket, ChunkTicketLevel};
 use crate::entity::{
-    ENTITIES, EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest, init_entities,
+    ENTITIES, EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest, Mob, init_entities,
 };
 use crate::entity::{EntityBase, entities::ItemEntity, entities::PigEntity};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
@@ -714,5 +714,66 @@ fn a_player_joins_over_an_entity_that_stole_their_uuid() {
         world.get_entity_by_uuid(&uuid).map(|entity| entity.id()),
         Some(player.id()),
         "the UUID must now resolve to the player"
+    );
+}
+
+#[test]
+fn a_mob_lets_go_of_a_player_who_disconnects() {
+    // `PlayerList.remove` ends with `removePlayerImmediately(player,
+    // UNLOADED_WITH_PLAYER)`, which is `player.remove(reason)`. Foton took the
+    // player out of the entity manager without ever marking them removed, so
+    // `Entity::is_alive` kept answering true all the way down
+    // `is_valid_target` -> `can_attack` -> `can_be_seen_as_enemy`, and a mob
+    // holding them as a target kept hunting someone who had left. Goals such as
+    // `beg` hold a strong `Arc<Player>`, so the ghost never expired on its own.
+    let world = fresh_test_world("mob_target_after_disconnect");
+    init_entities();
+    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+    let mut bytes = Vec::new();
+    NbtCompound::new().write(&mut bytes);
+    let borrowed = read_borrowed_compound(&mut Cursor::new(&bytes))
+        .unwrap_or_else(|error| panic!("test nbt should reborrow: {error}"));
+    let zombie = ENTITIES.create_and_load_or_raw(
+        EntityLoadRequest {
+            entity_type: &vanilla_entities::ZOMBIE,
+            position: DVec3::new(8.0, 64.0, 8.0),
+            uuid: Uuid::from_u128(0x2222),
+            velocity: DVec3::ZERO,
+            rotation: (0.0, 0.0),
+            fall_distance: 0.0,
+            fire_freeze: EntityFireFreezeState::new(),
+            on_ground: true,
+            save_data: EntityBaseSaveData::new(),
+            world: Arc::downgrade(&world),
+        },
+        &borrowed,
+    );
+    world
+        .try_add_entity(Arc::clone(&zombie))
+        .unwrap_or_else(|error| panic!("the zombie should join the world: {error}"));
+    let Some(mob) = zombie.as_mob() else {
+        panic!("a zombie is a mob");
+    };
+
+    let player = TestPlayerBuilder::new(Arc::clone(&world), "Prey", 901).build();
+    assert!(world.add_player(Arc::clone(&player), ResetReason::InitialJoin));
+
+    let prey: SharedEntity = Arc::clone(&player) as SharedEntity;
+    assert!(
+        mob.mob_base().set_target(Some(&prey), |_| true),
+        "the zombie should accept a living target"
+    );
+    assert!(
+        Mob::target(mob).is_some(),
+        "the zombie should be hunting the player while they are online"
+    );
+
+    world.detach_player_for_disconnect(Arc::clone(&player));
+
+    assert!(player.is_removed(), "a disconnected player must be removed");
+    assert!(
+        Mob::target(mob).is_none(),
+        "the zombie must let go of a player who has left"
     );
 }
