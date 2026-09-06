@@ -496,6 +496,20 @@ public final class EventBridge {
         return completions == null ? new String[0] : completions.toArray(new String[0]);
     }
 
+    /** The command list is about to be sent. Returns what survived, or null
+     * when no listener touched it -- which lets the caller keep the tree it
+     * already built instead of rebuilding an identical one. */
+    public static String[] fireCommandSend(String uuid, String[] commands) {
+        java.util.List<String> mutable =
+                new java.util.ArrayList<>(java.util.Arrays.asList(commands));
+        org.bukkit.event.player.PlayerCommandSendEvent event =
+                new org.bukkit.event.player.PlayerCommandSendEvent(player(uuid), mutable);
+        dispatch(event);
+        java.util.Collection<String> kept = event.getCommands();
+        if (kept.size() == commands.length) return null;
+        return kept.toArray(new String[0]);
+    }
+
     /** A hotbar slot is about to change. Returns false when a plugin refused. */
     public static boolean fireItemHeld(String uuid, int previous, int current) {
         org.bukkit.event.player.PlayerItemHeldEvent event =

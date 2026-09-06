@@ -3,7 +3,7 @@ use foton_protocol::packets::game::{
     CCommands, CommandNode as ProtocolCommandNode, CommandNodeInfo, SuggestionEntry,
     SuggestionType,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use thiserror::Error;
 
 use super::brigadier::{
@@ -82,7 +82,26 @@ where
     R: CommandRuntime<S>,
     R::Argument: CommandArgumentProtocol,
 {
-    let visible = visible_nodes(dispatcher, source)?;
+    command_tree_packet_without(dispatcher, source, &FxHashSet::default())
+}
+
+/// The command tree, minus the root commands named in `hidden`.
+///
+/// Bukkit's `PlayerCommandSendEvent` hands a plugin the list of root commands
+/// and lets it remove entries. Filtering at the root rather than after the
+/// packet is built is what keeps the node indices consistent: the packet is a
+/// graph of integer references, and dropping a node from a finished one would
+/// leave every later index pointing at the wrong entry.
+pub(crate) fn command_tree_packet_without<S, R>(
+    dispatcher: &CommandDispatcher<S, R>,
+    source: &S,
+    hidden: &FxHashSet<String>,
+) -> Result<CCommands, CommandTreeProjectionError>
+where
+    R: CommandRuntime<S>,
+    R::Argument: CommandArgumentProtocol,
+{
+    let visible = visible_nodes(dispatcher, source, hidden)?;
     let mut indices = FxHashMap::default();
     for (index, node) in visible.iter().copied().enumerate() {
         let Ok(index) = i32::try_from(index) else {
@@ -160,12 +179,14 @@ where
 fn visible_nodes<S, R>(
     dispatcher: &CommandDispatcher<S, R>,
     source: &S,
+    hidden: &FxHashSet<String>,
 ) -> Result<Vec<NodeId>, CommandTreeProjectionError>
 where
     R: CommandRuntime<S>,
 {
+    let root = dispatcher.root();
     let mut visible = Vec::new();
-    let mut pending = vec![dispatcher.root()];
+    let mut pending = vec![root];
     while let Some(node_id) = pending.pop() {
         visible.push(node_id);
         let children = dispatcher
@@ -175,12 +196,41 @@ where
             let node = dispatcher
                 .node(*child)
                 .ok_or(CommandTreeProjectionError::UnknownNode(*child))?;
+            // Only at the root: a plugin removes whole commands, not the
+            // arguments inside one it left in place.
+            if node_id == root && hidden.contains(node.name()) {
+                continue;
+            }
             if node.allows(source) {
                 pending.push(*child);
             }
         }
     }
     Ok(visible)
+}
+
+/// The root command names this source may see, in the tree's order.
+pub(crate) fn visible_root_names<S, R>(
+    dispatcher: &CommandDispatcher<S, R>,
+    source: &S,
+) -> Result<Vec<String>, CommandTreeProjectionError>
+where
+    R: CommandRuntime<S>,
+{
+    let root = dispatcher.root();
+    let children = dispatcher
+        .children(root)
+        .ok_or(CommandTreeProjectionError::UnknownNode(root))?;
+    let mut names = Vec::with_capacity(children.len());
+    for child in children {
+        let node = dispatcher
+            .node(*child)
+            .ok_or(CommandTreeProjectionError::UnknownNode(*child))?;
+        if node.allows(source) {
+            names.push(node.name().to_owned());
+        }
+    }
+    Ok(names)
 }
 
 pub(crate) trait CommandArgumentProtocol {
