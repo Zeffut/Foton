@@ -32,12 +32,14 @@
 
 mod bit_pack;
 mod format;
+mod nesting;
 mod ram_only;
 mod region_manager;
 pub mod registry;
 mod storage;
 
 pub use format::*;
+pub use nesting::Nested;
 pub use ram_only::*;
 pub use region_manager::*;
 pub use storage::*;

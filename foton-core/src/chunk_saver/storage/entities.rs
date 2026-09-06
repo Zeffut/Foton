@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunk_saver::nesting::MAX_NESTING_DEPTH;
 
 impl ChunkStorage {
     pub(super) fn entities_to_persistent(entities: &[SharedEntity]) -> Vec<PersistentEntity> {
@@ -7,14 +8,19 @@ impl ChunkStorage {
             .iter()
             .filter(|entity| !entity.is_passenger())
             .filter_map(|entity| {
-                Self::entity_to_persistent(entity, &mut visited, EntityPersistenceMode::ChunkSave)
+                Self::entity_to_persistent(
+                    entity,
+                    &mut visited,
+                    EntityPersistenceMode::ChunkSave,
+                    0,
+                )
             })
             .collect()
     }
 
     pub(crate) fn entity_tree_to_persistent(entity: &SharedEntity) -> Option<PersistentEntity> {
         let mut visited = FxHashSet::default();
-        Self::entity_to_persistent(entity, &mut visited, EntityPersistenceMode::ChunkSave)
+        Self::entity_to_persistent(entity, &mut visited, EntityPersistenceMode::ChunkSave, 0)
     }
 
     pub(crate) fn entity_to_dimension_transition_persistent(
@@ -25,6 +31,7 @@ impl ChunkStorage {
             entity,
             &mut visited,
             EntityPersistenceMode::DimensionTransition,
+            0,
         )
     }
 
@@ -138,8 +145,20 @@ impl ChunkStorage {
         entity: &SharedEntity,
         visited: &mut FxHashSet<i32>,
         mode: EntityPersistenceMode,
+        depth: u32,
     ) -> Option<PersistentEntity> {
         if !Self::entity_should_persist(entity.as_ref(), mode) {
+            return None;
+        }
+
+        // The reader refuses a chain deeper than this, so writing one would
+        // save a chunk that can never be loaded again -- and building it
+        // recurses the same way the reader does, which is its own way to die.
+        if depth > MAX_NESTING_DEPTH {
+            tracing::warn!(
+                uuid = ?entity.uuid(),
+                "Passenger chain is deeper than {MAX_NESTING_DEPTH}, saving it without its remaining riders"
+            );
             return None;
         }
 
@@ -188,7 +207,9 @@ impl ChunkStorage {
         let passengers = entity
             .passengers()
             .iter()
-            .filter_map(|passenger| Self::entity_to_persistent(passenger, visited, mode))
+            .filter_map(|passenger| {
+                Self::entity_to_persistent(passenger, visited, mode, depth + 1).map(Nested)
+            })
             .collect();
 
         Some(PersistentEntity {
@@ -306,7 +327,7 @@ impl ChunkStorage {
         entities.push(Arc::clone(&entity));
         for persistent_passenger in &persistent.passengers {
             Self::load_persistent_passenger_tree(
-                persistent_passenger,
+                &persistent_passenger.0,
                 chunk_pos,
                 level,
                 &entity,
@@ -332,7 +353,7 @@ impl ChunkStorage {
         entities.push(Arc::clone(&passenger));
         for persistent_passenger in &persistent.passengers {
             Self::load_persistent_passenger_tree(
-                persistent_passenger,
+                &persistent_passenger.0,
                 chunk_pos,
                 level,
                 &passenger,
