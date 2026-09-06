@@ -17,6 +17,13 @@ impl FeatureDecorationRunner {
         WorldgenStateResolver::feature_block_state_from_data(registry, data, "block state provider")
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(super) fn fluid_state_from_data(data: &FluidStateData) -> FluidState {
         let mut amount = Self::default_fluid_amount(data.fluid);
         let mut falling = false;
@@ -51,6 +58,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(super) fn parse_fluid_bool_property(
         fluid_name: &foton_utils::Identifier,
         property: &str,
@@ -65,6 +79,13 @@ impl FeatureDecorationRunner {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(super) fn parse_flowing_fluid_level(
         fluid_name: &foton_utils::Identifier,
         value: &str,
@@ -79,6 +100,13 @@ impl FeatureDecorationRunner {
         level
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from FotonExtractor; a reference it cannot resolve means the extraction is broken, not that anything at runtime went wrong"
+        )
+    )]
     pub(super) fn legacy_block_from_fluid_state(
         registry: &Registry,
         fluid_state: FluidState,

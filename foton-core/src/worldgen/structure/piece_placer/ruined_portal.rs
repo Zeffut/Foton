@@ -262,6 +262,13 @@ impl StructurePiecePlacer {
             [random.next_i32_bounded(RUINED_PORTAL_HORIZONTAL_DIRECTIONS.len() as i32) as usize]
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     const fn vine_face_property(direction: Direction) -> &'static BoolProperty {
         match direction {
             Direction::Up => &BlockStateProperties::UP,

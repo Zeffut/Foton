@@ -137,6 +137,13 @@ impl FlatChunkGenerator {
 
     /// The layer stack and per-step feature list `adjust_generation_settings`
     /// produces, before they are handed to the decoration runner.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn adjusted_features(
         mut layers: Vec<BlockStateId>,
         biome: BiomeRef,

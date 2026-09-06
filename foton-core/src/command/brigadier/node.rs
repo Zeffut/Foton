@@ -321,6 +321,13 @@ where
     }
 
     /// Returns this node's redirect target.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     pub(crate) fn redirect(&self) -> Option<NodeId> {
         self.redirect
             .as_ref()

@@ -30,6 +30,13 @@ use foton_worldgen::structure::{
 use super::{StructurePiecePlacer, create_structure_mob, finalize_structure_mob};
 
 impl StructurePiecePlacer {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(super) fn place_template_piece(
         region: &impl WorldGenLevel,
         registry: &Registry,
@@ -657,6 +664,13 @@ impl StructurePiecePlacer {
         clippy::too_many_arguments,
         reason = "postprocess needs the same placement context as vanilla TemplateStructurePiece after block placement"
     )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn post_process_template_piece(
         region: &impl WorldGenLevel,
         registry: &Registry,
@@ -759,6 +773,13 @@ impl StructurePiecePlacer {
         let _ = region.set_block_state(pos, state, Self::TEMPLATE_UPDATE_FLAGS);
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn dried_ghast_state(registry: &Registry, rotation: Rotation) -> BlockStateId {
         let facing = rotation.rotate(Direction::North);
         let Some(state) = registry.blocks.state_id_from_block_properties(

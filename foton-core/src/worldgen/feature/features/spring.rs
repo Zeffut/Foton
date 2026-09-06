@@ -2,6 +2,13 @@ use super::super::prelude::*;
 use super::super::runner::FeatureDecorationRunner;
 
 impl FeatureDecorationRunner {
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(in crate::worldgen::feature) fn place_spring_feature(
         region: &impl WorldGenLevel,
         registry: &Registry,

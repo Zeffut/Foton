@@ -305,6 +305,13 @@ const VINE_FACE_DIRECTIONS: [Direction; 5] = [
     Direction::West,
 ];
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::unreachable,
+        reason = "a block's property set is fixed by its own definition, and this reads a face that definition gives it; the counted directions come from the same fixed set"
+    )
+)]
 fn get_property_for_face(direction: Direction) -> &'static BoolProperty {
     match direction {
         Direction::Up => UP,

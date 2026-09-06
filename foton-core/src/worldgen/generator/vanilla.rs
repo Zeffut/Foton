@@ -918,6 +918,13 @@ where
     /// Drive the 17×17 source-chunk carver loop. Each carver in each source
     /// biome is seeded via `set_large_feature_seed`, probability-checked,
     /// then dispatched to the appropriate `carve_*` method.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn run_all(&mut self, source_biomes: &[SourceChunk], seed_i64: i64, random: &mut LegacyRandom) {
         for source in source_biomes {
             for (index, carver_key) in source.biome.carvers.iter().enumerate() {

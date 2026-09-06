@@ -171,6 +171,13 @@ impl MenuKind for InventoryKind {
         clippy::too_many_lines,
         reason = "mirrors Java's InventoryMenu::quickMoveStack branch structure"
     )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the menu validates its layout for coverage and overlap before any cell is used, and a slot keeps the concrete storage it was built with"
+        )
+    )]
     fn quick_move(
         &mut self,
         behavior: &mut MenuBehavior,

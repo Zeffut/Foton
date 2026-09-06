@@ -96,6 +96,13 @@ impl<T> StaticCache2D<T> {
     /// # Panics
     /// Panics if coordinates are out of bounds.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub fn get(&self, x: i32, z: i32) -> &T {
         let Some(value) = self.try_get(x, z) else {
             panic!(

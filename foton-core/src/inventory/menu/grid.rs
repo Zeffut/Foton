@@ -719,6 +719,13 @@ impl<'a> GridPlacer<'a> {
     ///
     /// # Panics
     /// If the rect exceeds this scope or overlaps a placement or subgrid, or if `f` leaves cells uncovered.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the menu validates its layout for coverage and overlap before any cell is used, and a slot keeps the concrete storage it was built with"
+        )
+    )]
     pub fn subgrid<R>(&mut self, rect: Rect, f: impl FnOnce(&mut GridPlacer<'_>) -> R) -> R {
         let abs = self.to_abs(rect);
         for (x, y) in abs.cells() {
@@ -991,6 +998,13 @@ impl MenuBuilder {
     }
 
     /// Emits the resolved grid cells as menu slots in row-major order.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the menu validates its layout for coverage and overlap before any cell is used, and a slot keeps the concrete storage it was built with"
+        )
+    )]
     fn flush_grid(&mut self, state: GridState) {
         let GridState {
             cells,

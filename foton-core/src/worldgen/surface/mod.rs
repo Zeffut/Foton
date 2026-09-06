@@ -661,6 +661,13 @@ impl SurfaceNoiseProvider for SurfaceSystem {
 }
 
 /// Helper to create a `NormalNoise` from the parameter registry.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+    )
+)]
 fn create_noise(
     splitter: &RandomSplitter,
     id: &str,

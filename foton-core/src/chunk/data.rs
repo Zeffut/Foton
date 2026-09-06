@@ -165,6 +165,13 @@ impl Chunk {
         reason = "disk rehydration mirrors the persisted proto chunk fields"
     )]
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the loader validates light and section sizes against each other before a chunk gets here, and nothing resizes either afterwards"
+        )
+    )]
     pub(crate) fn from_disk(
         sections: Sections,
         pos: ChunkPos,
@@ -364,6 +371,13 @@ impl Chunk {
 
     /// Reads a generation heightmap, priming it lazily when needed.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "priming inserts every heightmap type the caller asks for, and this reads back the same list"
+        )
+    )]
     pub(crate) fn generation_height_at(
         &self,
         heightmap_type: HeightmapType,
@@ -470,6 +484,13 @@ impl Chunk {
     /// # Panics
     ///
     /// Panics if the current generator has already installed transient state.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the transient state is installed and consumed by the same generation step, under the same lock"
+        )
+    )]
     pub(crate) fn install_transient_generation_state<T>(&self, state: T)
     where
         T: DowncastType + Send + Sync,
@@ -493,6 +514,13 @@ impl Chunk {
     /// # Panics
     ///
     /// Panics if another generator's state occupies this chunk.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the transient state is installed and consumed by the same generation step, under the same lock"
+        )
+    )]
     pub(crate) fn with_transient_generation_state_mut<T, R>(
         &self,
         f: impl FnOnce(&mut T) -> R,
@@ -521,6 +549,13 @@ impl Chunk {
     /// # Panics
     ///
     /// Panics if another generator's state occupies this chunk.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the transient state is installed and consumed by the same generation step, under the same lock"
+        )
+    )]
     pub(crate) fn consume_transient_generation_state<T, R>(
         &self,
         f: impl FnOnce(Option<&mut T>) -> R,
@@ -553,6 +588,13 @@ impl Chunk {
     ///
     /// # Panics
     /// Never — the mask is populated immediately before projecting the guard.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the transient state is installed and consumed by the same generation step, under the same lock"
+        )
+    )]
     pub(crate) fn get_or_create_carving_mask(&self) -> MappedRwLockWriteGuard<'_, CarvingMask> {
         let mut guard = self.carving_mask.write();
         if guard.is_none() {
@@ -1003,6 +1045,13 @@ impl Chunk {
             });
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the loader validates light and section sizes against each other before a chunk gets here, and nothing resizes either afterwards"
+        )
+    )]
     pub(crate) fn refresh_light_emptiness_maps(&self) {
         if let Err(error) = self
             .light
@@ -1049,6 +1098,13 @@ impl Chunk {
         );
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "priming inserts every heightmap type the caller asks for, and this reads back the same list"
+        )
+    )]
     fn update_heightmaps_after_block_change(
         &self,
         heightmap_types: &[HeightmapType],
@@ -1081,6 +1137,13 @@ impl Chunk {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "priming inserts every heightmap type the caller asks for, and this reads back the same list"
+        )
+    )]
     fn update_heightmaps_after_column_block_changes(
         &self,
         heightmap_types: &[HeightmapType],

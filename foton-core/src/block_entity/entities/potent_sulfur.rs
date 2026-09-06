@@ -78,6 +78,13 @@ impl PotentSulfurBlockEntity {
         self.sulfur.lock().eruption_tick = eruption_tick;
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the random source is created by this call, so its concrete type is settled here"
+        )
+    )]
     fn geyser_positional_rng(seed: i64, pos: BlockPos) -> Xoroshiro {
         let mut base = Xoroshiro::from_seed((seed ^ GEYSER_SALT) as u64);
         let RandomSplitter::Xoroshiro(splitter) = base.next_positional() else {

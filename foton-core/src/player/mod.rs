@@ -395,6 +395,13 @@ impl PlayerResidenceState {
         }
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     fn advance(&mut self) -> DomainResidenceToken {
         let Some(next_token) = self.token.0.checked_add(1) else {
             panic!("domain residence token space exhausted");
@@ -2075,6 +2082,13 @@ impl LivingEntity for Player {
         inventory.with_equipment_item_mut(slot, visitor);
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     fn interact_living_entity_with_equippable(
         &self,
         player: &Player,

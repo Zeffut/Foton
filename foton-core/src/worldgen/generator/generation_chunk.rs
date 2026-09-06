@@ -58,6 +58,13 @@ impl<'a, Phase> GenerationChunk<'a, Phase> {
         Self::from_chunk(chunk)
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn acquire_input(holder: &'a ChunkHolder, input_status: ChunkStatus) -> Self {
         assert_eq!(
             holder.published_status(),

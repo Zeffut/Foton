@@ -112,6 +112,13 @@ impl PlayerInventory {
     /// # Panics
     ///
     /// Panics if the slot is not a valid hotbar slot (must be 0-8).
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     pub fn set_selected_slot(&mut self, slot: u8) {
         if Self::is_hotbar_slot(slot as usize) {
             if self.selected != slot {
@@ -205,6 +212,13 @@ impl PlayerInventory {
 
     /// Returns the non-equipment items (main 36 slots).
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     pub fn get_items(&self) -> &[ItemStack; Self::INVENTORY_SIZE] {
         let Some(items) = self.items.first_chunk::<{ Self::INVENTORY_SIZE }>() else {
             unreachable!("the player inventory always contains its 36 main slots");

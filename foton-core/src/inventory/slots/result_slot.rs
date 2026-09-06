@@ -35,6 +35,13 @@ impl ResultSlot {
     }
 
     /// Returns the result container this slot derived from its handler.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the menu validates its layout for coverage and overlap before any cell is used, and a slot keeps the concrete storage it was built with"
+        )
+    )]
     pub(crate) fn result_container(&self) -> &ContainerRef {
         let Some((container, _)) = self.storage.physical_backing() else {
             unreachable!("ResultSlot always has physical storage");

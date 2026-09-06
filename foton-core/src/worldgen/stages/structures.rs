@@ -36,6 +36,13 @@ pub(crate) fn generate_starts(
 ///
 /// # Panics
 /// Panics if the chunk is not at `ChunkStatus::StructureStarts` or higher.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+    )
+)]
 pub(crate) fn generate_references(
     _context: Arc<WorldGenContext>,
     _step: &ChunkStep,

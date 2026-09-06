@@ -924,6 +924,13 @@ impl Player {
 
     /// A shared handle to the 2x2 crafting grid of the always-open inventory
     /// menu.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     pub fn crafting_container(&self) -> Shared<CraftingContainer> {
         let menu = self.inventory_menu.lock();
         let Some(kind) = menu.kind().downcast_ref::<InventoryKind>() else {
@@ -934,6 +941,13 @@ impl Player {
 
     /// A shared handler for the 2x2 crafting grid of the always-open inventory
     /// menu and its result.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "packet dispatch is split by kind before this point, and the player's inventory keeps the concrete type it was created with"
+        )
+    )]
     pub(crate) fn inventory_crafting_handler(&self) -> CraftingHandler {
         let menu = self.inventory_menu.lock();
         let Some(kind) = menu.kind().downcast_ref::<InventoryKind>() else {

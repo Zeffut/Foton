@@ -772,6 +772,13 @@ impl Mob for RabbitEntity {
 
     /// Vanilla parity: `Rabbit.finalizeSpawn`. The whole group shares one
     /// variant, which is why a warren is all one color.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the value was constructed, locked or registered by this same call a few lines up"
+        )
+    )]
     fn finalize_spawn(
         &self,
         world: &Arc<World>,

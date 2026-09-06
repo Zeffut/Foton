@@ -58,6 +58,13 @@ impl World {
     ///
     /// Panics if a published Full chunk's scheduled-tick container was finalized,
     /// which violates the chunk publication invariant.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a scheduled-tick container is registered before any deadline refers to it, and deregistered only after the last one"
+        )
+    )]
     pub fn has_scheduled_block_tick(&self, pos: BlockPos, block: BlockRef) -> bool {
         let chunk_pos = Self::chunk_pos_for_block(pos);
         self.chunk_map
@@ -78,6 +85,13 @@ impl World {
     ///
     /// Panics if a published Full chunk's scheduled-tick container was finalized,
     /// which violates the chunk publication invariant.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a scheduled-tick container is registered before any deadline refers to it, and deregistered only after the last one"
+        )
+    )]
     pub fn has_scheduled_fluid_tick(&self, pos: BlockPos, fluid: FluidRef) -> bool {
         let chunk_pos = Self::chunk_pos_for_block(pos);
         self.chunk_map

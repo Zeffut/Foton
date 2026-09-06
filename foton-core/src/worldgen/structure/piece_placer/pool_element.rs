@@ -111,6 +111,13 @@ impl StructurePiecePlacer {
         clippy::too_many_arguments,
         reason = "mirrors SinglePoolElement.place and StructureTemplate.placeInWorld"
     )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn place_single_pool_element(
         region: &impl WorldGenLevel,
         registry: &Registry,
@@ -161,6 +168,13 @@ impl StructurePiecePlacer {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn pool_processors<'a>(
         registry: &'a Registry,
         processors: &'a ProcessorList,

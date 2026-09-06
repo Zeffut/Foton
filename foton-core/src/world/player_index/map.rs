@@ -47,6 +47,13 @@ impl PlayerMap {
     /// Panics if another player already has the same entity ID. Entity IDs are
     /// session-unique; accepting a duplicate would break entity lookup and
     /// packet routing invariants.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "a scheduled-tick container is registered before any deadline refers to it, and deregistered only after the last one"
+        )
+    )]
     pub fn insert(&self, player: Arc<Player>) -> bool {
         let uuid = player.gameprofile.id;
         let entity_id = player.id();

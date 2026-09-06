@@ -371,6 +371,13 @@ impl ChunkMap {
     /// This runs only after lifecycle/readiness changes, never as fixed per-tick
     /// bookkeeping. The published snapshot owns holders but never component guards,
     /// so callbacks cannot retain section or chunk-component locks.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub(crate) fn rebuild_ticking_chunk_snapshot(&self) -> usize {
         let mut block = Vec::new();
         let mut random_chunk_indices = Vec::new();
@@ -565,6 +572,13 @@ impl ChunkMap {
         snapshot_changed
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub(super) fn apply_final_readiness(
         &self,
         dirty: Vec<(ChunkPos, FullNeighborhoodCounts)>,

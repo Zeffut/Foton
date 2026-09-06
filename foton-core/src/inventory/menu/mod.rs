@@ -318,6 +318,13 @@ impl Menu {
 
     /// Handles a click action in this menu. Packet clicks are validated via
     /// [`Click::parse`]; invalid programmatically constructed clicks are ignored.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the menu locks the player inventory before dispatching a click, so it is present for the whole dispatch"
+        )
+    )]
     pub fn clicked(&mut self, click: Click, player: &Player) {
         if !click.is_valid_for(self.behavior().slot_count()) {
             log::debug!(
@@ -441,6 +448,13 @@ impl Menu {
 
     /// Handles swap (number keys for a hotbar slot, or swap-hands for the
     /// offhand).
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the menu locks the player inventory before dispatching a click, so it is present for the whole dispatch"
+        )
+    )]
     fn do_swap(&mut self, slot_index: usize, with: SwapTarget, player: &Player) {
         let player_inventory = ContainerRef::from(player.inventory.clone());
         let player_inv_id = ContainerId::from_arc(&player.inventory);

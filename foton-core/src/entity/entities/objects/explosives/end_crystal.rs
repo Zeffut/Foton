@@ -95,6 +95,13 @@ impl EndCrystalEntity {
     ///
     /// Panics if the active world entity manager rejects the snap position. This is an invariant
     /// failure for loaded end crystals.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the value was constructed, locked or registered by this same call a few lines up"
+        )
+    )]
     pub fn snap_to(&self, position: DVec3, yaw: f32, pitch: f32) {
         if let Err(error) = self.base.try_set_position(position) {
             panic!(

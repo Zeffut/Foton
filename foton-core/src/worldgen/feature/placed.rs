@@ -438,6 +438,13 @@ impl FeatureDecorationRunner {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(crate) fn place_structure_pool_feature(
         region: &impl WorldGenLevel,
         registry: &Registry,

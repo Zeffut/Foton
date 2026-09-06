@@ -432,6 +432,13 @@ impl<L: WorldGenLevel> MineshaftPlacer<'_, L> {
         false
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     fn is_mineshaft_blocking_biome(&self, pos: BlockPos) -> bool {
         let Some(biome_id) = fuzzed_biome_at_block(self.biome_zoom_seed, pos, |quart| {
             self.region.noise_biome_id(quart.x, quart.y, quart.z)

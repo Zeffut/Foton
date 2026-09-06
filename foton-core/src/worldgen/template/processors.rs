@@ -491,6 +491,13 @@ impl StructureTemplate {
         clippy::too_many_arguments,
         reason = "matches vanilla CappedProcessor.finalizeProcessing inputs"
     )]
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(super) fn finalize_capped_processing(
         region: &impl WorldGenLevel,
         registry: &Registry,
@@ -577,6 +584,13 @@ impl StructureTemplate {
             .at(position.x(), position.y(), position.z())
     }
 
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "this comes from extracted vanilla data or from a count taken over it, so an unresolved reference means the extraction is broken rather than anything at runtime"
+        )
+    )]
     pub(super) fn vanilla_shuffle<T>(items: &mut [T], random: &mut impl Random) {
         for i in (1..items.len()).rev() {
             let Ok(bound) = i32::try_from(i + 1) else {

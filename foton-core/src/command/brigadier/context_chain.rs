@@ -97,6 +97,13 @@ impl<S> ContextChain<S, BrigadierRuntime> {
     }
 
     /// Runs the current stage's terminal command.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     pub(crate) fn run_executable(
         &self,
         source: Arc<S>,
@@ -120,6 +127,13 @@ impl<S> ContextChain<S, BrigadierRuntime> {
     }
 
     /// Executes the complete chain with Brigadier's synchronous semantics.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::unreachable,
+            reason = "the command graph is built by the registration that runs before any dispatch, and a redirect always names a node that registration created"
+        )
+    )]
     pub(crate) fn execute_all(
         &self,
         source: S,

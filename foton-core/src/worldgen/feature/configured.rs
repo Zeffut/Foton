@@ -140,6 +140,13 @@ impl FeatureDecorationRunner {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_random_boolean_selector<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -162,6 +169,13 @@ fn place_random_boolean_selector<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_random_selector<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -193,6 +207,13 @@ fn place_random_selector<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_weighted_random_selector<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -217,6 +238,13 @@ fn place_weighted_random_selector<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_simple_random_selector<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -245,6 +273,13 @@ fn place_simple_random_selector<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_sequence<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -267,6 +302,13 @@ fn place_sequence<L: WorldGenLevel>(
     true
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_template<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -326,6 +368,13 @@ fn place_template<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn weighted_index(
     len: usize,
     weight_at: impl Fn(usize) -> u32,
@@ -368,6 +417,13 @@ fn template_feature_bounding_box(region: &impl WorldGenLevel) -> BoundingBox {
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_bamboo<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -383,6 +439,13 @@ fn place_bamboo<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_simple_block<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -399,6 +462,13 @@ fn place_simple_block<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_block_blob<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -415,6 +485,13 @@ fn place_block_blob<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_vegetation_patch<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -432,6 +509,13 @@ fn place_vegetation_patch<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_waterlogged_vegetation_patch<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -449,6 +533,13 @@ fn place_waterlogged_vegetation_patch<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_block_column<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -465,6 +556,13 @@ fn place_block_column<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_block_pile<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -481,6 +579,13 @@ fn place_block_pile<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_disk<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -497,6 +602,13 @@ fn place_disk<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_basalt_pillar<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -511,6 +623,13 @@ fn place_basalt_pillar<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_basalt_columns<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -526,6 +645,13 @@ fn place_basalt_columns<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_blue_ice<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -536,6 +662,13 @@ fn place_blue_ice<L: WorldGenLevel>(
     FeatureDecorationRunner::place_blue_ice_feature(context.region, context.random, context.origin)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_bonus_chest<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -550,6 +683,13 @@ fn place_bonus_chest<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_chorus_plant<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -564,6 +704,13 @@ fn place_chorus_plant<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_coral_claw<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -579,6 +726,13 @@ fn place_coral_claw<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_coral_mushroom<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -594,6 +748,13 @@ fn place_coral_mushroom<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_coral_tree<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -609,6 +770,13 @@ fn place_coral_tree<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_delta_feature<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -625,6 +793,13 @@ fn place_delta_feature<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_desert_well<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -639,6 +814,13 @@ fn place_desert_well<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_end_gateway<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -649,6 +831,13 @@ fn place_end_gateway<L: WorldGenLevel>(
     FeatureDecorationRunner::place_end_gateway_feature(context.region, config, context.origin)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_end_island<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -663,6 +852,13 @@ fn place_end_island<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_end_platform<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -673,6 +869,13 @@ fn place_end_platform<L: WorldGenLevel>(
     FeatureDecorationRunner::place_end_platform_feature(context.region, context.origin)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_end_spike<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -688,6 +891,13 @@ fn place_end_spike<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_geode<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -704,6 +914,13 @@ fn place_geode<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_glowstone_blob<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -718,6 +935,13 @@ fn place_glowstone_blob<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_huge_brown_mushroom<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -734,6 +958,13 @@ fn place_huge_brown_mushroom<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_huge_red_mushroom<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -750,6 +981,13 @@ fn place_huge_red_mushroom<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_huge_fungus<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -766,6 +1004,13 @@ fn place_huge_fungus<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_iceberg<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -782,6 +1027,13 @@ fn place_iceberg<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_netherrack_replace_blobs<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -798,6 +1050,13 @@ fn place_netherrack_replace_blobs<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_nether_forest_vegetation<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -814,6 +1073,13 @@ fn place_nether_forest_vegetation<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_twisting_vines<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -829,6 +1095,13 @@ fn place_twisting_vines<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_vines<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -839,6 +1112,13 @@ fn place_vines<L: WorldGenLevel>(
     FeatureDecorationRunner::place_vines_feature(context.region, context.origin)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_void_start_platform<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -849,6 +1129,13 @@ fn place_void_start_platform<L: WorldGenLevel>(
     FeatureDecorationRunner::place_void_start_platform_feature(context.region, context.origin)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_weeping_vines<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -863,6 +1150,13 @@ fn place_weeping_vines<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_spring_feature<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -878,6 +1172,13 @@ fn place_spring_feature<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_kelp<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -888,6 +1189,13 @@ fn place_kelp<L: WorldGenLevel>(
     FeatureDecorationRunner::place_kelp_feature(context.region, context.random, context.origin)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_lake<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -905,6 +1213,13 @@ fn place_lake<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_monster_room<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -919,6 +1234,13 @@ fn place_monster_room<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_fill_layer<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -929,6 +1251,13 @@ fn place_fill_layer<L: WorldGenLevel>(
     FeatureDecorationRunner::place_fill_layer_feature(context.region, context.origin, *config)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_freeze_top_layer<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -944,6 +1273,13 @@ fn place_freeze_top_layer<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_multiface_growth<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -960,6 +1296,13 @@ fn place_multiface_growth<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_sea_pickle<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -975,6 +1318,13 @@ fn place_sea_pickle<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_seagrass<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -990,6 +1340,13 @@ fn place_seagrass<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_underwater_magma<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1005,6 +1362,13 @@ fn place_underwater_magma<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_pointed_dripstone<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1020,6 +1384,13 @@ fn place_pointed_dripstone<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_dripstone_cluster<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1035,6 +1406,13 @@ fn place_dripstone_cluster<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_speleothem<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1050,6 +1428,13 @@ fn place_speleothem<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_speleothem_cluster<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1065,6 +1450,13 @@ fn place_speleothem_cluster<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_large_dripstone<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1080,6 +1472,13 @@ fn place_large_dripstone<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_spike<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1096,6 +1495,13 @@ fn place_spike<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_ore<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1112,6 +1518,13 @@ fn place_ore<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_scattered_ore<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1128,6 +1541,13 @@ fn place_scattered_ore<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_sculk_patch<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1144,6 +1564,13 @@ fn place_sculk_patch<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_tree<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1178,6 +1605,13 @@ fn place_tree<L: WorldGenLevel>(
 /// The tree code runs over any `LevelAccessor` so a sapling can grow one, and a
 /// nested configured feature can only be placed from this dispatcher, so the
 /// decorators hand back where they wanted one and this puts it there.
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_tree_ground_features<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     origins: &[BlockPos],
@@ -1210,6 +1644,13 @@ fn place_tree_ground_features<L: WorldGenLevel>(
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_fallen_tree<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1232,6 +1673,13 @@ fn place_fallen_tree<L: WorldGenLevel>(
     placed
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_fossil<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,
@@ -1248,6 +1696,13 @@ fn place_fossil<L: WorldGenLevel>(
     )
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::panic,
+        reason = "each placer is reached only through the registry entry that pairs it with its own configured-feature kind, so the other arms of the match cannot be the one it was handed"
+    )
+)]
 fn place_root_system<L: WorldGenLevel>(
     context: &mut ConfiguredFeaturePlaceContext<'_, L>,
     kind: &ConfiguredFeatureKind,

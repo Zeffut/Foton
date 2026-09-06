@@ -448,19 +448,24 @@ system that compiles.
   which the eighteen call sites had no `expect` at all.
 
 - **`panic!` was the other half of the `expect` problem, and it is now denied in
-  eleven crates of twelve.** `expect_used` says nothing about `panic!`,
+  every crate that runs in the server -- eleven of the twelve.** The twelfth,
+  `foton-macros`, is deliberately exempt: a proc-macro crate runs at build time,
+  where a `panic!` is a compile error carrying a message, which is how a macro
+  is *supposed* to reject bad input. `expect_used` says nothing about `panic!`,
   `unreachable!` or `todo!`, which under `panic = "abort"` kill the server just
   as dead -- one of them sits on the chunk *save* path, where dying costs
   exactly the chunks being written. Measured before adopting: six crates had
   none at all, `foton-utils` and `foton-protocol` four each, `foton-worldgen`
   ten, `foton-registry` thirty-nine. All annotated or fixed.
 
-  `foton-core` has **303** -- the 249 first counted missed the `unreachable!`
-  half, the same grep mistake this file warns about twice. They are
+  `foton-core` had **303** -- the 249 first counted missed the `unreachable!`
+  half, the same grep mistake this file warns about twice. They were
   concentrated: 69 in `worldgen/feature/configured.rs`, 20 in
   `worldgen/region.rs`, 11 each in `worldgen/stages/light.rs` and
-  `leaf_distance.rs`. That is a pass of its own, and the measurement is its
-  head start.
+  `leaf_distance.rs`. It took eight passes to reach zero, and what came out is
+  **240 annotations across 89 files carrying 31 distinct reasons** -- one
+  annotation often covers several panics in the same function, and one reason
+  often covers a whole family of functions that assert the same thing.
 
   The 57 sites outside worldgen were read first, on the reasoning that a panic
   over extracted feature data shows up on the first generated chunk while one on
@@ -471,35 +476,48 @@ system that compiles.
   sections the file supplied. A chunk saved under a different world height, or a
   truncated one, aborted the server mid-load and took every other dirty chunk
   with it. `try_persistent_to_chunk` now refreshes first and returns the load
-  error it already had.
+  error it already had. **One live defect in 303 sites** is the honest yield of
+  this pass, and it was not in the bulk -- it was in the fifty-seven read first.
 
-  The worldgen bulk was sampled rather than left unknown, and it splits in two.
-  Sixty-nine of the 69 in `worldgen/feature/configured.rs` are one sentence --
+  The worldgen bulk split in two, as the sample predicted. Sixty-nine of the 69
+  in `worldgen/feature/configured.rs` are one sentence --
   `panic!("<feature> placer received wrong configured feature kind")` -- a
   single genuine invariant, since the registry pairs each placer with its own
-  config type; one reason covers all of them honestly. The rest are varied:
-  bulk-section cache indices in `region.rs`, coordinate conversions and missing
-  chunks in the stages, registry lookups in `runner.rs`. Those need reading one
-  at a time, which is why they are a pass and not a chore -- an annotation is
-  only worth having if its reason is true, and 180 judgments made in one sitting
-  is where that stops being so.
+  config type; one reason covers all of them honestly. The rest were varied and
+  were read one at a time: bulk-section cache indices in `region.rs`, step
+  declarations and published status, coordinate conversions and missing chunks
+  in the stages, registry lookups in `runner.rs`. That distinction is the whole
+  method -- an annotation is only worth having if its reason is true, so the
+  families were annotated wholesale and everything else individually.
 
-  The other 56 non-worldgen sites are internal invariants: command-chain state,
-  packet-lane bookkeeping, heightmap types. One of them is a lead rather than a chore --
+  The 56 remaining non-worldgen sites are internal invariants: command-chain
+  state, packet-lane bookkeeping, heightmap types. One is still a lead rather
+  than a chore, and is deliberately left as one --
   `inventory/menu/mod.rs` repeats "the explicitly locked player inventory must
   be present" seven times, which is the same shape as the eighteen slot methods
   that turned into four accessors on `ContainerLockGuard`. A repeated assertion
   is an invariant asking for a name, and naming it is worth more than seven
   annotations.
 
-  Two process notes, both earned the hard way in the same sitting. Attaching
+  Three process notes, all earned the hard way in the same sitting. Attaching
   `clippy::panic` and `clippy::unreachable` together "to be safe" left thirteen
-  expectations unfulfilled, and the compiler said so -- an annotation wider than
-  the thing it justifies will one day cover a site that deserved to be caught.
-  And eleven crates were checked with `cargo clippy -p <crate> --lib` in debug
+  expectations unfulfilled, then thirty-seven, and the compiler said so both
+  times -- an annotation wider than the thing it justifies will one day cover a
+  site that deserved to be caught. The fix that finally held was to read the
+  source line and derive the lint from it *before* writing the annotation,
+  rather than annotating and narrowing afterwards.
+
+  Eleven crates were checked with `cargo clippy -p <crate> --lib` in debug
   while the gate is `cargo clippy -r --workspace --all-targets --all-features`;
   two `unreachable!` in `foton-login` walked straight through the gap. Verify
   with the command that decides, not a narrower one.
+
+  And a script that finds functions by regex must be checked against what it
+  did not match. The pattern `pub(\([a-z()]*\))?` silently skipped four
+  functions declared `pub(in crate::worldgen::feature)` -- lowercase letters and
+  parentheses do not cover a path. The count of sites the script *reports*
+  finishing is not the count of sites there are; only the compiler knows that,
+  which is why every pass ended on a clippy run and not on the script's output.
 
 - **`clippy::indexing_slicing` is not the answer to unchecked indexing, and it
   was measured rather than guessed.** The corrupt-region-file panic this audit

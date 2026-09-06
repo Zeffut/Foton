@@ -6,6 +6,13 @@ use super::{
 
 impl ChunkMap {
     /// Collects this tick's block batch from sparse live-container heads.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub(super) fn collect_scheduled_block_ticks(
         world: &World,
         tickable_chunks: &TickingChunkSnapshot,
@@ -25,6 +32,13 @@ impl ChunkMap {
     }
 
     /// Collects this tick's fluid batch after block callbacks have run.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the holder publishes this state before anything reads it, and building mode is entered and left within the same call"
+        )
+    )]
     pub(super) fn collect_scheduled_fluid_ticks(
         world: &World,
         tickable_chunks: &TickingChunkSnapshot,

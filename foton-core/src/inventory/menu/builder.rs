@@ -1016,6 +1016,13 @@ impl MenuBuilder {
     ///
     /// # Panics
     /// Panics if the range exceeds the container or was already covered by another range.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::panic,
+            reason = "the menu validates its layout for coverage and overlap before any cell is used, and a slot keeps the concrete storage it was built with"
+        )
+    )]
     pub(crate) fn claim(&mut self, container: &ContainerRef, range: Range<usize>) {
         let id = container.container_id();
         let size = {
