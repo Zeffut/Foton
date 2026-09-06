@@ -3,13 +3,13 @@ use std::{f32::consts::TAU, mem, sync::Arc};
 use crate::event::Event as _;
 use crate::event::{
     InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent, InventoryOpenEvent,
-    PlayerDropItemEvent,
+    PlayerDropItemEvent, PlayerItemHeldEvent,
 };
 use crate::inventory::click::QuickCraft;
 use foton_protocol::packets::game::{
-    CContainerClose, CMountScreenOpen, COpenBook, COpenScreen, CSetPlayerInventory, ClickType,
-    SContainerButtonClick, SContainerClick, SContainerClose, SContainerSlotStateChanged, SEditBook,
-    SRenameItem, SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem,
+    CContainerClose, CMountScreenOpen, COpenBook, COpenScreen, CSetHeldSlot, CSetPlayerInventory,
+    ClickType, SContainerButtonClick, SContainerClick, SContainerClose, SContainerSlotStateChanged,
+    SEditBook, SRenameItem, SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem,
     SSetCreativeModeSlot,
 };
 use foton_registry::data_components::components::{
@@ -721,7 +721,21 @@ impl Player {
     }
 
     /// Sets selected slot
-    pub fn handle_set_carried_item(&self, packet: SSetCarriedItem) {
+    pub fn handle_set_carried_item(self: &Arc<Self>, packet: SSetCarriedItem) {
+        // Before the swap, and refusable: a plugin pinning a player to one slot
+        // cannot do it by swapping them back, because the client has already
+        // drawn the new one and would flicker.
+        let previous = i32::from(self.inventory.lock().get_selected_slot());
+        let mut event =
+            PlayerItemHeldEvent::new(Arc::clone(self), previous, i32::from(packet.slot));
+        self.fire_event(&mut event);
+        if event.is_cancelled() {
+            // The client already moved its own selection, so refusing means
+            // telling it what the slot really is.
+            self.send_packet(CSetHeldSlot { slot: previous });
+            return;
+        }
+
         if self
             .inventory
             .lock()

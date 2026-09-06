@@ -1451,6 +1451,65 @@ impl PlayerChangedWorldEvent {
     }
 }
 
+/// Emitted before a player's selected hotbar slot changes.
+///
+/// Bukkit's `PlayerItemHeldEvent`. Before rather than after, and cancellable,
+/// because the point of the hook is to refuse a swap -- a minigame pinning a
+/// player to one slot cannot do it by swapping them back, which the client has
+/// already drawn.
+pub struct PlayerItemHeldEvent {
+    player: Arc<Player>,
+    previous_slot: i32,
+    new_slot: i32,
+    cancelled: bool,
+}
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for PlayerItemHeldEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_item_held");
+}
+impl Event for PlayerItemHeldEvent {}
+impl PlayerItemHeldEvent {
+    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
+    #[must_use]
+    pub const fn new(player: Arc<Player>, previous_slot: i32, new_slot: i32) -> Self {
+        Self {
+            player,
+            previous_slot,
+            new_slot,
+            cancelled: false,
+        }
+    }
+
+    /// Whose hand is changing.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+
+    /// The slot they were holding.
+    #[must_use]
+    pub const fn previous_slot(&self) -> i32 {
+        self.previous_slot
+    }
+
+    /// The slot they are switching to.
+    #[must_use]
+    pub const fn new_slot(&self) -> i32 {
+        self.new_slot
+    }
+
+    /// Whether a plugin refused the swap.
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Refuses the swap; the player keeps the slot they had.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// Emitted when a client changes its language preference.
 pub struct PlayerLocaleChangeEvent {
     player: Arc<Player>,

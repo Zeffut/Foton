@@ -38,7 +38,7 @@ use foton_core::event::{
     PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
     SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
-use foton_core::event::{PlayerChangedWorldEvent, PlayerGameModeChangeEvent};
+use foton_core::event::{PlayerChangedWorldEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent};
 use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
@@ -939,6 +939,18 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
             Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerItemHeldEvent, _>(owner(), move |event| {
+        if !item_held_call(
+            &jvm,
+            event.player().gameprofile.id,
+            event.previous_slot(),
+            event.new_slot(),
+        ) {
+            event.set_cancelled(true);
         }
     });
 
@@ -2504,6 +2516,28 @@ fn block_damage_call(vm: &JavaVM, player: uuid::Uuid, world: &str, pos: BlockPos
     .ok()
     .and_then(|value| value.z().ok())
     .unwrap_or(true)
+}
+
+/// Returns false only when a plugin actually refused. An unreachable bridge
+/// answers true, for the same reason every other gate here does.
+fn item_held_call(vm: &JavaVM, player: uuid::Uuid, previous: i32, current: i32) -> bool {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let Ok(player) = env.new_string(player.to_string()) else {
+        return true;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "fireItemHeld",
+        "(Ljava/lang/String;II)Z",
+        &[
+            JValue::Object(&player),
+            JValue::Int(previous),
+            JValue::Int(current),
+        ],
+    )
+    .map_or(true, |value| value.z().unwrap_or(true))
 }
 
 /// Returns false only when a plugin actually refused: an unreachable bridge
