@@ -200,7 +200,11 @@ impl JavaTcpClient {
             }
         };
 
-        //TODO: Check for duplicate player UUID or name
+        // A duplicate UUID is settled at admission, not here: `queue_player_join`
+        // kicks the session already holding it with
+        // `multiplayer.disconnect.duplicate_login` and waits for it to leave,
+        // which is what `PlayerList.disconnectAllPlayersWithProfile` does.
+        // A duplicate *name* on a different UUID is still unhandled.
 
         let action = self
             .send_login_finished(&profile)

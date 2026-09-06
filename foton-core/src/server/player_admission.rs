@@ -1,10 +1,21 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use foton_utils::translations;
+
+/// How long a duplicate login waits for the session it displaced to finish leaving.
+///
+/// The incumbent's teardown finishes at a game-tick safe point and its player
+/// save is asynchronous, so the UUID is not free the instant it is kicked. Five
+/// seconds is far longer than that takes and still well inside a client's own
+/// login patience; past it the newcomer is refused rather than left hanging.
+const DUPLICATE_LOGIN_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const DUPLICATE_LOGIN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 use super::{
     Arc, CPlayerInfoUpdate, CRemovePlayerInfo, ClientPacket, ConnectionProtocol, DomainPlayerState,
     EncodedPacket, Entity, GlobalPlayerData, Instant, JoinSet, NetworkConnection,
     PendingWorldChangeToken, PersistentPlayerData, Player, ResetReason, SegQueue, Server,
-    SyncMutex, Uuid, mpsc,
+    SyncMutex, Uuid, mpsc, sleep,
 };
 
 pub(super) struct PendingPlayerJoin {
@@ -101,18 +112,65 @@ impl Server {
         if player.connection.closed() {
             return;
         }
-        if !self.reserve_player_join(&player) {
-            player.disconnect("You are already connected to this server");
-            return;
-        }
 
         let server = Arc::clone(self);
         tokio::spawn(async move {
+            if !server.reserve_player_join_over_duplicate(&player).await {
+                return;
+            }
             let state = server.prepare_player_join(&player).await;
             server
                 .pending_player_joins
                 .send(PendingPlayerJoin { player, state });
         });
+    }
+
+    /// Reserves the join slot, displacing whoever already holds the UUID.
+    ///
+    /// Vanilla parity: on login success `ServerLoginPacketListenerImpl` calls
+    /// `PlayerList.disconnectAllPlayersWithProfile`, which kicks every session
+    /// on that UUID with `multiplayer.disconnect.duplicate_login`, and parks the
+    /// login in `WAITING_FOR_DUPE_DISCONNECT` until the UUID is free. The
+    /// newcomer wins; the incumbent leaves.
+    ///
+    /// Foton refused the newcomer instead, so quitting and reconnecting inside
+    /// the asynchronous disconnect save answered "You are already connected to
+    /// this server" -- and before connections were ticked per connection rather
+    /// than per world-resident player, a client that died without closing its
+    /// socket locked its own account out for good.
+    ///
+    /// The wait is a poll rather than a notification because the UUID is freed
+    /// from three different places -- the tick safe point, the disconnect save
+    /// and the admission release -- and a condition variable spanning all three
+    /// would be one more lost-wakeup surface for a path that runs once per login.
+    pub(super) async fn reserve_player_join_over_duplicate(
+        self: &Arc<Self>,
+        player: &Arc<Player>,
+    ) -> bool {
+        if self.reserve_player_join(player) {
+            return true;
+        }
+
+        let uuid = player.gameprofile.id;
+        if let Some(incumbent) = self.online_players.get_by_uuid(&uuid) {
+            log::info!("Disconnecting the existing session for {uuid}: duplicate login");
+            incumbent.disconnect(translations::MULTIPLAYER_DISCONNECT_DUPLICATE_LOGIN.msg());
+        }
+
+        let deadline = Instant::now() + DUPLICATE_LOGIN_TEARDOWN_TIMEOUT;
+        while Instant::now() < deadline {
+            sleep(DUPLICATE_LOGIN_POLL_INTERVAL).await;
+            if player.connection.closed() {
+                return false;
+            }
+            if self.reserve_player_join(player) {
+                return true;
+            }
+        }
+
+        log::warn!("Login for {uuid} gave up waiting for the previous session to leave");
+        player.disconnect("You are already connected to this server");
+        false
     }
 
     async fn prepare_player_join(&self, player: &Player) -> Result<DomainPlayerState, String> {
