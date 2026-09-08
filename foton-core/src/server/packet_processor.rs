@@ -134,10 +134,11 @@ impl PacketProcessor {
     ) -> bool {
         !player.connection.closed()
             && !server_cancelled
-            && player.gate_domain_switch_packet(
-                packet.is_domain_handshake_packet(),
-                packet.is_perform_respawn(),
-            )
+            && (packet.is_maintenance_packet()
+                || player.gate_domain_switch_packet(
+                    packet.is_domain_handshake_packet(),
+                    packet.is_perform_respawn(),
+                ))
     }
 
     /// Opens the inter-tick packet phase and wakes the worker.
@@ -930,6 +931,22 @@ mod tests {
             &player, &packet, false
         ));
         assert!(player.has_deferred_death_respawn_for_test());
+
+        assert!(player.finish_domain_switch(token));
+        assert!(player.finish_pending_world_change(token));
+    }
+
+    #[test]
+    fn scheduled_ping_is_runnable_during_domain_maintenance() {
+        let world = fresh_test_world("scheduled_domain_maintenance_ping_processor");
+        let player = TestPlayerBuilder::new(world, "PingTester", 1).build();
+        let Some(token) = player.begin_pending_world_change() else {
+            panic!("test player should acquire a world-change token");
+        };
+        assert!(player.begin_domain_switch(token));
+        let packet = ScheduledPlayPacket::ping_request_for_test(42);
+
+        assert!(PacketProcessor::packet_is_runnable(&player, &packet, false));
 
         assert!(player.finish_domain_switch(token));
         assert!(player.finish_pending_world_change(token));

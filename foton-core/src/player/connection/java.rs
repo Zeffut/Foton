@@ -230,6 +230,7 @@ pub(crate) enum ScheduledPacketExecution {
 }
 
 enum ScheduledPlayPacketKind {
+    PingRequest(SPingRequest),
     AcceptTeleportation(SAcceptTeleportation),
     Attack(SAttack),
     Interact(SInteract),
@@ -279,7 +280,6 @@ enum ScheduledPlayPacketKind {
 
 enum ImmediatePlayPacket {
     KeepAlive(SKeepAlive),
-    PingRequest(SPingRequest),
     ChunkBatchReceived(SChunkBatchReceived),
     Unknown(i32),
 }
@@ -296,6 +296,11 @@ impl ScheduledPlayPacket {
             self.0,
             ScheduledPlayPacketKind::AcceptTeleportation(_) | ScheduledPlayPacketKind::PlayerLoaded
         )
+    }
+
+    /// Returns whether this packet is allowed to run while a domain switch is in progress.
+    pub(crate) const fn is_maintenance_packet(&self) -> bool {
+        matches!(self.0, ScheduledPlayPacketKind::PingRequest(_))
     }
 
     /// Returns whether this is the death screen's one-shot respawn request.
@@ -315,6 +320,11 @@ impl ScheduledPlayPacket {
         }))
     }
 
+    #[cfg(test)]
+    pub(crate) const fn ping_request_for_test(time: i64) -> Self {
+        Self(ScheduledPlayPacketKind::PingRequest(SPingRequest { time }))
+    }
+
     /// Returns the handler's audited cross-player concurrency class.
     ///
     /// This match is intentionally exhaustive so every newly implemented packet requires an
@@ -323,7 +333,8 @@ impl ScheduledPlayPacket {
         match &self.0 {
             // These handlers touch player-owned state or use an individually linearizable shared
             // operation. The player lane preserves same-player order.
-            ScheduledPlayPacketKind::ChatSessionUpdate(_)
+            ScheduledPlayPacketKind::PingRequest(_)
+            | ScheduledPlayPacketKind::ChatSessionUpdate(_)
             | ScheduledPlayPacketKind::ClientInformation(_)
             | ScheduledPlayPacketKind::ClientTickEnd
             | ScheduledPlayPacketKind::PlayerLoaded
@@ -403,7 +414,8 @@ impl ScheduledPlayPacket {
     pub(crate) const fn can_process_before_join(&self) -> bool {
         matches!(
             &self.0,
-            ScheduledPlayPacketKind::AcceptTeleportation(_)
+            ScheduledPlayPacketKind::PingRequest(_)
+                | ScheduledPlayPacketKind::AcceptTeleportation(_)
                 | ScheduledPlayPacketKind::ClientInformation(_)
                 | ScheduledPlayPacketKind::ClientTickEnd
                 | ScheduledPlayPacketKind::CustomClickAction(_)
@@ -496,6 +508,9 @@ impl ScheduledPlayPacket {
 
         let kind = self.0;
         match kind {
+            ScheduledPlayPacketKind::PingRequest(packet) => {
+                player.send_packet(CPongResponse::new(packet.time));
+            }
             ScheduledPlayPacketKind::AcceptTeleportation(packet) => {
                 player.handle_accept_teleportation(packet);
             }
@@ -1131,7 +1146,7 @@ impl JavaConnection {
             play::S_SEEN_ADVANCEMENTS => scheduled(ScheduledPlayPacketKind::SeenAdvancements(
                 SSeenAdvancements::read_packet(data)?,
             )),
-            play::S_PING_REQUEST => DecodedPlayPacket::Immediate(ImmediatePlayPacket::PingRequest(
+            play::S_PING_REQUEST => scheduled(ScheduledPlayPacketKind::PingRequest(
                 SPingRequest::read_packet(data)?,
             )),
             play::S_CHANGE_GAME_MODE => scheduled(ScheduledPlayPacketKind::ChangeGameMode(
@@ -1147,9 +1162,6 @@ impl JavaConnection {
     fn handle_immediate_packet(&self, packet: ImmediatePlayPacket, player: &Player) {
         match packet {
             ImmediatePlayPacket::KeepAlive(packet) => self.handle_keep_alive(packet),
-            ImmediatePlayPacket::PingRequest(packet) => {
-                player.send_packet(CPongResponse::new(packet.time));
-            }
             ImmediatePlayPacket::ChunkBatchReceived(packet) => {
                 player
                     .chunk_sender
@@ -1453,6 +1465,29 @@ mod tests {
         );
         assert!(matches!(perform_respawn, Ok(None)));
         assert!(player.has_deferred_death_respawn_for_test());
+
+        assert!(player.finish_domain_switch(token));
+        assert!(player.finish_pending_world_change(token));
+    }
+
+    #[test]
+    fn ping_during_domain_maintenance_uses_player_local_scheduling() {
+        let world = fresh_test_world("scheduled_domain_maintenance_ping");
+        let player = TestPlayerBuilder::new(world, "PingTester", 1).build();
+        let Some(token) = player.begin_pending_world_change() else {
+            panic!("test player should acquire a world-change token");
+        };
+        assert!(player.begin_domain_switch(token));
+
+        let decoded = JavaConnection::decode_domain_gated_packet(
+            RawPacket::new(play::S_PING_REQUEST, 42_i64.to_be_bytes().to_vec()),
+            &player,
+        );
+        let Ok(Some(DecodedPlayPacket::Scheduled(packet))) = decoded else {
+            panic!("ping during domain maintenance should be scheduled");
+        };
+
+        assert_eq!(packet.execution(), ScheduledPacketExecution::PlayerLocal);
 
         assert!(player.finish_domain_switch(token));
         assert!(player.finish_pending_world_change(token));

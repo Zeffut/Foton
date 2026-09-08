@@ -202,6 +202,7 @@ impl<R: AsyncRead + Unpin> TCPNetworkDecoder<R> {
 
             if decompressed_len > 0 {
                 let mut decompressed = vec![0; decompressed_len];
+                let compressed_len = packet_data.len().saturating_sub(cursor.position() as usize);
                 let mut decoder = ZlibDecoder::new(&mut cursor);
                 decoder
                     .read_exact(&mut decompressed)
@@ -215,6 +216,15 @@ impl<R: AsyncRead + Unpin> TCPNetworkDecoder<R> {
                 {
                     Err(PacketError::DecompressionFailed(format!(
                         "decompressed packet exceeds declared length of {decompressed_len}"
+                    )))?;
+                }
+                let consumed_len = usize::try_from(decoder.total_in()).map_err(|_| {
+                    PacketError::DecompressionFailed("compressed packet input is too long".into())
+                })?;
+                if consumed_len != compressed_len {
+                    Err(PacketError::DecompressionFailed(format!(
+                        "compressed packet has {} trailing bytes",
+                        compressed_len.saturating_sub(consumed_len)
                     )))?;
                 }
                 (decompressed, 0)
@@ -607,6 +617,14 @@ mod compression_security_tests {
     use super::*;
 
     fn compressed_packet(claimed_len: usize, decompressed: &[u8]) -> Vec<u8> {
+        compressed_packet_with_trailing_bytes(claimed_len, decompressed, &[])
+    }
+
+    fn compressed_packet_with_trailing_bytes(
+        claimed_len: usize,
+        decompressed: &[u8],
+        trailing: &[u8],
+    ) -> Vec<u8> {
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder
             .write_all(decompressed)
@@ -620,6 +638,7 @@ mod compression_security_tests {
             .write(&mut packet_data)
             .expect("test claimed length should encode");
         packet_data.extend_from_slice(&compressed);
+        packet_data.extend_from_slice(trailing);
 
         let mut packet = Vec::new();
         VarInt::from(packet_data.len())
@@ -672,5 +691,22 @@ mod compression_security_tests {
 
         assert_eq!(raw_packet.id, 2);
         assert_eq!(raw_packet.payload(), b"hello");
+    }
+
+    #[tokio::test]
+    async fn rejects_zlib_stream_with_trailing_frame_bytes() {
+        let decompressed = [2, b'h', b'e', b'l', b'l', b'o'];
+        let packet = compressed_packet_with_trailing_bytes(
+            decompressed.len(),
+            &decompressed,
+            &[0xde, 0xad],
+        );
+        let mut decoder = TCPNetworkDecoder::new(packet.as_slice());
+        decoder.set_compression(NonZeroU32::MIN);
+
+        assert!(matches!(
+            decoder.get_raw_packet().await,
+            Err(PacketError::DecompressionFailed(_))
+        ));
     }
 }
