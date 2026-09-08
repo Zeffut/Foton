@@ -25,6 +25,9 @@ use std::{
     },
 };
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use foton_core::{
     config::WorldsConfig,
     permission::{PermissionGroupStore, PermissionGroupsConfig},
@@ -43,7 +46,7 @@ static TEMPORARY_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
 std::thread_local! {
-    static ATOMIC_CONFIG_WRITE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ATOMIC_CONFIG_WRITE_COUNT: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -53,7 +56,7 @@ fn reset_atomic_config_write_count() {
 
 #[cfg(test)]
 fn atomic_config_write_count() -> usize {
-    ATOMIC_CONFIG_WRITE_COUNT.with(std::cell::Cell::get)
+    ATOMIC_CONFIG_WRITE_COUNT.with(Cell::get)
 }
 
 /// Top-level TOML deserialization target — used once at startup, not stored globally.
@@ -243,10 +246,13 @@ mod tests;
 #[cfg(test)]
 mod atomic_tests {
     use std::{
-        env::temp_dir,
+        env::{current_dir, current_exe, temp_dir, var_os},
+        ffi::OsStr,
         fs,
-        path::Path,
+        path::{Path, PathBuf},
+        process::Command,
         sync::{Arc, Barrier},
+        thread::spawn,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -257,7 +263,7 @@ mod atomic_tests {
         write_atomic_config_with_before_rename,
     };
 
-    fn temp_config_root(name: &str) -> std::path::PathBuf {
+    fn temp_config_root(name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after Unix epoch")
@@ -307,7 +313,7 @@ mod atomic_tests {
 
         let first_path = path.clone();
         let first_barrier = Arc::clone(&barrier);
-        let first = std::thread::spawn(move || {
+        let first = spawn(move || {
             write_atomic_config_with_before_rename(&first_path, b"first", move || {
                 first_barrier.wait();
                 Ok(())
@@ -315,7 +321,7 @@ mod atomic_tests {
         });
         let second_path = path.clone();
         let second_barrier = Arc::clone(&barrier);
-        let second = std::thread::spawn(move || {
+        let second = spawn(move || {
             write_atomic_config_with_before_rename(&second_path, b"second", move || {
                 second_barrier.wait();
                 Ok(())
@@ -336,13 +342,13 @@ mod atomic_tests {
 
     #[test]
     fn bare_relative_config_path_is_supported_without_writing_to_the_caller_cwd() {
-        let root_name = std::env::current_dir().ok().and_then(|path| {
+        let root_name = current_dir().ok().and_then(|path| {
             path.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
         });
         let child_token = root_name.map(|name| format!("foton-bare-relative-{name}"));
-        if std::env::var_os("FOTON_BARE_RELATIVE_CONFIG_CHILD").as_deref()
-            == child_token.as_deref().map(std::ffi::OsStr::new)
+        if var_os("FOTON_BARE_RELATIVE_CONFIG_CHILD").as_deref()
+            == child_token.as_deref().map(OsStr::new)
         {
             let config = load_or_create(Path::new("config.toml"))
                 .expect("bare relative config path should load");
@@ -370,9 +376,7 @@ mod atomic_tests {
                 .expect("temporary config root should have a name")
                 .to_string_lossy()
         );
-        let status = std::process::Command::new(
-            std::env::current_exe().expect("test executable should exist"),
-        )
+        let status = Command::new(current_exe().expect("test executable should exist"))
         .current_dir(&root)
         .env("FOTON_BARE_RELATIVE_CONFIG_CHILD", &child_token)
         .args([

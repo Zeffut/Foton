@@ -904,6 +904,7 @@ mod tests {
         },
     };
 
+    use super::super::format::CHUNKS_PER_REGION;
     use super::*;
     use crate::chunk_saver::{PersistentChunk, PersistentLightData};
 
@@ -1014,7 +1015,7 @@ mod tests {
             .expect("test region should be created");
 
         let live_table_bound = ((FILE_HEADER_SIZE + CHUNK_TABLE_SIZE).div_ceil(SECTOR_SIZE)
-            + crate::chunk_saver::format::CHUNKS_PER_REGION * MAX_CHUNK_SIZE.div_ceil(SECTOR_SIZE))
+            + CHUNKS_PER_REGION * MAX_CHUNK_SIZE.div_ceil(SECTOR_SIZE))
             as u64
             * SECTOR_SIZE as u64;
         let path = directory.join(RegionPos::from_chunk(0, 0).filename());

@@ -949,7 +949,7 @@ impl Server {
 mod tests {
     use std::{
         iter::empty,
-        sync::{Arc, Mutex, Once},
+        sync::{Arc, Once},
     };
 
     use super::{Server, detach_world};
@@ -963,7 +963,7 @@ mod tests {
         },
         world::World,
     };
-    use foton_utils::{ChunkPos, Identifier};
+    use foton_utils::{ChunkPos, Identifier, locks::SyncMutex};
     use futures::executor::block_on;
     use log::{Level, Log, Metadata, Record};
     use rustc_hash::FxHashMap;
@@ -972,7 +972,7 @@ mod tests {
 
     static WORLD_REMOVAL_LOGGER: WorldRemovalLogger = WorldRemovalLogger;
     static WORLD_REMOVAL_LOGGER_INIT: Once = Once::new();
-    static WORLD_REMOVAL_LOGS: Mutex<Vec<(Level, String)>> = Mutex::new(Vec::new());
+    static WORLD_REMOVAL_LOGS: SyncMutex<Vec<(Level, String)>> = SyncMutex::new(Vec::new());
 
     impl Log for WorldRemovalLogger {
         fn enabled(&self, metadata: &Metadata<'_>) -> bool {
@@ -983,9 +983,7 @@ mod tests {
             if !self.enabled(record.metadata()) {
                 return;
             }
-            let Ok(mut logs) = WORLD_REMOVAL_LOGS.lock() else {
-                return;
-            };
+            let mut logs = WORLD_REMOVAL_LOGS.lock();
             logs.push((record.level(), record.args().to_string()));
         }
 
@@ -997,9 +995,7 @@ mod tests {
             let _ = log::set_logger(&WORLD_REMOVAL_LOGGER);
             log::set_max_level(log::LevelFilter::Trace);
         });
-        let Ok(mut logs) = WORLD_REMOVAL_LOGS.lock() else {
-            panic!("world removal log capture should remain available");
-        };
+        let mut logs = WORLD_REMOVAL_LOGS.lock();
         logs.clear();
     }
 
@@ -1096,9 +1092,7 @@ mod tests {
 
         assert!(detach_world(&worlds, &mut workers, &key).is_err());
 
-        let Ok(logs) = WORLD_REMOVAL_LOGS.lock() else {
-            panic!("world removal logs should remain available");
-        };
+        let logs = WORLD_REMOVAL_LOGS.lock();
         assert!(logs.iter().any(|(level, message)| {
             *level == Level::Error
                 && message == "Requested world main:arena_without_worker has no tick worker"

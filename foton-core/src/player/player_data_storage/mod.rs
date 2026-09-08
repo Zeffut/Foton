@@ -1139,6 +1139,7 @@ mod tests {
     use simdnbt::owned::NbtCompound;
     use std::{
         env,
+        io::Write,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -1193,7 +1194,9 @@ mod tests {
                 .expect("test encoder should initialize");
             let block = vec![0u8; 1024 * 1024];
             for _ in 0..=(TEST_MAX_DECOMPRESSED_BYTES / block.len()) {
-                std::io::Write::write_all(&mut encoder, &block).expect("test bomb should compress");
+                encoder
+                    .write_all(&block)
+                    .expect("test bomb should compress");
             }
             encoder.finish().expect("test frame should finish");
         }

@@ -611,6 +611,10 @@ impl PistonBaseBlock {
         );
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the vanilla piston retraction sequence together for behavioral parity and readability."
+    )]
     fn trigger_retraction(
         &self,
         world: &Arc<World>,

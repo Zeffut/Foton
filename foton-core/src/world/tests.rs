@@ -9,7 +9,7 @@ use foton_registry::{
     init_vanilla_registry, sound_events, vanilla_entities, vanilla_fluids, vanilla_game_rules,
     vanilla_items,
 };
-use tokio::sync::oneshot;
+use tokio::{spawn, sync::oneshot, task::yield_now, time::sleep};
 use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
@@ -87,11 +87,11 @@ fn cleanup_without_save_waits_for_tracked_chunk_tasks() {
 
         let mut cleanup = {
             let world = Arc::clone(&world);
-            tokio::spawn(async move { world.cleanup_without_save().await })
+            spawn(async move { world.cleanup_without_save().await })
         };
         tokio::select! {
             result = &mut cleanup => panic!("cleanup completed before its tracked task released: {result:?}"),
-            () = tokio::task::yield_now() => {}
+            () = yield_now() => {}
         }
 
         assert!(release_sender.send(()).is_ok());
@@ -107,17 +107,17 @@ fn discard_cleanup_skips_admitted_save_that_has_not_started() {
         world.level_data.write().mark_dirty();
         let save_guard = world.save_lock.lock().await;
         world.request_save();
-        tokio::task::yield_now().await;
+        yield_now().await;
 
         let cleanup_world = Arc::clone(&world);
-        let cleanup = tokio::spawn(async move {
+        let cleanup = spawn(async move {
             cleanup_world.cleanup_without_save().await;
         });
         for _ in 0..100 {
             if world.save_coordinator.lock().discard_unstarted {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            sleep(Duration::from_millis(1)).await;
         }
         assert!(world.save_coordinator.lock().discard_unstarted);
         drop(save_guard);

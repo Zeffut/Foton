@@ -2,12 +2,12 @@
 //!
 //! Handles authentication with Mojang's session servers for online mode.
 
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::{io, net::IpAddr, sync::OnceLock, time::Duration};
 
 use foton_core::player::GameProfile;
-use reqwest::{StatusCode, Url};
+use reqwest::{StatusCode, Url, redirect::Policy};
 use thiserror::Error;
+use tokio::time::timeout as tokio_timeout;
 
 const DEFAULT_AUTH_SERVER: &str = "https://sessionserver.mojang.com/session/minecraft/hasJoined";
 
@@ -48,7 +48,7 @@ fn auth_client(allow_insecure_auth_server: bool) -> Result<&'static reqwest::Cli
     let client = reqwest::Client::builder()
         .connect_timeout(AUTH_CONNECT_TIMEOUT)
         .read_timeout(AUTH_READ_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+        .redirect(Policy::custom(move |attempt| {
             if attempt.previous().len() >= MAX_AUTH_REDIRECT_HOPS {
                 attempt.stop()
             } else if !is_auth_redirect_allowed(
@@ -56,7 +56,7 @@ fn auth_client(allow_insecure_auth_server: bool) -> Result<&'static reqwest::Cli
                 attempt.url(),
                 allow_insecure_auth_server,
             ) {
-                attempt.error(std::io::Error::other(
+                attempt.error(io::Error::other(
                     "authentication redirect rejected by endpoint policy",
                 ))
             } else {
@@ -201,7 +201,7 @@ async fn mojang_authenticate_with_timeout(
         Err(last_error)
     };
 
-    tokio::time::timeout(timeout, request)
+    tokio_timeout(timeout, request)
         .await
         .unwrap_or(Err(AuthError::FailedResponse))
 }
@@ -256,7 +256,7 @@ fn is_loopback_url(url: &Url) -> bool {
         host.eq_ignore_ascii_case("localhost")
             || host
                 .trim_matches(['[', ']'])
-                .parse::<std::net::IpAddr>()
+                .parse::<IpAddr>()
                 .is_ok_and(|address| address.is_loopback())
     })
 }
@@ -336,6 +336,7 @@ mod tests {
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
         task::JoinHandle,
+        time::sleep,
     };
 
     #[test]
@@ -650,7 +651,7 @@ mod tests {
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
                 .await
                 .expect("HTTP test server should write headers");
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(200)).await;
             let _ = stream.write_all(b"{}").await;
         });
 

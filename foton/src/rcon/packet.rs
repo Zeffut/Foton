@@ -6,6 +6,8 @@
 //! counts everything after itself, so it is the payload length plus the two
 //! ids, the terminator and the pad.
 
+use std::mem;
+
 /// Largest request frame vanilla will read in one go.
 ///
 /// Vanilla parity: `PktUtils.MAX_PACKET_SIZE`.
@@ -15,8 +17,7 @@ pub(super) const MAX_PACKET_SIZE: usize = 1460;
 const FRAME_OVERHEAD: usize = 10;
 
 /// Payload bytes left after the length prefix and frame overhead.
-const MAX_RESPONSE_PAYLOAD_BYTES: usize =
-    MAX_PACKET_SIZE - std::mem::size_of::<i32>() - FRAME_OVERHEAD;
+const MAX_RESPONSE_PAYLOAD_BYTES: usize = MAX_PACKET_SIZE - mem::size_of::<i32>() - FRAME_OVERHEAD;
 
 /// Largest response chunk vanilla emits before splitting.
 ///

@@ -74,7 +74,7 @@ use foton_registry::{vanilla_blocks, vanilla_entities, vanilla_game_events, vani
 use foton_utils::block_util::FoundRectangle;
 use foton_utils::{
     Downcast as _,
-    locks::{SyncMutex, SyncRwLock},
+    locks::{AsyncMutex, SyncMutex, SyncRwLock},
     random::{Random as _, RandomSource, legacy_random::LegacyRandom},
 };
 use foton_worldgen::{biomes::obfuscate_biome_seed, noise::PerlinSimplexNoise};
@@ -88,7 +88,6 @@ use foton_utils::{
 };
 use tokio::{
     runtime::{Handle, Runtime},
-    sync::Mutex as AsyncMutex,
     time::Instant,
 };
 use tokio_util::task::TaskTracker;
@@ -459,7 +458,7 @@ impl SaveCoordinator {
         self.tasks.clone()
     }
 
-    fn may_start_save(&self) -> bool {
+    const fn may_start_save(&self) -> bool {
         !self.discard_unstarted
     }
 }
@@ -1158,10 +1157,10 @@ impl World {
             Ok(None) => {}
             Err(error) => first_error = Some(error),
         }
-        if let Err(error) = self.save_all_chunks().await {
-            if first_error.is_none() {
-                first_error = Some(error);
-            }
+        if let Err(error) = self.save_all_chunks().await
+            && first_error.is_none()
+        {
+            first_error = Some(error);
         }
         first_error.map_or(Ok(()), Err)
     }
