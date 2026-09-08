@@ -26,8 +26,8 @@ use crate::world::World;
 use super::{
     ChunkStorage, LoadedChunk, PersistentChunk,
     format::{
-        CHUNK_TABLE_SIZE, CHUNKS_PER_REGION, ChunkEntry, FILE_HEADER_SIZE, FIRST_DATA_SECTOR,
-        FORMAT_VERSION, MAX_CHUNK_SIZE, REGION_MAGIC, RegionHeader, RegionPos, SECTOR_SIZE,
+        CHUNK_TABLE_SIZE, ChunkEntry, FILE_HEADER_SIZE, FIRST_DATA_SECTOR, FORMAT_VERSION,
+        MAX_CHUNK_SIZE, REGION_MAGIC, RegionHeader, RegionPos, SECTOR_SIZE,
     },
 };
 
@@ -45,11 +45,12 @@ impl fmt::Display for CorruptChunkData {
 /// slot that goes corrupt, regenerates, and goes corrupt again.
 const MAX_QUARANTINED_COPIES_PER_SLOT: u32 = 16;
 
-/// Largest file representable by a complete region's chunk table.
-const MAX_REGION_FILE_SIZE: u64 = ((FILE_HEADER_SIZE + CHUNK_TABLE_SIZE).div_ceil(SECTOR_SIZE)
-    + CHUNKS_PER_REGION * MAX_CHUNK_SIZE.div_ceil(SECTOR_SIZE))
-    as u64
-    * SECTOR_SIZE as u64;
+/// Largest file whose sector count and chunk offsets fit the region layout.
+///
+/// Saves append new chunk data without reclaiming old sectors, so the bound
+/// must include every sector addressable by the on-disk `u32` offsets rather
+/// than only the sectors currently retained by the chunk table.
+const MAX_REGION_FILE_SIZE: u64 = u32::MAX as u64 * SECTOR_SIZE as u64;
 
 /// Manages region files with seek-based chunk access.
 ///
@@ -131,15 +132,6 @@ impl RegionManager {
             .await?;
 
         let file_size = file.metadata().await?.len();
-        if file_size > MAX_REGION_FILE_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "region file is {file_size} bytes, exceeding the format limit of {MAX_REGION_FILE_SIZE} bytes"
-                ),
-            ));
-        }
-
         // Read and verify magic + version
         let mut header_bytes = [0u8; FILE_HEADER_SIZE];
         file.read_exact(&mut header_bytes).await?;
@@ -163,6 +155,15 @@ impl RegionManager {
                 backup_path.display()
             );
             return self.create_region(pos).await;
+        }
+
+        if file_size > MAX_REGION_FILE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "region file is {file_size} bytes, exceeding the format limit of {MAX_REGION_FILE_SIZE} bytes"
+                ),
+            ));
         }
 
         // Read chunk table
@@ -404,6 +405,7 @@ impl RegionManager {
             };
         }
         quarantine.flush().await?;
+        quarantine.sync_all().await?;
         tracing::warn!(
             path = %path.display(),
             bytes = bytes.len(),
@@ -981,17 +983,13 @@ mod tests {
             .await
             .expect("test region should be created");
 
-        let max_data_sectors = crate::chunk_saver::format::CHUNKS_PER_REGION as u64
-            * MAX_CHUNK_SIZE.div_ceil(SECTOR_SIZE) as u64;
-        let max_region_bytes =
-            (u64::from(FIRST_DATA_SECTOR) + max_data_sectors) * SECTOR_SIZE as u64;
         let path = directory.join(RegionPos::from_chunk(0, 0).filename());
         let file = OpenOptions::new()
             .write(true)
             .open(&path)
             .await
             .expect("test region should reopen");
-        file.set_len(max_region_bytes + 1)
+        file.set_len(MAX_REGION_FILE_SIZE + 1)
             .await
             .expect("sparse file should extend without allocating its contents");
 
@@ -1000,6 +998,45 @@ mod tests {
         };
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
 
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn valid_append_history_beyond_live_table_size_still_opens() {
+        let directory = test_directory("append-history");
+        let pos = ChunkPos::new(0, 0);
+        let manager = RegionManager::new(&directory);
+        manager
+            .create_region(RegionPos::from_chunk(pos.0.x, pos.0.y))
+            .await
+            .expect("test region should be created");
+
+        let live_table_bound = ((FILE_HEADER_SIZE + CHUNK_TABLE_SIZE).div_ceil(SECTOR_SIZE)
+            + crate::chunk_saver::format::CHUNKS_PER_REGION
+                * MAX_CHUNK_SIZE.div_ceil(SECTOR_SIZE)) as u64
+            * SECTOR_SIZE as u64;
+        let path = directory.join(RegionPos::from_chunk(0, 0).filename());
+        let file = OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .await
+            .expect("test region should reopen");
+        file.set_len(live_table_bound + 1)
+            .await
+            .expect("append history should extend without allocating its contents");
+
+        assert!(
+            !manager
+                .acquire_chunk(pos)
+                .await
+                .expect("valid append history should still open")
+        );
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
         fs::remove_dir_all(directory)
             .await
             .expect("test directory should be removable");
@@ -1051,6 +1088,79 @@ mod tests {
             .release_chunk(pos)
             .await
             .expect("region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn oversized_incompatible_version_is_backed_up_before_size_rejection() {
+        let directory = test_directory("oversized-version-backup");
+        fs::create_dir_all(&directory)
+            .await
+            .expect("test directory should be created");
+        let pos = ChunkPos::new(0, 0);
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let region_path = directory.join(region_pos.filename());
+        let old_version = FORMAT_VERSION - 1;
+        let mut old_header = [0u8; FILE_HEADER_SIZE];
+        old_header[0..4].copy_from_slice(&REGION_MAGIC);
+        old_header[4..6].copy_from_slice(&old_version.to_le_bytes());
+        fs::write(&region_path, old_header)
+            .await
+            .expect("old region should be written");
+        let first_backup = region_path.with_extension(format!("srg.v{old_version}.bak"));
+        fs::write(&first_backup, b"first backup")
+            .await
+            .expect("existing backup should be written");
+        let file = OpenOptions::new()
+            .write(true)
+            .open(&region_path)
+            .await
+            .expect("old region should reopen");
+        file.set_len(MAX_REGION_FILE_SIZE + 1)
+            .await
+            .expect("sparse old region should extend without allocating its contents");
+
+        let manager = RegionManager::new(&directory);
+        assert!(
+            !manager
+                .acquire_chunk(pos)
+                .await
+                .expect("oversized old region should be backed up and recreated")
+        );
+        assert_eq!(
+            fs::read(&first_backup)
+                .await
+                .expect("first backup should remain readable"),
+            b"first backup"
+        );
+        let second_backup = region_path.with_extension(format!("srg.v{old_version}.bak.1"));
+        assert_eq!(
+            fs::metadata(&second_backup)
+                .await
+                .expect("oversized old region should be preserved")
+                .len(),
+            MAX_REGION_FILE_SIZE + 1
+        );
+        let mut backup = File::open(&second_backup)
+            .await
+            .expect("oversized backup should remain readable");
+        let mut backed_up_header = [0u8; FILE_HEADER_SIZE];
+        backup
+            .read_exact(&mut backed_up_header)
+            .await
+            .expect("backup header should remain readable");
+        assert_eq!(&backed_up_header[0..4], &REGION_MAGIC);
+        assert_eq!(
+            u16::from_le_bytes([backed_up_header[4], backed_up_header[5]]),
+            old_version
+        );
+
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("new region should release");
         fs::remove_dir_all(directory)
             .await
             .expect("test directory should be removable");
