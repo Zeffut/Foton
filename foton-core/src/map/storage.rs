@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::io::{self, Cursor};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 use foton_registry::data_components::components::MapId;
 use foton_registry::dye_color::DyeColor;
@@ -38,9 +38,15 @@ pub struct MapStorage {
     /// Vanilla parity: `MapIndex.lastMapId`, which starts one below the first
     /// id it will hand out.
     last_id: AtomicI32,
-    /// Set when the id counter moves or a map is added; individual maps carry
-    /// their own dirty flag.
-    layout_dirty: SyncRwLock<bool>,
+    /// Moves when the id counter or map collection changes; individual maps
+    /// carry their own dirty flag.
+    layout_revision: AtomicU64,
+    saved_layout_revision: AtomicU64,
+}
+
+struct MapStorageSaveSnapshot {
+    layout_revision: u64,
+    state: PersistentMaps,
 }
 
 impl MapStorage {
@@ -50,7 +56,8 @@ impl MapStorage {
         Self {
             maps: SyncRwLock::new(FxHashMap::default()),
             last_id: AtomicI32::new(-1),
-            layout_dirty: SyncRwLock::new(false),
+            layout_revision: AtomicU64::new(0),
+            saved_layout_revision: AtomicU64::new(0),
         }
     }
 
@@ -64,41 +71,56 @@ impl MapStorage {
     pub fn set(&self, id: MapId, data: MapItemSavedData) -> SharedMapData {
         let shared = Arc::new(SyncMutex::new(data));
         self.maps.write().insert(id.id(), Arc::clone(&shared));
-        *self.layout_dirty.write() = true;
+        self.layout_revision.fetch_add(1, Ordering::Release);
         shared
     }
 
     /// Vanilla parity: `ServerLevel.getFreeMapId` via `MapIndex.getNextMapId`.
     pub fn next_id(&self) -> MapId {
         let id = self.last_id.fetch_add(1, Ordering::AcqRel) + 1;
-        *self.layout_dirty.write() = true;
+        self.layout_revision.fetch_add(1, Ordering::Release);
         MapId::new(id)
     }
 
-    fn pending_save(&self) -> bool {
-        if *self.layout_dirty.read() {
-            return true;
+    fn pending_save(&self) -> Option<MapStorageSaveSnapshot> {
+        let layout_revision = self.layout_revision.load(Ordering::Acquire);
+        if layout_revision == self.saved_layout_revision.load(Ordering::Acquire)
+            && !self.maps.read().values().any(|map| map.lock().is_dirty())
+        {
+            return None;
         }
-        self.maps.read().values().any(|map| map.lock().is_dirty())
+        Some(self.snapshot())
     }
 
-    fn snapshot(&self) -> PersistentMaps {
+    fn snapshot(&self) -> MapStorageSaveSnapshot {
         let maps = self.maps.read();
         let mut entries: Vec<PersistentMap> = maps
             .iter()
             .map(|(id, map)| persist_map(*id, &map.lock()))
             .collect();
         entries.sort_unstable_by_key(|entry| entry.id);
-        PersistentMaps {
-            last_id: self.last_id.load(Ordering::Acquire),
-            maps: entries,
+        MapStorageSaveSnapshot {
+            layout_revision: self.layout_revision.load(Ordering::Acquire),
+            state: PersistentMaps {
+                last_id: self.last_id.load(Ordering::Acquire),
+                maps: entries,
+            },
         }
     }
 
-    fn mark_saved(&self) {
-        *self.layout_dirty.write() = false;
-        for map in self.maps.read().values() {
-            map.lock().mark_saved();
+    fn mark_saved(&self, snapshot: &MapStorageSaveSnapshot) {
+        self.saved_layout_revision
+            .fetch_max(snapshot.layout_revision, Ordering::Release);
+
+        let maps = self.maps.read();
+        for saved in &snapshot.state.maps {
+            let Some(map) = maps.get(&saved.id) else {
+                continue;
+            };
+            let mut map = map.lock();
+            if persist_map(saved.id, &map) == *saved {
+                map.mark_saved();
+            }
         }
     }
 
@@ -110,7 +132,7 @@ impl MapStorage {
     #[cfg(test)]
     #[must_use]
     pub fn round_trip_for_tests(&self) -> Self {
-        let bytes = wincode::serialize(&self.snapshot()).expect("map snapshot should encode");
+        let bytes = wincode::serialize(&self.snapshot().state).expect("map snapshot should encode");
         let persistent = wincode::deserialize_exact(&bytes).expect("map snapshot should decode");
         Self::from_persistent(persistent)
     }
@@ -124,7 +146,8 @@ impl MapStorage {
         Self {
             maps: SyncRwLock::new(maps),
             last_id: AtomicI32::new(persistent.last_id),
-            layout_dirty: SyncRwLock::new(false),
+            layout_revision: AtomicU64::new(0),
+            saved_layout_revision: AtomicU64::new(0),
         }
     }
 }
@@ -174,16 +197,15 @@ impl DomainMapData {
         let _save_guard = self.save_lock.lock().await;
         let mut saved = 0;
         for (domain, storage) in &self.domains {
-            if !storage.pending_save() {
+            let Some(snapshot) = storage.pending_save() else {
                 continue;
-            }
+            };
             let world = domain_default_world(worlds, domain)?;
-            let snapshot = storage.snapshot();
             world
                 .saved_data
-                .sync_save_wincode(saved_data_names::MAPS, &snapshot)
+                .sync_save_wincode(saved_data_names::MAPS, &snapshot.state)
                 .map_err(|error| map_io_error(domain, error))?;
-            storage.mark_saved();
+            storage.mark_saved(&snapshot);
             saved += 1;
         }
         Ok(saved)
@@ -212,7 +234,7 @@ struct PersistentMaps {
     maps: Vec<PersistentMap>,
 }
 
-#[derive(Debug, SchemaWrite, SchemaRead)]
+#[derive(Debug, PartialEq, SchemaWrite, SchemaRead)]
 struct PersistentMap {
     id: i32,
     dimension: String,
@@ -228,7 +250,7 @@ struct PersistentMap {
     frames: Vec<PersistentMapFrame>,
 }
 
-#[derive(Debug, SchemaWrite, SchemaRead)]
+#[derive(Debug, PartialEq, SchemaWrite, SchemaRead)]
 struct PersistentMapBanner {
     pos: [i32; 3],
     /// `DyeColor.serialized_name`, the form vanilla's codec writes.
@@ -237,7 +259,7 @@ struct PersistentMapBanner {
     name: Option<Vec<u8>>,
 }
 
-#[derive(Debug, SchemaWrite, SchemaRead)]
+#[derive(Debug, PartialEq, SchemaWrite, SchemaRead)]
 struct PersistentMapFrame {
     pos: [i32; 3],
     rotation: i32,
@@ -329,4 +351,52 @@ fn component_from_nbt_bytes(bytes: &[u8]) -> Option<TextComponent> {
     let tag = read_tag(&mut Cursor::new(bytes)).ok()?;
     let owned: NbtTag = tag.as_tag().to_owned();
     TextComponent::from_nbt(&owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_map() -> MapItemSavedData {
+        MapItemSavedData::create_fresh(
+            0.0,
+            0.0,
+            0,
+            true,
+            false,
+            Identifier::vanilla_static("overworld"),
+            false,
+        )
+    }
+
+    #[test]
+    fn map_mutation_after_snapshot_remains_dirty() {
+        let storage = MapStorage::new();
+        let id = MapId::new(0);
+        let map = storage.set(id, test_map());
+        let snapshot = storage.snapshot();
+
+        map.lock().set_color(0, 0, 1);
+        storage.mark_saved(&snapshot);
+
+        assert!(
+            storage.pending_save().is_some(),
+            "a map changed after the saved snapshot must remain dirty"
+        );
+    }
+
+    #[test]
+    fn layout_mutation_after_snapshot_remains_dirty() {
+        let storage = MapStorage::new();
+        let _first = storage.next_id();
+        let snapshot = storage.snapshot();
+
+        let _second = storage.next_id();
+        storage.mark_saved(&snapshot);
+
+        let Some(pending) = storage.pending_save() else {
+            panic!("an id allocated after the saved snapshot must remain dirty");
+        };
+        assert!(pending.layout_revision > snapshot.layout_revision);
+    }
 }
