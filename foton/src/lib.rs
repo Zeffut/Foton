@@ -17,6 +17,7 @@ use std::{
     net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf, absolute},
     sync::{Arc, OnceLock, Weak},
+    time::Duration,
 };
 
 use foton_bedrock::config::BedrockConfig;
@@ -25,8 +26,14 @@ use foton_bedrock::key;
 use foton_core::{command::CommandRegistry, permission::PermissionGroupManager, server::Server};
 use foton_login::{JavaTcpClient, ServerConnectionSession};
 use foton_plugin::{PluginHost, PluginHostConfig};
-use tokio::{net::TcpListener, runtime::Runtime, select};
+use tokio::{net::TcpListener, runtime::Runtime, select, time::sleep};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
+async fn accept_error_backoff(duration: Duration) {
+    sleep(duration).await;
+}
 
 /// Command-line arguments.
 pub mod args;
@@ -359,8 +366,16 @@ impl FotonServer {
                     break;
                 }
                 accept_result = self.tcp_listener.accept() => {
-                    let Ok((connection, address)) = accept_result else {
-                        continue;
+                    let (connection, address) = match accept_result {
+                        Ok(accepted) => accepted,
+                        Err(error) => {
+                            log::warn!(
+                                "Failed to accept Java connection: {error}; retrying after {} ms",
+                                ACCEPT_ERROR_BACKOFF.as_millis()
+                            );
+                            accept_error_backoff(ACCEPT_ERROR_BACKOFF).await;
+                            continue;
+                        }
                     };
                     if let Err(e) = connection.set_nodelay(true) {
                         log::warn!("Failed to set TCP_NODELAY: {e}");
@@ -529,11 +544,22 @@ async fn start_bedrock_supervisor(
 
 #[cfg(test)]
 mod tests {
-    use std::env;
+    use std::{env, time::Duration};
+    use tokio::time::Instant;
 
     use super::{
-        BedrockConfig, CancellationToken, resolve_run_directory, start_bedrock_supervisor,
+        BedrockConfig, CancellationToken, accept_error_backoff, resolve_run_directory,
+        start_bedrock_supervisor,
     };
+
+    #[tokio::test]
+    async fn accept_error_backoff_yields_before_retrying() {
+        let started = Instant::now();
+
+        accept_error_backoff(Duration::from_millis(20)).await;
+
+        assert!(started.elapsed() >= Duration::from_millis(20));
+    }
 
     #[test]
     fn resolve_run_directory_is_always_absolute() {

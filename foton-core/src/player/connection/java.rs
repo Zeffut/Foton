@@ -1,8 +1,9 @@
 //! This module contains the `JavaConnection` struct, which is used to represent a connection to a Java client.
+use std::future::Future;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::{Arc, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use foton_protocol::packet_reader::TCPNetworkDecoder;
 use foton_protocol::packet_traits::{ClientPacket, CompressionInfo, EncodedPacket, ServerPacket};
@@ -35,7 +36,11 @@ use text_components::{Modifier, TextComponent, format::Color};
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::select;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
+use tokio::sync::mpsc::{
+    self, Receiver, Sender,
+    error::{TryRecvError, TrySendError},
+};
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 use crate::command::{handle_client_request, sender::CommandSender};
@@ -54,6 +59,155 @@ pub enum OutboundPacket {
     Packet(EncodedPacket),
     /// Final disconnect packet that must be flushed before closing the socket.
     Disconnect(EncodedPacket),
+}
+
+const OUTBOUND_PACKET_LIMIT: usize = 4_096;
+const OUTBOUND_BYTE_LIMIT: usize = 64 * 1024 * 1024;
+const FINAL_DISCONNECT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+
+#[derive(Default)]
+struct OutboundBudget {
+    queued_packets: usize,
+    queued_bytes: usize,
+    disconnect_queued: bool,
+}
+
+/// Why an outbound packet could not enter a client's bounded queue.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutboundSendError {
+    /// The packet-count or encoded-byte budget is exhausted.
+    Full,
+    /// The network writer task has dropped its receiver.
+    Closed,
+}
+
+/// Non-blocking producer for a client's bounded outbound queue.
+#[derive(Clone)]
+pub struct OutboundSender {
+    sender: Sender<OutboundPacket>,
+    budget: Arc<SyncMutex<OutboundBudget>>,
+    packet_limit: usize,
+    byte_limit: usize,
+}
+
+/// Consumer for a client's bounded outbound queue.
+pub struct OutboundReceiver {
+    receiver: Receiver<OutboundPacket>,
+    budget: Arc<SyncMutex<OutboundBudget>>,
+}
+
+impl OutboundSender {
+    /// Tries to enqueue a normal packet without waiting or allocating beyond the queue limits.
+    pub fn try_send_packet(&self, packet: EncodedPacket) -> Result<(), OutboundSendError> {
+        let packet_bytes = packet.encoded_data.len();
+        let mut budget = self.budget.lock();
+        if budget.queued_packets >= self.packet_limit
+            || packet_bytes > self.byte_limit
+            || budget.queued_bytes > self.byte_limit - packet_bytes
+        {
+            return Err(OutboundSendError::Full);
+        }
+
+        match self.sender.try_send(OutboundPacket::Packet(packet)) {
+            Ok(()) => {
+                budget.queued_packets += 1;
+                budget.queued_bytes += packet_bytes;
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => Err(OutboundSendError::Full),
+            Err(TrySendError::Closed(_)) => Err(OutboundSendError::Closed),
+        }
+    }
+
+    /// Tries to enqueue the final disconnect packet in its reserved control slot.
+    pub fn try_send_disconnect(&self, packet: EncodedPacket) -> Result<(), OutboundSendError> {
+        let mut budget = self.budget.lock();
+        if budget.disconnect_queued {
+            return Err(OutboundSendError::Full);
+        }
+
+        match self.sender.try_send(OutboundPacket::Disconnect(packet)) {
+            Ok(()) => {
+                budget.disconnect_queued = true;
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => Err(OutboundSendError::Full),
+            Err(TrySendError::Closed(_)) => Err(OutboundSendError::Closed),
+        }
+    }
+}
+
+impl OutboundReceiver {
+    fn release_budget(&self, outbound: &OutboundPacket) {
+        let mut budget = self.budget.lock();
+        match outbound {
+            OutboundPacket::Packet(packet) => {
+                budget.queued_packets = budget.queued_packets.saturating_sub(1);
+                budget.queued_bytes = budget
+                    .queued_bytes
+                    .saturating_sub(packet.encoded_data.len());
+            }
+            OutboundPacket::Disconnect(_) => budget.disconnect_queued = false,
+        }
+    }
+
+    /// Receives the next queued packet and releases its admission budget.
+    pub async fn recv(&mut self) -> Option<OutboundPacket> {
+        let outbound = self.receiver.recv().await?;
+        self.release_budget(&outbound);
+        Some(outbound)
+    }
+
+    /// Tries to receive a queued packet and releases its admission budget.
+    pub fn try_recv(&mut self) -> Result<OutboundPacket, TryRecvError> {
+        let outbound = self.receiver.try_recv()?;
+        self.release_budget(&outbound);
+        Ok(outbound)
+    }
+}
+
+fn outbound_channel_with_limits(
+    packet_limit: usize,
+    byte_limit: usize,
+) -> (OutboundSender, OutboundReceiver) {
+    let budget = Arc::new(SyncMutex::new(OutboundBudget::default()));
+    let (sender, receiver) = mpsc::channel(packet_limit.saturating_add(1).max(1));
+    (
+        OutboundSender {
+            sender,
+            budget: Arc::clone(&budget),
+            packet_limit,
+            byte_limit,
+        },
+        OutboundReceiver { receiver, budget },
+    )
+}
+
+/// Creates the bounded outbound queue shared by pre-play and play connections.
+#[must_use]
+pub fn outbound_channel() -> (OutboundSender, OutboundReceiver) {
+    outbound_channel_with_limits(OUTBOUND_PACKET_LIMIT, OUTBOUND_BYTE_LIMIT)
+}
+
+async fn with_disconnect_write_deadline<F>(deadline: Duration, write: F) -> Result<(), PacketError>
+where
+    F: Future<Output = Result<(), PacketError>>,
+{
+    match timeout(deadline, write).await {
+        Ok(result) => result,
+        Err(_) => Err(PacketError::SendError(format!(
+            "final disconnect write exceeded its {} ms deadline",
+            deadline.as_millis()
+        ))),
+    }
+}
+
+/// Runs a final disconnect write with the connection shutdown deadline.
+pub async fn write_final_disconnect<F>(write: F) -> Result<(), PacketError>
+where
+    F: Future<Output = Result<(), PacketError>>,
+{
+    with_disconnect_write_deadline(FINAL_DISCONNECT_WRITE_TIMEOUT, write).await
 }
 
 /// A decoded play packet whose handler runs in the server's inter-tick packet phase.
@@ -535,7 +689,7 @@ struct KeepAliveTracker {
 
 /// A connection to a Java client.
 pub struct JavaConnection {
-    outgoing_packets: UnboundedSender<OutboundPacket>,
+    outgoing_packets: OutboundSender,
     cancel_token: CancellationToken,
     compression: Option<CompressionInfo>,
     network_writer: JavaNetworkWriter,
@@ -552,7 +706,7 @@ pub struct JavaConnection {
 impl JavaConnection {
     /// Creates a new `JavaConnection`.
     pub const fn new(
-        outgoing_packets: UnboundedSender<OutboundPacket>,
+        outgoing_packets: OutboundSender,
         cancel_token: CancellationToken,
         compression: Option<CompressionInfo>,
         network_writer: JavaNetworkWriter,
@@ -666,11 +820,7 @@ impl JavaConnection {
                 return;
             }
         };
-        if self
-            .outgoing_packets
-            .send(OutboundPacket::Disconnect(packet))
-            .is_err()
-        {
+        if self.outgoing_packets.try_send_disconnect(packet).is_err() {
             self.close();
             return;
         }
@@ -696,25 +846,14 @@ impl JavaConnection {
             self.close();
             return;
         };
-        if self
-            .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
-            .is_err()
-        {
+        if self.outgoing_packets.try_send_packet(packet).is_err() {
             self.close();
         }
     }
 
     /// Sends an encoded packet to the client.
-    ///
-    /// # Panics
-    /// - If the packet fails to be sent through the channel.
     pub fn send_encoded_packet(&self, packet: EncodedPacket) {
-        if self
-            .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
-            .is_err()
-        {
+        if self.outgoing_packets.try_send_packet(packet).is_err() {
             self.close();
         }
     }
@@ -1077,7 +1216,7 @@ impl JavaConnection {
 
     /// Sends packets to the client.
     ///
-    pub async fn sender(&self, mut sender_recv: UnboundedReceiver<OutboundPacket>) {
+    pub async fn sender(&self, mut sender_recv: OutboundReceiver) {
         loop {
             select! {
                 biased;
@@ -1093,7 +1232,9 @@ impl JavaConnection {
                         };
 
                         if close_after_write {
-                            if let Err(err) = self.write_packet_now(&packet).await {
+                            if let Err(err) =
+                                write_final_disconnect(self.write_packet_now(&packet)).await
+                            {
                                 log::warn!("Failed to send disconnect packet to client {}: {err}", self.id);
                             }
                             self.close();
@@ -1137,7 +1278,7 @@ impl JavaConnection {
         player.server().queue_player_disconnect(player);
     }
 
-    async fn write_queued_disconnect(&self, sender_recv: &mut UnboundedReceiver<OutboundPacket>) {
+    async fn write_queued_disconnect(&self, sender_recv: &mut OutboundReceiver) {
         let mut disconnect_packet = None;
         loop {
             match sender_recv.try_recv() {
@@ -1150,7 +1291,7 @@ impl JavaConnection {
         let Some(packet) = disconnect_packet else {
             return;
         };
-        if let Err(err) = self.write_packet_now(&packet).await {
+        if let Err(err) = write_final_disconnect(self.write_packet_now(&packet)).await {
             log::warn!(
                 "Failed to send disconnect packet to client {} during close: {err}",
                 self.id
@@ -1217,7 +1358,7 @@ impl NetworkConnection for JavaConnection {
 
 #[cfg(test)]
 mod tests {
-    use std::array;
+    use std::{array, future::pending, time::Duration};
 
     use crate::{
         entity::{Entity as _, LivingEntity as _},
@@ -1228,6 +1369,7 @@ mod tests {
     use foton_registry::{blocks::properties::Direction, item_stack::ItemStack};
     use foton_utils::{BlockPos, codec::VarInt, types::InteractionHand};
     use rustc_hash::FxHashMap;
+    use tokio::time::timeout;
     use uuid::Uuid;
 
     use super::*;
@@ -1616,5 +1758,80 @@ mod tests {
                 }
             ))
         ));
+    }
+
+    fn encoded_keep_alive(id: i64) -> EncodedPacket {
+        let Ok(packet) =
+            EncodedPacket::from_bare(CKeepAlive::new(id), None, ConnectionProtocol::Play)
+        else {
+            panic!("test keep-alive should encode");
+        };
+        packet
+    }
+
+    #[test]
+    fn full_outbound_packet_budget_rejects_the_next_packet() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, _receiver) = outbound_channel_with_limits(1, packet_bytes * 2);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert_eq!(
+            sender.try_send_packet(encoded_keep_alive(2)),
+            Err(OutboundSendError::Full)
+        );
+    }
+
+    #[test]
+    fn full_outbound_byte_budget_rejects_the_next_packet() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, _receiver) = outbound_channel_with_limits(2, packet_bytes);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert_eq!(
+            sender.try_send_packet(encoded_keep_alive(2)),
+            Err(OutboundSendError::Full)
+        );
+    }
+
+    #[test]
+    fn receiving_a_packet_releases_its_outbound_budgets() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, mut receiver) = outbound_channel_with_limits(1, packet_bytes);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert!(matches!(receiver.try_recv(), Ok(OutboundPacket::Packet(_))));
+        assert_eq!(sender.try_send_packet(encoded_keep_alive(2)), Ok(()));
+    }
+
+    #[test]
+    fn disconnect_uses_its_reserved_control_slot() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, mut receiver) = outbound_channel_with_limits(1, packet_bytes);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert_eq!(sender.try_send_disconnect(encoded_keep_alive(2)), Ok(()));
+        assert!(matches!(receiver.try_recv(), Ok(OutboundPacket::Packet(_))));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(OutboundPacket::Disconnect(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn final_disconnect_write_is_deadline_bounded() {
+        let result = timeout(
+            Duration::from_secs(1),
+            with_disconnect_write_deadline(
+                Duration::from_millis(20),
+                pending::<Result<(), PacketError>>(),
+            ),
+        )
+        .await;
+
+        assert!(matches!(result, Ok(Err(PacketError::SendError(_)))));
     }
 }
