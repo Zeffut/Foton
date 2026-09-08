@@ -85,7 +85,8 @@ use foton_utils::{
     WorldAabb,
     types::{Difficulty, GameType, UpdateFlags},
 };
-use tokio::{runtime::Runtime, time::Instant};
+use tokio::{runtime::Runtime, sync::Mutex as AsyncMutex, time::Instant};
+use tokio_util::task::TaskTracker;
 
 use crate::{
     ChunkMap,
@@ -352,6 +353,10 @@ pub struct World {
     spawn_ticks: SyncRwLock<FxHashMap<MobCategory, i32>>,
     keep_spawn_in_memory: AtomicBool,
     auto_save: AtomicBool,
+    /// Serializes persistence snapshots so an older save cannot publish later.
+    save_lock: Arc<AsyncMutex<()>>,
+    /// Tracks non-blocking save requests until cleanup or shutdown joins them.
+    save_tasks: TaskTracker,
     /// Whether vanilla's scheduled/chunk/block-event tick phase is active.
     handling_tick: AtomicBool,
     /// Ordered, duplicate-suppressing server block events awaiting execution.
@@ -639,6 +644,8 @@ impl World {
                 spawn_ticks: SyncRwLock::new(FxHashMap::default()),
                 keep_spawn_in_memory: AtomicBool::new(keep_spawn_in_memory),
                 auto_save: AtomicBool::new(true),
+                save_lock: Arc::new(AsyncMutex::new(())),
+                save_tasks: TaskTracker::new(),
                 handling_tick: AtomicBool::new(false),
                 block_events: SyncMutex::new(BlockEventQueue::default()),
                 neighbor_updater: CollectingNeighborUpdater::new(max_chained_neighbor_updates),
@@ -685,8 +692,12 @@ impl World {
         self.server.get().and_then(Weak::upgrade)
     }
 
-    /// Cleans up the world by saving all chunks.
-    pub async fn cleanup(&self, total_saved: &mut usize) {
+    /// Cleans up the world by waiting for queued saves and persisting all data.
+    pub async fn cleanup(&self, total_saved: &mut usize) -> io::Result<()> {
+        self.save_tasks.close();
+        self.save_tasks.wait().await;
+        let _save_guard = self.save_lock.lock().await;
+        let mut first_error = None;
         self.sync_world_border_to_level_data();
         let level_data_save = self.level_data.write().prepare_save();
         match level_data_save {
@@ -699,11 +710,15 @@ impl World {
                         // dropped silently for the rest of the run.
                         self.level_data.write().mark_dirty();
                         log::error!("Failed to save world level data: {error}");
+                        first_error = Some(error);
                     }
                 }
             }
             Ok(None) => {}
-            Err(error) => log::error!("Failed to prepare world level data: {error}"),
+            Err(error) => {
+                log::error!("Failed to prepare world level data: {error}");
+                first_error = Some(error);
+            }
         }
 
         let chunk_tickets = self.chunk_map.persistent_chunk_tickets();
@@ -713,13 +728,23 @@ impl World {
             .await
         {
             Ok(()) => log::info!("World {} saved chunk ticket data successfully", self.key),
-            Err(e) => log::error!("Failed to save world chunk ticket data: {e}"),
+            Err(error) => {
+                log::error!("Failed to save world chunk ticket data: {error}");
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
         }
 
         let raids = self.raids.to_persistent();
         match self.saved_data.save(saved_data_names::RAIDS, &raids).await {
             Ok(()) => log::info!("World {} saved raid data successfully", self.key),
-            Err(e) => log::error!("Failed to save world raid data: {e}"),
+            Err(error) => {
+                log::error!("Failed to save world raid data: {error}");
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
         }
 
         if let Some(fight) = self.dragon_fight.as_ref() {
@@ -730,14 +755,25 @@ impl World {
                 .await
             {
                 Ok(()) => log::info!("World {} saved dragon fight data successfully", self.key),
-                Err(e) => log::error!("Failed to save world dragon fight data: {e}"),
+                Err(error) => {
+                    log::error!("Failed to save world dragon fight data: {error}");
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
             }
         }
 
         match self.save_all_chunks().await {
             Ok(count) => *total_saved += count,
-            Err(e) => log::error!("Failed to save world chunks: {e}"),
+            Err(error) => {
+                log::error!("Failed to save world chunks: {error}");
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
         }
+        first_error.map_or(Ok(()), Err)
     }
 
     /// Returns the domain this loaded world belongs to.
@@ -1034,23 +1070,37 @@ impl World {
 
     /// Queues a non-blocking save of level data and dirty chunks.
     pub fn request_save(self: &Arc<Self>) {
-        let prepared = self.level_data.write().prepare_save();
         let world = Arc::clone(self);
-        self.chunk_map.chunk_runtime.handle().spawn(async move {
-            match prepared {
-                Ok(Some((path, content))) => {
-                    if let Err(error) = write_level_data(&path, &content).await {
-                        world.level_data.write().mark_dirty();
-                        tracing::error!(%error, "World level-data save failed");
-                    }
+        self.save_tasks.spawn_on(
+            async move {
+                if let Err(error) = world.save_requested().await {
+                    tracing::error!(%error, "World save request failed");
                 }
-                Ok(None) => {}
-                Err(error) => tracing::error!(%error, "World level-data serialization failed"),
+            },
+            self.chunk_map.chunk_runtime.handle(),
+        );
+    }
+
+    async fn save_requested(&self) -> io::Result<()> {
+        let _save_guard = self.save_lock.lock().await;
+        let mut first_error = None;
+        let level_data_save = { self.level_data.write().prepare_save() };
+        match level_data_save {
+            Ok(Some((path, content))) => {
+                if let Err(error) = write_level_data(&path, &content).await {
+                    self.level_data.write().mark_dirty();
+                    first_error = Some(error);
+                }
             }
-            if let Err(error) = world.save_all_chunks().await {
-                tracing::error!(%error, "World chunk save failed");
+            Ok(None) => {}
+            Err(error) => first_error = Some(error),
+        }
+        if let Err(error) = self.save_all_chunks().await {
+            if first_error.is_none() {
+                first_error = Some(error);
             }
-        });
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     /// Saves all dirty chunks in this world to disk.

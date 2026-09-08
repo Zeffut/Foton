@@ -838,10 +838,19 @@ impl Server {
             let runtime = Arc::clone(&self.chunk_runtime);
             let _cleanup = runtime.spawn(async move {
                 let mut saved = 0;
-                world.cleanup(&mut saved).await;
-                tracing::debug!(world = %key, saved_chunks = saved, "World cleanup finished");
-                if let Some(sender) = completion {
-                    let _ = sender.send(Ok(saved));
+                match world.cleanup(&mut saved).await {
+                    Ok(()) => {
+                        tracing::debug!(world = %key, saved_chunks = saved, "World cleanup finished");
+                        if let Some(sender) = completion {
+                            let _ = sender.send(Ok(saved));
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("World cleanup failed for {key}: {error}");
+                        if let Some(sender) = completion {
+                            let _ = sender.send(Err(error.to_string()));
+                        }
+                    }
                 }
             });
         }

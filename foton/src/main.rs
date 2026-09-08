@@ -478,7 +478,12 @@ async fn shutdown_worlds(server: &Arc<Server>) {
     }
     let mut total_saved = 0;
     for world in server.worlds.values() {
-        world.cleanup(&mut total_saved).await;
+        if let Err(error) = world.cleanup(&mut total_saved).await {
+            log::error!(
+                "Failed to save world {} during shutdown: {error}",
+                world.key
+            );
+        }
     }
     log::info!("Saved {total_saved} chunks");
 
