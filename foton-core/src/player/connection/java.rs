@@ -1369,7 +1369,11 @@ mod tests {
     use foton_registry::{blocks::properties::Direction, item_stack::ItemStack};
     use foton_utils::{BlockPos, codec::VarInt, types::InteractionHand};
     use rustc_hash::FxHashMap;
-    use tokio::time::timeout;
+    use tokio::{
+        io::AsyncReadExt,
+        net::{TcpListener, TcpStream},
+        time::{sleep, timeout},
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -1807,6 +1811,28 @@ mod tests {
     }
 
     #[test]
+    fn production_send_cancels_connection_when_outbound_admission_fails() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, _receiver) = outbound_channel_with_limits(1, packet_bytes * 2);
+        let cancel_token = CancellationToken::new();
+        let connection = JavaConnection::new(
+            sender.clone(),
+            cancel_token.clone(),
+            None,
+            Arc::new(AsyncMutex::new(None)),
+            1,
+            SocketAddr::from(([127, 0, 0, 1], 25_565)),
+            Weak::new(),
+        );
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        connection.send_encoded_packet(encoded_keep_alive(2));
+
+        assert!(cancel_token.is_cancelled());
+    }
+
+    #[test]
     fn disconnect_uses_its_reserved_control_slot() {
         let first = encoded_keep_alive(1);
         let packet_bytes = first.encoded_data.len();
@@ -1833,5 +1859,65 @@ mod tests {
         .await;
 
         assert!(matches!(result, Ok(Err(PacketError::SendError(_)))));
+    }
+
+    #[tokio::test]
+    async fn production_disconnect_drops_locked_writer_after_final_write_deadline() {
+        let listener = match TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await {
+            Ok(listener) => listener,
+            Err(error) => panic!("test listener should bind: {error}"),
+        };
+        let address = match listener.local_addr() {
+            Ok(address) => address,
+            Err(error) => panic!("test listener should have an address: {error}"),
+        };
+        let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        let mut client = match client {
+            Ok(client) => client,
+            Err(error) => panic!("test client should connect: {error}"),
+        };
+        let (server_stream, _) = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => panic!("test listener should accept: {error}"),
+        };
+        let (_, write_half) = server_stream.into_split();
+        let network_writer = Arc::new(AsyncMutex::new(Some(TCPNetworkEncoder::new(
+            BufWriter::new(write_half),
+        ))));
+        let writer_guard = network_writer.lock().await;
+        let (sender, receiver) = outbound_channel_with_limits(1, 1_024);
+        let cancel_token = CancellationToken::new();
+        let connection = JavaConnection::new(
+            sender,
+            cancel_token,
+            None,
+            Arc::clone(&network_writer),
+            2,
+            address,
+            Weak::new(),
+        );
+        connection.disconnect("test disconnect");
+        let mut sender_future = Box::pin(connection.sender(receiver));
+
+        tokio::select! {
+            () = &mut sender_future => panic!("sender cannot finish while the writer is locked"),
+            () = sleep(FINAL_DISCONNECT_WRITE_TIMEOUT + Duration::from_millis(100)) => {}
+        }
+        drop(writer_guard);
+
+        assert!(
+            timeout(Duration::from_millis(500), &mut sender_future)
+                .await
+                .is_ok(),
+            "the production disconnect path should abandon its blocked final write"
+        );
+        let mut byte = [0_u8; 1];
+        assert!(
+            matches!(
+                timeout(Duration::from_millis(500), client.read(&mut byte)).await,
+                Ok(Ok(0))
+            ),
+            "a timed-out disconnect write must be dropped instead of resuming later"
+        );
     }
 }

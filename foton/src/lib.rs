@@ -35,6 +35,20 @@ async fn accept_error_backoff(duration: Duration) {
     sleep(duration).await;
 }
 
+async fn accept_or_backoff<T>(accept_result: io::Result<T>, duration: Duration) -> Option<T> {
+    match accept_result {
+        Ok(accepted) => Some(accepted),
+        Err(error) => {
+            log::warn!(
+                "Failed to accept Java connection: {error}; retrying after {} ms",
+                duration.as_millis()
+            );
+            accept_error_backoff(duration).await;
+            None
+        }
+    }
+}
+
 /// Command-line arguments.
 pub mod args;
 /// Server configuration module.
@@ -366,16 +380,10 @@ impl FotonServer {
                     break;
                 }
                 accept_result = self.tcp_listener.accept() => {
-                    let (connection, address) = match accept_result {
-                        Ok(accepted) => accepted,
-                        Err(error) => {
-                            log::warn!(
-                                "Failed to accept Java connection: {error}; retrying after {} ms",
-                                ACCEPT_ERROR_BACKOFF.as_millis()
-                            );
-                            accept_error_backoff(ACCEPT_ERROR_BACKOFF).await;
-                            continue;
-                        }
+                    let Some((connection, address)) =
+                        accept_or_backoff(accept_result, ACCEPT_ERROR_BACKOFF).await
+                    else {
+                        continue;
                     };
                     if let Err(e) = connection.set_nodelay(true) {
                         log::warn!("Failed to set TCP_NODELAY: {e}");
@@ -544,20 +552,25 @@ async fn start_bedrock_supervisor(
 
 #[cfg(test)]
 mod tests {
-    use std::{env, time::Duration};
+    use std::{env, io, time::Duration};
     use tokio::time::Instant;
 
     use super::{
-        BedrockConfig, CancellationToken, accept_error_backoff, resolve_run_directory,
+        BedrockConfig, CancellationToken, accept_or_backoff, resolve_run_directory,
         start_bedrock_supervisor,
     };
 
     #[tokio::test]
-    async fn accept_error_backoff_yields_before_retrying() {
+    async fn production_accept_error_path_waits_before_retrying() {
         let started = Instant::now();
 
-        accept_error_backoff(Duration::from_millis(20)).await;
+        let accepted = accept_or_backoff::<()>(
+            Err(io::Error::other("test accept failure")),
+            Duration::from_millis(20),
+        )
+        .await;
 
+        assert!(accepted.is_none());
         assert!(started.elapsed() >= Duration::from_millis(20));
     }
 
