@@ -4,7 +4,7 @@ mod known_players;
 mod permissions;
 
 use std::{
-    io::Cursor,
+    io::{Cursor, Read},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -13,7 +13,7 @@ use rustc_hash::FxHashMap;
 use simdnbt::{ToNbtTag, borrow::read_compound as read_borrowed_compound, owned::NbtTag};
 use tokio::{
     fs,
-    io::{self, AsyncWriteExt},
+    io::{self, AsyncReadExt, AsyncWriteExt},
 };
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
@@ -47,6 +47,10 @@ const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
 const PLAYER_STORAGE_VERSION: u16 = 11;
 const GLOBAL_STORAGE_VERSION: u16 = 3;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
+/// Largest compressed player data file accepted from disk.
+const MAX_COMPRESSED_PLAYER_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// Largest decompressed player data payload accepted from disk.
+const MAX_DECOMPRESSED_PLAYER_FILE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Server-wide player data.
 #[derive(Debug, Clone)]
@@ -364,7 +368,7 @@ impl FilePlayerDataStorage {
         if !Self::recover_missing_atomic_path_locked(&path).await? {
             return Ok(None);
         }
-        let bytes = fs::read(&path).await?;
+        let bytes = Self::read_bounded_file(&path, MAX_COMPRESSED_PLAYER_FILE_BYTES).await?;
         let file = decode_player_file(&bytes)?;
         let data = file.into_persistent()?;
         log::debug!("Loaded player data for {uuid} in domain {domain}");
@@ -378,7 +382,7 @@ impl FilePlayerDataStorage {
         if !Self::recover_missing_atomic_path_locked(&path).await? {
             return Ok(None);
         }
-        let bytes = fs::read(&path).await?;
+        let bytes = Self::read_bounded_file(&path, MAX_COMPRESSED_PLAYER_FILE_BYTES).await?;
         let file = decode_global_file(&bytes)?;
         Ok(Some(GlobalPlayerData {
             last_active_domain: file.last_active_domain,
@@ -415,8 +419,51 @@ impl FilePlayerDataStorage {
         if !Self::recover_missing_atomic_path_locked(path).await? {
             return Ok(KnownPlayers::new());
         }
-        let bytes = fs::read(path).await?;
+        let bytes = Self::read_bounded_file(path, MAX_COMPRESSED_PLAYER_FILE_BYTES).await?;
         decode_known_players_file(&bytes)?.into_known_players()
+    }
+
+    async fn read_bounded_file(path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
+        let max_bytes_usize = usize::try_from(max_bytes).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "player data file size limit does not fit in memory",
+            )
+        })?;
+        let mut file = fs::File::open(path).await?;
+        let file_size = file.metadata().await?.len();
+        if file_size > max_bytes {
+            return Err(oversized_player_file_error(file_size, max_bytes));
+        }
+
+        let initial_capacity = usize::try_from(file_size).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "player data file size does not fit in memory",
+            )
+        })?;
+        let mut bytes = Vec::with_capacity(initial_capacity);
+        let mut buffer = [0_u8; 16 * 1024];
+        loop {
+            let read = file.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            let new_len = bytes.len().checked_add(read).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "player data file size overflowed memory limits",
+                )
+            })?;
+            if new_len > max_bytes_usize {
+                return Err(oversized_player_file_error(new_len as u64, max_bytes));
+            }
+            if bytes.capacity() < new_len {
+                bytes.reserve_exact(new_len - bytes.len());
+            }
+            bytes.extend_from_slice(&buffer[..read]);
+        }
+        Ok(bytes)
     }
 
     async fn save_known_players_if_current(
@@ -986,7 +1033,7 @@ fn decode_global_file(bytes: &[u8]) -> io::Result<GlobalPlayerDataFile> {
         ));
     }
     let version = u16::from_le_bytes([bytes[4], bytes[5]]);
-    let payload = zstd::decode_all(&bytes[6..])?;
+    let payload = decode_zstd_payload(&bytes[6..], MAX_DECOMPRESSED_PLAYER_FILE_BYTES)?;
     if version == 1 {
         let legacy: LegacyGlobalPlayerDataFile = wincode::deserialize(&payload)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -1043,6 +1090,46 @@ fn encode_file(
     Ok(bytes)
 }
 
+fn decode_zstd_payload(bytes: &[u8], max_bytes: usize) -> io::Result<Vec<u8>> {
+    let mut decoder = zstd::stream::read::Decoder::new(Cursor::new(bytes))?;
+    let mut payload = Vec::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let read = Read::read(&mut decoder, &mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let new_len = payload.len().checked_add(read).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "player data payload size overflowed memory limits",
+            )
+        })?;
+        if new_len > max_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "player data payload exceeds decompressed size limit of {max_bytes} bytes"
+                ),
+            ));
+        }
+        if payload.capacity() < new_len {
+            payload.reserve_exact(new_len - payload.len());
+        }
+        payload.extend_from_slice(&buffer[..read]);
+    }
+    Ok(payload)
+}
+
+fn oversized_player_file_error(size: u64, max_bytes: u64) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "compressed player data file is too large: {size} bytes (maximum {max_bytes} bytes)"
+        ),
+    )
+}
+
 fn decode_file(
     expected_magic: [u8; 4],
     expected_version: u16,
@@ -1067,7 +1154,7 @@ fn decode_file(
             format!("unsupported player data storage version {version}"),
         ));
     }
-    zstd::decode_all(&bytes[6..])
+    decode_zstd_payload(&bytes[6..], MAX_DECOMPRESSED_PLAYER_FILE_BYTES)
 }
 
 #[cfg(test)]
