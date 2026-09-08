@@ -36,6 +36,7 @@ const UPDATE_CLEARED_MOVED_BLOCK: UpdateFlags = UpdateFlags::UPDATE_CLIENTS
     .union(UpdateFlags::UPDATE_KNOWN_SHAPE)
     .union(UpdateFlags::UPDATE_MOVE_BY_PISTON);
 const PISTON_NEIGHBOR_UPDATE_LIMIT: i32 = 512;
+const MAX_MOVED_BLOCKS: usize = 12;
 
 /// Vanilla `PistonBaseBlock` shared by normal and sticky pistons.
 #[block_behavior]
@@ -221,6 +222,24 @@ impl PistonBaseBlock {
         !state.has_block_entity()
     }
 
+    fn final_movement_is_valid(
+        world: &dyn PistonLevel,
+        to_push: &[BlockPos],
+        push_direction: Direction,
+    ) -> bool {
+        to_push.len() <= MAX_MOVED_BLOCKS
+            && to_push.iter().all(|&pos| {
+                Self::is_pushable(
+                    world.get_block_state(pos),
+                    world,
+                    pos,
+                    push_direction,
+                    false,
+                    push_direction,
+                )
+            })
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "keeping vanilla's ordered piston mutation sequence together makes parity auditable"
@@ -261,8 +280,11 @@ impl PistonBaseBlock {
             return false;
         }
         to_push = piston_event.blocks().to_vec();
-        let to_destroy = resolver.to_destroy().to_vec();
         let push_direction = resolver.push_direction();
+        if !Self::final_movement_is_valid(world.as_ref(), &to_push, push_direction) {
+            return false;
+        }
+        let to_destroy = resolver.to_destroy().to_vec();
         let mut delete_after_move = Vec::with_capacity(to_push.len());
         let mut pushed_states = Vec::with_capacity(to_push.len());
         for &pos in &to_push {
@@ -695,6 +717,87 @@ mod tests {
             pos,
             Direction::East,
             false,
+            Direction::East,
+        ));
+    }
+
+    #[test]
+    fn event_injected_block_entity_is_rejected_before_movement() {
+        init_vanilla_registry();
+        init_behaviors();
+        let piston_pos = BlockPos::new(0, 64, 0);
+        let stone_pos = piston_pos.east();
+        let chest_pos = stone_pos.east();
+        let level = TestLevel::default()
+            .with_block(stone_pos, vanilla_blocks::STONE.default_state())
+            .with_block(chest_pos, vanilla_blocks::CHEST.default_state());
+        let mut event = PistonEvent::new(
+            "minecraft:test".to_owned(),
+            piston_pos,
+            vec![stone_pos],
+            "East".to_owned(),
+            true,
+        );
+        event.blocks_mut().push(chest_pos);
+
+        assert!(!PistonBaseBlock::final_movement_is_valid(
+            &level,
+            event.blocks(),
+            Direction::East,
+        ));
+    }
+
+    #[test]
+    fn event_injected_thirteenth_block_is_rejected_before_movement() {
+        init_vanilla_registry();
+        init_behaviors();
+        let piston_pos = BlockPos::new(0, 64, 0);
+        let level = TestLevel::default();
+        let mut event = PistonEvent::new(
+            "minecraft:test".to_owned(),
+            piston_pos,
+            (1..=12)
+                .map(|offset| piston_pos.relative_n(Direction::East, offset))
+                .collect(),
+            "East".to_owned(),
+            true,
+        );
+        for offset in 1..=13 {
+            level.set_test_block(
+                piston_pos.relative_n(Direction::East, offset),
+                vanilla_blocks::STONE.default_state(),
+            );
+        }
+        event
+            .blocks_mut()
+            .push(piston_pos.relative_n(Direction::East, 13));
+
+        assert!(!PistonBaseBlock::final_movement_is_valid(
+            &level,
+            event.blocks(),
+            Direction::East,
+        ));
+    }
+
+    #[test]
+    fn event_injected_out_of_bounds_block_is_rejected_before_movement() {
+        init_vanilla_registry();
+        init_behaviors();
+        let piston_pos = BlockPos::new(0, 64, 0);
+        let outside_pos = BlockPos::new(1, 320, 0);
+        let level =
+            TestLevel::default().with_block(outside_pos, vanilla_blocks::STONE.default_state());
+        let event = PistonEvent::new(
+            "minecraft:test".to_owned(),
+            piston_pos,
+            vec![outside_pos],
+            "East".to_owned(),
+            true,
+        );
+
+        assert!(!PistonBaseBlock::final_movement_is_valid(
+            &level,
+            event.blocks(),
             Direction::East,
         ));
     }

@@ -3,7 +3,7 @@ use std::future::Future;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::{Arc, Weak};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use foton_protocol::packet_reader::TCPNetworkDecoder;
 use foton_protocol::packet_traits::{ClientPacket, CompressionInfo, EncodedPacket, ServerPacket};
@@ -64,6 +64,7 @@ pub enum OutboundPacket {
 const OUTBOUND_PACKET_LIMIT: usize = 4_096;
 const OUTBOUND_BYTE_LIMIT: usize = 64 * 1024 * 1024;
 const FINAL_DISCONNECT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Default)]
 struct OutboundBudget {
@@ -663,28 +664,65 @@ impl BundleBuilder {
     }
 }
 
-/// Milliseconds since the Unix epoch, saturating rather than panicking.
+/// Milliseconds since the Unix epoch for the opaque keep-alive identifier.
 ///
 /// `duration_since(UNIX_EPOCH)` only fails when the wall clock is set before
 /// 1970, which a bad RTC or a container with no clock source can produce. The
 /// release profile is `panic = "abort"`, so panicking here would kill the
-/// server outright -- taking every unsaved chunk with it -- over a clock that
-/// the keep-alive logic can perfectly well treat as "time zero".
+/// server outright. Elapsed-time decisions use [`Instant`] instead.
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+        .map_or(0, |elapsed| elapsed.as_millis() as u64)
 }
 
-#[expect(
-    clippy::struct_field_names,
-    reason = "alive_ prefix is intentional to group related keep-alive fields"
-)]
 struct KeepAliveTracker {
-    alive_time: u64,
-    alive_pending: bool,
-    alive_id: u64,
+    sent_at: Option<Instant>,
+    pending: bool,
+    id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeepAliveTick {
+    None,
+    Send(u64),
+    Timeout,
+}
+
+impl KeepAliveTracker {
+    const fn new() -> Self {
+        Self {
+            sent_at: None,
+            pending: false,
+            id: 0,
+        }
+    }
+
+    fn tick_at(&mut self, now: Instant, id: u64) -> KeepAliveTick {
+        if self
+            .sent_at
+            .is_some_and(|sent_at| now.saturating_duration_since(sent_at) < KEEP_ALIVE_INTERVAL)
+        {
+            return KeepAliveTick::None;
+        }
+        if self.pending {
+            return KeepAliveTick::Timeout;
+        }
+
+        self.sent_at = Some(now);
+        self.pending = true;
+        self.id = id;
+        KeepAliveTick::Send(id)
+    }
+
+    fn acknowledge_at(&mut self, id: u64, now: Instant) -> Option<Duration> {
+        if !self.pending || id != self.id {
+            return None;
+        }
+        let sent_at = self.sent_at?;
+        self.pending = false;
+        Some(now.saturating_duration_since(sent_at))
+    }
 }
 
 /// A connection to a Java client.
@@ -722,11 +760,7 @@ impl JavaConnection {
             id,
             remote_address,
             player,
-            keep_alive_tracker: SyncMutex::new(KeepAliveTracker {
-                alive_time: 0,
-                alive_pending: false,
-                alive_id: 0,
-            }),
+            keep_alive_tracker: SyncMutex::new(KeepAliveTracker::new()),
             latency: SyncMutex::new(0),
             unhandled_packet_ids: SyncMutex::new(Vec::new()),
         }
@@ -756,44 +790,31 @@ impl JavaConnection {
 
     fn keep_connection_alive(&self) {
         let mut tracker = self.keep_alive_tracker.lock();
-        let now = now_millis();
+        let action = tracker.tick_at(Instant::now(), now_millis());
+        drop(tracker);
 
-        // `saturating_sub`, not `-`: the wall clock can move backwards (an NTP
-        // correction, a VM resumed from a snapshot), and in release this
-        // subtraction wraps to a colossal number that clears the 15 s gate at
-        // once. Every player with a keep-alive in flight is then dropped for
-        // "timeout" on the same tick. `handle_keep_alive` below already
-        // saturates; this side did not.
-        if now.saturating_sub(tracker.alive_time) >= 15000 {
-            if tracker.alive_pending {
+        match action {
+            KeepAliveTick::None => {}
+            KeepAliveTick::Send(id) => self.send_packet(CKeepAlive::new(id as i64)),
+            KeepAliveTick::Timeout => {
                 self.disconnect(translations::DISCONNECT_TIMEOUT.msg());
-            } else {
-                tracker.alive_pending = true;
-                tracker.alive_id = now;
-                tracker.alive_time = now;
-                self.send_packet(CKeepAlive::new(tracker.alive_id as i64));
             }
         }
     }
 
     /// Handles a keep alive packet.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "latency saturates at u32::MAX ms (~49 days), which is unreachable in practice"
-    )]
     fn handle_keep_alive(&self, packet: SKeepAlive) {
         let mut tracker = self.keep_alive_tracker.lock();
-        if tracker.alive_pending && packet.id as u64 == tracker.alive_id {
-            let now = now_millis();
-
-            let time = now.saturating_sub(tracker.alive_time) as u32;
-            tracker.alive_pending = false;
-            drop(tracker);
-            let mut latency = self.latency.lock();
-            *latency = (*latency * 3 + time) / 4;
-        } else {
+        let elapsed = tracker.acknowledge_at(packet.id as u64, Instant::now());
+        drop(tracker);
+        let Some(elapsed) = elapsed else {
             self.disconnect(translations::DISCONNECT_TIMEOUT.msg());
-        }
+            return;
+        };
+        let time = u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX);
+        let mut latency = self.latency.lock();
+        let smoothed = (u64::from(*latency) * 3 + u64::from(time)) / 4;
+        *latency = u32::try_from(smoothed).unwrap_or(u32::MAX);
     }
 
     /// Returns the current latency in milliseconds.
@@ -1358,7 +1379,11 @@ impl NetworkConnection for JavaConnection {
 
 #[cfg(test)]
 mod tests {
-    use std::{array, future::pending, time::Duration};
+    use std::{
+        array,
+        future::pending,
+        time::{Duration, Instant},
+    };
 
     use crate::{
         entity::{Entity as _, LivingEntity as _},
@@ -1745,6 +1770,44 @@ mod tests {
             decoded,
             DecodedPlayPacket::Immediate(ImmediatePlayPacket::KeepAlive(SKeepAlive { id: 42 }))
         ));
+    }
+
+    #[test]
+    fn backward_wall_clock_does_not_delay_monotonic_keep_alive_timeout() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(14), 1),
+            KeepAliveTick::None
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 2),
+            KeepAliveTick::Timeout
+        );
+    }
+
+    #[test]
+    fn keep_alive_round_trip_uses_monotonic_time_after_wall_clock_rollback() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_millis(10), 1),
+            KeepAliveTick::None
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_000, started_at + Duration::from_millis(42)),
+            Some(Duration::from_millis(42))
+        );
     }
 
     #[test]
