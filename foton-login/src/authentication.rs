@@ -27,15 +27,18 @@ const AUTH_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTH_TOTAL_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_AUTH_RESPONSE_BODY_BYTES: usize = 1024 * 1024;
+const MAX_AUTH_REDIRECT_HOPS: usize = 10;
 
-/// The one HTTP client every session-server call goes through.
+/// The HTTP clients every session-server call goes through, split by the
+/// configured remote-HTTP policy captured by their redirect handlers.
 ///
 /// `reqwest::get` builds a fresh client per call, which means a fresh TLS
 /// handshake and connection pool for every login.
-static AUTH_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static AUTH_CLIENTS: [OnceLock<reqwest::Client>; 2] = [OnceLock::new(), OnceLock::new()];
 
-fn auth_client() -> Result<&'static reqwest::Client, AuthError> {
-    if let Some(client) = AUTH_CLIENT.get() {
+fn auth_client(allow_insecure_auth_server: bool) -> Result<&'static reqwest::Client, AuthError> {
+    let client_slot = &AUTH_CLIENTS[usize::from(allow_insecure_auth_server)];
+    if let Some(client) = client_slot.get() {
         return Ok(client);
     }
 
@@ -45,10 +48,16 @@ fn auth_client() -> Result<&'static reqwest::Client, AuthError> {
     let client = reqwest::Client::builder()
         .connect_timeout(AUTH_CONNECT_TIMEOUT)
         .read_timeout(AUTH_READ_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if is_https_to_http_downgrade(attempt.previous(), attempt.url()) {
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= MAX_AUTH_REDIRECT_HOPS {
+                attempt.stop()
+            } else if !is_auth_redirect_allowed(
+                attempt.previous(),
+                attempt.url(),
+                allow_insecure_auth_server,
+            ) {
                 attempt.error(std::io::Error::other(
-                    "HTTPS-to-HTTP authentication redirect rejected",
+                    "authentication redirect rejected by endpoint policy",
                 ))
             } else {
                 attempt.follow()
@@ -57,7 +66,7 @@ fn auth_client() -> Result<&'static reqwest::Client, AuthError> {
         .build()
         .map_err(|_| AuthError::FailedResponse)?;
 
-    Ok(AUTH_CLIENT.get_or_init(|| client))
+    Ok(client_slot.get_or_init(|| client))
 }
 
 /// An error that can occur during Mojang authentication.
@@ -151,7 +160,7 @@ async fn mojang_authenticate_with_timeout(
         allow_insecure_auth_server,
     )?;
 
-    let client = auth_client()?;
+    let client = auth_client(allow_insecure_auth_server)?;
     let mut last_error = AuthError::FailedResponse;
 
     let request = async {
@@ -170,7 +179,7 @@ async fn mojang_authenticate_with_timeout(
                     let body = read_auth_response(response).await?;
                     let profile: GameProfile =
                         serde_json::from_slice(&body).map_err(|_| AuthError::FailedParse)?;
-                    if profile.name != username {
+                    if !profile.name.eq_ignore_ascii_case(username) {
                         return Err(AuthError::ProfileNameMismatch);
                     }
                     return Ok(profile);
@@ -233,9 +242,7 @@ fn build_auth_url(
     let endpoint = auth_server.unwrap_or(DEFAULT_AUTH_SERVER);
     let mut url =
         Url::parse(endpoint).map_err(|_| AuthError::InvalidAuthServer(endpoint.to_string()))?;
-    if url.scheme() != "https"
-        && !(url.scheme() == "http" && (allow_insecure_auth_server || is_loopback_url(&url)))
-    {
+    if !is_allowed_auth_endpoint(&url, allow_insecure_auth_server) {
         return Err(AuthError::InvalidAuthServer(endpoint.to_string()));
     }
     url.query_pairs_mut()
@@ -252,6 +259,21 @@ fn is_loopback_url(url: &Url) -> bool {
                 .parse::<std::net::IpAddr>()
                 .is_ok_and(|address| address.is_loopback())
     })
+}
+
+fn is_allowed_auth_endpoint(url: &Url, allow_insecure_auth_server: bool) -> bool {
+    url.scheme() == "https"
+        || (url.scheme() == "http" && (allow_insecure_auth_server || is_loopback_url(url)))
+}
+
+fn is_auth_redirect_allowed(
+    previous: &[Url],
+    next: &Url,
+    allow_insecure_auth_server: bool,
+) -> bool {
+    previous.len() < MAX_AUTH_REDIRECT_HOPS
+        && is_allowed_auth_endpoint(next, allow_insecure_auth_server)
+        && !is_https_to_http_downgrade(previous, next)
 }
 
 fn is_https_to_http_downgrade(previous: &[Url], next: &Url) -> bool {
@@ -448,6 +470,25 @@ mod tests {
         assert!(!is_https_to_http_downgrade(&previous, &secure));
     }
 
+    #[test]
+    fn redirect_policy_reuses_initial_http_endpoint_rules() {
+        let previous = [Url::parse("http://localhost/session").expect("valid URL")];
+        let remote_http = Url::parse("http://auth.example.com/session").expect("valid URL");
+
+        assert!(!is_auth_redirect_allowed(&previous, &remote_http, false));
+        assert!(is_auth_redirect_allowed(&previous, &remote_http, true));
+    }
+
+    #[test]
+    fn redirect_policy_has_a_finite_hop_limit() {
+        let previous = (0..MAX_AUTH_REDIRECT_HOPS)
+            .map(|_| Url::parse("https://auth.example.com/session").expect("valid URL"))
+            .collect::<Vec<_>>();
+        let next = Url::parse("https://auth.example.com/next").expect("valid URL");
+
+        assert!(!is_auth_redirect_allowed(&previous, &next, false));
+    }
+
     #[tokio::test]
     async fn oversized_auth_response_is_rejected_before_json_parsing() {
         let body = "x".repeat(MAX_AUTH_RESPONSE_BODY_BYTES + 1);
@@ -538,6 +579,27 @@ mod tests {
         let result = mojang_authenticate("Steve", "abc123", Some(&url), false).await;
 
         assert!(matches!(result, Err(AuthError::ProfileNameMismatch)));
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        server.await.expect("HTTP test server should finish");
+    }
+
+    #[tokio::test]
+    async fn matching_auth_profile_name_is_case_insensitive() {
+        let body = r#"{"id":"8667ba71-b85a-4004-af54-457a9734eed7","name":"sTeVe","properties":[],"profileActions":null}"#;
+        let (url, requests, server) = spawn_http_server(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+            1,
+        )
+        .await;
+
+        let profile = mojang_authenticate("Steve", "abc123", Some(&url), false)
+            .await
+            .expect("case-insensitive profile name should authenticate");
+
+        assert_eq!(profile.name, "sTeVe");
         assert_eq!(requests.load(Ordering::Relaxed), 1);
         server.await.expect("HTTP test server should finish");
     }
