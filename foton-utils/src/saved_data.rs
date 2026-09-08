@@ -380,13 +380,15 @@ fn invalid_binary_data(path: &Path, message: impl Display) -> io::Error {
 mod tests {
     use std::{
         env::temp_dir,
-        io::ErrorKind,
+        io::{Error, ErrorKind},
         path::PathBuf,
-        sync::Arc,
+        sync::{Arc, Barrier, mpsc},
+        thread,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use serde::{Deserialize, Serialize};
+    use tokio::{fs as tokio_fs, sync::oneshot, task::yield_now, time::timeout};
 
     use wincode::{SchemaRead, SchemaWrite};
 
@@ -425,7 +427,7 @@ mod tests {
         let dir = temp_world_dir("overlapping-async-writes");
         sync_fs::create_dir_all(&dir).expect("test directory should be created");
         let path = dir.join("saved.toml");
-        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier = Arc::new(Barrier::new(2));
 
         let first_barrier = Arc::clone(&barrier);
         let first =
@@ -466,7 +468,7 @@ mod tests {
             b"saved",
             |parent| {
                 assert_eq!(parent, expected_parent);
-                Err(std::io::Error::other("parent sync failed"))
+                Err(Error::other("parent sync failed"))
             },
             || Ok(()),
         )
@@ -485,11 +487,11 @@ mod tests {
         let dir = temp_world_dir("overlapping-sync-writes");
         sync_fs::create_dir_all(&dir).expect("test directory should be created");
         let path = dir.join("saved.toml");
-        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier = Arc::new(Barrier::new(2));
 
         let first_path = path.clone();
         let first_barrier = Arc::clone(&barrier);
-        let first = std::thread::spawn(move || {
+        let first = thread::spawn(move || {
             write_atomically_sync_with_parent_sync(
                 &first_path,
                 b"first",
@@ -502,7 +504,7 @@ mod tests {
         });
         let second_path = path.clone();
         let second_barrier = Arc::clone(&barrier);
-        let second = std::thread::spawn(move || {
+        let second = thread::spawn(move || {
             write_atomically_sync_with_parent_sync(
                 &second_path,
                 b"second",
@@ -531,8 +533,8 @@ mod tests {
         let dir = temp_world_dir("cancelled-async-write");
         sync_fs::create_dir_all(&dir).expect("test directory should be created");
         let path = dir.join("saved.toml");
-        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
-        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let (started_sender, started_receiver) = oneshot::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
 
         let writer = tokio::spawn(write_atomically_with_before_rename(
             path.clone(),
@@ -540,10 +542,10 @@ mod tests {
             move || {
                 started_sender
                     .send(())
-                    .map_err(|_| std::io::Error::other("cancellation test receiver dropped"))?;
+                    .map_err(|()| Error::other("cancellation test receiver dropped"))?;
                 release_receiver
                     .recv()
-                    .map_err(|_| std::io::Error::other("cancellation test release dropped"))?;
+                    .map_err(|_| Error::other("cancellation test release dropped"))?;
                 Ok(())
             },
         ));
@@ -562,15 +564,15 @@ mod tests {
             .send(())
             .expect("blocking transaction should be released");
 
-        tokio::time::timeout(Duration::from_secs(5), async {
+        timeout(Duration::from_secs(5), async {
             loop {
-                if tokio::fs::try_exists(&path)
+                if tokio_fs::try_exists(&path)
                     .await
                     .expect("final path existence should be readable")
                 {
                     break;
                 }
-                tokio::task::yield_now().await;
+                yield_now().await;
             }
         })
         .await
