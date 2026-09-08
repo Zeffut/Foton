@@ -5,16 +5,21 @@
 //! human-readable TOML data and versioned binary data.
 
 use std::{
+    ffi::OsString,
     fmt::Display,
     fs as sync_fs,
     future::Future,
     io,
     path::{Path, PathBuf},
+    process,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::fs;
 use wincode::{SchemaRead, SchemaWrite, config::DefaultConfig};
+
+static TEMPORARY_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Built-in saved data entry names.
 pub mod names {
@@ -137,7 +142,7 @@ pub struct SavedDataManager {
 /// as a perfectly valid empty scoreboard: the loss would be silent. `level.toml`
 /// and the player store already publish this way; this is the same pattern.
 async fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_atomically_with_parent_sync(path, bytes, sync_parent_directory).await
+    write_atomically_with_parent_sync(path, bytes, sync_parent_directory, || async { Ok(()) }).await
 }
 
 async fn sync_parent_directory(parent: PathBuf) -> io::Result<()> {
@@ -147,14 +152,17 @@ async fn sync_parent_directory(parent: PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-async fn write_atomically_with_parent_sync<F, Fut>(
+async fn write_atomically_with_parent_sync<F, Fut, G, Gut>(
     path: &Path,
     bytes: &[u8],
     sync_parent: F,
+    before_rename: G,
 ) -> io::Result<()>
 where
     F: FnOnce(PathBuf) -> Fut,
     Fut: Future<Output = io::Result<()>>,
+    G: FnOnce() -> Gut,
+    Gut: Future<Output = io::Result<()>>,
 {
     use tokio::io::AsyncWriteExt as _;
 
@@ -164,12 +172,12 @@ where
             "atomic saved-data path has no parent",
         )
     })?;
-    let temporary = path.with_extension("tmp");
+    let (temporary, mut file) = create_temporary_file(path).await?;
     let publication = async {
-        let mut file = fs::File::create(&temporary).await?;
         file.write_all(bytes).await?;
         file.sync_all().await?;
         drop(file);
+        before_rename().await?;
         fs::rename(&temporary, path).await
     }
     .await;
@@ -193,7 +201,30 @@ where
 
 /// Blocking twin of [`write_atomically`], for the shutdown path.
 fn write_atomically_sync(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_atomically_sync_with_parent_sync(path, bytes, sync_parent_directory_sync)
+    write_atomically_sync_with_parent_sync(path, bytes, sync_parent_directory_sync, || Ok(()))
+}
+
+fn temporary_path(path: &Path) -> PathBuf {
+    let counter = TEMPORARY_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut file_name = match path.file_name() {
+        Some(file_name) => file_name.to_os_string(),
+        None => OsString::from("saved-data"),
+    };
+    file_name.push(format!(".tmp-{}-{counter}", process::id()));
+    path.with_file_name(file_name)
+}
+
+async fn create_temporary_file(path: &Path) -> io::Result<(PathBuf, fs::File)> {
+    loop {
+        let temporary = temporary_path(path);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        match options.open(&temporary).await {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn sync_parent_directory_sync(parent: &Path) -> io::Result<()> {
@@ -203,13 +234,15 @@ fn sync_parent_directory_sync(parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn write_atomically_sync_with_parent_sync<F>(
+fn write_atomically_sync_with_parent_sync<F, G>(
     path: &Path,
     bytes: &[u8],
     sync_parent: F,
+    before_rename: G,
 ) -> io::Result<()>
 where
     F: FnOnce(&Path) -> io::Result<()>,
+    G: FnOnce() -> io::Result<()>,
 {
     use std::io::Write as _;
 
@@ -219,12 +252,12 @@ where
             "atomic saved-data path has no parent",
         )
     })?;
-    let temporary = path.with_extension("tmp");
+    let (temporary, mut file) = create_temporary_file_sync(path)?;
     let publication = (|| {
-        let mut file = sync_fs::File::create(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
+        before_rename()?;
         sync_fs::rename(&temporary, path)
     })();
 
@@ -243,6 +276,19 @@ where
     }
 
     sync_parent(parent)
+}
+
+fn create_temporary_file_sync(path: &Path) -> io::Result<(PathBuf, sync_fs::File)> {
+    loop {
+        let temporary = temporary_path(path);
+        let mut options = sync_fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        match options.open(&temporary) {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 impl SavedDataManager {
@@ -385,6 +431,7 @@ mod tests {
         env::temp_dir,
         io::ErrorKind,
         path::PathBuf,
+        sync::Arc,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -429,10 +476,15 @@ mod tests {
         let path = dir.join("saved.toml");
         let expected_parent = dir.clone();
 
-        let error = write_atomically_with_parent_sync(&path, b"saved", move |parent| async move {
-            assert_eq!(parent, expected_parent);
-            Err(std::io::Error::other("parent sync failed"))
-        })
+        let error = write_atomically_with_parent_sync(
+            &path,
+            b"saved",
+            move |parent| async move {
+                assert_eq!(parent, expected_parent);
+                Err(std::io::Error::other("parent sync failed"))
+            },
+            || async { Ok(()) },
+        )
         .await
         .expect_err("the injected directory sync failure should be returned");
 
@@ -444,6 +496,48 @@ mod tests {
         sync_fs::remove_dir_all(dir).expect("test directory should be removed");
     }
 
+    #[tokio::test]
+    async fn overlapping_async_atomic_writes_publish_without_colliding() {
+        let dir = temp_world_dir("overlapping-async-writes");
+        sync_fs::create_dir_all(&dir).expect("test directory should be created");
+        let path = dir.join("saved.toml");
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+
+        let first_barrier = Arc::clone(&barrier);
+        let first = write_atomically_with_parent_sync(
+            &path,
+            b"first",
+            |_| async { Ok(()) },
+            move || async move {
+                first_barrier.wait().await;
+                Ok(())
+            },
+        );
+        let second_barrier = Arc::clone(&barrier);
+        let second = write_atomically_with_parent_sync(
+            &path,
+            b"second",
+            |_| async { Ok(()) },
+            move || async move {
+                second_barrier.wait().await;
+                Ok(())
+            },
+        );
+
+        let (first_result, second_result) = tokio::join!(first, second);
+        assert!(
+            first_result.is_ok(),
+            "first overlapping write should succeed"
+        );
+        assert!(
+            second_result.is_ok(),
+            "second overlapping write should succeed"
+        );
+        let contents = sync_fs::read(&path).expect("published file should be readable");
+        assert!(contents == b"first" || contents == b"second");
+        sync_fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
     #[test]
     fn sync_atomic_write_syncs_the_containing_directory_after_rename() {
         let dir = temp_world_dir("sync-parent-sync");
@@ -451,10 +545,15 @@ mod tests {
         let path = dir.join("saved.bin");
         let expected_parent = dir.clone();
 
-        let error = write_atomically_sync_with_parent_sync(&path, b"saved", |parent| {
-            assert_eq!(parent, expected_parent);
-            Err(std::io::Error::other("parent sync failed"))
-        })
+        let error = write_atomically_sync_with_parent_sync(
+            &path,
+            b"saved",
+            |parent| {
+                assert_eq!(parent, expected_parent);
+                Err(std::io::Error::other("parent sync failed"))
+            },
+            || Ok(()),
+        )
         .expect_err("the injected directory sync failure should be returned");
 
         assert_eq!(error.kind(), ErrorKind::Other);
@@ -462,6 +561,52 @@ mod tests {
             sync_fs::read(&path).expect("rename should precede directory sync"),
             b"saved"
         );
+        sync_fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn overlapping_sync_atomic_writes_publish_without_colliding() {
+        let dir = temp_world_dir("overlapping-sync-writes");
+        sync_fs::create_dir_all(&dir).expect("test directory should be created");
+        let path = dir.join("saved.toml");
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+
+        let first_path = path.clone();
+        let first_barrier = Arc::clone(&barrier);
+        let first = std::thread::spawn(move || {
+            write_atomically_sync_with_parent_sync(
+                &first_path,
+                b"first",
+                |_| Ok(()),
+                move || {
+                    first_barrier.wait();
+                    Ok(())
+                },
+            )
+        });
+        let second_path = path.clone();
+        let second_barrier = Arc::clone(&barrier);
+        let second = std::thread::spawn(move || {
+            write_atomically_sync_with_parent_sync(
+                &second_path,
+                b"second",
+                |_| Ok(()),
+                move || {
+                    second_barrier.wait();
+                    Ok(())
+                },
+            )
+        });
+
+        assert!(first.join().expect("first writer should not panic").is_ok());
+        assert!(
+            second
+                .join()
+                .expect("second writer should not panic")
+                .is_ok()
+        );
+        let contents = sync_fs::read(&path).expect("published file should be readable");
+        assert!(contents == b"first" || contents == b"second");
         sync_fs::remove_dir_all(dir).expect("test directory should be removed");
     }
 

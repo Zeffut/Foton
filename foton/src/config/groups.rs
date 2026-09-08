@@ -201,33 +201,28 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn initial_and_updated_groups_config_use_shared_atomic_publication() {
+    async fn initial_and_updated_groups_config_preserve_contents() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after Unix epoch")
             .as_nanos();
         let root = temp_dir().join(format!("foton-atomic-groups-{unique}"));
-        fs::create_dir_all(root.join("groups.toml.tmp"))
-            .expect("blocking the atomic temporary path should succeed");
+        fs::create_dir_all(&root).expect("test directory should be created");
         let path = root.join("groups.toml");
 
-        let initial_result = load_or_create_groups(&path);
+        let initial =
+            load_or_create_groups(&path).expect("initial groups config should be created");
         let store = FilePermissionGroupStore::new(path.clone());
         let update_result =
             PermissionGroupStore::save_groups(&store, PermissionGroupsConfig::default()).await;
 
-        assert!(
-            initial_result.is_err(),
-            "the blocked initial atomic write should fail"
+        assert_eq!(
+            initial,
+            toml::from_str(DEFAULT_GROUPS).expect("packaged groups config should parse")
         );
-        assert!(
-            update_result.is_err(),
-            "the blocked update atomic write should fail"
-        );
-        assert!(
-            !path.exists(),
-            "a failed atomic write must not publish a file"
-        );
+        update_result.expect("groups config update should succeed");
+        let written = fs::read_to_string(&path).expect("groups config should be readable");
+        assert!(written.starts_with(GROUPS_CONFIG_HEADER));
         fs::remove_dir_all(root).expect("test directory should be removed");
     }
 }
