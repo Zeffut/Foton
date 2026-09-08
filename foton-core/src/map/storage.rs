@@ -278,14 +278,14 @@ struct PersistentMapFrame {
 fn persist_map(id: i32, map: &MapItemSavedData) -> PersistentMap {
     PersistentMap {
         id,
-        dimension: map.dimension.to_string(),
+        dimension: map.dimension().to_string(),
         nether: map.nether(),
-        center_x: map.center_x,
-        center_z: map.center_z,
-        scale: map.scale,
+        center_x: map.center_x(),
+        center_z: map.center_z(),
+        scale: map.scale(),
         tracking_position: map.tracking_position(),
         unlimited_tracking: map.unlimited_tracking(),
-        locked: map.locked,
+        locked: map.locked(),
         colors: map.colors().to_vec(),
         banners: map
             .banners()
@@ -391,6 +391,37 @@ mod tests {
         assert!(
             storage.pending_save().is_some(),
             "a map changed after the saved snapshot must remain dirty"
+        );
+    }
+
+    #[test]
+    fn unchanged_snapshot_is_acknowledged() {
+        let storage = MapStorage::new();
+        let id = MapId::new(0);
+        storage.set(id, test_map());
+        let snapshot = storage.snapshot();
+
+        storage.mark_saved(&snapshot);
+
+        assert!(
+            storage.pending_save().is_none(),
+            "an unchanged snapshot must clear the map's dirty state"
+        );
+    }
+
+    #[test]
+    fn persisted_field_mutation_after_snapshot_remains_dirty() {
+        let storage = MapStorage::new();
+        let id = MapId::new(0);
+        let map = storage.set(id, test_map());
+        let snapshot = storage.snapshot();
+
+        map.lock().set_locked(true);
+        storage.mark_saved(&snapshot);
+
+        assert!(
+            storage.pending_save().is_some(),
+            "a persisted field changed after the saved snapshot must remain dirty"
         );
     }
 

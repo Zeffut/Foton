@@ -96,21 +96,21 @@ fn a_map_centers_on_the_cell_its_scale_divides_the_world_into() {
 
     let near_origin =
         MapItemSavedData::create_fresh(8.5, 8.5, 0, true, false, dimension.clone(), false);
-    assert_eq!((near_origin.center_x, near_origin.center_z), (0, 0));
+    assert_eq!((near_origin.center_x(), near_origin.center_z()), (0, 0));
 
     let same_cell =
         MapItemSavedData::create_fresh(63.0, -64.0, 0, true, false, dimension.clone(), false);
-    assert_eq!((same_cell.center_x, same_cell.center_z), (0, 0));
+    assert_eq!((same_cell.center_x(), same_cell.center_z()), (0, 0));
 
     let next_cell =
         MapItemSavedData::create_fresh(65.0, 8.5, 0, true, false, dimension.clone(), false);
-    assert_eq!((next_cell.center_x, next_cell.center_z), (128, 0));
+    assert_eq!((next_cell.center_x(), next_cell.center_z()), (128, 0));
 
     // Vanilla parity: `scaled()` re-centers on the coarser grid rather than
     // keeping the old center.
     let zoomed = near_origin.scaled();
-    assert_eq!(zoomed.scale, 1);
-    assert_eq!((zoomed.center_x, zoomed.center_z), (64, 64));
+    assert_eq!(zoomed.scale(), 1);
+    assert_eq!((zoomed.center_x(), zoomed.center_z()), (64, 64));
 }
 
 /// The whole point of the item: what the ground is made of has to reach the
@@ -188,9 +188,9 @@ fn locking_a_map_copies_its_pixels_and_leaves_the_original_alone() {
 
     let locked = original.locked_copy();
 
-    assert!(locked.locked);
-    assert!(!original.locked);
-    assert_eq!(locked.scale, original.scale);
+    assert!(locked.locked());
+    assert!(!original.locked());
+    assert_eq!(locked.scale(), original.scale());
     assert_eq!(
         locked.colors()[3 + 4 * MAP_SIZE],
         MapColor::EMERALD.packed_id(Brightness::Low)
@@ -345,8 +345,8 @@ fn a_domains_maps_and_id_counter_round_trip_through_storage() {
         .get(second)
         .expect("the stored map should come back");
     let map = map.lock();
-    assert_eq!(map.scale, 1);
-    assert_eq!(map.dimension, dimension);
+    assert_eq!(map.scale(), 1);
+    assert_eq!(map.dimension(), &dimension);
     assert!(map.nether());
     assert_eq!(
         map.colors()[5 + 6 * MAP_SIZE],

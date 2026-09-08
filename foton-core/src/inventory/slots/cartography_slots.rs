@@ -115,7 +115,7 @@ impl CartographyHandler {
         };
         let (locked, scale) = {
             let data = data.lock();
-            (data.locked, data.scale)
+            (data.locked(), data.scale())
         };
 
         if additional.is(&vanilla_items::PAPER) && !locked && scale < MAX_SCALE {
