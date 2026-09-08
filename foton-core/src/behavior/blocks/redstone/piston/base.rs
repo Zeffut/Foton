@@ -38,6 +38,13 @@ const UPDATE_CLEARED_MOVED_BLOCK: UpdateFlags = UpdateFlags::UPDATE_CLIENTS
 const PISTON_NEIGHBOR_UPDATE_LIMIT: i32 = 512;
 const MAX_MOVED_BLOCKS: usize = 12;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MoveBlocksResult {
+    Moved,
+    NoMovement,
+    Rejected,
+}
+
 /// Vanilla `PistonBaseBlock` shared by normal and sticky pistons.
 #[block_behavior]
 pub struct PistonBaseBlock {
@@ -353,18 +360,22 @@ impl PistonBaseBlock {
         Some(to_destroy.to_vec())
     }
 
-    fn finish_retraction_arm(world: &Arc<World>, level: &RetractionLevel<'_>) {
-        if world.get_block_state(level.arm_pos) != level.original_arm_state {
+    fn finish_retraction_arm(
+        world: &Arc<World>,
+        arm_pos: BlockPos,
+        original_arm_state: BlockStateId,
+    ) {
+        if world.get_block_state(arm_pos) != original_arm_state {
             return;
         }
-        if level.original_arm_state.get_block() == &vanilla_blocks::PISTON_HEAD {
+        if original_arm_state.get_block() == &vanilla_blocks::PISTON_HEAD {
             world.set_block(
-                level.arm_pos,
+                arm_pos,
                 vanilla_blocks::AIR.default_state(),
                 UPDATE_RETRACT_BASE,
             );
-        } else if level.original_arm_state.get_block() == &vanilla_blocks::MOVING_PISTON {
-            Self::finish_moving_block_entity(world, level.arm_pos);
+        } else if original_arm_state.get_block() == &vanilla_blocks::MOVING_PISTON {
+            Self::finish_moving_block_entity(world, arm_pos);
         }
     }
 
@@ -378,7 +389,7 @@ impl PistonBaseBlock {
         piston_pos: BlockPos,
         direction: Direction,
         extending: bool,
-    ) -> bool {
+    ) -> MoveBlocksResult {
         let arm_pos = piston_pos.relative(direction);
         let retraction_level = (!extending).then(|| RetractionLevel {
             world: world.as_ref(),
@@ -391,7 +402,7 @@ impl PistonBaseBlock {
         };
         let mut resolver = PistonStructureResolver::new(level, piston_pos, direction, extending);
         if !resolver.resolve() {
-            return false;
+            return MoveBlocksResult::NoMovement;
         }
 
         let original_to_push = resolver.to_push().to_vec();
@@ -404,7 +415,7 @@ impl PistonBaseBlock {
         );
         world.fire_event(&mut piston_event);
         if piston_event.is_cancelled() {
-            return false;
+            return MoveBlocksResult::Rejected;
         }
         let to_push = piston_event.blocks().to_vec();
         let Some(to_destroy) = Self::validate_final_movement(
@@ -415,11 +426,15 @@ impl PistonBaseBlock {
             &original_to_push,
             &to_push,
         ) else {
-            return false;
+            return MoveBlocksResult::Rejected;
         };
         let push_direction = resolver.push_direction();
         if let Some(retraction_level) = retraction_level.as_ref() {
-            Self::finish_retraction_arm(world, retraction_level);
+            Self::finish_retraction_arm(
+                world,
+                retraction_level.arm_pos,
+                retraction_level.original_arm_state,
+            );
         }
         let mut delete_after_move = Vec::with_capacity(to_push.len());
         let mut pushed_states = Vec::with_capacity(to_push.len());
@@ -567,7 +582,7 @@ impl PistonBaseBlock {
         if extending {
             world.update_neighbors_at(arm_pos, &vanilla_blocks::PISTON_HEAD);
         }
-        true
+        MoveBlocksResult::Moved
     }
 
     fn apply_retraction_base(
@@ -659,10 +674,33 @@ impl PistonBaseBlock {
                     Self::apply_retraction_base(world, pos, moving_state, moved_state, direction);
                     world.remove_block(arm_pos, false);
                 } else {
-                    if !self.move_blocks(world, pos, direction, false) {
-                        return false;
+                    match self.move_blocks(world, pos, direction, false) {
+                        MoveBlocksResult::Moved => {
+                            Self::apply_retraction_base(
+                                world,
+                                pos,
+                                moving_state,
+                                moved_state,
+                                direction,
+                            );
+                        }
+                        MoveBlocksResult::NoMovement => {
+                            Self::finish_retraction_arm(
+                                world,
+                                arm_pos,
+                                world.get_block_state(arm_pos),
+                            );
+                            Self::apply_retraction_base(
+                                world,
+                                pos,
+                                moving_state,
+                                moved_state,
+                                direction,
+                            );
+                            world.remove_block(arm_pos, false);
+                        }
+                        MoveBlocksResult::Rejected => return false,
                     }
-                    Self::apply_retraction_base(world, pos, moving_state, moved_state, direction);
                 }
             }
         } else {
@@ -752,7 +790,10 @@ impl BlockBehavior for PistonBaseBlock {
         }
 
         if event == 0 {
-            if !self.move_blocks(world, pos, direction, true) {
+            if !matches!(
+                self.move_blocks(world, pos, direction, true),
+                MoveBlocksResult::Moved
+            ) {
                 return false;
             }
             world.set_block(
@@ -797,7 +838,10 @@ impl PistonBaseBlock {
         direction: Direction,
         extending: bool,
     ) -> bool {
-        self.move_blocks(world, piston_pos, direction, extending)
+        matches!(
+            self.move_blocks(world, piston_pos, direction, extending),
+            MoveBlocksResult::Moved
+        )
     }
 
     pub(crate) fn trigger_event_for_test(
@@ -1195,5 +1239,66 @@ mod tests {
                 .get_block_state(piston_pos.relative_n(Direction::East, 2))
                 .is_air()
         );
+    }
+
+    #[test]
+    fn sticky_retraction_finishes_when_attached_block_cannot_move() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("sticky_piston_no_pull");
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let head_pos = piston_pos.east();
+        let slime_pos = piston_pos.relative_n(Direction::East, 2);
+        let attached_pos = slime_pos.above();
+        let attached_positions: Vec<_> = (0..13)
+            .map(|offset| attached_pos.relative_n(Direction::Up, offset))
+            .collect();
+        let _holder = insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::STICKY_PISTON
+            .default_state()
+            .set_value(FACING, Direction::East)
+            .set_value(EXTENDED, true);
+        let head_state = vanilla_blocks::PISTON_HEAD
+            .default_state()
+            .set_value(FACING, Direction::East)
+            .set_value(PISTON_TYPE, PistonType::Sticky);
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(head_pos, head_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(
+            slime_pos,
+            vanilla_blocks::SLIME_BLOCK.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        for &attached_pos in &attached_positions {
+            assert!(world.set_block(
+                attached_pos,
+                vanilla_blocks::SLIME_BLOCK.default_state(),
+                UpdateFlags::UPDATE_NONE,
+            ));
+        }
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::STICKY_PISTON, true);
+        assert!(piston.trigger_event_for_test(piston_state, &world, piston_pos, 1, 5,));
+        assert_eq!(
+            world.get_block_state(piston_pos).get_block(),
+            &vanilla_blocks::MOVING_PISTON
+        );
+        assert!(world.get_block_state(head_pos).is_air());
+
+        tick_block_entities(&world, 3);
+        let base = world.get_block_state(piston_pos);
+        assert_eq!(base.get_block(), &vanilla_blocks::STICKY_PISTON);
+        assert!(!base.get_value(EXTENDED));
+        assert!(world.get_block_state(head_pos).is_air());
+        assert_eq!(
+            world.get_block_state(slime_pos).get_block(),
+            &vanilla_blocks::SLIME_BLOCK
+        );
+        for attached_pos in attached_positions {
+            assert_eq!(
+                world.get_block_state(attached_pos).get_block(),
+                &vanilla_blocks::SLIME_BLOCK
+            );
+        }
     }
 }
