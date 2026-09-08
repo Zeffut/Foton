@@ -24,6 +24,14 @@ RUN_DIR="$ROOT/run-offline"
 # range, which exercises terrain, structures and both spawn paths at once.
 WORLD_SEED=${WORLD_SEED:-8675309}
 
+sed_in_place() {
+  if [ "$(uname -s)" = Darwin ]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
 echo "=== Building ==="
 cargo build 2>&1 | tail -3
 # A pipeline's status is its last command's, so `if ! cargo build | tail`
@@ -61,7 +69,7 @@ if [ ! -f config/config.toml ]; then
   fi
 fi
 
-sed -i \
+sed_in_place \
   -e 's/^online_mode = .*/online_mode = false/' \
   -e 's/^encryption = .*/encryption = false/' \
   -e 's/^enforce_secure_chat = .*/enforce_secure_chat = false/' \
@@ -74,9 +82,9 @@ sed -i \
 # Pinned, two runs of the same build are comparable, and a run that suddenly
 # stops showing livestock means the server changed rather than the world did.
 if grep -q '^seed = ' config/worlds.toml; then
-  sed -i "s/^seed = .*/seed = \"$WORLD_SEED\"/" config/worlds.toml
+  sed_in_place "s/^seed = .*/seed = \"$WORLD_SEED\"/" config/worlds.toml
 else
-  sed -i "/^save_path = /a seed = \"$WORLD_SEED\"" config/worlds.toml
+  sed_in_place "/^save_path = /a seed = \"$WORLD_SEED\"" config/worlds.toml
 fi
 
 # Start from a clean world every time, so the test measures the server and not
