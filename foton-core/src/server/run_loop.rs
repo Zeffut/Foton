@@ -26,6 +26,10 @@ fn detach_world(
         .validate_removal(key)
         .map_err(|error| format!("{error:?}"))?;
     let Some(worker_removal) = workers.prepare_removal(key) else {
+        log::error!(
+            target: "foton::server::world_removal",
+            "Requested world {key} has no tick worker"
+        );
         return Err("world has no tick worker".to_owned());
     };
     let world = worlds.remove(key).map_err(|error| format!("{error:?}"))?;
@@ -895,7 +899,10 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
-    use std::{iter::empty, sync::Arc};
+    use std::{
+        iter::empty,
+        sync::{Arc, Mutex, Once},
+    };
 
     use super::{Server, detach_world};
     use crate::{
@@ -910,7 +917,43 @@ mod tests {
     };
     use foton_utils::{ChunkPos, Identifier};
     use futures::executor::block_on;
+    use log::{Level, Log, Metadata, Record};
     use rustc_hash::FxHashMap;
+
+    struct WorldRemovalLogger;
+
+    static WORLD_REMOVAL_LOGGER: WorldRemovalLogger = WorldRemovalLogger;
+    static WORLD_REMOVAL_LOGGER_INIT: Once = Once::new();
+    static WORLD_REMOVAL_LOGS: Mutex<Vec<(Level, String)>> = Mutex::new(Vec::new());
+
+    impl Log for WorldRemovalLogger {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+            metadata.target() == "foton::server::world_removal"
+        }
+
+        fn log(&self, record: &Record<'_>) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let Ok(mut logs) = WORLD_REMOVAL_LOGS.lock() else {
+                return;
+            };
+            logs.push((record.level(), record.args().to_string()));
+        }
+
+        fn flush(&self) {}
+    }
+
+    fn capture_world_removal_logs() {
+        WORLD_REMOVAL_LOGGER_INIT.call_once(|| {
+            let _ = log::set_logger(&WORLD_REMOVAL_LOGGER);
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+        let Ok(mut logs) = WORLD_REMOVAL_LOGS.lock() else {
+            panic!("world removal log capture should remain available");
+        };
+        logs.clear();
+    }
 
     fn domain(default_world: Identifier) -> ResolvedDomainConfig {
         ResolvedDomainConfig {
@@ -986,6 +1029,72 @@ mod tests {
             panic!("missing worker must not detach the live world");
         };
         assert!(Arc::ptr_eq(&remaining_world, &world));
+    }
+
+    #[test]
+    fn missing_tick_worker_is_logged_as_an_error() {
+        capture_world_removal_logs();
+        let world = fresh_test_world_in_domain("main", "arena_without_worker");
+        let key = world.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        assert!(worlds.insert(key.clone(), world).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn(empty::<&Arc<World>>()) else {
+            panic!("empty worker set should initialize");
+        };
+
+        assert!(detach_world(&worlds, &mut workers, &key).is_err());
+
+        let Ok(logs) = WORLD_REMOVAL_LOGS.lock() else {
+            panic!("world removal logs should remain available");
+        };
+        assert!(logs.iter().any(|(level, message)| {
+            *level == Level::Error
+                && message == "Requested world main:arena_without_worker has no tick worker"
+        }));
+    }
+
+    #[test]
+    fn successful_detach_removes_world_and_worker_while_other_world_keeps_ticking() {
+        let removed = fresh_test_world_in_domain("main", "arena");
+        let remaining = fresh_test_world_in_domain("main", "lobby");
+        let removed_key = removed.key.clone();
+        let remaining_key = remaining.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        assert!(
+            worlds
+                .insert(removed_key.clone(), Arc::clone(&removed))
+                .is_ok()
+        );
+        assert!(
+            worlds
+                .insert(remaining_key.clone(), Arc::clone(&remaining))
+                .is_ok()
+        );
+        let Ok(mut workers) = WorldTickWorkers::spawn([&removed, &remaining]) else {
+            panic!("world tick workers should start");
+        };
+
+        let Ok(detached) = detach_world(&worlds, &mut workers, &removed_key) else {
+            panic!("eligible world should detach");
+        };
+
+        assert!(Arc::ptr_eq(&detached, &removed));
+        assert!(worlds.get(&removed_key).is_none());
+        assert!(worlds.get(&remaining_key).is_some());
+        let Ok(timings) = block_on(workers.tick_all(1, true)) else {
+            panic!("remaining world worker should tick");
+        };
+        assert_eq!(timings.len(), 1);
+        assert_eq!(removed.game_time(), 0);
+        assert_eq!(remaining.game_time(), 1);
     }
 
     #[test]
