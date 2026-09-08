@@ -828,17 +828,20 @@ impl Server {
                     continue;
                 }
             };
-            if !save {
-                if let Some(sender) = completion {
-                    let _ = sender.send(Ok(0));
-                }
-                continue;
-            }
             // Persistence is I/O and must not stall the serialized game tick.
             self.world_cleanup_tasks.spawn_on(async move {
-                let mut saved = 0;
-                match world.cleanup(&mut saved).await {
-                    Ok(()) => {
+                let result = if save {
+                    let mut saved = 0;
+                    match world.cleanup(&mut saved).await {
+                        Ok(()) => Ok(saved),
+                        Err(error) => Err(error.to_string()),
+                    }
+                } else {
+                    world.cleanup_without_save().await;
+                    Ok(0)
+                };
+                match result {
+                    Ok(saved) => {
                         tracing::debug!(world = %key, saved_chunks = saved, "World cleanup finished");
                         if let Some(sender) = completion {
                             let _ = sender.send(Ok(saved));
@@ -847,7 +850,7 @@ impl Server {
                     Err(error) => {
                         log::error!("World cleanup failed for {key}: {error}");
                         if let Some(sender) = completion {
-                            let _ = sender.send(Err(error.to_string()));
+                            let _ = sender.send(Err(error));
                         }
                     }
                 }

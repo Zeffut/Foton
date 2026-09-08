@@ -5,9 +5,13 @@ use super::{
 use crate::chunk_saver::PreparedChunkSave;
 use tokio::sync::oneshot;
 
-fn finish_save_after_close(saved_count: usize, close_result: io::Result<()>) -> io::Result<usize> {
+fn finish_save_after_close(
+    saved_count: usize,
+    save_error: Option<io::Error>,
+    close_result: io::Result<()>,
+) -> io::Result<usize> {
     match close_result {
-        Ok(()) => Ok(saved_count),
+        Ok(()) => save_error.map_or(Ok(saved_count), Err),
         Err(error) => {
             tracing::error!("Failed to close region files: {error}");
             Err(error)
@@ -233,6 +237,7 @@ impl ChunkMap {
     )]
     pub async fn save_all_chunks(self: &Arc<Self>) -> io::Result<usize> {
         let mut saved_count = 0;
+        let mut save_error = None;
 
         self.flush_queued_light_changes_for_save().await;
 
@@ -308,6 +313,9 @@ impl ChunkMap {
                 Err(e) => {
                     tracing::error!(chunk = ?holder.get_pos(), "Failed to save chunk: {e}");
                     Self::mark_chunk_dirty_for_save_retry(holder);
+                    if save_error.is_none() {
+                        save_error = Some(e);
+                    }
                 }
             }
         }
@@ -346,7 +354,7 @@ impl ChunkMap {
             "Chunk save complete"
         );
 
-        finish_save_after_close(saved_count, close_result)
+        finish_save_after_close(saved_count, save_error, close_result)
     }
 }
 
@@ -358,12 +366,22 @@ mod tests {
 
     #[test]
     fn region_close_error_is_returned_instead_of_successful_save_count() {
-        let result = finish_save_after_close(7, Err(io::Error::other("close failed")));
+        let result = finish_save_after_close(7, None, Err(io::Error::other("close failed")));
 
         let Err(error) = result else {
             panic!("region close failure must fail the overall save");
         };
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert_eq!(error.to_string(), "close failed");
+    }
+
+    #[test]
+    fn chunk_save_error_is_returned_after_all_chunks_are_processed() {
+        let result = finish_save_after_close(7, Some(io::Error::other("chunk failed")), Ok(()));
+
+        let Err(error) = result else {
+            panic!("a chunk save failure must fail the overall save");
+        };
+        assert_eq!(error.to_string(), "chunk failed");
     }
 }

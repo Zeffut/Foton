@@ -9,6 +9,7 @@ use foton_registry::{
     init_vanilla_registry, sound_events, vanilla_entities, vanilla_fluids, vanilla_game_rules,
     vanilla_items,
 };
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
@@ -68,6 +69,34 @@ fn keep_spawn_in_memory_toggle_is_observable() {
     assert!(!world.keep_spawn_in_memory());
     world.set_keep_spawn_in_memory(true);
     assert!(world.keep_spawn_in_memory());
+}
+
+#[test]
+fn cleanup_without_save_waits_for_tracked_chunk_tasks() {
+    let world = fresh_test_world("cleanup_without_save_waits");
+    let runtime = Arc::clone(&world.chunk_map.chunk_runtime);
+    runtime.block_on(async move {
+        let (started_sender, started_receiver) = oneshot::channel();
+        let (release_sender, release_receiver) = oneshot::channel();
+
+        world.chunk_map.task_tracker.spawn(async move {
+            let _ = started_sender.send(());
+            let _ = release_receiver.await;
+        });
+        assert!(started_receiver.await.is_ok());
+
+        let mut cleanup = {
+            let world = Arc::clone(&world);
+            tokio::spawn(async move { world.cleanup_without_save().await })
+        };
+        tokio::select! {
+            result = &mut cleanup => panic!("cleanup completed before its tracked task released: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+
+        assert!(release_sender.send(()).is_ok());
+        assert!(cleanup.await.is_ok());
+    });
 }
 
 #[test]

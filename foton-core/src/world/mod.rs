@@ -733,11 +733,7 @@ impl World {
 
     /// Cleans up the world by waiting for queued saves and persisting all data.
     pub async fn cleanup(&self, total_saved: &mut usize) -> io::Result<()> {
-        let save_tasks = self.save_coordinator.lock().close();
-        self.chunk_map.stop_generation_refill_loop();
-        self.chunk_map.task_tracker.close();
-        let chunk_tasks = self.chunk_map.task_tracker.clone();
-        tokio::join!(chunk_tasks.wait(), save_tasks.wait());
+        self.wait_for_background_tasks().await;
         let _save_guard = self.save_lock.lock().await;
         let mut first_error = None;
         self.sync_world_border_to_level_data();
@@ -816,6 +812,19 @@ impl World {
             }
         }
         first_error.map_or(Ok(()), Err)
+    }
+
+    /// Stops background work without persisting world data.
+    pub(crate) async fn cleanup_without_save(&self) {
+        self.wait_for_background_tasks().await;
+    }
+
+    async fn wait_for_background_tasks(&self) {
+        let save_tasks = self.save_coordinator.lock().close();
+        self.chunk_map.stop_generation_refill_loop();
+        self.chunk_map.task_tracker.close();
+        let chunk_tasks = self.chunk_map.task_tracker.clone();
+        tokio::join!(chunk_tasks.wait(), save_tasks.wait());
     }
 
     /// Returns the domain this loaded world belongs to.
