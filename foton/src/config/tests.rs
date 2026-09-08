@@ -149,6 +149,32 @@ fn server_config_defaults_backward_compatible_fields() {
 
     assert!(!config.server.allow_flight);
     assert_eq!(config.server.max_chained_neighbor_updates, 1_000_000);
+    assert_eq!(config.server.rcon.bind.to_string(), "127.0.0.1");
+    assert_eq!(config.server.rcon.max_connections, 8);
+}
+
+#[test]
+fn older_inline_rcon_password_keeps_new_security_defaults() {
+    let input = r#"
+            [server]
+            server_port = 25565
+            max_players = 20
+            view_distance = 10
+            simulation_distance = 10
+            online_mode = true
+            encryption = true
+            motd = "A Foton Server"
+            use_favicon = false
+            favicon = "config/favicon.png"
+            enforce_secure_chat = false
+            rcon = { enable = true, port = 25575, password = "legacy-secret" }
+        "#;
+
+    let config: FotonConfig = toml::from_str(input).expect("older inline Rcon config should parse");
+
+    assert_eq!(config.server.rcon.password, "legacy-secret");
+    assert_eq!(config.server.rcon.bind.to_string(), "127.0.0.1");
+    assert_eq!(config.server.rcon.max_connections, 8);
 }
 
 #[test]
@@ -350,6 +376,31 @@ fn validate_allows_http_auth_server_url() {
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
     validate(&config.server).expect("http auth server URL validates");
+}
+
+#[test]
+fn validate_rejects_zero_rcon_connection_limit() {
+    let config_toml = DEFAULT_CONFIG
+        .replace("enable = false", "enable = true")
+        .replace("password = \"\"", "password = \"test-password\"")
+        .replace("max_connections = 8", "max_connections = 0");
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("rcon.max_connections must be greater than 0")
+    );
+}
+
+#[test]
+fn validate_rejects_excessive_rcon_connection_limit() {
+    let config_toml = DEFAULT_CONFIG.replace("max_connections = 8", "max_connections = 65536");
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err("rcon.max_connections must not exceed 65535")
+    );
 }
 
 #[test]

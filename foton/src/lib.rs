@@ -305,12 +305,17 @@ impl FotonServer {
 
         let rcon_listener = if rcon_config.enable {
             Some(
-                rcon::RconListener::bind(rcon_config.port, rcon_config.password.into())
-                    .await
-                    .map_err(|source| FotonServerError::RconBind {
-                        port: rcon_config.port,
-                        source,
-                    })?,
+                rcon::RconListener::bind(
+                    rcon_config.bind,
+                    rcon_config.port,
+                    rcon_config.password.into(),
+                    rcon_config.max_connections,
+                )
+                .await
+                .map_err(|source| FotonServerError::RconBind {
+                    port: rcon_config.port,
+                    source,
+                })?,
             )
         } else {
             None

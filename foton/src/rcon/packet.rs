@@ -20,6 +20,9 @@ const FRAME_OVERHEAD: usize = 10;
 /// `String.substring` bound and therefore counts UTF-16 code units.
 const MAX_RESPONSE_UNITS: usize = 4096;
 
+/// Maximum command output sent for one request.
+pub(super) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+
 /// Client-to-server login attempt. Vanilla `SERVERDATA_AUTH`.
 pub(super) const SERVERDATA_AUTH: i32 = 3;
 /// Client-to-server command. Vanilla `SERVERDATA_EXECCOMMAND`.
@@ -88,6 +91,11 @@ pub(super) fn encode_response(request_id: i32, kind: i32, payload: &str) -> Vec<
 /// This cuts at the last code-point boundary that fits instead, which no
 /// client can tell apart except by not receiving a broken character.
 pub(super) fn split_response(response: &str) -> Vec<&str> {
+    let mut response_end = response.len().min(MAX_RESPONSE_BYTES);
+    while !response.is_char_boundary(response_end) {
+        response_end -= 1;
+    }
+    let response = &response[..response_end];
     if response.is_empty() {
         return vec![""];
     }
@@ -114,8 +122,8 @@ pub(super) fn split_response(response: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_RESPONSE_UNITS, RconRequest, SERVERDATA_AUTH, SERVERDATA_RESPONSE_VALUE,
-        decode_request, encode_response, split_response,
+        MAX_RESPONSE_BYTES, MAX_RESPONSE_UNITS, RconRequest, SERVERDATA_AUTH,
+        SERVERDATA_RESPONSE_VALUE, decode_request, encode_response, split_response,
     };
 
     #[test]
@@ -177,5 +185,22 @@ mod tests {
                 "a chunk may not exceed the vanilla bound"
             );
         }
+    }
+
+    #[test]
+    fn total_response_work_is_capped_at_one_mebibyte() {
+        let response = "x".repeat(MAX_RESPONSE_BYTES + 1);
+        let chunks = split_response(&response);
+
+        assert_eq!(chunks.concat().len(), MAX_RESPONSE_BYTES);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_RESPONSE_UNITS));
+    }
+
+    #[test]
+    fn response_cap_never_splits_a_utf8_character() {
+        let response = format!("{}é", "x".repeat(MAX_RESPONSE_BYTES - 1));
+        let chunks = split_response(&response);
+
+        assert_eq!(chunks.concat(), "x".repeat(MAX_RESPONSE_BYTES - 1));
     }
 }

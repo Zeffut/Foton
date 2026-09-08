@@ -1,7 +1,7 @@
 // The Bedrock settings live in `foton-bedrock` rather than here: the login
 // path reads them too, and `foton-login` cannot depend on this binary crate.
 pub use foton_bedrock::config::BedrockConfig;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use foton_core::{
     chunk::chunk_ticket_manager::MAX_SUPPORTED_VIEW_DISTANCE,
@@ -169,13 +169,19 @@ impl ServerConfig {
 /// warns and quietly disables Rcon when the password is blank; Foton refuses
 /// to start instead, because an administrator who asked for remote access and
 /// silently did not get it is worse off than one who is told why.
+const MAX_RCON_CONNECTIONS: usize = u16::MAX as usize;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RconConfig {
     /// Whether the Rcon port is opened at all.
     pub enable: bool,
+    /// The address Rcon listens on.
+    pub bind: IpAddr,
     /// The port Rcon listens on.
     pub port: u16,
+    /// Maximum simultaneous Rcon connections.
+    pub max_connections: usize,
     /// The password every client must send before it may run a command.
     pub password: String,
 }
@@ -184,8 +190,10 @@ impl Default for RconConfig {
     fn default() -> Self {
         Self {
             enable: false,
+            bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
             // Vanilla's default `rcon.port`.
             port: 25575,
+            max_connections: 8,
             password: String::new(),
         }
     }
@@ -265,6 +273,12 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         if !(1..=9).contains(&compression.level) {
             return Err("Compression level must be between 1 and 9");
         }
+    }
+    if config.rcon.max_connections == 0 {
+        return Err("rcon.max_connections must be greater than 0");
+    }
+    if config.rcon.max_connections > MAX_RCON_CONNECTIONS {
+        return Err("rcon.max_connections must not exceed 65535");
     }
     if config.rcon.enable {
         if config.rcon.password.is_empty() {

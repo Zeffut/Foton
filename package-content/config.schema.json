@@ -238,12 +238,33 @@
               "description": "Whether the rcon port is opened at all",
               "default": false
             },
+            "bind": {
+              "description": "IP address rcon listens on. Keep loopback unless remote administration is required",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "format": "ipv4"
+                },
+                {
+                  "type": "string",
+                  "format": "ipv6"
+                }
+              ],
+              "default": "127.0.0.1"
+            },
             "port": {
               "type": "integer",
               "description": "Port rcon listens on",
               "minimum": 1,
               "maximum": 65535,
               "default": 25575
+            },
+            "max_connections": {
+              "type": "integer",
+              "description": "Maximum simultaneous rcon connections",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8
             },
             "password": {
               "type": "string",
