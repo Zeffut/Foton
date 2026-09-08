@@ -63,7 +63,7 @@ use super::player_admission::{PendingPlayerJoin, PlayerAdmissionState};
 use super::{
     AsyncMutex, CancellationToken, ChunkSender, CommandRegistry, CommandRequest,
     CommandRequestQueue, DomainCommandStorage, DomainMapData, DomainPlayerData, DomainPlayerState,
-    DomainScoreboards, EnderPearlRestoreJob, FxHashMap, KeyStore, KnownPlayerCacheState,
+    DomainScoreboards, EnderPearlRestoreJob, FxHashMap, FxHashSet, KeyStore, KnownPlayerCacheState,
     KnownPlayers, Notify, PacketProcessor, PersistentEnderPearl, PersistentEntity,
     PersistentPlayerData, PersistentRootVehicle, PlayerDataStorage, PlayerDisconnectQueue,
     PlayerJoinQueue, PlayerMap, PreparedSpawn, RegistryCache, RootVehicleRestoreJob, Server,
@@ -266,6 +266,7 @@ async fn test_server_with_worlds(
                 .chunk_runtime,
         ),
         world_cleanup_tasks: TaskTracker::new(),
+        world_key_reservations: Arc::new(SyncMutex::new(FxHashSet::default())),
         world_save_path: storage_root.to_path_buf(),
         config,
         permission_groups,
@@ -569,6 +570,41 @@ async fn world_creation_request_poll_and_wait_are_non_blocking() {
         request.wait().await,
         WorldCreationState::Failed("build failed".to_owned())
     );
+}
+
+#[test]
+fn world_key_reservation_blocks_recreation_until_cleanup_releases_it() {
+    let world = fresh_test_world_in_domain("main", "spawn");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should initialize");
+    runtime.block_on(async move {
+        let storage_root = test_storage_root("world-key-reservation");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .expect("test server should initialize");
+        let key = Identifier::new("main", "arena");
+
+        let reservation = server
+            .reserve_world_cleanup_key(&key)
+            .expect("cleanup should reserve an unused world key");
+        assert!(server.reserve_world_key(&key).is_err());
+        drop(reservation);
+        let reservation = server
+            .reserve_world_key(&key)
+            .expect("released cleanup reservation should permit recreation");
+        drop(reservation);
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
 }
 
 #[test]

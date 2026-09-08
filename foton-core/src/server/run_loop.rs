@@ -15,7 +15,7 @@ use crate::command::functions::CommandFunction;
 use crate::event::{AsyncTabCompleteEvent, CommandEvent, ServerTickEvent};
 use foton_utils::Identifier;
 use std::mem::take;
-use tokio::sync::oneshot::{Receiver, channel};
+use tokio::sync::oneshot::{self, Receiver, channel};
 
 fn detach_world(
     worlds: &super::WorldMap,
@@ -741,24 +741,49 @@ impl Server {
     /// Attaches worlds constructed asynchronously at a tick safe-point.
     fn process_world_additions(&self, workers: &mut WorldTickWorkers) {
         let worlds = take(&mut *self.pending_world_additions.lock());
-        for (world, completion) in worlds {
+        for (world, completion, reservation) in worlds {
             let key = world.key.clone();
+            let cleanup_world = Arc::clone(&world);
             if let Err(error) = self.worlds.insert(key.clone(), world) {
-                let _ = completion.send(Err(error));
+                self.cleanup_rejected_world(cleanup_world, reservation, completion, error);
                 continue;
             }
             let Some(world) = self.worlds.get(&key) else {
-                let _ = completion.send(Err(format!("world {key} was not attached")));
+                let error = format!("world {key} was not attached");
+                self.cleanup_rejected_world(cleanup_world, reservation, completion, error);
                 continue;
             };
             if let Err(error) = workers.add(&world) {
                 log::error!("Failed to start tick worker for {key}: {error}");
                 let _ = self.worlds.remove(&key);
-                let _ = completion.send(Err(error.to_string()));
+                self.cleanup_rejected_world(
+                    cleanup_world,
+                    reservation,
+                    completion,
+                    error.to_string(),
+                );
             } else {
+                drop(reservation);
                 let _ = completion.send(Ok(()));
             }
         }
+    }
+
+    fn cleanup_rejected_world(
+        &self,
+        world: Arc<World>,
+        reservation: super::WorldKeyReservation,
+        completion: oneshot::Sender<Result<(), String>>,
+        error: String,
+    ) {
+        self.world_cleanup_tasks.spawn_on(
+            async move {
+                world.cleanup_without_save().await;
+                drop(reservation);
+                let _ = completion.send(Err(error));
+            },
+            self.chunk_runtime.handle(),
+        );
     }
 
     /// Queues a loaded-world removal for the next tick safe-point.
@@ -818,6 +843,16 @@ impl Server {
                 save,
                 completion,
             } = request;
+            let reservation = match self.reserve_world_cleanup_key(&key) {
+                Ok(reservation) => reservation,
+                Err(error) => {
+                    log::debug!("World removal deferred for {key}: {error}");
+                    if let Some(sender) = completion {
+                        let _ = sender.send(Err(error));
+                    }
+                    continue;
+                }
+            };
             let world = match detach_world(&self.worlds, workers, &key) {
                 Ok(world) => world,
                 Err(error) => {
@@ -842,12 +877,14 @@ impl Server {
                 };
                 match result {
                     Ok(saved) => {
+                        drop(reservation);
                         tracing::debug!(world = %key, saved_chunks = saved, "World cleanup finished");
                         if let Some(sender) = completion {
                             let _ = sender.send(Ok(saved));
                         }
                     }
                     Err(error) => {
+                        drop(reservation);
                         log::error!("World cleanup failed for {key}: {error}");
                         if let Some(sender) = completion {
                             let _ = sender.send(Err(error));

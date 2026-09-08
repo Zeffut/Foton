@@ -100,6 +100,34 @@ fn cleanup_without_save_waits_for_tracked_chunk_tasks() {
 }
 
 #[test]
+fn discard_cleanup_skips_admitted_save_that_has_not_started() {
+    let world = fresh_test_world("discard_save_after_lock");
+    let runtime = Arc::clone(&world.chunk_map.chunk_runtime);
+    runtime.block_on(async move {
+        world.level_data.write().mark_dirty();
+        let save_guard = world.save_lock.lock().await;
+        world.request_save();
+        tokio::task::yield_now().await;
+
+        let cleanup_world = Arc::clone(&world);
+        let cleanup = tokio::spawn(async move {
+            cleanup_world.cleanup_without_save().await;
+        });
+        for _ in 0..100 {
+            if world.save_coordinator.lock().discard_unstarted {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        assert!(world.save_coordinator.lock().discard_unstarted);
+        drop(save_guard);
+
+        assert!(cleanup.await.is_ok());
+        assert!(world.level_data.read().is_dirty());
+    });
+}
+
+#[test]
 fn sound_range_uses_event_range_and_strict_vanilla_boundary() {
     init_vanilla_registry();
     let sound = &sound_events::ENTITY_PLAYER_LEVELUP;

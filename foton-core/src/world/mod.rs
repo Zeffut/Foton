@@ -428,6 +428,7 @@ pub struct World {
 struct SaveCoordinator {
     tasks: TaskTracker,
     closed: bool,
+    discard_unstarted: bool,
 }
 
 impl SaveCoordinator {
@@ -435,6 +436,7 @@ impl SaveCoordinator {
         Self {
             tasks: TaskTracker::new(),
             closed: false,
+            discard_unstarted: false,
         }
     }
 
@@ -450,10 +452,15 @@ impl SaveCoordinator {
         true
     }
 
-    fn close(&mut self) -> TaskTracker {
+    fn close(&mut self, discard_unstarted: bool) -> TaskTracker {
         self.closed = true;
+        self.discard_unstarted = discard_unstarted;
         self.tasks.close();
         self.tasks.clone()
+    }
+
+    fn may_start_save(&self) -> bool {
+        !self.discard_unstarted
     }
 }
 
@@ -733,7 +740,7 @@ impl World {
 
     /// Cleans up the world by waiting for queued saves and persisting all data.
     pub async fn cleanup(&self, total_saved: &mut usize) -> io::Result<()> {
-        self.wait_for_background_tasks().await;
+        self.wait_for_background_tasks(false).await;
         let _save_guard = self.save_lock.lock().await;
         let mut first_error = None;
         self.sync_world_border_to_level_data();
@@ -816,11 +823,12 @@ impl World {
 
     /// Stops background work without persisting world data.
     pub(crate) async fn cleanup_without_save(&self) {
-        self.wait_for_background_tasks().await;
+        self.wait_for_background_tasks(true).await;
+        let _save_guard = self.save_lock.lock().await;
     }
 
-    async fn wait_for_background_tasks(&self) {
-        let save_tasks = self.save_coordinator.lock().close();
+    async fn wait_for_background_tasks(&self, discard_unstarted_saves: bool) {
+        let save_tasks = self.save_coordinator.lock().close(discard_unstarted_saves);
         self.chunk_map.stop_generation_refill_loop();
         self.chunk_map.task_tracker.close();
         let chunk_tasks = self.chunk_map.task_tracker.clone();
@@ -1135,6 +1143,9 @@ impl World {
 
     async fn save_requested(&self) -> io::Result<()> {
         let _save_guard = self.save_lock.lock().await;
+        if !self.save_coordinator.lock().may_start_save() {
+            return Ok(());
+        }
         let mut first_error = None;
         let level_data_save = { self.level_data.write().prepare_save() };
         match level_data_save {

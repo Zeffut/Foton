@@ -102,7 +102,7 @@ use foton_utils::{
 };
 use glam::DVec3;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering, Ordering as AtomicOrdering};
 use std::{
     collections::BTreeSet,
@@ -433,6 +433,8 @@ pub struct Server {
     chunk_runtime: Arc<Runtime>,
     /// Detached world cleanups that must finish before shutdown persistence.
     world_cleanup_tasks: TaskTracker,
+    /// Keys reserved by world creation, attachment, or detached cleanup.
+    world_key_reservations: Arc<SyncMutex<FxHashSet<Identifier>>>,
     /// Runtime permission groups and their persistence boundary.
     pub permission_groups: PermissionGroupManager,
     /// The cancellation token for graceful shutdown.
@@ -536,10 +538,25 @@ pub enum WorldCreationState {
     Failed(String),
 }
 
+struct WorldKeyReservation {
+    reservations: Arc<SyncMutex<FxHashSet<Identifier>>>,
+    key: Identifier,
+}
+
+impl Drop for WorldKeyReservation {
+    fn drop(&mut self) {
+        self.reservations.lock().remove(&self.key);
+    }
+}
+
 /// Handle for a world creation request. Poll this from a safe-point; never block the game tick.
 /// A world built off-thread, paired with the channel that reports whether it
 /// attached at the next tick safe-point.
-type PendingWorldAddition = (Arc<World>, oneshot::Sender<Result<(), String>>);
+type PendingWorldAddition = (
+    Arc<World>,
+    oneshot::Sender<Result<(), String>>,
+    WorldKeyReservation,
+);
 
 /// A handle on a world being built off-thread.
 ///
@@ -621,9 +638,7 @@ impl Server {
         }
         let domain = self.worlds.default_domain().to_owned();
         let key = Identifier::new(domain.clone(), name.clone());
-        if self.worlds.get(&key).is_some() {
-            return Err(format!("world {key} is already loaded"));
-        }
+        let reservation = self.reserve_world_key(&key)?;
         let generator_config = self
             .world_generator_registry
             .validate_config(&generator, &toml::Value::Table(Map::new()))?;
@@ -644,7 +659,10 @@ impl Server {
         let (sender, receiver) = oneshot::channel();
         let server = Arc::clone(self);
         self.chunk_runtime.spawn(async move {
-            let result = match server.load_world_from_config_tracked(world_entry).await {
+            let result = match server
+                .load_world_from_config_tracked(world_entry, reservation)
+                .await
+            {
                 Ok(request) => match request.wait().await {
                     WorldCreationState::Ready => Ok(()),
                     WorldCreationState::Failed(error) => Err(error),
@@ -832,21 +850,23 @@ impl Server {
         )
         .await
         .map_err(|error| format!("failed to create world {}: {error}", world_entry.key))?;
-        world
+        if let Err(error) = world
             .initialize_spawn_if_needed_with_bonus_chest(world_entry.bonus_chest)
             .await
-            .map_err(|error| {
-                format!(
-                    "failed to initialize spawn for {}: {error}",
-                    world_entry.key
-                )
-            })?;
+        {
+            world.cleanup_without_save().await;
+            return Err(format!(
+                "failed to initialize spawn for {}: {error}",
+                world_entry.key
+            ));
+        }
         Ok(world)
     }
 
-    pub(crate) async fn load_world_from_config_tracked(
+    async fn load_world_from_config_tracked(
         self: &Arc<Self>,
         world_entry: ResolvedWorldConfig,
+        reservation: WorldKeyReservation,
     ) -> Result<WorldCreationRequest, String> {
         if self.worlds.get(&world_entry.key).is_some() {
             return Err(format!("world {} is already loaded", world_entry.key));
@@ -857,17 +877,21 @@ impl Server {
         world.attach_server(self);
         let id = NEXT_WORLD_CREATION_ID.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
-        let mut pending = self.pending_world_additions.lock();
-        if pending
+        let already_pending = self
+            .pending_world_additions
+            .lock()
             .iter()
-            .any(|(pending_world, _)| pending_world.key == world_entry.key)
-        {
+            .any(|(pending_world, _, _)| pending_world.key == world_entry.key);
+        if already_pending {
+            world.cleanup_without_save().await;
             return Err(format!(
                 "world {} is already pending attachment",
                 world_entry.key
             ));
         }
-        pending.push((world, sender));
+        self.pending_world_additions
+            .lock()
+            .push((world, sender, reservation));
         Ok(WorldCreationRequest { id, receiver })
     }
 
@@ -1096,6 +1120,7 @@ impl Server {
             config,
             chunk_runtime,
             world_cleanup_tasks: TaskTracker::new(),
+            world_key_reservations: Arc::new(SyncMutex::new(FxHashSet::default())),
             permission_groups,
             cancel_token,
             key_store: KeyStore::create()
@@ -1178,10 +1203,46 @@ impl Server {
     }
 
     /// Closes admission of detached world cleanups and waits for those already
-    /// queued so shutdown cannot race a removed world's final save.
+    /// queued so shutdown cannot race a removed world's final save. Worlds
+    /// still waiting for attachment are cleaned up here as well.
     pub async fn wait_for_world_cleanups(&self) {
+        let pending = mem::take(&mut *self.pending_world_additions.lock());
+        for (world, completion, reservation) in pending {
+            self.world_cleanup_tasks.spawn_on(
+                async move {
+                    world.cleanup_without_save().await;
+                    drop(reservation);
+                    let _ = completion.send(Err(
+                        "world creation stopped before safe-point attachment".to_owned(),
+                    ));
+                },
+                self.chunk_runtime.handle(),
+            );
+        }
         self.world_cleanup_tasks.close();
         self.world_cleanup_tasks.wait().await;
+    }
+
+    fn reserve_world_key(&self, key: &Identifier) -> Result<WorldKeyReservation, String> {
+        let mut reservations = self.world_key_reservations.lock();
+        if self.worlds.get(key).is_some() || !reservations.insert(key.clone()) {
+            return Err(format!("world {key} is already loaded or busy"));
+        }
+        Ok(WorldKeyReservation {
+            reservations: Arc::clone(&self.world_key_reservations),
+            key: key.clone(),
+        })
+    }
+
+    fn reserve_world_cleanup_key(&self, key: &Identifier) -> Result<WorldKeyReservation, String> {
+        let mut reservations = self.world_key_reservations.lock();
+        if !reservations.insert(key.clone()) {
+            return Err(format!("world {key} is already busy"));
+        }
+        Ok(WorldKeyReservation {
+            reservations: Arc::clone(&self.world_key_reservations),
+            key: key.clone(),
+        })
     }
 
     /// Reloads every datapack function and reports what the load produced.
