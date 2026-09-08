@@ -10,16 +10,22 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 
 root = pathlib.Path(sys.argv[1])
 build_script = (root / "dev/build-plugin-api.sh").read_text()
-doctor_script = (root / "dev/doctor.sh").read_text()
 helper = root / "dev/wait-tcp.py"
 
 assert "-printf" not in build_script, "plugin API classpath still uses GNU find -printf"
 assert 'for jar in "$REPO/plugin-api/lib/"*.jar' in build_script, "plugin API classpath is not built from flat jars"
-assert 'git rev-parse --git-path hooks/pre-commit' in doctor_script, "doctor does not resolve worktree hooks"
+tcp_probe_scripts = [
+    path for path in (root / "dev").glob("*.sh") if path.name != "test-dev-tools.sh"
+]
+remaining_ss_probes = [
+    str(path.relative_to(root))
+    for path in tcp_probe_scripts
+    if "ss -ltn" in path.read_text()
+]
+assert not remaining_ss_probes, f"remaining ss -ltn readiness probes: {remaining_ss_probes}"
 
 
 def run_helper(host, port, timeout, pid=None):
@@ -67,7 +73,17 @@ with tempfile.TemporaryDirectory() as directory:
         hook_path = subprocess.check_output(
             ["git", "-C", str(worktree), "rev-parse", "--git-path", "hooks/pre-commit"], text=True
         ).strip()
-        assert hook_path.endswith("hooks/pre-commit"), hook_path
+        hook = pathlib.Path(hook_path)
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/sh\nexit 0\n")
+        result = subprocess.run(
+            ["bash", str(worktree / "dev/doctor.sh")],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert "[ OK ] pre-commit hook installed" in result.stdout, result.stdout
     finally:
         subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(worktree)], check=True, capture_output=True)
 

@@ -127,7 +127,10 @@ docker run -d --name "$NAME" \
   -v "$PWD/data:/data" \
   foton:test >/dev/null
 
-for _ in $(seq 1 45); do ss -ltn 2>/dev/null | grep -q ":25800" && break; sleep 2; done
+for _ in $(seq 1 45); do
+  python3 -c 'import socket, sys; connection = socket.create_connection((sys.argv[1], int(sys.argv[2])), 1); connection.close()' 127.0.0.1 25800 && break
+  sleep 2
+done
 RUNNING=$(docker exec "$NAME" sha256sum /usr/local/bin/foton 2>/dev/null | cut -c1-16)
 [ "$RUNNING" = "$EXPECTED" ] || { echo "container runs $RUNNING, expected $EXPECTED"; exit 1; }
 echo "running $RUNNING   $(docker ps --filter name=$NAME --format '{{.Status}}')"

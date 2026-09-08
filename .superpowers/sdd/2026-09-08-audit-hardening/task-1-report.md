@@ -53,3 +53,34 @@ optional Guava annotation classes, serial warnings, and related lint warnings),
 but exits successfully. Full repository CI was not run because Task 1 calls for
 focused developer-tool verification and the current checkout is missing the
 vanilla source/extractor prerequisites reported by `doctor.sh`.
+
+## Review fixes
+
+The review identified two gaps, both fixed in the follow-up commit:
+
+- `dev/deploy.sh` now uses the remote host's already-required Python runtime to
+  make a real TCP connection to `127.0.0.1:25800`; no helper transfer or GNU
+  networking tool is required in the remote context.
+- `dev/test-dev-tools.sh` now scans all applicable developer shell scripts for
+  remaining `ss -ltn` readiness probes and runs the actual `doctor.sh` from a
+  temporary Git worktree with the worktree-specific pre-commit hook installed.
+
+### Review-fix TDD evidence
+
+RED was captured by temporarily restoring the reviewed `ss -ltn` line in
+`dev/deploy.sh`:
+
+```text
+AssertionError: remaining ss -ltn readiness probes: ['dev/deploy.sh']
+```
+
+GREEN after restoring the Python TCP probe:
+
+```text
+$ bash dev/test-dev-tools.sh
+developer tooling tests passed
+```
+
+The same GREEN run executed `doctor.sh` behaviorally in the temporary worktree
+and observed `[ OK ] pre-commit hook installed`, rather than merely checking
+that the `git rev-parse` text exists.
