@@ -60,7 +60,7 @@ cd "$RUN_DIR" || exit 1
 
 wait_for_port() {
   for _ in $(seq 1 180); do
-    ss -ltn 2>/dev/null | grep -q ":$PORT" && return 0
+    python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1 && return 0
     sleep 1
   done
   return 1

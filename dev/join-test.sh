@@ -100,7 +100,7 @@ for _ in $(seq 1 120); do
     tail -30 server.log
     exit 1
   fi
-  if ss -ltn 2>/dev/null | grep -q ":$PORT"; then
+  if python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1; then
     STATUS=0
     break
   fi

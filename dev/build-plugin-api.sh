@@ -45,7 +45,11 @@ if ! bash "$REPO/dev/fetch-plugin-api-libs.sh" --check; then
   echo "run dev/fetch-plugin-api-libs.sh to restore them" >&2
   exit 1
 fi
-LIBS="$(find "$REPO/plugin-api/lib" -name '*.jar' -printf ':%p')"
+LIBS=""
+for jar in "$REPO/plugin-api/lib/"*.jar; do
+  [ -e "$jar" ] || continue
+  LIBS="${LIBS}:$jar"
+done
 
 # javac reads a file of sources with @, which avoids both mapfile (bash 4+,
 # and macOS ships bash 3.2) and an argument list long enough to overflow exec.
