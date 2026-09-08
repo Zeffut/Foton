@@ -4,7 +4,7 @@ mod known_players;
 mod permissions;
 
 use std::{
-    io::Cursor,
+    io::{Cursor, Read},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -13,7 +13,7 @@ use rustc_hash::FxHashMap;
 use simdnbt::{ToNbtTag, borrow::read_compound as read_borrowed_compound, owned::NbtTag};
 use tokio::{
     fs,
-    io::{self, AsyncWriteExt},
+    io::{self, AsyncReadExt, AsyncWriteExt},
 };
 use uuid::Uuid;
 use wincode::{SchemaRead, SchemaWrite};
@@ -47,6 +47,8 @@ const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
 const PLAYER_STORAGE_VERSION: u16 = 11;
 const GLOBAL_STORAGE_VERSION: u16 = 3;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
+const MAX_COMPRESSED_PLAYER_DATA_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_DECOMPRESSED_PLAYER_DATA_BYTES: usize = 64 * 1024 * 1024;
 
 /// Server-wide player data.
 #[derive(Debug, Clone)]
@@ -364,7 +366,7 @@ impl FilePlayerDataStorage {
         if !Self::recover_missing_atomic_path_locked(&path).await? {
             return Ok(None);
         }
-        let bytes = fs::read(&path).await?;
+        let bytes = Self::read_player_data_file_locked(&path).await?;
         let file = decode_player_file(&bytes)?;
         let data = file.into_persistent()?;
         log::debug!("Loaded player data for {uuid} in domain {domain}");
@@ -378,7 +380,7 @@ impl FilePlayerDataStorage {
         if !Self::recover_missing_atomic_path_locked(&path).await? {
             return Ok(None);
         }
-        let bytes = fs::read(&path).await?;
+        let bytes = Self::read_player_data_file_locked(&path).await?;
         let file = decode_global_file(&bytes)?;
         Ok(Some(GlobalPlayerData {
             last_active_domain: file.last_active_domain,
@@ -540,6 +542,43 @@ impl FilePlayerDataStorage {
 
     fn player_file(players_dir: &Path, uuid: Uuid) -> PathBuf {
         players_dir.join(format!("{uuid}.dat"))
+    }
+
+    async fn read_player_data_file_locked(path: &Path) -> io::Result<Vec<u8>> {
+        let file = fs::File::open(path).await?;
+        let file_size = file.metadata().await?.len();
+        if file_size > MAX_COMPRESSED_PLAYER_DATA_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "compressed player data file {} exceeds the {MAX_COMPRESSED_PLAYER_DATA_BYTES}-byte limit",
+                    path.display()
+                ),
+            ));
+        }
+
+        let capacity = usize::try_from(file_size).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "compressed player data file {} is too large",
+                    path.display()
+                ),
+            )
+        })?;
+        let mut bytes = Vec::with_capacity(capacity);
+        let mut limited = file.take(MAX_COMPRESSED_PLAYER_DATA_BYTES + 1);
+        limited.read_to_end(&mut bytes).await?;
+        if bytes.len() > capacity && bytes.len() as u64 > MAX_COMPRESSED_PLAYER_DATA_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "compressed player data file {} exceeds the {MAX_COMPRESSED_PLAYER_DATA_BYTES}-byte limit",
+                    path.display()
+                ),
+            ));
+        }
+        Ok(bytes)
     }
 
     fn file_lock(&self, path: &Path) -> Arc<AsyncMutex<()>> {
@@ -986,7 +1025,7 @@ fn decode_global_file(bytes: &[u8]) -> io::Result<GlobalPlayerDataFile> {
         ));
     }
     let version = u16::from_le_bytes([bytes[4], bytes[5]]);
-    let payload = zstd::decode_all(&bytes[6..])?;
+    let payload = decode_payload(&bytes[6..])?;
     if version == 1 {
         let legacy: LegacyGlobalPlayerDataFile = wincode::deserialize(&payload)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -1067,7 +1106,27 @@ fn decode_file(
             format!("unsupported player data storage version {version}"),
         ));
     }
-    zstd::decode_all(&bytes[6..])
+    decode_payload(&bytes[6..])
+}
+
+fn decode_payload(bytes: &[u8]) -> io::Result<Vec<u8>> {
+    let mut decoder = zstd::stream::read::Decoder::new(bytes)?;
+    let mut payload = Vec::new();
+    decoder
+        .by_ref()
+        .take(MAX_DECOMPRESSED_PLAYER_DATA_BYTES as u64)
+        .read_to_end(&mut payload)?;
+
+    let mut extra = [0];
+    if decoder.read(&mut extra)? != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "decompressed player data exceeds the {MAX_DECOMPRESSED_PLAYER_DATA_BYTES}-byte limit"
+            ),
+        ));
+    }
+    Ok(payload)
 }
 
 #[cfg(test)]
@@ -1089,6 +1148,64 @@ mod tests {
             .expect("system clock should be after unix epoch")
             .as_nanos();
         env::temp_dir().join(format!("fotonmc-player-storage-{name}-{suffix}"))
+    }
+
+    #[tokio::test]
+    async fn oversized_compressed_player_file_is_rejected_before_loading() {
+        const TEST_MAX_COMPRESSED_BYTES: u64 = 16 * 1024 * 1024;
+
+        let root = temp_storage_root("oversized-compressed");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+        let uuid = Uuid::from_u128(7);
+        let path =
+            FilePlayerDataStorage::player_file(&storage.domain_players_dir("minecraft"), uuid);
+        fs::create_dir_all(path.parent().expect("player path should have a parent"))
+            .await
+            .expect("player directory should be created");
+        let file = fs::File::create(&path)
+            .await
+            .expect("player file should be created");
+        file.set_len(TEST_MAX_COMPRESSED_BYTES + 1)
+            .await
+            .expect("sparse player file should be extended");
+
+        let error = storage
+            .load_domain("minecraft", uuid)
+            .await
+            .expect_err("oversized compressed input must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("compressed player data file"));
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[test]
+    fn player_decompression_stops_at_the_output_limit() {
+        const TEST_MAX_DECOMPRESSED_BYTES: usize = 64 * 1024 * 1024;
+
+        let mut compressed = Vec::new();
+        {
+            let mut encoder = zstd::stream::Encoder::new(&mut compressed, 1)
+                .expect("test encoder should initialize");
+            let block = vec![0u8; 1024 * 1024];
+            for _ in 0..=(TEST_MAX_DECOMPRESSED_BYTES / block.len()) {
+                std::io::Write::write_all(&mut encoder, &block).expect("test bomb should compress");
+            }
+            encoder.finish().expect("test frame should finish");
+        }
+        assert!(compressed.len() < 1024 * 1024);
+
+        let mut file = Vec::with_capacity(6 + compressed.len());
+        file.extend_from_slice(&PLAYER_MAGIC);
+        file.extend_from_slice(&PLAYER_STORAGE_VERSION.to_le_bytes());
+        file.extend_from_slice(&compressed);
+        let error = decode_file(PLAYER_MAGIC, PLAYER_STORAGE_VERSION, &file)
+            .expect_err("decoded player data must be bounded");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     /// An ender chest's contents survive the save format.
