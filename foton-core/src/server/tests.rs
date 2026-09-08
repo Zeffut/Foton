@@ -26,6 +26,7 @@ use foton_utils::{codec::VarInt, serial::ReadFrom, text::DisplayResolutor};
 use glam::DVec3;
 use text_components::TextComponent;
 use tokio::{fs, runtime::Builder, task::JoinSet, time::sleep};
+use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
 use crate::behavior::{blocks::PistonBaseBlock, init_behaviors};
@@ -264,6 +265,7 @@ async fn test_server_with_worlds(
                 .chunk_map
                 .chunk_runtime,
         ),
+        world_cleanup_tasks: TaskTracker::new(),
         world_save_path: storage_root.to_path_buf(),
         config,
         permission_groups,

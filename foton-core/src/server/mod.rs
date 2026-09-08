@@ -121,7 +121,7 @@ use tokio::{
     task::{JoinSet, spawn_blocking},
     time::sleep,
 };
-use tokio_util::sync::CancellationToken;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
 
 /// Interval in ticks between tab list updates (20 ticks = 1 second).
@@ -431,6 +431,8 @@ pub struct Server {
     pub config: Arc<RuntimeConfig>,
     /// Runtime used by world loading and chunk tasks.
     chunk_runtime: Arc<Runtime>,
+    /// Detached world cleanups that must finish before shutdown persistence.
+    world_cleanup_tasks: TaskTracker,
     /// Runtime permission groups and their persistence boundary.
     pub permission_groups: PermissionGroupManager,
     /// The cancellation token for graceful shutdown.
@@ -1093,6 +1095,7 @@ impl Server {
         Ok(Server {
             config,
             chunk_runtime,
+            world_cleanup_tasks: TaskTracker::new(),
             permission_groups,
             cancel_token,
             key_store: KeyStore::create()
@@ -1172,6 +1175,13 @@ impl Server {
         for snapshot in self.worlds.snapshots() {
             snapshot.world().attach_server(self);
         }
+    }
+
+    /// Closes admission of detached world cleanups and waits for those already
+    /// queued so shutdown cannot race a removed world's final save.
+    pub async fn wait_for_world_cleanups(&self) {
+        self.world_cleanup_tasks.close();
+        self.world_cleanup_tasks.wait().await;
     }
 
     /// Reloads every datapack function and reports what the load produced.

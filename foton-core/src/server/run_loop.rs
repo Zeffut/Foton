@@ -835,8 +835,7 @@ impl Server {
                 continue;
             }
             // Persistence is I/O and must not stall the serialized game tick.
-            let runtime = Arc::clone(&self.chunk_runtime);
-            let _cleanup = runtime.spawn(async move {
+            self.world_cleanup_tasks.spawn_on(async move {
                 let mut saved = 0;
                 match world.cleanup(&mut saved).await {
                     Ok(()) => {
@@ -852,7 +851,7 @@ impl Server {
                         }
                     }
                 }
-            });
+            }, self.chunk_runtime.handle());
         }
     }
 

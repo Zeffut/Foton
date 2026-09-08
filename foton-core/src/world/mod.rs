@@ -1,6 +1,7 @@
 //! This module contains the `World` struct, which represents a world.
 
 use std::{
+    future::Future,
     io, mem,
     path::Path,
     sync::{
@@ -85,7 +86,11 @@ use foton_utils::{
     WorldAabb,
     types::{Difficulty, GameType, UpdateFlags},
 };
-use tokio::{runtime::Runtime, sync::Mutex as AsyncMutex, time::Instant};
+use tokio::{
+    runtime::{Handle, Runtime},
+    sync::Mutex as AsyncMutex,
+    time::Instant,
+};
 use tokio_util::task::TaskTracker;
 
 use crate::{
@@ -355,8 +360,8 @@ pub struct World {
     auto_save: AtomicBool,
     /// Serializes persistence snapshots so an older save cannot publish later.
     save_lock: Arc<AsyncMutex<()>>,
-    /// Tracks non-blocking save requests until cleanup or shutdown joins them.
-    save_tasks: TaskTracker,
+    /// Coordinates non-blocking save requests with cleanup admission.
+    save_coordinator: SyncMutex<SaveCoordinator>,
     /// Whether vanilla's scheduled/chunk/block-event tick phase is active.
     handling_tick: AtomicBool,
     /// Ordered, duplicate-suppressing server block events awaiting execution.
@@ -416,6 +421,40 @@ pub struct World {
     /// [`crate::server::Server::attach_worlds`] and is absent in tests that
     /// build a world on its own.
     server: OnceLock<Weak<Server>>,
+}
+
+/// Admits autosaves until cleanup closes the world, then joins already admitted
+/// tasks without allowing a late caller to escape the cleanup barrier.
+struct SaveCoordinator {
+    tasks: TaskTracker,
+    closed: bool,
+}
+
+impl SaveCoordinator {
+    fn new() -> Self {
+        Self {
+            tasks: TaskTracker::new(),
+            closed: false,
+        }
+    }
+
+    fn spawn_on(
+        &mut self,
+        future: impl Future<Output = ()> + Send + 'static,
+        handle: &Handle,
+    ) -> bool {
+        if self.closed {
+            return false;
+        }
+        self.tasks.spawn_on(future, handle);
+        true
+    }
+
+    fn close(&mut self) -> TaskTracker {
+        self.closed = true;
+        self.tasks.close();
+        self.tasks.clone()
+    }
 }
 
 impl World {
@@ -645,7 +684,7 @@ impl World {
                 keep_spawn_in_memory: AtomicBool::new(keep_spawn_in_memory),
                 auto_save: AtomicBool::new(true),
                 save_lock: Arc::new(AsyncMutex::new(())),
-                save_tasks: TaskTracker::new(),
+                save_coordinator: SyncMutex::new(SaveCoordinator::new()),
                 handling_tick: AtomicBool::new(false),
                 block_events: SyncMutex::new(BlockEventQueue::default()),
                 neighbor_updater: CollectingNeighborUpdater::new(max_chained_neighbor_updates),
@@ -694,8 +733,11 @@ impl World {
 
     /// Cleans up the world by waiting for queued saves and persisting all data.
     pub async fn cleanup(&self, total_saved: &mut usize) -> io::Result<()> {
-        self.save_tasks.close();
-        self.save_tasks.wait().await;
+        let save_tasks = self.save_coordinator.lock().close();
+        self.chunk_map.stop_generation_refill_loop();
+        self.chunk_map.task_tracker.close();
+        let chunk_tasks = self.chunk_map.task_tracker.clone();
+        tokio::join!(chunk_tasks.wait(), save_tasks.wait());
         let _save_guard = self.save_lock.lock().await;
         let mut first_error = None;
         self.sync_world_border_to_level_data();
@@ -1071,7 +1113,8 @@ impl World {
     /// Queues a non-blocking save of level data and dirty chunks.
     pub fn request_save(self: &Arc<Self>) {
         let world = Arc::clone(self);
-        self.save_tasks.spawn_on(
+        let mut coordinator = self.save_coordinator.lock();
+        let _ = coordinator.spawn_on(
             async move {
                 if let Err(error) = world.save_requested().await {
                     tracing::error!(%error, "World save request failed");
