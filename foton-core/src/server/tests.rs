@@ -28,7 +28,7 @@ use text_components::TextComponent;
 use tokio::{fs, runtime::Builder, task::JoinSet, time::sleep};
 use uuid::Uuid;
 
-use crate::behavior::init_behaviors;
+use crate::behavior::{blocks::PistonBaseBlock, init_behaviors};
 use crate::chunk_saver::registry::WorldStorageRegistry;
 use crate::command::execution::{
     CommandArgumentSource, CommandExecutionContext, CommandPermissionSource, CommandResultCallback,
@@ -73,12 +73,12 @@ use super::{
     offline_uuid, portal_entity_still_valid, validate_player_permission_group_update,
 };
 use crate::boss_event::custom::DomainCustomBossEvents;
-use crate::event::{BlockBreakEvent, EventBus, PlayerChatEvent, PlayerJoinEvent};
+use crate::event::{BlockBreakEvent, EventBus, PistonEvent, PlayerChatEvent, PlayerJoinEvent};
 use crate::player::game_mode::block_breaking::BlockBreakAction;
 use crate::test_support::init_test_logger;
 use foton_protocol::packets::game::SChat;
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
-use foton_registry::blocks::properties::Direction;
+use foton_registry::blocks::properties::{BlockStateProperties, Direction};
 use foton_utils::Identifier;
 use foton_utils::types::GameType;
 use tokio::sync::oneshot::channel;
@@ -317,6 +317,120 @@ async fn test_server_with_worlds(
         events: EventBus::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
+}
+
+#[test]
+fn invalid_piston_event_output_leaves_world_unchanged() {
+    let world = fresh_test_world("piston_invalid_event_output");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-invalid-event-output");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let moved_pos = piston_pos.east();
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, false);
+        let moved_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(moved_pos, moved_state, UpdateFlags::UPDATE_NONE));
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "invalid_piston_event_output"),
+            |event| {
+                let piston_pos = event.piston();
+                event.blocks_mut().push(piston_pos);
+            },
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::PISTON, false);
+        assert!(!piston.move_blocks_for_test(&world, piston_pos, Direction::East, true,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(moved_pos), moved_state);
+        assert!(world.get_block_entity(moved_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn piston_event_rechecks_destruction_after_world_replacement() {
+    let world = fresh_test_world("piston_replaced_destruction_target");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-replaced-destruction-target");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let moved_pos = piston_pos.east();
+        let destruction_pos = piston_pos.relative_n(Direction::East, 2);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, false);
+        let moved_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(moved_pos, moved_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(
+            destruction_pos,
+            vanilla_blocks::DANDELION.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        let replacement = vanilla_blocks::STONE.default_state();
+        let world_for_listener = Arc::clone(&world);
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "replace_piston_destruction_target"),
+            move |_| {
+                let _ = world_for_listener.set_block(
+                    destruction_pos,
+                    replacement,
+                    UpdateFlags::UPDATE_NONE,
+                );
+            },
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::PISTON, false);
+        assert!(!piston.move_blocks_for_test(&world, piston_pos, Direction::East, true,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(moved_pos), moved_state);
+        assert_eq!(world.get_block_state(destruction_pos), replacement);
+        assert!(world.get_block_entity(moved_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
 }
 
 #[tokio::test]

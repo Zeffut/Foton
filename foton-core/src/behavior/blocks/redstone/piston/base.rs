@@ -222,22 +222,83 @@ impl PistonBaseBlock {
         !state.has_block_entity()
     }
 
-    fn final_movement_is_valid(
+    fn is_ordered_subsequence(whole: &[BlockPos], candidate: &[BlockPos]) -> bool {
+        let mut next = 0;
+        for &candidate_pos in candidate {
+            let Some(offset) = whole[next..]
+                .iter()
+                .position(|&whole_pos| whole_pos == candidate_pos)
+            else {
+                return false;
+            };
+            next += offset + 1;
+        }
+        true
+    }
+
+    fn is_within_world(world: &dyn PistonLevel, pos: BlockPos) -> bool {
+        let min_y = i64::from(world.min_y());
+        let max_y = min_y + i64::from(world.height());
+        let y = i64::from(pos.y());
+        (min_y..max_y).contains(&y) && world.is_within_world_border(pos)
+    }
+
+    fn final_destination_is_available(
         world: &dyn PistonLevel,
+        destination: BlockPos,
         to_push: &[BlockPos],
-        push_direction: Direction,
+        to_destroy: &[BlockPos],
     ) -> bool {
-        to_push.len() <= MAX_MOVED_BLOCKS
-            && to_push.iter().all(|&pos| {
-                Self::is_pushable(
-                    world.get_block_state(pos),
+        Self::is_within_world(world, destination)
+            && (world.get_block_state(destination).is_air()
+                || to_push.contains(&destination)
+                || to_destroy.contains(&destination))
+    }
+
+    fn validate_final_movement(
+        world: &dyn PistonLevel,
+        piston_pos: BlockPos,
+        direction: Direction,
+        extending: bool,
+        original_to_push: &[BlockPos],
+        final_to_push: &[BlockPos],
+    ) -> Option<Vec<BlockPos>> {
+        if final_to_push.len() > MAX_MOVED_BLOCKS
+            || !Self::is_ordered_subsequence(original_to_push, final_to_push)
+        {
+            return None;
+        }
+
+        let mut resolver = PistonStructureResolver::new(world, piston_pos, direction, extending);
+        if !resolver.resolve() || !Self::is_ordered_subsequence(resolver.to_push(), final_to_push) {
+            return None;
+        }
+
+        let push_direction = resolver.push_direction();
+        let to_destroy = resolver.to_destroy();
+        if to_destroy.iter().any(|pos| final_to_push.contains(pos)) {
+            return None;
+        }
+        if final_to_push.iter().any(|&pos| {
+            !Self::is_within_world(world, pos)
+                || !Self::final_destination_is_available(
                     world,
-                    pos,
-                    push_direction,
-                    false,
-                    push_direction,
+                    pos.relative(push_direction),
+                    final_to_push,
+                    to_destroy,
                 )
-            })
+        }) {
+            return None;
+        }
+
+        let arm_pos = piston_pos.relative(direction);
+        if extending
+            && !Self::final_destination_is_available(world, arm_pos, final_to_push, to_destroy)
+        {
+            return None;
+        }
+
+        Some(to_destroy.to_vec())
     }
 
     #[expect(
@@ -267,11 +328,11 @@ impl PistonBaseBlock {
             return false;
         }
 
-        let mut to_push = resolver.to_push().to_vec();
+        let original_to_push = resolver.to_push().to_vec();
         let mut piston_event = PistonEvent::new(
             world.key.to_string(),
             piston_pos,
-            to_push.clone(),
+            original_to_push.clone(),
             format!("{direction:?}"),
             extending,
         );
@@ -279,12 +340,18 @@ impl PistonBaseBlock {
         if piston_event.is_cancelled() {
             return false;
         }
-        to_push = piston_event.blocks().to_vec();
-        let push_direction = resolver.push_direction();
-        if !Self::final_movement_is_valid(world.as_ref(), &to_push, push_direction) {
+        let to_push = piston_event.blocks().to_vec();
+        let Some(to_destroy) = Self::validate_final_movement(
+            world.as_ref(),
+            piston_pos,
+            direction,
+            extending,
+            &original_to_push,
+            &to_push,
+        ) else {
             return false;
-        }
-        let to_destroy = resolver.to_destroy().to_vec();
+        };
+        let push_direction = resolver.push_direction();
         let mut delete_after_move = Vec::with_capacity(to_push.len());
         let mut pushed_states = Vec::with_capacity(to_push.len());
         for &pos in &to_push {
@@ -635,6 +702,19 @@ impl BlockBehavior for PistonBaseBlock {
 }
 
 #[cfg(test)]
+impl PistonBaseBlock {
+    pub(crate) fn move_blocks_for_test(
+        &self,
+        world: &Arc<World>,
+        piston_pos: BlockPos,
+        direction: Direction,
+        extending: bool,
+    ) -> bool {
+        self.move_blocks(world, piston_pos, direction, extending)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
@@ -727,24 +807,81 @@ mod tests {
         init_behaviors();
         let piston_pos = BlockPos::new(0, 64, 0);
         let stone_pos = piston_pos.east();
-        let chest_pos = stone_pos.east();
-        let level = TestLevel::default()
-            .with_block(stone_pos, vanilla_blocks::STONE.default_state())
-            .with_block(chest_pos, vanilla_blocks::CHEST.default_state());
-        let mut event = PistonEvent::new(
-            "minecraft:test".to_owned(),
-            piston_pos,
-            vec![stone_pos],
-            "East".to_owned(),
-            true,
-        );
-        event.blocks_mut().push(chest_pos);
+        let level =
+            TestLevel::default().with_block(stone_pos, vanilla_blocks::CHEST.default_state());
 
-        assert!(!PistonBaseBlock::final_movement_is_valid(
-            &level,
-            event.blocks(),
-            Direction::East,
-        ));
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level,
+                piston_pos,
+                Direction::East,
+                true,
+                &[stone_pos],
+                &[stone_pos],
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn event_output_must_preserve_resolver_order_and_safe_destinations() {
+        init_vanilla_registry();
+        init_behaviors();
+        let piston_pos = BlockPos::new(0, 64, 0);
+        let first = piston_pos.east();
+        let second = first.east();
+        let third = second.east();
+        let level = TestLevel::default()
+            .with_block(first, vanilla_blocks::STONE.default_state())
+            .with_block(second, vanilla_blocks::STONE.default_state());
+        let level_with_third = level.with_block(third, vanilla_blocks::STONE.default_state());
+
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &TestLevel::default()
+                    .with_block(first, vanilla_blocks::STONE.default_state())
+                    .with_block(second, vanilla_blocks::STONE.default_state()),
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[first, second],
+            )
+            .is_some()
+        );
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level_with_third,
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[second, first],
+            )
+            .is_none()
+        );
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level_with_third,
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[first, third],
+            )
+            .is_none()
+        );
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level_with_third,
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[piston_pos],
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -753,53 +890,27 @@ mod tests {
         init_behaviors();
         let piston_pos = BlockPos::new(0, 64, 0);
         let level = TestLevel::default();
-        let mut event = PistonEvent::new(
-            "minecraft:test".to_owned(),
-            piston_pos,
-            (1..=12)
-                .map(|offset| piston_pos.relative_n(Direction::East, offset))
-                .collect(),
-            "East".to_owned(),
-            true,
-        );
-        for offset in 1..=13 {
-            level.set_test_block(
-                piston_pos.relative_n(Direction::East, offset),
-                vanilla_blocks::STONE.default_state(),
-            );
+        let original: Vec<_> = (1..=12)
+            .map(|offset| piston_pos.relative_n(Direction::East, offset))
+            .collect();
+        let too_long: Vec<_> = (1..=13)
+            .map(|offset| piston_pos.relative_n(Direction::East, offset))
+            .collect();
+        for &pos in &too_long {
+            level.set_test_block(pos, vanilla_blocks::STONE.default_state());
         }
-        event
-            .blocks_mut()
-            .push(piston_pos.relative_n(Direction::East, 13));
 
-        assert!(!PistonBaseBlock::final_movement_is_valid(
-            &level,
-            event.blocks(),
-            Direction::East,
-        ));
-    }
-
-    #[test]
-    fn event_injected_out_of_bounds_block_is_rejected_before_movement() {
-        init_vanilla_registry();
-        init_behaviors();
-        let piston_pos = BlockPos::new(0, 64, 0);
-        let outside_pos = BlockPos::new(1, 320, 0);
-        let level =
-            TestLevel::default().with_block(outside_pos, vanilla_blocks::STONE.default_state());
-        let event = PistonEvent::new(
-            "minecraft:test".to_owned(),
-            piston_pos,
-            vec![outside_pos],
-            "East".to_owned(),
-            true,
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level,
+                piston_pos,
+                Direction::East,
+                true,
+                &original,
+                &too_long,
+            )
+            .is_none()
         );
-
-        assert!(!PistonBaseBlock::final_movement_is_valid(
-            &level,
-            event.blocks(),
-            Direction::East,
-        ));
     }
 
     #[test]

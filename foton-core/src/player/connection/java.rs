@@ -1811,6 +1811,44 @@ mod tests {
     }
 
     #[test]
+    fn wrong_keep_alive_id_keeps_pending_state_until_timeout() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_001, started_at + Duration::from_millis(10)),
+            None
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 10_002),
+            KeepAliveTick::Timeout
+        );
+    }
+
+    #[test]
+    fn valid_keep_alive_ack_clears_pending_state_for_the_next_probe() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_000, started_at + Duration::from_millis(10)),
+            Some(Duration::from_millis(10))
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 10_001),
+            KeepAliveTick::Send(10_001)
+        );
+    }
+
+    #[test]
     fn chunk_batch_ack_uses_the_immediate_connection_path() {
         let decoded = decode(RawPacket::new(
             play::S_CHUNK_BATCH_RECEIVED,
