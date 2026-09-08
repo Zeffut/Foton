@@ -7,16 +7,14 @@
 use std::{
     ffi::OsString,
     fmt::Display,
-    fs as sync_fs,
-    future::Future,
-    io,
+    fs as sync_fs, io,
     path::{Path, PathBuf},
     process,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use serde::{Serialize, de::DeserializeOwned};
-use tokio::fs;
+use tokio::{fs, task::spawn_blocking};
 use wincode::{SchemaRead, SchemaWrite, config::DefaultConfig};
 
 static TEMPORARY_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -142,61 +140,27 @@ pub struct SavedDataManager {
 /// as a perfectly valid empty scoreboard: the loss would be silent. `level.toml`
 /// and the player store already publish this way; this is the same pattern.
 async fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_atomically_with_parent_sync(path, bytes, sync_parent_directory, || async { Ok(()) }).await
+    write_atomically_with_before_rename(path.to_owned(), bytes.to_vec(), || Ok(())).await
 }
 
-async fn sync_parent_directory(parent: PathBuf) -> io::Result<()> {
-    if cfg!(unix) {
-        fs::File::open(parent).await?.sync_all().await?;
-    }
-    Ok(())
-}
-
-async fn write_atomically_with_parent_sync<F, Fut, G, Gut>(
-    path: &Path,
-    bytes: &[u8],
-    sync_parent: F,
-    before_rename: G,
+async fn write_atomically_with_before_rename<F>(
+    path: PathBuf,
+    bytes: Vec<u8>,
+    before_rename: F,
 ) -> io::Result<()>
 where
-    F: FnOnce(PathBuf) -> Fut,
-    Fut: Future<Output = io::Result<()>>,
-    G: FnOnce() -> Gut,
-    Gut: Future<Output = io::Result<()>>,
+    F: FnOnce() -> io::Result<()> + Send + 'static,
 {
-    use tokio::io::AsyncWriteExt as _;
-
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "atomic saved-data path has no parent",
+    spawn_blocking(move || {
+        write_atomically_sync_with_parent_sync(
+            &path,
+            &bytes,
+            sync_parent_directory_sync,
+            before_rename,
         )
-    })?;
-    let (temporary, mut file) = create_temporary_file(path).await?;
-    let publication = async {
-        file.write_all(bytes).await?;
-        file.sync_all().await?;
-        drop(file);
-        before_rename().await?;
-        fs::rename(&temporary, path).await
-    }
-    .await;
-
-    if let Err(error) = publication {
-        return match fs::remove_file(&temporary).await {
-            Ok(()) => Err(error),
-            Err(cleanup_error) if cleanup_error.kind() == io::ErrorKind::NotFound => Err(error),
-            Err(cleanup_error) => Err(io::Error::new(
-                error.kind(),
-                format!(
-                    "{error}; additionally failed to remove temporary file {}: {cleanup_error}",
-                    temporary.display()
-                ),
-            )),
-        };
-    }
-
-    sync_parent(parent.to_path_buf()).await
+    })
+    .await
+    .map_err(|error| io::Error::other(format!("atomic write task failed: {error}")))?
 }
 
 /// Blocking twin of [`write_atomically`], for the shutdown path.
@@ -212,19 +176,6 @@ fn temporary_path(path: &Path) -> PathBuf {
     };
     file_name.push(format!(".tmp-{}-{counter}", process::id()));
     path.with_file_name(file_name)
-}
-
-async fn create_temporary_file(path: &Path) -> io::Result<(PathBuf, fs::File)> {
-    loop {
-        let temporary = temporary_path(path);
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        match options.open(&temporary).await {
-            Ok(file) => return Ok((temporary, file)),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
-    }
 }
 
 fn sync_parent_directory_sync(parent: &Path) -> io::Result<()> {
@@ -432,7 +383,7 @@ mod tests {
         io::ErrorKind,
         path::PathBuf,
         sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use serde::{Deserialize, Serialize};
@@ -441,7 +392,7 @@ mod tests {
 
     use super::{
         SavedDataManager, SavedDataName, WincodeSavedDataName, sync_fs,
-        write_atomically_sync_with_parent_sync, write_atomically_with_parent_sync,
+        write_atomically_sync_with_parent_sync, write_atomically_with_before_rename,
     };
 
     const TEST_DATA: SavedDataName = SavedDataName::trusted("test_data");
@@ -470,59 +421,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn async_atomic_write_syncs_the_containing_directory_after_rename() {
-        let dir = temp_world_dir("async-parent-sync");
-        sync_fs::create_dir_all(&dir).expect("test directory should be created");
-        let path = dir.join("saved.toml");
-        let expected_parent = dir.clone();
-
-        let error = write_atomically_with_parent_sync(
-            &path,
-            b"saved",
-            move |parent| async move {
-                assert_eq!(parent, expected_parent);
-                Err(std::io::Error::other("parent sync failed"))
-            },
-            || async { Ok(()) },
-        )
-        .await
-        .expect_err("the injected directory sync failure should be returned");
-
-        assert_eq!(error.kind(), ErrorKind::Other);
-        assert_eq!(
-            sync_fs::read(&path).expect("rename should precede directory sync"),
-            b"saved"
-        );
-        sync_fs::remove_dir_all(dir).expect("test directory should be removed");
-    }
-
-    #[tokio::test]
     async fn overlapping_async_atomic_writes_publish_without_colliding() {
         let dir = temp_world_dir("overlapping-async-writes");
         sync_fs::create_dir_all(&dir).expect("test directory should be created");
         let path = dir.join("saved.toml");
-        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let barrier = Arc::new(std::sync::Barrier::new(2));
 
         let first_barrier = Arc::clone(&barrier);
-        let first = write_atomically_with_parent_sync(
-            &path,
-            b"first",
-            |_| async { Ok(()) },
-            move || async move {
-                first_barrier.wait().await;
+        let first =
+            write_atomically_with_before_rename(path.clone(), b"first".to_vec(), move || {
+                first_barrier.wait();
                 Ok(())
-            },
-        );
+            });
         let second_barrier = Arc::clone(&barrier);
-        let second = write_atomically_with_parent_sync(
-            &path,
-            b"second",
-            |_| async { Ok(()) },
-            move || async move {
-                second_barrier.wait().await;
+        let second =
+            write_atomically_with_before_rename(path.clone(), b"second".to_vec(), move || {
+                second_barrier.wait();
                 Ok(())
-            },
-        );
+            });
 
         let (first_result, second_result) = tokio::join!(first, second);
         assert!(
@@ -607,6 +523,73 @@ mod tests {
         );
         let contents = sync_fs::read(&path).expect("published file should be readable");
         assert!(contents == b"first" || contents == b"second");
+        sync_fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelling_async_atomic_write_finishes_the_blocking_transaction() {
+        let dir = temp_world_dir("cancelled-async-write");
+        sync_fs::create_dir_all(&dir).expect("test directory should be created");
+        let path = dir.join("saved.toml");
+        let (started_sender, started_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+
+        let writer = tokio::spawn(write_atomically_with_before_rename(
+            path.clone(),
+            b"saved".to_vec(),
+            move || {
+                started_sender
+                    .send(())
+                    .map_err(|_| std::io::Error::other("cancellation test receiver dropped"))?;
+                release_receiver
+                    .recv()
+                    .map_err(|_| std::io::Error::other("cancellation test release dropped"))?;
+                Ok(())
+            },
+        ));
+        started_receiver
+            .await
+            .expect("blocking transaction should start");
+
+        writer.abort();
+        assert!(
+            writer
+                .await
+                .expect_err("writer should be cancelled")
+                .is_cancelled()
+        );
+        release_sender
+            .send(())
+            .expect("blocking transaction should be released");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if tokio::fs::try_exists(&path)
+                    .await
+                    .expect("final path existence should be readable")
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("blocking transaction should finish after cancellation");
+
+        assert_eq!(
+            sync_fs::read(&path).expect("published file should be readable"),
+            b"saved"
+        );
+        let entries = sync_fs::read_dir(&dir)
+            .expect("temporary directory should be readable")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("directory entries should be readable");
+        assert_eq!(
+            entries.len(),
+            1,
+            "cancelled write should not orphan a temp file"
+        );
+        assert_eq!(entries[0].file_name(), "saved.toml");
         sync_fs::remove_dir_all(dir).expect("test directory should be removed");
     }
 

@@ -41,6 +41,21 @@ const DEFAULT_WORLDS: &str = include_str!("../../../package-content/worlds.toml"
 
 static TEMPORARY_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
+std::thread_local! {
+    static ATOMIC_CONFIG_WRITE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_atomic_config_write_count() {
+    ATOMIC_CONFIG_WRITE_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn atomic_config_write_count() -> usize {
+    ATOMIC_CONFIG_WRITE_COUNT.with(std::cell::Cell::get)
+}
+
 /// Top-level TOML deserialization target — used once at startup, not stored globally.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -152,6 +167,9 @@ fn config_parent(path: &Path) -> Option<&Path> {
 }
 
 pub(super) fn write_atomic_config(path: &Path, contents: &[u8]) -> io::Result<()> {
+    #[cfg(test)]
+    ATOMIC_CONFIG_WRITE_COUNT.with(|count| count.set(count.get() + 1));
+
     write_atomic_config_with_before_rename(path, contents, || Ok(()))
 }
 
@@ -234,7 +252,8 @@ mod atomic_tests {
 
     use super::groups::DEFAULT_GROUPS;
     use super::{
-        DEFAULT_CONFIG, DEFAULT_WORLDS, load_or_create, load_or_create_worlds,
+        DEFAULT_CONFIG, DEFAULT_WORLDS, atomic_config_write_count, load_or_create,
+        load_or_create_worlds, reset_atomic_config_write_count,
         write_atomic_config_with_before_rename,
     };
 
@@ -251,12 +270,14 @@ mod atomic_tests {
         let root = temp_config_root("server");
         let path = root.join("config.toml");
 
+        reset_atomic_config_write_count();
         let result = load_or_create(&path).expect("initial config should be created");
 
         assert_eq!(
             fs::read(&path).expect("config should be readable"),
             DEFAULT_CONFIG.as_bytes()
         );
+        assert_eq!(atomic_config_write_count(), 3);
         assert_eq!(result.groups_path, Some(root.join("groups.toml")));
         fs::remove_dir_all(root).expect("test directory should be removed");
     }
@@ -266,12 +287,14 @@ mod atomic_tests {
         let root = temp_config_root("worlds");
         let path = root.join("worlds.toml");
 
+        reset_atomic_config_write_count();
         load_or_create_worlds(&path).expect("initial worlds config should be created");
 
         assert_eq!(
             fs::read(&path).expect("worlds config should be readable"),
             DEFAULT_WORLDS.as_bytes()
         );
+        assert_eq!(atomic_config_write_count(), 1);
         fs::remove_dir_all(root).expect("test directory should be removed");
     }
 
@@ -313,7 +336,14 @@ mod atomic_tests {
 
     #[test]
     fn bare_relative_config_path_is_supported_without_writing_to_the_caller_cwd() {
-        if std::env::var_os("FOTON_BARE_RELATIVE_CONFIG_CHILD").is_some() {
+        let root_name = std::env::current_dir().ok().and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        });
+        let child_token = root_name.map(|name| format!("foton-bare-relative-{name}"));
+        if std::env::var_os("FOTON_BARE_RELATIVE_CONFIG_CHILD").as_deref()
+            == child_token.as_deref().map(std::ffi::OsStr::new)
+        {
             let config = load_or_create(Path::new("config.toml"))
                 .expect("bare relative config path should load");
             assert_eq!(
@@ -334,11 +364,17 @@ mod atomic_tests {
 
         let root = temp_config_root("bare-relative");
         fs::create_dir_all(&root).expect("test directory should be created");
+        let child_token = format!(
+            "foton-bare-relative-{}",
+            root.file_name()
+                .expect("temporary config root should have a name")
+                .to_string_lossy()
+        );
         let status = std::process::Command::new(
             std::env::current_exe().expect("test executable should exist"),
         )
         .current_dir(&root)
-        .env("FOTON_BARE_RELATIVE_CONFIG_CHILD", "1")
+        .env("FOTON_BARE_RELATIVE_CONFIG_CHILD", &child_token)
         .args([
             "--exact",
             "config::atomic_tests::bare_relative_config_path_is_supported_without_writing_to_the_caller_cwd",
