@@ -696,11 +696,8 @@ mod compression_security_tests {
     #[tokio::test]
     async fn rejects_zlib_stream_with_trailing_frame_bytes() {
         let decompressed = [2, b'h', b'e', b'l', b'l', b'o'];
-        let packet = compressed_packet_with_trailing_bytes(
-            decompressed.len(),
-            &decompressed,
-            &[0xde, 0xad],
-        );
+        let packet =
+            compressed_packet_with_trailing_bytes(decompressed.len(), &decompressed, &[0xde, 0xad]);
         let mut decoder = TCPNetworkDecoder::new(packet.as_slice());
         decoder.set_compression(NonZeroU32::MIN);
 

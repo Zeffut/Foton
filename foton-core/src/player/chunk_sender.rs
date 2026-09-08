@@ -615,10 +615,7 @@ mod tests {
 
         assert!(sender.on_chunk_batch_received_by_client(f32::NAN));
         assert_eq!(sender.unacknowledged_batches, 0);
-        assert_eq!(
-            sender.desired_chunks_per_tick.to_bits(),
-            0.01_f32.to_bits()
-        );
+        assert_eq!(sender.desired_chunks_per_tick.to_bits(), 0.01_f32.to_bits());
         assert_eq!(sender.batch_quota.to_bits(), 1.0_f32.to_bits());
         assert_eq!(
             sender.max_unacknowledged_batches,
