@@ -9,7 +9,7 @@ use foton_core::permission::{
 };
 use futures::future::BoxFuture;
 use serde::Serialize;
-use tokio::fs as async_fs;
+use tokio::task;
 use toml::ser::Error as TomlSerializeError;
 
 pub(super) const DEFAULT_GROUPS: &str = include_str!("../../../package-content/groups.toml");
@@ -45,7 +45,7 @@ impl PermissionGroupStore for FilePermissionGroupStore {
                     "failed to serialize groups config: {error}"
                 ))
             })?;
-            write_atomic_config(&path, serialized)
+            write_atomic_config_async(&path, serialized)
                 .await
                 .map_err(|error| {
                     PermissionGroupStoreError::new(format!(
@@ -162,17 +162,11 @@ fn permission_metadata_value_toml(
     }
 }
 
-async fn write_atomic_config(path: &Path, contents: String) -> io::Result<()> {
-    let Some(parent) = path.parent() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "config path has no parent",
-        ));
-    };
-    async_fs::create_dir_all(parent).await?;
-    let temp_path = path.with_extension("toml.tmp");
-    async_fs::write(&temp_path, contents).await?;
-    async_fs::rename(temp_path, path).await
+async fn write_atomic_config_async(path: &Path, contents: String) -> io::Result<()> {
+    let path = path.to_path_buf();
+    task::spawn_blocking(move || super::write_atomic_config(&path, contents.as_bytes()))
+        .await
+        .map_err(|error| io::Error::other(format!("atomic config writer task failed: {error}")))?
 }
 
 pub(super) fn load_or_create_groups(path: &Path) -> Result<PermissionGroupsConfig, String> {
@@ -182,7 +176,7 @@ pub(super) fn load_or_create_groups(path: &Path) -> Result<PermissionGroupsConfi
         toml::from_str(&contents)
             .map_err(|error| format!("failed to parse groups config {}: {error}", path.display()))?
     } else {
-        fs::write(path, DEFAULT_GROUPS).map_err(|error| {
+        super::write_atomic_config(path, DEFAULT_GROUPS.as_bytes()).map_err(|error| {
             format!("failed to write groups config {}: {error}", path.display())
         })?;
         toml::from_str(DEFAULT_GROUPS)
@@ -195,4 +189,45 @@ pub(super) fn load_or_create_groups(path: &Path) -> Result<PermissionGroupsConfi
         )
     })?;
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        env::temp_dir,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn initial_and_updated_groups_config_use_shared_atomic_publication() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after Unix epoch")
+            .as_nanos();
+        let root = temp_dir().join(format!("foton-atomic-groups-{unique}"));
+        fs::create_dir_all(root.join("groups.toml.tmp"))
+            .expect("blocking the atomic temporary path should succeed");
+        let path = root.join("groups.toml");
+
+        let initial_result = load_or_create_groups(&path);
+        let store = FilePermissionGroupStore::new(path.clone());
+        let update_result =
+            PermissionGroupStore::save_groups(&store, PermissionGroupsConfig::default()).await;
+
+        assert!(
+            initial_result.is_err(),
+            "the blocked initial atomic write should fail"
+        );
+        assert!(
+            update_result.is_err(),
+            "the blocked update atomic write should fail"
+        );
+        assert!(
+            !path.exists(),
+            "a failed atomic write must not publish a file"
+        );
+        fs::remove_dir_all(root).expect("test directory should be removed");
+    }
 }

@@ -6,7 +6,9 @@
 
 use std::{
     fmt::Display,
-    fs as sync_fs, io,
+    fs as sync_fs,
+    future::Future,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -135,26 +137,112 @@ pub struct SavedDataManager {
 /// as a perfectly valid empty scoreboard: the loss would be silent. `level.toml`
 /// and the player store already publish this way; this is the same pattern.
 async fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomically_with_parent_sync(path, bytes, sync_parent_directory).await
+}
+
+async fn sync_parent_directory(parent: PathBuf) -> io::Result<()> {
+    if cfg!(unix) {
+        fs::File::open(parent).await?.sync_all().await?;
+    }
+    Ok(())
+}
+
+async fn write_atomically_with_parent_sync<F, Fut>(
+    path: &Path,
+    bytes: &[u8],
+    sync_parent: F,
+) -> io::Result<()>
+where
+    F: FnOnce(PathBuf) -> Fut,
+    Fut: Future<Output = io::Result<()>>,
+{
     use tokio::io::AsyncWriteExt as _;
 
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "atomic saved-data path has no parent",
+        )
+    })?;
     let temporary = path.with_extension("tmp");
-    let mut file = fs::File::create(&temporary).await?;
-    file.write_all(bytes).await?;
-    file.sync_all().await?;
-    drop(file);
-    fs::rename(&temporary, path).await
+    let publication = async {
+        let mut file = fs::File::create(&temporary).await?;
+        file.write_all(bytes).await?;
+        file.sync_all().await?;
+        drop(file);
+        fs::rename(&temporary, path).await
+    }
+    .await;
+
+    if let Err(error) = publication {
+        return match fs::remove_file(&temporary).await {
+            Ok(()) => Err(error),
+            Err(cleanup_error) if cleanup_error.kind() == io::ErrorKind::NotFound => Err(error),
+            Err(cleanup_error) => Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; additionally failed to remove temporary file {}: {cleanup_error}",
+                    temporary.display()
+                ),
+            )),
+        };
+    }
+
+    sync_parent(parent.to_path_buf()).await
 }
 
 /// Blocking twin of [`write_atomically`], for the shutdown path.
 fn write_atomically_sync(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomically_sync_with_parent_sync(path, bytes, sync_parent_directory_sync)
+}
+
+fn sync_parent_directory_sync(parent: &Path) -> io::Result<()> {
+    if cfg!(unix) {
+        sync_fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+fn write_atomically_sync_with_parent_sync<F>(
+    path: &Path,
+    bytes: &[u8],
+    sync_parent: F,
+) -> io::Result<()>
+where
+    F: FnOnce(&Path) -> io::Result<()>,
+{
     use std::io::Write as _;
 
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "atomic saved-data path has no parent",
+        )
+    })?;
     let temporary = path.with_extension("tmp");
-    let mut file = sync_fs::File::create(&temporary)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    sync_fs::rename(&temporary, path)
+    let publication = (|| {
+        let mut file = sync_fs::File::create(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        sync_fs::rename(&temporary, path)
+    })();
+
+    if let Err(error) = publication {
+        return match sync_fs::remove_file(&temporary) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) if cleanup_error.kind() == io::ErrorKind::NotFound => Err(error),
+            Err(cleanup_error) => Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; additionally failed to remove temporary file {}: {cleanup_error}",
+                    temporary.display()
+                ),
+            )),
+        };
+    }
+
+    sync_parent(parent)
 }
 
 impl SavedDataManager {
@@ -304,7 +392,10 @@ mod tests {
 
     use wincode::{SchemaRead, SchemaWrite};
 
-    use super::{SavedDataManager, SavedDataName, WincodeSavedDataName, sync_fs};
+    use super::{
+        SavedDataManager, SavedDataName, WincodeSavedDataName, sync_fs,
+        write_atomically_sync_with_parent_sync, write_atomically_with_parent_sync,
+    };
 
     const TEST_DATA: SavedDataName = SavedDataName::trusted("test_data");
     const TEST_BINARY_DATA: WincodeSavedDataName =
@@ -329,6 +420,49 @@ mod tests {
         assert!(SavedDataName::try_new("").is_err());
         assert!(WincodeSavedDataName::try_new("valid_name", *b"TEST", 1).is_ok());
         assert!(WincodeSavedDataName::try_new("../outside", *b"TEST", 1).is_err());
+    }
+
+    #[tokio::test]
+    async fn async_atomic_write_syncs_the_containing_directory_after_rename() {
+        let dir = temp_world_dir("async-parent-sync");
+        sync_fs::create_dir_all(&dir).expect("test directory should be created");
+        let path = dir.join("saved.toml");
+        let expected_parent = dir.clone();
+
+        let error = write_atomically_with_parent_sync(&path, b"saved", move |parent| async move {
+            assert_eq!(parent, expected_parent);
+            Err(std::io::Error::other("parent sync failed"))
+        })
+        .await
+        .expect_err("the injected directory sync failure should be returned");
+
+        assert_eq!(error.kind(), ErrorKind::Other);
+        assert_eq!(
+            sync_fs::read(&path).expect("rename should precede directory sync"),
+            b"saved"
+        );
+        sync_fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn sync_atomic_write_syncs_the_containing_directory_after_rename() {
+        let dir = temp_world_dir("sync-parent-sync");
+        sync_fs::create_dir_all(&dir).expect("test directory should be created");
+        let path = dir.join("saved.bin");
+        let expected_parent = dir.clone();
+
+        let error = write_atomically_sync_with_parent_sync(&path, b"saved", |parent| {
+            assert_eq!(parent, expected_parent);
+            Err(std::io::Error::other("parent sync failed"))
+        })
+        .expect_err("the injected directory sync failure should be returned");
+
+        assert_eq!(error.kind(), ErrorKind::Other);
+        assert_eq!(
+            sync_fs::read(&path).expect("rename should precede directory sync"),
+            b"saved"
+        );
+        sync_fs::remove_dir_all(dir).expect("test directory should be removed");
     }
 
     fn temp_world_dir(test_name: &str) -> PathBuf {

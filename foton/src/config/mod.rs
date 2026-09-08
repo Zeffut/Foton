@@ -15,6 +15,7 @@ pub use server::{ServerConfig, ThreadConfig};
 use std::{
     collections::BTreeMap,
     fs,
+    io::{self, Write as _},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -93,7 +94,7 @@ pub fn load_or_create(path: &Path) -> Result<FotonConfig, String> {
                 parent.display()
             )
         })?;
-        fs::write(path, DEFAULT_CONFIG)
+        write_atomic_config(path, DEFAULT_CONFIG.as_bytes())
             .map_err(|e| format!("failed to write config file {}: {e}", path.display()))?;
         let config: FotonConfig = toml::from_str(DEFAULT_CONFIG)
             .map_err(|e| format!("failed to parse default config: {e}"))?;
@@ -134,12 +135,100 @@ fn load_or_create_worlds(path: &Path) -> Result<WorldsConfig, String> {
         toml::from_str(worlds_str.as_str())
             .map_err(|e| format!("failed to parse worlds config {}: {e}", path.display()))
     } else {
-        fs::write(path, DEFAULT_WORLDS)
+        write_atomic_config(path, DEFAULT_WORLDS.as_bytes())
             .map_err(|e| format!("failed to write worlds config file {}: {e}", path.display()))?;
         toml::from_str(DEFAULT_WORLDS)
             .map_err(|e| format!("failed to parse default worlds config: {e}"))
     }
 }
 
+pub(super) fn write_atomic_config(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "config path has no parent"))?;
+    fs::create_dir_all(parent)?;
+
+    let temporary = path.with_extension("toml.tmp");
+    let publication = (|| {
+        let mut file = fs::File::create(&temporary)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)
+    })();
+
+    if let Err(error) = publication {
+        return match fs::remove_file(&temporary) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) if cleanup_error.kind() == io::ErrorKind::NotFound => Err(error),
+            Err(cleanup_error) => Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; additionally failed to remove temporary file {}: {cleanup_error}",
+                    temporary.display()
+                ),
+            )),
+        };
+    }
+
+    if cfg!(unix) {
+        fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod atomic_tests {
+    use std::{
+        env::temp_dir,
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{load_or_create, load_or_create_worlds};
+
+    fn temp_config_root(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after Unix epoch")
+            .as_nanos();
+        temp_dir().join(format!("foton-atomic-config-{name}-{unique}"))
+    }
+
+    #[test]
+    fn initial_server_config_uses_atomic_publication() {
+        let root = temp_config_root("server");
+        fs::create_dir_all(root.join("config.toml.tmp"))
+            .expect("blocking the atomic temporary path should succeed");
+        let path = root.join("config.toml");
+
+        let result = load_or_create(&path);
+
+        assert!(result.is_err(), "the blocked atomic write should fail");
+        assert!(
+            !path.exists(),
+            "a failed atomic write must not publish a file"
+        );
+        fs::remove_dir_all(root).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn initial_worlds_config_uses_atomic_publication() {
+        let root = temp_config_root("worlds");
+        fs::create_dir_all(root.join("worlds.toml.tmp"))
+            .expect("blocking the atomic temporary path should succeed");
+        let path = root.join("worlds.toml");
+
+        let result = load_or_create_worlds(&path);
+
+        assert!(result.is_err(), "the blocked atomic write should fail");
+        assert!(
+            !path.exists(),
+            "a failed atomic write must not publish a file"
+        );
+        fs::remove_dir_all(root).expect("test directory should be removed");
+    }
+}
