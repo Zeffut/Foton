@@ -6,6 +6,50 @@
 # anywhere in the join pipeline fails the build instead of shipping.
 #
 # Usage: bash dev/join-test.sh
+
+write_world_seed() {
+  local worlds_file=$1
+
+  python3 - "$worlds_file" "$WORLD_SEED" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+encoded_seed = json.dumps(sys.argv[2], ensure_ascii=False)
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+save_path_index = None
+replaced = False
+
+for index, line in enumerate(lines):
+    content = line.rstrip("\r\n")
+    ending = line[len(content):]
+    if content.startswith("seed = "):
+        lines[index] = f"seed = {encoded_seed}{ending}"
+        replaced = True
+    elif save_path_index is None and content.startswith("save_path = "):
+        save_path_index = index + 1
+
+if not replaced:
+    if save_path_index is None:
+        raise SystemExit(f"{path}: missing top-level save_path = entry")
+
+    previous = lines[save_path_index - 1]
+    previous_content = previous.rstrip("\r\n")
+    previous_ending = previous[len(previous_content):]
+    if not previous_ending:
+        previous_ending = "\n"
+        lines[save_path_index - 1] = previous + previous_ending
+    lines.insert(save_path_index, f"seed = {encoded_seed}{previous_ending}")
+
+path.write_text("".join(lines), encoding="utf-8")
+PY
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
@@ -18,7 +62,7 @@ TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 BIN="$TARGET_DIR/debug/foton"
 
 PORT=25566
-RUN_DIR="$ROOT/run-offline"
+RUN_DIR="${RUN_DIR:-$ROOT/run-offline}"
 
 # Any fixed value works; this one is a plains start with water and a village in
 # range, which exercises terrain, structures and both spawn paths at once.
@@ -81,11 +125,7 @@ sed_in_place \
 # with -- changes from run to run and the test can only say "it did not crash".
 # Pinned, two runs of the same build are comparable, and a run that suddenly
 # stops showing livestock means the server changed rather than the world did.
-if grep -q '^seed = ' config/worlds.toml; then
-  sed_in_place "s/^seed = .*/seed = \"$WORLD_SEED\"/" config/worlds.toml
-else
-  sed_in_place "/^save_path = /a seed = \"$WORLD_SEED\"" config/worlds.toml
-fi
+write_world_seed config/worlds.toml
 
 # Start from a clean world every time, so the test measures the server and not
 # whatever a previous run left behind.
