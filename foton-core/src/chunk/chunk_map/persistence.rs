@@ -5,6 +5,16 @@ use super::{
 use crate::chunk_saver::PreparedChunkSave;
 use tokio::sync::oneshot;
 
+fn finish_save_after_close(saved_count: usize, close_result: io::Result<()>) -> io::Result<usize> {
+    match close_result {
+        Ok(()) => Ok(saved_count),
+        Err(error) => {
+            tracing::error!("Failed to close region files: {error}");
+            Err(error)
+        }
+    }
+}
+
 impl ChunkMap {
     async fn prepare_chunk_save_on_pool(
         self: &Arc<Self>,
@@ -328,9 +338,7 @@ impl ChunkMap {
         }
 
         // Close all region files (flushes headers and releases file handles)
-        if let Err(e) = self.storage.close_all().await {
-            tracing::error!("Failed to close region files: {e}");
-        }
+        let close_result = self.storage.close_all().await;
 
         tracing::info!(
             saved_count,
@@ -338,6 +346,24 @@ impl ChunkMap {
             "Chunk save complete"
         );
 
-        Ok(saved_count)
+        finish_save_after_close(saved_count, close_result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::finish_save_after_close;
+
+    #[test]
+    fn region_close_error_is_returned_instead_of_successful_save_count() {
+        let result = finish_save_after_close(7, Err(io::Error::other("close failed")));
+
+        let Err(error) = result else {
+            panic!("region close failure must fail the overall save");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(error.to_string(), "close failed");
     }
 }
