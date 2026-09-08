@@ -17,6 +17,22 @@ use foton_utils::Identifier;
 use std::mem::take;
 use tokio::sync::oneshot::{Receiver, channel};
 
+fn detach_world(
+    worlds: &super::WorldMap,
+    workers: &mut WorldTickWorkers,
+    key: &Identifier,
+) -> Result<Arc<World>, String> {
+    worlds
+        .validate_removal(key)
+        .map_err(|error| format!("{error:?}"))?;
+    let Some(worker_removal) = workers.prepare_removal(key) else {
+        return Err("world has no tick worker".to_owned());
+    };
+    let world = worlds.remove(key).map_err(|error| format!("{error:?}"))?;
+    worker_removal.commit();
+    Ok(world)
+}
+
 impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
     /// fork background chunk-scheduling epochs through each world's task tracker.
@@ -798,23 +814,16 @@ impl Server {
                 save,
                 completion,
             } = request;
-            let Some(world) = self.worlds.get_owned(&key) else {
-                continue;
+            let world = match detach_world(&self.worlds, workers, &key) {
+                Ok(world) => world,
+                Err(error) => {
+                    log::debug!("World removal deferred for {key}: {error}");
+                    if let Some(sender) = completion {
+                        let _ = sender.send(Err(error));
+                    }
+                    continue;
+                }
             };
-            if !workers.remove(&key) {
-                log::error!("Requested world {key} has no tick worker");
-                if let Some(sender) = completion {
-                    let _ = sender.send(Err("world has no tick worker".to_owned()));
-                }
-                continue;
-            }
-            if let Err(error) = self.worlds.remove(&key) {
-                log::debug!("World removal deferred for {key}: {error:?}");
-                if let Some(sender) = completion {
-                    let _ = sender.send(Err(format!("{error:?}")));
-                }
-                continue;
-            }
             if !save {
                 if let Some(sender) = completion {
                     let _ = sender.send(Ok(0));
@@ -886,15 +895,98 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{iter::empty, sync::Arc};
 
-    use super::Server;
+    use super::{Server, detach_world};
     use crate::{
+        config::ResolvedDomainConfig,
         player::ResetReason,
-        test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk},
+        server::{WorldMap, world_tick_workers::WorldTickWorkers},
+        test_support::{
+            TestPlayerBuilder, fresh_test_world, fresh_test_world_in_domain,
+            insert_ready_full_chunk,
+        },
+        world::World,
     };
-    use foton_utils::ChunkPos;
+    use foton_utils::{ChunkPos, Identifier};
+    use futures::executor::block_on;
     use rustc_hash::FxHashMap;
+
+    fn domain(default_world: Identifier) -> ResolvedDomainConfig {
+        ResolvedDomainConfig {
+            name: "main".to_owned(),
+            default_world: default_world.clone(),
+            worlds: vec![default_world],
+        }
+    }
+
+    #[test]
+    fn rejecting_default_world_removal_keeps_its_tick_worker() {
+        let world = fresh_test_world_in_domain("main", "spawn");
+        let key = world.key.clone();
+        let worlds = WorldMap::new("main".to_owned(), &[domain(key.clone())], &[]);
+        assert!(worlds.insert(key.clone(), Arc::clone(&world)).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn([&world]) else {
+            panic!("world tick worker should start");
+        };
+
+        let Err(error) = detach_world(&worlds, &mut workers, &key) else {
+            panic!("default world removal must be rejected");
+        };
+        assert_eq!(error, "DefaultWorld");
+        assert!(worlds.get(&key).is_some());
+        assert!(block_on(workers.tick_all(1, true)).is_ok());
+        assert_eq!(world.game_time(), 1);
+    }
+
+    #[test]
+    fn rejecting_world_with_players_removal_keeps_its_tick_worker() {
+        let world = fresh_test_world_in_domain("main", "arena");
+        let key = world.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "player", 1).build();
+        assert!(world.players.insert(player));
+        assert!(worlds.insert(key.clone(), Arc::clone(&world)).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn([&world]) else {
+            panic!("world tick worker should start");
+        };
+
+        let Err(error) = detach_world(&worlds, &mut workers, &key) else {
+            panic!("world removal with players must be rejected");
+        };
+        assert_eq!(error, "PlayersPresent(1)");
+        assert!(worlds.get(&key).is_some());
+        assert!(block_on(workers.tick_all(1, true)).is_ok());
+        assert_eq!(world.game_time(), 1);
+    }
+
+    #[test]
+    fn missing_tick_worker_does_not_detach_live_world() {
+        let world = fresh_test_world_in_domain("main", "arena");
+        let key = world.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        assert!(worlds.insert(key.clone(), Arc::clone(&world)).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn(empty::<&Arc<World>>()) else {
+            panic!("empty worker set should initialize");
+        };
+
+        let Err(error) = detach_world(&worlds, &mut workers, &key) else {
+            panic!("missing worker must reject world removal");
+        };
+        assert_eq!(error, "world has no tick worker");
+        let Some(remaining_world) = worlds.get(&key) else {
+            panic!("missing worker must not detach the live world");
+        };
+        assert!(Arc::ptr_eq(&remaining_world, &world));
+    }
 
     #[test]
     fn chunk_send_commit_rechecks_live_world_membership() {

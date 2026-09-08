@@ -142,12 +142,8 @@ impl WorldMap {
         self.get(key)
     }
 
-    /// Removes a loaded world after checking lifecycle invariants.
-    ///
-    /// A world cannot be detached while it is a configured domain default or
-    /// while players still belong to it. The caller remains responsible for
-    /// persistence and shutting down world workers before invoking this method.
-    pub fn remove(&self, key: &Identifier) -> Result<Arc<World>, WorldRemovalError> {
+    /// Validates that a loaded world can be removed without mutating the map.
+    pub fn validate_removal(&self, key: &Identifier) -> Result<(), WorldRemovalError> {
         let Some(world) = self.get(key) else {
             return Err(WorldRemovalError::NotLoaded);
         };
@@ -158,6 +154,17 @@ impl WorldMap {
         if player_count != 0 {
             return Err(WorldRemovalError::PlayersPresent(player_count));
         }
+        Ok(())
+    }
+
+    /// Removes a loaded world after checking lifecycle invariants.
+    ///
+    /// A world cannot be detached while it is a configured domain default or
+    /// while players still belong to it. The caller remains responsible for
+    /// persistence and shutting down world workers. Callers coordinating those
+    /// resources can use [`Self::validate_removal`] for a non-mutating preflight.
+    pub fn remove(&self, key: &Identifier) -> Result<Arc<World>, WorldRemovalError> {
+        self.validate_removal(key)?;
         self.worlds
             .write()
             .remove(key)
