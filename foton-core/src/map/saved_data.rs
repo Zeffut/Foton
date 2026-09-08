@@ -178,6 +178,7 @@ pub struct MapItemSavedData {
     frame_markers: FxHashMap<String, MapFrame>,
     tracked_decoration_count: i32,
     dirty: bool,
+    persistence_revision: u64,
 }
 
 impl MapItemSavedData {
@@ -212,6 +213,7 @@ impl MapItemSavedData {
             frame_markers: FxHashMap::default(),
             tracked_decoration_count: 0,
             dirty: true,
+            persistence_revision: 0,
         }
     }
 
@@ -383,13 +385,29 @@ impl MapItemSavedData {
         self.dirty
     }
 
-    /// Clears the dirty flag after a successful write.
-    pub const fn mark_saved(&mut self) {
-        self.dirty = false;
+    /// Returns the revision used to acknowledge a persistence snapshot.
+    #[must_use]
+    pub(crate) const fn persistence_revision(&self) -> u64 {
+        self.persistence_revision
+    }
+
+    /// Clears the dirty flag when the acknowledged revision is still current.
+    pub(crate) const fn mark_saved(&mut self, revision: u64) {
+        if self.persistence_revision == revision {
+            self.dirty = false;
+        }
     }
 
     /// Vanilla parity: `SavedData.setDirty`.
+    ///
+    /// # Panics
+    /// Panics if this map has already exhausted every persistence revision.
     pub const fn set_dirty(&mut self) {
+        assert!(
+            self.persistence_revision < u64::MAX,
+            "map persistence revision exhausted"
+        );
+        self.persistence_revision += 1;
         self.dirty = true;
     }
 
@@ -410,7 +428,7 @@ impl MapItemSavedData {
     /// Vanilla parity: `MapItemSavedData.setColor`.
     pub fn set_color(&mut self, x: usize, y: usize, color: u8) {
         self.colors[x + y * MAP_SIZE] = color;
-        self.dirty = true;
+        self.set_dirty();
         for holder in &mut self.carried_by {
             holder.mark_colors_dirty(x, y);
         }
@@ -591,7 +609,7 @@ impl MapItemSavedData {
                 None,
             );
             if self.frame_markers.insert(frame.id(), frame) != Some(frame) {
-                self.dirty = true;
+                self.set_dirty();
             }
         }
 
@@ -630,7 +648,7 @@ impl MapItemSavedData {
         if self.banner_markers.get(&id) == Some(&banner) {
             self.banner_markers.remove(&id);
             self.remove_decoration(&id);
-            self.dirty = true;
+            self.set_dirty();
             return true;
         }
 
@@ -650,7 +668,7 @@ impl MapItemSavedData {
             180.0,
             name,
         );
-        self.dirty = true;
+        self.set_dirty();
         true
     }
 
@@ -667,7 +685,7 @@ impl MapItemSavedData {
         for id in stale {
             self.banner_markers.remove(&id);
             self.remove_decoration(&id);
-            self.dirty = true;
+            self.set_dirty();
         }
     }
 
@@ -675,7 +693,7 @@ impl MapItemSavedData {
     pub fn removed_from_frame(&mut self, pos: BlockPos, entity_id: i32) {
         self.remove_decoration(&Self::frame_key(entity_id));
         self.frame_markers.remove(&MapFrame::frame_id(pos));
-        self.dirty = true;
+        self.set_dirty();
     }
 
     /// Vanilla parity: `MapItemSavedData.getFrameKey`.

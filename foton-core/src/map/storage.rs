@@ -46,6 +46,7 @@ pub struct MapStorage {
 
 struct MapStorageSaveSnapshot {
     layout_revision: u64,
+    map_revisions: Vec<(i32, u64)>,
     state: PersistentMaps,
 }
 
@@ -94,16 +95,27 @@ impl MapStorage {
 
     fn snapshot(&self) -> MapStorageSaveSnapshot {
         let maps = self.maps.read();
-        let mut entries: Vec<PersistentMap> = maps
+        let mut entries: Vec<(PersistentMap, u64)> = maps
             .iter()
-            .map(|(id, map)| persist_map(*id, &map.lock()))
+            .map(|(id, map)| {
+                let map = map.lock();
+                (persist_map(*id, &map), map.persistence_revision())
+            })
             .collect();
-        entries.sort_unstable_by_key(|entry| entry.id);
+        entries.sort_unstable_by_key(|(entry, _revision)| entry.id);
+        let map_revisions = entries
+            .iter()
+            .map(|(entry, revision)| (entry.id, *revision))
+            .collect();
         MapStorageSaveSnapshot {
             layout_revision: self.layout_revision.load(Ordering::Acquire),
+            map_revisions,
             state: PersistentMaps {
                 last_id: self.last_id.load(Ordering::Acquire),
-                maps: entries,
+                maps: entries
+                    .into_iter()
+                    .map(|(entry, _revision)| entry)
+                    .collect(),
             },
         }
     }
@@ -113,14 +125,11 @@ impl MapStorage {
             .fetch_max(snapshot.layout_revision, Ordering::Release);
 
         let maps = self.maps.read();
-        for saved in &snapshot.state.maps {
-            let Some(map) = maps.get(&saved.id) else {
+        for (id, revision) in &snapshot.map_revisions {
+            let Some(map) = maps.get(id) else {
                 continue;
             };
-            let mut map = map.lock();
-            if persist_map(saved.id, &map) == *saved {
-                map.mark_saved();
-            }
+            map.lock().mark_saved(*revision);
         }
     }
 
@@ -234,7 +243,7 @@ struct PersistentMaps {
     maps: Vec<PersistentMap>,
 }
 
-#[derive(Debug, PartialEq, SchemaWrite, SchemaRead)]
+#[derive(Debug, SchemaWrite, SchemaRead)]
 struct PersistentMap {
     id: i32,
     dimension: String,
@@ -250,7 +259,7 @@ struct PersistentMap {
     frames: Vec<PersistentMapFrame>,
 }
 
-#[derive(Debug, PartialEq, SchemaWrite, SchemaRead)]
+#[derive(Debug, SchemaWrite, SchemaRead)]
 struct PersistentMapBanner {
     pos: [i32; 3],
     /// `DyeColor.serialized_name`, the form vanilla's codec writes.
@@ -259,7 +268,7 @@ struct PersistentMapBanner {
     name: Option<Vec<u8>>,
 }
 
-#[derive(Debug, PartialEq, SchemaWrite, SchemaRead)]
+#[derive(Debug, SchemaWrite, SchemaRead)]
 struct PersistentMapFrame {
     pos: [i32; 3],
     rotation: i32,
@@ -382,6 +391,26 @@ mod tests {
         assert!(
             storage.pending_save().is_some(),
             "a map changed after the saved snapshot must remain dirty"
+        );
+    }
+
+    #[test]
+    fn map_aba_mutation_after_snapshot_remains_dirty() {
+        let storage = MapStorage::new();
+        let id = MapId::new(0);
+        let map = storage.set(id, test_map());
+        let snapshot = storage.snapshot();
+
+        {
+            let mut map = map.lock();
+            map.set_color(0, 0, 1);
+            map.set_color(0, 0, 0);
+        }
+        storage.mark_saved(&snapshot);
+
+        assert!(
+            storage.pending_save().is_some(),
+            "a map changed and restored after the saved snapshot must remain dirty"
         );
     }
 
