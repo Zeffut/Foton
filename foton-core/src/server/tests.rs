@@ -318,6 +318,7 @@ async fn test_server_with_worlds(
         pending_world_changes: SyncMutex::new(Vec::new()),
         pending_world_removals: SyncMutex::new(Vec::new()),
         pending_world_additions: SyncMutex::new(Vec::new()),
+        world_creation_closed: AtomicBool::new(false),
         events: EventBus::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
@@ -599,6 +600,54 @@ fn world_key_reservation_blocks_recreation_until_cleanup_releases_it() {
             .reserve_world_key(&key)
             .expect("released cleanup reservation should permit recreation");
         drop(reservation);
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn world_creation_closes_admission_and_cleans_pending_additions() {
+    let world = fresh_test_world_in_domain("main", "spawn");
+    let pending_world = fresh_test_world_in_domain("main", "pending");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should initialize");
+    runtime.block_on(async move {
+        let storage_root = test_storage_root("world-creation-shutdown");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .expect("test server should initialize");
+        let pending_key = pending_world.key.clone();
+        let reservation = server
+            .reserve_world_key(&pending_key)
+            .expect("pending world should reserve its key");
+        let (sender, receiver) = channel();
+        server
+            .pending_world_additions
+            .lock()
+            .push((pending_world, sender, reservation));
+
+        server.wait_for_world_cleanups().await;
+
+        assert_eq!(
+            receiver
+                .await
+                .expect("pending creation sender should remain live"),
+            Err("world creation stopped before safe-point attachment".to_owned())
+        );
+        assert!(
+            server
+                .reserve_world_key(&Identifier::new("main", "after-shutdown"))
+                .is_err()
+        );
 
         drop(server);
         if let Err(error) = fs::remove_dir_all(&storage_root).await {

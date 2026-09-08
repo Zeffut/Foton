@@ -103,7 +103,7 @@ use foton_utils::{
 use glam::DVec3;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering, Ordering as AtomicOrdering};
 use std::{
     collections::BTreeSet,
     io, mem,
@@ -514,6 +514,8 @@ pub struct Server {
     pub(crate) pending_world_removals: SyncMutex<Vec<WorldRemovalRequest>>,
     /// Worlds ready to attach at the next tick safe-point.
     pending_world_additions: SyncMutex<Vec<PendingWorldAddition>>,
+    /// Prevents new asynchronous world creations from entering during shutdown.
+    world_creation_closed: AtomicBool,
     /// Who is listening for what.
     ///
     /// Unlike the block and item registries this is not frozen after startup:
@@ -877,21 +879,27 @@ impl Server {
         world.attach_server(self);
         let id = NEXT_WORLD_CREATION_ID.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
-        let already_pending = self
-            .pending_world_additions
-            .lock()
-            .iter()
-            .any(|(pending_world, _, _)| pending_world.key == world_entry.key);
-        if already_pending {
+        let insertion = {
+            let mut pending = self.pending_world_additions.lock();
+            if self.world_creation_closed.load(Ordering::Acquire) {
+                Err("world creation is closed".to_owned())
+            } else if pending
+                .iter()
+                .any(|(pending_world, _, _)| pending_world.key == world_entry.key)
+            {
+                Err(format!(
+                    "world {} is already pending attachment",
+                    world_entry.key
+                ))
+            } else {
+                pending.push((Arc::clone(&world), sender, reservation));
+                Ok(())
+            }
+        };
+        if let Err(error) = insertion {
             world.cleanup_without_save().await;
-            return Err(format!(
-                "world {} is already pending attachment",
-                world_entry.key
-            ));
+            return Err(error);
         }
-        self.pending_world_additions
-            .lock()
-            .push((world, sender, reservation));
         Ok(WorldCreationRequest { id, receiver })
     }
 
@@ -1158,6 +1166,7 @@ impl Server {
             pending_world_changes: SyncMutex::new(vec![]),
             pending_world_removals: SyncMutex::new(vec![]),
             pending_world_additions: SyncMutex::new(vec![]),
+            world_creation_closed: AtomicBool::new(false),
             events: EventBus::new(),
             pending_domain_switches: SyncMutex::new(vec![]),
         })
@@ -1206,7 +1215,11 @@ impl Server {
     /// queued so shutdown cannot race a removed world's final save. Worlds
     /// still waiting for attachment are cleaned up here as well.
     pub async fn wait_for_world_cleanups(&self) {
-        let pending = mem::take(&mut *self.pending_world_additions.lock());
+        let pending = {
+            let mut pending = self.pending_world_additions.lock();
+            self.world_creation_closed.store(true, Ordering::Release);
+            mem::take(&mut *pending)
+        };
         for (world, completion, reservation) in pending {
             self.world_cleanup_tasks.spawn_on(
                 async move {
@@ -1224,6 +1237,10 @@ impl Server {
     }
 
     fn reserve_world_key(&self, key: &Identifier) -> Result<WorldKeyReservation, String> {
+        let _pending_world_additions = self.pending_world_additions.lock();
+        if self.world_creation_closed.load(Ordering::Acquire) {
+            return Err("world creation is closed".to_owned());
+        }
         let mut reservations = self.world_key_reservations.lock();
         if self.worlds.get(key).is_some() || !reservations.insert(key.clone()) {
             return Err(format!("world {key} is already loaded or busy"));
