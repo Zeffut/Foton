@@ -165,6 +165,7 @@ impl JavaTcpClient {
                 &requested_username,
                 &server_hash,
                 self.server.config.auth_server.as_deref(),
+                self.server.config.allow_insecure_auth_server,
             )
             .await
             {

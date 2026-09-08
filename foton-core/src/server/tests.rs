@@ -165,6 +165,7 @@ fn test_runtime_config() -> Arc<RuntimeConfig> {
         online_mode: false,
         whitelist_enabled: false,
         auth_server: None,
+        allow_insecure_auth_server: false,
         profile_server: None,
         services_server: None,
         encryption: false,

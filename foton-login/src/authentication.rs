@@ -25,6 +25,8 @@ const DEFAULT_AUTH_SERVER: &str = "https://sessionserver.mojang.com/session/mine
 /// three attempts still fit inside a client's own login patience.
 const AUTH_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(5);
+const AUTH_TOTAL_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_AUTH_RESPONSE_BODY_BYTES: usize = 1024 * 1024;
 
 /// The one HTTP client every session-server call goes through.
 ///
@@ -43,6 +45,15 @@ fn auth_client() -> Result<&'static reqwest::Client, AuthError> {
     let client = reqwest::Client::builder()
         .connect_timeout(AUTH_CONNECT_TIMEOUT)
         .read_timeout(AUTH_READ_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if is_https_to_http_downgrade(attempt.previous(), attempt.url()) {
+                attempt.error(std::io::Error::other(
+                    "HTTPS-to-HTTP authentication redirect rejected",
+                ))
+            } else {
+                attempt.follow()
+            }
+        }))
         .build()
         .map_err(|_| AuthError::FailedResponse)?;
 
@@ -73,6 +84,15 @@ pub enum AuthError {
     /// Authentication server URL is invalid.
     #[error("Invalid authentication server URL")]
     InvalidAuthServer(String),
+    /// The authentication server returned a profile for a different username.
+    #[error("Authentication server returned a mismatched profile name")]
+    ProfileNameMismatch,
+    /// The authentication server response exceeded the configured size limit.
+    #[error("Authentication server response is too large")]
+    ResponseTooLarge,
+    /// The authentication server attempted an HTTPS-to-HTTP redirect.
+    #[error("Authentication server attempted an HTTPS-to-HTTP redirect")]
+    RedirectDowngrade,
     /// An unknown status code was returned.
     #[error("Unknown Status Code {0}")]
     UnknownStatusCode(StatusCode),
@@ -105,44 +125,137 @@ pub async fn mojang_authenticate(
     username: &str,
     server_hash: &str,
     auth_server: Option<&str>,
+    allow_insecure_auth_server: bool,
 ) -> Result<GameProfile, AuthError> {
-    let auth_url = build_auth_url(auth_server, username, server_hash)?;
+    mojang_authenticate_with_timeout(
+        username,
+        server_hash,
+        auth_server,
+        allow_insecure_auth_server,
+        AUTH_TOTAL_TIMEOUT,
+    )
+    .await
+}
+
+async fn mojang_authenticate_with_timeout(
+    username: &str,
+    server_hash: &str,
+    auth_server: Option<&str>,
+    allow_insecure_auth_server: bool,
+    timeout: Duration,
+) -> Result<GameProfile, AuthError> {
+    let auth_url = build_auth_url(
+        auth_server,
+        username,
+        server_hash,
+        allow_insecure_auth_server,
+    )?;
 
     let client = auth_client()?;
     let mut last_error = AuthError::FailedResponse;
 
-    for _ in 0..MAX_RETRIES {
-        let Ok(response) = client.get(auth_url.clone()).send().await else {
-            last_error = AuthError::FailedResponse;
-            continue;
-        };
+    let request = async {
+        for _ in 0..MAX_RETRIES {
+            let response = match client.get(auth_url.clone()).send().await {
+                Ok(response) => response,
+                Err(error) if error.is_redirect() => return Err(AuthError::RedirectDowngrade),
+                Err(_) => {
+                    last_error = AuthError::FailedResponse;
+                    continue;
+                }
+            };
 
-        match response.status() {
-            StatusCode::OK => {
-                return response.json().await.map_err(|_| AuthError::FailedParse);
+            match response.status() {
+                StatusCode::OK => {
+                    let body = read_auth_response(response).await?;
+                    let profile: GameProfile =
+                        serde_json::from_slice(&body).map_err(|_| AuthError::FailedParse)?;
+                    if profile.name != username {
+                        return Err(AuthError::ProfileNameMismatch);
+                    }
+                    return Ok(profile);
+                }
+                StatusCode::NO_CONTENT => return Err(AuthError::UnverifiedUsername),
+                status
+                    if status.is_server_error()
+                        || matches!(
+                            status,
+                            StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
+                        ) =>
+                {
+                    last_error = AuthError::UnknownStatusCode(status);
+                }
+                other => return Err(AuthError::UnknownStatusCode(other)),
             }
-            StatusCode::NO_CONTENT => last_error = AuthError::UnverifiedUsername,
-            other => last_error = AuthError::UnknownStatusCode(other),
         }
+
+        Err(last_error)
+    };
+
+    tokio::time::timeout(timeout, request)
+        .await
+        .unwrap_or(Err(AuthError::FailedResponse))
+}
+
+async fn read_auth_response(mut response: reqwest::Response) -> Result<Vec<u8>, AuthError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_AUTH_RESPONSE_BODY_BYTES as u64)
+    {
+        return Err(AuthError::ResponseTooLarge);
     }
 
-    log::warn!("Player {username} auth failed");
-
-    Err(last_error)
+    let mut body = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(MAX_AUTH_RESPONSE_BODY_BYTES as u64) as usize,
+    );
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| AuthError::FailedResponse)?
+    {
+        if body.len().saturating_add(chunk.len()) > MAX_AUTH_RESPONSE_BODY_BYTES {
+            return Err(AuthError::ResponseTooLarge);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn build_auth_url(
     auth_server: Option<&str>,
     username: &str,
     server_hash: &str,
+    allow_insecure_auth_server: bool,
 ) -> Result<Url, AuthError> {
     let endpoint = auth_server.unwrap_or(DEFAULT_AUTH_SERVER);
     let mut url =
         Url::parse(endpoint).map_err(|_| AuthError::InvalidAuthServer(endpoint.to_string()))?;
+    if url.scheme() != "https"
+        && !(url.scheme() == "http" && (allow_insecure_auth_server || is_loopback_url(&url)))
+    {
+        return Err(AuthError::InvalidAuthServer(endpoint.to_string()));
+    }
     url.query_pairs_mut()
         .append_pair("username", username)
         .append_pair("serverId", server_hash);
     Ok(url)
+}
+
+fn is_loopback_url(url: &Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    })
+}
+
+fn is_https_to_http_downgrade(previous: &[Url], next: &Url) -> bool {
+    previous.iter().any(|url| url.scheme() == "https") && next.scheme() == "http"
 }
 
 /// Converts a signed bytes big endian to a hex string.
@@ -190,6 +303,18 @@ pub fn signed_bytes_be_to_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use sha2::Digest;
+    use std::{
+        net::SocketAddr,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        task::JoinHandle,
+    };
 
     #[test]
     fn test_positive_simple() {
@@ -258,7 +383,7 @@ mod tests {
 
     #[test]
     fn auth_url_defaults_to_mojang_session_server() {
-        let url = build_auth_url(None, "Steve", "abc123").expect("auth URL builds");
+        let url = build_auth_url(None, "Steve", "abc123", false).expect("auth URL builds");
 
         assert_eq!(
             url.as_str(),
@@ -272,6 +397,7 @@ mod tests {
             Some("https://auth.example.com/session/minecraft/hasJoined"),
             "Steve",
             "abc123",
+            false,
         )
         .expect("auth URL builds");
 
@@ -279,5 +405,193 @@ mod tests {
             url.as_str(),
             "https://auth.example.com/session/minecraft/hasJoined?username=Steve&serverId=abc123"
         );
+    }
+
+    #[test]
+    fn auth_url_rejects_remote_http_without_opt_in() {
+        let result = build_auth_url(
+            Some("http://auth.example.com/session/minecraft/hasJoined"),
+            "Steve",
+            "abc123",
+            false,
+        );
+
+        assert!(matches!(result, Err(AuthError::InvalidAuthServer(_))));
+    }
+
+    #[test]
+    fn auth_url_accepts_loopback_and_explicitly_opted_in_http() {
+        let loopback = build_auth_url(
+            Some("http://[::1]/session/minecraft/hasJoined"),
+            "Steve",
+            "abc123",
+            false,
+        );
+        let opted_in = build_auth_url(
+            Some("http://auth.example.com/session/minecraft/hasJoined"),
+            "Steve",
+            "abc123",
+            true,
+        );
+
+        assert!(loopback.is_ok());
+        assert!(opted_in.is_ok());
+    }
+
+    #[test]
+    fn https_to_http_redirects_are_rejected() {
+        let previous = [Url::parse("https://auth.example.com/session").expect("valid URL")];
+        let downgrade = Url::parse("http://auth.example.com/session").expect("valid URL");
+        let secure = Url::parse("https://auth.example.com/other").expect("valid URL");
+
+        assert!(is_https_to_http_downgrade(&previous, &downgrade));
+        assert!(!is_https_to_http_downgrade(&previous, &secure));
+    }
+
+    #[tokio::test]
+    async fn oversized_auth_response_is_rejected_before_json_parsing() {
+        let body = "x".repeat(MAX_AUTH_RESPONSE_BODY_BYTES + 1);
+        let (url, requests, server) = spawn_http_server(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+            1,
+        )
+        .await;
+
+        let result = mojang_authenticate("Steve", "abc123", Some(&url), false).await;
+
+        assert!(matches!(result, Err(AuthError::ResponseTooLarge)));
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        server.await.expect("HTTP test server should finish");
+    }
+
+    #[tokio::test]
+    async fn slow_auth_response_is_bounded_by_the_total_request_timeout() {
+        let (url, server) = spawn_slow_http_server().await;
+
+        let result = mojang_authenticate_with_timeout(
+            "Steve",
+            "abc123",
+            Some(&url),
+            false,
+            Duration::from_millis(20),
+        )
+        .await;
+
+        assert!(matches!(result, Err(AuthError::FailedResponse)));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn non_transient_auth_status_is_not_retried() {
+        let (url, requests, server) = spawn_http_server(
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
+            1,
+        )
+        .await;
+
+        let result = mojang_authenticate("Steve", "abc123", Some(&url), false).await;
+
+        assert!(matches!(
+            result,
+            Err(AuthError::UnknownStatusCode(StatusCode::NOT_FOUND))
+        ));
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        server.await.expect("HTTP test server should finish");
+    }
+
+    #[tokio::test]
+    async fn transient_auth_status_is_retried() {
+        let (url, requests, server) = spawn_http_server(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_owned(),
+            MAX_RETRIES as usize,
+        )
+        .await;
+
+        let result = mojang_authenticate("Steve", "abc123", Some(&url), false).await;
+
+        assert!(matches!(
+            result,
+            Err(AuthError::UnknownStatusCode(
+                StatusCode::SERVICE_UNAVAILABLE
+            ))
+        ));
+        assert_eq!(requests.load(Ordering::Relaxed), MAX_RETRIES as usize);
+        server.await.expect("HTTP test server should finish");
+    }
+
+    #[tokio::test]
+    async fn mismatched_auth_profile_name_is_rejected() {
+        let body = r#"{"id":"8667ba71-b85a-4004-af54-457a9734eed7","name":"Alex","properties":[],"profileActions":null}"#;
+        let (url, requests, server) = spawn_http_server(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+            1,
+        )
+        .await;
+
+        let result = mojang_authenticate("Steve", "abc123", Some(&url), false).await;
+
+        assert!(matches!(result, Err(AuthError::ProfileNameMismatch)));
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        server.await.expect("HTTP test server should finish");
+    }
+
+    async fn spawn_http_server(
+        response: String,
+        expected_requests: usize,
+    ) -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("HTTP test server should bind");
+        let address = listener
+            .local_addr()
+            .expect("HTTP test server should have an address");
+        let requests = Arc::new(AtomicUsize::new(0));
+        let request_count = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            for _ in 0..expected_requests {
+                let (mut stream, _) = listener
+                    .accept()
+                    .await
+                    .expect("HTTP test server should accept");
+                request_count.fetch_add(1, Ordering::Relaxed);
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request).await;
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+
+        (format!("http://{address}/session"), requests, server)
+    }
+
+    async fn spawn_slow_http_server() -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("HTTP test server should bind");
+        let address: SocketAddr = listener
+            .local_addr()
+            .expect("HTTP test server should have an address");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("HTTP test server should accept");
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+                .await
+                .expect("HTTP test server should write headers");
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let _ = stream.write_all(b"{}").await;
+        });
+
+        (format!("http://{address}/session"), server)
     }
 }

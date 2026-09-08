@@ -25,6 +25,7 @@ Server configuration
 | `max_chained_neighbor_updates` | integer | `1000000` |  | Maximum queued neighbor-update tasks in one chained run. Negative values disable the limit. |
 | `online_mode` *(required)* | boolean | `true` |  | Whether to use Mojang's authentication service |
 | `auth_server` | string |  | uri | Optional authentication endpoint for online-mode hasJoined checks. Omit to use Mojang's session server. |
+| `allow_insecure_auth_server` | boolean | `false` |  | Allow a non-loopback HTTP authentication endpoint. HTTPS remains the default. |
 | `profile_server` | string |  | uri | Optional endpoint for online-mode player name-to-profile lookups. Omit to use Mojang's profile service. |
 | `services_server` | string |  | uri | Optional endpoint for Mojang-compatible service public keys. Omit to use Mojang's services endpoint. |
 | `encryption` *(required)* | boolean | `true` |  | Whether to enable encryption for client-server communication. Required in online mode. |

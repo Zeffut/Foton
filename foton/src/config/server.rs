@@ -48,6 +48,9 @@ pub struct ServerConfig {
     pub whitelist_enabled: bool,
     /// Optional authentication endpoint for online-mode `hasJoined` checks.
     pub auth_server: Option<String>,
+    /// Whether remote HTTP authentication endpoints are explicitly allowed.
+    #[serde(default)]
+    pub allow_insecure_auth_server: bool,
     /// Optional endpoint for online-mode player name-to-profile lookups.
     pub profile_server: Option<String>,
     /// Optional endpoint for Mojang-compatible service public keys.
@@ -143,6 +146,7 @@ impl ServerConfig {
             online_mode: self.online_mode,
             whitelist_enabled: self.whitelist_enabled,
             auth_server: self.auth_server,
+            allow_insecure_auth_server: self.allow_insecure_auth_server,
             profile_server: self.profile_server,
             services_server: self.services_server,
             encryption: self.encryption,
@@ -246,6 +250,14 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         if !matches!(url.scheme(), "http" | "https") {
             return Err("auth_server must use http or https");
         }
+        if url.scheme() == "http"
+            && !self::is_loopback_url(&url)
+            && !config.allow_insecure_auth_server
+        {
+            return Err(
+                "auth_server must use HTTPS unless it is loopback or allow_insecure_auth_server is true",
+            );
+        }
     }
     if let Some(profile_server) = &config.profile_server {
         let Ok(url) = Url::parse(profile_server) else {
@@ -334,4 +346,14 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         }
     }
     Ok(())
+}
+
+fn is_loopback_url(url: &Url) -> bool {
+    url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    })
 }

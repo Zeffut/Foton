@@ -148,6 +148,7 @@ fn server_config_defaults_backward_compatible_fields() {
     let config: FotonConfig = toml::from_str(input).expect("config should parse");
 
     assert!(!config.server.allow_flight);
+    assert!(!config.server.allow_insecure_auth_server);
     assert_eq!(config.server.max_chained_neighbor_updates, 1_000_000);
     assert_eq!(config.server.rcon.bind.to_string(), "127.0.0.1");
     assert_eq!(config.server.rcon.max_connections, 8);
@@ -195,6 +196,27 @@ fn configured_auth_server_flows_to_runtime_config() {
             .auth_server
             .as_deref(),
         Some(auth_server)
+    );
+}
+
+#[test]
+fn insecure_auth_server_opt_in_flows_to_runtime_config() {
+    let config_toml = DEFAULT_CONFIG.replace(
+        "online_mode = true",
+        concat!(
+            "online_mode = true\n",
+            "auth_server = \"http://auth.example.com/session/minecraft/hasJoined\"\n",
+            "allow_insecure_auth_server = true",
+        ),
+    );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert!(
+        config
+            .server
+            .into_runtime_config()
+            .expect("the test config resolves")
+            .allow_insecure_auth_server
     );
 }
 
@@ -368,14 +390,67 @@ fn validate_rejects_invalid_auth_server_url() {
 }
 
 #[test]
-fn validate_allows_http_auth_server_url() {
+fn validate_allows_loopback_http_auth_server_url() {
     let config_toml = DEFAULT_CONFIG.replace(
         "online_mode = true",
         "online_mode = true\nauth_server = \"http://localhost:8080/session/minecraft/hasJoined\"",
     );
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
-    validate(&config.server).expect("http auth server URL validates");
+    validate(&config.server).expect("loopback HTTP auth server URL validates");
+}
+
+#[test]
+fn validate_allows_ipv6_loopback_http_auth_server_url() {
+    let config_toml = DEFAULT_CONFIG.replace(
+        "online_mode = true",
+        "online_mode = true\nauth_server = \"http://[::1]:8080/session/minecraft/hasJoined\"",
+    );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    validate(&config.server).expect("IPv6 loopback HTTP auth server URL validates");
+}
+
+#[test]
+fn validate_rejects_remote_http_auth_server_url_by_default() {
+    let config_toml = DEFAULT_CONFIG.replace(
+        "online_mode = true",
+        "online_mode = true\nauth_server = \"http://auth.example.com/session/minecraft/hasJoined\"",
+    );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    assert_eq!(
+        validate(&config.server),
+        Err(
+            "auth_server must use HTTPS unless it is loopback or allow_insecure_auth_server is true"
+        )
+    );
+}
+
+#[test]
+fn validate_allows_remote_http_auth_server_with_explicit_opt_in() {
+    let config_toml = DEFAULT_CONFIG.replace(
+        "online_mode = true",
+        concat!(
+            "online_mode = true\n",
+            "auth_server = \"http://auth.example.com/session/minecraft/hasJoined\"\n",
+            "allow_insecure_auth_server = true",
+        ),
+    );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    validate(&config.server).expect("the explicit insecure endpoint opt-in validates");
+}
+
+#[test]
+fn validate_allows_https_auth_server_without_opt_in() {
+    let config_toml = DEFAULT_CONFIG.replace(
+        "online_mode = true",
+        "online_mode = true\nauth_server = \"https://auth.example.com/session/minecraft/hasJoined\"",
+    );
+    let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
+
+    validate(&config.server).expect("HTTPS auth server URL validates");
 }
 
 #[test]

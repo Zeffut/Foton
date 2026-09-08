@@ -20,6 +20,8 @@ online_mode = true
 whitelist_enabled = false
 # Optional authentication endpoint for online mode. Omit to use Mojang's session server.
 # auth_server = "https://sessionserver.mojang.com/session/minecraft/hasJoined"
+# Allow a remote HTTP authentication endpoint (unsafe; HTTPS is recommended)
+# allow_insecure_auth_server = false
 # Optional name-to-profile lookup endpoint used by commands such as /op.
 # profile_server = "https://api.minecraftservices.com/minecraft/profile/lookup/name"
 # Optional service public-key endpoint used to validate signed chat certificates.

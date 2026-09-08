@@ -58,6 +58,11 @@
           "description": "Optional authentication endpoint for online-mode hasJoined checks. Omit to use Mojang's session server.",
           "format": "uri"
         },
+        "allow_insecure_auth_server": {
+          "type": "boolean",
+          "description": "Allow a non-loopback HTTP authentication endpoint. HTTPS remains the default.",
+          "default": false
+        },
         "profile_server": {
           "type": "string",
           "description": "Optional endpoint for online-mode player name-to-profile lookups. Omit to use Mojang's profile service.",
