@@ -433,6 +433,121 @@ fn piston_event_rechecks_destruction_after_world_replacement() {
     });
 }
 
+#[test]
+fn cancelled_piston_retraction_leaves_world_unchanged() {
+    let world = fresh_test_world("piston_cancelled_retraction");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-cancelled-retraction");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let head_pos = piston_pos.east();
+        let pulled_pos = piston_pos.relative_n(Direction::East, 2);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::STICKY_PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, true);
+        let head_state = vanilla_blocks::PISTON_HEAD
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East);
+        let pulled_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(head_pos, head_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(pulled_pos, pulled_state, UpdateFlags::UPDATE_NONE));
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "cancel_piston_retraction"),
+            |event| event.set_cancelled(true),
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::STICKY_PISTON, true);
+        assert!(!piston.trigger_event_for_test(piston_state, &world, piston_pos, 1, 5,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(head_pos), head_state);
+        assert_eq!(world.get_block_state(pulled_pos), pulled_state);
+        assert!(world.get_block_entity(piston_pos).is_none());
+        assert!(world.get_block_entity(head_pos).is_none());
+        assert!(world.get_block_entity(pulled_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn invalid_piston_retraction_output_leaves_world_unchanged() {
+    let world = fresh_test_world("piston_invalid_retraction");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-invalid-retraction");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let head_pos = piston_pos.east();
+        let pulled_pos = piston_pos.relative_n(Direction::East, 2);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::STICKY_PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, true);
+        let head_state = vanilla_blocks::PISTON_HEAD
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East);
+        let pulled_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(head_pos, head_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(pulled_pos, pulled_state, UpdateFlags::UPDATE_NONE));
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "invalid_piston_retraction"),
+            |event| {
+                let piston_pos = event.piston();
+                event.blocks_mut().push(piston_pos);
+            },
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::STICKY_PISTON, true);
+        assert!(!piston.trigger_event_for_test(piston_state, &world, piston_pos, 1, 5,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(head_pos), head_state);
+        assert_eq!(world.get_block_state(pulled_pos), pulled_state);
+        assert!(world.get_block_entity(piston_pos).is_none());
+        assert!(world.get_block_entity(head_pos).is_none());
+        assert!(world.get_block_entity(pulled_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
 #[tokio::test]
 async fn world_creation_request_poll_and_wait_are_non_blocking() {
     let (sender, receiver) = channel();
