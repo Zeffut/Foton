@@ -5,6 +5,11 @@
   "outputDirectory": "site/dist",
   "framework": null,
   "trailingSlash": true,
+  "functions": {
+    "api/**/*.py": {
+      "excludeFiles": "{.cargo/**,.github/**,.superpowers/**,design/**,dev/**,docs/**,foton/**,foton-*/**,package-content/**,plugin-api/**,plugins/**,site/**}"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/bug-reports/",
