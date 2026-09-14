@@ -38,6 +38,7 @@ class VercelFunctionBundleConfigTest(unittest.TestCase):
             "plugin-api/src/lib.rs",
             "plugins/example/plugin.json",
             "site/dist/index.html",
+            "target/debug/deps/libfoton_core.rlib",
         ]
         for path in excluded_paths:
             with self.subTest(path=path):

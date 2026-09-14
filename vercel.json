@@ -7,7 +7,7 @@
   "trailingSlash": true,
   "functions": {
     "api/**/*.py": {
-      "excludeFiles": "{.cargo/**,.github/**,.superpowers/**,design/**,dev/**,docs/**,foton/**,foton-*/**,package-content/**,plugin-api/**,plugins/**,site/**}"
+      "excludeFiles": "{.cargo/**,.github/**,.superpowers/**,design/**,dev/**,docs/**,foton/**,foton-*/**,package-content/**,plugin-api/**,plugins/**,site/**,target/**}"
     }
   },
   "rewrites": [
