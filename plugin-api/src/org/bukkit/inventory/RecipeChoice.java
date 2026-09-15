@@ -3,10 +3,11 @@ package org.bukkit.inventory;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Predicate;
 import org.bukkit.Material;
 
 /** An ingredient predicate used by Bukkit crafting recipes. */
-public interface RecipeChoice extends Cloneable {
+public interface RecipeChoice extends Predicate<ItemStack>, Cloneable {
     boolean test(ItemStack stack);
     ItemStack getItemStack();
     RecipeChoice clone();

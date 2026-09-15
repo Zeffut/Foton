@@ -6105,6 +6105,102 @@ const fn equipment_slot_from_index(slot: jint) -> Option<EquipmentSlot> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EquipmentSlotRequestError {
+    Unsupported,
+}
+
+fn entity_equipment_slot_state(
+    entity: Option<&dyn Entity>,
+    slot: jint,
+) -> Result<Option<String>, EquipmentSlotRequestError> {
+    let Some(slot) = equipment_slot_from_index(slot) else {
+        return Err(EquipmentSlotRequestError::Unsupported);
+    };
+    let Some(living) = entity.and_then(Entity::as_living_entity) else {
+        return Ok(None);
+    };
+    if !living.can_use_slot(slot) {
+        return Err(EquipmentSlotRequestError::Unsupported);
+    }
+    Ok(Some(describe_slot(&living.get_item_by_slot(slot))))
+}
+
+fn set_entity_equipment_slot_state(
+    entity: Option<&dyn Entity>,
+    slot: jint,
+    encoded: &str,
+) -> Result<(), EquipmentSlotRequestError> {
+    let Some(slot) = equipment_slot_from_index(slot) else {
+        return Err(EquipmentSlotRequestError::Unsupported);
+    };
+    let Some(living) = entity.and_then(Entity::as_living_entity) else {
+        return Ok(());
+    };
+    if !living.can_use_slot(slot) {
+        return Err(EquipmentSlotRequestError::Unsupported);
+    }
+    let Some(stack) = parse_slot(encoded) else {
+        return Ok(());
+    };
+    living.set_item_slot(slot, stack);
+    Ok(())
+}
+
+fn throw_unsupported_equipment_slot(env: &mut JNIEnv<'_>) {
+    let _ = env.throw_new(
+        "java/lang/IllegalArgumentException",
+        "equipment slot is invalid for this entity",
+    );
+}
+
+extern "system" fn entity_equipment_slot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    slot: jint,
+) -> jstring {
+    let entity = env
+        .get_string(&uuid)
+        .ok()
+        .and_then(|text| Uuid::parse_str(text.to_str().ok()?).ok())
+        .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
+    match entity_equipment_slot_state(entity.as_deref(), slot) {
+        Ok(value) => to_java(&mut env, value),
+        Err(EquipmentSlotRequestError::Unsupported) => {
+            throw_unsupported_equipment_slot(&mut env);
+            null_mut()
+        }
+    }
+}
+
+extern "system" fn set_entity_equipment_slot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    slot: jint,
+    item: JString<'_>,
+) {
+    let Some(encoded) = env
+        .get_string(&item)
+        .ok()
+        .and_then(|text| text.to_str().ok().map(str::to_owned))
+    else {
+        return;
+    };
+    let entity = env
+        .get_string(&uuid)
+        .ok()
+        .and_then(|text| Uuid::parse_str(text.to_str().ok()?).ok())
+        .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
+    if matches!(
+        set_entity_equipment_slot_state(entity.as_deref(), slot, &encoded),
+        Err(EquipmentSlotRequestError::Unsupported)
+    ) {
+        throw_unsupported_equipment_slot(&mut env);
+    }
+}
+
 extern "system" fn entity_drop_chance(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -13171,6 +13267,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_entity_drop_chance as *mut c_void,
         ),
         method(
+            "entityEquipmentSlot",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            entity_equipment_slot as *mut c_void,
+        ),
+        method(
+            "setEntityEquipmentSlot",
+            "(Ljava/lang/String;ILjava/lang/String;)V",
+            set_entity_equipment_slot as *mut c_void,
+        ),
+        method(
             "arrowPotion",
             "(Ljava/lang/String;)Ljava/lang/String;",
             arrow_potion as *mut c_void,
@@ -13982,8 +14088,9 @@ mod entity_bridge_tests {
 
     use foton_core::chunk::chunk_request::{ChunkRequestState, ChunkTicketKind};
     use foton_core::chunk::status::ChunkStatus;
-    use foton_core::entity::Entity as _;
-    use foton_core::entity::entities::RawEntity;
+    use foton_core::entity::entities::{ArmorStandEntity, HorseEntity, RawEntity};
+    use foton_core::entity::{Entity as _, LivingEntity as _};
+    use foton_core::inventory::equipment::EquipmentSlot;
     use foton_core::level_data::WorldGenerationSettings;
     use foton_core::world::{World, WorldConfig, WorldStorageConfig};
     use foton_core::worldgen::{ChunkGeneratorType, EmptyChunkGenerator};
@@ -13993,10 +14100,12 @@ mod entity_bridge_tests {
     use glam::DVec3;
 
     use super::{
-        add_entity_scoreboard_tag_state, bindings, entity_by_text, entity_has_gravity_state,
-        entity_in_rain_state, entity_position_state, entity_scoreboard_tags_state,
-        entity_silent_state, remove_entity_scoreboard_tag_state, set_entity_gravity_state,
-        set_entity_rotation_state, set_entity_silent_state,
+        EquipmentSlotRequestError, add_entity_scoreboard_tag_state, bindings, entity_by_text,
+        entity_equipment_slot_state, entity_has_gravity_state, entity_in_rain_state,
+        entity_position_state, entity_scoreboard_tags_state, entity_silent_state,
+        equipment_slot_from_index, remove_entity_scoreboard_tag_state,
+        set_entity_equipment_slot_state, set_entity_gravity_state, set_entity_rotation_state,
+        set_entity_silent_state,
     };
 
     fn entity() -> RawEntity {
@@ -14084,6 +14193,64 @@ mod entity_bridge_tests {
     fn entity_lookup_rejects_invalid_and_missing_uuids() {
         assert!(entity_by_text("not-a-uuid").is_none());
         assert!(entity_by_text("00000000-0000-0000-0000-000000000000").is_none());
+    }
+
+    #[test]
+    fn equipment_bridge_reads_and_writes_body_and_saddle_on_a_horse() {
+        init_vanilla_registry();
+        let horse = HorseEntity::new(&vanilla_entities::HORSE, 8, DVec3::ZERO, Weak::new());
+        let horse = &horse as &dyn foton_core::entity::Entity;
+
+        for (index, slot) in [
+            EquipmentSlot::MainHand,
+            EquipmentSlot::OffHand,
+            EquipmentSlot::Feet,
+            EquipmentSlot::Legs,
+            EquipmentSlot::Chest,
+            EquipmentSlot::Head,
+            EquipmentSlot::Body,
+            EquipmentSlot::Saddle,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(equipment_slot_from_index(index as i32), Some(slot));
+        }
+
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(horse), 6, "minecraft:leather_horse_armor 1"),
+            Ok(())
+        );
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(horse), 7, "minecraft:saddle 1"),
+            Ok(())
+        );
+        assert!(matches!(
+            entity_equipment_slot_state(Some(horse), 6),
+            Ok(Some(value)) if value.starts_with("minecraft:leather_horse_armor 1")
+        ));
+        assert!(matches!(
+            entity_equipment_slot_state(Some(horse), 7),
+            Ok(Some(value)) if value.starts_with("minecraft:saddle 1")
+        ));
+    }
+
+    #[test]
+    fn equipment_bridge_rejects_a_slot_the_living_entity_cannot_use() {
+        init_vanilla_registry();
+        let stand =
+            ArmorStandEntity::new(&vanilla_entities::ARMOR_STAND, 9, DVec3::ZERO, Weak::new());
+        let entity = &stand as &dyn foton_core::entity::Entity;
+
+        assert_eq!(
+            entity_equipment_slot_state(Some(entity), 6),
+            Err(EquipmentSlotRequestError::Unsupported)
+        );
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(entity), 7, "minecraft:saddle 1"),
+            Err(EquipmentSlotRequestError::Unsupported)
+        );
+        assert!(stand.get_item_by_slot(EquipmentSlot::Saddle).is_empty());
     }
 
     #[test]

@@ -13,8 +13,10 @@ final class AdapterCheck {
         worldClassFilterUsesTheExistingEntityCollection();
         registryIteratorDelegatesTheCompleteStreamIteratorContract();
         shapelessRecipePreservesStackIngredientMultiplicity();
+        shapelessRecipeReturnsDetachedIngredientViews();
         shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
         shapelessRecipeRejectsInvalidItemStackIngredientsAtomically();
+        recipeChoiceIsAPredicateAndCloneable();
         shapelessRecipeChoiceMatchesPaperValidationAndCloneSemantics();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
@@ -26,8 +28,10 @@ final class AdapterCheck {
         worldClassFilterUsesTheExistingEntityCollection();
         registryIteratorDelegatesTheCompleteStreamIteratorContract();
         shapelessRecipePreservesStackIngredientMultiplicity();
+        shapelessRecipeReturnsDetachedIngredientViews();
         shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
         shapelessRecipeRejectsInvalidItemStackIngredientsAtomically();
+        recipeChoiceIsAPredicateAndCloneable();
         shapelessRecipeChoiceMatchesPaperValidationAndCloneSemantics();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
@@ -41,6 +45,8 @@ final class AdapterCheck {
         ItemStack leggings = new ItemStack(Material.LEATHER_LEGGINGS);
         ItemStack chestplate = new ItemStack(Material.LEATHER_CHESTPLATE);
         ItemStack helmet = new ItemStack(Material.LEATHER_HELMET);
+        ItemStack body = new ItemStack(Material.LEATHER_HORSE_ARMOR);
+        ItemStack saddle = new ItemStack(Material.SADDLE);
 
         equipment.setItem(EquipmentSlot.HAND, hand);
         equipment.setItem(EquipmentSlot.OFF_HAND, offHand);
@@ -48,6 +54,8 @@ final class AdapterCheck {
         equipment.setItem(EquipmentSlot.LEGS, leggings);
         equipment.setItem(EquipmentSlot.CHEST, chestplate);
         equipment.setItem(EquipmentSlot.HEAD, helmet);
+        equipment.setItem(EquipmentSlot.BODY, body);
+        equipment.setItem(EquipmentSlot.SADDLE, saddle);
 
         same(equipment.getItem(EquipmentSlot.HAND), hand, "main hand slot");
         same(equipment.getItem(EquipmentSlot.OFF_HAND), offHand, "off-hand slot");
@@ -55,6 +63,8 @@ final class AdapterCheck {
         same(equipment.getItem(EquipmentSlot.LEGS), leggings, "leggings slot");
         same(equipment.getItem(EquipmentSlot.CHEST), chestplate, "chestplate slot");
         same(equipment.getItem(EquipmentSlot.HEAD), helmet, "helmet slot");
+        same(equipment.getItem(EquipmentSlot.BODY), body, "body slot");
+        same(equipment.getItem(EquipmentSlot.SADDLE), saddle, "saddle slot");
     }
 
     private static void pluginConfigMethodsOperateThroughTheLivePluginConfig()
@@ -143,6 +153,36 @@ final class AdapterCheck {
     }
 
     /**
+     * Catches views that expose the recipe's list, choices, or representative
+     * stacks to callers that mutate the values they receive.
+     */
+    private static void shapelessRecipeReturnsDetachedIngredientViews() {
+        org.bukkit.inventory.ShapelessRecipe recipe = new org.bukkit.inventory.ShapelessRecipe(
+            org.bukkit.NamespacedKey.minecraft("detached_ingredients"),
+            new ItemStack(Material.STONE));
+        recipe.addIngredient(new MutableRecipeChoice(Material.DIRT));
+
+        java.util.List<org.bukkit.inventory.RecipeChoice> choices = recipe.getChoiceList();
+        ((MutableRecipeChoice) choices.get(0)).setMaterial(Material.STONE);
+        choices.clear();
+
+        java.util.List<org.bukkit.inventory.RecipeChoice> untouchedChoices = recipe.getChoiceList();
+        equal(untouchedChoices.size(), 1, "mutating a returned choice list leaves the recipe intact");
+        expect(untouchedChoices.get(0).test(new ItemStack(Material.DIRT)),
+            "mutating a returned choice leaves the recipe ingredient intact");
+
+        java.util.List<ItemStack> ingredients = recipe.getIngredientList();
+        ingredients.get(0).setType(Material.STONE);
+        ingredients.clear();
+
+        java.util.List<ItemStack> untouchedIngredients = recipe.getIngredientList();
+        equal(untouchedIngredients.size(), 1,
+            "mutating a returned ingredient list leaves the recipe intact");
+        equal(untouchedIngredients.get(0).getType(), Material.DIRT,
+            "mutating a returned ingredient stack leaves the recipe ingredient intact");
+    }
+
+    /**
      * Catches the mutations that silently add null/AIR choices or append part
      * of an over-limit batch before rejecting the rest.
      */
@@ -171,7 +211,7 @@ final class AdapterCheck {
         }
         expect(overflowRejected,
             "a batch exceeding the global nine-ingredient limit throws IllegalArgumentException");
-        sameChoices(recipe.getChoiceList(), beforeOverflow,
+        sameChoiceValues(recipe.getChoiceList(), beforeOverflow,
             "an over-limit batch leaves every existing choice untouched");
     }
 
@@ -188,7 +228,7 @@ final class AdapterCheck {
             rejected = true;
         }
         expect(rejected, failure);
-        sameChoices(recipe.getChoiceList(), before, failure + " without altering choices");
+        sameChoiceValues(recipe.getChoiceList(), before, failure + " without altering choices");
     }
 
     /**
@@ -224,6 +264,20 @@ final class AdapterCheck {
             "the uncounted ItemStack overload must honor its stack amount and global limit");
     }
 
+    /** Ensures Paper consumers can use a recipe choice through Predicate's API. */
+    private static void recipeChoiceIsAPredicateAndCloneable() {
+        org.bukkit.inventory.RecipeChoice choice =
+            new org.bukkit.inventory.RecipeChoice.MaterialChoice(Material.DIRT);
+        java.util.function.Predicate<ItemStack> predicate = choice;
+        Cloneable cloneable = choice;
+
+        expect(predicate.test(new ItemStack(Material.DIRT)),
+            "RecipeChoice's Predicate view matches the choice");
+        expect(!predicate.test(new ItemStack(Material.STONE)),
+            "RecipeChoice's Predicate view rejects another material");
+        expect(cloneable != null, "RecipeChoice remains assignable to Cloneable");
+    }
+
     /** Verifies RecipeChoice's own Paper validation, limit, and clone contract. */
     private static void shapelessRecipeChoiceMatchesPaperValidationAndCloneSemantics() {
         org.bukkit.inventory.ShapelessRecipe recipe = new org.bukkit.inventory.ShapelessRecipe(
@@ -239,7 +293,7 @@ final class AdapterCheck {
             nullRejected = true;
         }
         expect(nullRejected, "a null RecipeChoice must dereference as Paper does");
-        sameChoices(recipe.getChoiceList(), beforeNull,
+        sameChoiceValues(recipe.getChoiceList(), beforeNull,
             "a null RecipeChoice leaves choices untouched");
 
         MutableRecipeChoice choice = new MutableRecipeChoice(Material.DIRT);
@@ -264,7 +318,7 @@ final class AdapterCheck {
             overflowRejected = true;
         }
         expect(overflowRejected, "a tenth RecipeChoice must be rejected");
-        sameChoices(recipe.getChoiceList(), beforeOverflow,
+        sameChoiceValues(recipe.getChoiceList(), beforeOverflow,
             "an over-limit RecipeChoice leaves choices untouched");
     }
 
@@ -279,7 +333,7 @@ final class AdapterCheck {
         } catch (RuntimeException expected) {
             equal(expected.getClass(), expectedType, failure + " exception type");
         }
-        sameChoices(recipe.getChoiceList(), before, failure + " without altering choices");
+        sameChoiceValues(recipe.getChoiceList(), before, failure + " without altering choices");
     }
 
     private static void assertRejectedStackAdditionLeavesChoicesUntouched(
@@ -293,14 +347,15 @@ final class AdapterCheck {
         } catch (RuntimeException expected) {
             equal(expected.getClass(), expectedType, failure + " exception type");
         }
-        sameChoices(recipe.getChoiceList(), before, failure + " without altering choices");
+        sameChoiceValues(recipe.getChoiceList(), before, failure + " without altering choices");
     }
 
-    private static void sameChoices(java.util.List<org.bukkit.inventory.RecipeChoice> actual,
+    private static void sameChoiceValues(java.util.List<org.bukkit.inventory.RecipeChoice> actual,
             java.util.List<org.bukkit.inventory.RecipeChoice> expected, String description) {
         equal(actual.size(), expected.size(), description + " size");
         for (int index = 0; index < expected.size(); index++) {
-            same(actual.get(index), expected.get(index), description + " at index " + index);
+            equal(actual.get(index).getItemStack(), expected.get(index).getItemStack(),
+                description + " at index " + index);
         }
     }
 
@@ -376,6 +431,33 @@ final class AdapterCheck {
         private ItemStack leggings;
         private ItemStack chestplate;
         private ItemStack helmet;
+        private ItemStack body;
+        private ItemStack saddle;
+
+        @Override public ItemStack getItem(EquipmentSlot slot) {
+            return switch (slot) {
+                case HAND -> hand;
+                case OFF_HAND -> offHand;
+                case FEET -> boots;
+                case LEGS -> leggings;
+                case CHEST -> chestplate;
+                case HEAD -> helmet;
+                case BODY -> body;
+                case SADDLE -> saddle;
+            };
+        }
+        @Override public void setItem(EquipmentSlot slot, ItemStack item) {
+            switch (slot) {
+                case HAND -> hand = item;
+                case OFF_HAND -> offHand = item;
+                case FEET -> boots = item;
+                case LEGS -> leggings = item;
+                case CHEST -> chestplate = item;
+                case HEAD -> helmet = item;
+                case BODY -> body = item;
+                case SADDLE -> saddle = item;
+            }
+        }
 
         @Override public ItemStack[] getArmorContents() {
             return new ItemStack[] { boots, leggings, chestplate, helmet };
@@ -391,7 +473,7 @@ final class AdapterCheck {
         @Override public ItemStack getItemInOffHand() { return offHand; }
         @Override public void setItemInOffHand(ItemStack item) { offHand = item; }
         @Override public void clear() {
-            hand = offHand = boots = leggings = chestplate = helmet = null;
+            hand = offHand = boots = leggings = chestplate = helmet = body = saddle = null;
         }
     }
 

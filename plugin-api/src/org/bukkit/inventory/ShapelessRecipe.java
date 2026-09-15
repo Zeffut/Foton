@@ -1,7 +1,6 @@
 package org.bukkit.inventory;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -50,7 +49,15 @@ public class ShapelessRecipe extends CraftingRecipe {
             choices.add(new RecipeChoice.ExactChoice(stack));
         return this;
     }
-    public List<RecipeChoice> getChoiceList() { return Collections.unmodifiableList(choices); }
-    /** Bukkit compatibility name for the ingredient choices. */
-    public List<RecipeChoice> getIngredientList() { return getChoiceList(); }
+    public List<RecipeChoice> getChoiceList() {
+        List<RecipeChoice> copied = new ArrayList<>(choices.size());
+        for (RecipeChoice choice : choices) copied.add(choice.clone());
+        return copied;
+    }
+    /** Bukkit compatibility list of representative ingredient stacks. */
+    public List<ItemStack> getIngredientList() {
+        List<ItemStack> copied = new ArrayList<>(choices.size());
+        for (RecipeChoice choice : choices) copied.add(choice.getItemStack().clone());
+        return copied;
+    }
 }
