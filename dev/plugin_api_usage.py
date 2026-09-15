@@ -444,17 +444,20 @@ def gaps(corpus, api_jar):
     missing_audience = collections.Counter()
     for jar in sorted(corpus.glob("*.jar")):
         found, _ = scan(jar)
-        if found["internal"]:
+        internal_classes = classes_on_surface(found["classes"], "internal")
+        if found["internal"] or internal_classes:
             continue
-        wanted = found["api"]
-        if not wanted:
+        wanted_members = found["api"]
+        wanted_classes = classes_on_surface(found["classes"], "api")
+        if not wanted_members and not wanted_classes:
             continue
         missing = set()
-        for member in wanted:
+        for member in wanted_members:
             owner, signature = member.split("#", 1)
             if signature not in FROM_OBJECT and signature not in INHERITED_API.get(owner, ()) and signature not in have.get(owner, ()):
                 missing.add(member)
-        per_plugin[jar.name] = (len(wanted), missing)
+        missing.update(wanted_classes - have.keys())
+        per_plugin[jar.name] = (len(wanted_members) + len(wanted_classes), missing)
         for member in missing:
             missing_audience[member] += 1
     return per_plugin, missing_audience
@@ -487,6 +490,19 @@ def scan(jar):
     return found, unreadable
 
 
+def surface_of_class(name):
+    """The compatibility surface containing a slash-separated class name."""
+    return next(
+        (kind for prefix, kind in SURFACE_PREFIXES if name.startswith(prefix)),
+        None,
+    )
+
+
+def classes_on_surface(classes, surface):
+    """Class references belonging to one compatibility surface."""
+    return {name for name in classes if surface_of_class(name) == surface}
+
+
 def package_of(member):
     """The package a member's owner lives in, which is the unit worth ranking.
 
@@ -510,15 +526,6 @@ def reach_by(api, plugins_per_member, group):
     for member, count in api:
         key = group(member)
         best[key] = max(best.get(key, 0), count)
-    return sorted(best.items(), key=lambda pair: (-pair[1], pair[0]))
-
-
-def event_reach(events):
-    """Ranks event *types* rather than the accessors called on them."""
-    best = {}
-    for member, count in events:
-        owner = member.split("#", 1)[0]
-        best[owner] = max(best.get(owner, 0), count)
     return sorted(best.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
@@ -557,14 +564,31 @@ def coverage_curve(reachable, ranked):
     return rows
 
 
-JAVA_STATIC_METHOD = re.compile(
-    r"\bstatic\s+(?:<[^>{}]+>\s+)?[\w.$<>\[\], ?]+\s+"
+JAVA_METHOD = re.compile(
+    r"\b(?:(?:public|protected|private|static|final|synchronized|default)\s+)*"
+    r"(?:<[^>{}]+>\s+)?[\w.$<>\[\], ?]+\s+"
     r"([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws\s+[^{}]+)?\{"
 )
 JAVA_CONSTRUCTOR = re.compile(
     r"\bnew\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\("
 )
+JAVA_EVENT_VALUE = re.compile(
+    r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*Event)\s+"
+    r"[A-Za-z_$][\w$]*\s*="
+)
 JAVA_CALL = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\(")
+JAVA_OWNED_CALL = re.compile(
+    r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\."
+    r"([A-Za-z_$][\w$]*)\s*\("
+)
+RUST_STRING_CONSTANT = re.compile(
+    r'\bconst\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]+)"'
+)
+RUST_STATIC_CALL = re.compile(
+    r'\bcall_static_method\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,\s*'
+    r'"([A-Za-z_$][A-Za-z0-9_$]*)"',
+    re.DOTALL,
+)
 RUST_FIRE_METHOD = re.compile(r'"(fire[A-Z][A-Za-z0-9_$]*)"')
 
 
@@ -598,44 +622,103 @@ def _event_name(java_name, imports, package):
     return resolved
 
 
+def _java_owner(java_name, imports, package):
+    """Resolves a Java class expression to a slash-separated owner."""
+    if "." in java_name:
+        return java_name.replace(".", "/")
+    if java_name in imports:
+        return imports[java_name].replace(".", "/")
+    if java_name[:1].isupper() and package:
+        return f"{package.replace('.', '/')}/{java_name}"
+    return None
+
+
 def emitted_events(java_source_root: pathlib.Path, rust_source_root: pathlib.Path) -> set[str]:
     """Events whose Java fire path is called by the Rust bridge."""
     called_from_rust = set()
+    rust_fire_methods = set()
     for path in pathlib.Path(rust_source_root).rglob("*.rs"):
         source = path.read_text(encoding="utf-8", errors="replace")
-        called_from_rust.update(RUST_FIRE_METHOD.findall(source))
+        constants = dict(RUST_STRING_CONSTANT.findall(source))
+        for owner_expression, method in RUST_STATIC_CALL.findall(source):
+            if owner_expression.startswith('"'):
+                owner = owner_expression[1:-1]
+            else:
+                owner = constants.get(owner_expression)
+            if owner:
+                called_from_rust.add((owner, method))
+        rust_fire_methods.update(RUST_FIRE_METHOD.findall(source))
 
     methods = collections.defaultdict(list)
     for path in pathlib.Path(java_source_root).rglob("*.java"):
         source = path.read_text(encoding="utf-8", errors="replace")
         package_match = re.search(r"^\s*package\s+([\w.]+)\s*;", source, re.MULTILINE)
         package = package_match.group(1) if package_match else ""
+        owner = f"{package.replace('.', '/')}/{path.stem}" if package else path.stem
         imports = {
             name.rsplit(".", 1)[-1]: name
             for name in re.findall(r"^\s*import\s+([\w.]+)\s*;", source, re.MULTILINE)
         }
-        for match in JAVA_STATIC_METHOD.finditer(source):
+        for match in JAVA_METHOD.finditer(source):
             body = _method_body(source, match.end() - 1)
             events = {
                 event
-                for name in JAVA_CONSTRUCTOR.findall(body)
+                for name in (
+                    JAVA_CONSTRUCTOR.findall(body) + JAVA_EVENT_VALUE.findall(body)
+                )
                 if (event := _event_name(name, imports, package)) is not None
             }
-            calls = set(JAVA_CALL.findall(body))
-            methods[match.group(1)].append((events, calls))
+            calls = {(owner, name) for name in JAVA_CALL.findall(body)}
+            for receiver, method in JAVA_OWNED_CALL.findall(body):
+                called_owner = _java_owner(receiver, imports, package)
+                calls.add((called_owner or owner, method))
+            methods[(owner, match.group(1))].append((events, calls))
+
+    called_from_rust.update(
+        ("foton/EventBridge", method) for method in rust_fire_methods
+    )
 
     emitted = set()
     pending = list(called_from_rust)
     reached = set()
     while pending:
-        method = pending.pop()
-        if method in reached:
+        node = pending.pop()
+        if node in reached:
             continue
-        reached.add(method)
-        for events, calls in methods.get(method, ()):
+        reached.add(node)
+        for events, calls in methods.get(node, ()):
             emitted.update(events)
             pending.extend(calls - reached)
     return emitted
+
+
+def event_parents(api_jar):
+    """Direct event supertypes declared by the built API jar."""
+    parents = {}
+    with zipfile.ZipFile(api_jar) as archive:
+        for entry in archive.namelist():
+            if not entry.endswith(".class"):
+                continue
+            try:
+                name, supertypes, _ = declares(archive.read(entry))
+            except (NotAClassFile, struct.error, KeyError, IndexError):
+                continue
+            if name:
+                parents[name] = set(supertypes)
+    return parents
+
+
+def expand_event_hierarchy(events, parents):
+    """Events plus every supertype that receives their dispatched instances."""
+    reachable = set()
+    pending = list(events)
+    while pending:
+        current = pending.pop()
+        if current in reachable:
+            continue
+        reachable.add(current)
+        pending.extend(set(parents.get(current, ())) - reachable)
+    return reachable
 
 
 def _member_resolution(rows, provided_members):
@@ -657,12 +740,35 @@ def _member_resolution(rows, provided_members):
     }
 
 
-def compatibility_summary(ledger, provided_members, wanted_events, emitted):
+def _class_resolution(rows, provided_members):
+    missing = [row["class"] for row in rows if row["class"] not in provided_members]
+    return {
+        "referenced": len(rows),
+        "resolved": len(rows) - len(missing),
+        "missing": len(missing),
+        "missing_classes": sorted(name.replace("/", ".") for name in missing),
+    }
+
+
+def compatibility_summary(
+    ledger,
+    provided_members,
+    wanted_events,
+    emitted,
+    parents=None,
+):
     """Return JSON-serializable binary, ceiling and event evidence."""
     rows = list(ledger.get("api_members", ()))
+    class_rows = list(ledger.get("api_classes", ()))
     threshold = ledger.get("api_members_kept_at_least", SHARED_BY)
     shared = [row for row in rows if row.get("plugins", 0) >= threshold]
+    shared_classes = [
+        row for row in class_rows if row.get("plugins", 0) >= threshold
+    ]
     all_members_recorded = len(rows) == ledger.get("api_members_referenced", len(rows))
+    classes_recorded = "api_classes" in ledger
+    all_classes_recorded = classes_recorded and len(class_rows) == ledger.get(
+        "api_classes_referenced", len(class_rows))
 
     all_evidence = _member_resolution(rows, provided_members)
     if not all_members_recorded:
@@ -673,17 +779,38 @@ def compatibility_summary(ledger, provided_members, wanted_events, emitted):
             "missing_members": None,
         }
 
+    all_class_evidence = _class_resolution(class_rows, provided_members)
+    if not all_classes_recorded:
+        all_class_evidence = {
+            "referenced": ledger.get("api_classes_referenced"),
+            "resolved": None,
+            "missing": None,
+            "missing_classes": None,
+        }
+    shared_class_evidence = _class_resolution(shared_classes, provided_members)
+    if not classes_recorded:
+        shared_class_evidence = {
+            "referenced": None,
+            "resolved": None,
+            "missing": None,
+            "missing_classes": None,
+        }
+
     wanted = {
         row["event"] if isinstance(row, dict) else row
         for row in wanted_events
     }
-    emitted_wanted = wanted & set(emitted)
+    emitted_wanted = wanted & expand_event_hierarchy(set(emitted), parents or {})
     missing_events = wanted - emitted_wanted
     scanned = ledger.get("plugins_scanned", 0)
     reaches_internals = ledger.get("plugins_reaching_internals", 0)
     return {
         "api": {
             "all": all_evidence,
+            "classes": {
+                "all": all_class_evidence,
+                "shared": shared_class_evidence,
+            },
             "shared": _member_resolution(shared, provided_members),
         },
         "ceiling": {
@@ -761,12 +888,29 @@ def report_covered(api_jar, top):
           f"{ledger['api_members_kept_at_least']} of {ledger['plugins_scanned']} plugins")
     print(f"covered by the built API: {covered} ({100 * covered // max(total, 1)}%)")
     print(f"missing: {len(missing)}")
-    if not missing:
-        return
-    print()
-    print(f"by audience -- plugins that reference each, top {top}:")
-    for row in sorted(missing, key=lambda row: -row["plugins"])[:top]:
-        print(f"  {row['plugins']:3d}  {row['member']}")
+    if missing:
+        print()
+        print(f"by audience -- plugins that reference each, top {top}:")
+        for row in sorted(missing, key=lambda row: -row["plugins"])[:top]:
+            print(f"  {row['plugins']:3d}  {row['member']}")
+
+    class_rows = [
+        row for row in ledger.get("api_classes", ())
+        if row["plugins"] >= ledger["api_members_kept_at_least"]
+    ]
+    if class_rows:
+        missing_classes = [
+            row for row in class_rows if row["class"] not in api
+        ]
+        covered_classes = len(class_rows) - len(missing_classes)
+        print()
+        print(f"class references in the same shared corpus: {len(class_rows)}")
+        print(f"classes present in the built API: {covered_classes}")
+        print(f"missing classes: {len(missing_classes)}")
+        for row in sorted(
+            missing_classes, key=lambda row: (-row["plugins"], row["class"])
+        )[:top]:
+            print(f"  {row['plugins']:3d}  {row['class']}")
 
 
 def report_events(source_root, api_jar, top):
@@ -793,29 +937,7 @@ def report_events(source_root, api_jar, top):
 
     # Every ancestor of every constructed event, so a base class counts as
     # reachable when something builds one of its descendants.
-    parents = {}
-    with zipfile.ZipFile(api_jar) as archive:
-        for entry in archive.namelist():
-            if not entry.endswith(".class"):
-                continue
-            try:
-                name, supertypes, _ = declares(archive.read(entry))
-            except (NotAClassFile, struct.error, KeyError, IndexError):
-                continue
-            if name:
-                parents[name] = supertypes
-
-    reachable = set()
-    for name in constructed:
-        pending = [name]
-        seen = set()
-        while pending:
-            current = pending.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            reachable.add(current)
-            pending.extend(parents.get(current, ()))
+    reachable = expand_event_hierarchy(constructed, event_parents(api_jar))
 
     silent = []
     for row in wanted:
@@ -882,7 +1004,12 @@ def main():
         java_source = args.events or REPO / "plugin-api" / "src"
         emitted = emitted_events(java_source, REPO / "foton-plugin" / "src")
         summary = compatibility_summary(
-            ledger, provided(args.covered), wanted, emitted)
+            ledger,
+            provided(args.covered),
+            wanted,
+            emitted,
+            event_parents(args.covered),
+        )
         write_summary_json(args.summary_json, summary)
         print(f"wrote {args.summary_json}")
 
@@ -911,6 +1038,7 @@ def main():
 
     plugins_per_member = collections.Counter()
     plugins_per_class = collections.Counter()
+    plugins_per_internal_class = collections.Counter()
     plugins_per_event = collections.Counter()
     surface_of = {}
     reaches_internal = []
@@ -928,22 +1056,23 @@ def main():
             continue
         if unreadable:
             failed.append((jar.name, f"{unreadable} unreadable class files"))
-        if found["internal"]:
+        api_classes = classes_on_surface(found["classes"], "api")
+        internal_classes = classes_on_surface(found["classes"], "internal")
+        if found["internal"] or internal_classes:
             reaches_internal.append(jar.name)
-        elif found["api"]:
-            needs[jar.stem] = found["api"]
+        elif found["api"] or api_classes:
+            needs[jar.stem] = found["api"] | api_classes
         for kind in ("api", "internal"):
             members = found[kind]
             for member in members:
                 plugins_per_member[member] += 1
                 surface_of[member] = kind
         for name in found["classes"]:
-            surface = next(
-                (kind for prefix, kind in SURFACE_PREFIXES if name.startswith(prefix)),
-                None,
-            )
+            surface = surface_of_class(name)
             if surface == "api":
                 plugins_per_class[name] += 1
+            elif surface == "internal":
+                plugins_per_internal_class[name] += 1
         for event in found["handler_events"]:
             plugins_per_event[event] += 1
 
@@ -1010,6 +1139,14 @@ def main():
                         {"class": name, "plugins": count}
                         for name, count in sorted(
                             plugins_per_class.items(),
+                            key=lambda pair: (-pair[1], pair[0]),
+                        )
+                    ],
+                    "internal_classes_referenced": len(plugins_per_internal_class),
+                    "internal_classes": [
+                        {"class": name, "plugins": count}
+                        for name, count in sorted(
+                            plugins_per_internal_class.items(),
                             key=lambda pair: (-pair[1], pair[0]),
                         )
                     ],

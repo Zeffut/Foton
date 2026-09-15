@@ -7,14 +7,18 @@ fixture that was hand-written would only prove the reader agrees with whoever
 wrote the fixture.
 """
 import collections
+import contextlib
+import io
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import plugin_api_usage
@@ -109,6 +113,79 @@ fn forward_world_load(env: &mut JNIEnv) {
 }
 """
 
+JAVA_JNI_ENTRY_POINTS = {
+    "foton/PluginHost.java": """
+        package foton;
+        import org.bukkit.event.server.PluginDisableEvent;
+        import org.bukkit.event.server.PluginEnableEvent;
+        public final class PluginHost {
+            public static void enableAll() { enable(); }
+            private static void enable() {
+                FotonLifecycle.dispatchCommands();
+                new PluginEnableEvent();
+            }
+            public static void disableAll() { disable(); }
+            private static void disable() { new PluginDisableEvent(); }
+        }
+    """,
+    "foton/FotonLifecycle.java": """
+        package foton;
+        import io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent;
+        public final class FotonLifecycle {
+            public static void dispatchCommands() {
+                ReloadableRegistrarEvent event = () -> null;
+                consume(event);
+            }
+            private static void consume(Object event) { }
+        }
+    """,
+    "foton/FotonMessenger.java": """
+        package foton;
+        import org.bukkit.event.player.PlayerRegisterChannelEvent;
+        import org.bukkit.event.player.PlayerUnregisterChannelEvent;
+        public final class FotonMessenger {
+            public static void dispatchFromNetwork() {
+                FotonMessenger messenger = new FotonMessenger();
+                messenger.updateListening();
+            }
+            private void updateListening() {
+                new PlayerRegisterChannelEvent();
+                new PlayerUnregisterChannelEvent();
+            }
+        }
+    """,
+    "foton/UncalledHost.java": """
+        package foton;
+        import org.bukkit.event.world.WorldUnloadEvent;
+        public final class UncalledHost {
+            public static void enableAll() { new WorldUnloadEvent(); }
+        }
+    """,
+}
+
+RUST_JNI_ENTRY_POINTS = """
+const HOST_CLASS: &str = "foton/PluginHost";
+const MESSENGER: &str = "foton/FotonMessenger";
+
+fn lifecycle(env: &mut JNIEnv) {
+    env.call_static_method(HOST_CLASS, "enableAll", "()V", &[]);
+    env.call_static_method(HOST_CLASS, "disableAll", "()V", &[]);
+    env.call_static_method(MESSENGER, "dispatchFromNetwork", "()V", &[]);
+}
+"""
+
+INTERNAL_CLASS_ONLY_SOURCE = """
+package example;
+
+import net.minecraft.FakeInternals;
+
+public class InternalClassOnly {
+    public Class<?> internalType() {
+        return FakeInternals.class;
+    }
+}
+"""
+
 LEDGER = {
     "plugins_scanned": 3,
     "plugins_reaching_internals": 1,
@@ -121,6 +198,11 @@ LEDGER = {
         },
         {"member": "org/bukkit/World#getSeed()J", "plugins": 1},
     ],
+    "api_classes_referenced": 2,
+    "api_classes": [
+        {"class": "org/bukkit/World", "plugins": 2},
+        {"class": "org/bukkit/Server", "plugins": 1},
+    ],
 }
 
 PROVIDED = {"org/bukkit/World": {"getName()Ljava/lang/String;"}}
@@ -129,6 +211,12 @@ WANTED = {
     "org/bukkit/event/world/WorldUnloadEvent",
 }
 EMITTED = {"org/bukkit/event/world/WorldLoadEvent"}
+EVENT_PARENTS = {
+    "org/bukkit/event/world/WorldUnloadEvent": {
+        "org/bukkit/event/world/WorldEvent",
+    },
+    "org/bukkit/event/world/WorldEvent": {"org/bukkit/event/Event"},
+}
 
 STUBS = {
     "org/bukkit/Bukkit.java": """
@@ -181,7 +269,15 @@ STUBS = {
     """,
     "org/bukkit/event/world/WorldUnloadEvent.java": """
         package org.bukkit.event.world;
-        public class WorldUnloadEvent { }
+        public class WorldUnloadEvent extends WorldEvent { }
+    """,
+    "org/bukkit/event/world/WorldEvent.java": """
+        package org.bukkit.event.world;
+        public class WorldEvent extends org.bukkit.event.Event { }
+    """,
+    "org/bukkit/event/Event.java": """
+        package org.bukkit.event;
+        public class Event { }
     """,
 }
 
@@ -238,6 +334,25 @@ def build_jar(sources, into, drop=None):
     return jar
 
 
+def write_sources(root, sources):
+    for name, body in sources.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+
+def run_main(args, repo, ledger):
+    output = io.StringIO()
+    with (
+        mock.patch.object(plugin_api_usage, "REPO", repo),
+        mock.patch.object(plugin_api_usage, "LEDGER", ledger),
+        mock.patch.object(sys, "argv", ["plugin_api_usage.py", *map(str, args)]),
+        contextlib.redirect_stdout(output),
+    ):
+        result = plugin_api_usage.main()
+    return result, output.getvalue()
+
+
 @unittest.skipIf(shutil.which("javac") is None, "javac is needed to build the fixture")
 class Scanning(unittest.TestCase):
     @classmethod
@@ -249,9 +364,15 @@ class Scanning(unittest.TestCase):
         cls.crafty = build_jar({"example/Crafty.java": REACHES_CRAFTBUKKIT}, root / "crafty")
         cls.class_only = build_jar(
             {"example/ClassOnly.java": CLASS_ONLY_SOURCE}, root / "class-only")
+        cls.internal_class_only = build_jar(
+            {"example/InternalClassOnly.java": INTERNAL_CLASS_ONLY_SOURCE},
+            root / "internal-class-only",
+        )
         cls.handler = build_jar(
             {"example/WorldListener.java": HANDLER_SOURCE}, root / "handler")
         cls.api = build_jar({}, root / "api")
+        cls.api_without_world = build_jar(
+            {}, root / "api-without-world", drop="org/bukkit/World.class")
 
     @classmethod
     def tearDownClass(cls):
@@ -307,11 +428,40 @@ class Scanning(unittest.TestCase):
         self.assertEqual(unreadable, 0)
         self.assertIn("org/bukkit/World", found["classes"])
 
+    def test_missing_class_only_reference_is_a_binary_gap(self):
+        per_plugin, missing = plugin_api_usage.gaps(
+            self.class_only.parent, self.api_without_world)
+
+        self.assertEqual(per_plugin[self.class_only.name][0], 1)
+        self.assertEqual(missing["org/bukkit/World"], 1)
+
     def test_handler_descriptor_records_fully_qualified_event(self):
         found, _ = plugin_api_usage.scan(self.handler)
 
         self.assertIn(
             "org/bukkit/event/world/WorldUnloadEvent", found["handler_events"])
+
+    def test_corpus_write_counts_class_only_internals_in_the_ceiling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            shutil.copy(self.plain, corpus / "plain.jar")
+            shutil.copy(self.internal_class_only, corpus / "internal.jar")
+            repo = root / "repo"
+            ledger = repo / "dev" / "plugin-api-usage.json"
+            ledger.parent.mkdir(parents=True)
+
+            result, output = run_main([corpus, "--write"], repo, ledger)
+            written = json.loads(ledger.read_text(encoding="utf-8"))
+
+        self.assertEqual(result, 0)
+        self.assertIn("plugins reaching past the public API: 1 of 2", output)
+        self.assertEqual(written["plugins_reaching_internals"], 1)
+        self.assertEqual(
+            written["internal_classes"],
+            [{"class": "net/minecraft/FakeInternals", "plugins": 1}],
+        )
 
 
 class CompatibilityEvidence(unittest.TestCase):
@@ -331,12 +481,68 @@ class CompatibilityEvidence(unittest.TestCase):
         self.assertIn("org/bukkit/event/world/WorldLoadEvent", emitted)
         self.assertNotIn("org/bukkit/event/world/WorldUnloadEvent", emitted)
 
+    def test_jni_entry_points_follow_static_and_instance_java_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            java = root / "java"
+            rust = root / "rust"
+            write_sources(java, JAVA_JNI_ENTRY_POINTS)
+            write_sources(rust, {"bridge.rs": RUST_JNI_ENTRY_POINTS})
+
+            emitted = plugin_api_usage.emitted_events(java, rust)
+
+        self.assertEqual(
+            emitted,
+            {
+                "org/bukkit/event/player/PlayerRegisterChannelEvent",
+                "org/bukkit/event/player/PlayerUnregisterChannelEvent",
+                "org/bukkit/event/server/PluginDisableEvent",
+                "org/bukkit/event/server/PluginEnableEvent",
+                "io/papermc/paper/plugin/lifecycle/event/registrar/ReloadableRegistrarEvent",
+            },
+        )
+
     def test_summary_keeps_shared_and_long_tail_counts_separate(self):
         summary = plugin_api_usage.compatibility_summary(
             LEDGER, PROVIDED, WANTED, EMITTED)
 
         self.assertEqual(summary["api"]["shared"]["resolved"], 1)
         self.assertEqual(summary["api"]["all"]["missing"], 1)
+        self.assertEqual(summary["api"]["classes"]["all"]["missing"], 1)
+        self.assertEqual(
+            summary["api"]["classes"]["all"]["missing_classes"],
+            ["org.bukkit.Server"],
+        )
+
+    def test_summary_expands_emitted_event_supertypes(self):
+        wanted = {
+            "org/bukkit/event/Event",
+            "org/bukkit/event/world/WorldEvent",
+            "org/bukkit/event/world/WorldUnloadEvent",
+        }
+
+        summary = plugin_api_usage.compatibility_summary(
+            LEDGER,
+            PROVIDED,
+            wanted,
+            {"org/bukkit/event/world/WorldUnloadEvent"},
+            EVENT_PARENTS,
+        )
+
+        self.assertEqual(summary["events"]["emitted"], 3)
+        self.assertEqual(summary["events"]["missing"], 0)
+
+    def test_summary_marks_unrecorded_class_evidence_unknown(self):
+        legacy = {
+            key: value for key, value in LEDGER.items()
+            if key not in {"api_classes", "api_classes_referenced"}
+        }
+
+        summary = plugin_api_usage.compatibility_summary(
+            legacy, PROVIDED, WANTED, EMITTED)
+
+        self.assertIsNone(summary["api"]["classes"]["all"]["referenced"])
+        self.assertIsNone(summary["api"]["classes"]["shared"]["resolved"])
 
     def test_summary_json_is_stable_and_newline_terminated(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -349,6 +555,90 @@ class CompatibilityEvidence(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
         self.assertEqual(
             text, json.dumps(summary, indent=2, sort_keys=True) + "\n")
+
+    @unittest.skipIf(shutil.which("javac") is None, "javac is needed to build the fixture")
+    def test_summary_json_cli_matches_human_event_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            repo = root / "repo"
+            java = repo / "plugin-api" / "src"
+            rust = repo / "foton-plugin" / "src"
+            write_sources(
+                java,
+                {
+                    "foton/EventBridge.java": """
+                        package foton;
+                        import org.bukkit.event.world.WorldUnloadEvent;
+                        public final class EventBridge {
+                            public static void fireWorldUnload() {
+                                new WorldUnloadEvent();
+                            }
+                        }
+                    """,
+                },
+            )
+            write_sources(
+                rust,
+                {
+                    "forward.rs": """
+                        const BRIDGE: &str = "foton/EventBridge";
+                        fn forward(env: &mut JNIEnv) {
+                            env.call_static_method(
+                                BRIDGE, "fireWorldUnload", "()V", &[]);
+                        }
+                    """,
+                },
+            )
+            ledger = repo / "dev" / "plugin-api-usage.json"
+            ledger.parent.mkdir(parents=True)
+            ledger.write_text(
+                json.dumps(
+                    {
+                        "plugins_scanned": 1,
+                        "plugins_reaching_internals": 0,
+                        "api_members_referenced": 0,
+                        "api_members_kept_at_least": 2,
+                        "api_members": [],
+                        "api_classes_referenced": 2,
+                        "api_classes": [
+                            {"class": "org/bukkit/World", "plugins": 2},
+                            {"class": "org/bukkit/Server", "plugins": 1},
+                        ],
+                        "events": [
+                            {"event": "org/bukkit/event/Event", "plugins": 1},
+                            {
+                                "event": "org/bukkit/event/world/WorldEvent",
+                                "plugins": 1,
+                            },
+                            {
+                                "event": "org/bukkit/event/world/WorldUnloadEvent",
+                                "plugins": 1,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            api = build_jar({}, root / "api")
+            summary_path = root / "summary.json"
+
+            result, output = run_main(
+                [
+                    "--covered", api,
+                    "--events", java,
+                    "--summary-json", summary_path,
+                ],
+                repo,
+                ledger,
+            )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+        human_emitted = int(
+            re.search(r"a listener could receive: (\d+)", output).group(1))
+        self.assertIsNone(result)
+        self.assertEqual(summary["events"]["emitted"], human_emitted)
+        self.assertEqual(summary["events"]["emitted"], 3)
+        self.assertEqual(summary["api"]["classes"]["all"]["missing"], 1)
 
 
 @unittest.skipIf(shutil.which("javac") is None, "javac is needed to build the fixture")
