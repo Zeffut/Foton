@@ -51,12 +51,19 @@ public final class FotonScheduler implements BukkitScheduler {
     /** Where async tasks run. One thread: a plugin's background work is
      * almost always waiting on something, and a pool would mostly buy the
      * chance for two of a plugin's own tasks to race each other. */
-    private static final java.util.concurrent.ScheduledExecutorService OFF_TICK =
-        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "foton-plugin-async");
-            thread.setDaemon(true);
-            return thread;
-        });
+    private static final java.util.concurrent.ScheduledThreadPoolExecutor OFF_TICK =
+        offTickExecutor();
+
+    private static java.util.concurrent.ScheduledThreadPoolExecutor offTickExecutor() {
+        java.util.concurrent.ScheduledThreadPoolExecutor executor =
+            new java.util.concurrent.ScheduledThreadPoolExecutor(1, runnable -> {
+                Thread thread = new Thread(runnable, "foton-plugin-async");
+                thread.setDaemon(true);
+                return thread;
+            });
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
 
     @Override
     public BukkitTask runTaskAsynchronously(Plugin plugin, Runnable task) {
@@ -182,6 +189,7 @@ public final class FotonScheduler implements BukkitScheduler {
                 task.cancel();
             }
         }
+        pending.removeIf(task -> task.plugin == plugin);
     }
 
     @Override

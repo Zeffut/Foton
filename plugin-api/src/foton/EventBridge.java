@@ -75,16 +75,18 @@ public final class EventBridge {
 
     /** Forgets everything one plugin registered. */
     public static void unregister(Plugin plugin) {
-        for (List<Handler> list : handlers.values()) {
-            list.removeIf(handler -> handler.plugin == plugin);
-        }
+        handlers.entrySet().removeIf(entry -> {
+            entry.getValue().removeIf(handler -> handler.plugin == plugin);
+            return entry.getValue().isEmpty();
+        });
     }
 
     /** Forgets everything one listener object registered. */
     public static void unregister(Listener listener) {
-        for (List<Handler> list : handlers.values()) {
-            list.removeIf(handler -> handler.listener == listener);
-        }
+        handlers.entrySet().removeIf(entry -> {
+            entry.getValue().removeIf(handler -> handler.listener == listener);
+            return entry.getValue().isEmpty();
+        });
     }
 
     /** Forgets every handler on the server. */

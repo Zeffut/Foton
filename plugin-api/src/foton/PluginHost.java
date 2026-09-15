@@ -29,6 +29,24 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class PluginHost {
     private static final List<Plugin> loaded = new ArrayList<>();
     private static final Map<String, org.bukkit.plugin.java.PluginClassLoader> pluginLoaders = new HashMap<>();
+    private static final Map<String, PluginState> states = new HashMap<>();
+    private static final Map<Plugin, PluginState> statesByPlugin =
+        new java.util.IdentityHashMap<>();
+
+    private enum Status { DISCOVERED, LOADING, LOADED, ENABLING, ENABLED, FAILED, DISABLED }
+
+    private static final class PluginState {
+        final PluginDescriptionFile descriptor;
+        org.bukkit.plugin.java.PluginClassLoader loader;
+        JavaPlugin plugin;
+        Status status = Status.DISCOVERED;
+        boolean enableAttempted;
+        boolean cleaned;
+
+        PluginState(PluginDescriptionFile descriptor) {
+            this.descriptor = descriptor;
+        }
+    }
 
     private PluginHost() {}
 
@@ -59,6 +77,15 @@ public final class PluginHost {
         int enabledNow = 0;
         for (Plugin plugin : new ArrayList<>(loaded)) {
             if (plugin.isEnabled()) continue;
+            PluginState state = stateOf(plugin);
+            String unavailable = unavailableDependency(plugin.getDescription(), true);
+            if (unavailable != null) {
+                System.out.println("[host] " + plugin.getName()
+                    + ": required dependency " + unavailable + " did not enable");
+                if (state != null) state.status = Status.FAILED;
+                cleanup(plugin);
+                continue;
+            }
             try {
                 if (!(plugin instanceof JavaPlugin java)) continue;
                 enable(java);
@@ -66,7 +93,8 @@ public final class PluginHost {
             } catch (Throwable error) {
                 System.out.println("[host] " + plugin.getName() + " failed: " + error);
                 error.printStackTrace(System.out);
-                disable(plugin);
+                if (state != null) state.status = Status.FAILED;
+                cleanup(plugin);
             }
         }
         return enabledNow;
@@ -163,16 +191,28 @@ public final class PluginHost {
         }
     }
 
-    private static boolean load(File jar, boolean enableNow) throws Exception {
+    private static boolean load(File jar, boolean enableNow) throws Throwable {
         PluginDescriptionFile descriptor = readDescriptor(jar);
         if (byName(descriptor.getName()) != null) {
             System.out.println("[host] " + descriptor.getName() + " is already enabled; skipping " + jar.getName());
             return false;
         }
-        org.bukkit.plugin.java.PluginClassLoader loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar), dependencyParent(descriptor));
-        boolean enabled = false;
-        JavaPlugin plugin = null;
+        String key = key(descriptor.getName());
+        PluginState state = new PluginState(descriptor);
+        states.put(key, state);
+        String unavailable = unavailableDependency(descriptor, false);
+        if (unavailable != null) {
+            System.out.println("[host] " + descriptor.getName()
+                + ": required dependency " + unavailable + " did not load");
+            rollback(state);
+            return false;
+        }
+
+        org.bukkit.plugin.java.PluginClassLoader loader = null;
         try {
+            loader = new org.bukkit.plugin.java.PluginClassLoader(
+                pluginUrls(jar), dependencyParent(descriptor));
+            state.loader = loader;
             File dataFolder = new File(jar.getParentFile(), descriptor.getName());
             // Before the constructor, not after: a plugin may call getName()
             // or getLogger() from it, and several do.
@@ -182,24 +222,52 @@ public final class PluginHost {
             if (!(instance instanceof JavaPlugin candidate)) {
                 System.out.println(
                     "[host] " + descriptor.getName() + ": main class is not a JavaPlugin");
+                rollback(state);
                 return false;
             }
-            plugin = candidate;
+            state.plugin = candidate;
+            statesByPlugin.put(candidate, state);
 
-            loader.setPlugin(plugin);
-            plugin.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
-            plugin.onLoad();
-            loaded.add(plugin);
+            loader.setPlugin(candidate);
+            candidate.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
+            loaded.add(candidate);
             pluginLoaders.put(descriptor.getName().toLowerCase(java.util.Locale.ROOT), loader);
-            enabled = true;
-            if (enableNow) enable(plugin);
+            state.status = Status.LOADING;
+            candidate.onLoad();
+            state.status = Status.LOADED;
+            if (enableNow) enable(candidate);
             return true;
-        } finally {
-            if (!enabled) {
-                if (plugin != null) plugin.setEnabled(false);
-                loader.close();
+        } catch (Throwable error) {
+            if (state.plugin == null && loader != null) {
+                state.plugin = loader.getPlugin();
+                if (state.plugin != null) statesByPlugin.put(state.plugin, state);
             }
+            rollback(state);
+            throw error;
         }
+    }
+
+    private static void rollback(PluginState state) {
+        state.status = Status.FAILED;
+        if (state.plugin != null) {
+            cleanup(state.plugin);
+            return;
+        }
+        state.cleaned = true;
+        if (state.loader != null) close(state.loader, state.descriptor.getName());
+        state.loader = null;
+    }
+
+    private static String unavailableDependency(
+            PluginDescriptionFile descriptor, boolean enabling) {
+        for (String dependency : descriptor.getDepend()) {
+            PluginState state = states.get(key(dependency));
+            boolean available = state != null && (enabling
+                ? state.status == Status.ENABLED
+                : state.status == Status.LOADED || state.status == Status.ENABLED);
+            if (!available) return dependency;
+        }
+        return null;
     }
 
     private static URL[] pluginUrls(File jar) throws Exception {
@@ -276,41 +344,98 @@ public final class PluginHost {
     }
 
     private static void enable(JavaPlugin plugin) {
+        PluginState state = stateOf(plugin);
+        if (state != null) {
+            state.enableAttempted = true;
+            state.status = Status.ENABLING;
+        }
         plugin.setEnabled(true);
         plugin.onEnable();
         FotonLifecycle.dispatchCommands(plugin);
         EventBridge.dispatch(new org.bukkit.event.server.PluginEnableEvent(plugin));
+        if (state != null) state.status = Status.ENABLED;
         System.out.println("[host] enabled " + plugin.getDescription().getFullName());
     }
 
     /** Disables one plugin, and lets go of what it claimed. */
     public static void disable(Plugin plugin) {
-        if (plugin == null || !loaded.remove(plugin)) {
-            return;
-        }
-        CommandMap.forget(plugin);
-        org.bukkit.Bukkit.getServicesManager().unregisterAll(plugin);
-        org.bukkit.Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin);
-        org.bukkit.Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin);
-        EventBridge.unregister(plugin);
-        try {
-            plugin.onDisable();
-        } catch (Throwable error) {
-            System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);
-        }
+        cleanup(plugin);
+    }
+
+    /** Idempotently rolls back or disables every resource owned by a plugin. */
+    public static void cleanup(Plugin plugin) {
+        if (plugin == null) return;
+        PluginState state = stateOf(plugin);
+        if (state == null || state.cleaned) return;
+        state.cleaned = true;
+
         if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
             java.setEnabled(false);
         }
-        org.bukkit.plugin.java.PluginClassLoader loader =
-            pluginLoaders.remove(plugin.getName().toLowerCase(java.util.Locale.ROOT));
-        if (loader != null) {
+        loaded.remove(plugin);
+        boolean disable = state.enableAttempted;
+        if (disable) {
             try {
-                loader.close();
-            } catch (java.io.IOException error) {
-                System.out.println("[host] " + plugin.getName() + " classloader failed to close: " + error);
+                plugin.onDisable();
+            } catch (Throwable error) {
+                System.out.println("[host] " + plugin.getName()
+                    + " failed to disable: " + error);
             }
         }
-        EventBridge.dispatch(new org.bukkit.event.server.PluginDisableEvent(plugin));
+        release(plugin, "scheduler tasks",
+            () -> org.bukkit.Bukkit.getScheduler().cancelTasks(plugin));
+        release(plugin, "commands", () -> CommandMap.forget(plugin));
+        release(plugin, "services",
+            () -> org.bukkit.Bukkit.getServicesManager().unregisterAll(plugin));
+        release(plugin, "incoming channels",
+            () -> org.bukkit.Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin));
+        release(plugin, "outgoing channels",
+            () -> org.bukkit.Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin));
+        release(plugin, "listeners", () -> EventBridge.unregister(plugin));
+
+        org.bukkit.plugin.java.PluginClassLoader loader = state.loader;
+        if (loader != null) {
+            pluginLoaders.remove(key(plugin.getName()), loader);
+            close(loader, plugin.getName());
+        }
+        if (state.status != Status.FAILED) {
+            state.status = Status.DISABLED;
+        }
+        if (disable) {
+            release(plugin, "disable event",
+                () -> EventBridge.dispatch(
+                    new org.bukkit.event.server.PluginDisableEvent(plugin)));
+        }
+        state.plugin = null;
+        state.loader = null;
+        statesByPlugin.remove(plugin);
+    }
+
+    private static void release(Plugin plugin, String resource, Runnable action) {
+        try {
+            action.run();
+        } catch (Throwable error) {
+            System.out.println("[host] " + plugin.getName() + " failed to release "
+                + resource + ": " + error);
+        }
+    }
+
+    private static void close(
+            org.bukkit.plugin.java.PluginClassLoader loader, String pluginName) {
+        try {
+            loader.close();
+        } catch (java.io.IOException error) {
+            System.out.println("[host] " + pluginName
+                + " classloader failed to close: " + error);
+        }
+    }
+
+    private static PluginState stateOf(Plugin plugin) {
+        return statesByPlugin.get(plugin);
+    }
+
+    private static String key(String name) {
+        return name.toLowerCase(java.util.Locale.ROOT);
     }
 
     /** The plugin with this name, or null. Case-insensitive, as Bukkit is. */

@@ -72,6 +72,7 @@ public final class CommandMap {
 
     public static void clear() {
         byName.clear();
+        brigadierByPlugin.clear();
     }
 
     /** Snapshot exposed through Bukkit's administrative command map API. */
