@@ -371,17 +371,30 @@ git commit -m "feat(plugin): run the Paper bootstrap lifecycle"
 - Modify: `foton-plugin/src/tests.rs`
 - Modify: `foton/src/lib.rs`
 - Modify: `dev/build-plugin-api.sh`
+- Create: `dev/plugin_compatibility.py`
+- Create: `dev/test_plugin_compatibility.py`
 - Modify: `README.md`
 - Modify: `design/plugin-compatibility.md`
 - Modify: `AUDITING.md`
 
 **Interfaces:**
 - Consumes: transactional Java disable, Rust `forward::unsubscribe`, Task 1 summary command and all fixture suites.
-- Produces: idempotent host shutdown that removes plugin-owned Rust event subscriptions; documented compatibility command and current caveated metrics.
+- Produces: idempotent host shutdown that removes plugin-owned Rust event subscriptions; `dev/plugin_compatibility.py` combining binary, ceiling, event and fixture evidence into one JSON document; documented compatibility command and current caveated metrics.
 
 - [ ] **Step 1: Add failing shutdown tests**
 
 Add a Rust test around a testable subscription owner proving repeated bind does not duplicate subscriptions and shutdown removes the `foton:plugins` owner. Add a Java host check that `disableAll()` leaves zero plugins, handlers, commands and pending tasks.
+
+Add `dev/test_plugin_compatibility.py` with temporary analyzer and fixture reports:
+
+```python
+def test_combined_report_keeps_evidence_kinds_separate(self):
+    report = compatibility.combine(API_REPORT, FIXTURE_REPORT)
+    self.assertEqual(2478, report["binary"]["shared_members"]["resolved"])
+    self.assertEqual(3, report["fixtures"]["enabled"])
+    self.assertEqual(1, report["fixtures"]["rejected"])
+    self.assertNotIn("plugin_success_percent", report)
+```
 
 - [ ] **Step 2: Verify RED**
 
@@ -400,12 +413,15 @@ Store the weak server association needed for shutdown without creating an `Arc` 
 
 - [ ] **Step 4: Publish compatibility evidence**
 
+Implement `dev/plugin_compatibility.py` with `combine(api_report, fixture_report)` and a CLI accepting `--api-report`, `--fixture-report` and `--output`. Make the Java fixture runner write deterministic JSON containing discovered, loaded, enabled and rejected fixture counts plus rejection reasons. The combined output has top-level `binary`, `ceiling`, `events` and `fixtures` objects and deliberately has no aggregate plugin-success percentage.
+
 Update README and auditing documentation with the exact commands:
 
 ```bash
 bash dev/build-plugin-api.sh --check
 python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar
 python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar --events plugin-api/src
+python3 dev/plugin_compatibility.py --api-report build/plugin-api-evidence.json --fixture-report plugin-api/build/fixture-evidence.json --output build/plugin-compatibility.json
 ```
 
 State beside the output that shared symbol coverage is not a plugin success rate, the NMS/CraftBukkit slice is excluded, and event coverage requires a Rust call site. Update `design/plugin-compatibility.md` only with measurements produced by the final branch.
@@ -418,6 +434,7 @@ Run:
 cargo test -p foton-plugin
 bash dev/build-plugin-api.sh --check
 python3 -m unittest dev.test_plugin_api_usage -v
+python3 -m unittest dev.test_plugin_compatibility -v
 python3 dev/check-natives.py
 ```
 
@@ -439,6 +456,6 @@ Expected: every command exits zero and `dev/ci.sh` ends with `ALL GREEN`.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add foton-plugin/src/lib.rs foton-plugin/src/tests.rs foton/src/lib.rs dev/build-plugin-api.sh README.md design/plugin-compatibility.md AUDITING.md
+git add foton-plugin/src/lib.rs foton-plugin/src/tests.rs foton/src/lib.rs dev/build-plugin-api.sh dev/plugin_compatibility.py dev/test_plugin_compatibility.py README.md design/plugin-compatibility.md AUDITING.md
 git commit -m "docs(plugin): publish verified compatibility evidence"
 ```
