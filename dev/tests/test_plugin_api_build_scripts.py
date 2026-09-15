@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -19,6 +21,13 @@ GENERATED_REGISTRY_INPUTS = (
     "vanilla_enchantments.rs",
     "vanilla_potions.rs",
 )
+
+
+def interpreter_environment() -> dict:
+    environment = os.environ.copy()
+    python_directory = str(Path(sys.executable).parent)
+    environment["PATH"] = f"{python_directory}:{environment['PATH']}"
+    return environment
 
 
 def add_tar_file(archive: tarfile.TarFile, name: str, contents: bytes = b"payload") -> None:
@@ -96,7 +105,7 @@ class PluginApiBuildScriptTests(unittest.TestCase):
                     extract_archive_safely(archive, destination)
             self.assertFalse(outside.exists())
 
-    def test_fresh_checkout_builds_from_a_path_with_spaces(self) -> None:
+    def test_fresh_and_cached_builds_regenerate_missing_sources_from_path_with_spaces(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton plugin api ", dir="/tmp") as temporary:
             checkout = Path(temporary) / "fresh checkout"
             checkout.mkdir()
@@ -106,7 +115,7 @@ class PluginApiBuildScriptTests(unittest.TestCase):
             for filename in GENERATED_REGISTRY_INPUTS:
                 self.assertFalse((generated / filename).exists())
 
-            environment = os.environ.copy()
+            environment = interpreter_environment()
             environment["CARGO_TARGET_DIR"] = str(ROOT / "target")
             result = subprocess.run(
                 ["bash", "dev/build-plugin-api.sh", "--check"],
@@ -122,6 +131,146 @@ class PluginApiBuildScriptTests(unittest.TestCase):
             for filename in GENERATED_REGISTRY_INPUTS:
                 self.assertTrue((generated / filename).is_file(), filename)
 
+            backup = Path(temporary) / "generated-backup"
+            backup.mkdir()
+            for filename in GENERATED_REGISTRY_INPUTS:
+                shutil.copy2(generated / filename, backup / filename)
+                (generated / filename).unlink()
+            fake_bin = Path(temporary) / "fake-cargo-bin"
+            fake_bin.mkdir()
+            fake_cargo = fake_bin / "cargo"
+            fake_cargo.write_text(
+                """#!/bin/sh
+if [ "$1" = "clean" ]; then
+  : > "$FOTON_TEST_CARGO_INVALIDATED"
+elif [ "$1" = "check" ] && [ -f "$FOTON_TEST_CARGO_INVALIDATED" ]; then
+  cp "$FOTON_TEST_REGISTRY_BACKUP"/*.rs "$FOTON_TEST_REGISTRY_OUTPUT/"
+fi
+exit 0
+""",
+                encoding="utf-8",
+            )
+            fake_cargo.chmod(0o755)
+            cached_environment = environment.copy()
+            cached_environment["PATH"] = f"{fake_bin}:{cached_environment['PATH']}"
+            cached_environment["FOTON_TEST_CARGO_INVALIDATED"] = str(
+                Path(temporary) / "cargo-invalidated"
+            )
+            cached_environment["FOTON_TEST_REGISTRY_BACKUP"] = str(backup)
+            cached_environment["FOTON_TEST_REGISTRY_OUTPUT"] = str(generated)
+            cached_result = subprocess.run(
+                ["bash", "dev/build-plugin-api.sh"],
+                cwd=checkout,
+                env=cached_environment,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+
+            self.assertEqual(
+                cached_result.returncode,
+                0,
+                cached_result.stdout + cached_result.stderr,
+            )
+            for filename in GENERATED_REGISTRY_INPUTS:
+                self.assertTrue((generated / filename).is_file(), filename)
+
+    def test_registry_generation_reports_every_missing_output(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton registry output ", dir="/tmp") as temporary:
+            checkout = Path(temporary) / "fresh checkout"
+            checkout.mkdir()
+            export_tracked_checkout(checkout)
+
+            fake_bin = Path(temporary) / "fake-bin"
+            fake_bin.mkdir()
+            fake_cargo = fake_bin / "cargo"
+            fake_cargo.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_cargo.chmod(0o755)
+
+            environment = interpreter_environment()
+            environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+            result = subprocess.run(
+                ["bash", "dev/build-plugin-api.sh"],
+                cwd=checkout,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, output)
+            self.assertIn("foton-registry build did not generate", output)
+            for filename in GENERATED_REGISTRY_INPUTS:
+                self.assertIn(filename, output)
+
+    def test_minecraft_source_preserves_spaced_target_as_one_gradle_argument(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton minecraft source ", dir="/tmp") as temporary:
+            root = Path(temporary)
+            checkout = root / "fresh checkout with spaces"
+            checkout.mkdir()
+            shutil.copy2(ROOT / "Cargo.toml", checkout / "Cargo.toml")
+            shutil.copy2(ROOT / "update-minecraft-src.sh", checkout / "update-minecraft-src.sh")
+
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            fake_gradlew = fake_bin / "fake-gradlew"
+            fake_gradlew.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import shlex
+import sys
+
+payload = next(argument.split("=", 1)[1] for argument in sys.argv[1:] if argument.startswith("--args="))
+with open(os.environ["FOTON_TEST_GRADLE_ARGS"], "w", encoding="utf-8") as output:
+    json.dump(shlex.split(payload), output)
+""",
+                encoding="utf-8",
+            )
+            fake_gradlew.chmod(0o755)
+            fake_git = fake_bin / "git"
+            fake_git.write_text(
+                """#!/bin/sh
+if [ "$1" = "clone" ]; then
+  destination="$3"
+  mkdir -p "$destination"
+  printf '%s\n' 'org.gradle.jvmargs=-Xmx4G' > "$destination/build.gradle"
+  cp "$FOTON_TEST_FAKE_GRADLEW" "$destination/gradlew"
+  chmod +x "$destination/gradlew"
+fi
+exit 0
+""",
+                encoding="utf-8",
+            )
+            fake_git.chmod(0o755)
+
+            observed_args = root / "observed-args.json"
+            environment = interpreter_environment()
+            environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+            environment["FOTON_TEST_FAKE_GRADLEW"] = str(fake_gradlew)
+            environment["FOTON_TEST_GRADLE_ARGS"] = str(observed_args)
+            result = subprocess.run(
+                ["bash", "update-minecraft-src.sh"],
+                cwd=checkout,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                json.loads(observed_args.read_text(encoding="utf-8")),
+                [
+                    f"--override-repo-target={checkout.resolve() / 'minecraft-src'}",
+                    "--only-version=26.2",
+                    "--only-unobfuscated",
+                    "--mappings=identity_unmapped",
+                    "--only-stable",
+                ],
+            )
+
     def test_minecraft_source_dry_run_is_target_exact_and_network_free(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton minecraft source ", dir="/tmp") as temporary:
             checkout = Path(temporary) / "fresh checkout"
@@ -134,7 +283,7 @@ class PluginApiBuildScriptTests(unittest.TestCase):
             fake_git.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
             fake_git.chmod(0o755)
 
-            environment = os.environ.copy()
+            environment = interpreter_environment()
             environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
             result = subprocess.run(
                 ["bash", "update-minecraft-src.sh", "--dry-run"],

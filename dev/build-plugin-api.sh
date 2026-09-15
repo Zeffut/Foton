@@ -45,10 +45,24 @@ for registry_input in "${REGISTRY_INPUTS[@]}"; do
       exit 1
     fi
     echo "generating missing foton-registry sources"
+    cargo clean --manifest-path "$REPO/Cargo.toml" -p foton-registry
     cargo check --manifest-path "$REPO/Cargo.toml" -p foton-registry
     break
   fi
 done
+MISSING_REGISTRY_INPUTS=()
+for registry_input in "${REGISTRY_INPUTS[@]}"; do
+  if [ ! -f "$registry_input" ]; then
+    MISSING_REGISTRY_INPUTS+=("$registry_input")
+  fi
+done
+if [ "${#MISSING_REGISTRY_INPUTS[@]}" -ne 0 ]; then
+  echo "foton-registry build did not generate required plugin API inputs:" >&2
+  for registry_input in "${MISSING_REGISTRY_INPUTS[@]}"; do
+    echo "  ${registry_input#"$REPO/"}" >&2
+  done
+  exit 1
+fi
 
 # Material is sixteen hundred constants over every block and item. It is
 # generated from the same registry files the server itself is built from, so

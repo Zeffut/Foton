@@ -32,14 +32,26 @@ GITCRAFT_ARGS=(
   "--mappings=identity_unmapped"
   "--only-stable"
 )
+GITCRAFT_ARGS_SERIALIZED="$(python3 - "${GITCRAFT_ARGS[@]}" <<'PY'
+import sys
+
+serialized = []
+for argument in sys.argv[1:]:
+    if '"' not in argument:
+        serialized.append(f'"{argument}"')
+    elif "'" not in argument:
+        serialized.append(f"'{argument}'")
+    else:
+        raise SystemExit("Gradle --args cannot represent an argument containing both quote types")
+print(" ".join(serialized))
+PY
+)"
 
 if [ "${1:-}" = "--dry-run" ]; then
   echo "temporary directory: /tmp/foton-gitcraft.XXXXXX"
   echo "git clone $GITCRAFT_REPOSITORY <temporary>/GitCraft"
   echo "git -C <temporary>/GitCraft checkout --detach $GITCRAFT_REVISION"
-  printf './gradlew run --args='
-  printf '%s ' "${GITCRAFT_ARGS[@]}"
-  printf '\n'
+  printf './gradlew run --args=%s\n' "$GITCRAFT_ARGS_SERIALIZED"
   exit 0
 fi
 if [ "$#" -ne 0 ]; then
@@ -63,6 +75,6 @@ sed -i.bak "s/-Xmx4G/-Xmx8G/" "$TEMP_DIR/GitCraft/build.gradle" && rm -f "$TEMP_
 # Run GitCraft
 cd "$TEMP_DIR/GitCraft"
 echo "Running GitCraft..."
-./gradlew run --args="${GITCRAFT_ARGS[*]}"
+./gradlew run --args="$GITCRAFT_ARGS_SERIALIZED"
 
 echo "Done! minecraft-src has been updated."
