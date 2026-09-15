@@ -33,7 +33,7 @@ public final class ResolvableProfile {
         public Builder name(String value) { name = value; return this; }
         public Builder addProperty(ProfileProperty value) { if (value != null) properties.add(value); return this; }
         public Builder skinPatch(SkinPatch value) { skinPatch = value; return this; }
-        public Object build() { return new ResolvableProfile(uuid, name, properties, skinPatch); }
+        public ResolvableProfile build() { return new ResolvableProfile(uuid, name, properties, skinPatch); }
     }
 
     /** Optional skin patch values carried by a profile component. */

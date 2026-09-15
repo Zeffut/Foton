@@ -25,8 +25,8 @@ final class FotonEntityEquipment implements EntityEquipment {
     @Override public void setChestplate(ItemStack item) { inventory.setItem(38, item); }
     @Override public ItemStack getBoots() { return inventory.getItem(36); }
     @Override public void setBoots(ItemStack item) { inventory.setItem(36, item); }
-    @Override public ItemStack getLeggings() { return inventory.getItem(38); }
-    @Override public void setLeggings(ItemStack item) { inventory.setItem(38, item); }
+    @Override public ItemStack getLeggings() { return inventory.getItem(37); }
+    @Override public void setLeggings(ItemStack item) { inventory.setItem(37, item); }
     @Override public void setArmorContents(ItemStack[] items) { for (int i = 0; i < 4; i++) inventory.setItem(36 + i, items != null && i < items.length ? items[i] : null); }
     @Override public ItemStack getItemInMainHand() { return inventory.getItemInMainHand(); }
     @Override public void setItemInMainHand(ItemStack item) { inventory.setItemInMainHand(item); }

@@ -6,7 +6,7 @@ import java.util.stream.Stream;
 import org.bukkit.enchantments.Enchantment;
 
 /** Read-only Bukkit registry view backed by Foton's generated values. */
-public interface Registry<T extends Keyed> {
+public interface Registry<T extends Keyed> extends Iterable<T> {
     T get(NamespacedKey key);
 
     /** Returns the value or throws when the key is absent. */
@@ -14,6 +14,12 @@ public interface Registry<T extends Keyed> {
         return Objects.requireNonNull(get(key), "No registry value for " + key);
     }
     Stream<T> stream();
+
+    /** Iterates through the same live values exposed by this registry's stream. */
+    @Override
+    default java.util.Iterator<T> iterator() {
+        return stream().iterator();
+    }
 
     default NamespacedKey getKey(T value) { return value == null ? null : value.getKey(); }
 

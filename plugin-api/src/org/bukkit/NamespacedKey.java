@@ -2,7 +2,7 @@ package org.bukkit;
 
 import org.bukkit.plugin.Plugin;
 
-public final class NamespacedKey {
+public final class NamespacedKey implements net.kyori.adventure.key.Key {
     private final String namespace;
     private final String key;
 
@@ -22,6 +22,8 @@ public final class NamespacedKey {
 
     public String getNamespace() { return namespace; }
     public String getKey() { return key; }
+    @Override public String namespace() { return namespace; }
+    @Override public String value() { return key; }
 
     /** Reads `namespace:key`, defaulting the namespace to minecraft.
      *

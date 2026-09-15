@@ -14,7 +14,21 @@ public class ShapelessRecipe extends CraftingRecipe {
     public ShapelessRecipe(ItemStack result) { this(null, result); }
     public ShapelessRecipe addIngredient(RecipeChoice choice) { if (choice != null) choices.add(choice); return this; }
     public ShapelessRecipe addIngredient(Material material) { return addIngredient(new RecipeChoice.MaterialChoice(material)); }
-    public ShapelessRecipe addIngredient(ItemStack stack) { return addIngredient(new RecipeChoice.ExactChoice(stack)); }
+    /** Adds one live material choice for each requested ingredient. */
+    public ShapelessRecipe addIngredient(int count, Material material) {
+        for (int remaining = count; remaining > 0; remaining--) addIngredient(material);
+        return this;
+    }
+    /** A stack's amount is the number of slots it occupies in a shapeless recipe. */
+    public ShapelessRecipe addIngredient(ItemStack stack) {
+        return stack == null ? this : addIngredient(stack.getAmount(), stack);
+    }
+    /** Adds one exact choice for each requested ingredient. */
+    public ShapelessRecipe addIngredient(int count, ItemStack stack) {
+        for (int remaining = count; remaining > 0; remaining--)
+            addIngredient(new RecipeChoice.ExactChoice(stack));
+        return this;
+    }
     public List<RecipeChoice> getChoiceList() { return Collections.unmodifiableList(choices); }
     /** Bukkit compatibility name for the ingredient choices. */
     public List<RecipeChoice> getIngredientList() { return getChoiceList(); }

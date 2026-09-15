@@ -16,6 +16,7 @@ public final class Checks {
         Geometry.check();
         EntityCheck.check();
         InventoryViewCheck.check();
+        AdapterCheck.check();
         Items.check();
         Colors.check();
         Commands.check();

@@ -311,6 +311,17 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
         return result;
     }
 
+    /** Filters this world's current entity collection by one concrete entity type. */
+    default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(
+            Class<T> entityClass) {
+        if (entityClass == null) throw new IllegalArgumentException("entityClass cannot be null");
+        java.util.ArrayList<T> result = new java.util.ArrayList<>();
+        for (org.bukkit.entity.Entity entity : getEntities()) {
+            if (entityClass.isInstance(entity)) result.add(entityClass.cast(entity));
+        }
+        return result;
+    }
+
     Environment getEnvironment();
 
     enum Environment {

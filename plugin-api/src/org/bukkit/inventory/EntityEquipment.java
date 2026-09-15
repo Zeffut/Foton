@@ -10,8 +10,8 @@ public interface EntityEquipment {
     default void setChestplate(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 2) { armor[2] = item; setArmorContents(armor); } }
     default ItemStack getBoots() { return getArmorContents().length > 0 ? getArmorContents()[0] : null; }
     default void setBoots(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 0) { armor[0] = item; setArmorContents(armor); } }
-    default ItemStack getLeggings() { ItemStack[] armor = getArmorContents(); return armor.length > 2 ? armor[2] : null; }
-    default void setLeggings(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 2) { armor[2] = item; setArmorContents(armor); } }
+    default ItemStack getLeggings() { ItemStack[] armor = getArmorContents(); return armor.length > 1 ? armor[1] : null; }
+    default void setLeggings(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 1) { armor[1] = item; setArmorContents(armor); } }
     default void setArmorContents(ItemStack[] items) { }
     ItemStack getItemInMainHand();
     void setItemInMainHand(ItemStack item);
@@ -23,6 +23,32 @@ public interface EntityEquipment {
     default void setItemInHand(ItemStack item) { setItemInMainHand(item); }
     ItemStack getItemInOffHand();
     void setItemInOffHand(ItemStack item);
+    /** Gets the live item at one of this entity's supported equipment slots. */
+    default ItemStack getItem(EquipmentSlot slot) {
+        if (slot == null) throw new IllegalArgumentException("slot cannot be null");
+        return switch (slot) {
+            case HAND -> getItemInMainHand();
+            case OFF_HAND -> getItemInOffHand();
+            case HEAD -> getHelmet();
+            case CHEST -> getChestplate();
+            case LEGS -> getLeggings();
+            case FEET -> getBoots();
+            default -> throw new IllegalArgumentException("unsupported equipment slot: " + slot);
+        };
+    }
+    /** Writes the live item at one of this entity's supported equipment slots. */
+    default void setItem(EquipmentSlot slot, ItemStack item) {
+        if (slot == null) throw new IllegalArgumentException("slot cannot be null");
+        switch (slot) {
+            case HAND -> setItemInMainHand(item);
+            case OFF_HAND -> setItemInOffHand(item);
+            case HEAD -> setHelmet(item);
+            case CHEST -> setChestplate(item);
+            case LEGS -> setLeggings(item);
+            case FEET -> setBoots(item);
+            default -> throw new IllegalArgumentException("unsupported equipment slot: " + slot);
+        }
+    }
     default float getItemInHandDropChance() { return 0.085f; }
     default void setItemInHandDropChance(float chance) { }
     default float getItemInMainHandDropChance() { return getItemInHandDropChance(); }
