@@ -29,7 +29,10 @@ simdnbt.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+rayon.workspace = true
 tempfile = "3"
+tokio.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

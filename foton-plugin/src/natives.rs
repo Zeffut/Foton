@@ -13977,11 +13977,20 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
 
 #[cfg(test)]
 mod entity_bridge_tests {
-    use std::sync::Weak;
+    use std::sync::{Arc, Weak};
+    use std::thread;
+    use std::time::Duration;
 
+    use foton_core::chunk::chunk_request::{ChunkRequestState, ChunkTicketKind};
+    use foton_core::chunk::status::ChunkStatus;
     use foton_core::entity::Entity as _;
     use foton_core::entity::entities::RawEntity;
-    use foton_registry::vanilla_entities;
+    use foton_core::level_data::WorldGenerationSettings;
+    use foton_core::world::{World, WorldConfig, WorldStorageConfig};
+    use foton_core::worldgen::{ChunkGeneratorType, EmptyChunkGenerator};
+    use foton_registry::{init_vanilla_registry, vanilla_dimension_types, vanilla_entities};
+    use foton_utils::types::{Difficulty, GameType};
+    use foton_utils::{ChunkPos, Identifier};
     use glam::DVec3;
 
     use super::{
@@ -13998,6 +14007,78 @@ mod entity_bridge_tests {
             Weak::new(),
             &vanilla_entities::ITEM,
         )
+    }
+
+    fn rain_test_world() -> Arc<World> {
+        init_vanilla_registry();
+        let runtime = Arc::new(
+            match tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => panic!("rain test runtime should start: {error}"),
+            },
+        );
+        let generation_pool = Arc::new(
+            match rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .thread_name(|index| format!("foton-plugin-rain-test-{index}"))
+                .build()
+            {
+                Ok(pool) => pool,
+                Err(error) => panic!("rain test generation pool should start: {error}"),
+            },
+        );
+        let dimension_type = &vanilla_dimension_types::OVERWORLD;
+        let generator_config = toml::Value::Table(toml::map::Map::new());
+        let generation_settings = WorldGenerationSettings::from_generator_config(
+            Identifier::vanilla_static("empty"),
+            &generator_config,
+            dimension_type.key.clone(),
+            dimension_type.min_y,
+            dimension_type.height,
+        );
+        let world = match runtime.block_on(World::new_with_config(
+            Arc::clone(&runtime),
+            Identifier::vanilla_static("plugin_rain_binding"),
+            dimension_type,
+            0,
+            WorldConfig {
+                storage: WorldStorageConfig::RamOnly,
+                level_data_path: None,
+                generator: Arc::new(ChunkGeneratorType::Empty(EmptyChunkGenerator::new())),
+                generation_settings,
+                view_distance: 2,
+                simulation_distance: 2,
+                max_chained_neighbor_updates: 1_000_000,
+                compression: None,
+                is_flat: false,
+                sea_level: 63,
+                default_gamemode: GameType::Survival,
+                difficulty: Difficulty::Normal,
+                bonus_chest: false,
+            },
+            generation_pool,
+        )) {
+            Ok(world) => world,
+            Err(error) => panic!("rain test world should initialize: {error}"),
+        };
+        let request = world.chunk_map.request_square(
+            ChunkPos::new(0, -1),
+            1,
+            ChunkStatus::Full,
+            ChunkTicketKind::Command,
+        );
+        for _ in 0..10_000 {
+            world.chunk_map.advance_scheduling();
+            if request.poll() == ChunkRequestState::Ready {
+                return world;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("rain test chunks did not become ready");
     }
 
     #[test]
@@ -14093,11 +14174,24 @@ mod entity_bridge_tests {
     }
 
     #[test]
-    fn rain_binding_delegates_to_the_existing_entity_state() {
-        let entity = entity();
+    fn rain_binding_observes_dry_to_raining_world_transition() {
+        let world = rain_test_world();
+        let entity = RawEntity::new(
+            8,
+            DVec3::new(1.25, 64.5, -3.75),
+            Arc::downgrade(&world),
+            &vanilla_entities::ITEM,
+        );
 
         assert!(!entity_in_rain_state(None));
         assert!(!entity_in_rain_state(Some(&entity)));
+
+        world.level_data.write().set_raining(true);
+        world.weather.lock().rain_level = 1.0;
+
+        assert!(world.can_see_sky(entity.block_position()));
+        assert!(world.is_raining_at(entity.block_position()));
+        assert!(entity_in_rain_state(Some(&entity)));
     }
 
     #[test]
