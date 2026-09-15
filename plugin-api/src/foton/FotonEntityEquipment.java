@@ -69,7 +69,7 @@ final class FotonEntityEquipment implements EntityEquipment {
         return chance;
     }
     @Override public void clear() {
-        for (EquipmentSlot slot : EquipmentSlot.values()) setItem(slot, null);
+        Native.clearEntityEquipment(owner);
     }
     private static int slotIndex(EquipmentSlot slot) {
         return switch (slot) {

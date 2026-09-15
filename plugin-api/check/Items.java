@@ -155,6 +155,13 @@ final class Items {
             "removing an enchantment returns its old level");
         Checks.same(enchanted.getEnchantmentLevel(org.bukkit.enchantments.Enchantment.LOOTING), 0,
             "removed enchantment is absent");
+        ItemStack damaged = new ItemStack(Material.DIAMOND_SWORD);
+        damaged.setDurability((short) 37);
+        String damagedEncoded = foton.FotonInventory.encode(damaged);
+        Checks.expect(damagedEncoded.contains("\u001ddamage=37"),
+            "slot damage uses the shared codec field");
+        Checks.same(foton.FotonInventory.decode(damagedEncoded).getDurability(), (short) 37,
+            "slot damage survives encoding");
         boolean rejected = false;
         try { enchanted.addEnchantment(org.bukkit.enchantments.Enchantment.LOOTING, 4); }
         catch (IllegalArgumentException expected) { rejected = true; }
@@ -188,7 +195,13 @@ final class Items {
         potion.setItemMeta(potionData);
         org.bukkit.inventory.meta.PotionMeta potionRead = (org.bukkit.inventory.meta.PotionMeta)
             foton.FotonInventory.decode(foton.FotonInventory.encode(potion)).getItemMeta();
+        org.bukkit.potion.PotionEffect potionEffect = potionRead.getCustomEffects().isEmpty()
+            ? null : potionRead.getCustomEffects().get(0);
         Checks.expect(potionRead.getCustomEffects().size() == 1
+            && potionEffect != null
+            && potionEffect.getType().equals(org.bukkit.potion.PotionEffectType.SPEED)
+            && potionEffect.getDuration() == 20
+            && potionEffect.getAmplifier() == 1
             && potionRead.getDisplayName().equals("potion")
             && potionRead.getLore().equals(java.util.List.of("line")),
             "slot metadata fields coexist with potion effects");

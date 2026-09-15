@@ -236,10 +236,12 @@ public final class Native {
     public static native void setEntityRemoveWhenFarAway(String uuid, boolean remove);
     public static native float entityDropChance(String uuid, int slot);
     public static native void setEntityDropChance(String uuid, int slot, float chance);
-    /** Reads one supported living-entity equipment slot through the item codec. */
+    /** Reads one living-entity equipment slot through the item codec. */
     public static native String entityEquipmentSlot(String uuid, int slot);
-    /** Writes one supported living-entity equipment slot through the item codec. */
+    /** Writes one living-entity equipment slot through the item codec. */
     public static native void setEntityEquipmentSlot(String uuid, int slot, String item);
+    /** Clears all living-entity equipment slots atomically. */
+    public static native void clearEntityEquipment(String uuid);
     public static native int experienceLevel(String uuid);
     public static native float experienceProgress(String uuid);
     public static native void setExperienceLevel(String uuid, int level);

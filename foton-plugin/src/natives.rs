@@ -122,9 +122,10 @@ use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
-    CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
-    FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
-    TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+    CUSTOM_MODEL_DATA, CUSTOM_NAME, DAMAGE, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
+    FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, POTION_CONTENTS,
+    STORED_ENCHANTMENTS, TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT,
+    WRITTEN_BOOK_CONTENT,
 };
 use foton_registry::entity_data::{Quaternionf, Vector3f};
 use foton_registry::entity_type::EntityTypeRef;
@@ -6107,7 +6108,7 @@ const fn equipment_slot_from_index(slot: jint) -> Option<EquipmentSlot> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EquipmentSlotRequestError {
-    Unsupported,
+    InvalidIndex,
 }
 
 fn entity_equipment_slot_state(
@@ -6115,15 +6116,14 @@ fn entity_equipment_slot_state(
     slot: jint,
 ) -> Result<Option<String>, EquipmentSlotRequestError> {
     let Some(slot) = equipment_slot_from_index(slot) else {
-        return Err(EquipmentSlotRequestError::Unsupported);
+        return Err(EquipmentSlotRequestError::InvalidIndex);
     };
     let Some(living) = entity.and_then(Entity::as_living_entity) else {
         return Ok(None);
     };
-    if !living.can_use_slot(slot) {
-        return Err(EquipmentSlotRequestError::Unsupported);
-    }
-    Ok(Some(describe_slot(&living.get_item_by_slot(slot))))
+    let mut described = None;
+    living.with_equipment_slot(slot, &mut |item| described = Some(describe_slot(item)));
+    Ok(described)
 }
 
 fn set_entity_equipment_slot_state(
@@ -6132,25 +6132,31 @@ fn set_entity_equipment_slot_state(
     encoded: &str,
 ) -> Result<(), EquipmentSlotRequestError> {
     let Some(slot) = equipment_slot_from_index(slot) else {
-        return Err(EquipmentSlotRequestError::Unsupported);
+        return Err(EquipmentSlotRequestError::InvalidIndex);
     };
     let Some(living) = entity.and_then(Entity::as_living_entity) else {
         return Ok(());
     };
-    if !living.can_use_slot(slot) {
-        return Err(EquipmentSlotRequestError::Unsupported);
-    }
     let Some(stack) = parse_slot(encoded) else {
         return Ok(());
     };
-    living.set_item_slot(slot, stack);
+    let mut stack = stack;
+    living.with_equipment_slot_mut(slot, &mut |item| mem::swap(item, &mut stack));
     Ok(())
 }
 
-fn throw_unsupported_equipment_slot(env: &mut JNIEnv<'_>) {
+fn clear_entity_equipment_state(entity: Option<&dyn Entity>) -> bool {
+    let Some(living) = entity.and_then(Entity::as_living_entity) else {
+        return false;
+    };
+    living.living_base().equipment().lock().clear();
+    true
+}
+
+fn throw_invalid_equipment_slot_index(env: &mut JNIEnv<'_>) {
     let _ = env.throw_new(
         "java/lang/IllegalArgumentException",
-        "equipment slot is invalid for this entity",
+        "equipment slot index is invalid",
     );
 }
 
@@ -6167,8 +6173,8 @@ extern "system" fn entity_equipment_slot(
         .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
     match entity_equipment_slot_state(entity.as_deref(), slot) {
         Ok(value) => to_java(&mut env, value),
-        Err(EquipmentSlotRequestError::Unsupported) => {
-            throw_unsupported_equipment_slot(&mut env);
+        Err(EquipmentSlotRequestError::InvalidIndex) => {
+            throw_invalid_equipment_slot_index(&mut env);
             null_mut()
         }
     }
@@ -6195,10 +6201,23 @@ extern "system" fn set_entity_equipment_slot(
         .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
     if matches!(
         set_entity_equipment_slot_state(entity.as_deref(), slot, &encoded),
-        Err(EquipmentSlotRequestError::Unsupported)
+        Err(EquipmentSlotRequestError::InvalidIndex)
     ) {
-        throw_unsupported_equipment_slot(&mut env);
+        throw_invalid_equipment_slot_index(&mut env);
     }
+}
+
+extern "system" fn clear_entity_equipment(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) {
+    let entity = env
+        .get_string(&uuid)
+        .ok()
+        .and_then(|text| Uuid::parse_str(text.to_str().ok()?).ok())
+        .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
+    clear_entity_equipment_state(entity.as_deref());
 }
 
 extern "system" fn entity_drop_chance(
@@ -7918,6 +7937,10 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         return String::new();
     }
     let mut value = format!("{} {}", stack.item().key, stack.count());
+    if let Some(damage) = stack.get(DAMAGE).copied().filter(|damage| *damage != 0) {
+        value.push('\u{1d}');
+        let _ = write!(value, "damage={damage}");
+    }
     if let Some(opaque) = stack.opaque_nbt() {
         value.push('\u{1d}');
         value.push_str("nbthex=");
@@ -8002,6 +8025,20 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
                 "storedenchhex={}:{}",
                 hex_encode(key.to_string().as_bytes()),
                 level
+            );
+        }
+    }
+    if let Some(contents) = stack.get(POTION_CONTENTS)
+        && !contents.custom_effects().is_empty()
+    {
+        value.push('\u{1d}');
+        for effect in contents.custom_effects() {
+            let _ = write!(
+                value,
+                "{},{},{};",
+                effect.effect().key.path,
+                effect.duration(),
+                effect.amplifier()
             );
         }
     }
@@ -8200,7 +8237,6 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
             && **value != "unbreakable"
     }) {
         use foton_registry::data_components::components::PotionContents;
-        use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
         use foton_registry::mob_effect::instance::MobEffectInstance;
         let mut custom = Vec::new();
         for field in effects.split(';') {
@@ -13277,6 +13313,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_entity_equipment_slot as *mut c_void,
         ),
         method(
+            "clearEntityEquipment",
+            "(Ljava/lang/String;)V",
+            clear_entity_equipment as *mut c_void,
+        ),
+        method(
             "arrowPotion",
             "(Ljava/lang/String;)Ljava/lang/String;",
             arrow_potion as *mut c_void,
@@ -14088,24 +14129,31 @@ mod entity_bridge_tests {
 
     use foton_core::chunk::chunk_request::{ChunkRequestState, ChunkTicketKind};
     use foton_core::chunk::status::ChunkStatus;
+    use foton_core::config::RuntimeConfig;
     use foton_core::entity::entities::{ArmorStandEntity, HorseEntity, RawEntity};
-    use foton_core::entity::{Entity as _, LivingEntity as _};
+    use foton_core::entity::Entity as _;
+    use foton_core::inventory::container::Container as _;
     use foton_core::inventory::equipment::EquipmentSlot;
     use foton_core::level_data::WorldGenerationSettings;
+    use foton_core::player::connection::NetworkConnection;
+    use foton_core::player::{ClientInformation, GameProfile, Player, PlayerConnection};
     use foton_core::world::{World, WorldConfig, WorldStorageConfig};
     use foton_core::worldgen::{ChunkGeneratorType, EmptyChunkGenerator};
+    use foton_protocol::packet_traits::{CompressionInfo, EncodedPacket};
     use foton_registry::{init_vanilla_registry, vanilla_dimension_types, vanilla_entities};
     use foton_utils::types::{Difficulty, GameType};
     use foton_utils::{ChunkPos, Identifier};
     use glam::DVec3;
+    use text_components::TextComponent;
+    use uuid::Uuid;
 
     use super::{
-        EquipmentSlotRequestError, add_entity_scoreboard_tag_state, bindings, entity_by_text,
-        entity_equipment_slot_state, entity_has_gravity_state, entity_in_rain_state,
-        entity_position_state, entity_scoreboard_tags_state, entity_silent_state,
-        equipment_slot_from_index, remove_entity_scoreboard_tag_state,
-        set_entity_equipment_slot_state, set_entity_gravity_state, set_entity_rotation_state,
-        set_entity_silent_state,
+        EquipmentSlotRequestError, add_entity_scoreboard_tag_state, bindings,
+        clear_entity_equipment_state, entity_by_text, entity_equipment_slot_state,
+        entity_has_gravity_state, entity_in_rain_state, entity_position_state,
+        entity_scoreboard_tags_state, entity_silent_state, equipment_slot_from_index,
+        remove_entity_scoreboard_tag_state, set_entity_equipment_slot_state,
+        set_entity_gravity_state, set_entity_rotation_state, set_entity_silent_state,
     };
 
     fn entity() -> RawEntity {
@@ -14115,6 +14163,82 @@ mod entity_bridge_tests {
             Weak::new(),
             &vanilla_entities::ITEM,
         )
+    }
+
+    struct EquipmentTestConnection;
+
+    impl NetworkConnection for EquipmentTestConnection {
+        fn compression(&self) -> Option<CompressionInfo> {
+            None
+        }
+
+        fn send_encoded(&self, _packet: EncodedPacket) {}
+
+        fn send_encoded_bundle(&self, _packets: Vec<EncodedPacket>) {}
+
+        fn disconnect_with_reason(&self, _reason: TextComponent) {}
+
+        fn tick(&self) {}
+
+        fn latency(&self) -> i32 {
+            0
+        }
+
+        fn close(&self) {}
+
+        fn closed(&self) -> bool {
+            false
+        }
+    }
+
+    fn equipment_test_config() -> Arc<RuntimeConfig> {
+        Arc::new(RuntimeConfig {
+            max_players: 1,
+            view_distance: 2,
+            simulation_distance: 2,
+            max_chained_neighbor_updates: 1_000_000,
+            online_mode: false,
+            whitelist_enabled: false,
+            auth_server: None,
+            allow_insecure_auth_server: false,
+            profile_server: None,
+            services_server: None,
+            encryption: false,
+            allow_flight: false,
+            motd: String::new(),
+            use_favicon: false,
+            favicon: String::new(),
+            enforce_secure_chat: false,
+            chat_spam_threshold_seconds: 10,
+            command_spam_threshold_seconds: 10,
+            compression: None,
+            server_links: None,
+            packet_workers: Some(1),
+            chunk_generation_threads: Some(1),
+            chunk_encoding_threads: Some(1),
+            bug_report_webhook: None,
+        })
+    }
+
+    fn equipment_test_player() -> Arc<Player> {
+        let world = rain_test_world();
+        Arc::new_cyclic(|player| {
+            Player::new(
+                GameProfile {
+                    id: Uuid::new_v4(),
+                    name: "EquipmentBridge".to_owned(),
+                    properties: Vec::new(),
+                    profile_actions: None,
+                },
+                Arc::new(PlayerConnection::Other(Box::new(EquipmentTestConnection))),
+                world,
+                Weak::new(),
+                equipment_test_config(),
+                10,
+                ClientInformation::default(),
+                player,
+            )
+        })
     }
 
     fn rain_test_world() -> Arc<World> {
@@ -14236,21 +14360,157 @@ mod entity_bridge_tests {
     }
 
     #[test]
-    fn equipment_bridge_rejects_a_slot_the_living_entity_cannot_use() {
+    fn equipment_bridge_crosses_player_inventory_for_selected_hand_offhand_and_armor() {
+        init_vanilla_registry();
+        let player = equipment_test_player();
+        player.inventory.lock().set_selected_slot(4);
+        let entity = player.as_ref() as &dyn foton_core::entity::Entity;
+
+        for (bridge_slot, inventory_slot, encoded) in [
+            (0, 4, "minecraft:diamond_sword 1"),
+            (1, 40, "minecraft:shield 1"),
+            (2, 36, "minecraft:diamond_boots 1"),
+            (3, 37, "minecraft:diamond_leggings 1"),
+            (4, 38, "minecraft:diamond_chestplate 1"),
+            (5, 39, "minecraft:diamond_helmet 1"),
+        ] {
+            assert_eq!(
+                set_entity_equipment_slot_state(Some(entity), bridge_slot, encoded),
+                Ok(())
+            );
+            assert!(
+                super::describe_slot(player.inventory.lock().get_item(inventory_slot))
+                    .starts_with(encoded)
+            );
+        }
+
+        let changes_before_idempotent_write = player.inventory.lock().get_times_changed();
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(entity), 0, "minecraft:diamond_sword 1"),
+            Ok(())
+        );
+        assert_eq!(
+            player.inventory.lock().get_times_changed(),
+            changes_before_idempotent_write
+        );
+
+        for (bridge_slot, inventory_slot, encoded) in [
+            (0, 4, "minecraft:iron_sword 1"),
+            (1, 40, "minecraft:totem_of_undying 1"),
+            (2, 36, "minecraft:iron_boots 1"),
+            (3, 37, "minecraft:iron_leggings 1"),
+            (4, 38, "minecraft:iron_chestplate 1"),
+            (5, 39, "minecraft:iron_helmet 1"),
+        ] {
+            let stack = super::parse_slot(encoded).expect("test item should parse");
+            player.inventory.lock().set_item(inventory_slot, stack);
+            assert!(matches!(
+                entity_equipment_slot_state(Some(entity), bridge_slot),
+                Ok(Some(value)) if value.starts_with(encoded)
+            ));
+        }
+    }
+
+    #[test]
+    fn equipment_bridge_uses_storage_for_slots_the_entity_cannot_naturally_use() {
         init_vanilla_registry();
         let stand =
             ArmorStandEntity::new(&vanilla_entities::ARMOR_STAND, 9, DVec3::ZERO, Weak::new());
         let entity = &stand as &dyn foton_core::entity::Entity;
 
         assert_eq!(
-            entity_equipment_slot_state(Some(entity), 6),
-            Err(EquipmentSlotRequestError::Unsupported)
+            set_entity_equipment_slot_state(Some(entity), 6, "minecraft:stone 2"),
+            Ok(())
         );
         assert_eq!(
             set_entity_equipment_slot_state(Some(entity), 7, "minecraft:saddle 1"),
-            Err(EquipmentSlotRequestError::Unsupported)
+            Ok(())
         );
-        assert!(stand.get_item_by_slot(EquipmentSlot::Saddle).is_empty());
+        assert!(matches!(
+            entity_equipment_slot_state(Some(entity), 6),
+            Ok(Some(value)) if value.starts_with("minecraft:stone 2")
+        ));
+        assert!(matches!(
+            entity_equipment_slot_state(Some(entity), 7),
+            Ok(Some(value)) if value.starts_with("minecraft:saddle 1")
+        ));
+    }
+
+    #[test]
+    fn equipment_bridge_clear_is_atomic_and_validates_before_mutating() {
+        init_vanilla_registry();
+        let stand =
+            ArmorStandEntity::new(&vanilla_entities::ARMOR_STAND, 11, DVec3::ZERO, Weak::new());
+        let entity = &stand as &dyn foton_core::entity::Entity;
+
+        for slot in 0..8 {
+            assert_eq!(
+                set_entity_equipment_slot_state(
+                    Some(entity),
+                    slot,
+                    &format!("minecraft:stone {}", slot + 1),
+                ),
+                Ok(())
+            );
+        }
+        let before = (0..8)
+            .map(|slot| entity_equipment_slot_state(Some(entity), slot))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(entity), 8, "minecraft:diamond 1"),
+            Err(EquipmentSlotRequestError::InvalidIndex)
+        );
+        assert_eq!(
+            entity_equipment_slot_state(Some(entity), -1),
+            Err(EquipmentSlotRequestError::InvalidIndex)
+        );
+        assert!(!clear_entity_equipment_state(None));
+        assert_eq!(
+            (0..8)
+                .map(|slot| entity_equipment_slot_state(Some(entity), slot))
+                .collect::<Vec<_>>(),
+            before
+        );
+
+        assert!(clear_entity_equipment_state(Some(entity)));
+        assert!(bindings().iter().any(|method| {
+            method.name.to_str().ok() == Some("clearEntityEquipment")
+                && method.sig.to_str().ok() == Some("(Ljava/lang/String;)V")
+        }));
+        for slot in 0..8 {
+            assert_eq!(
+                entity_equipment_slot_state(Some(entity), slot),
+                Ok(Some(String::new()))
+            );
+        }
+    }
+
+    #[test]
+    fn equipment_bridge_clear_updates_player_inventory_once() {
+        init_vanilla_registry();
+        let player = equipment_test_player();
+        let entity = player.as_ref() as &dyn foton_core::entity::Entity;
+        for slot in 0..8 {
+            assert_eq!(
+                set_entity_equipment_slot_state(Some(entity), slot, "minecraft:stone 1"),
+                Ok(())
+            );
+        }
+        let changes_before_clear = player.inventory.lock().get_times_changed();
+
+        assert!(clear_entity_equipment_state(Some(entity)));
+
+        assert_eq!(
+            player.inventory.lock().get_times_changed(),
+            changes_before_clear + 1
+        );
+        for slot in 0..8 {
+            assert_eq!(
+                entity_equipment_slot_state(Some(entity), slot),
+                Ok(Some(String::new()))
+            );
+        }
     }
 
     #[test]
@@ -14408,5 +14668,55 @@ mod snbt_tests {
     fn malformed_or_unknown_prefix_is_rejected() {
         assert!(parse_item_snbt_patch("not valid{foo:1}").is_none());
         assert!(parse_item_snbt_patch("minecraft:stone{foo:}").is_none());
+    }
+}
+
+#[cfg(test)]
+mod slot_codec_tests {
+    use foton_registry::data_components::components::PotionContents;
+    use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::mob_effect::instance::MobEffectInstance;
+    use foton_registry::{init_vanilla_registry, vanilla_items, vanilla_mob_effects};
+
+    use super::{describe_slot, parse_slot};
+
+    #[test]
+    fn slot_codec_round_trip_preserves_damage_exactly() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::DIAMOND_SWORD);
+        original.set_damage_value(37);
+
+        let encoded = describe_slot(&original);
+        let decoded = parse_slot(&encoded).expect("described damaged item should parse");
+
+        assert!(encoded.split('\u{1d}').any(|field| field == "damage=37"));
+        assert_eq!(decoded.get_damage_value(), 37);
+        assert!(ItemStack::matches(&decoded, &original));
+    }
+
+    #[test]
+    fn slot_codec_round_trip_preserves_custom_potion_effects_exactly() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::POTION);
+        original.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                None,
+                None,
+                vec![
+                    MobEffectInstance::simple(vanilla_mob_effects::SPEED, 120, 2),
+                    MobEffectInstance::simple(vanilla_mob_effects::POISON, 45, 1),
+                ],
+                None,
+            ),
+        );
+
+        let encoded = describe_slot(&original);
+        let decoded = parse_slot(&encoded).expect("described custom potion should parse");
+
+        assert!(encoded.contains("speed,120,2;poison,45,1"));
+        assert_eq!(decoded.get(POTION_CONTENTS), original.get(POTION_CONTENTS));
+        assert!(ItemStack::matches(&decoded, &original));
     }
 }
