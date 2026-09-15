@@ -28,6 +28,7 @@ import re
 import struct
 import sys
 import zipfile
+import zlib
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 LEDGER = REPO / "dev" / "plugin-api-usage.json"
@@ -100,6 +101,44 @@ DOUBLE_WIDTH_TAGS = {5, 6}
 
 class NotAClassFile(Exception):
     """The bytes are not a class file this tool can read."""
+
+
+CLASS_ENTRY_ERRORS = (
+    NotAClassFile,
+    struct.error,
+    KeyError,
+    IndexError,
+    zipfile.BadZipFile,
+    OSError,
+    EOFError,
+    RuntimeError,
+    NotImplementedError,
+    zlib.error,
+)
+ARCHIVE_ERRORS = (
+    zipfile.BadZipFile,
+    OSError,
+    EOFError,
+    RuntimeError,
+    NotImplementedError,
+    zlib.error,
+)
+
+
+def _error_reason(error):
+    return str(error) or type(error).__name__
+
+
+def _unreadable_class(entry, error):
+    return {"entry": entry, "reason": _error_reason(error)}
+
+
+def _empty_scan_result():
+    found = {kind: set() for kind in set(SURFACES.values())}
+    found["classes"] = set()
+    found["handler_events"] = set()
+    found["unreadable_classes"] = []
+    return found
 
 
 def constant_pool(data):
@@ -476,10 +515,7 @@ def scan(jar):
     a corpus that quietly lost half its entries would produce a ranking that
     looks exactly as authoritative as a correct one.
     """
-    found = {kind: set() for kind in set(SURFACES.values())}
-    found["classes"] = set()
-    found["handler_events"] = set()
-    unreadable = 0
+    found = _empty_scan_result()
     with zipfile.ZipFile(jar) as archive:
         for entry in archive.namelist():
             if not entry.endswith(".class"):
@@ -491,9 +527,11 @@ def scan(jar):
                 classes, handler_events = class_usage(data)
                 found["classes"].update(classes)
                 found["handler_events"].update(handler_events)
-            except (NotAClassFile, struct.error, KeyError, IndexError):
-                unreadable += 1
-    return found, unreadable
+            except CLASS_ENTRY_ERRORS as error:
+                found["unreadable_classes"].append(
+                    _unreadable_class(entry, error))
+    found["unreadable_classes"].sort(key=lambda row: row["entry"])
+    return found, len(found["unreadable_classes"])
 
 
 DESCRIPTOR_ENTRYPOINT = re.compile(
@@ -520,19 +558,16 @@ def plugin_incidence(jar):
         for entry in archive.namelist():
             if not entry.endswith(".class"):
                 continue
-            data = archive.read(entry)
             try:
+                data = archive.read(entry)
                 owner, _, _ = declares(data)
                 classes, _ = _class_usage(data)
                 members = {
                     member for surface, member in references(data)
                     if surface == "internal"
                 }
-            except (NotAClassFile, struct.error, KeyError, IndexError) as error:
-                unreadable_classes.append({
-                    "entry": entry,
-                    "reason": str(error) or type(error).__name__,
-                })
+            except CLASS_ENTRY_ERRORS as error:
+                unreadable_classes.append(_unreadable_class(entry, error))
                 continue
             if not owner:
                 continue
@@ -571,6 +606,7 @@ def plugin_incidence(jar):
         "plugin": pathlib.Path(jar).name,
         "reachability_status": "complete" if complete else "unknown",
         "reachability_reason": reachability_reason,
+        "archive_error": None,
         "entrypoints": sorted(entrypoints),
         "entrypoint_reachable_classes": sorted(reachable) if complete else None,
         "unreadable_class_count": len(unreadable_classes),
@@ -589,6 +625,27 @@ def plugin_incidence(jar):
             "optional_adapter_members": sorted(set().union(
                 *(internal_members.get(owner, set()) for owner in optional_owners)
             )),
+        },
+    }
+
+
+def unreadable_archive_incidence(jar, error):
+    """An unknown row for a corpus item whose ZIP directory cannot be read."""
+    reason = _error_reason(error)
+    return {
+        "plugin": pathlib.Path(jar).name,
+        "reachability_status": "unknown",
+        "reachability_reason": "plugin archive was unreadable",
+        "archive_error": reason,
+        "entrypoints": [],
+        "entrypoint_reachable_classes": None,
+        "unreadable_class_count": None,
+        "unreadable_classes": [],
+        "internal": {
+            "load_bearing_classes": [],
+            "load_bearing_members": [],
+            "optional_adapter_classes": [],
+            "optional_adapter_members": [],
         },
     }
 
@@ -1097,6 +1154,8 @@ def compatibility_summary(
         internal = row.get("internal")
         return (
             row.get("reachability_status") == "complete"
+            and "archive_error" in row
+            and row["archive_error"] is None
             and row.get("unreadable_class_count") == 0
             and row.get("unreadable_classes") == []
             and isinstance(row.get("entrypoints"), list)
@@ -1403,14 +1462,21 @@ def main():
         try:
             found, unreadable = scan(jar)
             incidence = plugin_incidence(jar)
-        except (zipfile.BadZipFile, OSError) as error:
+        except ARCHIVE_ERRORS as error:
+            found = _empty_scan_result()
+            unreadable = 0
+            incidence = unreadable_archive_incidence(jar, error)
             failed.append((jar.name, str(error)))
-            continue
+        incidence_rows.append(incidence)
         if unreadable:
-            failed.append((jar.name, f"{unreadable} unreadable class files"))
+            details = "; ".join(
+                f'{row["entry"]}: {row["reason"]}'
+                for row in incidence["unreadable_classes"]
+            )
+            failed.append(
+                (jar.name, f"{unreadable} unreadable class files ({details})"))
         api_classes = classes_on_surface(found["classes"], "api")
         internal_classes = classes_on_surface(found["classes"], "internal")
-        incidence_rows.append(incidence)
         internal = incidence["internal"]
         load_bearing_internal = (
             internal["load_bearing_members"] or internal["load_bearing_classes"]
@@ -1435,7 +1501,7 @@ def main():
         for event in found["handler_events"]:
             plugins_per_event[event] += 1
 
-    scanned = len(jars) - len([f for f in failed if "unreadable" not in f[1]])
+    scanned = len(jars)
     api = [(m, n) for m, n in plugins_per_member.items() if surface_of[m] == "api"]
     api.sort(key=lambda pair: (-pair[1], pair[0]))
 

@@ -317,6 +317,7 @@ LEDGER = {
             "plugin": "Public.jar",
             "reachability_status": "complete",
             "reachability_reason": None,
+            "archive_error": None,
             "entrypoints": ["example/Public"],
             "entrypoint_reachable_classes": ["example/Public"],
             "unreadable_class_count": 0,
@@ -332,6 +333,7 @@ LEDGER = {
             "plugin": "OptionalAdapter.jar",
             "reachability_status": "complete",
             "reachability_reason": None,
+            "archive_error": None,
             "entrypoints": ["example/OptionalAdapter"],
             "entrypoint_reachable_classes": ["example/OptionalAdapter"],
             "unreadable_class_count": 0,
@@ -347,6 +349,7 @@ LEDGER = {
             "plugin": "LoadBearing.jar",
             "reachability_status": "complete",
             "reachability_reason": None,
+            "archive_error": None,
             "entrypoints": ["example/LoadBearing"],
             "entrypoint_reachable_classes": ["example/LoadBearing"],
             "unreadable_class_count": 0,
@@ -535,6 +538,27 @@ def merge_jars(output, *jars):
                     merged.writestr(entry, source.read(entry))
                     written.add(entry)
     return output
+
+
+def damage_zip_entry_crc(jar, entry_name):
+    """Make one real ZIP entry fail its CRC check without damaging the archive."""
+    data = bytearray(pathlib.Path(jar).read_bytes())
+    offset = 0
+    while True:
+        offset = data.find(b"PK\x01\x02", offset)
+        if offset < 0:
+            raise AssertionError(f"central directory entry not found: {entry_name}")
+        name_length = int.from_bytes(data[offset + 28:offset + 30], "little")
+        extra_length = int.from_bytes(data[offset + 30:offset + 32], "little")
+        comment_length = int.from_bytes(data[offset + 32:offset + 34], "little")
+        name = bytes(data[offset + 46:offset + 46 + name_length]).decode()
+        if name == entry_name:
+            crc_offset = offset + 16
+            crc = int.from_bytes(data[crc_offset:crc_offset + 4], "little")
+            data[crc_offset:crc_offset + 4] = (crc ^ 1).to_bytes(4, "little")
+            pathlib.Path(jar).write_bytes(data)
+            return
+        offset += 46 + name_length + extra_length + comment_length
 
 
 def run_main(args, repo, ledger):
@@ -746,6 +770,77 @@ class Scanning(unittest.TestCase):
             row["unreadable_classes"],
             [{"entry": "example/Adapter.class", "reason": "bad magic"}],
         )
+        self.assertEqual(summary["ceiling"]["status"], "unknown")
+        self.assertIsNone(summary["ceiling"]["plugins_on_public_api"])
+
+    def test_bad_crc_class_retains_entry_reason_and_corpus_denominator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            jar = build_jar(UNREADABLE_ADAPTER_SOURCES, root / "bad-crc")
+            with zipfile.ZipFile(jar, "a") as archive:
+                archive.writestr(
+                    "plugin.yml",
+                    "name: BadCrc\nmain: example.Main\nversion: 1\n",
+                )
+            damage_zip_entry_crc(jar, "example/Adapter.class")
+            shutil.copy(jar, corpus / "bad-crc.jar")
+            repo = root / "repo"
+            ledger = repo / "dev" / "plugin-api-usage.json"
+            ledger.parent.mkdir(parents=True)
+
+            result, _ = run_main([corpus, "--write"], repo, ledger)
+            written = json.loads(ledger.read_text(encoding="utf-8"))
+            summary = plugin_api_usage.compatibility_summary(
+                written, PROVIDED, WANTED, EMITTED)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(written["plugins_scanned"], 1)
+        self.assertEqual(written["plugins_reachability_unknown"], 1)
+        row = written["plugin_incidence"][0]
+        self.assertEqual(row["reachability_status"], "unknown")
+        self.assertEqual(
+            row["unreadable_classes"],
+            [{
+                "entry": "example/Adapter.class",
+                "reason": "Bad CRC-32 for file 'example/Adapter.class'",
+            }],
+        )
+        self.assertEqual(summary["ceiling"]["status"], "unknown")
+        self.assertIsNone(summary["ceiling"]["plugins_on_public_api"])
+
+    def test_wholly_corrupt_jar_remains_an_unknown_corpus_item(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            valid = build_jar(
+                {"example/Main.java": "package example; public final class Main {}"},
+                root / "valid",
+            )
+            with zipfile.ZipFile(valid, "a") as archive:
+                archive.writestr(
+                    "plugin.yml", "name: Valid\nmain: example.Main\nversion: 1\n")
+            shutil.copy(valid, corpus / "valid.jar")
+            (corpus / "corrupt.jar").write_bytes(b"not a ZIP archive")
+            repo = root / "repo"
+            ledger = repo / "dev" / "plugin-api-usage.json"
+            ledger.parent.mkdir(parents=True)
+
+            result, _ = run_main([corpus, "--write"], repo, ledger)
+            written = json.loads(ledger.read_text(encoding="utf-8"))
+            summary = plugin_api_usage.compatibility_summary(
+                written, PROVIDED, WANTED, EMITTED)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(written["plugins_scanned"], 2)
+        self.assertEqual(written["plugins_reachability_unknown"], 1)
+        incidence = {row["plugin"]: row for row in written["plugin_incidence"]}
+        self.assertEqual(incidence["valid.jar"]["reachability_status"], "complete")
+        self.assertEqual(incidence["corrupt.jar"]["reachability_status"], "unknown")
+        self.assertEqual(
+            incidence["corrupt.jar"]["archive_error"], "File is not a zip file")
         self.assertEqual(summary["ceiling"]["status"], "unknown")
         self.assertIsNone(summary["ceiling"]["plugins_on_public_api"])
 
@@ -1035,6 +1130,17 @@ class CompatibilityEvidence(unittest.TestCase):
         self.assertEqual(summary["ceiling"]["plugins_on_public_api"], 2)
         self.assertEqual(summary["ceiling"]["plugins_reaching_internals"], 1)
         self.assertEqual(summary["ceiling"]["plugins_with_optional_adapters"], 1)
+
+    def test_v2_rows_without_archive_read_evidence_keep_ceiling_unknown(self):
+        incomplete = json.loads(json.dumps(LEDGER))
+        for row in incomplete["plugin_incidence"]:
+            row.pop("archive_error", None)
+
+        summary = plugin_api_usage.compatibility_summary(
+            incomplete, PROVIDED, WANTED, EMITTED)
+
+        self.assertEqual(summary["ceiling"]["status"], "unknown")
+        self.assertIsNone(summary["ceiling"]["plugins_on_public_api"])
 
     def test_summary_json_is_stable_and_newline_terminated(self):
         with tempfile.TemporaryDirectory() as directory:
