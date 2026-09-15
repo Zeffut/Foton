@@ -425,6 +425,7 @@ public final class Checks {
                 "foton.fixture.paper.fallback.enable",
                 "foton.fixture.paper.failing.bootstrap",
                 "foton.fixture.paper.invalid.main",
+                "foton.fixture.paper.invalid.staticInitializer",
                 "foton.fixture.paper.loader.bootstrap",
                 "foton.fixture.paper.healthy")) {
             System.clearProperty(property);
@@ -449,9 +450,13 @@ public final class Checks {
             Object steps = paper.getClass().getField("steps").get(null);
             same(steps, java.util.List.of(
                 "bootstrap", "createPlugin", "constructor:sentinel", "onLoad",
-                "commands", "onEnable"), "Paper bootstrap lifecycle order");
+                "commands", "constructorCommands", "onEnable"),
+                "Paper bootstrap and constructor lifecycle order");
             expect(org.bukkit.Bukkit.getServer().getPluginCommand("paperfixture") != null,
                 "bootstrap lifecycle command was not registered");
+            expect(org.bukkit.Bukkit.getServer().getPluginCommand("constructorfixture") != null,
+                "constructor lifecycle command was not registered");
+            lifecycleTransferIsIdempotent();
 
             same(System.getProperty("foton.fixture.paper.fallback.bootstrap"), "true",
                 "null createPlugin fallback did not bootstrap");
@@ -470,9 +475,12 @@ public final class Checks {
                 "unsupported descriptor loader was accepted");
             expect(System.getProperty("foton.fixture.paper.invalid.main") == null,
                 "invalid bootstrap fixture constructed its main class");
+            expect(System.getProperty("foton.fixture.paper.invalid.staticInitializer") == null,
+                "invalid bootstrapper ran its static initializer before type checking");
             expect(System.getProperty("foton.fixture.paper.loader.bootstrap") == null,
                 "unsupported loader began bootstrap");
-            expect(log.contains("example.PaperPlugin") && log.contains("PluginBootstrap"),
+            expect(log.contains("example.StaticInitializerBootstrap")
+                    && log.contains("PluginBootstrap"),
                 "invalid bootstrapper diagnostic did not name its class: " + log);
             expect(log.contains("example.CustomLoader"),
                 "unsupported loader diagnostic did not name its class: " + log);
@@ -486,6 +494,32 @@ public final class Checks {
         } finally {
             foton.PluginHost.disableAll();
         }
+    }
+
+    private static void lifecycleTransferIsIdempotent() {
+        var bootstrap =
+            new io.papermc.paper.plugin.lifecycle.event.FotonLifecycleEventManager();
+        var plugin =
+            new io.papermc.paper.plugin.lifecycle.event.FotonLifecycleEventManager();
+        java.util.List<String> calls = new java.util.ArrayList<>();
+        bootstrap.registerEventHandler(
+            io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS,
+            event -> calls.add("bootstrap"));
+        plugin.registerEventHandler(
+            io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS,
+            event -> calls.add("constructor"));
+
+        bootstrap.transferTo(plugin);
+        bootstrap.transferTo(plugin);
+        var event = (io.papermc.paper.plugin.lifecycle.event.registrar.ReloadableRegistrarEvent)
+            () -> new foton.FotonCommands();
+        plugin.dispatch(
+            io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, event);
+        plugin.dispatch(
+            io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, event);
+        same(calls, java.util.List.of(
+            "bootstrap", "constructor", "bootstrap", "constructor"),
+            "repeated lifecycle transfer or dispatch duplicated a bootstrap handler");
     }
 
     private static void awaitSchedulerTasks(String owner, int expected) {

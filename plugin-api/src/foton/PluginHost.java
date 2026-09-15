@@ -571,14 +571,16 @@ public final class PluginHost {
             if (descriptor.getBootstrapper() == null) {
                 candidate = constructMain(descriptor, loader);
             } else {
-                Class<?> type = Class.forName(descriptor.getBootstrapper(), true, loader);
+                Class<?> type = Class.forName(descriptor.getBootstrapper(), false, loader);
                 if (!io.papermc.paper.plugin.bootstrap.PluginBootstrap.class
                         .isAssignableFrom(type)) {
                     throw new IllegalArgumentException("bootstrapper "
                         + descriptor.getBootstrapper() + " does not implement PluginBootstrap");
                 }
-                var bootstrapper = (io.papermc.paper.plugin.bootstrap.PluginBootstrap)
-                    type.getDeclaredConstructor().newInstance();
+                Class<? extends io.papermc.paper.plugin.bootstrap.PluginBootstrap>
+                    bootstrapType = type.asSubclass(
+                        io.papermc.paper.plugin.bootstrap.PluginBootstrap.class);
+                var bootstrapper = bootstrapType.getDeclaredConstructor().newInstance();
                 bootstrapContext = new FotonBootstrapContext(
                     descriptor, dataFolder.toPath(), jar.toPath());
                 bootstrapper.bootstrap(bootstrapContext);
