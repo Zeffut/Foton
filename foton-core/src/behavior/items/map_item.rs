@@ -73,7 +73,7 @@ impl ItemBehavior for MapItem {
             .unwrap_or(MapDecorations::EMPTY);
         tick_carried_by(world, player, map_id, &data, &decorations, None);
 
-        let locked = data.lock().locked;
+        let locked = data.lock().locked();
         if !locked && slot.is_some_and(|slot| slot.slot_type() == EquipmentSlotType::Hand) {
             update(world, player, &data);
         }
@@ -309,13 +309,13 @@ pub fn tick_carried_by(
 )]
 pub fn update(world: &Arc<World>, player: &Player, data: &SharedMapData) {
     let mut map = data.lock();
-    if map.dimension != world.key {
+    if map.dimension() != &world.key {
         return;
     }
 
-    let scale = 1i32 << map.scale;
-    let center_x = map.center_x;
-    let center_z = map.center_z;
+    let scale = 1i32 << map.scale();
+    let center_x = map.center_x();
+    let center_z = map.center_z();
     let position = player.position();
     let player_img_x = (position.x.floor() as i32 - center_x) / scale + 64;
     let player_img_y = (position.z.floor() as i32 - center_z) / scale + 64;

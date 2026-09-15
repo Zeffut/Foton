@@ -1,8 +1,9 @@
 //! This module contains the `JavaConnection` struct, which is used to represent a connection to a Java client.
+use std::future::Future;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::{Arc, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use foton_protocol::packet_reader::TCPNetworkDecoder;
 use foton_protocol::packet_traits::{ClientPacket, CompressionInfo, EncodedPacket, ServerPacket};
@@ -35,7 +36,11 @@ use text_components::{Modifier, TextComponent, format::Color};
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::select;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
+use tokio::sync::mpsc::{
+    self, Receiver, Sender,
+    error::{TryRecvError, TrySendError},
+};
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 use crate::command::{handle_client_request, sender::CommandSender};
@@ -54,6 +59,156 @@ pub enum OutboundPacket {
     Packet(EncodedPacket),
     /// Final disconnect packet that must be flushed before closing the socket.
     Disconnect(EncodedPacket),
+}
+
+const OUTBOUND_PACKET_LIMIT: usize = 4_096;
+const OUTBOUND_BYTE_LIMIT: usize = 64 * 1024 * 1024;
+const FINAL_DISCONNECT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+#[derive(Default)]
+struct OutboundBudget {
+    queued_packets: usize,
+    queued_bytes: usize,
+    disconnect_queued: bool,
+}
+
+/// Why an outbound packet could not enter a client's bounded queue.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutboundSendError {
+    /// The packet-count or encoded-byte budget is exhausted.
+    Full,
+    /// The network writer task has dropped its receiver.
+    Closed,
+}
+
+/// Non-blocking producer for a client's bounded outbound queue.
+#[derive(Clone)]
+pub struct OutboundSender {
+    sender: Sender<OutboundPacket>,
+    budget: Arc<SyncMutex<OutboundBudget>>,
+    packet_limit: usize,
+    byte_limit: usize,
+}
+
+/// Consumer for a client's bounded outbound queue.
+pub struct OutboundReceiver {
+    receiver: Receiver<OutboundPacket>,
+    budget: Arc<SyncMutex<OutboundBudget>>,
+}
+
+impl OutboundSender {
+    /// Tries to enqueue a normal packet without waiting or allocating beyond the queue limits.
+    pub fn try_send_packet(&self, packet: EncodedPacket) -> Result<(), OutboundSendError> {
+        let packet_bytes = packet.encoded_data.len();
+        let mut budget = self.budget.lock();
+        if budget.queued_packets >= self.packet_limit
+            || packet_bytes > self.byte_limit
+            || budget.queued_bytes > self.byte_limit - packet_bytes
+        {
+            return Err(OutboundSendError::Full);
+        }
+
+        match self.sender.try_send(OutboundPacket::Packet(packet)) {
+            Ok(()) => {
+                budget.queued_packets += 1;
+                budget.queued_bytes += packet_bytes;
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => Err(OutboundSendError::Full),
+            Err(TrySendError::Closed(_)) => Err(OutboundSendError::Closed),
+        }
+    }
+
+    /// Tries to enqueue the final disconnect packet in its reserved control slot.
+    pub fn try_send_disconnect(&self, packet: EncodedPacket) -> Result<(), OutboundSendError> {
+        let mut budget = self.budget.lock();
+        if budget.disconnect_queued {
+            return Err(OutboundSendError::Full);
+        }
+
+        match self.sender.try_send(OutboundPacket::Disconnect(packet)) {
+            Ok(()) => {
+                budget.disconnect_queued = true;
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => Err(OutboundSendError::Full),
+            Err(TrySendError::Closed(_)) => Err(OutboundSendError::Closed),
+        }
+    }
+}
+
+impl OutboundReceiver {
+    fn release_budget(&self, outbound: &OutboundPacket) {
+        let mut budget = self.budget.lock();
+        match outbound {
+            OutboundPacket::Packet(packet) => {
+                budget.queued_packets = budget.queued_packets.saturating_sub(1);
+                budget.queued_bytes = budget
+                    .queued_bytes
+                    .saturating_sub(packet.encoded_data.len());
+            }
+            OutboundPacket::Disconnect(_) => budget.disconnect_queued = false,
+        }
+    }
+
+    /// Receives the next queued packet and releases its admission budget.
+    pub async fn recv(&mut self) -> Option<OutboundPacket> {
+        let outbound = self.receiver.recv().await?;
+        self.release_budget(&outbound);
+        Some(outbound)
+    }
+
+    /// Tries to receive a queued packet and releases its admission budget.
+    pub fn try_recv(&mut self) -> Result<OutboundPacket, TryRecvError> {
+        let outbound = self.receiver.try_recv()?;
+        self.release_budget(&outbound);
+        Ok(outbound)
+    }
+}
+
+fn outbound_channel_with_limits(
+    packet_limit: usize,
+    byte_limit: usize,
+) -> (OutboundSender, OutboundReceiver) {
+    let budget = Arc::new(SyncMutex::new(OutboundBudget::default()));
+    let (sender, receiver) = mpsc::channel(packet_limit.saturating_add(1).max(1));
+    (
+        OutboundSender {
+            sender,
+            budget: Arc::clone(&budget),
+            packet_limit,
+            byte_limit,
+        },
+        OutboundReceiver { receiver, budget },
+    )
+}
+
+/// Creates the bounded outbound queue shared by pre-play and play connections.
+#[must_use]
+pub fn outbound_channel() -> (OutboundSender, OutboundReceiver) {
+    outbound_channel_with_limits(OUTBOUND_PACKET_LIMIT, OUTBOUND_BYTE_LIMIT)
+}
+
+async fn with_disconnect_write_deadline<F>(deadline: Duration, write: F) -> Result<(), PacketError>
+where
+    F: Future<Output = Result<(), PacketError>>,
+{
+    match timeout(deadline, write).await {
+        Ok(result) => result,
+        Err(_) => Err(PacketError::SendError(format!(
+            "final disconnect write exceeded its {} ms deadline",
+            deadline.as_millis()
+        ))),
+    }
+}
+
+/// Runs a final disconnect write with the connection shutdown deadline.
+pub async fn write_final_disconnect<F>(write: F) -> Result<(), PacketError>
+where
+    F: Future<Output = Result<(), PacketError>>,
+{
+    with_disconnect_write_deadline(FINAL_DISCONNECT_WRITE_TIMEOUT, write).await
 }
 
 /// A decoded play packet whose handler runs in the server's inter-tick packet phase.
@@ -524,33 +679,70 @@ impl BundleBuilder {
     }
 }
 
-/// Milliseconds since the Unix epoch, saturating rather than panicking.
+/// Milliseconds since the Unix epoch for the opaque keep-alive identifier.
 ///
 /// `duration_since(UNIX_EPOCH)` only fails when the wall clock is set before
 /// 1970, which a bad RTC or a container with no clock source can produce. The
 /// release profile is `panic = "abort"`, so panicking here would kill the
-/// server outright -- taking every unsaved chunk with it -- over a clock that
-/// the keep-alive logic can perfectly well treat as "time zero".
+/// server outright. Elapsed-time decisions use [`Instant`] instead.
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+        .map_or(0, |elapsed| elapsed.as_millis() as u64)
 }
 
-#[expect(
-    clippy::struct_field_names,
-    reason = "alive_ prefix is intentional to group related keep-alive fields"
-)]
 struct KeepAliveTracker {
-    alive_time: u64,
-    alive_pending: bool,
-    alive_id: u64,
+    sent_at: Option<Instant>,
+    pending: bool,
+    id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeepAliveTick {
+    None,
+    Send(u64),
+    Timeout,
+}
+
+impl KeepAliveTracker {
+    const fn new() -> Self {
+        Self {
+            sent_at: None,
+            pending: false,
+            id: 0,
+        }
+    }
+
+    fn tick_at(&mut self, now: Instant, id: u64) -> KeepAliveTick {
+        if self
+            .sent_at
+            .is_some_and(|sent_at| now.saturating_duration_since(sent_at) < KEEP_ALIVE_INTERVAL)
+        {
+            return KeepAliveTick::None;
+        }
+        if self.pending {
+            return KeepAliveTick::Timeout;
+        }
+
+        self.sent_at = Some(now);
+        self.pending = true;
+        self.id = id;
+        KeepAliveTick::Send(id)
+    }
+
+    fn acknowledge_at(&mut self, id: u64, now: Instant) -> Option<Duration> {
+        if !self.pending || id != self.id {
+            return None;
+        }
+        let sent_at = self.sent_at?;
+        self.pending = false;
+        Some(now.saturating_duration_since(sent_at))
+    }
 }
 
 /// A connection to a Java client.
 pub struct JavaConnection {
-    outgoing_packets: UnboundedSender<OutboundPacket>,
+    outgoing_packets: OutboundSender,
     cancel_token: CancellationToken,
     compression: Option<CompressionInfo>,
     network_writer: JavaNetworkWriter,
@@ -567,7 +759,7 @@ pub struct JavaConnection {
 impl JavaConnection {
     /// Creates a new `JavaConnection`.
     pub const fn new(
-        outgoing_packets: UnboundedSender<OutboundPacket>,
+        outgoing_packets: OutboundSender,
         cancel_token: CancellationToken,
         compression: Option<CompressionInfo>,
         network_writer: JavaNetworkWriter,
@@ -583,11 +775,7 @@ impl JavaConnection {
             id,
             remote_address,
             player,
-            keep_alive_tracker: SyncMutex::new(KeepAliveTracker {
-                alive_time: 0,
-                alive_pending: false,
-                alive_id: 0,
-            }),
+            keep_alive_tracker: SyncMutex::new(KeepAliveTracker::new()),
             latency: SyncMutex::new(0),
             unhandled_packet_ids: SyncMutex::new(Vec::new()),
         }
@@ -617,44 +805,31 @@ impl JavaConnection {
 
     fn keep_connection_alive(&self) {
         let mut tracker = self.keep_alive_tracker.lock();
-        let now = now_millis();
+        let action = tracker.tick_at(Instant::now(), now_millis());
+        drop(tracker);
 
-        // `saturating_sub`, not `-`: the wall clock can move backwards (an NTP
-        // correction, a VM resumed from a snapshot), and in release this
-        // subtraction wraps to a colossal number that clears the 15 s gate at
-        // once. Every player with a keep-alive in flight is then dropped for
-        // "timeout" on the same tick. `handle_keep_alive` below already
-        // saturates; this side did not.
-        if now.saturating_sub(tracker.alive_time) >= 15000 {
-            if tracker.alive_pending {
+        match action {
+            KeepAliveTick::None => {}
+            KeepAliveTick::Send(id) => self.send_packet(CKeepAlive::new(id as i64)),
+            KeepAliveTick::Timeout => {
                 self.disconnect(translations::DISCONNECT_TIMEOUT.msg());
-            } else {
-                tracker.alive_pending = true;
-                tracker.alive_id = now;
-                tracker.alive_time = now;
-                self.send_packet(CKeepAlive::new(tracker.alive_id as i64));
             }
         }
     }
 
     /// Handles a keep alive packet.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "latency saturates at u32::MAX ms (~49 days), which is unreachable in practice"
-    )]
     fn handle_keep_alive(&self, packet: SKeepAlive) {
         let mut tracker = self.keep_alive_tracker.lock();
-        if tracker.alive_pending && packet.id as u64 == tracker.alive_id {
-            let now = now_millis();
-
-            let time = now.saturating_sub(tracker.alive_time) as u32;
-            tracker.alive_pending = false;
-            drop(tracker);
-            let mut latency = self.latency.lock();
-            *latency = (*latency * 3 + time) / 4;
-        } else {
+        let elapsed = tracker.acknowledge_at(packet.id as u64, Instant::now());
+        drop(tracker);
+        let Some(elapsed) = elapsed else {
             self.disconnect(translations::DISCONNECT_TIMEOUT.msg());
-        }
+            return;
+        };
+        let time = u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX);
+        let mut latency = self.latency.lock();
+        let smoothed = (u64::from(*latency) * 3 + u64::from(time)) / 4;
+        *latency = u32::try_from(smoothed).unwrap_or(u32::MAX);
     }
 
     /// Returns the current latency in milliseconds.
@@ -681,11 +856,7 @@ impl JavaConnection {
                 return;
             }
         };
-        if self
-            .outgoing_packets
-            .send(OutboundPacket::Disconnect(packet))
-            .is_err()
-        {
+        if self.outgoing_packets.try_send_disconnect(packet).is_err() {
             self.close();
             return;
         }
@@ -711,25 +882,14 @@ impl JavaConnection {
             self.close();
             return;
         };
-        if self
-            .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
-            .is_err()
-        {
+        if self.outgoing_packets.try_send_packet(packet).is_err() {
             self.close();
         }
     }
 
     /// Sends an encoded packet to the client.
-    ///
-    /// # Panics
-    /// - If the packet fails to be sent through the channel.
     pub fn send_encoded_packet(&self, packet: EncodedPacket) {
-        if self
-            .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
-            .is_err()
-        {
+        if self.outgoing_packets.try_send_packet(packet).is_err() {
             self.close();
         }
     }
@@ -1089,7 +1249,7 @@ impl JavaConnection {
 
     /// Sends packets to the client.
     ///
-    pub async fn sender(&self, mut sender_recv: UnboundedReceiver<OutboundPacket>) {
+    pub async fn sender(&self, mut sender_recv: OutboundReceiver) {
         loop {
             select! {
                 biased;
@@ -1105,7 +1265,9 @@ impl JavaConnection {
                         };
 
                         if close_after_write {
-                            if let Err(err) = self.write_packet_now(&packet).await {
+                            if let Err(err) =
+                                write_final_disconnect(self.write_packet_now(&packet)).await
+                            {
                                 log::warn!("Failed to send disconnect packet to client {}: {err}", self.id);
                             }
                             self.close();
@@ -1149,7 +1311,7 @@ impl JavaConnection {
         player.server().queue_player_disconnect(player);
     }
 
-    async fn write_queued_disconnect(&self, sender_recv: &mut UnboundedReceiver<OutboundPacket>) {
+    async fn write_queued_disconnect(&self, sender_recv: &mut OutboundReceiver) {
         let mut disconnect_packet = None;
         loop {
             match sender_recv.try_recv() {
@@ -1162,7 +1324,7 @@ impl JavaConnection {
         let Some(packet) = disconnect_packet else {
             return;
         };
-        if let Err(err) = self.write_packet_now(&packet).await {
+        if let Err(err) = write_final_disconnect(self.write_packet_now(&packet)).await {
             log::warn!(
                 "Failed to send disconnect packet to client {} during close: {err}",
                 self.id
@@ -1229,7 +1391,11 @@ impl NetworkConnection for JavaConnection {
 
 #[cfg(test)]
 mod tests {
-    use std::array;
+    use std::{
+        array,
+        future::pending,
+        time::{Duration, Instant},
+    };
 
     use crate::{
         entity::{Entity as _, LivingEntity as _},
@@ -1240,6 +1406,11 @@ mod tests {
     use foton_registry::{blocks::properties::Direction, item_stack::ItemStack};
     use foton_utils::{BlockPos, codec::VarInt, types::InteractionHand};
     use rustc_hash::FxHashMap;
+    use tokio::{
+        io::AsyncReadExt,
+        net::{TcpListener, TcpStream},
+        time::{sleep, timeout},
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -1637,6 +1808,82 @@ mod tests {
     }
 
     #[test]
+    fn backward_wall_clock_does_not_delay_monotonic_keep_alive_timeout() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(14), 1),
+            KeepAliveTick::None
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 2),
+            KeepAliveTick::Timeout
+        );
+    }
+
+    #[test]
+    fn keep_alive_round_trip_uses_monotonic_time_after_wall_clock_rollback() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_millis(10), 1),
+            KeepAliveTick::None
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_000, started_at + Duration::from_millis(42)),
+            Some(Duration::from_millis(42))
+        );
+    }
+
+    #[test]
+    fn wrong_keep_alive_id_keeps_pending_state_until_timeout() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_001, started_at + Duration::from_millis(10)),
+            None
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 10_002),
+            KeepAliveTick::Timeout
+        );
+    }
+
+    #[test]
+    fn valid_keep_alive_ack_clears_pending_state_for_the_next_probe() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_000, started_at + Duration::from_millis(10)),
+            Some(Duration::from_millis(10))
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 10_001),
+            KeepAliveTick::Send(10_001)
+        );
+    }
+
+    #[test]
     fn chunk_batch_ack_uses_the_immediate_connection_path() {
         let decoded = decode(RawPacket::new(
             play::S_CHUNK_BATCH_RECEIVED,
@@ -1651,5 +1898,162 @@ mod tests {
                 }
             ))
         ));
+    }
+
+    fn encoded_keep_alive(id: i64) -> EncodedPacket {
+        let Ok(packet) =
+            EncodedPacket::from_bare(CKeepAlive::new(id), None, ConnectionProtocol::Play)
+        else {
+            panic!("test keep-alive should encode");
+        };
+        packet
+    }
+
+    #[test]
+    fn full_outbound_packet_budget_rejects_the_next_packet() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, _receiver) = outbound_channel_with_limits(1, packet_bytes * 2);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert_eq!(
+            sender.try_send_packet(encoded_keep_alive(2)),
+            Err(OutboundSendError::Full)
+        );
+    }
+
+    #[test]
+    fn full_outbound_byte_budget_rejects_the_next_packet() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, _receiver) = outbound_channel_with_limits(2, packet_bytes);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert_eq!(
+            sender.try_send_packet(encoded_keep_alive(2)),
+            Err(OutboundSendError::Full)
+        );
+    }
+
+    #[test]
+    fn receiving_a_packet_releases_its_outbound_budgets() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, mut receiver) = outbound_channel_with_limits(1, packet_bytes);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert!(matches!(receiver.try_recv(), Ok(OutboundPacket::Packet(_))));
+        assert_eq!(sender.try_send_packet(encoded_keep_alive(2)), Ok(()));
+    }
+
+    #[test]
+    fn production_send_cancels_connection_when_outbound_admission_fails() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, _receiver) = outbound_channel_with_limits(1, packet_bytes * 2);
+        let cancel_token = CancellationToken::new();
+        let connection = JavaConnection::new(
+            sender.clone(),
+            cancel_token.clone(),
+            None,
+            Arc::new(AsyncMutex::new(None)),
+            1,
+            SocketAddr::from(([127, 0, 0, 1], 25_565)),
+            Weak::new(),
+        );
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        connection.send_encoded_packet(encoded_keep_alive(2));
+
+        assert!(cancel_token.is_cancelled());
+    }
+
+    #[test]
+    fn disconnect_uses_its_reserved_control_slot() {
+        let first = encoded_keep_alive(1);
+        let packet_bytes = first.encoded_data.len();
+        let (sender, mut receiver) = outbound_channel_with_limits(1, packet_bytes);
+
+        assert_eq!(sender.try_send_packet(first), Ok(()));
+        assert_eq!(sender.try_send_disconnect(encoded_keep_alive(2)), Ok(()));
+        assert!(matches!(receiver.try_recv(), Ok(OutboundPacket::Packet(_))));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(OutboundPacket::Disconnect(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn final_disconnect_write_is_deadline_bounded() {
+        let result = timeout(
+            Duration::from_secs(1),
+            with_disconnect_write_deadline(
+                Duration::from_millis(20),
+                pending::<Result<(), PacketError>>(),
+            ),
+        )
+        .await;
+
+        assert!(matches!(result, Ok(Err(PacketError::SendError(_)))));
+    }
+
+    #[tokio::test]
+    async fn production_disconnect_drops_locked_writer_after_final_write_deadline() {
+        let listener = match TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await {
+            Ok(listener) => listener,
+            Err(error) => panic!("test listener should bind: {error}"),
+        };
+        let address = match listener.local_addr() {
+            Ok(address) => address,
+            Err(error) => panic!("test listener should have an address: {error}"),
+        };
+        let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        let mut client = match client {
+            Ok(client) => client,
+            Err(error) => panic!("test client should connect: {error}"),
+        };
+        let (server_stream, _) = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => panic!("test listener should accept: {error}"),
+        };
+        let (_, write_half) = server_stream.into_split();
+        let network_writer = Arc::new(AsyncMutex::new(Some(TCPNetworkEncoder::new(
+            BufWriter::new(write_half),
+        ))));
+        let writer_guard = network_writer.lock().await;
+        let (sender, receiver) = outbound_channel_with_limits(1, 1_024);
+        let cancel_token = CancellationToken::new();
+        let connection = JavaConnection::new(
+            sender,
+            cancel_token,
+            None,
+            Arc::clone(&network_writer),
+            2,
+            address,
+            Weak::new(),
+        );
+        connection.disconnect("test disconnect");
+        let mut sender_future = Box::pin(connection.sender(receiver));
+
+        tokio::select! {
+            () = &mut sender_future => panic!("sender cannot finish while the writer is locked"),
+            () = sleep(FINAL_DISCONNECT_WRITE_TIMEOUT + Duration::from_millis(100)) => {}
+        }
+        drop(writer_guard);
+
+        assert!(
+            timeout(Duration::from_millis(500), &mut sender_future)
+                .await
+                .is_ok(),
+            "the production disconnect path should abandon its blocked final write"
+        );
+        let mut byte = [0_u8; 1];
+        assert!(
+            matches!(
+                timeout(Duration::from_millis(500), client.read(&mut byte)).await,
+                Ok(Ok(0))
+            ),
+            "a timed-out disconnect write must be dropped instead of resuming later"
+        );
     }
 }

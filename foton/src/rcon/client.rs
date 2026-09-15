@@ -3,13 +3,15 @@
 //! Vanilla parity: `net.minecraft.server.rcon.thread.RconClient`, one thread
 //! per connection that reads a frame, answers it, and reads the next.
 
-use std::{io, net::SocketAddr, sync::Arc};
+use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 
 use foton_core::server::Server;
 use tokio::{
-    io::{AsyncReadExt as _, AsyncWriteExt as _},
+    io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
     net::TcpStream,
     select,
+    sync::OwnedSemaphorePermit,
+    time::{Instant, timeout},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -19,22 +21,33 @@ use super::packet::{
     encode_response, split_response,
 };
 
+const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Serves one connection until it closes, misbehaves, or the server stops.
 pub(super) async fn serve(
     mut connection: TcpStream,
     address: SocketAddr,
     connection_id: u64,
+    permit: OwnedSemaphorePermit,
     password: Arc<str>,
     server: Arc<Server>,
     cancel: CancellationToken,
 ) {
     let mut authenticated = false;
+    let authentication_deadline = Instant::now() + AUTHENTICATION_TIMEOUT;
     // Set when authentication fails, so the connection closes after answering.
     let mut reject_and_close = false;
     loop {
+        let read_timeout = if authenticated {
+            IDLE_TIMEOUT
+        } else {
+            authentication_deadline.saturating_duration_since(Instant::now())
+        };
         let request = select! {
             () = cancel.cancelled() => break,
-            request = read_request(&mut connection) => request,
+            request = read_request(&mut connection, read_timeout) => request,
         };
         let Some(request) = request else { break };
 
@@ -58,6 +71,7 @@ pub(super) async fn serve(
                         request.request_id,
                         SERVERDATA_AUTH_RESPONSE,
                         "",
+                        WRITE_TIMEOUT,
                     )
                     .await
                 } else {
@@ -89,28 +103,37 @@ pub(super) async fn serve(
         }
     }
     log::debug!("Rcon client {address} disconnected");
+    drop(permit);
 }
 
 /// Reads one frame, or `None` once the connection ends or breaks its own rules.
-async fn read_request(connection: &mut TcpStream) -> Option<RconRequest> {
-    let mut length = [0_u8; 4];
-    connection.read_exact(&mut length).await.ok()?;
-    let length = i32::from_le_bytes(length);
+async fn read_request<R>(connection: &mut R, deadline: Duration) -> Option<RconRequest>
+where
+    R: AsyncRead + Unpin,
+{
+    timeout(deadline, async {
+        let mut length = [0_u8; 4];
+        connection.read_exact(&mut length).await.ok()?;
+        let length = i32::from_le_bytes(length);
 
-    // Vanilla reads one 1460-byte chunk and hangs up unless the frame fills it
-    // exactly, which makes a client that coalesces two frames into one segment
-    // look malformed. Reading the declared length instead accepts that client;
-    // a well-formed frame is byte-for-byte the same either way. The upper
-    // bound is still vanilla's, so an absurd length is refused rather than
-    // allocated.
-    let length = usize::try_from(length).ok()?;
-    if !(8..=MAX_PACKET_SIZE - 4).contains(&length) {
-        return None;
-    }
+        // Vanilla reads one 1460-byte chunk and hangs up unless the frame fills it
+        // exactly, which makes a client that coalesces two frames into one segment
+        // look malformed. Reading the declared length instead accepts that client;
+        // a well-formed frame is byte-for-byte the same either way. The upper
+        // bound is still vanilla's, so an absurd length is refused rather than
+        // allocated.
+        let length = usize::try_from(length).ok()?;
+        if !(8..=MAX_PACKET_SIZE - 4).contains(&length) {
+            return None;
+        }
 
-    let mut contents = vec![0_u8; length];
-    connection.read_exact(&mut contents).await.ok()?;
-    decode_request(&contents)
+        let mut contents = vec![0_u8; length];
+        connection.read_exact(&mut contents).await.ok()?;
+        decode_request(&contents)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Runs one command and waits for everything it prints.
@@ -143,8 +166,16 @@ async fn send_command_response(
     request_id: i32,
     response: &str,
 ) -> Result<(), io::Error> {
+    let write_deadline = Instant::now() + WRITE_TIMEOUT;
     for chunk in split_response(response) {
-        send(connection, request_id, SERVERDATA_RESPONSE_VALUE, chunk).await?;
+        send(
+            connection,
+            request_id,
+            SERVERDATA_RESPONSE_VALUE,
+            chunk,
+            write_deadline.saturating_duration_since(Instant::now()),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -155,19 +186,25 @@ async fn send_auth_failure(connection: &mut TcpStream) -> Result<(), io::Error> 
         AUTH_FAILURE_REQUEST_ID,
         SERVERDATA_AUTH_RESPONSE,
         "",
+        WRITE_TIMEOUT,
     )
     .await
 }
 
-async fn send(
-    connection: &mut TcpStream,
+async fn send<W>(
+    connection: &mut W,
     request_id: i32,
     kind: i32,
     payload: &str,
-) -> Result<(), io::Error> {
-    connection
-        .write_all(&encode_response(request_id, kind, payload))
+    deadline: Duration,
+) -> Result<(), io::Error>
+where
+    W: AsyncWrite + Unpin,
+{
+    let frame = encode_response(request_id, kind, payload);
+    timeout(deadline, connection.write_all(&frame))
         .await
+        .map_err(|_| io::Error::from(io::ErrorKind::TimedOut))?
 }
 
 /// Compares two secrets without leaking where they first differ.
@@ -190,7 +227,18 @@ fn constant_time_eq(candidate: &str, expected: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::constant_time_eq;
+    use std::{io::ErrorKind, time::Duration};
+
+    use tokio::{
+        io::{AsyncWriteExt as _, duplex},
+        task::yield_now,
+        time::timeout,
+    };
+
+    use super::{
+        super::packet::{SERVERDATA_AUTH, SERVERDATA_AUTH_RESPONSE, encode_response},
+        constant_time_eq, read_request, send,
+    };
 
     /// The comparison still answers correctly; being timing-safe is not an
     /// excuse for being wrong.
@@ -233,5 +281,68 @@ mod tests {
         // Both are the same length as the secret, so both walk all 32 bytes.
         assert_eq!(differs_early.len(), expected.len());
         assert_eq!(differs_late.len(), expected.len());
+    }
+
+    #[tokio::test]
+    async fn fragmented_request_is_read_as_one_source_rcon_frame() {
+        let (mut server_side, mut client_side) = duplex(64);
+        let frame = encode_response(41, SERVERDATA_AUTH, "test-password");
+        let writer = tokio::spawn(async move {
+            for fragment in frame.chunks(2) {
+                client_side
+                    .write_all(fragment)
+                    .await
+                    .expect("fragment should write");
+                yield_now().await;
+            }
+        });
+
+        let request = read_request(&mut server_side, Duration::from_secs(1))
+            .await
+            .expect("fragmented request should decode");
+        writer.await.expect("fragment writer should finish");
+
+        assert_eq!(request.request_id, 41);
+        assert_eq!(request.kind, SERVERDATA_AUTH);
+        assert_eq!(request.body, "test-password");
+    }
+
+    #[tokio::test]
+    async fn partial_request_is_dropped_when_its_deadline_expires() {
+        let (mut server_side, mut client_side) = duplex(64);
+        client_side
+            .write_all(&12_i32.to_le_bytes()[..2])
+            .await
+            .expect("partial length should write");
+
+        let request = timeout(
+            Duration::from_millis(100),
+            read_request(&mut server_side, Duration::from_millis(25)),
+        )
+        .await
+        .expect("the request deadline must bound the read");
+
+        assert!(request.is_none());
+    }
+
+    #[tokio::test]
+    async fn blocked_response_write_is_bounded_by_its_deadline() {
+        let (mut server_side, _client_side) = duplex(1);
+
+        let error = timeout(
+            Duration::from_millis(100),
+            send(
+                &mut server_side,
+                41,
+                SERVERDATA_AUTH_RESPONSE,
+                "response that cannot fit",
+                Duration::from_millis(25),
+            ),
+        )
+        .await
+        .expect("the write deadline must bound the send")
+        .expect_err("a peer that does not read must hit the write deadline");
+
+        assert_eq!(error.kind(), ErrorKind::TimedOut);
     }
 }

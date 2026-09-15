@@ -17,6 +17,7 @@ use std::{
     net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf, absolute},
     sync::{Arc, OnceLock, Weak},
+    time::Duration,
 };
 
 use foton_bedrock::config::BedrockConfig;
@@ -25,8 +26,28 @@ use foton_bedrock::key;
 use foton_core::{command::CommandRegistry, permission::PermissionGroupManager, server::Server};
 use foton_login::{JavaTcpClient, ServerConnectionSession};
 use foton_plugin::{PluginHost, PluginHostConfig};
-use tokio::{net::TcpListener, runtime::Runtime, select};
+use tokio::{net::TcpListener, runtime::Runtime, select, time::sleep};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
+async fn accept_error_backoff(duration: Duration) {
+    sleep(duration).await;
+}
+
+async fn accept_or_backoff<T>(accept_result: io::Result<T>, duration: Duration) -> Option<T> {
+    match accept_result {
+        Ok(accepted) => Some(accepted),
+        Err(error) => {
+            log::warn!(
+                "Failed to accept Java connection: {error}; retrying after {} ms",
+                duration.as_millis()
+            );
+            accept_error_backoff(duration).await;
+            None
+        }
+    }
+}
 
 /// Command-line arguments.
 pub mod args;
@@ -284,12 +305,17 @@ impl FotonServer {
 
         let rcon_listener = if rcon_config.enable {
             Some(
-                rcon::RconListener::bind(rcon_config.port, rcon_config.password.into())
-                    .await
-                    .map_err(|source| FotonServerError::RconBind {
-                        port: rcon_config.port,
-                        source,
-                    })?,
+                rcon::RconListener::bind(
+                    rcon_config.bind,
+                    rcon_config.port,
+                    rcon_config.password.into(),
+                    rcon_config.max_connections,
+                )
+                .await
+                .map_err(|source| FotonServerError::RconBind {
+                    port: rcon_config.port,
+                    source,
+                })?,
             )
         } else {
             None
@@ -359,7 +385,9 @@ impl FotonServer {
                     break;
                 }
                 accept_result = self.tcp_listener.accept() => {
-                    let Ok((connection, address)) = accept_result else {
+                    let Some((connection, address)) =
+                        accept_or_backoff(accept_result, ACCEPT_ERROR_BACKOFF).await
+                    else {
                         continue;
                     };
                     if let Err(e) = connection.set_nodelay(true) {
@@ -529,11 +557,27 @@ async fn start_bedrock_supervisor(
 
 #[cfg(test)]
 mod tests {
-    use std::env;
+    use std::{env, io, time::Duration};
+    use tokio::time::Instant;
 
     use super::{
-        BedrockConfig, CancellationToken, resolve_run_directory, start_bedrock_supervisor,
+        BedrockConfig, CancellationToken, accept_or_backoff, resolve_run_directory,
+        start_bedrock_supervisor,
     };
+
+    #[tokio::test]
+    async fn production_accept_error_path_waits_before_retrying() {
+        let started = Instant::now();
+
+        let accepted = accept_or_backoff::<()>(
+            Err(io::Error::other("test accept failure")),
+            Duration::from_millis(20),
+        )
+        .await;
+
+        assert!(accepted.is_none());
+        assert!(started.elapsed() >= Duration::from_millis(20));
+    }
 
     #[test]
     fn resolve_run_directory_is_always_absolute() {

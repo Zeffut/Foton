@@ -229,7 +229,7 @@ for _ in $(seq 1 120); do
     tail -40 server.log
     exit 1
   fi
-  if ss -ltn 2>/dev/null | grep -q ":$PORT"; then
+  if python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1; then
     STATUS=0
     break
   fi
@@ -275,8 +275,8 @@ if [ "$GEYSER_STARTED" -eq 1 ]; then
   GEYSER_UDP_PORT=$(echo "$GEYSER_STARTUP_LINE" | grep -oE '[0-9]+$')
   if [ "$GEYSER_UDP_PORT" != "$PORT" ]; then
     note_failure "Geyser bound UDP $GEYSER_UDP_PORT, not the shared port $PORT"
-  elif ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
-    note_failure "TCP (Java) is not listening on $PORT according to ss"
+  elif ! python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1; then
+    note_failure "TCP (Java) is not accepting connections on $PORT"
   elif ! ss -lun 2>/dev/null | grep -q ":$PORT"; then
     note_failure "UDP (Bedrock) is not listening on $PORT according to ss -- the shared-port claim does not hold"
   else

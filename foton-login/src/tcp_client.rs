@@ -15,7 +15,10 @@ use std::{
 use crossbeam::atomic::AtomicCell;
 use foton_core::player::{
     ClientInformation, PlayerConnection,
-    connection::{JavaNetworkWriter, OutboundPacket},
+    connection::{
+        JavaNetworkWriter, OutboundPacket, OutboundReceiver, OutboundSender, outbound_channel,
+        write_final_disconnect,
+    },
 };
 use foton_core::server::Server;
 use foton_protocol::{
@@ -48,7 +51,7 @@ use tokio::{
     sync::{
         Notify,
         broadcast::{self, Sender, error::RecvError},
-        mpsc::{self, UnboundedReceiver, UnboundedSender, error::TryRecvError},
+        mpsc::error::TryRecvError,
     },
     time::timeout,
 };
@@ -157,7 +160,7 @@ pub struct JavaTcpClient {
     pub cancel_token: CancellationToken,
 
     /// A queue of encoded packets to send to the network.
-    pub outgoing_queue: UnboundedSender<OutboundPacket>,
+    pub outgoing_queue: OutboundSender,
     /// The packet encoder for outgoing packets.
     pub network_writer: JavaNetworkWriter,
     /// Current compression settings.
@@ -209,11 +212,11 @@ impl JavaTcpClient {
         bedrock: BedrockConfig,
     ) -> (
         Self,
-        UnboundedReceiver<OutboundPacket>,
+        OutboundReceiver,
         TCPNetworkDecoder<BufReader<OwnedReadHalf>>,
     ) {
         let (read, write) = tcp_stream.into_split();
-        let (outgoing_queue, recv) = mpsc::unbounded_channel();
+        let (outgoing_queue, recv) = outbound_channel();
         let (connection_updates, _) = broadcast::channel(128);
 
         let client = Self {
@@ -275,6 +278,27 @@ impl JavaTcpClient {
         }
     }
 
+    async fn send_final_bare_packet<P: ClientPacket>(&self, packet: P) {
+        let compression = self.compression.load();
+        let protocol = self.protocol.load();
+        let Ok(packet) = EncodedPacket::from_bare(packet, compression, protocol) else {
+            log::warn!(
+                "Client {}: dropping a disconnect packet that failed to encode",
+                self.id
+            );
+            return;
+        };
+
+        if let Err(err) =
+            write_final_disconnect(Self::write_network_packet(&self.network_writer, &packet)).await
+        {
+            log::warn!(
+                "Failed to send final disconnect packet to client {}: {err}",
+                self.id
+            );
+        }
+    }
+
     /// Sends an already encoded packet immediately, without queuing.
     pub async fn send_packet_now(&self, packet: &EncodedPacket) {
         if let Err(err) = Self::write_network_packet(&self.network_writer, packet).await
@@ -303,14 +327,14 @@ impl JavaTcpClient {
     /// Queues an already encoded packet to be sent.
     pub fn send_packet(&self, packet: EncodedPacket) -> Result<(), PacketError> {
         self.outgoing_queue
-            .send(OutboundPacket::Packet(packet))
-            .map_err(|e| {
+            .try_send_packet(packet)
+            .map_err(|error| {
+                self.close();
                 PacketError::SendError(format!(
-                    "Failed to send packet to client {}: {}",
-                    self.id, e
+                    "Failed to queue packet for client {}: {error:?}",
+                    self.id
                 ))
-            })?;
-        Ok(())
+            })
     }
 
     /// Starts a task that will send packets to the client from the outgoing packet queue.
@@ -322,10 +346,7 @@ impl JavaTcpClient {
             reason = "this task is only started for a connection this file built as PlayerConnection::Java; the other arm exists to keep the match exhaustive"
         )
     )]
-    pub fn start_outgoing_packet_task(
-        self: &Arc<Self>,
-        mut sender_recv: UnboundedReceiver<OutboundPacket>,
-    ) {
+    pub fn start_outgoing_packet_task(self: &Arc<Self>, mut sender_recv: OutboundReceiver) {
         let cancel_token = self.cancel_token.clone();
         let network_writer = self.network_writer.clone();
         let id = self.id;
@@ -349,7 +370,11 @@ impl JavaTcpClient {
                             };
 
                             if close_after_write {
-                                if let Err(err) = Self::write_network_packet(&network_writer, &packet).await {
+                                if let Err(err) = write_final_disconnect(
+                                    Self::write_network_packet(&network_writer, &packet),
+                                )
+                                .await
+                                {
                                     log::warn!("Failed to send disconnect packet to client {id}: {err}");
                                 }
                                 cancel_token.cancel();
@@ -424,7 +449,7 @@ impl JavaTcpClient {
 
     async fn write_queued_disconnect(
         network_writer: &JavaNetworkWriter,
-        sender_recv: &mut UnboundedReceiver<OutboundPacket>,
+        sender_recv: &mut OutboundReceiver,
         id: u64,
     ) {
         let mut disconnect_packet = None;
@@ -439,7 +464,9 @@ impl JavaTcpClient {
         let Some(packet) = disconnect_packet else {
             return;
         };
-        if let Err(err) = Self::write_network_packet(network_writer, &packet).await {
+        if let Err(err) =
+            write_final_disconnect(Self::write_network_packet(network_writer, &packet)).await
+        {
             log::warn!("Failed to send disconnect packet to client {id} during close: {err}");
         }
     }
@@ -736,11 +763,11 @@ impl JavaTcpClient {
         match self.protocol.load() {
             ConnectionProtocol::Login => {
                 let packet = CLoginDisconnect::new(&reason, self);
-                self.send_bare_packet_now(packet).await;
+                self.send_final_bare_packet(packet).await;
             }
             ConnectionProtocol::Play | ConnectionProtocol::Config => {
                 let packet = CDisconnect::new(&reason, self);
-                self.send_bare_packet_now(packet).await;
+                self.send_final_bare_packet(packet).await;
             }
             ConnectionProtocol::Handshake | ConnectionProtocol::Status => (),
         }

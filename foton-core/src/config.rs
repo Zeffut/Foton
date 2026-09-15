@@ -92,6 +92,8 @@ pub struct RuntimeConfig {
     pub whitelist_enabled: bool,
     /// Optional authentication endpoint for online-mode `hasJoined` checks.
     pub auth_server: Option<String>,
+    /// Whether remote HTTP authentication endpoints are explicitly allowed.
+    pub allow_insecure_auth_server: bool,
     /// Optional endpoint for online-mode player name-to-profile lookups.
     pub profile_server: Option<String>,
     /// Optional endpoint for Mojang-compatible service public keys.

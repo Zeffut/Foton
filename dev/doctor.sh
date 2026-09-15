@@ -15,6 +15,14 @@ chk() {
     KO=$((KO + 1))
   fi
 }
+optional_chk() {
+  local label="$1"; shift
+  if out=$("$@" 2>&1); then
+    printf '  [ OK ] %-32s %s\n' "$label" "$(echo "$out" | head -1 | cut -c1-46)"
+  else
+    printf '  [WARN] %-32s %s\n' "$label" "$(echo "$out" | head -1 | cut -c1-46)"
+  fi
+}
 
 echo "=== Tools ==="
 chk "rustc"    rustc --version
@@ -24,6 +32,20 @@ chk "ast-grep" ast-grep --version
 chk "prek"     prek --version
 chk "gh"       gh --version
 chk "java"     java -version
+chk "python3"  python3 --version
+chk "javac"    javac --version
+chk "jar"      jar --version
+chk "curl"     curl --version
+if command -v sha256sum >/dev/null 2>&1; then
+  chk "checksum tooling (sha256sum)" sha256sum --version
+elif command -v shasum >/dev/null 2>&1; then
+  chk "checksum tooling (shasum)" shasum --version
+else
+  printf '  [FAIL] %-32s %s\n' "checksum tooling" "sha256sum or shasum is missing"
+  KO=$((KO + 1))
+fi
+optional_chk "ss (legacy TCP probe)" ss --version
+chk "TCP helper" python3 "$PWD/dev/wait-tcp.py" --help
 
 echo
 echo "=== Repository ==="
@@ -88,7 +110,8 @@ fi
 
 echo
 echo "=== Hooks ==="
-if [ -f .git/hooks/pre-commit ]; then
+PRE_COMMIT_HOOK=$(git rev-parse --git-path hooks/pre-commit 2>/dev/null || true)
+if [ -n "$PRE_COMMIT_HOOK" ] && [ -f "$PRE_COMMIT_HOOK" ]; then
   echo "  [ OK ] pre-commit hook installed"
   OK=$((OK + 1))
 else

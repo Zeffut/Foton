@@ -6,6 +6,8 @@
 //! counts everything after itself, so it is the payload length plus the two
 //! ids, the terminator and the pad.
 
+use std::mem;
+
 /// Largest request frame vanilla will read in one go.
 ///
 /// Vanilla parity: `PktUtils.MAX_PACKET_SIZE`.
@@ -14,11 +16,17 @@ pub(super) const MAX_PACKET_SIZE: usize = 1460;
 /// Bytes a frame carries besides its payload: two ids, a terminator and a pad.
 const FRAME_OVERHEAD: usize = 10;
 
+/// Payload bytes left after the length prefix and frame overhead.
+const MAX_RESPONSE_PAYLOAD_BYTES: usize = MAX_PACKET_SIZE - mem::size_of::<i32>() - FRAME_OVERHEAD;
+
 /// Largest response chunk vanilla emits before splitting.
 ///
 /// Vanilla parity: the `4096` of `RconClient.sendCmdResponse`, which is a
 /// `String.substring` bound and therefore counts UTF-16 code units.
 const MAX_RESPONSE_UNITS: usize = 4096;
+
+/// Maximum command output sent for one request.
+pub(super) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// Client-to-server login attempt. Vanilla `SERVERDATA_AUTH`.
 pub(super) const SERVERDATA_AUTH: i32 = 3;
@@ -86,8 +94,15 @@ pub(super) fn encode_response(request_id: i32, kind: i32, payload: &str) -> Vec<
 ///
 /// Vanilla cuts at a UTF-16 index and will happily halve a surrogate pair.
 /// This cuts at the last code-point boundary that fits instead, which no
-/// client can tell apart except by not receiving a broken character.
+/// client can tell apart except by not receiving a broken character. Foton
+/// also keeps the encoded frame within `MAX_PACKET_SIZE`; vanilla's UTF-16-only
+/// bound can exceed that byte limit after UTF-8 encoding.
 pub(super) fn split_response(response: &str) -> Vec<&str> {
+    let mut response_end = response.len().min(MAX_RESPONSE_BYTES);
+    while !response.is_char_boundary(response_end) {
+        response_end -= 1;
+    }
+    let response = &response[..response_end];
     if response.is_empty() {
         return vec![""];
     }
@@ -98,12 +113,13 @@ pub(super) fn split_response(response: &str) -> Vec<&str> {
         let mut units = 0;
         let mut end = start;
         for (offset, character) in response[start..].char_indices() {
-            let next = units + character.len_utf16();
-            if next > MAX_RESPONSE_UNITS {
+            let next_units = units + character.len_utf16();
+            let next_bytes = offset + character.len_utf8();
+            if next_units > MAX_RESPONSE_UNITS || next_bytes > MAX_RESPONSE_PAYLOAD_BYTES {
                 break;
             }
-            units = next;
-            end = start + offset + character.len_utf8();
+            units = next_units;
+            end = start + next_bytes;
         }
         chunks.push(&response[start..end]);
         start = end;
@@ -114,8 +130,9 @@ pub(super) fn split_response(response: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_RESPONSE_UNITS, RconRequest, SERVERDATA_AUTH, SERVERDATA_RESPONSE_VALUE,
-        decode_request, encode_response, split_response,
+        MAX_PACKET_SIZE, MAX_RESPONSE_BYTES, MAX_RESPONSE_PAYLOAD_BYTES, MAX_RESPONSE_UNITS,
+        RconRequest, SERVERDATA_AUTH, SERVERDATA_RESPONSE_VALUE, decode_request, encode_response,
+        split_response,
     };
 
     #[test]
@@ -155,11 +172,11 @@ mod tests {
 
     #[test]
     fn a_long_response_is_split_and_loses_nothing() {
-        let response = "x".repeat(MAX_RESPONSE_UNITS * 2 + 5);
+        let response = "x".repeat(MAX_RESPONSE_PAYLOAD_BYTES * 2 + 5);
         let chunks = split_response(&response);
         assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0].len(), MAX_RESPONSE_UNITS);
-        assert_eq!(chunks[1].len(), MAX_RESPONSE_UNITS);
+        assert_eq!(chunks[0].len(), MAX_RESPONSE_PAYLOAD_BYTES);
+        assert_eq!(chunks[1].len(), MAX_RESPONSE_PAYLOAD_BYTES);
         assert_eq!(chunks[2].len(), 5);
         assert_eq!(chunks.concat(), response);
     }
@@ -177,5 +194,38 @@ mod tests {
                 "a chunk may not exceed the vanilla bound"
             );
         }
+    }
+
+    #[test]
+    fn encoded_response_frames_stay_within_packet_limit() {
+        let response = "\u{1F9F1}".repeat(MAX_RESPONSE_UNITS);
+        let chunks = split_response(&response);
+
+        assert_eq!(chunks.concat(), response);
+        for chunk in chunks {
+            let frame = encode_response(7, SERVERDATA_RESPONSE_VALUE, chunk);
+            assert!(
+                frame.len() <= MAX_PACKET_SIZE,
+                "encoded frame has {} bytes, limit is {MAX_PACKET_SIZE}",
+                frame.len()
+            );
+        }
+    }
+
+    #[test]
+    fn total_response_work_is_capped_at_one_mebibyte() {
+        let response = "x".repeat(MAX_RESPONSE_BYTES + 1);
+        let chunks = split_response(&response);
+
+        assert_eq!(chunks.concat().len(), MAX_RESPONSE_BYTES);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_RESPONSE_UNITS));
+    }
+
+    #[test]
+    fn response_cap_never_splits_a_utf8_character() {
+        let response = format!("{}é", "x".repeat(MAX_RESPONSE_BYTES - 1));
+        let chunks = split_response(&response);
+
+        assert_eq!(chunks.concat(), "x".repeat(MAX_RESPONSE_BYTES - 1));
     }
 }

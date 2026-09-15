@@ -19,6 +19,7 @@ tokio-util.workspace = true
 
 # Serialization
 base64.workspace = true
+serde_json.workspace = true
 
 # Concurrency
 crossbeam.workspace = true

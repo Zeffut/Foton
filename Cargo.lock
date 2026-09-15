@@ -960,6 +960,7 @@ dependencies = [
  "rand 0.10.2",
  "reqwest",
  "rsa",
+ "serde_json",
  "sha1",
  "sha2",
  "text_components",

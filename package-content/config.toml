@@ -20,6 +20,8 @@ online_mode = true
 whitelist_enabled = false
 # Optional authentication endpoint for online mode. Omit to use Mojang's session server.
 # auth_server = "https://sessionserver.mojang.com/session/minecraft/hasJoined"
+# Allow a remote HTTP authentication endpoint (unsafe; HTTPS is recommended)
+# allow_insecure_auth_server = false
 # Optional name-to-profile lookup endpoint used by commands such as /op.
 # profile_server = "https://api.minecraftservices.com/minecraft/profile/lookup/name"
 # Optional service public-key endpoint used to validate signed chat certificates.
@@ -46,8 +48,12 @@ command_spam_threshold_seconds = 10
 [server.rcon]
 # Whether the rcon port is opened at all
 enable = false
+# IP address rcon listens on. Keep loopback unless remote administration is required.
+bind = "127.0.0.1"
 # Port rcon listens on
 port = 25575
+# Maximum simultaneous rcon connections
+max_connections = 8
 # Password every rcon client must send before it may run a command.
 # The server refuses to start with rcon enabled and this left blank.
 password = ""
