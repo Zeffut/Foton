@@ -2,14 +2,31 @@ package org.bukkit.attribute;
 
 /** Vanilla attribute keys commonly used by Bukkit plugins. */
 public enum Attribute implements org.bukkit.Keyed {
-    GRAVITY,
-    GENERIC_MAX_HEALTH, GENERIC_FOLLOW_RANGE, GENERIC_KNOCKBACK_RESISTANCE,
-    GENERIC_MOVEMENT_SPEED, GENERIC_ATTACK_DAMAGE, GENERIC_ATTACK_KNOCKBACK,
-    GENERIC_ATTACK_SPEED, GENERIC_ARMOR, GENERIC_ARMOR_TOUGHNESS,
-    GENERIC_LUCK, GENERIC_JUMP_STRENGTH, GENERIC_SCALE,
-    PLAYER_BLOCK_INTERACTION_RANGE, PLAYER_ENTITY_INTERACTION_RANGE,
-    PLAYER_BLOCK_BREAK_SPEED, PLAYER_MINING_EFFICIENCY, PLAYER_SNEAKING_SPEED,
-    ZOMBIE_SPAWN_REINFORCEMENTS;
+    GRAVITY("gravity"),
+    GENERIC_MAX_HEALTH("max_health"),
+    GENERIC_FOLLOW_RANGE("follow_range"),
+    GENERIC_KNOCKBACK_RESISTANCE("knockback_resistance"),
+    GENERIC_MOVEMENT_SPEED("movement_speed"),
+    GENERIC_ATTACK_DAMAGE("attack_damage"),
+    GENERIC_ATTACK_KNOCKBACK("attack_knockback"),
+    GENERIC_ATTACK_SPEED("attack_speed"),
+    GENERIC_ARMOR("armor"),
+    GENERIC_ARMOR_TOUGHNESS("armor_toughness"),
+    GENERIC_LUCK("luck"),
+    GENERIC_JUMP_STRENGTH("jump_strength"),
+    GENERIC_SCALE("scale"),
+    PLAYER_BLOCK_INTERACTION_RANGE("block_interaction_range"),
+    PLAYER_ENTITY_INTERACTION_RANGE("entity_interaction_range"),
+    PLAYER_BLOCK_BREAK_SPEED("block_break_speed"),
+    PLAYER_MINING_EFFICIENCY("mining_efficiency"),
+    PLAYER_SNEAKING_SPEED("sneaking_speed"),
+    ZOMBIE_SPAWN_REINFORCEMENTS("spawn_reinforcements");
+
+    private final org.bukkit.NamespacedKey key;
+
+    Attribute(String key) {
+        this.key = org.bukkit.NamespacedKey.minecraft(key);
+    }
 
     /** Paper/Bukkit compatibility alias. */
     public static final Attribute MAX_HEALTH = GENERIC_MAX_HEALTH;
@@ -19,5 +36,5 @@ public enum Attribute implements org.bukkit.Keyed {
     public static final Attribute MOVEMENT_SPEED = GENERIC_MOVEMENT_SPEED;
     public static final Attribute SCALE = GENERIC_SCALE;
 
-    @Override public org.bukkit.NamespacedKey getKey() { return org.bukkit.NamespacedKey.minecraft(name().toLowerCase(java.util.Locale.ROOT).replace('_', '.')); }
+    @Override public org.bukkit.NamespacedKey getKey() { return key; }
 }
