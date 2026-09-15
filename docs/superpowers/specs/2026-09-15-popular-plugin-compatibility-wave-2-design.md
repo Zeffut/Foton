@@ -56,11 +56,13 @@ Add modern attribute and potion names only as references to the existing keyed i
 
 Identity tests must prove aliases are the same objects/enum constants. No separate unbacked registry identities are permitted.
 
-### 5. Shaded JDBC driver discovery
+### 5. Paper-compatible JDBC runtime
 
-Plugin code must be able to use a JDBC driver and `META-INF/services/java.sql.Driver` packaged inside its own JAR, as popular database-backed plugins do. Driver discovery and registration must occur through the plugin classloader at the correct lifecycle point, preserve classloader isolation, and avoid retaining plugin classloaders after disable/reload.
+Paper places Xerial SQLite JDBC on the server classpath. Foton must match that practical contract with a pinned, checksum-verified runtime library and initialize host-visible `java.sql.Driver` providers before any plugin constructor or lifecycle callback.
 
-The regression fixture must contain a tiny in-JAR JDBC driver and service descriptor so the test remains deterministic and network-free. Foton must not special-case SQLite or add a global SQLite dependency.
+Foton must not set the thread context classloader to a plugin loader for discovery: `DriverManager` provider initialization is process-global and plugin-owned registrations would retain plugin classloaders across disable/reload. A deterministic host-classpath fixture must prove provider discovery while preserving the original context classloader.
+
+If a plugin disables itself during `onEnable`, the host must respect that state: do not emit `PluginEnableEvent`, transition it back to enabled, or log a successful enable.
 
 ### 6. Additional already-backed API
 
@@ -85,7 +87,7 @@ Add only the following low-risk contracts confirmed against the clean Zelda gate
 1. A copied checkout whose path contains spaces builds the plugin API without pre-existing ignored generated registry Rust.
 2. Focused Java checks and Rust native tests cover the new bridge and adapter behavior.
 3. Every planned Zelda diagnostic symbol disappears. The clean baseline should fall from 392 to about 330 after entity/adapters/aliases and about 319 after the additional backed API, while acknowledging javac cascade effects.
-4. A shaded, service-discovered JDBC fixture connects during plugin enable and releases its classloader-owned registration on disable/reload.
+4. A host-visible, service-discovered JDBC fixture connects during plugin enable without changing the thread context classloader or retaining a plugin-owned driver. A self-disabling plugin stays disabled and emits no enable event.
 5. Runtime Zelda validation uses the version where Simple Voice Chat is truly optional and progresses beyond the SQLite connection that currently fails.
 6. `bash dev/ci.sh` passes on the exact final commit.
 

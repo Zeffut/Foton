@@ -77,20 +77,22 @@
 5. Run plugin API checks and build.
 6. Commit.
 
-### Task 5: Support JDBC drivers shaded inside plugin JARs
+### Task 5: Match Paper's JDBC runtime and self-disable lifecycle
 
 **Files:**
-- Modify: `plugin-api/src/foton/PluginHost.java` and focused classloader/lifecycle helpers as required
+- Modify: `plugin-api/lib/manifest.txt` and runtime library preparation as required
+- Modify: `plugin-api/src/foton/PluginHost.java`
 - Modify: plugin lifecycle fixture sources/resources under `plugin-api/fixtures/`
 - Modify focused Java checks
 
 **Steps:**
-1. Add a minimal plugin fixture that shades a tiny JDBC driver plus `META-INF/services/java.sql.Driver` into its own JAR and calls `DriverManager.getConnection` during enable. Observe the current `No suitable driver` failure.
-2. Correct plugin classloader context and driver discovery/registration at the narrowest lifecycle boundary, without special-casing SQLite or sharing plugin-private classes globally.
-3. Add disable/reload assertions proving driver registrations and plugin classloaders are not leaked or reused across plugin identities.
-4. Run focused lifecycle checks and the normal plugin API build.
-5. Re-run Zelda `ae06d49cb093a977ce2192bb31426a118d342c80` and confirm startup advances past SQLite driver acquisition.
-6. Commit.
+1. Add a JVM-isolated fixture with a tiny host-classpath JDBC provider and `META-INF/services/java.sql.Driver`; its plugin calls only `DriverManager.getConnection` during enable. Observe the current `No suitable driver` failure when the normal thread context classloader cannot see the provider.
+2. Pin the same Xerial SQLite JDBC line supplied by the target Paper server in Foton's verified runtime manifest, including exact filename and SHA-256 through the existing library preparation path.
+3. Initialize only host-visible JDBC providers with `PluginHost.class.getClassLoader()` before plugin construction/lifecycle, while leaving the thread context classloader unchanged. Do not scan plugin-private providers or register plugin-owned drivers globally.
+4. Add a lifecycle fixture whose `onEnable` disables itself. Guard the post-callback transition so Foton emits no enable event, does not log success, and leaves the plugin disabled.
+5. Run focused lifecycle/JDBC checks and the normal plugin API build. Verify the provider remains host-owned and reload does not accumulate plugin-owned driver registrations.
+6. Re-run Zelda `ae06d49cb093a977ce2192bb31426a118d342c80` and confirm startup advances past SQLite driver acquisition.
+7. Commit.
 
 ### Task 6: Add additional API already backed by live foundations
 
