@@ -137,33 +137,26 @@ if [ "${1:-}" != "--check" ]; then
   exit 0
 fi
 
-# This consumer is compiled against Paper's ABI, then run against Foton's jar.
-# An explicit override keeps the check usable when Gradle uses a non-default
-# cache location.
-PAPER_API_26_2="${FOTON_PAPER_API_26_2:-}"
-if [ -z "$PAPER_API_26_2" ]; then
-  PAPER_CACHE_ROOT="${GRADLE_USER_HOME:-$HOME/.gradle}/caches/modules-2/files-2.1/io.papermc.paper/paper-api/26.2.build.121-stable"
-  for candidate in "$PAPER_CACHE_ROOT"/*/paper-api-26.2.build.121-stable.jar; do
-    if [ -f "$candidate" ]; then
-      PAPER_API_26_2="$candidate"
-      break
-    fi
-  done
-fi
-if [ ! -f "$PAPER_API_26_2" ]; then
-  echo "Paper 26.2 API jar is required for the binary compatibility check" >&2
-  echo "set FOTON_PAPER_API_26_2 to paper-api-26.2.build.121-stable.jar" >&2
-  exit 1
-fi
+# This consumer is compiled against the committed Paper 26.2 ABI fixture, then
+# run against Foton's jar with the fixture deliberately omitted. This verifies
+# both Builder's interface linkage and the inherited erased build() descriptor
+# without depending on a cache, override, download, or network.
+PAPER_ABI_FIXTURE_SRC="$REPO/plugin-api/check/paper-26.2-abi-fixture/src"
+PAPER_ABI_FIXTURE_CLASSES="$OUT/paper-26.2-abi-fixture-classes"
 PAPER_BINARY_CLASSES="$OUT/paper-binary-classes"
 FOTON_BINARY_RUNNER_CLASSES="$OUT/foton-binary-runner-classes"
-mkdir -p "$PAPER_BINARY_CLASSES"
-javac --release 21 -nowarn -d "$PAPER_BINARY_CLASSES" -cp "$PAPER_API_26_2$LIBS" \
+rm -rf "$PAPER_ABI_FIXTURE_CLASSES" "$PAPER_BINARY_CLASSES" "$FOTON_BINARY_RUNNER_CLASSES"
+mkdir -p "$PAPER_ABI_FIXTURE_CLASSES" "$PAPER_BINARY_CLASSES" "$FOTON_BINARY_RUNNER_CLASSES"
+javac --release 21 -nowarn -d "$PAPER_ABI_FIXTURE_CLASSES" \
+  "$PAPER_ABI_FIXTURE_SRC/io/papermc/paper/datacomponent/DataComponentBuilder.java" \
+  "$PAPER_ABI_FIXTURE_SRC/io/papermc/paper/datacomponent/item/ResolvableProfile.java"
+javac --release 21 -nowarn -d "$PAPER_BINARY_CLASSES" -cp "$PAPER_ABI_FIXTURE_CLASSES" \
   "$REPO/plugin-api/check/PaperResolvableProfileConsumer.java"
-mkdir -p "$FOTON_BINARY_RUNNER_CLASSES"
 javac --release 21 -nowarn -d "$FOTON_BINARY_RUNNER_CLASSES" \
   -cp "$PAPER_BINARY_CLASSES:$JAR$LIBS" \
   "$REPO/plugin-api/check/FotonResolvableProfileBinaryRunner.java"
+# PAPER_ABI_FIXTURE_CLASSES is intentionally absent: Foton must supply every
+# linked Paper type at runtime.
 java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
   FotonResolvableProfileBinaryRunner
 

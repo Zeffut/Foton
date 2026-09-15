@@ -29,10 +29,16 @@ public class ShapelessRecipe extends CraftingRecipe {
     }
     /** A stack's amount is the number of slots it occupies in a shapeless recipe. */
     public ShapelessRecipe addIngredient(ItemStack stack) {
-        return stack == null ? this : addIngredient(stack.getAmount(), stack);
+        return addIngredient(stack.getAmount(), stack);
     }
     /** Adds one exact choice for each requested ingredient. */
     public ShapelessRecipe addIngredient(int count, ItemStack stack) {
+        if (choices.size() + count > 9) {
+            throw new IllegalArgumentException("Shapeless recipes cannot have more than 9 ingredients");
+        }
+        if (stack.getType().isAir()) {
+            throw new IllegalArgumentException("Cannot have empty/air item stack choice");
+        }
         for (int remaining = count; remaining > 0; remaining--)
             addIngredient(new RecipeChoice.ExactChoice(stack));
         return this;

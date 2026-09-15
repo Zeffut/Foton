@@ -14,6 +14,7 @@ final class AdapterCheck {
         registryIteratorDelegatesTheCompleteStreamIteratorContract();
         shapelessRecipePreservesStackIngredientMultiplicity();
         shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
+        shapelessRecipeRejectsInvalidItemStackIngredientsAtomically();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
     }
@@ -25,6 +26,7 @@ final class AdapterCheck {
         registryIteratorDelegatesTheCompleteStreamIteratorContract();
         shapelessRecipePreservesStackIngredientMultiplicity();
         shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
+        shapelessRecipeRejectsInvalidItemStackIngredientsAtomically();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
     }
@@ -184,6 +186,67 @@ final class AdapterCheck {
             rejected = true;
         }
         expect(rejected, failure);
+        sameChoices(recipe.getChoiceList(), before, failure + " without altering choices");
+    }
+
+    /**
+     * Catches the mutations that accept null/AIR stack choices, skip a stack's
+     * amount in the global limit, or partially append an over-limit batch.
+     */
+    private static void shapelessRecipeRejectsInvalidItemStackIngredientsAtomically() {
+        org.bukkit.inventory.ShapelessRecipe recipe = new org.bukkit.inventory.ShapelessRecipe(
+            org.bukkit.NamespacedKey.minecraft("adapter_stack_validation"),
+            new ItemStack(Material.STONE));
+
+        assertRejectedStackAdditionLeavesChoicesUntouched(recipe, 1, null,
+            NullPointerException.class,
+            "a counted null ItemStack must dereference as Paper does");
+        assertRejectedStackAdditionLeavesChoicesUntouched(recipe, null,
+            NullPointerException.class,
+            "an uncounted null ItemStack must dereference its amount as Paper does");
+        assertRejectedStackAdditionLeavesChoicesUntouched(recipe, 1,
+            new ItemStack(Material.AIR), IllegalArgumentException.class,
+            "an AIR ItemStack must be rejected before an exact choice is added");
+
+        for (int ingredient = 0; ingredient < 8; ingredient++) {
+            recipe.addIngredient(Material.COBBLESTONE);
+        }
+        assertRejectedStackAdditionLeavesChoicesUntouched(recipe, 2,
+            new ItemStack(Material.DIRT), IllegalArgumentException.class,
+            "a counted ItemStack batch over the global limit must be atomic");
+        assertRejectedStackAdditionLeavesChoicesUntouched(recipe, 2, null,
+            IllegalArgumentException.class,
+            "the global limit must run before a counted ItemStack is dereferenced");
+        assertRejectedStackAdditionLeavesChoicesUntouched(recipe,
+            new ItemStack(Material.DIRT, 2), IllegalArgumentException.class,
+            "the uncounted ItemStack overload must honor its stack amount and global limit");
+    }
+
+    private static void assertRejectedStackAdditionLeavesChoicesUntouched(
+            org.bukkit.inventory.ShapelessRecipe recipe, int count, ItemStack stack,
+            Class<? extends RuntimeException> expectedType, String failure) {
+        java.util.List<org.bukkit.inventory.RecipeChoice> before =
+            java.util.List.copyOf(recipe.getChoiceList());
+        try {
+            recipe.addIngredient(count, stack);
+            throw new AssertionError(failure + " did not throw");
+        } catch (RuntimeException expected) {
+            equal(expected.getClass(), expectedType, failure + " exception type");
+        }
+        sameChoices(recipe.getChoiceList(), before, failure + " without altering choices");
+    }
+
+    private static void assertRejectedStackAdditionLeavesChoicesUntouched(
+            org.bukkit.inventory.ShapelessRecipe recipe, ItemStack stack,
+            Class<? extends RuntimeException> expectedType, String failure) {
+        java.util.List<org.bukkit.inventory.RecipeChoice> before =
+            java.util.List.copyOf(recipe.getChoiceList());
+        try {
+            recipe.addIngredient(stack);
+            throw new AssertionError(failure + " did not throw");
+        } catch (RuntimeException expected) {
+            equal(expected.getClass(), expectedType, failure + " exception type");
+        }
         sameChoices(recipe.getChoiceList(), before, failure + " without altering choices");
     }
 
