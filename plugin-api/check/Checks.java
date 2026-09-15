@@ -23,8 +23,9 @@ public final class Checks {
         lifecycle(args[1], args[2]);
         dependencies(args[3], args[4], args[5], args[6]);
         libraries(args[7], args[8], args[9], args[10]);
-        paper(args[11]);
+        paper(args[11], args[12]);
         YamlCheck.check();
+        assertHostIsEmpty();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"
                 + "    geometry, items, colors and commands");
@@ -40,6 +41,21 @@ public final class Checks {
         if (expected == null ? actual != null : !expected.equals(actual)) {
             throw new AssertionError(what + ": expected " + expected + ", got " + actual);
         }
+    }
+
+    private static void assertHostIsEmpty() throws Exception {
+        same(foton.PluginHost.all().length, 0,
+            "disableAll retained plugins");
+        java.lang.reflect.Field handlers = foton.EventBridge.class
+            .getDeclaredField("handlers");
+        handlers.setAccessible(true);
+        int handlerCount = ((java.util.Map<?, ?>) handlers.get(null)).values().stream()
+            .mapToInt(value -> ((java.util.List<?>) value).size()).sum();
+        same(handlerCount, 0, "disableAll retained event handlers");
+        same(foton.CommandMap.knownCommands().size(), 0,
+            "disableAll retained commands");
+        same(org.bukkit.Bukkit.getScheduler().getPendingTasks().size(), 0,
+            "disableAll retained pending tasks");
     }
 
     private static void lifecycle(String directory, String replacementDirectory)
@@ -418,7 +434,7 @@ public final class Checks {
         System.clearProperty("foton.fixture.dependencies.crossCallJoined");
     }
 
-    private static void paper(String directory) throws Exception {
+    private static void paper(String directory, String evidencePath) throws Exception {
         for (String property : java.util.List.of(
                 "foton.fixture.paper.fallback.bootstrap",
                 "foton.fixture.paper.fallback.constructor",
@@ -433,16 +449,20 @@ public final class Checks {
 
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
         java.io.PrintStream original = System.out;
+        int loaded;
         int enabled;
         try (java.io.PrintStream capture = new java.io.PrintStream(
                 bytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
             System.setOut(capture);
-            enabled = foton.PluginHost.loadAll(directory);
+            loaded = foton.PluginHost.loadAllOnLoad(directory);
+            enabled = foton.PluginHost.enableAll();
         } finally {
             System.setOut(original);
         }
         String log = bytes.toString(java.nio.charset.StandardCharsets.UTF_8);
         try {
+            same(loaded, 3,
+                "Paper bootstrap fixtures loaded count; log=" + log);
             same(enabled, 3,
                 "Paper bootstrap fixtures enabled count; log=" + log);
             org.bukkit.plugin.Plugin paper = foton.PluginHost.byName("PaperFixture");
@@ -491,9 +511,58 @@ public final class Checks {
                 "failed bootstrap lifecycle command leaked");
             same(foton.LifecycleDiagnostics.hostReferences("FailingBootstrap"), 0,
                 "failed bootstrap retained plugin or classloader resources");
+            writeFixtureEvidence(directory, evidencePath, loaded, enabled, log);
         } finally {
             foton.PluginHost.disableAll();
         }
+    }
+
+    private static void writeFixtureEvidence(
+            String directory, String output, int loaded, int enabled, String log)
+            throws Exception {
+        java.util.List<java.util.Map<String, String>> rejections = new java.util.ArrayList<>();
+        for (String line : log.lines().toList()) {
+            if (!line.startsWith("[host] ") || !line.contains(".jar failed: ")) continue;
+            int split = line.indexOf(" failed: ");
+            rejections.add(java.util.Map.of(
+                "fixture", line.substring("[host] ".length(), split),
+                "reason", line.substring(split + " failed: ".length())));
+        }
+        rejections.sort(java.util.Comparator.comparing(row -> row.get("fixture")));
+        long discovered;
+        try (var entries = java.nio.file.Files.list(java.nio.file.Path.of(directory))) {
+            discovered = entries.filter(path -> path.getFileName().toString().endsWith(".jar"))
+                .count();
+        }
+        same(rejections.size(), (int) (discovered - enabled),
+            "fixture rejection diagnostics count");
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\n")
+            .append("  \"discovered\": ").append(discovered).append(",\n")
+            .append("  \"enabled\": ").append(enabled).append(",\n")
+            .append("  \"loaded\": ").append(loaded).append(",\n")
+            .append("  \"rejected\": ").append(discovered - enabled).append(",\n")
+            .append("  \"rejections\": [\n");
+        for (int index = 0; index < rejections.size(); index++) {
+            var rejection = rejections.get(index);
+            json.append("    {\n")
+                .append("      \"fixture\": \"")
+                .append(jsonString(rejection.get("fixture"))).append("\",\n")
+                .append("      \"reason\": \"")
+                .append(jsonString(rejection.get("reason"))).append("\"\n")
+                .append("    }");
+            if (index + 1 < rejections.size()) json.append(',');
+            json.append('\n');
+        }
+        json.append("  ]\n}\n");
+        java.nio.file.Files.writeString(
+            java.nio.file.Path.of(output), json, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static String jsonString(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"")
+            .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
     private static void lifecycleTransferIsIdempotent() {

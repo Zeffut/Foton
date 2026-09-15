@@ -254,7 +254,13 @@ if [ -d "$FIXTURE_SRC" ]; then
     "$FIX/dependency-graph-plugins" "$FIX/dependency-duplicates-plugins" \
     "$FIX/dependency-existing-plugins" "$FIX/dependency-cross-call-plugins" \
     "$LIBRARY_PLUGINS" "$MALFORMED_LIBRARY_PLUGINS" \
-    "$DESCRIPTOR_CACHE_JAR" "$INTERRUPTED_CACHE_JAR" "$PAPER_PLUGINS"
+    "$DESCRIPTOR_CACHE_JAR" "$INTERRUPTED_CACHE_JAR" "$PAPER_PLUGINS" \
+    "$OUT/fixture-evidence.json"
+
+  mkdir -p "$REPO/build"
+  python3 "$REPO/dev/plugin_api_usage.py" \
+    --covered "$JAR" --events "$SRC" \
+    --summary-json "$REPO/build/plugin-api-evidence.json" >/dev/null
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

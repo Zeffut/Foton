@@ -84,6 +84,21 @@ its runtime dependencies with `FOTON_PLUGIN_LIBRARY_DIRECTORY`. With no
 FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
 unchanged.
 
+Compatibility evidence is regenerated and combined with:
+
+```sh
+bash dev/build-plugin-api.sh --check
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar --events plugin-api/src
+python3 dev/plugin_compatibility.py --api-report build/plugin-api-evidence.json --fixture-report plugin-api/build/fixture-evidence.json --output build/plugin-compatibility.json
+```
+
+The combined JSON deliberately separates binary symbols, the corpus ceiling,
+Rust-reachable events and executable fixtures. Shared symbol coverage is not a
+plugin success rate. The ceiling excludes the NMS/CraftBukkit slice, which a
+Rust server cannot provide, and an event counts only when a Rust call site can
+reach its Java construction path.
+
 ## License
 
 Foton is free software under the

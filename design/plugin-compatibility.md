@@ -5,6 +5,24 @@ blocks it, and how the surface gets bounded. Written 2026-08-31. The measured
 API bridge and event foundation are now under active implementation; the
 staging notes below remain the architecture and coverage baseline.
 
+## Current generated evidence
+
+The final Wave 1 branch produces `build/plugin-compatibility.json` from the
+built API and Java fixture run. It reports four separate measurements:
+
+- binary: 2,478 of 2,487 shared referenced members resolve;
+- ceiling: 41 of 59 corpus plugins stay on the public API, while 18 reach into
+  NMS or CraftBukkit;
+- events: 101 of 199 listened-for event types have a Java construction path
+  reached by a Rust call site;
+- fixtures: the isolated Paper set discovers 6 jars, loads and enables 3, and
+  rejects 3 with causal diagnostics.
+
+These numbers cannot be collapsed into a plugin success percentage. Shared
+symbol coverage is not runtime behavior, the 18-plugin NMS/CraftBukkit slice is
+excluded from the public-API ceiling, event declarations count only with a Rust
+caller, and fixtures prove only the paths they execute.
+
 ## What is actually being asked for
 
 A Bukkit-family plugin is a JVM jar compiled against `org.bukkit.*`, discovered
@@ -159,8 +177,8 @@ what the API is.
 `dev/plugin_api_usage.py` reads the constant pool of every class in every jar of
 a corpus and ranks what it finds; `dev/plugin-api-usage.json` is the committed
 ledger from a first run over the fifty-nine most-downloaded server plugins.
-6,345 distinct API members are referenced; 2,509 of them by more than one
-plugin.
+5,973 distinct API members are referenced; 2,487 of them by more than one
+plugin. These are the counts emitted from the current committed ledger.
 
 Three findings change the plan that was written above them.
 

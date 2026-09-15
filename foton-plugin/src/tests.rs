@@ -6,9 +6,13 @@
 
 use std::fs::{create_dir_all, write};
 use std::path::PathBuf;
-use std::sync::Weak;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 
-use super::{PluginHostConfig, PluginHostError};
+use foton_core::event::{EventBus, ServerTickEvent};
+use foton_utils::Identifier;
+
+use super::{HostLifecycle, PluginHostConfig, PluginHostError};
 
 fn config() -> PluginHostConfig {
     PluginHostConfig {
@@ -143,3 +147,73 @@ fn a_missing_runtime_library_directory_is_reported_before_startup() {
 }
 
 use super::PluginHost;
+
+/// Rebinding must replace the owner's complete subscription set without
+/// retaining the server through an `Arc` cycle.
+#[test]
+fn repeated_binding_does_not_duplicate_owner_subscriptions_and_is_weak() {
+    let lifecycle = HostLifecycle::new();
+    let events = Arc::new(EventBus::new());
+    let owner = Identifier::from_foton("plugins");
+    let resets = AtomicUsize::new(0);
+    let subscriptions = AtomicUsize::new(0);
+
+    for _ in 0..2 {
+        lifecycle.bind(
+            &Arc::downgrade(&events),
+            |events| {
+                resets.fetch_add(1, Ordering::Relaxed);
+                events.forget(&owner);
+            },
+            |events| {
+                subscriptions.fetch_add(1, Ordering::Relaxed);
+                events.on::<ServerTickEvent, _>(owner.clone(), |_| {});
+            },
+        );
+    }
+
+    assert_eq!(events.listener_count::<ServerTickEvent>(), 1);
+    assert_eq!(resets.load(Ordering::Relaxed), 1);
+    assert_eq!(subscriptions.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        Arc::strong_count(&events),
+        1,
+        "the host must store only Weak"
+    );
+}
+
+/// Graceful shutdown and startup rollback share the same exactly-once gate.
+#[test]
+fn graceful_and_startup_failure_unsubscribe_and_disable_once() {
+    for path in ["graceful shutdown", "startup failure"] {
+        let lifecycle = HostLifecycle::new();
+        let events = Arc::new(EventBus::new());
+        let owner = Identifier::from_foton("plugins");
+        lifecycle.bind(
+            &Arc::downgrade(&events),
+            |_| {},
+            |events| events.on::<ServerTickEvent, _>(owner.clone(), |_| {}),
+        );
+
+        let java_disables = AtomicUsize::new(0);
+        let rust_unsubscribes = AtomicUsize::new(0);
+        for _ in 0..2 {
+            lifecycle
+                .shutdown(
+                    |events| {
+                        rust_unsubscribes.fetch_add(1, Ordering::Relaxed);
+                        events.forget(&owner);
+                    },
+                    || {
+                        java_disables.fetch_add(1, Ordering::Relaxed);
+                        Ok::<(), ()>(())
+                    },
+                )
+                .expect("the test disable action cannot fail");
+        }
+
+        assert_eq!(events.listener_count::<ServerTickEvent>(), 0, "{path}");
+        assert_eq!(rust_unsubscribes.load(Ordering::Relaxed), 1, "{path}");
+        assert_eq!(java_disables.load(Ordering::Relaxed), 1, "{path}");
+    }
+}

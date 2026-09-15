@@ -27,11 +27,14 @@
 use std::ffi::{CString, NulError, c_void};
 use std::fs::read_dir;
 use std::io;
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use foton_core::server::Server;
+use foton_utils::locks::SyncMutex;
 use jni::objects::JString;
 use jni::sys::{JNI_OK, JNI_VERSION_1_8, JavaVM as RawJavaVm, JavaVMInitArgs, JavaVMOption};
 use jni::{JavaVM, errors::Error as JniError};
@@ -157,10 +160,61 @@ fn jars_in(directory: &Path) -> Result<Vec<String>, PluginHostError> {
 /// [`Self::disable_all`] to stop the plugins.
 pub struct PluginHost {
     vm: Arc<JavaVM>,
+    lifecycle: HostLifecycle<Server>,
     /// The loaded runtime, kept alive because the VM's code lives in it.
     ///
     /// Dropping this would unmap the library the JVM is executing from.
     _runtime: libloading::Library,
+}
+
+/// The host-side association whose lifecycle must not keep a server alive.
+///
+/// `T` is generic only so the ownership and exactly-once behavior can be
+/// exercised without constructing a complete server or JVM.
+struct HostLifecycle<T> {
+    server: SyncMutex<Weak<T>>,
+    shutdown: AtomicBool,
+}
+
+impl<T> HostLifecycle<T> {
+    const fn new() -> Self {
+        Self {
+            server: SyncMutex::new(Weak::new()),
+            shutdown: AtomicBool::new(false),
+        }
+    }
+
+    fn bind<U, S>(&self, server: &Weak<T>, unsubscribe: U, subscribe: S)
+    where
+        U: FnOnce(&Arc<T>),
+        S: FnOnce(&Arc<T>),
+    {
+        let mut current = self.server.lock();
+        if self.shutdown.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(previous) = current.upgrade() {
+            unsubscribe(&previous);
+        }
+        *current = server.clone();
+        if let Some(server) = current.upgrade() {
+            subscribe(&server);
+        }
+    }
+
+    fn shutdown<U, D, E>(&self, unsubscribe: U, disable: D) -> Result<(), E>
+    where
+        U: FnOnce(&Arc<T>),
+        D: FnOnce() -> Result<(), E>,
+    {
+        if self.shutdown.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        if let Some(server) = mem::take(&mut *self.server.lock()).upgrade() {
+            unsubscribe(&server);
+        }
+        disable()
+    }
 }
 
 /// The entry point every Java runtime exports.
@@ -229,20 +283,16 @@ impl PluginHost {
             (vm, runtime)
         };
 
-        natives::bind(server.clone());
         let host = Self {
             vm: Arc::new(vm),
+            lifecycle: HostLifecycle::new(),
             _runtime: runtime,
         };
         if let Err(error) = host.register_natives() {
             eprintln!("native registration failed: {error:?}");
             return Err(error);
         }
-        // Foton's events reach plugins only once this is done, which is why it
-        // happens before any plugin is loaded rather than after.
-        if let Some(server) = server.upgrade() {
-            forward::subscribe(&server, Arc::clone(&host.vm));
-        }
+        host.bind_server(server);
         Ok(host)
     }
 
@@ -253,9 +303,9 @@ impl PluginHost {
     /// that access gameplay state must only observe the completed server.
     pub fn bind_server(&self, server: &Weak<Server>) {
         natives::bind(server.clone());
-        if let Some(server) = server.upgrade() {
-            forward::subscribe(&server, Arc::clone(&self.vm));
-        }
+        self.lifecycle.bind(server, forward::unsubscribe, |server| {
+            forward::subscribe(server, Arc::clone(&self.vm));
+        });
     }
 
     /// Tells the runtime which Rust function answers each declared native.
@@ -347,21 +397,21 @@ impl PluginHost {
             .z()?)
     }
 
-    /// Stops delivering Foton's events to plugins.
+    /// Stops Rust event delivery, then disables every loaded plugin newest first.
     ///
-    /// Separate from [`Self::disable_all`] on purpose: a plugin being disabled
-    /// should stop hearing about the world before it is asked to shut down, or
-    /// its last moments are spent handling events for a server it is leaving.
-    pub fn unsubscribe(server: &Arc<Server>) {
-        forward::unsubscribe(server);
-    }
-
-    /// Disables every loaded plugin, newest first.
+    /// Repeated calls do nothing. This explicit path may attach to the JVM and
+    /// report errors; dropping the host never performs that potentially
+    /// blocking work.
     ///
     /// # Errors
     ///
     /// Returns an error when the Java side cannot be reached at all.
     pub fn disable_all(&self) -> Result<(), PluginHostError> {
+        self.lifecycle
+            .shutdown(forward::unsubscribe, || self.disable_java())
+    }
+
+    fn disable_java(&self) -> Result<(), PluginHostError> {
         let mut env = self.vm.attach_current_thread()?;
         env.call_static_method(HOST_CLASS, "disableAll", "()V", &[])?;
         Ok(())

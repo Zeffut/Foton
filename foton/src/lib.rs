@@ -210,8 +210,11 @@ impl FotonServer {
                     &Weak::new(),
                 )
                 .map_err(|error| FotonServerError::Plugin(error.to_string()))?;
-                host.load_all_on_load(&plugin_directory)
-                    .map_err(|error| FotonServerError::Plugin(error.to_string()))?;
+                if let Err(error) = host.load_all_on_load(&plugin_directory) {
+                    let message = error.to_string();
+                    disable_plugin_host(Some(&host));
+                    return Err(FotonServerError::Plugin(message));
+                }
                 Some(host)
             }
         };
@@ -228,9 +231,7 @@ impl FotonServer {
         {
             Ok(server) => Arc::new(server),
             Err(error) => {
-                if let Some(host) = &plugin_host {
-                    let _ = host.disable_all();
-                }
+                disable_plugin_host(plugin_host.as_ref());
                 return Err(FotonServerError::Core(error));
             }
         };
@@ -238,17 +239,22 @@ impl FotonServer {
         if let Some(host) = &plugin_host {
             host.bind_server(&Arc::downgrade(&server));
             if let Err(error) = host.enable_all() {
-                let _ = host.disable_all();
+                disable_plugin_host(plugin_host.as_ref());
                 return Err(FotonServerError::Plugin(error.to_string()));
             }
         }
 
-        let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, server_port))
-            .await
-            .map_err(|source| FotonServerError::Bind {
-                port: server_port,
-                source,
-            })?;
+        let tcp_listener =
+            match TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, server_port)).await {
+                Ok(listener) => listener,
+                Err(source) => {
+                    disable_plugin_host(plugin_host.as_ref());
+                    return Err(FotonServerError::Bind {
+                        port: server_port,
+                        source,
+                    });
+                }
+            };
 
         // The server's own run directory, resolved to an absolute path once,
         // here, before anything derives a path from it -- but only when
@@ -304,19 +310,23 @@ impl FotonServer {
         }
 
         let rcon_listener = if rcon_config.enable {
-            Some(
-                rcon::RconListener::bind(
-                    rcon_config.bind,
-                    rcon_config.port,
-                    rcon_config.password.into(),
-                    rcon_config.max_connections,
-                )
-                .await
-                .map_err(|source| FotonServerError::RconBind {
-                    port: rcon_config.port,
-                    source,
-                })?,
+            match rcon::RconListener::bind(
+                rcon_config.bind,
+                rcon_config.port,
+                rcon_config.password.into(),
+                rcon_config.max_connections,
             )
+            .await
+            {
+                Ok(listener) => Some(listener),
+                Err(source) => {
+                    disable_plugin_host(plugin_host.as_ref());
+                    return Err(FotonServerError::RconBind {
+                        port: rcon_config.port,
+                        source,
+                    });
+                }
+            }
         } else {
             None
         };
@@ -346,11 +356,7 @@ impl FotonServer {
 
     /// Disables loaded plugins during an early or orderly shutdown.
     pub fn disable_plugins(&mut self) {
-        if let Some(host) = self.plugin_host.take()
-            && let Err(error) = host.disable_all()
-        {
-            log::warn!("Failed to disable plugins cleanly: {error}");
-        }
+        disable_plugin_host(self.plugin_host.take().as_ref());
     }
 
     /// Starts the server and begins accepting connections.
@@ -416,6 +422,14 @@ impl FotonServer {
         }
         let _ = server_handle.await;
         self.disable_plugins();
+    }
+}
+
+fn disable_plugin_host(host: Option<&PluginHost>) {
+    if let Some(host) = host
+        && let Err(error) = host.disable_all()
+    {
+        log::warn!("Failed to disable plugins cleanly: {error}");
     }
 }
 

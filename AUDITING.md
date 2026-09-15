@@ -62,6 +62,25 @@ and the `dev/` tooling tests.
 Cheap, and the only layer that must be green before anything is merged. It
 finds compile errors and lint regressions. It does not find gameplay bugs.
 
+### Plugin compatibility evidence
+
+The plugin check also emits separate machine-readable API and fixture reports.
+Rebuild and combine them with the same commands an auditor should quote:
+
+```bash
+bash dev/build-plugin-api.sh --check
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar --events plugin-api/src
+python3 dev/plugin_compatibility.py --api-report build/plugin-api-evidence.json --fixture-report plugin-api/build/fixture-evidence.json --output build/plugin-compatibility.json
+```
+
+Read the resulting `build/plugin-compatibility.json` as four independent kinds
+of evidence. Shared symbol coverage is not a plugin success rate. The ceiling
+excludes plugins that reference NMS or CraftBukkit internals, and event coverage
+requires a Rust call site that reaches the Java event constructor. Fixture
+counts prove only the checked jars and paths; no aggregate plugin-success
+percentage is generated.
+
 ## Layer 2 — in-world
 
 ```bash
