@@ -5,6 +5,7 @@ final class EntityCheck {
     static void check() {
         dimensionsComeFromTheBoundingBox();
         destinationLocationIsFilledInPlace();
+        missingEntityStillReturnsDestination();
     }
 
     private static void dimensionsComeFromTheBoundingBox() {
@@ -27,6 +28,14 @@ final class EntityCheck {
         Checks.same(destination.getPitch(), -35.0f, "destination pitch");
         Checks.same(entity.getLocation(null), null,
             "a null destination should remain null");
+    }
+
+    private static void missingEntityStillReturnsDestination() {
+        MissingEntity entity = new MissingEntity();
+        org.bukkit.Location destination = new org.bukkit.Location(null, 3.0, 4.0, 5.0);
+
+        Checks.expect(entity.getLocation(destination) == destination,
+            "a missing entity should still return the supplied destination");
     }
 
     @SuppressWarnings("unused")
@@ -56,6 +65,16 @@ final class EntityCheck {
 
         @Override public org.bukkit.Location getLocation() {
             return new org.bukkit.Location(null, 1.25, 64.5, -3.75, 120.0f, -35.0f);
+        }
+    }
+
+    private static final class MissingEntity extends foton.FotonEntity {
+        MissingEntity() {
+            super(java.util.UUID.fromString("00000000-0000-0000-0000-000000000003"));
+        }
+
+        @Override public org.bukkit.Location getLocation() {
+            return null;
         }
     }
 }

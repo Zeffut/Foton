@@ -49,7 +49,7 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default Location getLocation(Location destination) {
         if (destination == null) return null;
         Location current = getLocation();
-        if (current == null) return null;
+        if (current == null) return destination;
         destination.setWorld(current.getWorld());
         destination.setX(current.getX());
         destination.setY(current.getY());

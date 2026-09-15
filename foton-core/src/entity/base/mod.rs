@@ -513,6 +513,13 @@ impl EntityBase {
         self.state.lock().position
     }
 
+    /// Gets the entity's current position and rotation from one locked snapshot.
+    #[inline]
+    pub fn position_and_rotation(&self) -> (DVec3, (f32, f32)) {
+        let state = self.state.lock();
+        (state.position, state.rotation)
+    }
+
     /// Gets the entity position used by vanilla movement traces.
     #[inline]
     pub fn old_position(&self) -> DVec3 {

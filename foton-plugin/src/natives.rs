@@ -5163,8 +5163,7 @@ extern "system" fn entity_position(
 
 fn entity_position_state(entity: Option<&dyn Entity>) -> Option<[f64; 5]> {
     entity.map(|entity| {
-        let position = entity.position();
-        let (yaw, pitch) = entity.rotation();
+        let (position, (yaw, pitch)) = entity.base().position_and_rotation();
         [
             position.x,
             position.y,

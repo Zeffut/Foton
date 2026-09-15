@@ -4,7 +4,9 @@ use super::{
     EntityMovementEmission, EntityMovementFlags, EntityMovementProgress, EntityPhysicsStateInput,
     EntityPistonMovement, EntityVerticalMovementStateUpdate, MAX_ENTITY_TAGS,
 };
-use std::sync::{Arc, Weak};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Weak};
+use std::thread;
 
 use foton_registry::{
     entity_data::EntityPose, entity_type::EntityDimensions, entity_type::EntityTypeRef,
@@ -54,6 +56,42 @@ fn raw_entity(id: i32) -> SharedEntity {
         Weak::<World>::new(),
         &vanilla_entities::ITEM,
     ))
+}
+
+#[test]
+fn position_and_rotation_snapshot_never_mixes_atomic_state_updates() {
+    let base = Arc::new(EntityBase::new(
+        8,
+        DVec3::ZERO,
+        vanilla_entities::ITEM.dimensions,
+        Weak::<World>::new(),
+    ));
+    let start = Arc::new(Barrier::new(2));
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer_base = Arc::clone(&base);
+    let writer_start = Arc::clone(&start);
+    let writer_stop = Arc::clone(&stop);
+    let writer = thread::spawn(move || {
+        writer_start.wait();
+        let mut generation = 1.0_f64;
+        while !writer_stop.load(Ordering::Acquire) {
+            let mut state = writer_base.state.lock();
+            state.position = DVec3::splat(generation);
+            state.rotation = (generation as f32, -(generation as f32));
+            generation = if generation == 1.0 { 2.0 } else { 1.0 };
+        }
+    });
+
+    start.wait();
+    for _ in 0..100_000 {
+        let (position, (yaw, pitch)) = base.position_and_rotation();
+        assert_eq!(position.x as f32, yaw);
+        assert_eq!(pitch, -yaw);
+    }
+    stop.store(true, Ordering::Release);
+    if let Err(payload) = writer.join() {
+        std::panic::resume_unwind(payload);
+    }
 }
 
 fn link_vehicle_and_passenger(vehicle: &SharedEntity, passenger: &SharedEntity) {
