@@ -7,6 +7,7 @@ fixture that was hand-written would only prove the reader agrees with whoever
 wrote the fixture.
 """
 import collections
+import json
 import pathlib
 import shutil
 import subprocess
@@ -59,6 +60,76 @@ public class Crafty {
 }
 """
 
+CLASS_ONLY_SOURCE = """
+package example;
+
+import org.bukkit.World;
+
+public class ClassOnly {
+    public Class<?> worldType() {
+        return World.class;
+    }
+}
+"""
+
+HANDLER_SOURCE = """
+package example;
+
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.world.WorldUnloadEvent;
+
+public class WorldListener {
+    @EventHandler
+    public void onWorldUnload(WorldUnloadEvent event) { }
+}
+"""
+
+JAVA_BRIDGE_WITH_ORPHAN = """
+package foton;
+
+import org.bukkit.event.world.WorldLoadEvent;
+import org.bukkit.event.world.WorldUnloadEvent;
+
+public final class EventBridge {
+    public static void fireWorldLoad() {
+        dispatch(new WorldLoadEvent());
+    }
+
+    public static void fireWorldUnload() {
+        dispatch(new WorldUnloadEvent());
+    }
+
+    private static void dispatch(Object event) { }
+}
+"""
+
+RUST_WITHOUT_CALLER = """
+fn forward_world_load(env: &mut JNIEnv) {
+    env.call_static_method(BRIDGE, "fireWorldLoad", "()V", &[]);
+}
+"""
+
+LEDGER = {
+    "plugins_scanned": 3,
+    "plugins_reaching_internals": 1,
+    "api_members_referenced": 2,
+    "api_members_kept_at_least": 2,
+    "api_members": [
+        {
+            "member": "org/bukkit/World#getName()Ljava/lang/String;",
+            "plugins": 2,
+        },
+        {"member": "org/bukkit/World#getSeed()J", "plugins": 1},
+    ],
+}
+
+PROVIDED = {"org/bukkit/World": {"getName()Ljava/lang/String;"}}
+WANTED = {
+    "org/bukkit/event/world/WorldLoadEvent",
+    "org/bukkit/event/world/WorldUnloadEvent",
+}
+EMITTED = {"org/bukkit/event/world/WorldLoadEvent"}
+
 STUBS = {
     "org/bukkit/Bukkit.java": """
         package org.bukkit;
@@ -93,6 +164,24 @@ STUBS = {
         public class CraftPlayer {
             public Object getHandle() { return null; }
         }
+    """,
+    "org/bukkit/World.java": """
+        package org.bukkit;
+        public interface World { }
+    """,
+    "org/bukkit/event/EventHandler.java": """
+        package org.bukkit.event;
+        import java.lang.annotation.ElementType;
+        import java.lang.annotation.Retention;
+        import java.lang.annotation.RetentionPolicy;
+        import java.lang.annotation.Target;
+        @Retention(RetentionPolicy.RUNTIME)
+        @Target(ElementType.METHOD)
+        public @interface EventHandler { }
+    """,
+    "org/bukkit/event/world/WorldUnloadEvent.java": """
+        package org.bukkit.event.world;
+        public class WorldUnloadEvent { }
     """,
 }
 
@@ -158,6 +247,10 @@ class Scanning(unittest.TestCase):
         cls.plain = build_jar({"example/ExamplePlugin.java": PLUGIN}, root / "plain")
         cls.sneaky = build_jar({"example/Sneaky.java": REACHES_INTERNALS}, root / "sneaky")
         cls.crafty = build_jar({"example/Crafty.java": REACHES_CRAFTBUKKIT}, root / "crafty")
+        cls.class_only = build_jar(
+            {"example/ClassOnly.java": CLASS_ONLY_SOURCE}, root / "class-only")
+        cls.handler = build_jar(
+            {"example/WorldListener.java": HANDLER_SOURCE}, root / "handler")
         cls.api = build_jar({}, root / "api")
 
     @classmethod
@@ -207,6 +300,55 @@ class Scanning(unittest.TestCase):
         _, unreadable = plugin_api_usage.scan(self.plain)
 
         self.assertEqual(unreadable, 0)
+
+    def test_scan_keeps_class_only_references(self):
+        found, unreadable = plugin_api_usage.scan(self.class_only)
+
+        self.assertEqual(unreadable, 0)
+        self.assertIn("org/bukkit/World", found["classes"])
+
+    def test_handler_descriptor_records_fully_qualified_event(self):
+        found, _ = plugin_api_usage.scan(self.handler)
+
+        self.assertIn(
+            "org/bukkit/event/world/WorldUnloadEvent", found["handler_events"])
+
+
+class CompatibilityEvidence(unittest.TestCase):
+    def test_unlinked_java_fire_method_is_not_emitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            java = root / "java"
+            rust = root / "rust"
+            java.mkdir()
+            rust.mkdir()
+            (java / "EventBridge.java").write_text(
+                JAVA_BRIDGE_WITH_ORPHAN, encoding="utf-8")
+            (rust / "forward.rs").write_text(RUST_WITHOUT_CALLER, encoding="utf-8")
+
+            emitted = plugin_api_usage.emitted_events(java, rust)
+
+        self.assertIn("org/bukkit/event/world/WorldLoadEvent", emitted)
+        self.assertNotIn("org/bukkit/event/world/WorldUnloadEvent", emitted)
+
+    def test_summary_keeps_shared_and_long_tail_counts_separate(self):
+        summary = plugin_api_usage.compatibility_summary(
+            LEDGER, PROVIDED, WANTED, EMITTED)
+
+        self.assertEqual(summary["api"]["shared"]["resolved"], 1)
+        self.assertEqual(summary["api"]["all"]["missing"], 1)
+
+    def test_summary_json_is_stable_and_newline_terminated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "summary.json"
+            summary = plugin_api_usage.compatibility_summary(
+                LEDGER, PROVIDED, WANTED, EMITTED)
+
+            plugin_api_usage.write_summary_json(output, summary)
+
+            text = output.read_text(encoding="utf-8")
+        self.assertEqual(
+            text, json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
 
 @unittest.skipIf(shutil.which("javac") is None, "javac is needed to build the fixture")

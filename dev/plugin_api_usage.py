@@ -182,6 +182,119 @@ def references(data):
             yield surface, f"{owner}#{member}{descriptor}"
 
 
+EVENT_HANDLER_DESCRIPTOR = "Lorg/bukkit/event/EventHandler;"
+
+
+def _descriptor_classes(descriptor):
+    """Class names carried by a JVM field, method or generic descriptor."""
+    return set(re.findall(r"L([^;<]+)", descriptor))
+
+
+def _skip_annotation(data, offset):
+    """Returns the offset after one JVM annotation structure."""
+    _, pairs = struct.unpack_from(">HH", data, offset)
+    offset += 4
+    for _ in range(pairs):
+        offset += 2  # element_name_index
+        offset = _skip_element_value(data, offset)
+    return offset
+
+
+def _skip_element_value(data, offset):
+    """Returns the offset after one JVM annotation element_value."""
+    tag = chr(data[offset])
+    offset += 1
+    if tag in "BCDFIJSZsc":
+        return offset + 2
+    if tag == "e":
+        return offset + 4
+    if tag == "@":
+        return _skip_annotation(data, offset)
+    if tag == "[":
+        count = struct.unpack_from(">H", data, offset)[0]
+        offset += 2
+        for _ in range(count):
+            offset = _skip_element_value(data, offset)
+        return offset
+    raise NotAClassFile(f"unknown annotation element tag {tag!r}")
+
+
+def _annotation_types(pool, data):
+    """Annotation descriptors in a RuntimeVisible/InvisibleAnnotations body."""
+    count = struct.unpack_from(">H", data, 0)[0]
+    offset = 2
+    result = set()
+    for _ in range(count):
+        type_index = struct.unpack_from(">H", data, offset)[0]
+        descriptor = _utf8(pool, type_index)
+        if descriptor:
+            result.add(descriptor)
+        offset = _skip_annotation(data, offset)
+    return result
+
+
+def class_usage(data):
+    """Watched class references and Bukkit event-handler parameter types."""
+    pool, offset = _read_pool(data)
+    classes = set()
+
+    for tag, payload in pool.values():
+        descriptor = None
+        if tag == TAG_CLASS:
+            name = _utf8(pool, struct.unpack(">H", payload)[0])
+            if name:
+                if name.startswith("["):
+                    classes.update(_descriptor_classes(name))
+                else:
+                    classes.add(name)
+        elif tag == TAG_NAME_AND_TYPE:
+            _, descriptor_index = struct.unpack(">HH", payload)
+            descriptor = _utf8(pool, descriptor_index)
+        elif tag == TAG_METHOD_TYPE:
+            descriptor = _utf8(pool, struct.unpack(">H", payload)[0])
+        if descriptor:
+            classes.update(_descriptor_classes(descriptor))
+
+    offset += 6  # access_flags, this_class, super_class
+    interface_count = struct.unpack_from(">H", data, offset)[0]
+    offset += 2 + 2 * interface_count
+
+    handler_events = set()
+    for section in range(2):  # fields, then methods
+        count = struct.unpack_from(">H", data, offset)[0]
+        offset += 2
+        for _ in range(count):
+            _, _, descriptor_index, attribute_count = struct.unpack_from(
+                ">HHHH", data, offset)
+            offset += 8
+            descriptor = _utf8(pool, descriptor_index) or ""
+            descriptor_types = _descriptor_classes(descriptor)
+            classes.update(descriptor_types)
+            annotations = set()
+            for _ in range(attribute_count):
+                attribute_name_index, length = struct.unpack_from(">HI", data, offset)
+                offset += 6
+                attribute_name = _utf8(pool, attribute_name_index)
+                attribute = data[offset:offset + length]
+                offset += length
+                if attribute_name in (
+                    "RuntimeVisibleAnnotations",
+                    "RuntimeInvisibleAnnotations",
+                ):
+                    annotations.update(_annotation_types(pool, attribute))
+            if section == 1 and EVENT_HANDLER_DESCRIPTOR in annotations:
+                handler_events.update(
+                    name for name in descriptor_types
+                    if "/event/" in name and name.endswith("Event")
+                )
+
+    watched = {
+        name for name in classes
+        if any(name.startswith(prefix) for prefix, _ in SURFACE_PREFIXES)
+    }
+    return watched, handler_events
+
+
 # What a class answers because a JDK supertype does. Those class files are not
 # in the API jar and never will be, but `player.toString()` and
 # `material.name()` both compile to references on the API type -- so without
@@ -348,22 +461,28 @@ def gaps(corpus, api_jar):
 
 
 def scan(jar):
-    """What one plugin jar references, as {surface: {member, ...}}.
+    """What one plugin jar references, including classes and handler events.
 
     A jar that cannot be read at all is reported rather than skipped silently:
     a corpus that quietly lost half its entries would produce a ranking that
     looks exactly as authoritative as a correct one.
     """
     found = {kind: set() for kind in set(SURFACES.values())}
+    found["classes"] = set()
+    found["handler_events"] = set()
     unreadable = 0
     with zipfile.ZipFile(jar) as archive:
         for entry in archive.namelist():
             if not entry.endswith(".class"):
                 continue
             try:
-                for surface, member in references(archive.read(entry)):
+                data = archive.read(entry)
+                for surface, member in references(data):
                     found[surface].add(member)
-            except (NotAClassFile, struct.error, KeyError):
+                classes, handler_events = class_usage(data)
+                found["classes"].update(classes)
+                found["handler_events"].update(handler_events)
+            except (NotAClassFile, struct.error, KeyError, IndexError):
                 unreadable += 1
     return found, unreadable
 
@@ -437,6 +556,156 @@ def coverage_curve(reachable, ranked):
         )
     return rows
 
+
+JAVA_STATIC_METHOD = re.compile(
+    r"\bstatic\s+(?:<[^>{}]+>\s+)?[\w.$<>\[\], ?]+\s+"
+    r"([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws\s+[^{}]+)?\{"
+)
+JAVA_CONSTRUCTOR = re.compile(
+    r"\bnew\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\("
+)
+JAVA_CALL = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\(")
+RUST_FIRE_METHOD = re.compile(r'"(fire[A-Z][A-Za-z0-9_$]*)"')
+
+
+def _method_body(source, opening_brace):
+    """Returns a Java method body using balanced braces."""
+    depth = 1
+    offset = opening_brace + 1
+    while offset < len(source) and depth:
+        if source[offset] == "{":
+            depth += 1
+        elif source[offset] == "}":
+            depth -= 1
+        offset += 1
+    if depth:
+        return source[opening_brace + 1:]
+    return source[opening_brace + 1:offset - 1]
+
+
+def _event_name(java_name, imports, package):
+    """Resolves a Java event type to the slash-separated binary name."""
+    if "." in java_name:
+        resolved = java_name.replace(".", "/")
+    elif java_name in imports:
+        resolved = imports[java_name].replace(".", "/")
+    elif package:
+        resolved = f"{package.replace('.', '/')}/{java_name}"
+    else:
+        return None
+    if "/event/" not in resolved or not resolved.endswith("Event"):
+        return None
+    return resolved
+
+
+def emitted_events(java_source_root: pathlib.Path, rust_source_root: pathlib.Path) -> set[str]:
+    """Events whose Java fire path is called by the Rust bridge."""
+    called_from_rust = set()
+    for path in pathlib.Path(rust_source_root).rglob("*.rs"):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        called_from_rust.update(RUST_FIRE_METHOD.findall(source))
+
+    methods = collections.defaultdict(list)
+    for path in pathlib.Path(java_source_root).rglob("*.java"):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        package_match = re.search(r"^\s*package\s+([\w.]+)\s*;", source, re.MULTILINE)
+        package = package_match.group(1) if package_match else ""
+        imports = {
+            name.rsplit(".", 1)[-1]: name
+            for name in re.findall(r"^\s*import\s+([\w.]+)\s*;", source, re.MULTILINE)
+        }
+        for match in JAVA_STATIC_METHOD.finditer(source):
+            body = _method_body(source, match.end() - 1)
+            events = {
+                event
+                for name in JAVA_CONSTRUCTOR.findall(body)
+                if (event := _event_name(name, imports, package)) is not None
+            }
+            calls = set(JAVA_CALL.findall(body))
+            methods[match.group(1)].append((events, calls))
+
+    emitted = set()
+    pending = list(called_from_rust)
+    reached = set()
+    while pending:
+        method = pending.pop()
+        if method in reached:
+            continue
+        reached.add(method)
+        for events, calls in methods.get(method, ()):
+            emitted.update(events)
+            pending.extend(calls - reached)
+    return emitted
+
+
+def _member_resolution(rows, provided_members):
+    missing = []
+    for row in rows:
+        member = row["member"]
+        owner, signature = member.split("#", 1)
+        if (
+            signature not in FROM_OBJECT
+            and signature not in INHERITED_API.get(owner, ())
+            and signature not in provided_members.get(owner, ())
+        ):
+            missing.append(member)
+    return {
+        "referenced": len(rows),
+        "resolved": len(rows) - len(missing),
+        "missing": len(missing),
+        "missing_members": sorted(missing),
+    }
+
+
+def compatibility_summary(ledger, provided_members, wanted_events, emitted):
+    """Return JSON-serializable binary, ceiling and event evidence."""
+    rows = list(ledger.get("api_members", ()))
+    threshold = ledger.get("api_members_kept_at_least", SHARED_BY)
+    shared = [row for row in rows if row.get("plugins", 0) >= threshold]
+    all_members_recorded = len(rows) == ledger.get("api_members_referenced", len(rows))
+
+    all_evidence = _member_resolution(rows, provided_members)
+    if not all_members_recorded:
+        all_evidence = {
+            "referenced": ledger.get("api_members_referenced", len(rows)),
+            "resolved": None,
+            "missing": None,
+            "missing_members": None,
+        }
+
+    wanted = {
+        row["event"] if isinstance(row, dict) else row
+        for row in wanted_events
+    }
+    emitted_wanted = wanted & set(emitted)
+    missing_events = wanted - emitted_wanted
+    scanned = ledger.get("plugins_scanned", 0)
+    reaches_internals = ledger.get("plugins_reaching_internals", 0)
+    return {
+        "api": {
+            "all": all_evidence,
+            "shared": _member_resolution(shared, provided_members),
+        },
+        "ceiling": {
+            "plugins_on_public_api": max(scanned - reaches_internals, 0),
+            "plugins_reaching_internals": reaches_internals,
+            "plugins_scanned": scanned,
+        },
+        "events": {
+            "emitted": len(emitted_wanted),
+            "emitted_types": sorted(name.replace("/", ".") for name in emitted_wanted),
+            "listened": len(wanted),
+            "missing": len(missing_events),
+            "missing_types": sorted(name.replace("/", ".") for name in missing_events),
+        },
+    }
+
+
+def write_summary_json(path, summary):
+    """Writes a deterministic machine-readable compatibility summary."""
+    pathlib.Path(path).write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
 def report_gap(corpus, api_jar, top):
     """Prints how far the built jar gets, and what is next by audience."""
     per_plugin, missing_audience = gaps(corpus, api_jar)
@@ -476,13 +745,17 @@ def report_covered(api_jar, top):
     """
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     api = provided(api_jar)
+    shared = [
+        row for row in ledger["api_members"]
+        if row["plugins"] >= ledger["api_members_kept_at_least"]
+    ]
     missing = []
-    for row in ledger["api_members"]:
+    for row in shared:
         owner, _, member = row["member"].partition("#")
         if member not in api.get(owner, ()):
             missing.append(row)
 
-    total = len(ledger["api_members"])
+    total = len(shared)
     covered = total - len(missing)
     print(f"ledger: {total} members referenced by at least "
           f"{ledger['api_members_kept_at_least']} of {ledger['plugins_scanned']} plugins")
@@ -510,37 +783,13 @@ def report_events(source_root, api_jar, top):
     unfired would be measuring a gap that is not there. The hierarchy comes from
     the built jar, because that is what the dispatcher will actually walk.
 
-    Constructed-anywhere is the test, not constructed-in-one-file: events are
-    fired from the plugin host, the event bridge and the Rust forwarding layer.
-    It is still a floor rather than a proof -- an event constructed on a path
-    nothing reaches counts as fired here.
+    A Java declaration is only evidence when a Rust forwarding call reaches
+    it. This avoids crediting orphaned `fireX` methods that gameplay never
+    invokes.
     """
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     wanted = [row for row in ledger["events"] if row["event"].endswith("Event")]
-
-    # An event is built in more ways than `new`. `FotonLifecycle` supplies a
-    # `ReloadableRegistrarEvent` as a lambda, and counting only constructor
-    # calls reported the most-listened-for event of all as never fired -- which
-    # would have sent the work at something already done. So the test is
-    # "mentioned in a file other than its own, outside an import": loose enough
-    # to catch a lambda or a factory, and loose enough to over-count a type that
-    # is merely referenced. Over-counting hides a gap; under-counting invents
-    # one, and only the second wastes a day.
-    sources = {
-        path: path.read_text(encoding="utf-8", errors="replace")
-        for path in pathlib.Path(source_root).rglob("*.java")
-    }
-    constructed = set()
-    for path, text in sources.items():
-        own = path.stem
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("import ") or stripped.startswith("package "):
-                continue
-            for match in re.finditer(r"\b([A-Za-z0-9_]+Event)\b", line):
-                name = match.group(1)
-                if name != own:
-                    constructed.add(name)
+    constructed = emitted_events(source_root, REPO / "foton-plugin" / "src")
 
     # Every ancestor of every constructed event, so a base class counts as
     # reachable when something builds one of its descendants.
@@ -554,9 +803,7 @@ def report_events(source_root, api_jar, top):
             except (NotAClassFile, struct.error, KeyError, IndexError):
                 continue
             if name:
-                parents[name.rsplit("/", 1)[-1]] = [
-                    parent.rsplit("/", 1)[-1] for parent in supertypes
-                ]
+                parents[name] = supertypes
 
     reachable = set()
     for name in constructed:
@@ -572,9 +819,9 @@ def report_events(source_root, api_jar, top):
 
     silent = []
     for row in wanted:
-        simple = row["event"].rsplit("/", 1)[-1]
-        if simple not in reachable:
-            silent.append((row["plugins"], simple))
+        event = row["event"]
+        if event not in reachable:
+            silent.append((row["plugins"], event))
     silent.sort(reverse=True)
 
     fired = len(wanted) - len(silent)
@@ -586,8 +833,8 @@ def report_events(source_root, api_jar, top):
         return
     print()
     print(f"by audience -- plugins that listen and would never be called, top {top}:")
-    for plugins, simple in silent[:top]:
-        print(f"  {plugins:3d}  {simple}")
+    for plugins, event in silent[:top]:
+        print(f"  {plugins:3d}  {event.replace('/', '.')}")
 
 
 def main():
@@ -615,16 +862,40 @@ def main():
         type=pathlib.Path,
         help="measure a built API jar against the committed ledger, no corpus needed",
     )
+    parser.add_argument(
+        "--summary-json",
+        type=pathlib.Path,
+        help="write machine-readable compatibility evidence (requires --covered)",
+    )
     args = parser.parse_args()
+
+    if args.summary_json and not args.covered:
+        parser.error("--summary-json needs --covered <jar>")
+
+    def write_requested_summary():
+        if not args.summary_json:
+            return
+        ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
+        wanted = [
+            row for row in ledger["events"] if row["event"].endswith("Event")
+        ]
+        java_source = args.events or REPO / "plugin-api" / "src"
+        emitted = emitted_events(java_source, REPO / "foton-plugin" / "src")
+        summary = compatibility_summary(
+            ledger, provided(args.covered), wanted, emitted)
+        write_summary_json(args.summary_json, summary)
+        print(f"wrote {args.summary_json}")
 
     if args.events:
         if not args.covered:
             parser.error("--events needs --covered <jar> for the class hierarchy")
         report_events(args.events, args.covered, args.top)
+        write_requested_summary()
         return
 
     if args.covered:
         report_covered(args.covered, args.top)
+        write_requested_summary()
         return
 
     if args.corpus is None:
@@ -639,6 +910,8 @@ def main():
         raise SystemExit(f"no jars in {args.corpus}")
 
     plugins_per_member = collections.Counter()
+    plugins_per_class = collections.Counter()
+    plugins_per_event = collections.Counter()
     surface_of = {}
     reaches_internal = []
     failed = []
@@ -659,10 +932,20 @@ def main():
             reaches_internal.append(jar.name)
         elif found["api"]:
             needs[jar.stem] = found["api"]
-        for kind, members in found.items():
+        for kind in ("api", "internal"):
+            members = found[kind]
             for member in members:
                 plugins_per_member[member] += 1
                 surface_of[member] = kind
+        for name in found["classes"]:
+            surface = next(
+                (kind for prefix, kind in SURFACE_PREFIXES if name.startswith(prefix)),
+                None,
+            )
+            if surface == "api":
+                plugins_per_class[name] += 1
+        for event in found["handler_events"]:
+            plugins_per_event[event] += 1
 
     scanned = len(jars) - len([f for f in failed if "unreadable" not in f[1]])
     api = [(m, n) for m, n in plugins_per_member.items() if surface_of[m] == "api"]
@@ -688,10 +971,10 @@ def main():
     for package, count in reach_by(api, plugins_per_member, package_of)[:18]:
         print(f"  {count:4}  {package}")
 
-    events = [(m, n) for m, n in api if "/event/" in m]
+    events = sorted(plugins_per_event.items(), key=lambda pair: (-pair[1], pair[0]))
     print("\ntop events, which is what an event system has to carry first:")
-    for member, count in event_reach(events)[:18]:
-        print(f"  {count:4}  {member}")
+    for event, count in events[:18]:
+        print(f"  {count:4}  {event.replace('/', '.')}")
 
     # Ranked among the plugins that could ever run. A member only the
     # internals-reaching ones want is work that serves nobody, and letting it
@@ -720,7 +1003,15 @@ def main():
                     "api_members_referenced": len(api),
                     "api_members_kept_at_least": SHARED_BY,
                     "api_members": [
-                        {"member": m, "plugins": n} for m, n in api if n >= SHARED_BY
+                        {"member": m, "plugins": n} for m, n in api
+                    ],
+                    "api_classes_referenced": len(plugins_per_class),
+                    "api_classes": [
+                        {"class": name, "plugins": count}
+                        for name, count in sorted(
+                            plugins_per_class.items(),
+                            key=lambda pair: (-pair[1], pair[0]),
+                        )
                     ],
                     "packages": [
                         {"package": p, "plugins": n}
@@ -728,10 +1019,8 @@ def main():
                     ],
                     "coverage_curve": curve,
                     "events": [
-                        {"event": e, "plugins": n}
-                        for e, n in event_reach(
-                            [(m, n) for m, n in api if "/event/" in m]
-                        )
+                        {"event": event, "plugins": count}
+                        for event, count in events
                     ],
                 },
                 indent=1,
