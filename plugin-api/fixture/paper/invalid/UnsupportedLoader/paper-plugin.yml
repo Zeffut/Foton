@@ -1,0 +1,6 @@
+name: UnsupportedLoader
+version: '1.0'
+main: example.InvalidMainPlugin
+api-version: '26.2'
+bootstrapper: example.LoaderBootstrap
+loader: example.CustomLoader

@@ -1,0 +1,4 @@
+name: HealthyPaper
+version: '1.0'
+main: example.HealthyPaperPlugin
+api-version: '26.2'

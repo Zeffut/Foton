@@ -520,6 +520,10 @@ public final class PluginHost {
     private static PluginState prepare(DiscoveredPlugin discovered) throws Throwable {
         File jar = discovered.jar;
         PluginDescriptionFile descriptor = discovered.descriptor;
+        if (descriptor.getLoader() != null) {
+            throw new UnsupportedOperationException("custom plugin loader "
+                + descriptor.getLoader() + " is not supported");
+        }
         IdentityConflict conflict = loadedIdentityConflict(descriptor);
         if (conflict != null) {
             System.out.println("[host] " + descriptor.getName() + ": identity "
@@ -561,19 +565,42 @@ public final class PluginHost {
         org.bukkit.plugin.java.PluginClassLoader loader = state.loader;
         try {
             File dataFolder = new File(jar.getParentFile(), descriptor.getName());
-            Class<?> type = Class.forName(descriptor.getMain(), true, loader);
-            Object instance = type.getDeclaredConstructor().newInstance();
-            if (!(instance instanceof JavaPlugin candidate)) {
-                System.out.println(
-                    "[host] " + descriptor.getName() + ": main class is not a JavaPlugin");
-                rollback(state);
-                return false;
+            FotonBootstrapContext bootstrapContext = null;
+            boolean createdByBootstrap = false;
+            JavaPlugin candidate;
+            if (descriptor.getBootstrapper() == null) {
+                candidate = constructMain(descriptor, loader);
+            } else {
+                Class<?> type = Class.forName(descriptor.getBootstrapper(), true, loader);
+                if (!io.papermc.paper.plugin.bootstrap.PluginBootstrap.class
+                        .isAssignableFrom(type)) {
+                    throw new IllegalArgumentException("bootstrapper "
+                        + descriptor.getBootstrapper() + " does not implement PluginBootstrap");
+                }
+                var bootstrapper = (io.papermc.paper.plugin.bootstrap.PluginBootstrap)
+                    type.getDeclaredConstructor().newInstance();
+                bootstrapContext = new FotonBootstrapContext(
+                    descriptor, dataFolder.toPath(), jar.toPath());
+                bootstrapper.bootstrap(bootstrapContext);
+                candidate = bootstrapper.createPlugin(bootstrapContext);
+                if (candidate == null) {
+                    candidate = constructMain(descriptor, loader);
+                } else {
+                    createdByBootstrap = true;
+                }
+            }
+            if (createdByBootstrap && candidate.getClass().getClassLoader() != loader) {
+                throw new IllegalArgumentException("plugin instance for "
+                    + descriptor.getName() + " was not created by its plugin classloader");
             }
             state.plugin = candidate;
             statesByPlugin.put(candidate, state);
 
             loader.setPlugin(candidate);
             candidate.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
+            if (bootstrapContext != null) {
+                FotonLifecycle.transfer(bootstrapContext, candidate);
+            }
             FotonScheduler.activatePlugin(candidate);
             loaded.add(candidate);
             state.status = Status.LOADING;
@@ -589,6 +616,16 @@ public final class PluginHost {
             rollback(state);
             throw error;
         }
+    }
+
+    private static JavaPlugin constructMain(
+            PluginDescriptionFile descriptor,
+            org.bukkit.plugin.java.PluginClassLoader loader) throws ReflectiveOperationException {
+        Class<?> type = Class.forName(descriptor.getMain(), true, loader);
+        Object instance = type.getDeclaredConstructor().newInstance();
+        if (instance instanceof JavaPlugin candidate) return candidate;
+        throw new IllegalArgumentException("main class " + descriptor.getMain()
+            + " is not a JavaPlugin");
     }
 
     private static void rollback(PluginState state) {
@@ -994,8 +1031,8 @@ public final class PluginHost {
             state.status = Status.ENABLING;
         }
         plugin.setEnabled(true);
-        plugin.onEnable();
         FotonLifecycle.dispatchCommands(plugin);
+        plugin.onEnable();
         EventBridge.dispatch(new org.bukkit.event.server.PluginEnableEvent(plugin));
         if (state != null) state.status = Status.ENABLED;
         System.out.println("[host] enabled " + plugin.getDescription().getFullName());

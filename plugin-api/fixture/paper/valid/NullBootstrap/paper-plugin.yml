@@ -1,0 +1,5 @@
+name: NullBootstrap
+version: '1.0'
+main: example.FallbackPlugin
+api-version: '26.2'
+bootstrapper: example.FallbackBootstrap

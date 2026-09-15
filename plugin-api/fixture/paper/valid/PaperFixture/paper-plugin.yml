@@ -1,0 +1,5 @@
+name: PaperFixture
+version: '1.0'
+main: example.PaperPlugin
+api-version: '26.2'
+bootstrapper: example.PaperBootstrap

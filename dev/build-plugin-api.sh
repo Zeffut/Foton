@@ -87,9 +87,11 @@ if [ -d "$FIXTURE_SRC" ]; then
   DEPENDENCY_CLASSES="$FIX/dependency-classes"
   LIBRARY_CLASSES="$FIX/library-classes"
   LIBRARY_PLUGIN_CLASSES="$FIX/library-plugin-classes"
+  PAPER_CLASSES="$FIX/paper-classes"
   CHECK_CLASSES="$FIX/check-classes"
   mkdir -p "$EVENT_CLASSES" "$LIFECYCLE_CLASSES" "$DEPENDENCY_CLASSES" \
-    "$LIBRARY_CLASSES" "$LIBRARY_PLUGIN_CLASSES" "$CHECK_CLASSES"
+    "$LIBRARY_CLASSES" "$LIBRARY_PLUGIN_CLASSES" "$PAPER_CLASSES" \
+    "$CHECK_CLASSES"
 
   javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS" "$FIXTURE_SRC"/support/*.java
   javac -nowarn -d "$EVENT_CLASSES" -cp "$JAR$LIBS" \
@@ -110,6 +112,8 @@ if [ -d "$FIXTURE_SRC" ]; then
   javac -nowarn -d "$LIBRARY_PLUGIN_CLASSES" -cp "$JAR$LIBS:$LIBRARY_CLASSES" \
     "$REPO"/plugin-api/fixture/libraries/src/fixture/libraries/LibraryPlugin.java \
     "$REPO"/plugin-api/fixture/libraries/src/fixture/libraries/MalformedLibraryPlugin.java
+  javac -nowarn -d "$PAPER_CLASSES" -cp "$JAR$LIBS" \
+    "$REPO"/plugin-api/fixture/paper/src/example/*.java
 
   mkdir -p "$FIX/plugins"
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
@@ -229,6 +233,17 @@ if [ -d "$FIXTURE_SRC" ]; then
     done
   done
 
+  PAPER_PLUGINS="$FIX/paper-plugins"
+  mkdir -p "$PAPER_PLUGINS"
+  for descriptor in "$REPO/plugin-api/fixture/paper"/{valid,invalid}/*/paper-plugin.yml; do
+    fixture="$(basename "$(dirname "$descriptor")")"
+    STAGE="$FIX/stage-paper-$fixture"
+    mkdir -p "$STAGE/example"
+    cp "$PAPER_CLASSES"/example/*.class "$STAGE/example/"
+    cp "$descriptor" "$STAGE/"
+    jar --create --file "$PAPER_PLUGINS/$fixture.jar" -C "$STAGE" .
+  done
+
   # Only the original event fixture is parent-visible because older checks
   # inspect its counters directly. Lifecycle classes exist solely in their
   # plugin jars, so the PluginClassLoader owns their classes and lambdas.
@@ -239,7 +254,7 @@ if [ -d "$FIXTURE_SRC" ]; then
     "$FIX/dependency-graph-plugins" "$FIX/dependency-duplicates-plugins" \
     "$FIX/dependency-existing-plugins" "$FIX/dependency-cross-call-plugins" \
     "$LIBRARY_PLUGINS" "$MALFORMED_LIBRARY_PLUGINS" \
-    "$DESCRIPTOR_CACHE_JAR" "$INTERRUPTED_CACHE_JAR"
+    "$DESCRIPTOR_CACHE_JAR" "$INTERRUPTED_CACHE_JAR" "$PAPER_PLUGINS"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

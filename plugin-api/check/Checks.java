@@ -23,6 +23,7 @@ public final class Checks {
         lifecycle(args[1], args[2]);
         dependencies(args[3], args[4], args[5], args[6]);
         libraries(args[7], args[8], args[9], args[10]);
+        paper(args[11]);
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"
@@ -415,6 +416,76 @@ public final class Checks {
         System.clearProperty("foton.fixture.dependencies.omitJoined");
         System.clearProperty("foton.fixture.dependencies.crossCallProvider");
         System.clearProperty("foton.fixture.dependencies.crossCallJoined");
+    }
+
+    private static void paper(String directory) throws Exception {
+        for (String property : java.util.List.of(
+                "foton.fixture.paper.fallback.bootstrap",
+                "foton.fixture.paper.fallback.constructor",
+                "foton.fixture.paper.fallback.enable",
+                "foton.fixture.paper.failing.bootstrap",
+                "foton.fixture.paper.invalid.main",
+                "foton.fixture.paper.loader.bootstrap",
+                "foton.fixture.paper.healthy")) {
+            System.clearProperty(property);
+        }
+
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream original = System.out;
+        int enabled;
+        try (java.io.PrintStream capture = new java.io.PrintStream(
+                bytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setOut(capture);
+            enabled = foton.PluginHost.loadAll(directory);
+        } finally {
+            System.setOut(original);
+        }
+        String log = bytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            same(enabled, 3,
+                "Paper bootstrap fixtures enabled count; log=" + log);
+            org.bukkit.plugin.Plugin paper = foton.PluginHost.byName("PaperFixture");
+            expect(paper != null, "Paper bootstrap fixture did not enable");
+            Object steps = paper.getClass().getField("steps").get(null);
+            same(steps, java.util.List.of(
+                "bootstrap", "createPlugin", "constructor:sentinel", "onLoad",
+                "commands", "onEnable"), "Paper bootstrap lifecycle order");
+            expect(org.bukkit.Bukkit.getServer().getPluginCommand("paperfixture") != null,
+                "bootstrap lifecycle command was not registered");
+
+            same(System.getProperty("foton.fixture.paper.fallback.bootstrap"), "true",
+                "null createPlugin fallback did not bootstrap");
+            same(System.getProperty("foton.fixture.paper.fallback.constructor"), "true",
+                "null createPlugin did not construct descriptor main");
+            same(System.getProperty("foton.fixture.paper.fallback.enable"), "true",
+                "null createPlugin fallback did not enable");
+            same(System.getProperty("foton.fixture.paper.healthy"), "enabled",
+                "healthy neighbor did not enable after invalid bootstrappers");
+
+            expect(foton.PluginHost.byName("InvalidBootstrap") == null,
+                "class not implementing PluginBootstrap was accepted");
+            expect(foton.PluginHost.byName("FailingBootstrap") == null,
+                "throwing bootstrapper remained registered");
+            expect(foton.PluginHost.byName("UnsupportedLoader") == null,
+                "unsupported descriptor loader was accepted");
+            expect(System.getProperty("foton.fixture.paper.invalid.main") == null,
+                "invalid bootstrap fixture constructed its main class");
+            expect(System.getProperty("foton.fixture.paper.loader.bootstrap") == null,
+                "unsupported loader began bootstrap");
+            expect(log.contains("example.PaperPlugin") && log.contains("PluginBootstrap"),
+                "invalid bootstrapper diagnostic did not name its class: " + log);
+            expect(log.contains("example.CustomLoader"),
+                "unsupported loader diagnostic did not name its class: " + log);
+
+            same(System.getProperty("foton.fixture.paper.failing.bootstrap"), "true",
+                "throwing bootstrapper did not run");
+            expect(org.bukkit.Bukkit.getServer().getPluginCommand("leakedbootstrap") == null,
+                "failed bootstrap lifecycle command leaked");
+            same(foton.LifecycleDiagnostics.hostReferences("FailingBootstrap"), 0,
+                "failed bootstrap retained plugin or classloader resources");
+        } finally {
+            foton.PluginHost.disableAll();
+        }
     }
 
     private static void awaitSchedulerTasks(String owner, int expected) {
