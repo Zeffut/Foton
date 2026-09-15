@@ -64,12 +64,18 @@ def export_tracked_checkout(destination: Path) -> None:
     # Exercise the scripts from the working tree, including the change under test.
     for relative in (
         "dev/build-plugin-api.sh",
+        "dev/gen-attribute.py",
         "dev/gen-entity-type.py",
         "dev/gen-enchantment.py",
         "dev/gen-potion-type.py",
+        "foton-registry/build_assets/attributes.json",
+        "plugin-api/check/FotonPotionLookupRunner.java",
+        "plugin-api/check/PaperAttributeConsumer.java",
+        "plugin-api/src/org/bukkit/potion/PotionEffectType.java",
         "update-minecraft-src.sh",
     ):
         shutil.copy2(ROOT / relative, destination / relative)
+    (destination / "plugin-api/src/org/bukkit/attribute/Attribute.java").unlink()
 
 
 class PluginApiBuildScriptTests(unittest.TestCase):

@@ -146,10 +146,11 @@ public final class PotionEffectType {
 
     public static PotionEffectType getByName(String name) {
         if (name == null || name.isEmpty()) return null;
-        String normalized = name.toLowerCase(Locale.ROOT);
-        PotionEffectType canonical = getById(idForName(normalized));
-        if (canonical != null) return canonical;
-        return new PotionEffectType(normalized, idForName(normalized));
+        String normalized = name.trim().toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("minecraft:")) {
+            normalized = normalized.substring("minecraft:".length());
+        }
+        return getById(idForName(normalized));
     }
     public String getName() { return name; }
     public int getId() { return id; }

@@ -4,9 +4,13 @@ public final class FotonPotionLookupRunner {
 
     public static void main(String[] args) {
         assertCanonical("haste", org.bukkit.potion.PotionEffectType.HASTE);
+        assertCanonical("minecraft:haste", org.bukkit.potion.PotionEffectType.HASTE);
         assertCanonical("jump_boost", org.bukkit.potion.PotionEffectType.JUMP_BOOST);
         assertCanonical("resistance", org.bukkit.potion.PotionEffectType.RESISTANCE);
         assertCanonical("strength", org.bukkit.potion.PotionEffectType.STRENGTH);
+        if (org.bukkit.potion.PotionEffectType.getByName("foton:unknown") != null) {
+            throw new AssertionError("unknown potion lookup must return null");
+        }
     }
 
     private static void assertCanonical(String name,

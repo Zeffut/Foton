@@ -29,9 +29,9 @@ fi
 rm -rf "$OUT/classes" "$OUT/generated"
 mkdir -p "$OUT/classes" "$OUT/generated"
 
-# Three Java generators consume Rust registry source emitted by the
-# foton-registry build script. Those files are intentionally ignored, so a
-# fresh checkout must generate them before the plugin API can be built.
+# Java generators consume extracted registry assets and Rust registry source
+# emitted by the foton-registry build script. The Rust files are intentionally
+# ignored, so a fresh checkout must generate them before the plugin API builds.
 REGISTRY_GENERATED="$REPO/foton-registry/src/generated"
 REGISTRY_INPUTS=(
   "$REGISTRY_GENERATED/vanilla_entities.rs"
@@ -69,6 +69,8 @@ fi
 # the enum cannot name a block Foton does not have -- and so there is no
 # hand-written second copy to drift.
 python3 "$REPO/dev/gen-material.py" "$OUT/generated"
+python3 "$REPO/dev/gen-attribute.py" \
+  "$REPO/foton-registry/build_assets/attributes.json" "$OUT/generated"
 python3 "$REPO/dev/gen-entity-type.py" "$OUT/generated"
 python3 "$REPO/dev/gen-enchantment.py" "$OUT/generated"
 python3 "$REPO/dev/gen-potion-type.py" "$OUT/generated"
