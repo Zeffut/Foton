@@ -137,6 +137,36 @@ if [ "${1:-}" != "--check" ]; then
   exit 0
 fi
 
+# This consumer is compiled against Paper's ABI, then run against Foton's jar.
+# An explicit override keeps the check usable when Gradle uses a non-default
+# cache location.
+PAPER_API_26_2="${FOTON_PAPER_API_26_2:-}"
+if [ -z "$PAPER_API_26_2" ]; then
+  PAPER_CACHE_ROOT="${GRADLE_USER_HOME:-$HOME/.gradle}/caches/modules-2/files-2.1/io.papermc.paper/paper-api/26.2.build.121-stable"
+  for candidate in "$PAPER_CACHE_ROOT"/*/paper-api-26.2.build.121-stable.jar; do
+    if [ -f "$candidate" ]; then
+      PAPER_API_26_2="$candidate"
+      break
+    fi
+  done
+fi
+if [ ! -f "$PAPER_API_26_2" ]; then
+  echo "Paper 26.2 API jar is required for the binary compatibility check" >&2
+  echo "set FOTON_PAPER_API_26_2 to paper-api-26.2.build.121-stable.jar" >&2
+  exit 1
+fi
+PAPER_BINARY_CLASSES="$OUT/paper-binary-classes"
+FOTON_BINARY_RUNNER_CLASSES="$OUT/foton-binary-runner-classes"
+mkdir -p "$PAPER_BINARY_CLASSES"
+javac --release 21 -nowarn -d "$PAPER_BINARY_CLASSES" -cp "$PAPER_API_26_2$LIBS" \
+  "$REPO/plugin-api/check/PaperResolvableProfileConsumer.java"
+mkdir -p "$FOTON_BINARY_RUNNER_CLASSES"
+javac --release 21 -nowarn -d "$FOTON_BINARY_RUNNER_CLASSES" \
+  -cp "$PAPER_BINARY_CLASSES:$JAR$LIBS" \
+  "$REPO/plugin-api/check/FotonResolvableProfileBinaryRunner.java"
+java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
+  FotonResolvableProfileBinaryRunner
+
 # The fixture plugin exercises the parts of the event path that are easy to get
 # wrong: a rewrite that has to travel back, a veto that has to travel back, and
 # a priority order where a later handler must not undo an earlier cancel.

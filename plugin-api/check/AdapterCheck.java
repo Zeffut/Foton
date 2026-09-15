@@ -13,6 +13,7 @@ final class AdapterCheck {
         worldClassFilterUsesTheExistingEntityCollection();
         registryIteratorDelegatesTheCompleteStreamIteratorContract();
         shapelessRecipePreservesStackIngredientMultiplicity();
+        shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
     }
@@ -23,6 +24,7 @@ final class AdapterCheck {
         worldClassFilterUsesTheExistingEntityCollection();
         registryIteratorDelegatesTheCompleteStreamIteratorContract();
         shapelessRecipePreservesStackIngredientMultiplicity();
+        shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
     }
@@ -133,6 +135,63 @@ final class AdapterCheck {
         for (org.bukkit.inventory.RecipeChoice choice : recipe.getChoiceList().subList(3, 5)) {
             expect(choice.test(new ItemStack(Material.COBBLESTONE)),
                 "the explicit count retains every requested ingredient");
+        }
+    }
+
+    /**
+     * Catches the mutations that silently add null/AIR choices or append part
+     * of an over-limit batch before rejecting the rest.
+     */
+    private static void shapelessRecipeRejectsInvalidMaterialIngredientsAtomically() {
+        org.bukkit.inventory.ShapelessRecipe recipe = new org.bukkit.inventory.ShapelessRecipe(
+            org.bukkit.NamespacedKey.minecraft("adapter_validation"), new ItemStack(Material.STONE));
+        recipe.addIngredient(Material.DIRT);
+
+        assertRejectedMaterialAdditionLeavesChoicesUntouched(recipe, null,
+            "null material must be rejected as Paper rejects an invalid material choice");
+        assertRejectedMaterialAdditionLeavesChoicesUntouched(recipe, Material.AIR,
+            "AIR material must be rejected as Paper rejects an empty material choice");
+
+        for (int ingredient = recipe.getChoiceList().size(); ingredient < 8; ingredient++) {
+            recipe.addIngredient(Material.COBBLESTONE);
+        }
+        java.util.List<org.bukkit.inventory.RecipeChoice> beforeOverflow =
+            java.util.List.copyOf(recipe.getChoiceList());
+        boolean overflowRejected = false;
+        try {
+            recipe.addIngredient(2, Material.COBBLESTONE);
+        } catch (IllegalArgumentException expected) {
+            equal(expected.getClass(), IllegalArgumentException.class,
+                "the over-limit batch uses Paper's IllegalArgumentException");
+            overflowRejected = true;
+        }
+        expect(overflowRejected,
+            "a batch exceeding the global nine-ingredient limit throws IllegalArgumentException");
+        sameChoices(recipe.getChoiceList(), beforeOverflow,
+            "an over-limit batch leaves every existing choice untouched");
+    }
+
+    private static void assertRejectedMaterialAdditionLeavesChoicesUntouched(
+            org.bukkit.inventory.ShapelessRecipe recipe, Material material, String failure) {
+        java.util.List<org.bukkit.inventory.RecipeChoice> before =
+            java.util.List.copyOf(recipe.getChoiceList());
+        boolean rejected = false;
+        try {
+            recipe.addIngredient(1, material);
+        } catch (IllegalArgumentException expected) {
+            equal(expected.getClass(), IllegalArgumentException.class,
+                "the invalid material uses Paper's IllegalArgumentException");
+            rejected = true;
+        }
+        expect(rejected, failure);
+        sameChoices(recipe.getChoiceList(), before, failure + " without altering choices");
+    }
+
+    private static void sameChoices(java.util.List<org.bukkit.inventory.RecipeChoice> actual,
+            java.util.List<org.bukkit.inventory.RecipeChoice> expected, String description) {
+        equal(actual.size(), expected.size(), description + " size");
+        for (int index = 0; index < expected.size(); index++) {
+            same(actual.get(index), expected.get(index), description + " at index " + index);
         }
     }
 
