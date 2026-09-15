@@ -55,6 +55,8 @@ public final class PluginHost {
         JavaPlugin plugin;
         Status status = Status.DISCOVERED;
         boolean enableAttempted;
+        // Serializes this plugin's final enable commit with cleanup.
+        final Object lifecycleLock = new Object();
         final java.util.concurrent.atomic.AtomicBoolean cleaned =
             new java.util.concurrent.atomic.AtomicBoolean();
 
@@ -1052,20 +1054,38 @@ public final class PluginHost {
 
     private static void enable(JavaPlugin plugin) {
         PluginState state = stateOf(plugin);
-        if (state != null) {
+        if (state == null) return;
+        synchronized (state.lifecycleLock) {
+            if (state.cleaned.get()) return;
             state.enableAttempted = true;
             state.status = Status.ENABLING;
+            plugin.setEnabled(true);
         }
-        plugin.setEnabled(true);
         FotonLifecycle.dispatchCommands(plugin);
         plugin.onEnable();
-        if (!plugin.isEnabled() || (state != null && state.cleaned.get())) {
-            if (state != null && !state.cleaned.get()) cleanup(plugin);
+        if (!enableActive(plugin, state)) {
+            cleanup(plugin);
             return;
         }
         EventBridge.dispatch(new org.bukkit.event.server.PluginEnableEvent(plugin));
-        if (state != null) state.status = Status.ENABLED;
-        System.out.println("[host] enabled " + plugin.getDescription().getFullName());
+        synchronized (state.lifecycleLock) {
+            if (!enableActiveLocked(plugin, state)) return;
+            state.status = Status.ENABLED;
+            System.out.println("[host] enabled " + plugin.getDescription().getFullName());
+        }
+    }
+
+    private static boolean enableActive(JavaPlugin plugin, PluginState state) {
+        synchronized (state.lifecycleLock) {
+            return enableActiveLocked(plugin, state);
+        }
+    }
+
+    private static boolean enableActiveLocked(JavaPlugin plugin, PluginState state) {
+        return plugin.isEnabled()
+            && !state.cleaned.get()
+            && state.plugin == plugin
+            && loaded.contains(plugin);
     }
 
     /** Disables one plugin, and lets go of what it claimed. */
@@ -1078,14 +1098,19 @@ public final class PluginHost {
         if (plugin == null) return;
         PluginState state = stateOf(plugin);
         if (state == null) return;
-        FotonScheduler.beginPluginCleanup(plugin);
-        if (!state.cleaned.compareAndSet(false, true)) return;
-
-        if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
-            java.setEnabled(false);
+        boolean disable;
+        synchronized (state.lifecycleLock) {
+            if (!state.cleaned.compareAndSet(false, true)) return;
+            FotonScheduler.beginPluginCleanup(plugin);
+            if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
+                java.setEnabled(false);
+            }
+            loaded.remove(plugin);
+            disable = state.enableAttempted;
+            if (state.status != Status.FAILED) {
+                state.status = Status.DISABLED;
+            }
         }
-        loaded.remove(plugin);
-        boolean disable = state.enableAttempted;
         if (disable) {
             try {
                 plugin.onDisable();
@@ -1109,9 +1134,6 @@ public final class PluginHost {
         if (loader != null) {
             pluginLoaders.entrySet().removeIf(entry -> entry.getValue() == loader);
             close(loader, plugin.getName());
-        }
-        if (state.status != Status.FAILED) {
-            state.status = Status.DISABLED;
         }
         if (disable) {
             release(plugin, "disable event",

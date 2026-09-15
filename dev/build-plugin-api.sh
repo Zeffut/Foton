@@ -308,15 +308,27 @@ if [ -d "$FIXTURE_SRC" ]; then
   jar --create --file "$REPLACEMENT_PLUGINS/Replacement.jar" \
     -C "$REPLACEMENT_STAGE" .
 
-  HOST_RUNTIME_PLUGINS="$FIX/host-runtime-plugins"
+  SELF_DISABLE_PLUGINS="$FIX/self-disable-plugins"
+  EVENT_DISABLE_PLUGINS="$FIX/event-disable-plugins"
   JDBC_PLUGINS="$FIX/jdbc-plugins"
-  mkdir -p "$HOST_RUNTIME_PLUGINS" "$JDBC_PLUGINS"
-  for fixture in EnableObserver SelfDisabling; do
+  mkdir -p "$SELF_DISABLE_PLUGINS" "$EVENT_DISABLE_PLUGINS" "$JDBC_PLUGINS"
+  for fixture in EnableObserver SelfDisabling EventDisabled EventDisabledDependent; do
     STAGE="$FIX/stage-host-runtime-$fixture"
     mkdir -p "$STAGE/example"
     cp "$HOST_RUNTIME_CLASSES/example/$fixture"Plugin.class "$STAGE/example/"
     cp "$REPO/plugin-api/fixture/host-runtime/$fixture/plugin.yml" "$STAGE/"
-    jar --create --file "$HOST_RUNTIME_PLUGINS/$fixture.jar" -C "$STAGE" .
+    case "$fixture" in
+      EnableObserver)
+        jar --create --file "$SELF_DISABLE_PLUGINS/$fixture.jar" -C "$STAGE" .
+        jar --create --file "$EVENT_DISABLE_PLUGINS/$fixture.jar" -C "$STAGE" .
+        ;;
+      SelfDisabling)
+        jar --create --file "$SELF_DISABLE_PLUGINS/$fixture.jar" -C "$STAGE" .
+        ;;
+      *)
+        jar --create --file "$EVENT_DISABLE_PLUGINS/$fixture.jar" -C "$STAGE" .
+        ;;
+    esac
   done
   JDBC_STAGE="$FIX/stage-host-runtime-JdbcFixture"
   mkdir -p "$JDBC_STAGE/example"
@@ -389,7 +401,9 @@ if [ -d "$FIXTURE_SRC" ]; then
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$HOST_DRIVER_JAR" HostRuntimeCheck \
     jdbc "$JDBC_PLUGINS"
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$HOST_DRIVER_JAR" HostRuntimeCheck \
-    self-disable "$HOST_RUNTIME_PLUGINS"
+    self-disable "$SELF_DISABLE_PLUGINS"
+  java -cp "$CHECK_CLASSES:$JAR$LIBS:$HOST_DRIVER_JAR" HostRuntimeCheck \
+    event-disable "$EVENT_DISABLE_PLUGINS"
 
   mkdir -p "$REPO/build"
   python3 "$REPO/dev/plugin_api_usage.py" \

@@ -14,9 +14,18 @@ public final class EnableObserverPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPluginEnable(PluginEnableEvent event) {
-        if (!event.getPlugin().getName().equals("SelfDisabling")) return;
-        System.setProperty("foton.fixture.selfDisableEnableEvents",
-            Integer.toString(Integer.getInteger(
-                "foton.fixture.selfDisableEnableEvents", 0) + 1));
+        if (event.getPlugin().getName().equals("SelfDisabling")) {
+            System.setProperty("foton.fixture.selfDisableEnableEvents",
+                Integer.toString(Integer.getInteger(
+                    "foton.fixture.selfDisableEnableEvents", 0) + 1));
+        }
+        if (event.getPlugin().getName().equals("EventDisabled")) {
+            System.setProperty("foton.fixture.eventDisableEnableEvents",
+                Integer.toString(Integer.getInteger(
+                    "foton.fixture.eventDisableEnableEvents", 0) + 1));
+            getServer().getPluginManager().disablePlugin(event.getPlugin());
+            System.setProperty("foton.fixture.eventDisableEnabledAfterCleanup",
+                Boolean.toString(event.getPlugin().isEnabled()));
+        }
     }
 }

@@ -8,6 +8,7 @@ public final class HostRuntimeCheck {
         switch (args[0]) {
             case "jdbc" -> jdbc(args[1]);
             case "self-disable" -> selfDisable(args[1]);
+            case "event-disable" -> eventDisable(args[1]);
             default -> throw new IllegalArgumentException(args[0]);
         }
     }
@@ -71,6 +72,52 @@ public final class HostRuntimeCheck {
                 "self-disabling plugin logged a successful enable: " + log);
             Checks.expect(foton.PluginHost.byName("SelfDisabling") == null,
                 "self-disabling plugin remained registered");
+        } finally {
+            foton.PluginHost.disableAll();
+        }
+    }
+
+    private static void eventDisable(String directory) throws Exception {
+        System.clearProperty("foton.fixture.eventDisableEnableCalls");
+        System.clearProperty("foton.fixture.eventDisableDisableCalls");
+        System.clearProperty("foton.fixture.eventDisableEnableEvents");
+        System.clearProperty("foton.fixture.eventDisableEnabledAfterCleanup");
+        System.clearProperty("foton.fixture.eventDisableDependentEnableCalls");
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream original = System.out;
+        int enabled;
+        try (java.io.PrintStream capture = new java.io.PrintStream(
+                bytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setOut(capture);
+            enabled = foton.PluginHost.loadAll(directory);
+        } finally {
+            System.setOut(original);
+        }
+        try {
+            String log = bytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+            Checks.same(enabled, 1, "only the event observer should remain enabled");
+            Checks.same(System.getProperty("foton.fixture.eventDisableEnableCalls"), "1",
+                "event-disabled plugin onEnable call count");
+            Checks.same(System.getProperty("foton.fixture.eventDisableDisableCalls"), "1",
+                "event-disabled plugin cleanup count");
+            Checks.same(System.getProperty("foton.fixture.eventDisableEnableEvents"), "1",
+                "event-disabled plugin enable event count");
+            Checks.same(System.getProperty(
+                    "foton.fixture.eventDisableEnabledAfterCleanup"), "false",
+                "event-disabled plugin remained enabled after cleanup");
+            Checks.same(System.getProperty(
+                    "foton.fixture.eventDisableDependentEnableCalls"), null,
+                "hard dependent enabled after its provider was disabled");
+            Checks.expect(!log.contains("[host] enabled EventDisabled v1"),
+                "event-disabled plugin logged a successful enable: " + log);
+            Checks.expect(!log.contains("[host] enabled EventDisabledDependent v1"),
+                "hard dependent logged a successful enable: " + log);
+            Checks.expect(foton.PluginHost.byName("EventDisabled") == null,
+                "event-disabled plugin remained registered");
+            Checks.expect(foton.PluginHost.byName("EventDisabledDependent") == null,
+                "hard dependent remained registered");
+            Checks.same(foton.LifecycleDiagnostics.hostReferences("EventDisabled"), 0,
+                "event-disabled plugin retained host lifecycle references");
         } finally {
             foton.PluginHost.disableAll();
         }
