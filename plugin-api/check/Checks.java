@@ -22,6 +22,7 @@ public final class Checks {
             "disabling a plugin should release its custom channels");
         lifecycle(args[1], args[2]);
         dependencies(args[3], args[4], args[5], args[6]);
+        libraries(args[7], args[8], args[9], args[10]);
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"
@@ -314,6 +315,94 @@ public final class Checks {
     private static java.util.List<String> csvProperty(String property) {
         String value = System.getProperty(property, "");
         return value.isEmpty() ? java.util.List.of() : java.util.List.of(value.split(","));
+    }
+
+    private static void libraries(
+            String directory, String malformedDirectory,
+            String cachedJar, String interruptedTemporary) throws Exception {
+        java.nio.file.Path cached = java.nio.file.Path.of(cachedJar);
+        java.nio.file.Path interrupted = java.nio.file.Path.of(interruptedTemporary);
+        byte[] before = java.nio.file.Files.readAllBytes(cached);
+        byte[] interruptedBefore = java.nio.file.Files.readAllBytes(interrupted);
+        System.clearProperty("foton.fixture.libraries.descriptor");
+        System.clearProperty("foton.fixture.libraries.paper");
+        System.clearProperty("foton.fixture.libraries.malformed");
+        try {
+            same(foton.PluginHost.loadAll(directory), 1,
+                "pre-populated descriptor and Paper libraries should enable");
+            same(System.getProperty("foton.fixture.libraries.descriptor"),
+                "descriptor-cache", "descriptor library cache visibility");
+            same(System.getProperty("foton.fixture.libraries.paper"),
+                "paper-cache", "paper-libraries.json cache visibility");
+            expect(java.util.Arrays.equals(before, java.nio.file.Files.readAllBytes(cached)),
+                "a valid cache entry was replaced while a truncated sibling existed");
+            expect(java.util.Arrays.equals(interruptedBefore,
+                    java.nio.file.Files.readAllBytes(interrupted)),
+                "an unrelated interrupted cache sibling was published or modified");
+        } finally {
+            foton.PluginHost.disableAll();
+        }
+
+        java.io.ByteArrayOutputStream malformedBytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream original = System.out;
+        int enabled;
+        try (java.io.PrintStream capture = new java.io.PrintStream(
+                malformedBytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setOut(capture);
+            enabled = foton.PluginHost.loadAll(malformedDirectory);
+        } finally {
+            System.setOut(original);
+        }
+        String malformedLog = malformedBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            same(enabled, 0, "malformed Maven coordinates must be rejected");
+            expect(System.getProperty("foton.fixture.libraries.malformed") == null,
+                "a plugin with a path-traversing coordinate was loaded");
+            for (String coordinate : java.util.List.of(
+                    "..:group-library:1.0", "example.fixture:..:1.0",
+                    "example.fixture:version-library:..", "..:paper-library:1.0")) {
+                expect(malformedLog.contains(coordinate),
+                    "library failure did not name malformed coordinate " + coordinate
+                        + ": " + malformedLog);
+            }
+        } finally {
+            foton.PluginHost.disableAll();
+            System.clearProperty("foton.fixture.libraries.malformed");
+        }
+
+        java.lang.reflect.Method publish = foton.PluginHost.class.getDeclaredMethod(
+            "publishLibrary", java.nio.file.Path.class, java.nio.file.Path.class);
+        publish.setAccessible(true);
+        try {
+            publish.invoke(null, interrupted, cached);
+            throw new AssertionError("a truncated temporary jar was published");
+        } catch (java.lang.reflect.InvocationTargetException expected) {
+            expect(expected.getCause() instanceof java.io.IOException,
+                "truncated publication failed for the wrong reason: " + expected.getCause());
+        }
+        expect(java.util.Arrays.equals(before, java.nio.file.Files.readAllBytes(cached)),
+            "a truncated temporary jar replaced a valid cache entry");
+
+        java.lang.reflect.Method createTemporary = foton.PluginHost.class.getDeclaredMethod(
+            "createLibraryTemporary", java.nio.file.Path.class);
+        createTemporary.setAccessible(true);
+        java.nio.file.Path first = null;
+        java.nio.file.Path second = null;
+        try {
+            first = (java.nio.file.Path) createTemporary.invoke(null, cached);
+            second = (java.nio.file.Path) createTemporary.invoke(null, cached);
+            expect(!first.equals(second), "library downloads reused a temporary path");
+            same(first.getParent(), cached.getParent(),
+                "library temporary file must be a sibling of its destination");
+            same(second.getParent(), cached.getParent(),
+                "second library temporary file must be a sibling of its destination");
+            expect(java.nio.file.Files.isRegularFile(first)
+                    && java.nio.file.Files.isRegularFile(second),
+                "library temporary paths were not exclusively created");
+        } finally {
+            if (first != null) java.nio.file.Files.deleteIfExists(first);
+            if (second != null) java.nio.file.Files.deleteIfExists(second);
+        }
     }
 
     private static void clearDependencyProperties() {

@@ -2,9 +2,10 @@ package foton;
 
 import java.io.File;
 import java.io.InputStream;
+import java.io.IOException;
 import java.net.URL;
-import java.net.URLClassLoader;
 import java.net.URLConnection;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -20,6 +21,7 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.jar.JarFile;
+import java.util.regex.Pattern;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.InvalidDescriptionException;
 import org.bukkit.plugin.PluginDescriptionFile;
@@ -43,6 +45,7 @@ public final class PluginHost {
             String.CASE_INSENSITIVE_ORDER)
             .thenComparing(plugin -> plugin.descriptor.getName())
             .thenComparing(plugin -> plugin.jar.getName());
+    private static final Pattern MAVEN_SEGMENT = Pattern.compile("[A-Za-z0-9_.-]+");
 
     private enum Status { DISCOVERED, LOADING, LOADED, ENABLING, ENABLED, FAILED, DISABLED }
 
@@ -528,7 +531,8 @@ public final class PluginHost {
         registerState(state);
         try {
             org.bukkit.plugin.java.PluginClassLoader loader =
-                new HostedPluginClassLoader(pluginUrls(jar), dependencyParent(descriptor));
+                new HostedPluginClassLoader(
+                    pluginUrls(jar, descriptor), dependencyParent(descriptor));
             state.loader = loader;
             File dataFolder = new File(jar.getParentFile(), descriptor.getName());
             // Before the constructor, not after: a plugin may call getName()
@@ -714,39 +718,182 @@ public final class PluginHost {
         }
     }
 
-    private static URL[] pluginUrls(File jar) throws Exception {
+    private static URL[] pluginUrls(File jar, PluginDescriptionFile descriptor)
+            throws Exception {
         List<URL> urls = new ArrayList<>();
         urls.add(jar.toURI().toURL());
-        File libraries = new File(jar.getParentFile(), ".foton-libraries");
+        Path cache = jar.toPath().getParent().resolve(".foton-libraries");
+        List<String> declarations = new ArrayList<>(descriptor.getLibraries());
         try (JarFile archive = new JarFile(jar)) {
-            var entry = archive.getEntry("paper-libraries.json");
-            if (entry == null) return urls.toArray(new URL[0]);
-            String json;
-            try (InputStream stream = archive.getInputStream(entry)) { json = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8); }
-            int serializationIndex = json.indexOf("kotlinx-serialization-json:");
-            if (serializationIndex >= 0) {
-                int versionStart = serializationIndex + "kotlinx-serialization-json:".length();
-                int versionEnd = json.indexOf("\"", versionStart);
-                if (versionEnd > versionStart) json += "\"org.jetbrains.kotlinx:kotlinx-serialization-core:" + json.substring(versionStart, versionEnd) + "\"";
+            declarations.addAll(paperLibraries(archive));
+        }
+
+        List<MavenCoordinate> coordinates = new ArrayList<>();
+        for (String declaration : declarations) {
+            MavenCoordinate coordinate = MavenCoordinate.parse(declaration).runtimeVariant();
+            if (!coordinates.contains(coordinate)) coordinates.add(coordinate);
+            if (coordinate.group.equals("org.jetbrains.kotlinx")
+                    && coordinate.artifact.equals("kotlinx-serialization-json-jvm")) {
+                MavenCoordinate core = new MavenCoordinate(
+                    coordinate.group, "kotlinx-serialization-core-jvm", coordinate.version);
+                if (!coordinates.contains(core)) coordinates.add(core);
             }
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+)\"").matcher(json);
-            while (matcher.find()) {
-                String coordinate = matcher.group(1);
-                String[] parts = coordinate.split(":", 3);
-                String artifact = parts[1];
-                // Select the JVM variant for Kotlin Multiplatform artifacts.
-                if (parts[0].startsWith("org.jetbrains.kotlinx") && !artifact.endsWith("-jvm")) artifact += "-jvm";
-                Path target = libraries.toPath().resolve(parts[0].replace(".", "/")).resolve(artifact).resolve(parts[2]).resolve(artifact+"-"+parts[2]+".jar");
-                if (!Files.exists(target)) {
-                    Files.createDirectories(target.getParent());
-                    URLConnection connection = new java.net.URL("https://repo.maven.apache.org/maven2/"+parts[0].replace(".", "/")+"/"+artifact+"/"+parts[2]+"/"+artifact+"-"+parts[2]+".jar").openConnection();
-                    connection.setConnectTimeout(10_000); connection.setReadTimeout(30_000);
-                    try (InputStream input = connection.getInputStream()) { Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING); }
-                }
-                urls.add(target.toUri().toURL());
+        }
+        for (MavenCoordinate coordinate : coordinates) {
+            try {
+                urls.add(resolveLibrary(cache, coordinate).toUri().toURL());
+            } catch (IOException error) {
+                throw new IOException(
+                    "cannot resolve plugin library " + coordinate.declaration(), error);
             }
         }
         return urls.toArray(new URL[0]);
+    }
+
+    private static List<String> paperLibraries(JarFile archive) throws IOException {
+        var entry = archive.getEntry("paper-libraries.json");
+        if (entry == null) return List.of();
+        Object document;
+        try (InputStream stream = archive.getInputStream(entry)) {
+            document = new org.yaml.snakeyaml.Yaml().load(stream);
+        } catch (RuntimeException error) {
+            throw new IOException("invalid paper-libraries.json", error);
+        }
+        if (!(document instanceof Map<?, ?> root)) {
+            throw new IOException("paper-libraries.json must contain an object");
+        }
+        Object dependencies = root.get("dependencies");
+        if (dependencies == null) return List.of();
+        if (!(dependencies instanceof Collection<?> values)) {
+            throw new IOException("paper-libraries.json dependencies must be a list");
+        }
+        List<String> declarations = new ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof String declaration)) {
+                throw new IOException("paper-libraries.json dependencies must be strings");
+            }
+            declarations.add(declaration);
+        }
+        return declarations;
+    }
+
+    private static Path resolveLibrary(Path cache, MavenCoordinate coordinate)
+            throws IOException {
+        Path target = coordinate.cachePath(cache);
+        if (validJar(target)) return target;
+
+        Files.createDirectories(target.getParent());
+        Path temporary = createLibraryTemporary(target);
+        try {
+            URLConnection connection = coordinate.mavenUrl().openConnection();
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(30_000);
+            try (InputStream input = connection.getInputStream()) {
+                Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING);
+            }
+            publishLibrary(temporary, target);
+            return target;
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static Path createLibraryTemporary(Path target) throws IOException {
+        return Files.createTempFile(
+            target.getParent(), target.getFileName() + ".", ".tmp");
+    }
+
+    private static boolean validJar(Path path) {
+        if (!Files.isRegularFile(path)) return false;
+        try {
+            validateJar(path);
+            return true;
+        } catch (IOException invalid) {
+            return false;
+        }
+    }
+
+    private static void validateJar(Path path) throws IOException {
+        try (JarFile archive = new JarFile(path.toFile())) {
+            var entries = archive.entries();
+            while (entries.hasMoreElements()) {
+                var entry = entries.nextElement();
+                if (entry.isDirectory()) continue;
+                try (InputStream input = archive.getInputStream(entry)) {
+                    input.transferTo(java.io.OutputStream.nullOutputStream());
+                }
+            }
+        }
+    }
+
+    private static void publishLibrary(Path temporary, Path target) throws IOException {
+        validateJar(temporary);
+        try {
+            Files.move(temporary, target,
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private record MavenCoordinate(String group, String artifact, String version) {
+        static MavenCoordinate parse(String declaration) {
+            String[] parts = declaration == null
+                ? new String[0]
+                : declaration.split(":", -1);
+            if (parts.length != 3) {
+                throw invalid(declaration, "expected group:artifact:version");
+            }
+            String[] groupSegments = parts[0].split("\\.", -1);
+            for (String segment : groupSegments) {
+                validateSegment(segment, "group", declaration);
+            }
+            validateSegment(parts[1], "artifact", declaration);
+            validateSegment(parts[2], "version", declaration);
+            return new MavenCoordinate(parts[0], parts[1], parts[2]);
+        }
+
+        MavenCoordinate runtimeVariant() {
+            if (!group.startsWith("org.jetbrains.kotlinx") || artifact.endsWith("-jvm")) {
+                return this;
+            }
+            return new MavenCoordinate(group, artifact + "-jvm", version);
+        }
+
+        Path cachePath(Path cache) {
+            Path target = cache;
+            for (String segment : group.split("\\.")) target = target.resolve(segment);
+            return target.resolve(artifact).resolve(version)
+                .resolve(artifact + "-" + version + ".jar");
+        }
+
+        URL mavenUrl() throws IOException {
+            String path = group.replace('.', '/') + "/" + artifact + "/" + version;
+            String file = artifact + "-" + version + ".jar";
+            try {
+                return java.net.URI.create(
+                    "https://repo.maven.apache.org/maven2/" + path + "/" + file).toURL();
+            } catch (IllegalArgumentException error) {
+                throw new IOException("invalid Maven Central URL for " + declaration(), error);
+            }
+        }
+
+        String declaration() {
+            return group + ":" + artifact + ":" + version;
+        }
+
+        private static void validateSegment(
+                String segment, String kind, String declaration) {
+            if (segment.isEmpty() || segment.equals(".") || segment.equals("..")
+                    || !MAVEN_SEGMENT.matcher(segment).matches()) {
+                throw invalid(declaration, "invalid " + kind + " segment");
+            }
+        }
+
+        private static IllegalArgumentException invalid(String declaration, String reason) {
+            return new IllegalArgumentException(
+                "invalid Maven coordinate " + declaration + ": " + reason);
+        }
     }
 
     private static ClassLoader dependencyParent(PluginDescriptionFile descriptor) {

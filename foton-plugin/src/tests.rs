@@ -4,7 +4,7 @@
 //! are driven from a single place and the rest assert on what can be decided
 //! without starting anything.
 
-use std::fs::write;
+use std::fs::{create_dir_all, write};
 use std::path::PathBuf;
 use std::sync::Weak;
 
@@ -17,6 +17,37 @@ fn config() -> PluginHostConfig {
         library_directory: None,
         plugin_directory: PathBuf::from("/nowhere/plugins"),
     }
+}
+
+/// An API jar moved as one unit with its pinned dependencies keeps working
+/// without another hidden configuration value.
+#[test]
+fn resolved_library_directory_defaults_to_api_sibling_lib() {
+    let config = PluginHostConfig {
+        api_jar: PathBuf::from("/server/plugin-api/build/foton-plugin-api.jar"),
+        ..config()
+    };
+
+    assert_eq!(
+        config.resolved_library_directory(),
+        PathBuf::from("/server/plugin-api/lib")
+    );
+}
+
+/// Operators can place the pinned runtime jars elsewhere without the default
+/// derived from the API jar taking precedence.
+#[test]
+fn resolved_library_directory_prefers_the_explicit_override() {
+    let config = PluginHostConfig {
+        api_jar: PathBuf::from("/server/plugin-api/build/foton-plugin-api.jar"),
+        library_directory: Some(PathBuf::from("/srv/foton/runtime-libraries")),
+        ..config()
+    };
+
+    assert_eq!(
+        config.resolved_library_directory(),
+        PathBuf::from("/srv/foton/runtime-libraries")
+    );
 }
 
 /// A missing API jar is named, not discovered as a class-loading failure later.
@@ -78,6 +109,36 @@ fn the_class_path_is_ordered() {
     assert!(
         !class_path.contains("ignored.txt"),
         "only jars belong on a class path: {class_path}"
+    );
+}
+
+/// Public API signatures refer to classes in the pinned library set, so an
+/// absent directory is a startup error rather than a later linkage surprise.
+#[test]
+fn a_missing_runtime_library_directory_is_reported_before_startup() {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let api_jar = directory.path().join("build/foton-plugin-api.jar");
+    create_dir_all(api_jar.parent().expect("the API jar has a parent"))
+        .expect("the fixture build directory should exist");
+    write(&api_jar, b"not really a jar").expect("the fixture should write");
+
+    let config = PluginHostConfig {
+        api_jar,
+        ..config()
+    };
+    let error = config
+        .class_path()
+        .expect_err("the derived sibling lib directory is absent");
+
+    assert!(
+        matches!(error, PluginHostError::NoLibraryDirectory(..)),
+        "expected the missing runtime library directory, got {error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains(directory.path().join("lib").to_string_lossy().as_ref()),
+        "the startup error should name the missing directory: {error}"
     );
 }
 

@@ -85,8 +85,11 @@ if [ -d "$FIXTURE_SRC" ]; then
   EVENT_CLASSES="$FIX/event-classes"
   LIFECYCLE_CLASSES="$FIX/lifecycle-classes"
   DEPENDENCY_CLASSES="$FIX/dependency-classes"
+  LIBRARY_CLASSES="$FIX/library-classes"
+  LIBRARY_PLUGIN_CLASSES="$FIX/library-plugin-classes"
   CHECK_CLASSES="$FIX/check-classes"
-  mkdir -p "$EVENT_CLASSES" "$LIFECYCLE_CLASSES" "$DEPENDENCY_CLASSES" "$CHECK_CLASSES"
+  mkdir -p "$EVENT_CLASSES" "$LIFECYCLE_CLASSES" "$DEPENDENCY_CLASSES" \
+    "$LIBRARY_CLASSES" "$LIBRARY_PLUGIN_CLASSES" "$CHECK_CLASSES"
 
   javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS" "$FIXTURE_SRC"/support/*.java
   javac -nowarn -d "$EVENT_CLASSES" -cp "$JAR$LIBS" \
@@ -101,6 +104,12 @@ if [ -d "$FIXTURE_SRC" ]; then
     @"$FIX/lifecycle-sources.txt"
   javac -nowarn -d "$DEPENDENCY_CLASSES" -cp "$JAR$LIBS" \
     "$REPO"/plugin-api/fixture/dependencies/src/*.java
+  javac -nowarn -d "$LIBRARY_CLASSES" \
+    "$REPO"/plugin-api/fixture/libraries/src/fixture/libraries/DescriptorLibraryApi.java \
+    "$REPO"/plugin-api/fixture/libraries/src/fixture/libraries/PaperLibraryApi.java
+  javac -nowarn -d "$LIBRARY_PLUGIN_CLASSES" -cp "$JAR$LIBS:$LIBRARY_CLASSES" \
+    "$REPO"/plugin-api/fixture/libraries/src/fixture/libraries/LibraryPlugin.java \
+    "$REPO"/plugin-api/fixture/libraries/src/fixture/libraries/MalformedLibraryPlugin.java
 
   mkdir -p "$FIX/plugins"
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
@@ -119,6 +128,61 @@ if [ -d "$FIXTURE_SRC" ]; then
     cp "$REPO/plugin-api/fixture/lifecycle/$fixture/plugin.yml" "$STAGE/"
     jar --create --file "$LIFECYCLE_PLUGINS/$fixture.jar" -C "$STAGE" .
   done
+
+  LIBRARY_PLUGINS="$FIX/library-plugins"
+  MALFORMED_LIBRARY_PLUGINS="$FIX/malformed-library-plugins"
+  LIBRARY_CACHE="$LIBRARY_PLUGINS/.foton-libraries"
+  mkdir -p "$LIBRARY_PLUGINS" "$MALFORMED_LIBRARY_PLUGINS" \
+    "$LIBRARY_CACHE/example/fixture/descriptor-library/1.2.3" \
+    "$LIBRARY_CACHE/example/fixture/paper-library/4.5.6"
+  LIBRARY_STAGE="$FIX/stage-library"
+  mkdir -p "$LIBRARY_STAGE/fixture/libraries"
+  cp "$LIBRARY_PLUGIN_CLASSES/fixture/libraries/LibraryPlugin.class" \
+    "$LIBRARY_STAGE/fixture/libraries/"
+  cp "$REPO/plugin-api/fixture/libraries/valid/plugin.yml" \
+    "$REPO/plugin-api/fixture/libraries/valid/paper-libraries.json" "$LIBRARY_STAGE/"
+  jar --create --file "$LIBRARY_PLUGINS/LibraryFixture.jar" -C "$LIBRARY_STAGE" .
+  DESCRIPTOR_CACHE_JAR="$LIBRARY_CACHE/example/fixture/descriptor-library/1.2.3/descriptor-library-1.2.3.jar"
+  PAPER_CACHE_JAR="$LIBRARY_CACHE/example/fixture/paper-library/4.5.6/paper-library-4.5.6.jar"
+  jar --create --file "$DESCRIPTOR_CACHE_JAR" \
+    -C "$LIBRARY_CLASSES" fixture/libraries/DescriptorLibraryApi.class
+  jar --create --file "$PAPER_CACHE_JAR" \
+    -C "$LIBRARY_CLASSES" fixture/libraries/PaperLibraryApi.class
+  INTERRUPTED_CACHE_JAR="$DESCRIPTOR_CACHE_JAR.interrupted.tmp"
+  printf 'truncated' > "$INTERRUPTED_CACHE_JAR"
+
+  for descriptor in "$REPO/plugin-api/fixture/libraries/malformed"/*/plugin.yml; do
+    fixture="$(basename "$(dirname "$descriptor")")"
+    STAGE="$FIX/stage-library-malformed-$fixture"
+    mkdir -p "$STAGE/fixture/libraries"
+    cp "$LIBRARY_PLUGIN_CLASSES/fixture/libraries/MalformedLibraryPlugin.class" \
+      "$STAGE/fixture/libraries/"
+    cp "$descriptor" "$STAGE/"
+    if [ -f "$(dirname "$descriptor")/paper-libraries.json" ]; then
+      cp "$(dirname "$descriptor")/paper-libraries.json" "$STAGE/"
+    fi
+    jar --create --file "$MALFORMED_LIBRARY_PLUGINS/$fixture.jar" -C "$STAGE" .
+  done
+  # Keep the RED run offline even if an unsafe implementation accepts one of
+  # these coordinates and constructs its escaped path.
+  EMPTY_LIBRARY="$FIX/empty-library"
+  mkdir -p "$EMPTY_LIBRARY" \
+    "$MALFORMED_LIBRARY_PLUGINS/group-library/1.0" \
+    "$MALFORMED_LIBRARY_PLUGINS/paper-library/1.0" \
+    "$MALFORMED_LIBRARY_PLUGINS/.foton-libraries/example/1.0" \
+    "$MALFORMED_LIBRARY_PLUGINS/.foton-libraries/example/fixture"
+  jar --create --file \
+    "$MALFORMED_LIBRARY_PLUGINS/group-library/1.0/group-library-1.0.jar" \
+    -C "$EMPTY_LIBRARY" .
+  jar --create --file \
+    "$MALFORMED_LIBRARY_PLUGINS/paper-library/1.0/paper-library-1.0.jar" \
+    -C "$EMPTY_LIBRARY" .
+  jar --create --file \
+    "$MALFORMED_LIBRARY_PLUGINS/.foton-libraries/example/1.0/..-1.0.jar" \
+    -C "$EMPTY_LIBRARY" .
+  jar --create --file \
+    "$MALFORMED_LIBRARY_PLUGINS/.foton-libraries/example/fixture/version-library-...jar" \
+    -C "$EMPTY_LIBRARY" .
 
   REPLACEMENT_STAGE="$FIX/stage-Replacement"
   mkdir -p "$REPLACEMENT_STAGE/example"
@@ -173,7 +237,9 @@ if [ -d "$FIXTURE_SRC" ]; then
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$EVENT_CLASSES" Checks \
     "$FIX/plugins" "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS" \
     "$FIX/dependency-graph-plugins" "$FIX/dependency-duplicates-plugins" \
-    "$FIX/dependency-existing-plugins" "$FIX/dependency-cross-call-plugins"
+    "$FIX/dependency-existing-plugins" "$FIX/dependency-cross-call-plugins" \
+    "$LIBRARY_PLUGINS" "$MALFORMED_LIBRARY_PLUGINS" \
+    "$DESCRIPTOR_CACHE_JAR" "$INTERRUPTED_CACHE_JAR"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

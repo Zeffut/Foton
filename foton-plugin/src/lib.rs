@@ -26,6 +26,7 @@
 
 use std::ffi::{CString, NulError, c_void};
 use std::fs::read_dir;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, Weak};
@@ -63,6 +64,9 @@ pub enum PluginHostError {
     /// The API jar the plugins are loaded against is not where it should be.
     #[error("the plugin API jar is missing at {0}; run dev/build-plugin-api.sh")]
     NoApiJar(PathBuf),
+    /// The pinned dependencies referenced by public API signatures are absent.
+    #[error("the plugin API dependency directory is unavailable at {0}: {1}")]
+    NoLibraryDirectory(PathBuf, #[source] io::Error),
     /// Something went wrong on the Java side of the boundary.
     #[error("the plugin host failed: {0}")]
     Java(#[from] JniError),
@@ -86,6 +90,18 @@ pub struct PluginHostConfig {
 }
 
 impl PluginHostConfig {
+    /// The pinned dependencies referenced by the public plugin API.
+    #[must_use]
+    pub fn resolved_library_directory(&self) -> PathBuf {
+        self.library_directory.clone().unwrap_or_else(|| {
+            self.api_jar
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or_else(|| Path::new("."))
+                .join("lib")
+        })
+    }
+
     /// The shared library holding the runtime, for this platform's layout.
     fn runtime_library(&self) -> PathBuf {
         let name = if cfg!(target_os = "windows") {
@@ -108,9 +124,7 @@ impl PluginHostConfig {
             return Err(PluginHostError::NoApiJar(self.api_jar.clone()));
         }
         let mut entries = vec![self.api_jar.to_string_lossy().into_owned()];
-        if let Some(directory) = &self.library_directory {
-            entries.extend(jars_in(directory));
-        }
+        entries.extend(jars_in(&self.resolved_library_directory())?);
         Ok(entries.join(if cfg!(target_os = "windows") {
             ";"
         } else {
@@ -120,18 +134,20 @@ impl PluginHostConfig {
 }
 
 /// Every jar directly inside a directory, sorted so a classpath is reproducible.
-fn jars_in(directory: &Path) -> Vec<String> {
-    let Ok(entries) = read_dir(directory) else {
-        return Vec::new();
-    };
-    let mut jars: Vec<String> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "jar"))
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect();
+fn jars_in(directory: &Path) -> Result<Vec<String>, PluginHostError> {
+    let entries = read_dir(directory)
+        .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?;
+    let mut jars = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?
+            .path();
+        if path.is_file() && path.extension().is_some_and(|extension| extension == "jar") {
+            jars.push(path.to_string_lossy().into_owned());
+        }
+    }
     jars.sort();
-    jars
+    Ok(jars)
 }
 
 /// A running Java runtime with Foton's plugin host inside it.

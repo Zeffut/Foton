@@ -77,9 +77,10 @@ cargo run
 The JVM must be **Java 21 or newer** -- the API jar is compiled with
 `--release 21`, matching what Paper 26.2 itself requires.
 
-The API jar defaults to `plugin-api/build/foton-plugin-api.jar`. Override it
-with FOTON_PLUGIN_API_JAR; external dependency jars may be placed in a
-folder selected by FOTON_PLUGIN_LIBRARY_DIRECTORY. With no
+The API jar defaults to `plugin-api/build/foton-plugin-api.jar`; its bundled,
+digest-pinned `plugin-api/lib` runtime dependency directory is selected
+automatically. Override the jar with `FOTON_PLUGIN_API_JAR`, or override only
+its runtime dependencies with `FOTON_PLUGIN_LIBRARY_DIRECTORY`. With no
 FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
 unchanged.
 
