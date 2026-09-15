@@ -75,7 +75,7 @@ def export_tracked_checkout(destination: Path) -> None:
         "update-minecraft-src.sh",
     ):
         shutil.copy2(ROOT / relative, destination / relative)
-    (destination / "plugin-api/src/org/bukkit/attribute/Attribute.java").unlink()
+    (destination / "plugin-api/src/org/bukkit/attribute/Attribute.java").unlink(missing_ok=True)
 
 
 class PluginApiBuildScriptTests(unittest.TestCase):

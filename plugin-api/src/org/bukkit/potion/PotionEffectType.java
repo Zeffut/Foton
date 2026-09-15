@@ -1,6 +1,7 @@
 package org.bukkit.potion;
 
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /** Stable Bukkit handle for a named vanilla mob effect. */
@@ -53,6 +54,47 @@ public final class PotionEffectType {
     public static final PotionEffectType INFESTED = named("infested");
     public static final PotionEffectType BREATH_OF_THE_NAUTILUS = named("breath_of_the_nautilus");
     public static final PotionEffectType TRIAL_OMEN = named("trial_omen");
+    private static final Map<String, PotionEffectType> BY_NAME = Map.ofEntries(
+        Map.entry("speed", SPEED),
+        Map.entry("slowness", SLOW),
+        Map.entry("haste", FAST_DIGGING),
+        Map.entry("mining_fatigue", SLOW_DIGGING),
+        Map.entry("strength", INCREASE_DAMAGE),
+        Map.entry("instant_health", HEAL),
+        Map.entry("instant_damage", HARM),
+        Map.entry("jump_boost", JUMP),
+        Map.entry("nausea", CONFUSION),
+        Map.entry("regeneration", REGENERATION),
+        Map.entry("resistance", DAMAGE_RESISTANCE),
+        Map.entry("fire_resistance", FIRE_RESISTANCE),
+        Map.entry("water_breathing", WATER_BREATHING),
+        Map.entry("invisibility", INVISIBILITY),
+        Map.entry("blindness", BLINDNESS),
+        Map.entry("night_vision", NIGHT_VISION),
+        Map.entry("hunger", HUNGER),
+        Map.entry("weakness", WEAKNESS),
+        Map.entry("poison", POISON),
+        Map.entry("wither", WITHER),
+        Map.entry("health_boost", HEALTH_BOOST),
+        Map.entry("absorption", ABSORPTION),
+        Map.entry("saturation", SATURATION),
+        Map.entry("glowing", GLOWING),
+        Map.entry("levitation", LEVITATION),
+        Map.entry("luck", LUCK),
+        Map.entry("unluck", UNLUCK),
+        Map.entry("slow_falling", SLOW_FALLING),
+        Map.entry("conduit_power", CONDUIT_POWER),
+        Map.entry("dolphins_grace", DOLPHINS_GRACE),
+        Map.entry("bad_omen", BAD_OMEN),
+        Map.entry("hero_of_the_village", HERO_OF_THE_VILLAGE),
+        Map.entry("darkness", DARKNESS),
+        Map.entry("wind_charged", WIND_CHARGED),
+        Map.entry("weaving", WEAVING),
+        Map.entry("oozing", OOZING),
+        Map.entry("infested", INFESTED),
+        Map.entry("breath_of_the_nautilus", BREATH_OF_THE_NAUTILUS),
+        Map.entry("trial_omen", TRIAL_OMEN)
+    );
     private final String name;
     private final int id;
 
@@ -150,7 +192,7 @@ public final class PotionEffectType {
         if (normalized.startsWith("minecraft:")) {
             normalized = normalized.substring("minecraft:".length());
         }
-        return getById(idForName(normalized));
+        return BY_NAME.get(normalized);
     }
     public String getName() { return name; }
     public int getId() { return id; }
