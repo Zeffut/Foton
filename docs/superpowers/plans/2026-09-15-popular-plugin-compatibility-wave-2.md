@@ -77,16 +77,52 @@
 5. Run plugin API checks and build.
 6. Commit.
 
-### Task 5: Rebaseline real-plugin evidence and finish verification
+### Task 5: Support JDBC drivers shaded inside plugin JARs
+
+**Files:**
+- Modify: `plugin-api/src/foton/PluginHost.java` and focused classloader/lifecycle helpers as required
+- Modify: plugin lifecycle fixture sources/resources under `plugin-api/fixtures/`
+- Modify focused Java checks
+
+**Steps:**
+1. Add a minimal plugin fixture that shades a tiny JDBC driver plus `META-INF/services/java.sql.Driver` into its own JAR and calls `DriverManager.getConnection` during enable. Observe the current `No suitable driver` failure.
+2. Correct plugin classloader context and driver discovery/registration at the narrowest lifecycle boundary, without special-casing SQLite or sharing plugin-private classes globally.
+3. Add disable/reload assertions proving driver registrations and plugin classloaders are not leaked or reused across plugin identities.
+4. Run focused lifecycle checks and the normal plugin API build.
+5. Re-run Zelda `ae06d49cb093a977ce2192bb31426a118d342c80` and confirm startup advances past SQLite driver acquisition.
+6. Commit.
+
+### Task 6: Add additional API already backed by live foundations
+
+**Files:**
+- Modify: `plugin-api/src/org/bukkit/entity/Player.java`
+- Modify: `plugin-api/src/org/bukkit/OfflinePlayer.java`
+- Modify/add: `plugin-api/src/org/bukkit/entity/AnimalTamer.java`
+- Modify: `plugin-api/src/org/bukkit/GameRule.java`
+- Modify: `plugin-api/src/org/bukkit/Tag.java`
+- Modify: `plugin-api/src/org/bukkit/enchantments/Enchantment.java`
+- Modify: `plugin-api/src/foton/Native.java` and `foton-plugin/src/natives.rs` only for the enchantment compatibility binding
+- Modify focused Java/Rust checks
+
+**Steps:**
+1. Add failing checks for the Bukkit player hierarchy, four legacy game-rule handles, live trimmable-armor tag lookup, and bidirectional enchantment conflicts.
+2. Correct the hierarchy without duplicating player state or weakening existing implementations.
+3. Map `ANNOUNCE_ADVANCEMENTS`, `DO_INSOMNIA`, `DO_PATROL_SPAWNING`, and `DO_TRADER_SPAWNING` to the exact Minecraft 26.2 rule names already accepted by the live native registry.
+4. Add `ITEMS_TRIMMABLE_ARMOR` as a normal live item-tag handle.
+5. Delegate `Enchantment.conflictsWith` to the existing registry exclusive-set logic through a request-time binding; do not copy or hardcode the set.
+6. Run focused plugin API/Rust tests and clippy for the touched crate.
+7. Commit.
+
+### Task 7: Rebaseline real-plugin evidence and finish verification
 
 **Files:**
 - Modify compatibility design/report files that contain the current evidence and metrics
 - Modify `dev/test-counts.txt` only if verified Rust test totals changed
 
 **Steps:**
-1. Build the exact Foton branch and compile Zelda Civ at `2113484fc4bf8086fd268213bc64cf41968d2d19` against it.
+1. Build the exact Foton branch and compile Zelda Civ at the latest gate commit, starting from the clean 392-error Foton-only baseline at `de3d12ac00a04f077b68c7537b36c689ac3679a2`. Fail the gate if any `paper-api-*.jar` remains on the classpath.
 2. Confirm every planned diagnostic shape is gone; classify any residuals rather than adding declarations blindly.
-3. Start Zelda with its real Simple Voice Chat dependency available. If the dependency cannot be installed from the existing test environment, preserve the exact external blocker and validate Foton with the remaining lifecycle fixtures.
+3. Start Zelda at or after `ae06d49cb093a977ce2192bb31426a118d342c80`, where Simple Voice Chat is truly optional, and confirm it advances beyond shaded SQLite driver acquisition.
 4. Regenerate compatibility evidence and update the public report with exact, non-inflated metrics.
 5. Run `bash dev/ci.sh` on the exact final commit. Fix all failures and rerun until green.
 6. Request final whole-branch code review, resolve all Critical/Important findings, and rerun affected verification.

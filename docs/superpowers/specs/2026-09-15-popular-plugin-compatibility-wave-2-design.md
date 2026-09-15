@@ -8,8 +8,8 @@ Increase practical Paper/Bukkit plugin compatibility without signature-only stub
 
 - Foton branch baseline: `75f78b09351b3aa622dffd311831c7d61b566d38`.
 - Shared-member compatibility: 2478/2487; the nine residuals are architectural boundaries and have no Zelda overlap.
-- Zelda Civ baseline: 293 compiler errors at `2113484fc4bf8086fd268213bc64cf41968d2d19`.
-- Zelda currently fails before `onLoad` when the external Simple Voice Chat API is absent. Foton must not provide fake Voicechat classes.
+- Zelda Civ baseline: 392 compiler errors at `de3d12ac00a04f077b68c7537b36c689ac3679a2`, measured with a gate that rejects every residual `paper-api-*.jar` from the Maven classpath. The former 293-error measurement was contaminated by Paper and is invalid.
+- Zelda at `ae06d49cb093a977ce2192bb31426a118d342c80` makes Simple Voice Chat genuinely optional and reaches `onEnable`. Its next failure is Foton-owned: `DriverManager` does not discover the SQLite JDBC driver shaded inside the plugin JAR.
 
 ## Scope
 
@@ -56,6 +56,21 @@ Add modern attribute and potion names only as references to the existing keyed i
 
 Identity tests must prove aliases are the same objects/enum constants. No separate unbacked registry identities are permitted.
 
+### 5. Shaded JDBC driver discovery
+
+Plugin code must be able to use a JDBC driver and `META-INF/services/java.sql.Driver` packaged inside its own JAR, as popular database-backed plugins do. Driver discovery and registration must occur through the plugin classloader at the correct lifecycle point, preserve classloader isolation, and avoid retaining plugin classloaders after disable/reload.
+
+The regression fixture must contain a tiny in-JAR JDBC driver and service descriptor so the test remains deterministic and network-free. Foton must not special-case SQLite or add a global SQLite dependency.
+
+### 6. Additional already-backed API
+
+Add only the following low-risk contracts confirmed against the clean Zelda gate and existing runtime foundations:
+
+- correct `Player` / `OfflinePlayer` / `AnimalTamer` hierarchy;
+- legacy Bukkit game-rule handles backed by the current 26.2 rule names;
+- `Tag.ITEMS_TRIMMABLE_ARMOR` backed by Foton's live item-tag bridge;
+- `Enchantment.conflictsWith` backed by the registry's real bidirectional exclusive-set logic.
+
 ## Explicitly deferred
 
 - MavenLibraryResolver and custom Paper loader execution;
@@ -69,9 +84,10 @@ Identity tests must prove aliases are the same objects/enum constants. No separa
 
 1. A copied checkout whose path contains spaces builds the plugin API without pre-existing ignored generated registry Rust.
 2. Focused Java checks and Rust native tests cover the new bridge and adapter behavior.
-3. Every planned Zelda diagnostic symbol disappears. The expected count is at most 244 after the entity/adapters tranche and at most 230 when all aliases apply, while acknowledging compiler cascade effects.
-4. Runtime Zelda validation includes the real Simple Voice Chat dependency or records its absence as a plugin packaging/environment failure, never as a Foton API implementation.
-5. `bash dev/ci.sh` passes on the exact final commit.
+3. Every planned Zelda diagnostic symbol disappears. The clean baseline should fall from 392 to about 330 after entity/adapters/aliases and about 319 after the additional backed API, while acknowledging javac cascade effects.
+4. A shaded, service-discovered JDBC fixture connects during plugin enable and releases its classloader-owned registration on disable/reload.
+5. Runtime Zelda validation uses the version where Simple Voice Chat is truly optional and progresses beyond the SQLite connection that currently fails.
+6. `bash dev/ci.sh` passes on the exact final commit.
 
 ## Performance invariant
 
