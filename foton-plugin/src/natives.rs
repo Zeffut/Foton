@@ -6149,7 +6149,7 @@ fn clear_entity_equipment_state(entity: Option<&dyn Entity>) -> bool {
     let Some(living) = entity.and_then(Entity::as_living_entity) else {
         return false;
     };
-    living.living_base().equipment().lock().clear();
+    living.clear_equipment();
     true
 }
 
@@ -7932,6 +7932,29 @@ fn hex_decode(value: &str) -> Vec<u8> {
         .collect()
 }
 
+fn append_potion_effects(value: &mut String, stack: &ItemStack) {
+    let Some(contents) = stack.get(POTION_CONTENTS) else {
+        return;
+    };
+    if contents.custom_effects().is_empty() {
+        return;
+    }
+
+    value.push_str("\u{1d}potioneffects=");
+    for effect in contents.custom_effects() {
+        let _ = write!(
+            value,
+            "{},{},{},{},{},{};",
+            effect.effect().key.path,
+            effect.duration(),
+            effect.amplifier(),
+            effect.ambient(),
+            effect.show_particles(),
+            effect.show_icon()
+        );
+    }
+}
+
 pub(crate) fn describe_slot(stack: &ItemStack) -> String {
     if stack.is_empty() {
         return String::new();
@@ -8028,20 +8051,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
             );
         }
     }
-    if let Some(contents) = stack.get(POTION_CONTENTS)
-        && !contents.custom_effects().is_empty()
-    {
-        value.push('\u{1d}');
-        for effect in contents.custom_effects() {
-            let _ = write!(
-                value,
-                "{},{},{};",
-                effect.effect().key.path,
-                effect.duration(),
-                effect.amplifier()
-            );
-        }
-    }
+    append_potion_effects(&mut value, stack);
     value
 }
 
@@ -8220,31 +8230,61 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     if !stored.is_empty() {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
-    if let Some(effects) = metadata.iter().find(|value| {
-        !value.starts_with("damage=")
-            && !value.starts_with("namehex=")
-            && !value.starts_with("lorehex=")
-            && !value.starts_with("enchhex=")
-            && !value.starts_with("storedenchhex=")
-            && !value.starts_with("model=")
-            && !value.starts_with("modelfloat=")
-            && !value.starts_with("modelflag=")
-            && !value.starts_with("modelstrhex=")
-            && !value.starts_with("modelcolor=")
-            && !value.starts_with("itemmodelhex=")
-            && !value.starts_with("tooltipstylehex=")
-            && **value != "hidetooltip"
-            && **value != "unbreakable"
-    }) {
+    let effects = metadata
+        .iter()
+        .find_map(|value| value.strip_prefix("potioneffects="))
+        .or_else(|| {
+            metadata.iter().copied().find(|value| {
+                !value.starts_with("nbthex=")
+                    && !value.starts_with("damage=")
+                    && !value.starts_with("namehex=")
+                    && !value.starts_with("lorehex=")
+                    && !value.starts_with("enchhex=")
+                    && !value.starts_with("storedenchhex=")
+                    && !value.starts_with("model=")
+                    && !value.starts_with("modelfloat=")
+                    && !value.starts_with("modelflag=")
+                    && !value.starts_with("modelstrhex=")
+                    && !value.starts_with("modelcolor=")
+                    && !value.starts_with("itemmodelhex=")
+                    && !value.starts_with("tooltipstylehex=")
+                    && *value != "hidetooltip"
+                    && *value != "unbreakable"
+            })
+        });
+    if let Some(effects) = effects {
         use foton_registry::data_components::components::PotionContents;
         use foton_registry::mob_effect::instance::MobEffectInstance;
         let mut custom = Vec::new();
         for field in effects.split(';') {
-            let mut parts = field.split(',');
-            let (Some(name), Some(duration), Some(amplifier)) =
-                (parts.next(), parts.next(), parts.next())
-            else {
-                continue;
+            let parts = field.split(',').collect::<Vec<_>>();
+            let (name, duration, amplifier, ambient, show_particles, show_icon) = match parts[..] {
+                [name, duration, amplifier] => (name, duration, amplifier, false, true, true),
+                [
+                    name,
+                    duration,
+                    amplifier,
+                    ambient,
+                    show_particles,
+                    show_icon,
+                ] => {
+                    let (Ok(ambient), Ok(show_particles), Ok(show_icon)) = (
+                        ambient.parse::<bool>(),
+                        show_particles.parse::<bool>(),
+                        show_icon.parse::<bool>(),
+                    ) else {
+                        continue;
+                    };
+                    (
+                        name,
+                        duration,
+                        amplifier,
+                        ambient,
+                        show_particles,
+                        show_icon,
+                    )
+                }
+                _ => continue,
             };
             let (Ok(duration), Ok(amplifier)) = (duration.parse(), amplifier.parse()) else {
                 continue;
@@ -8255,7 +8295,15 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
             let Some(effect) = REGISTRY.mob_effects.by_key(&key) else {
                 continue;
             };
-            custom.push(MobEffectInstance::simple(effect, duration, amplifier));
+            custom.push(MobEffectInstance::new(
+                effect,
+                duration,
+                amplifier,
+                ambient,
+                show_particles,
+                show_icon,
+                None,
+            ));
         }
         if !custom.is_empty() {
             stack.set(
@@ -14130,8 +14178,8 @@ mod entity_bridge_tests {
     use foton_core::chunk::chunk_request::{ChunkRequestState, ChunkTicketKind};
     use foton_core::chunk::status::ChunkStatus;
     use foton_core::config::RuntimeConfig;
-    use foton_core::entity::entities::{ArmorStandEntity, HorseEntity, RawEntity};
     use foton_core::entity::Entity as _;
+    use foton_core::entity::entities::{ArmorStandEntity, HorseEntity, RawEntity};
     use foton_core::inventory::container::Container as _;
     use foton_core::inventory::equipment::EquipmentSlot;
     use foton_core::level_data::WorldGenerationSettings;
@@ -14491,11 +14539,36 @@ mod entity_bridge_tests {
         init_vanilla_registry();
         let player = equipment_test_player();
         let entity = player.as_ref() as &dyn foton_core::entity::Entity;
-        for slot in 0..8 {
-            assert_eq!(
-                set_entity_equipment_slot_state(Some(entity), slot, "minecraft:stone 1"),
-                Ok(())
-            );
+        let living = entity
+            .as_living_entity()
+            .expect("a player should expose living equipment");
+        living.clear_equipment();
+
+        for (bridge_slot, inventory_slot) in [
+            (0, 0),
+            (1, 40),
+            (2, 36),
+            (3, 37),
+            (4, 38),
+            (5, 39),
+            (6, 41),
+            (7, 42),
+        ] {
+            if bridge_slot % 2 == 0 {
+                assert_eq!(
+                    set_entity_equipment_slot_state(Some(entity), bridge_slot, "minecraft:stone 1",),
+                    Ok(())
+                );
+            } else {
+                let stack =
+                    super::parse_slot("minecraft:stone 1").expect("test equipment should parse");
+                player.inventory.lock().set_item(inventory_slot, stack);
+            }
+            assert!(!player.inventory.lock().get_item(inventory_slot).is_empty());
+            assert!(matches!(
+                entity_equipment_slot_state(Some(entity), bridge_slot),
+                Ok(Some(value)) if value.starts_with("minecraft:stone 1")
+            ));
         }
         let changes_before_clear = player.inventory.lock().get_times_changed();
 
@@ -14505,9 +14578,19 @@ mod entity_bridge_tests {
             player.inventory.lock().get_times_changed(),
             changes_before_clear + 1
         );
-        for slot in 0..8 {
+        for (bridge_slot, inventory_slot) in [
+            (0, 0),
+            (1, 40),
+            (2, 36),
+            (3, 37),
+            (4, 38),
+            (5, 39),
+            (6, 41),
+            (7, 42),
+        ] {
+            assert!(player.inventory.lock().get_item(inventory_slot).is_empty());
             assert_eq!(
-                entity_equipment_slot_state(Some(entity), slot),
+                entity_equipment_slot_state(Some(entity), bridge_slot),
                 Ok(Some(String::new()))
             );
         }
@@ -14699,14 +14782,31 @@ mod slot_codec_tests {
     fn slot_codec_round_trip_preserves_custom_potion_effects_exactly() {
         init_vanilla_registry();
         let mut original = ItemStack::new(&vanilla_items::POTION);
+        original.set_opaque_nbt(Some("{foton_opaque:1b}".to_owned()));
         original.set(
             POTION_CONTENTS,
             PotionContents::new(
                 None,
                 None,
                 vec![
-                    MobEffectInstance::simple(vanilla_mob_effects::SPEED, 120, 2),
-                    MobEffectInstance::simple(vanilla_mob_effects::POISON, 45, 1),
+                    MobEffectInstance::new(
+                        vanilla_mob_effects::SPEED,
+                        120,
+                        2,
+                        true,
+                        false,
+                        true,
+                        None,
+                    ),
+                    MobEffectInstance::new(
+                        vanilla_mob_effects::POISON,
+                        45,
+                        1,
+                        false,
+                        true,
+                        false,
+                        None,
+                    ),
                 ],
                 None,
             ),
@@ -14715,8 +14815,40 @@ mod slot_codec_tests {
         let encoded = describe_slot(&original);
         let decoded = parse_slot(&encoded).expect("described custom potion should parse");
 
-        assert!(encoded.contains("speed,120,2;poison,45,1"));
+        let effects = encoded
+            .split('\u{1d}')
+            .find_map(|field| field.strip_prefix("potioneffects="))
+            .expect("potion effects should use their labeled metadata field");
+        assert_eq!(
+            effects,
+            "speed,120,2,true,false,true;poison,45,1,false,true,false;"
+        );
+        assert!(
+            effects
+                .split(';')
+                .filter(|effect| !effect.is_empty())
+                .all(|effect| effect.split(',').count() == 6)
+        );
+        assert_eq!(decoded.opaque_nbt(), original.opaque_nbt());
         assert_eq!(decoded.get(POTION_CONTENTS), original.get(POTION_CONTENTS));
         assert!(ItemStack::matches(&decoded, &original));
+    }
+
+    #[test]
+    fn slot_codec_round_trip_accepts_legacy_unlabeled_potion_effects() {
+        init_vanilla_registry();
+
+        let decoded =
+            parse_slot("minecraft:potion 1\u{1d}speed,20,1;\u{1d}nbthex=7b666f6f3a31627d")
+                .expect("legacy potion metadata should parse");
+        let effects = decoded
+            .get(POTION_CONTENTS)
+            .expect("legacy potion effects should survive");
+
+        assert_eq!(effects.custom_effects().len(), 1);
+        assert!(!effects.custom_effects()[0].ambient());
+        assert!(effects.custom_effects()[0].show_particles());
+        assert!(effects.custom_effects()[0].show_icon());
+        assert_eq!(decoded.opaque_nbt(), Some("{foo:1b}"));
     }
 }

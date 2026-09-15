@@ -2676,6 +2676,11 @@ pub trait LivingEntity: Entity {
         visitor(equipment.get_mut(slot));
     }
 
+    /// Clears every vanilla living-entity equipment slot under one equipment lock.
+    fn clear_equipment(&self) {
+        self.living_base().equipment().lock().clear();
+    }
+
     /// Returns the item in a vanilla living-entity equipment slot.
     ///
     /// Vanilla parity: `LivingEntity.getItemBySlot`.
