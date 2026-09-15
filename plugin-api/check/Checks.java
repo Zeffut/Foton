@@ -17,6 +17,7 @@ public final class Checks {
         EntityCheck.check();
         InventoryViewCheck.check();
         AdapterCheck.check();
+        RecipeChoiceCheck.check();
         Items.check();
         Colors.check();
         Commands.check();

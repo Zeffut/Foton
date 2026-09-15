@@ -150,15 +150,22 @@ mkdir -p "$PAPER_ABI_FIXTURE_CLASSES" "$PAPER_BINARY_CLASSES" "$FOTON_BINARY_RUN
 javac --release 21 -nowarn -d "$PAPER_ABI_FIXTURE_CLASSES" \
   "$PAPER_ABI_FIXTURE_SRC/io/papermc/paper/datacomponent/DataComponentBuilder.java" \
   "$PAPER_ABI_FIXTURE_SRC/io/papermc/paper/datacomponent/item/ResolvableProfile.java"
-javac --release 21 -nowarn -d "$PAPER_BINARY_CLASSES" -cp "$PAPER_ABI_FIXTURE_CLASSES" \
-  "$REPO/plugin-api/check/PaperResolvableProfileConsumer.java"
+javac --release 21 -nowarn -d "$PAPER_ABI_FIXTURE_CLASSES" -cp "$JAR$LIBS" \
+  "$PAPER_ABI_FIXTURE_SRC/org/bukkit/inventory/RecipeChoice.java"
+javac --release 21 -nowarn -d "$PAPER_BINARY_CLASSES" \
+  -cp "$PAPER_ABI_FIXTURE_CLASSES:$JAR$LIBS" \
+  "$REPO/plugin-api/check/PaperResolvableProfileConsumer.java" \
+  "$REPO/plugin-api/check/PaperRecipeChoiceConsumer.java"
 javac --release 21 -nowarn -d "$FOTON_BINARY_RUNNER_CLASSES" \
   -cp "$PAPER_BINARY_CLASSES:$JAR$LIBS" \
-  "$REPO/plugin-api/check/FotonResolvableProfileBinaryRunner.java"
+  "$REPO/plugin-api/check/FotonResolvableProfileBinaryRunner.java" \
+  "$REPO/plugin-api/check/FotonRecipeChoiceBinaryRunner.java"
 # PAPER_ABI_FIXTURE_CLASSES is intentionally absent: Foton must supply every
 # linked Paper type at runtime.
 java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
   FotonResolvableProfileBinaryRunner
+java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
+  FotonRecipeChoiceBinaryRunner
 
 # The fixture plugin exercises the parts of the event path that are easy to get
 # wrong: a rewrite that has to travel back, a veto that has to travel back, and
