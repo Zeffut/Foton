@@ -1,0 +1,5 @@
+name: FailingEnable
+version: 1
+main: example.FailingEnablePlugin
+commands:
+  failingenable: {}

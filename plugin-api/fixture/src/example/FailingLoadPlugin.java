@@ -4,19 +4,23 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import fixture.LifecycleProbe;
 
 /** Claims every plugin-owned resource kind and then fails from onLoad. */
 public final class FailingLoadPlugin extends JavaPlugin implements Listener {
-    public static FailingLoadPlugin instance;
-    public static int disableCalls;
-    public static boolean visibleDuringLoad;
-
     @Override
     public void onLoad() {
-        instance = this;
-        visibleDuringLoad = getServer().getPluginManager().getPlugin(getName()) == this;
+        LifecycleProbe.called("FailingLoad.load");
+        LifecycleProbe.loaderOwned("FailingLoad.loader", getClass().getClassLoader());
+        LifecycleProbe.loaderOwned("FailingLoad.eventLoader",
+            FailingEvent.class.getClassLoader());
+        LifecycleProbe.flag("FailingLoad.visible",
+            getServer().getPluginManager().getPlugin(getName()) == this);
         getServer().getPluginManager().registerEvents(this, this);
-        getServer().getScheduler().runTaskTimer(this, () -> {}, 100, 100);
+        Runnable syncTask = () -> {};
+        LifecycleProbe.loaderOwned("FailingLoad.lambdaLoader",
+            syncTask.getClass().getClassLoader());
+        getServer().getScheduler().runTaskTimer(this, syncTask, 100, 100);
         getServer().getScheduler().runTaskTimerAsynchronously(
             this, () -> {}, 100, 100);
         try {
@@ -36,6 +40,6 @@ public final class FailingLoadPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
-        disableCalls++;
+        LifecycleProbe.called("FailingLoad.disable");
     }
 }

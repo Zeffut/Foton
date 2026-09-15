@@ -230,6 +230,7 @@ public final class PluginHost {
 
             loader.setPlugin(candidate);
             candidate.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
+            FotonScheduler.activatePlugin(candidate);
             loaded.add(candidate);
             pluginLoaders.put(descriptor.getName().toLowerCase(java.util.Locale.ROOT), loader);
             state.status = Status.LOADING;
@@ -366,8 +367,12 @@ public final class PluginHost {
     public static void cleanup(Plugin plugin) {
         if (plugin == null) return;
         PluginState state = stateOf(plugin);
-        if (state == null || state.cleaned) return;
-        state.cleaned = true;
+        if (state == null) return;
+        synchronized (state) {
+            if (state.cleaned) return;
+            FotonScheduler.beginPluginCleanup(plugin);
+            state.cleaned = true;
+        }
 
         if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
             java.setEnabled(false);
@@ -432,6 +437,20 @@ public final class PluginHost {
 
     private static PluginState stateOf(Plugin plugin) {
         return statesByPlugin.get(plugin);
+    }
+
+    static int lifecycleReferenceCount(String pluginName) {
+        int references = pluginLoaders.containsKey(key(pluginName)) ? 1 : 0;
+        PluginState state = states.get(key(pluginName));
+        if (state != null && state.plugin != null) references++;
+        if (state != null && state.loader != null) references++;
+        for (Plugin plugin : statesByPlugin.keySet()) {
+            if (plugin.getName().equals(pluginName)) references++;
+        }
+        for (Plugin plugin : loaded) {
+            if (plugin.getName().equals(pluginName)) references++;
+        }
+        return references;
     }
 
     private static String key(String name) {

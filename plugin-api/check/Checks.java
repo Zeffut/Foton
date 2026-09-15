@@ -20,7 +20,7 @@ public final class Checks {
         Checks.expect(org.bukkit.Bukkit.getMessenger().getIncomingChannels().isEmpty()
             && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
             "disabling a plugin should release its custom channels");
-        lifecycle();
+        lifecycle(args[1]);
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"
@@ -39,48 +39,53 @@ public final class Checks {
         }
     }
 
-    private static void lifecycle() throws Exception {
-        java.nio.file.Path directory = java.nio.file.Files.createTempDirectory(
-            "foton-lifecycle-fixtures-");
+    private static void lifecycle(String directory) throws Exception {
+        fixture.LifecycleProbe.reset();
+        int enabled;
         try {
-            fixture(directory, "FailingEnable", "example.FailingEnablePlugin",
-                "commands:\n  failingenable: {}\n");
-            fixture(directory, "EnableDependent", "example.EnableDependentPlugin",
-                "depend: [FailingEnable]\n");
-            fixture(directory, "FailingLoad", "example.FailingLoadPlugin",
-                "commands:\n  failingload: {}\n");
-            fixture(directory, "LoadDependent", "example.LoadDependentPlugin",
-                "depend: [FailingLoad]\n");
-            fixture(directory, "Healthy", "example.HealthyPlugin", "");
-
-            int enabled;
-            try {
-                enabled = foton.PluginHost.loadAll(directory.toString());
-            } catch (UnsatisfiedLinkError cleanupWasNotIsolated) {
-                enabled = -1;
-            }
+            enabled = foton.PluginHost.loadAll(directory);
+        } finally {
+            fixture.LifecycleProbe.releaseAsync();
+        }
+        fixture.LifecycleProbe.awaitAsyncFinished();
+        foton.FotonScheduler.tick();
+        try {
             same(enabled, 1,
                 "only the unrelated lifecycle fixture should enable");
-            same(example.FailingLoadPlugin.disableCalls, 0,
+            same(fixture.LifecycleProbe.calls("FailingLoad.disable"), 0,
                 "onDisable ran even though enable was never attempted");
-            expect(example.FailingLoadPlugin.visibleDuringLoad,
+            expect(fixture.LifecycleProbe.flag("FailingLoad.visible"),
                 "plugin was not registered before onLoad");
-            expect(example.FailingEnablePlugin.disabledSawFalse,
+            expect(fixture.LifecycleProbe.flag("FailingEnable.disabledSawFalse"),
                 "onDisable observed enabled=true");
-            same(example.FailingEnablePlugin.disableCalls, 1,
+            same(fixture.LifecycleProbe.calls("FailingEnable.disable"), 1,
                 "failed enable should invoke onDisable exactly once");
-            same(example.LoadDependentPlugin.loadCalls, 0,
+            same(fixture.LifecycleProbe.calls("LoadDependent.load"), 0,
                 "dependent onLoad ran after its required dependency failed onLoad");
-            same(example.LoadDependentPlugin.enableCalls, 0,
+            same(fixture.LifecycleProbe.calls("LoadDependent.enable"), 0,
                 "dependent onEnable ran after its required dependency failed onLoad");
-            same(example.EnableDependentPlugin.loadCalls, 1,
+            same(fixture.LifecycleProbe.calls("EnableDependent.load"), 1,
                 "enable-phase dependent should load before its dependency fails to enable");
-            same(example.EnableDependentPlugin.enableCalls, 0,
+            same(fixture.LifecycleProbe.calls("EnableDependent.enable"), 0,
                 "dependent onEnable ran after its required dependency failed onEnable");
-            same(example.HealthyPlugin.loadCalls, 1,
+            same(fixture.LifecycleProbe.calls("Healthy.load"), 1,
                 "unrelated plugin did not continue through onLoad");
-            same(example.HealthyPlugin.enableCalls, 1,
+            same(fixture.LifecycleProbe.calls("Healthy.enable"), 1,
                 "unrelated plugin did not continue through onEnable");
+            expect(fixture.LifecycleProbe.flag("FailingLoad.loader")
+                    && fixture.LifecycleProbe.flag("FailingLoad.eventLoader")
+                    && fixture.LifecycleProbe.flag("FailingLoad.lambdaLoader")
+                    && fixture.LifecycleProbe.flag("FailingEnable.loader")
+                    && fixture.LifecycleProbe.flag("EnableDependent.loader")
+                    && fixture.LifecycleProbe.flag("Healthy.loader"),
+                "lifecycle fixture class, event, or lambda came from the parent classpath");
+
+            same(fixture.LifecycleProbe.followUpAttempts(), 2,
+                "running async rollback task did not attempt both follow-ups");
+            same(fixture.LifecycleProbe.followUpRejections(), 2,
+                "running async rollback task scheduled work after cleanup began");
+            same(fixture.LifecycleProbe.followUpRuns(), 0,
+                "a post-cleanup follow-up task ran");
 
             same(foton.EventBridge.handlerCount("example.FailingEvent"), 0,
                 "failed plugin listener leaked");
@@ -90,33 +95,33 @@ public final class Checks {
                 "failed onEnable command leaked");
             same(pendingTasks("FailingLoad"), 0, "failed onLoad task leaked");
             same(pendingTasks("FailingEnable"), 0, "failed onEnable task leaked");
-            resourcesReleased(example.FailingLoadPlugin.instance, "failed onLoad");
-            resourcesReleased(example.FailingEnablePlugin.instance, "failed onEnable");
+            expect(org.bukkit.Bukkit.getServicesManager().getKnownServices().isEmpty(),
+                "failed plugin service leaked");
+            expect(org.bukkit.Bukkit.getMessenger().getIncomingChannels().isEmpty()
+                    && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
+                "failed plugin channel leaked");
             expect(foton.PluginHost.byName("FailingLoad") == null
                     && foton.PluginHost.byName("FailingEnable") == null
                     && foton.PluginHost.byName("LoadDependent") == null
                     && foton.PluginHost.byName("EnableDependent") == null,
                 "failed plugin or required dependent remained registered");
+            for (String failed : java.util.List.of(
+                    "FailingLoad", "LoadDependent", "FailingEnable", "EnableDependent")) {
+                same(foton.LifecycleDiagnostics.schedulerTasks(failed), 0,
+                    "scheduler retained " + failed + " work");
+                expect(!foton.LifecycleDiagnostics.schedulerAccepts(failed),
+                    "scheduler retained " + failed + " submission rights");
+                same(foton.LifecycleDiagnostics.hostReferences(failed), 0,
+                    "host retained " + failed + " plugin or classloader references");
+            }
+            same(foton.LifecycleDiagnostics.eventTypes("example.FailingEvent"), 0,
+                "event bridge retained the plugin-defined event class");
 
-            cleanupTwice(example.FailingEnablePlugin.instance);
-            same(example.FailingEnablePlugin.disableCalls, 1,
-                "transactional cleanup was not idempotent");
+            foton.PluginHost.disableAll();
+            same(foton.LifecycleDiagnostics.hostReferences("Healthy"), 0,
+                "host retained the healthy plugin after disable");
         } finally {
             foton.PluginHost.disableAll();
-            deleteTree(directory);
-        }
-    }
-
-    private static void fixture(
-            java.nio.file.Path directory, String name, String main, String extra)
-            throws Exception {
-        java.nio.file.Path jar = directory.resolve(name + ".jar");
-        try (java.util.jar.JarOutputStream output = new java.util.jar.JarOutputStream(
-                java.nio.file.Files.newOutputStream(jar))) {
-            output.putNextEntry(new java.util.jar.JarEntry("plugin.yml"));
-            output.write(("name: " + name + "\nversion: 1\nmain: " + main + "\n" + extra)
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            output.closeEntry();
         }
     }
 
@@ -129,25 +134,4 @@ public final class Checks {
         return count;
     }
 
-    private static void resourcesReleased(org.bukkit.plugin.Plugin plugin, String phase) {
-        expect(plugin != null, phase + " fixture did not retain its instance");
-        expect(org.bukkit.Bukkit.getServicesManager().getRegistrations(plugin).isEmpty(),
-            phase + " service leaked");
-        expect(org.bukkit.Bukkit.getMessenger().getIncomingChannels(plugin).isEmpty()
-                && org.bukkit.Bukkit.getMessenger().getOutgoingChannels(plugin).isEmpty(),
-            phase + " channel leaked");
-    }
-
-    private static void cleanupTwice(org.bukkit.plugin.Plugin plugin) {
-        foton.PluginHost.cleanup(plugin);
-        foton.PluginHost.cleanup(plugin);
-    }
-
-    private static void deleteTree(java.nio.file.Path directory) throws Exception {
-        try (java.util.stream.Stream<java.nio.file.Path> paths = java.nio.file.Files.walk(directory)) {
-            for (java.nio.file.Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
-                java.nio.file.Files.deleteIfExists(path);
-            }
-        }
-    }
 }

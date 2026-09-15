@@ -1095,6 +1095,14 @@ public final class EventBridge {
         return 0;
     }
 
+    static int eventTypeCount(String className) {
+        int count = 0;
+        for (Class<?> event : handlers.keySet()) {
+            if (event.getName().equals(className)) count++;
+        }
+        return count;
+    }
+
     /** One handler, however the plugin gave it to us.
      *
      * An annotated method and a hand-registered executor are the same thing to

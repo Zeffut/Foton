@@ -1,0 +1,4 @@
+name: EnableDependent
+version: 1
+main: example.EnableDependentPlugin
+depend: [FailingEnable]

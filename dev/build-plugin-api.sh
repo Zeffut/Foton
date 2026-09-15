@@ -82,20 +82,47 @@ FIXTURE_SRC="$REPO/plugin-api/fixture/src"
 if [ -d "$FIXTURE_SRC" ]; then
   FIX="$OUT/fixture"
   rm -rf "$FIX"
-  mkdir -p "$FIX/classes"
-  javac -nowarn -d "$FIX/classes" -cp "$JAR$LIBS" "$FIXTURE_SRC"/example/*.java
-  cp "$FIXTURE_SRC/plugin.yml" "$FIX/classes/"
-  cp "$FIXTURE_SRC/config.yml" "$FIX/classes/"
-  jar --create --file "$FIX/EventFixture.jar" -C "$FIX/classes" .
+  EVENT_CLASSES="$FIX/event-classes"
+  LIFECYCLE_CLASSES="$FIX/lifecycle-classes"
+  CHECK_CLASSES="$FIX/check-classes"
+  mkdir -p "$EVENT_CLASSES" "$LIFECYCLE_CLASSES" "$CHECK_CLASSES"
+
+  javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS" "$FIXTURE_SRC"/support/*.java
+  javac -nowarn -d "$EVENT_CLASSES" -cp "$JAR$LIBS" \
+    "$FIXTURE_SRC/example/EventFixture.java"
+  cp "$FIXTURE_SRC/plugin.yml" "$EVENT_CLASSES/"
+  cp "$FIXTURE_SRC/config.yml" "$EVENT_CLASSES/"
+  jar --create --file "$FIX/EventFixture.jar" -C "$EVENT_CLASSES" .
+
+  find "$FIXTURE_SRC/example" -name '*.java' ! -name 'EventFixture.java' \
+    | sort > "$FIX/lifecycle-sources.txt"
+  javac -nowarn -d "$LIFECYCLE_CLASSES" -cp "$JAR$LIBS:$CHECK_CLASSES" \
+    @"$FIX/lifecycle-sources.txt"
 
   mkdir -p "$FIX/plugins"
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
 
-  # The checks read the fixture's counters, so they compile against its
-  # classes. The jar in plugins/ is still what gets loaded; this is only so
-  # the names resolve.
-  javac -nowarn -d "$FIX" -cp "$JAR$LIBS:$FIX/classes" "$REPO"/plugin-api/check/*.java
-  java -cp "$FIX:$JAR$LIBS:$FIX/classes" Checks "$FIX/plugins"
+  LIFECYCLE_PLUGINS="$FIX/lifecycle-plugins"
+  mkdir -p "$LIFECYCLE_PLUGINS"
+  for fixture in FailingEnable EnableDependent FailingLoad LoadDependent Healthy; do
+    class="${fixture}Plugin"
+    STAGE="$FIX/stage-$fixture"
+    mkdir -p "$STAGE/example"
+    cp "$LIFECYCLE_CLASSES/example/$class.class" "$STAGE/example/"
+    if [ "$fixture" = "FailingEnable" ] || [ "$fixture" = "FailingLoad" ]; then
+      cp "$LIFECYCLE_CLASSES/example/FailingEvent.class" "$STAGE/example/"
+    fi
+    cp "$REPO/plugin-api/fixture/lifecycle/$fixture/plugin.yml" "$STAGE/"
+    jar --create --file "$LIFECYCLE_PLUGINS/$fixture.jar" -C "$STAGE" .
+  done
+
+  # Only the original event fixture is parent-visible because older checks
+  # inspect its counters directly. Lifecycle classes exist solely in their
+  # plugin jars, so the PluginClassLoader owns their classes and lambdas.
+  javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS:$EVENT_CLASSES:$CHECK_CLASSES" \
+    "$REPO"/plugin-api/check/*.java
+  java -cp "$CHECK_CLASSES:$JAR$LIBS:$EVENT_CLASSES" Checks \
+    "$FIX/plugins" "$LIFECYCLE_PLUGINS"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded
