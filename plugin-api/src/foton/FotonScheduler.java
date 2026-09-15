@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.BukkitTask;
@@ -20,16 +21,16 @@ import org.bukkit.scheduler.BukkitTask;
  * construction, because there is one tick.
  */
 public final class FotonScheduler implements BukkitScheduler {
-    /** Serializes plugin activation/cleanup with task submission only.
-     *
-     * <p>The tick never takes this lock. A submission either finishes before
-     * cleanup removes its owner's permission and is then cancelled, or sees
-     * the removal and is rejected without publishing a task. */
-    private static final Object lifecycleLock = new Object();
-    private static final java.util.Set<Plugin> acceptingPlugins =
-        java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private static final int PENDING = 0;
+    private static final int RUNNING = 1;
+    private static final int CANCELLED = 2;
+    private static final int CANCELLED_RUNNING = 3;
+    private static final int FINISHED = 4;
+    private static final ConcurrentLinkedQueue<Task> CLOSED = new ConcurrentLinkedQueue<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, PluginTasks> pluginTasks =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private static final ConcurrentLinkedQueue<Scheduled> pending = new ConcurrentLinkedQueue<>();
-    private static final java.util.concurrent.ConcurrentHashMap<Integer, BukkitTask> active =
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, Task> active =
         new java.util.concurrent.ConcurrentHashMap<>();
     private static final AtomicInteger nextId = new AtomicInteger(1);
 
@@ -90,33 +91,32 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     private static BukkitTask offTick(Plugin plugin, Runnable body, long delay, long period) {
-        synchronized (lifecycleLock) {
-            requireAccepting(plugin);
-            Async task = new Async(nextId.getAndIncrement(), plugin, period > 0);
-            active.put(task.id, task);
-            Runnable guarded = () -> {
-                synchronized (lifecycleLock) {
-                    if (task.cancelled) return;
-                    task.running = true;
-                    task.thread = Thread.currentThread();
-                }
-                try {
-                    body.run();
-                } catch (Throwable error) {
-                    // Nothing above this catches: an exception on the executor
-                    // thread would silently stop a repeating task forever.
-                    System.out.println("[scheduler] " + plugin.getName()
-                        + " threw in an async task: " + error);
-                } finally {
-                    synchronized (lifecycleLock) {
-                        task.running = false;
-                        task.thread = null;
-                        if (task.cancelled || !task.repeating) {
-                            active.remove(task.id, task);
-                        }
-                    }
-                }
-            };
+        PluginTasks owner = requireAccepting(plugin);
+        Async task = new Async(
+            nextId.getAndIncrement(), plugin, owner, period > 0);
+        if (!owner.register(task)) throw rejected(plugin);
+        active.put(task.id, task);
+        Runnable guarded = () -> {
+            if (!task.tryStart()) return;
+            if (!owner.accepting()) {
+                task.cancel();
+                task.finishRun();
+                return;
+            }
+            task.thread = Thread.currentThread();
+            try {
+                body.run();
+            } catch (Throwable error) {
+                // Nothing above this catches: an exception on the executor
+                // thread would silently stop a repeating task forever.
+                System.out.println("[scheduler] " + plugin.getName()
+                    + " threw in an async task: " + error);
+            } finally {
+                task.thread = null;
+                task.finishRun();
+            }
+        };
+        try {
             // A tick is fifty milliseconds. Bukkit measures async delays in ticks
             // too, which reads oddly and is what plugins pass.
             long delayMillis = delay * 50;
@@ -126,69 +126,75 @@ public final class FotonScheduler implements BukkitScheduler {
                 : OFF_TICK.schedule(guarded, delayMillis,
                     java.util.concurrent.TimeUnit.MILLISECONDS);
             task.bind(handle);
-            return task;
+        } catch (RuntimeException error) {
+            task.cancel();
+            throw error;
         }
+        if (!owner.accepting() || task.isCancelled()) {
+            task.cancel();
+            throw rejected(plugin);
+        }
+        return task;
     }
 
     /** Makes scheduling legal before onLoad, where Bukkit permits registration. */
     static void activatePlugin(Plugin plugin) {
-        synchronized (lifecycleLock) {
-            acceptingPlugins.add(plugin);
-        }
+        pluginTasks.put(key(plugin), new PluginTasks());
     }
 
     /** Closes and drains the scheduling side of cleanup before callbacks run. */
     static void beginPluginCleanup(Plugin plugin) {
-        synchronized (lifecycleLock) {
-            acceptingPlugins.remove(plugin);
-            cancelTasksLocked(plugin);
-        }
+        PluginTasks tasks = pluginTasks.get(key(plugin));
+        if (tasks == null) return;
+        tasks.close();
+        pluginTasks.remove(key(plugin), tasks);
     }
 
-    private static void requireAccepting(Plugin plugin) {
-        if (!acceptingPlugins.contains(plugin)) {
-            throw new IllegalStateException(
-                "Plugin " + plugin.getName() + " is no longer accepting scheduled tasks");
-        }
+    private static PluginTasks requireAccepting(Plugin plugin) {
+        PluginTasks tasks = pluginTasks.get(key(plugin));
+        if (tasks == null || !tasks.accepting()) throw rejected(plugin);
+        return tasks;
+    }
+
+    private static IllegalStateException rejected(Plugin plugin) {
+        return new IllegalStateException(
+            "Plugin " + plugin.getName() + " is no longer accepting scheduled tasks");
+    }
+
+    private static String key(Plugin plugin) {
+        return plugin.getName().toLowerCase(java.util.Locale.ROOT);
     }
 
     /** A task running off the tick, cancellable from anywhere. */
-    private static final class Async implements BukkitTask {
-        final int id;
-        final Plugin plugin;
+    private static final class Async extends Task {
         final boolean repeating;
         volatile java.util.concurrent.ScheduledFuture<?> handle;
-        volatile boolean cancelled;
-        volatile boolean running;
         volatile Thread thread;
 
-        Async(int id, Plugin plugin, boolean repeating) {
-            this.id = id;
-            this.plugin = plugin;
+        Async(int id, Plugin plugin, PluginTasks owner, boolean repeating) {
+            super(id, plugin, owner);
             this.repeating = repeating;
         }
 
         void bind(java.util.concurrent.ScheduledFuture<?> handle) {
             this.handle = handle;
-            if (cancelled) handle.cancel(false);
+            if (isCancelled()) handle.cancel(false);
         }
 
-        @Override public int getTaskId() {
-            return id;
-        }
-
-        @Override public Plugin getOwner() { return plugin; }
         @Override public boolean isSync() { return false; }
-        @Override public boolean isCancelled() { return cancelled; }
 
         @Override public void cancel() {
-            synchronized (lifecycleLock) {
-                if (cancelled) return;
-                cancelled = true;
-                java.util.concurrent.ScheduledFuture<?> future = handle;
-                if (future != null) future.cancel(false);
-                if (!running) active.remove(id, this);
-            }
+            boolean running = cancelTransition();
+            java.util.concurrent.ScheduledFuture<?> future = handle;
+            if (future != null) future.cancel(false);
+            if (!running) release();
+        }
+
+        void finishRun() {
+            if (repeating && owner.accepting()
+                    && phase.compareAndSet(RUNNING, PENDING)) return;
+            phase.set(FINISHED);
+            release();
         }
     }
 
@@ -216,31 +222,21 @@ public final class FotonScheduler implements BukkitScheduler {
 
     @Override
     public void cancelTasks(Plugin plugin) {
-        synchronized (lifecycleLock) {
-            cancelTasksLocked(plugin);
-        }
-    }
-
-    private static void cancelTasksLocked(Plugin plugin) {
-        for (BukkitTask task : List.copyOf(active.values())) {
-            if (task.getOwner() == plugin) task.cancel();
-        }
-        pending.removeIf(task -> task.plugin == plugin);
+        PluginTasks tasks = pluginTasks.get(key(plugin));
+        if (tasks != null) tasks.cancelCurrent();
     }
 
     @Override
     public boolean isCurrentlyRunning(int taskId) {
-        BukkitTask task = active.get(taskId);
-        return task instanceof Async async ? async.running
-            : task instanceof Scheduled scheduled && scheduled.running;
+        Task task = active.get(taskId);
+        return task != null && task.isRunning();
     }
 
     @Override
     public java.util.List<org.bukkit.scheduler.BukkitWorker> getActiveWorkers() {
         java.util.List<org.bukkit.scheduler.BukkitWorker> workers = new java.util.ArrayList<>();
-        for (BukkitTask task : active.values()) {
-            if (task instanceof Async async && async.running) workers.add(new Worker(async));
-            if (task instanceof Scheduled scheduled && scheduled.running) workers.add(new Worker(scheduled));
+        for (Task task : active.values()) {
+            if (task.isRunning()) workers.add(new Worker(task));
         }
         return java.util.List.copyOf(workers);
     }
@@ -251,14 +247,15 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     private static Scheduled submit(Plugin plugin, Runnable body, long delay, long period) {
-        synchronized (lifecycleLock) {
-            requireAccepting(plugin);
-            Scheduled task = new Scheduled(
-                nextId.getAndIncrement(), plugin, body, delay, period);
-            active.put(task.id, task);
-            pending.add(task);
-            return task;
+        PluginTasks owner = requireAccepting(plugin);
+        Scheduled task = new Scheduled(
+            nextId.getAndIncrement(), plugin, owner, body, delay, period);
+        if (!owner.register(task)) throw rejected(plugin);
+        active.put(task.id, task);
+        if (!task.publish()) {
+            throw rejected(plugin);
         }
+        return task;
     }
 
     /** Runs what this tick owes. Called by Foton, from the tick, once.
@@ -271,9 +268,7 @@ public final class FotonScheduler implements BukkitScheduler {
         List<Scheduled> keep = new ArrayList<>();
         Scheduled task;
         while ((task = pending.poll()) != null) {
-            if (task.cancelled) {
-                continue;
-            }
+            if (!task.isPending()) continue;
             // Count this tick down first, then ask whether the task is due.
             // Doing it the other way round costs a tick on every repeat: a
             // period of 2 would fire every 3. CraftBukkit stores an absolute
@@ -285,20 +280,18 @@ public final class FotonScheduler implements BukkitScheduler {
                 continue;
             }
             due.add(task);
-            if (task.period > 0) {
-                task.remaining = task.period;
-                keep.add(task);
-            }
         }
-        pending.addAll(keep);
+        for (Scheduled waiting : keep) waiting.publish();
 
         int ran = 0;
         for (Scheduled ready : due) {
-            if (ready.cancelled) {
+            if (!ready.tryStart()) continue;
+            if (!ready.owner.accepting()) {
+                ready.cancel();
+                ready.finishRun();
                 continue;
             }
             try {
-                ready.running = true;
                 ready.thread = Thread.currentThread();
                 ready.body.run();
                 ran++;
@@ -308,11 +301,8 @@ public final class FotonScheduler implements BukkitScheduler {
                 System.out.println("[scheduler] " + ready.plugin.getName()
                     + " threw in a task: " + error);
             } finally {
-                ready.running = false;
                 ready.thread = null;
-                if (ready.period <= 0) {
-                    active.remove(ready.id, ready);
-                }
+                ready.finishRun();
             }
         }
         return ran;
@@ -320,31 +310,130 @@ public final class FotonScheduler implements BukkitScheduler {
 
     /** Forgets everything, for a shutdown. */
     public static void clear() {
-        synchronized (lifecycleLock) {
-            acceptingPlugins.clear();
-            for (BukkitTask task : List.copyOf(active.values())) task.cancel();
-            active.clear();
-            pending.clear();
-            OFF_TICK.purge();
-        }
+        for (PluginTasks tasks : List.copyOf(pluginTasks.values())) tasks.close();
+        pluginTasks.clear();
+        for (BukkitTask task : List.copyOf(active.values())) task.cancel();
+        active.clear();
+        pending.clear();
+        OFF_TICK.purge();
     }
 
     static int trackedTaskCount(String pluginName) {
-        synchronized (lifecycleLock) {
-            int count = 0;
-            for (BukkitTask task : active.values()) {
-                if (task.getOwner().getName().equals(pluginName)) count++;
-            }
-            return count;
+        int count = 0;
+        for (BukkitTask task : active.values()) {
+            if (task.getOwner().getName().equals(pluginName)) count++;
         }
+        return count;
+    }
+
+    static int queuedTaskCount(String pluginName) {
+        int count = 0;
+        for (Scheduled task : pending) {
+            if (task.plugin.getName().equals(pluginName)) count++;
+        }
+        return count;
     }
 
     static boolean acceptsTasks(String pluginName) {
-        synchronized (lifecycleLock) {
-            for (Plugin plugin : acceptingPlugins) {
-                if (plugin.getName().equals(pluginName)) return true;
-            }
+        PluginTasks tasks = pluginTasks.get(pluginName.toLowerCase(java.util.Locale.ROOT));
+        return tasks != null && tasks.accepting();
+    }
+
+    /** One plugin generation's lock-free task registry.
+     *
+     * <p>Registration publishes into the current queue and rechecks its
+     * identity. Cleanup atomically replaces that queue with {@link #CLOSED}.
+     * A racing task is therefore either in cleanup's captured queue or sees
+     * the tombstone and removes itself after publication. */
+    private static final class PluginTasks {
+        private final AtomicReference<ConcurrentLinkedQueue<Task>> tasks =
+            new AtomicReference<>(new ConcurrentLinkedQueue<>());
+
+        boolean accepting() {
+            return tasks.get() != CLOSED;
+        }
+
+        boolean register(Task task) {
+            ConcurrentLinkedQueue<Task> registry = tasks.get();
+            if (registry == CLOSED) return false;
+            task.registry = registry;
+            registry.add(task);
+            if (tasks.get() == registry) return true;
+            task.cancel();
             return false;
+        }
+
+        void cancelCurrent() {
+            ConcurrentLinkedQueue<Task> registry = tasks.get();
+            if (registry == CLOSED) return;
+            cancelSnapshot(registry);
+        }
+
+        void close() {
+            ConcurrentLinkedQueue<Task> registry = tasks.getAndSet(CLOSED);
+            if (registry == CLOSED) return;
+            cancelSnapshot(registry);
+        }
+
+        void remove(Task task) {
+            ConcurrentLinkedQueue<Task> registry = task.registry;
+            if (registry == null) return;
+            registry.remove(task);
+            task.registry = null;
+        }
+
+        private static void cancelSnapshot(ConcurrentLinkedQueue<Task> registry) {
+            for (Object entry : registry.toArray()) ((Task) entry).cancel();
+        }
+    }
+
+    private abstract static class Task implements BukkitTask {
+        final int id;
+        final Plugin plugin;
+        final PluginTasks owner;
+        final AtomicInteger phase = new AtomicInteger(PENDING);
+        volatile ConcurrentLinkedQueue<Task> registry;
+
+        Task(int id, Plugin plugin, PluginTasks owner) {
+            this.id = id;
+            this.plugin = plugin;
+            this.owner = owner;
+        }
+
+        @Override public int getTaskId() { return id; }
+        @Override public Plugin getOwner() { return plugin; }
+        @Override public boolean isCancelled() {
+            int state = phase.get();
+            return state == CANCELLED || state == CANCELLED_RUNNING;
+        }
+
+        boolean isPending() {
+            return phase.get() == PENDING;
+        }
+
+        boolean isRunning() {
+            int state = phase.get();
+            return state == RUNNING || state == CANCELLED_RUNNING;
+        }
+
+        boolean tryStart() {
+            return phase.compareAndSet(PENDING, RUNNING);
+        }
+
+        /** Returns whether a body already won the right to finish running. */
+        boolean cancelTransition() {
+            while (true) {
+                int state = phase.get();
+                if (state == CANCELLED_RUNNING) return true;
+                if (state == CANCELLED || state == FINISHED) return false;
+                int cancelled = state == RUNNING ? CANCELLED_RUNNING : CANCELLED;
+                if (phase.compareAndSet(state, cancelled)) return state == RUNNING;
+            }
+        }
+
+        void release() {
+            active.remove(id, this);
+            owner.remove(this);
         }
     }
 
@@ -360,35 +449,48 @@ public final class FotonScheduler implements BukkitScheduler {
         }
     }
 
-    private static final class Scheduled implements BukkitTask {
-        final int id;
-        final Plugin plugin;
+    private static final class Scheduled extends Task {
         final Runnable body;
         final long period;
         long remaining;
-        volatile boolean cancelled;
-        volatile boolean running;
         volatile Thread thread;
 
-        Scheduled(int id, Plugin plugin, Runnable body, long delay, long period) {
-            this.id = id;
-            this.plugin = plugin;
+        Scheduled(
+                int id, Plugin plugin, PluginTasks owner, Runnable body,
+                long delay, long period) {
+            super(id, plugin, owner);
             this.body = body;
             this.period = period;
             this.remaining = delay;
         }
 
-        @Override public int getTaskId() { return id; }
-        @Override public Plugin getOwner() { return plugin; }
         @Override public boolean isSync() { return true; }
-        @Override public boolean isCancelled() { return cancelled; }
         @Override public void cancel() {
-            synchronized (lifecycleLock) {
-                if (cancelled) return;
-                cancelled = true;
-                active.remove(id, this);
-                pending.remove(this);
+            boolean running = cancelTransition();
+            pending.remove(this);
+            if (!running) release();
+        }
+
+        boolean publish() {
+            if (!isPending() || !owner.accepting()) {
+                cancel();
+                return false;
             }
+            pending.add(this);
+            if (isPending() && owner.accepting()) return true;
+            cancel();
+            return false;
+        }
+
+        void finishRun() {
+            if (period > 0 && owner.accepting()
+                    && phase.compareAndSet(RUNNING, PENDING)) {
+                remaining = period;
+                publish();
+                return;
+            }
+            phase.set(FINISHED);
+            release();
         }
     }
 }

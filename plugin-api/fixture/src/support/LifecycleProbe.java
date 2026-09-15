@@ -16,6 +16,9 @@ public final class LifecycleProbe {
     private static volatile CountDownLatch asyncStarted = new CountDownLatch(1);
     private static volatile CountDownLatch releaseAsync = new CountDownLatch(1);
     private static volatile CountDownLatch asyncFinished = new CountDownLatch(1);
+    private static volatile CountDownLatch syncStarted = new CountDownLatch(1);
+    private static volatile CountDownLatch releaseSync = new CountDownLatch(1);
+    private static volatile CountDownLatch syncFinished = new CountDownLatch(1);
 
     private LifecycleProbe() {}
 
@@ -28,6 +31,9 @@ public final class LifecycleProbe {
         asyncStarted = new CountDownLatch(1);
         releaseAsync = new CountDownLatch(1);
         asyncFinished = new CountDownLatch(1);
+        syncStarted = new CountDownLatch(1);
+        releaseSync = new CountDownLatch(1);
+        syncFinished = new CountDownLatch(1);
     }
 
     public static void called(String name) {
@@ -73,6 +79,30 @@ public final class LifecycleProbe {
 
     public static void awaitAsyncFinished() {
         await(asyncFinished, "async rollback task did not finish");
+    }
+
+    public static void syncStarted() {
+        syncStarted.countDown();
+    }
+
+    public static void awaitSyncStarted() {
+        await(syncStarted, "sync rollback task did not start");
+    }
+
+    public static void awaitSyncRelease() {
+        await(releaseSync, "sync rollback task was not released");
+    }
+
+    public static void releaseSync() {
+        releaseSync.countDown();
+    }
+
+    public static void syncFinished() {
+        syncFinished.countDown();
+    }
+
+    public static void awaitSyncFinished() {
+        await(syncFinished, "sync rollback task did not finish");
     }
 
     public static void followUpAttempt(boolean rejected) {

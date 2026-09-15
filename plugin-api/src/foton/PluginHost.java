@@ -41,7 +41,8 @@ public final class PluginHost {
         JavaPlugin plugin;
         Status status = Status.DISCOVERED;
         boolean enableAttempted;
-        boolean cleaned;
+        final java.util.concurrent.atomic.AtomicBoolean cleaned =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
         PluginState(PluginDescriptionFile descriptor) {
             this.descriptor = descriptor;
@@ -254,7 +255,7 @@ public final class PluginHost {
             cleanup(state.plugin);
             return;
         }
-        state.cleaned = true;
+        state.cleaned.set(true);
         if (state.loader != null) close(state.loader, state.descriptor.getName());
         state.loader = null;
     }
@@ -368,11 +369,8 @@ public final class PluginHost {
         if (plugin == null) return;
         PluginState state = stateOf(plugin);
         if (state == null) return;
-        synchronized (state) {
-            if (state.cleaned) return;
-            FotonScheduler.beginPluginCleanup(plugin);
-            state.cleaned = true;
-        }
+        FotonScheduler.beginPluginCleanup(plugin);
+        if (!state.cleaned.compareAndSet(false, true)) return;
 
         if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
             java.setEnabled(false);

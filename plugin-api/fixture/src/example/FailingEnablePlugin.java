@@ -12,6 +12,8 @@ public final class FailingEnablePlugin extends JavaPlugin implements Listener {
     public void onLoad() {
         LifecycleProbe.called("FailingEnable.load");
         LifecycleProbe.loaderOwned("FailingEnable.loader", getClass().getClassLoader());
+        LifecycleProbe.flag("scheduler.gameTickBlocked",
+            foton.LifecycleDiagnostics.gameTickApisBlockOnLifecycleMonitor(this));
     }
 
     @Override
@@ -38,7 +40,25 @@ public final class FailingEnablePlugin extends JavaPlugin implements Listener {
                 LifecycleProbe.asyncFinished();
             }
         });
+        org.bukkit.scheduler.BukkitTask tickLocal =
+            getServer().getScheduler().runTaskTimer(
+                this, () -> LifecycleProbe.called("FailingEnable.keptRun"), 100, 1);
+        LifecycleProbe.flag("FailingEnable.removedFromQueue",
+            foton.LifecycleDiagnostics.removeQueuedTask(tickLocal));
+        getServer().getScheduler().runTaskTimer(this, () -> {
+            LifecycleProbe.called("FailingEnable.syncRun");
+            LifecycleProbe.syncStarted();
+            try {
+                LifecycleProbe.awaitSyncRelease();
+                foton.LifecycleDiagnostics.republishQueuedTask(tickLocal);
+            } finally {
+                LifecycleProbe.syncFinished();
+            }
+        }, 0, 1);
+        Thread tick = new Thread(foton.FotonScheduler::tick, "fixture-sync-race");
+        tick.start();
         LifecycleProbe.awaitAsyncStarted();
+        LifecycleProbe.awaitSyncStarted();
         throw new IllegalStateException("failing from onEnable");
     }
 

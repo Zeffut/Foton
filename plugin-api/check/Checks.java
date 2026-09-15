@@ -46,8 +46,14 @@ public final class Checks {
             enabled = foton.PluginHost.loadAll(directory);
         } finally {
             fixture.LifecycleProbe.releaseAsync();
+            fixture.LifecycleProbe.releaseSync();
         }
         fixture.LifecycleProbe.awaitAsyncFinished();
+        fixture.LifecycleProbe.awaitSyncFinished();
+        int queuedAfterCleanup =
+            foton.LifecycleDiagnostics.queuedTasks("FailingEnable");
+        int syncRunsAfterCleanup =
+            fixture.LifecycleProbe.calls("FailingEnable.syncRun");
         foton.FotonScheduler.tick();
         try {
             same(enabled, 1,
@@ -86,6 +92,18 @@ public final class Checks {
                 "running async rollback task scheduled work after cleanup began");
             same(fixture.LifecycleProbe.followUpRuns(), 0,
                 "a post-cleanup follow-up task ran");
+            expect(!fixture.LifecycleProbe.flag("scheduler.gameTickBlocked"),
+                "a game-tick scheduler API blocked on the lifecycle monitor");
+            expect(fixture.LifecycleProbe.flag("FailingEnable.removedFromQueue"),
+                "sync fixture did not capture a task in the tick-local keep state");
+            same(syncRunsAfterCleanup, 1,
+                "sync task did not finish its one cleanup-racing invocation");
+            same(fixture.LifecycleProbe.calls("FailingEnable.syncRun"), 1,
+                "cancelled repeating sync work ran again after cleanup");
+            same(fixture.LifecycleProbe.calls("FailingEnable.keptRun"), 0,
+                "tick-local sync work ran after cleanup");
+            same(queuedAfterCleanup, 0,
+                "pending queue retained cancelled sync work after cleanup");
 
             same(foton.EventBridge.handlerCount("example.FailingEvent"), 0,
                 "failed plugin listener leaked");
