@@ -7,11 +7,13 @@
 use std::{
     fmt,
     io::{self},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Weak,
 };
 use zstd::bulk::decompress;
 
+#[cfg(test)]
+use foton_utils::locks::SyncMutex;
 use foton_utils::{ChunkPos, locks::AsyncRwLock};
 use rustc_hash::FxHashMap;
 use tokio::{
@@ -61,6 +63,10 @@ pub struct RegionManager {
     base_path: PathBuf,
     /// Open region file handles with their headers.
     regions: AsyncRwLock<FxHashMap<RegionPos, RegionHandle>>,
+    #[cfg(test)]
+    directory_sync_failure: SyncMutex<Option<PathBuf>>,
+    #[cfg(test)]
+    directory_syncs: SyncMutex<Vec<PathBuf>>,
 }
 
 /// Prepared chunk data ready to be saved asynchronously.
@@ -108,6 +114,10 @@ impl RegionManager {
         Self {
             base_path: base_path.into(),
             regions: AsyncRwLock::new(FxHashMap::default()),
+            #[cfg(test)]
+            directory_sync_failure: SyncMutex::new(None),
+            #[cfg(test)]
+            directory_syncs: SyncMutex::new(Vec::new()),
         }
     }
 
@@ -320,24 +330,44 @@ impl RegionManager {
     }
 
     fn validate_region_entries(header: &RegionHeader, file_sectors: u32) -> io::Result<()> {
-        let mut occupied = vec![false; file_sectors as usize];
-        for sector in occupied.iter_mut().take(FIRST_DATA_SECTOR as usize) {
-            *sector = true;
-        }
+        let mut allocations = Vec::with_capacity(CHUNK_TABLE_SIZE / 8);
         for (index, &entry) in header.entries.iter().enumerate() {
             if !entry.exists() {
                 continue;
             }
             Self::validate_chunk_entry(entry, file_sectors)?;
-            let start = entry.sector_offset as usize;
-            let end = start + entry.sector_count() as usize;
-            if occupied[start..end].iter().any(|is_occupied| *is_occupied) {
+            allocations.push((
+                entry.sector_offset,
+                entry.sector_offset + entry.sector_count(),
+                index,
+            ));
+        }
+        allocations.sort_unstable_by_key(|&(start, _, _)| start);
+        for pair in allocations.windows(2) {
+            let (_, previous_end, _) = pair[0];
+            let (current_start, _, current_index) = pair[1];
+            if current_start < previous_end {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("chunk table entry {index} overlaps another region allocation"),
+                    format!("chunk table entry {current_index} overlaps another region allocation"),
                 ));
             }
-            occupied[start..end].fill(true);
+        }
+        Ok(())
+    }
+
+    async fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+        #[cfg(test)]
+        {
+            self.directory_syncs.lock().push(directory.to_owned());
+            if self.directory_sync_failure.lock().as_deref() == Some(directory) {
+                return Err(io::Error::other("injected directory sync failure"));
+            }
+        }
+        // Directory fsync is Unix-only; keeping the runtime branch makes the
+        // async body compile identically on every supported platform.
+        if cfg!(unix) {
+            File::open(directory).await?.sync_all().await?;
         }
         Ok(())
     }
@@ -383,9 +413,14 @@ impl RegionManager {
     ) -> io::Result<()> {
         let path = self.free_quarantine_path(region_pos, index).await?;
         let bytes = Self::read_chunk_data(file, entry.sector_offset, entry.size_bytes).await?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
+        let parent = path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "quarantine path has no parent directory",
+            )
+        })?;
+        let parent_was_missing = !fs::try_exists(parent).await?;
+        fs::create_dir_all(parent).await?;
         let mut quarantine = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -406,12 +441,28 @@ impl RegionManager {
         }
         quarantine.flush().await?;
         quarantine.sync_all().await?;
+        drop(quarantine);
+        self.sync_directory(parent).await?;
+        if parent_was_missing {
+            let quarantine_parent = parent.parent().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "quarantine directory has no parent",
+                )
+            })?;
+            self.sync_directory(quarantine_parent).await?;
+        }
         tracing::warn!(
             path = %path.display(),
             bytes = bytes.len(),
             "Chunk failed to decode; its bytes were copied aside before the slot was cleared"
         );
         Ok(())
+    }
+
+    fn set_pending_header_entry(handle: &mut RegionHandle, index: usize, entry: ChunkEntry) {
+        handle.header.entries[index] = entry;
+        handle.header_dirty = true;
     }
 
     async fn clear_corrupt_chunk_if_unchanged(
@@ -572,17 +623,21 @@ impl RegionManager {
             return Err(error);
         }
 
-        // Update header entry
-        handle.header.entries[index] =
-            super::format::ChunkEntry::new(sector_offset, compressed.len() as u32, status);
+        // Mark the commit pending before any header I/O can yield. If this task
+        // is cancelled or the write fails, the cached handle stays dirty so a
+        // later flush or shutdown retries it.
+        Self::set_pending_header_entry(
+            handle,
+            index,
+            super::format::ChunkEntry::new(sector_offset, compressed.len() as u32, status),
+        );
 
         // If we opened this region and no chunks are loaded from it,
         // write the header and close it immediately
         if we_opened_region && handle.loaded_chunk_count == 0 {
             Self::write_header(&mut handle.file, &handle.header).await?;
+            handle.header_dirty = false;
             regions.remove(&region_pos);
-        } else {
-            handle.header_dirty = true;
         }
 
         Ok(true)
@@ -896,6 +951,7 @@ impl RegionManager {
 mod tests {
     use std::{
         env,
+        io::Write as _,
         path::Path,
         process,
         sync::{
@@ -972,6 +1028,67 @@ mod tests {
             .await
             .expect("chunk table entry should be readable");
         assert!(ChunkEntry::from_bytes(bytes).is_some_and(|entry| entry.exists()));
+    }
+
+    #[tokio::test]
+    async fn a_pending_header_commit_survives_cancellation_before_write() {
+        let directory = test_directory("pending-header");
+        let pos = ChunkPos::new(0, 0);
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let manager = RegionManager::new(&directory);
+        let mut handle = manager
+            .create_region(region_pos)
+            .await
+            .expect("test region should be created");
+        handle
+            .file
+            .set_len(u64::from(FIRST_DATA_SECTOR + 1) * SECTOR_SIZE as u64)
+            .await
+            .expect("test region should contain the pending sector");
+        handle.file_sectors = FIRST_DATA_SECTOR + 1;
+        manager.regions.write().await.insert(region_pos, handle);
+
+        let entry = ChunkEntry::new(FIRST_DATA_SECTOR, 1, ChunkStatus::Empty);
+        {
+            let mut regions = manager.regions.write().await;
+            let handle = regions
+                .get_mut(&region_pos)
+                .expect("test region should remain cached");
+            RegionManager::set_pending_header_entry(handle, 0, entry);
+        }
+
+        manager
+            .flush_all()
+            .await
+            .expect("a later flush should commit the pending header");
+        drop(manager);
+
+        let reopened = RegionManager::new(&directory);
+        assert!(
+            reopened
+                .acquire_chunk(pos)
+                .await
+                .expect("the committed header should reopen")
+        );
+        reopened
+            .release_chunk(pos)
+            .await
+            .expect("reopened region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[test]
+    fn maximum_sparse_region_entries_are_checked_by_interval() {
+        let mut header = RegionHeader::new();
+        header.entries[0] = ChunkEntry::new(u32::MAX - 2, 1, ChunkStatus::Empty);
+        header.entries[1] = ChunkEntry::new(u32::MAX - 2, 1, ChunkStatus::Empty);
+
+        let error = RegionManager::validate_region_entries(&header, u32::MAX)
+            .expect_err("overlapping intervals must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("overlaps"));
     }
 
     #[tokio::test]
@@ -1174,9 +1291,18 @@ mod tests {
     /// map, a restored backup -- into as much memory as the attacker likes.
     #[test]
     fn a_decompression_bomb_is_refused_rather_than_expanded() {
-        // A gigabyte of zeroes compresses to a few kilobytes.
-        let bomb = zstd::encode_all(vec![0u8; 1024 * 1024 * 1024].as_slice(), 3)
-            .expect("the bomb should compress");
+        let mut bomb = Vec::new();
+        {
+            let block = vec![0u8; 1024 * 1024];
+            let mut encoder = zstd::stream::Encoder::new(&mut bomb, 3)
+                .expect("the bomb encoder should initialize");
+            for _ in 0..=(MAX_DECOMPRESSED_CHUNK_BYTES / block.len()) {
+                encoder
+                    .write_all(&block)
+                    .expect("the bomb should compress progressively");
+            }
+            encoder.finish().expect("the bomb should finish");
+        }
         assert!(
             bomb.len() < 1024 * 1024,
             "the point of the test is that a small payload expands hugely, but              this one is {} bytes",
@@ -1185,7 +1311,7 @@ mod tests {
 
         assert!(
             decompress(&bomb, MAX_DECOMPRESSED_CHUNK_BYTES).is_err(),
-            "a gigabyte is past the per-chunk ceiling and must be refused"
+            "a payload over the per-chunk ceiling must be refused"
         );
 
         // A payload of a realistic size still round-trips.
@@ -1539,6 +1665,49 @@ mod tests {
             .expect("region should release");
         assert_slot_exists_on_disk(&directory, pos).await;
 
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn failed_new_quarantine_parent_sync_keeps_the_original_slot() {
+        let directory = test_directory("quarantine-parent-sync-failure");
+        let pos = ChunkPos::new(0, 0);
+        let payload = b"payload must not be decoded";
+        write_test_region(&directory, pos, payload, payload.len() as u32)
+            .await
+            .expect("test region should be written");
+
+        let manager = RegionManager::new(&directory);
+        manager
+            .directory_sync_failure
+            .lock()
+            .replace(directory.clone());
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should open")
+        );
+        let Err(error) = manager
+            .load_chunk(pos, 0, 16, Weak::new(), &test_thread_pool())
+            .await
+        else {
+            panic!("a failed quarantine-directory commit must abort slot removal");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(manager.chunk_exists(pos).await.expect("slot should remain"));
+        assert_eq!(
+            *manager.directory_syncs.lock(),
+            [directory.join("corrupt"), directory.clone()]
+        );
+
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        assert_slot_exists_on_disk(&directory, pos).await;
         fs::remove_dir_all(directory)
             .await
             .expect("test directory should be removable");

@@ -108,3 +108,73 @@ or generated-file edits.
 The focused debug-profile `foton-core` test link emits the existing macOS
 warning that `__eh_frame` exceeds 16 MiB; tests still pass and the full CI is
 green. No functional concern remains.
+
+## Fix round 1/5 — reviewer findings
+
+### Changes
+
+- `foton-core/src/chunk_saver/region_manager.rs`
+  - Header mutations made by a save now set `header_dirty` before the first
+    header-write await. The flag is cleared and a save-only handle is removed
+    only after `write_header` succeeds, leaving failures or cancellation
+    recoverable through `flush_all`/shutdown.
+  - Quarantine publication now fsyncs the quarantine file, then its directory,
+    and also the directory's parent when `corrupt/` was newly created. Any sync
+    failure is returned before the original region slot is cleared.
+  - Region header validation now validates, sorts, and compares at most 1,024
+    `(start, end, index)` intervals instead of allocating a `Vec<bool>` sized
+    from the region file's logical sector count.
+  - The zstd bomb test writes 1 MiB zero blocks progressively until just over
+    the 64 MiB ceiling instead of allocating 1 GiB at once.
+  - Added covering tests for pending-header retry, maximum sparse-region
+    interval validation, and failed parent-directory sync preserving the slot.
+- `foton-core/src/command/rcon.rs`
+  - `RconOutput` now writes through a UTF-8-safe bounded formatter and never
+    retains more than `MAX_RCON_OUTPUT_BYTES` cumulatively.
+  - Added a regression test whose multiple fragments exceed the total limit.
+- `foton/src/rcon/packet.rs`
+  - Response splitting now consumes the same exported RCON output limit,
+    removing the duplicate constant and preventing drift.
+- `dev/test-counts.json`
+  - Regenerated with `python3 dev/count-tests.py`: 5,538 tests across 19
+    targets.
+
+### TDD evidence
+
+- `cargo test -p foton-core command::rcon::tests::output_is_bounded_across_multiple_fragments -- --exact`
+  - RED after correcting the owned-string fixture: expected 1,048,576 bytes,
+    observed 1,048,590 bytes.
+  - GREEN after bounded accumulation: 1 passed, 0 failed.
+- The initial region regression compile failed because
+  `set_pending_header_entry` and the directory-sync failure instrumentation did
+  not exist. After implementing the invariants, each new behavior test passed.
+
+### Commands and results
+
+- `cargo test -p foton-core chunk_saver::region_manager::tests::a_pending_header_commit_survives_cancellation_before_write -- --exact`
+  — 1 passed, 0 failed.
+- `cargo test -p foton-core chunk_saver::region_manager::tests::maximum_sparse_region_entries_are_checked_by_interval -- --exact`
+  — 1 passed, 0 failed.
+- `cargo test -p foton-core chunk_saver::region_manager::tests::failed_new_quarantine_parent_sync_keeps_the_original_slot -- --exact`
+  — 1 passed, 0 failed.
+- `cargo test -p foton-core chunk_saver::region_manager::tests::a_decompression_bomb_is_refused_rather_than_expanded -- --exact`
+  — 1 passed, 0 failed.
+- `cargo test -p foton-core chunk_saver::region_manager::tests:: --lib`
+  — 16 passed, 0 failed.
+- `cargo test -p foton-core command::rcon::tests:: --lib`
+  — 3 passed, 0 failed.
+- `cargo test -p foton rcon::packet::tests::`
+  — 9 passed, 0 failed.
+- `python3 dev/count-tests.py`
+  — wrote `dev/test-counts.json`: 5,538 tests across 19 targets.
+- `cargo fmt --all --check` — passed.
+- `cargo clippy -r -p foton-core -p foton --all-targets --all-features -- -D warnings`
+  — passed.
+- `bash dev/ci.sh` — all stages passed: formatting, typos, config reference,
+  site build, workspace clippy, workspace tests, plugin API, native
+  registration, test counts, and developer tooling; final output
+  `########## ALL GREEN ##########`.
+
+The only observed warning remains the pre-existing macOS debug-linker
+`__eh_frame` size warning during focused `foton-core` tests; it is non-blocking
+and the complete CI run is green.

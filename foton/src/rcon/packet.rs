@@ -8,6 +8,8 @@
 
 use std::mem;
 
+use foton_core::command::rcon::MAX_RCON_OUTPUT_BYTES;
+
 /// Largest request frame vanilla will read in one go.
 ///
 /// Vanilla parity: `PktUtils.MAX_PACKET_SIZE`.
@@ -24,9 +26,6 @@ const MAX_RESPONSE_PAYLOAD_BYTES: usize = MAX_PACKET_SIZE - mem::size_of::<i32>(
 /// Vanilla parity: the `4096` of `RconClient.sendCmdResponse`, which is a
 /// `String.substring` bound and therefore counts UTF-16 code units.
 const MAX_RESPONSE_UNITS: usize = 4096;
-
-/// Maximum command output sent for one request.
-pub(super) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// Client-to-server login attempt. Vanilla `SERVERDATA_AUTH`.
 pub(super) const SERVERDATA_AUTH: i32 = 3;
@@ -98,7 +97,7 @@ pub(super) fn encode_response(request_id: i32, kind: i32, payload: &str) -> Vec<
 /// also keeps the encoded frame within `MAX_PACKET_SIZE`; vanilla's UTF-16-only
 /// bound can exceed that byte limit after UTF-8 encoding.
 pub(super) fn split_response(response: &str) -> Vec<&str> {
-    let mut response_end = response.len().min(MAX_RESPONSE_BYTES);
+    let mut response_end = response.len().min(MAX_RCON_OUTPUT_BYTES);
     while !response.is_char_boundary(response_end) {
         response_end -= 1;
     }
@@ -130,10 +129,11 @@ pub(super) fn split_response(response: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_PACKET_SIZE, MAX_RESPONSE_BYTES, MAX_RESPONSE_PAYLOAD_BYTES, MAX_RESPONSE_UNITS,
-        RconRequest, SERVERDATA_AUTH, SERVERDATA_RESPONSE_VALUE, decode_request, encode_response,
+        MAX_PACKET_SIZE, MAX_RESPONSE_PAYLOAD_BYTES, MAX_RESPONSE_UNITS, RconRequest,
+        SERVERDATA_AUTH, SERVERDATA_RESPONSE_VALUE, decode_request, encode_response,
         split_response,
     };
+    use foton_core::command::rcon::MAX_RCON_OUTPUT_BYTES;
 
     #[test]
     fn a_frame_round_trips_through_the_wire_layout() {
@@ -214,18 +214,18 @@ mod tests {
 
     #[test]
     fn total_response_work_is_capped_at_one_mebibyte() {
-        let response = "x".repeat(MAX_RESPONSE_BYTES + 1);
+        let response = "x".repeat(MAX_RCON_OUTPUT_BYTES + 1);
         let chunks = split_response(&response);
 
-        assert_eq!(chunks.concat().len(), MAX_RESPONSE_BYTES);
+        assert_eq!(chunks.concat().len(), MAX_RCON_OUTPUT_BYTES);
         assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_RESPONSE_UNITS));
     }
 
     #[test]
     fn response_cap_never_splits_a_utf8_character() {
-        let response = format!("{}é", "x".repeat(MAX_RESPONSE_BYTES - 1));
+        let response = format!("{}é", "x".repeat(MAX_RCON_OUTPUT_BYTES - 1));
         let chunks = split_response(&response);
 
-        assert_eq!(chunks.concat(), "x".repeat(MAX_RESPONSE_BYTES - 1));
+        assert_eq!(chunks.concat(), "x".repeat(MAX_RCON_OUTPUT_BYTES - 1));
     }
 }

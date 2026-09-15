@@ -13,13 +13,32 @@
 //! the server is shutting down -- so no path can leave a client waiting
 //! forever for a reply that is never coming.
 
-use std::mem;
 #[cfg(test)]
 use std::sync::Arc;
+use std::{fmt, mem};
 
 use foton_utils::locks::SyncMutex;
 use text_components::TextComponent;
 use tokio::sync::oneshot;
+
+/// Maximum command output retained and sent for one Rcon request.
+pub const MAX_RCON_OUTPUT_BYTES: usize = 1024 * 1024;
+
+struct BoundedOutputWriter<'a> {
+    buffer: &'a mut String,
+}
+
+impl fmt::Write for BoundedOutputWriter<'_> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let remaining = MAX_RCON_OUTPUT_BYTES.saturating_sub(self.buffer.len());
+        let mut end = text.len().min(remaining);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.buffer.push_str(&text[..end]);
+        Ok(())
+    }
+}
 
 /// Accumulates one Rcon command's output and delivers it once the command ends.
 pub struct RconOutput {
@@ -62,7 +81,12 @@ impl RconOutput {
         let mut buffer = self.buffer.lock();
         // `Display` resolves translations through the global resolutor, which
         // is the same plain text the console branch logs.
-        let _ = write!(buffer, "{text}");
+        let _ = write!(
+            BoundedOutputWriter {
+                buffer: &mut buffer
+            },
+            "{text}"
+        );
     }
 }
 
@@ -85,7 +109,7 @@ impl Drop for RconOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arc, RconOutput};
+    use super::{Arc, MAX_RCON_OUTPUT_BYTES, RconOutput};
     use tokio::sync::oneshot::error::TryRecvError;
 
     use text_components::TextComponent;
@@ -114,5 +138,21 @@ mod tests {
         let (output, mut receiver) = RconOutput::new(0);
         drop(output);
         assert_eq!(receiver.try_recv(), Ok(String::new()));
+    }
+
+    #[test]
+    fn output_is_bounded_across_multiple_fragments() {
+        let (output, mut receiver) = RconOutput::new(0);
+        let fragment = "x".repeat(MAX_RCON_OUTPUT_BYTES / 2 + 1);
+        output.record(&TextComponent::plain(fragment.clone()));
+        output.record(&TextComponent::plain(fragment));
+        output.record(&TextComponent::plain("ignored tail"));
+
+        drop(output);
+        let response = receiver
+            .try_recv()
+            .expect("dropping the output should deliver its response");
+        assert_eq!(response.len(), MAX_RCON_OUTPUT_BYTES);
+        assert!(response.bytes().all(|byte| byte == b'x'));
     }
 }
