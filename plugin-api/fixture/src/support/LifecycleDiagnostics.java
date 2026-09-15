@@ -140,6 +140,10 @@ public final class LifecycleDiagnostics {
         return FotonScheduler.acceptsTasks(plugin);
     }
 
+    public static int schedulerGenerations(String plugin) {
+        return FotonScheduler.generationCount(plugin);
+    }
+
     public static int hostReferences(String plugin) {
         return PluginHost.lifecycleReferenceCount(plugin);
     }

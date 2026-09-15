@@ -103,7 +103,8 @@ if [ -d "$FIXTURE_SRC" ]; then
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
 
   LIFECYCLE_PLUGINS="$FIX/lifecycle-plugins"
-  mkdir -p "$LIFECYCLE_PLUGINS"
+  REPLACEMENT_PLUGINS="$FIX/replacement-plugins"
+  mkdir -p "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS"
   for fixture in FailingEnable EnableDependent FailingLoad LoadDependent Healthy; do
     class="${fixture}Plugin"
     STAGE="$FIX/stage-$fixture"
@@ -116,13 +117,22 @@ if [ -d "$FIXTURE_SRC" ]; then
     jar --create --file "$LIFECYCLE_PLUGINS/$fixture.jar" -C "$STAGE" .
   done
 
+  REPLACEMENT_STAGE="$FIX/stage-Replacement"
+  mkdir -p "$REPLACEMENT_STAGE/example"
+  cp "$LIFECYCLE_CLASSES/example/ReplacementPlugin.class" \
+    "$REPLACEMENT_STAGE/example/"
+  cp "$REPO/plugin-api/fixture/lifecycle/Replacement/plugin.yml" \
+    "$REPLACEMENT_STAGE/"
+  jar --create --file "$REPLACEMENT_PLUGINS/Replacement.jar" \
+    -C "$REPLACEMENT_STAGE" .
+
   # Only the original event fixture is parent-visible because older checks
   # inspect its counters directly. Lifecycle classes exist solely in their
   # plugin jars, so the PluginClassLoader owns their classes and lambdas.
   javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS:$EVENT_CLASSES:$CHECK_CLASSES" \
     "$REPO"/plugin-api/check/*.java
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$EVENT_CLASSES" Checks \
-    "$FIX/plugins" "$LIFECYCLE_PLUGINS"
+    "$FIX/plugins" "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

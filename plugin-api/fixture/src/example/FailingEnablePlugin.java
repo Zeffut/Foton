@@ -30,16 +30,20 @@ public final class FailingEnablePlugin extends JavaPlugin implements Listener {
         getServer().getMessenger().registerIncomingPluginChannel(
             this, "failing:enable", (channel, player, message) -> {});
         getServer().getMessenger().registerOutgoingPluginChannel(this, "failing:enable");
-        getServer().getScheduler().runTaskAsynchronously(this, () -> {
+        org.bukkit.scheduler.BukkitTask async =
+            getServer().getScheduler().runTaskAsynchronously(this, () -> {
             LifecycleProbe.asyncStarted();
             try {
                 LifecycleProbe.awaitRelease();
+                LifecycleProbe.called("FailingEnable.oldCancelTasks");
+                getServer().getScheduler().cancelTasks(this);
                 submitFollowUp(false);
                 submitFollowUp(true);
             } finally {
                 LifecycleProbe.asyncFinished();
             }
         });
+        LifecycleProbe.retainAsyncHandle(async);
         org.bukkit.scheduler.BukkitTask tickLocal =
             getServer().getScheduler().runTaskTimer(
                 this, () -> LifecycleProbe.called("FailingEnable.keptRun"), 100, 1);

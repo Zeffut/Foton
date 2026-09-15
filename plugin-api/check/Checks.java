@@ -20,7 +20,7 @@ public final class Checks {
         Checks.expect(org.bukkit.Bukkit.getMessenger().getIncomingChannels().isEmpty()
             && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
             "disabling a plugin should release its custom channels");
-        lifecycle(args[1]);
+        lifecycle(args[1], args[2]);
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"
@@ -39,17 +39,23 @@ public final class Checks {
         }
     }
 
-    private static void lifecycle(String directory) throws Exception {
+    private static void lifecycle(String directory, String replacementDirectory)
+            throws Exception {
         fixture.LifecycleProbe.reset();
         int enabled;
+        int replacementEnabled;
         try {
             enabled = foton.PluginHost.loadAll(directory);
+            replacementEnabled = foton.PluginHost.loadAll(replacementDirectory);
         } finally {
             fixture.LifecycleProbe.releaseAsync();
             fixture.LifecycleProbe.releaseSync();
         }
         fixture.LifecycleProbe.awaitAsyncFinished();
         fixture.LifecycleProbe.awaitSyncFinished();
+        awaitSchedulerTasks("FailingEnable", 1);
+        boolean retainedAsyncCancelled =
+            fixture.LifecycleProbe.takeRetainedAsyncCancelled();
         int queuedAfterCleanup =
             foton.LifecycleDiagnostics.queuedTasks("FailingEnable");
         int syncRunsAfterCleanup =
@@ -58,6 +64,8 @@ public final class Checks {
         try {
             same(enabled, 1,
                 "only the unrelated lifecycle fixture should enable");
+            same(replacementEnabled, 1,
+                "same-name replacement generation should enable");
             same(fixture.LifecycleProbe.calls("FailingLoad.disable"), 0,
                 "onDisable ran even though enable was never attempted");
             expect(fixture.LifecycleProbe.flag("FailingLoad.visible"),
@@ -85,13 +93,25 @@ public final class Checks {
                     && fixture.LifecycleProbe.flag("EnableDependent.loader")
                     && fixture.LifecycleProbe.flag("Healthy.loader"),
                 "lifecycle fixture class, event, or lambda came from the parent classpath");
+            expect(fixture.LifecycleProbe.flag("Replacement.loader"),
+                "replacement fixture class came from the parent classpath");
+            same(fixture.LifecycleProbe.calls("Replacement.load"), 1,
+                "same-name replacement did not load");
+            same(fixture.LifecycleProbe.calls("Replacement.enable"), 1,
+                "same-name replacement did not enable");
+            same(foton.LifecycleDiagnostics.schedulerGenerations("FailingEnable"), 1,
+                "scheduler retained the failed same-name generation after reload");
 
+            same(fixture.LifecycleProbe.calls("FailingEnable.oldCancelTasks"), 1,
+                "held old generation did not exercise cancelTasks after reload");
             same(fixture.LifecycleProbe.followUpAttempts(), 2,
                 "running async rollback task did not attempt both follow-ups");
             same(fixture.LifecycleProbe.followUpRejections(), 2,
                 "running async rollback task scheduled work after cleanup began");
             same(fixture.LifecycleProbe.followUpRuns(), 0,
                 "a post-cleanup follow-up task ran");
+            expect(retainedAsyncCancelled,
+                "cancelled-running task handle lost terminal cancellation state");
             expect(!fixture.LifecycleProbe.flag("scheduler.gameTickBlocked"),
                 "a game-tick scheduler API blocked on the lifecycle monitor");
             expect(fixture.LifecycleProbe.flag("FailingEnable.removedFromQueue"),
@@ -102,8 +122,10 @@ public final class Checks {
                 "cancelled repeating sync work ran again after cleanup");
             same(fixture.LifecycleProbe.calls("FailingEnable.keptRun"), 0,
                 "tick-local sync work ran after cleanup");
-            same(queuedAfterCleanup, 0,
-                "pending queue retained cancelled sync work after cleanup");
+            same(queuedAfterCleanup, 1,
+                "pending queue retained work beyond the replacement's one task");
+            same(fixture.LifecycleProbe.calls("Replacement.taskRun"), 1,
+                "old generation cancellation removed the replacement task");
 
             same(foton.EventBridge.handlerCount("example.FailingEvent"), 0,
                 "failed plugin listener leaked");
@@ -119,12 +141,11 @@ public final class Checks {
                     && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
                 "failed plugin channel leaked");
             expect(foton.PluginHost.byName("FailingLoad") == null
-                    && foton.PluginHost.byName("FailingEnable") == null
                     && foton.PluginHost.byName("LoadDependent") == null
                     && foton.PluginHost.byName("EnableDependent") == null,
                 "failed plugin or required dependent remained registered");
             for (String failed : java.util.List.of(
-                    "FailingLoad", "LoadDependent", "FailingEnable", "EnableDependent")) {
+                    "FailingLoad", "LoadDependent", "EnableDependent")) {
                 same(foton.LifecycleDiagnostics.schedulerTasks(failed), 0,
                     "scheduler retained " + failed + " work");
                 expect(!foton.LifecycleDiagnostics.schedulerAccepts(failed),
@@ -136,6 +157,18 @@ public final class Checks {
                 "event bridge retained the plugin-defined event class");
 
             foton.PluginHost.disableAll();
+            same(fixture.LifecycleProbe.calls("Replacement.disable"), 1,
+                "same-name replacement did not disable exactly once");
+            expect(foton.PluginHost.byName("FailingEnable") == null,
+                "replacement plugin remained registered after disable");
+            same(foton.LifecycleDiagnostics.schedulerTasks("FailingEnable"), 0,
+                "scheduler retained same-name plugin work after disable");
+            expect(!foton.LifecycleDiagnostics.schedulerAccepts("FailingEnable"),
+                "scheduler retained same-name submission rights after disable");
+            same(foton.LifecycleDiagnostics.schedulerGenerations("FailingEnable"), 0,
+                "scheduler retained an old or replacement generation after disable");
+            same(foton.LifecycleDiagnostics.hostReferences("FailingEnable"), 0,
+                "host retained old or replacement same-name generation");
             same(foton.LifecycleDiagnostics.hostReferences("Healthy"), 0,
                 "host retained the healthy plugin after disable");
         } finally {
@@ -150,6 +183,17 @@ public final class Checks {
             if (task.getOwner().getName().equals(owner)) count++;
         }
         return count;
+    }
+
+    private static void awaitSchedulerTasks(String owner, int expected) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (foton.LifecycleDiagnostics.schedulerTasks(owner) != expected) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("scheduler did not release the old " + owner
+                    + " generation");
+            }
+            Thread.onSpinWait();
+        }
     }
 
 }

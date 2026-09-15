@@ -1,0 +1,3 @@
+name: FailingEnable
+version: 2
+main: example.ReplacementPlugin

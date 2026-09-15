@@ -5,6 +5,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.bukkit.scheduler.BukkitTask;
 
 /** Parent-loaded lifecycle observations that never retain a plugin object or class. */
 public final class LifecycleProbe {
@@ -13,6 +15,8 @@ public final class LifecycleProbe {
     private static final AtomicInteger followUpAttempts = new AtomicInteger();
     private static final AtomicInteger followUpRejections = new AtomicInteger();
     private static final AtomicInteger followUpRuns = new AtomicInteger();
+    private static final AtomicReference<BukkitTask> retainedAsyncHandle =
+        new AtomicReference<>();
     private static volatile CountDownLatch asyncStarted = new CountDownLatch(1);
     private static volatile CountDownLatch releaseAsync = new CountDownLatch(1);
     private static volatile CountDownLatch asyncFinished = new CountDownLatch(1);
@@ -28,6 +32,7 @@ public final class LifecycleProbe {
         followUpAttempts.set(0);
         followUpRejections.set(0);
         followUpRuns.set(0);
+        retainedAsyncHandle.set(null);
         asyncStarted = new CountDownLatch(1);
         releaseAsync = new CountDownLatch(1);
         asyncFinished = new CountDownLatch(1);
@@ -124,6 +129,17 @@ public final class LifecycleProbe {
 
     public static int followUpRuns() {
         return followUpRuns.get();
+    }
+
+    /** Retains a handle only until the cancellation contract is asserted. */
+    public static void retainAsyncHandle(BukkitTask task) {
+        retainedAsyncHandle.set(task);
+    }
+
+    public static boolean takeRetainedAsyncCancelled() {
+        BukkitTask task = retainedAsyncHandle.getAndSet(null);
+        if (task == null) throw new AssertionError("async rollback handle was not retained");
+        return task.isCancelled();
     }
 
     private static void await(CountDownLatch latch, String message) {
