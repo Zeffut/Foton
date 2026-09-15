@@ -12,7 +12,13 @@ public class ShapelessRecipe extends CraftingRecipe {
     public ShapelessRecipe(NamespacedKey key, ItemStack result) { super(key, result); }
     /** Legacy Bukkit constructor for recipes that are assigned a key on registration. */
     public ShapelessRecipe(ItemStack result) { this(null, result); }
-    public ShapelessRecipe addIngredient(RecipeChoice choice) { if (choice != null) choices.add(choice); return this; }
+    public ShapelessRecipe addIngredient(RecipeChoice choice) {
+        if (choices.size() + 1 > 9) {
+            throw new IllegalArgumentException("Shapeless recipes cannot have more than 9 ingredients");
+        }
+        choices.add(choice.validate(false).clone());
+        return this;
+    }
     public ShapelessRecipe addIngredient(Material material) { return addIngredient(1, material); }
     /** Adds one live material choice for each requested ingredient. */
     public ShapelessRecipe addIngredient(int count, Material material) {
@@ -39,8 +45,9 @@ public class ShapelessRecipe extends CraftingRecipe {
         if (stack.getType().isAir()) {
             throw new IllegalArgumentException("Cannot have empty/air item stack choice");
         }
+        stack = stack.clone();
         for (int remaining = count; remaining > 0; remaining--)
-            addIngredient(new RecipeChoice.ExactChoice(stack));
+            choices.add(new RecipeChoice.ExactChoice(stack));
         return this;
     }
     public List<RecipeChoice> getChoiceList() { return Collections.unmodifiableList(choices); }

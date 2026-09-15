@@ -15,6 +15,7 @@ final class AdapterCheck {
         shapelessRecipePreservesStackIngredientMultiplicity();
         shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
         shapelessRecipeRejectsInvalidItemStackIngredientsAtomically();
+        shapelessRecipeChoiceMatchesPaperValidationAndCloneSemantics();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
     }
@@ -27,6 +28,7 @@ final class AdapterCheck {
         shapelessRecipePreservesStackIngredientMultiplicity();
         shapelessRecipeRejectsInvalidMaterialIngredientsAtomically();
         shapelessRecipeRejectsInvalidItemStackIngredientsAtomically();
+        shapelessRecipeChoiceMatchesPaperValidationAndCloneSemantics();
         resolvableProfileBuilderReturnsItsConcreteProfile();
         namespacedKeyImplementsAdventureKeyWithoutChangingItsOwnIdentityRules();
     }
@@ -222,6 +224,50 @@ final class AdapterCheck {
             "the uncounted ItemStack overload must honor its stack amount and global limit");
     }
 
+    /** Verifies RecipeChoice's own Paper validation, limit, and clone contract. */
+    private static void shapelessRecipeChoiceMatchesPaperValidationAndCloneSemantics() {
+        org.bukkit.inventory.ShapelessRecipe recipe = new org.bukkit.inventory.ShapelessRecipe(
+            org.bukkit.NamespacedKey.minecraft("adapter_choice_validation"),
+            new ItemStack(Material.STONE));
+
+        java.util.List<org.bukkit.inventory.RecipeChoice> beforeNull =
+            java.util.List.copyOf(recipe.getChoiceList());
+        boolean nullRejected = false;
+        try {
+            recipe.addIngredient((org.bukkit.inventory.RecipeChoice) null);
+        } catch (NullPointerException expected) {
+            nullRejected = true;
+        }
+        expect(nullRejected, "a null RecipeChoice must dereference as Paper does");
+        sameChoices(recipe.getChoiceList(), beforeNull,
+            "a null RecipeChoice leaves choices untouched");
+
+        MutableRecipeChoice choice = new MutableRecipeChoice(Material.DIRT);
+        recipe.addIngredient(choice);
+        org.bukkit.inventory.RecipeChoice stored = recipe.getChoiceList().get(0);
+        expect(stored != choice, "a RecipeChoice is cloned before storage");
+        choice.setMaterial(Material.COBBLESTONE);
+        expect(stored.test(new ItemStack(Material.DIRT)),
+            "a stored RecipeChoice is independent from its caller-owned choice");
+        expect(!stored.test(new ItemStack(Material.COBBLESTONE)),
+            "a cloned RecipeChoice does not retain later caller mutations");
+
+        for (int ingredient = recipe.getChoiceList().size(); ingredient < 9; ingredient++) {
+            recipe.addIngredient(Material.STONE);
+        }
+        java.util.List<org.bukkit.inventory.RecipeChoice> beforeOverflow =
+            java.util.List.copyOf(recipe.getChoiceList());
+        boolean overflowRejected = false;
+        try {
+            recipe.addIngredient(new MutableRecipeChoice(Material.DIRT));
+        } catch (IllegalArgumentException expected) {
+            overflowRejected = true;
+        }
+        expect(overflowRejected, "a tenth RecipeChoice must be rejected");
+        sameChoices(recipe.getChoiceList(), beforeOverflow,
+            "an over-limit RecipeChoice leaves choices untouched");
+    }
+
     private static void assertRejectedStackAdditionLeavesChoicesUntouched(
             org.bukkit.inventory.ShapelessRecipe recipe, int count, ItemStack stack,
             Class<? extends RuntimeException> expectedType, String failure) {
@@ -297,6 +343,30 @@ final class AdapterCheck {
 
     private static void expect(boolean condition, String description) {
         if (!condition) throw new AssertionError(description);
+    }
+
+    private static final class MutableRecipeChoice implements org.bukkit.inventory.RecipeChoice {
+        private Material material;
+
+        private MutableRecipeChoice(Material material) {
+            this.material = material;
+        }
+
+        private void setMaterial(Material material) {
+            this.material = material;
+        }
+
+        @Override public boolean test(ItemStack stack) {
+            return stack != null && stack.getType() == material;
+        }
+
+        @Override public ItemStack getItemStack() {
+            return new ItemStack(material);
+        }
+
+        @Override public MutableRecipeChoice clone() {
+            return new MutableRecipeChoice(material);
+        }
     }
 
     private static final class RecordingEquipment implements EntityEquipment {

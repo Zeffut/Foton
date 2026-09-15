@@ -6,9 +6,11 @@ import java.util.List;
 import org.bukkit.Material;
 
 /** An ingredient predicate used by Bukkit crafting recipes. */
-public interface RecipeChoice {
+public interface RecipeChoice extends Cloneable {
     boolean test(ItemStack stack);
     ItemStack getItemStack();
+    RecipeChoice clone();
+    default RecipeChoice validate(boolean allowEmpty) { return this; }
 
     /** Matches any one of a set of materials. */
     class MaterialChoice implements RecipeChoice {
@@ -30,6 +32,13 @@ public interface RecipeChoice {
         @Override public ItemStack getItemStack() {
             return new ItemStack(choices.isEmpty() ? Material.AIR : choices.get(0));
         }
+        @Override public MaterialChoice clone() { return new MaterialChoice(choices); }
+        @Override public MaterialChoice validate(boolean allowEmpty) {
+            if (choices.stream().anyMatch(Material::isAir)) {
+                throw new IllegalArgumentException("RecipeChoice.MaterialChoice cannot contain air");
+            }
+            return this;
+        }
     }
 
     /** Matches an item type and its metadata. */
@@ -39,5 +48,12 @@ public interface RecipeChoice {
         @Override public boolean test(ItemStack candidate) { return stack.isSimilar(candidate); }
         public List<ItemStack> getChoices() { return Collections.singletonList(getItemStack()); }
         @Override public ItemStack getItemStack() { return stack.clone(); }
+        @Override public ExactChoice clone() { return new ExactChoice(stack); }
+        @Override public ExactChoice validate(boolean allowEmpty) {
+            if (stack.getType().isAir()) {
+                throw new IllegalArgumentException("RecipeChoice.ExactChoice cannot contain air");
+            }
+            return this;
+        }
     }
 }
