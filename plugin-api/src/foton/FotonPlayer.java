@@ -76,7 +76,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
 
     @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
         if (attribute == null) return null;
-        String value = Native.playerAttribute(id.toString(), attribute.name());
+        String value = Native.playerAttribute(id.toString(), attribute.getKey().getKey());
         if (value == null) return null;
         String[] fields = value.split("\\|", -1);
         if (fields.length != 2) return null;
@@ -416,7 +416,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume,
             float pitch) {
-        playSound(at, sound == null ? null : sound.key(), volume, pitch);
+        playSound(at, sound == null ? null : sound.getKey().toString(), volume, pitch);
     }
 
     @Override
@@ -432,7 +432,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound,
             org.bukkit.SoundCategory category, float volume, float pitch) {
-        playSound(at, sound == null ? null : sound.key(), category, volume, pitch);
+        playSound(at, sound == null ? null : sound.getKey().toString(), category, volume, pitch);
     }
 
     @Override

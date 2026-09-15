@@ -52,7 +52,7 @@ public class FotonLivingEntity extends FotonEntity implements LivingEntity {
     }
     @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
         if (attribute == null) return null;
-        String encoded = Native.playerAttribute(getUniqueId().toString(), attribute.name());
+        String encoded = Native.playerAttribute(getUniqueId().toString(), attribute.getKey().getKey());
         if (encoded == null) return null;
         String[] values = encoded.split("\\|", -1);
         if (values.length != 2) return null;
@@ -64,7 +64,7 @@ public class FotonLivingEntity extends FotonEntity implements LivingEntity {
     @Override public double getHealth() { return Native.health(getUniqueId().toString()); }
     @Override public void setHealth(double value) { Native.setHealth(getUniqueId().toString(), value); }
     @Override public double getMaxHealth() { return Native.maxHealth(getUniqueId().toString()); }
-    @Override public void setMaxHealth(double value) { org.bukkit.attribute.AttributeInstance attribute = getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH); if (attribute != null) attribute.setBaseValue(value); }
+    @Override public void setMaxHealth(double value) { org.bukkit.attribute.AttributeInstance attribute = getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH); if (attribute != null) attribute.setBaseValue(value); }
     @Override public int getAir() { return Native.airSupply(getUniqueId().toString()); }
     @Override public void setAir(int ticks) { Native.setAirSupply(getUniqueId().toString(), ticks); }
     @Override public int getMaximumAir() { return Native.maxAirSupply(getUniqueId().toString()); }

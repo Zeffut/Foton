@@ -147,21 +147,28 @@ PAPER_BINARY_CLASSES="$OUT/paper-binary-classes"
 FOTON_BINARY_RUNNER_CLASSES="$OUT/foton-binary-runner-classes"
 rm -rf "$PAPER_ABI_FIXTURE_CLASSES" "$PAPER_BINARY_CLASSES" "$FOTON_BINARY_RUNNER_CLASSES"
 mkdir -p "$PAPER_ABI_FIXTURE_CLASSES" "$PAPER_BINARY_CLASSES" "$FOTON_BINARY_RUNNER_CLASSES"
-javac --release 21 -nowarn -d "$PAPER_ABI_FIXTURE_CLASSES" \
-  "$PAPER_ABI_FIXTURE_SRC/io/papermc/paper/datacomponent/DataComponentBuilder.java" \
-  "$PAPER_ABI_FIXTURE_SRC/io/papermc/paper/datacomponent/item/ResolvableProfile.java"
+write_javac_argfile "$OUT/paper-26.2-abi-fixture-sources.txt" "" \
+  "$PAPER_ABI_FIXTURE_SRC"
 javac --release 21 -nowarn -d "$PAPER_ABI_FIXTURE_CLASSES" -cp "$JAR$LIBS" \
-  "$PAPER_ABI_FIXTURE_SRC/org/bukkit/inventory/RecipeChoice.java"
+  @"$OUT/paper-26.2-abi-fixture-sources.txt"
 javac --release 21 -nowarn -d "$PAPER_BINARY_CLASSES" \
   -cp "$PAPER_ABI_FIXTURE_CLASSES:$JAR$LIBS" \
+  "$REPO/plugin-api/check/PaperAttributeConsumer.java" \
+  "$REPO/plugin-api/check/PaperAttributeOldEnumConsumer.java" \
   "$REPO/plugin-api/check/PaperResolvableProfileConsumer.java" \
   "$REPO/plugin-api/check/PaperRecipeChoiceConsumer.java"
 javac --release 21 -nowarn -d "$FOTON_BINARY_RUNNER_CLASSES" \
   -cp "$PAPER_BINARY_CLASSES:$JAR$LIBS" \
+  "$REPO/plugin-api/check/FotonAttributeBinaryRunner.java" \
+  "$REPO/plugin-api/check/FotonPotionLookupRunner.java" \
   "$REPO/plugin-api/check/FotonResolvableProfileBinaryRunner.java" \
   "$REPO/plugin-api/check/FotonRecipeChoiceBinaryRunner.java"
 # PAPER_ABI_FIXTURE_CLASSES is intentionally absent: Foton must supply every
 # linked Paper type at runtime.
+java -cp "$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
+  FotonPotionLookupRunner
+java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
+  FotonAttributeBinaryRunner
 java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
   FotonResolvableProfileBinaryRunner
 java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \

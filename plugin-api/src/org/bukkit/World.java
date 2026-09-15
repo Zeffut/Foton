@@ -227,7 +227,7 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     }
 
     default void playSound(Location location, Sound sound, float volume, float pitch) {
-        if (location != null) playSound(location, sound == null ? null : sound.key(), volume, pitch);
+        if (location != null) playSound(location, sound == null ? null : sound.getKey().toString(), volume, pitch);
     }
     default void playSound(org.bukkit.entity.Entity entity, Sound sound, float volume, float pitch) {
         if (entity != null) playSound(entity.getLocation(), sound, volume, pitch);
@@ -296,7 +296,7 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     }
     default void playSound(Location location, String sound, float volume, float pitch) { }
     default void playSound(Location location, Sound sound, SoundCategory category, float volume, float pitch) {
-        if (location != null) playSound(location, sound == null ? null : sound.key(), category, volume, pitch);
+        if (location != null) playSound(location, sound == null ? null : sound.getKey().toString(), category, volume, pitch);
     }
     default void playSound(Location location, String sound, SoundCategory category, float volume, float pitch) { }
 

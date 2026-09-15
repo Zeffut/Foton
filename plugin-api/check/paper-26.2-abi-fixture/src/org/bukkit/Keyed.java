@@ -1,6 +1,6 @@
 package org.bukkit;
 
-/** A registry-backed Bukkit value with a stable namespaced key. */
+/** Minimal Paper 26.2 Keyed ABI fixture. */
 public interface Keyed extends net.kyori.adventure.key.Keyed {
     NamespacedKey getKey();
 

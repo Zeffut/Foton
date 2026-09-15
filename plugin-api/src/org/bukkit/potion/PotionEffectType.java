@@ -147,6 +147,8 @@ public final class PotionEffectType {
     public static PotionEffectType getByName(String name) {
         if (name == null || name.isEmpty()) return null;
         String normalized = name.toLowerCase(Locale.ROOT);
+        PotionEffectType canonical = getById(idForName(normalized));
+        if (canonical != null) return canonical;
         return new PotionEffectType(normalized, idForName(normalized));
     }
     public String getName() { return name; }

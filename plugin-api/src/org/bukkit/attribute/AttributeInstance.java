@@ -16,10 +16,10 @@ public final class AttributeInstance {
     public Attribute getAttribute() { return attribute; }
     public double getBaseValue() { return base; }
     public double getValue() { return value; }
-    public void setBaseValue(double value) { if (entity != null) foton.Native.setAttributeBase(entity, attribute.name(), value); }
+    public void setBaseValue(double value) { if (entity != null) foton.Native.setAttributeBase(entity, attribute.getKey().getKey(), value); }
     public java.util.Collection<AttributeModifier> getModifiers() {
         if (entity == null) return java.util.List.of();
-        String[] encoded = foton.Native.attributeModifiers(entity, attribute.name());
+        String[] encoded = foton.Native.attributeModifiers(entity, attribute.getKey().getKey());
         if (encoded == null) return java.util.List.of();
         java.util.ArrayList<AttributeModifier> result = new java.util.ArrayList<>();
         for (String item : encoded) {
@@ -32,10 +32,10 @@ public final class AttributeInstance {
         return java.util.Collections.unmodifiableList(result);
     }
     public void addModifier(AttributeModifier modifier) {
-        if (entity != null && modifier != null) foton.Native.addAttributeModifier(entity, attribute.name(),
+        if (entity != null && modifier != null) foton.Native.addAttributeModifier(entity, attribute.getKey().getKey(),
             modifier.getUniqueId().toString(), modifier.getAmount(), modifier.getOperation().name());
     }
     public void removeModifier(AttributeModifier modifier) {
-        if (entity != null && modifier != null) foton.Native.removeAttributeModifier(entity, attribute.name(), modifier.getUniqueId().toString());
+        if (entity != null && modifier != null) foton.Native.removeAttributeModifier(entity, attribute.getKey().getKey(), modifier.getUniqueId().toString());
     }
 }
