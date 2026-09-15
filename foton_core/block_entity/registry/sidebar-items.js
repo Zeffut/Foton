@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["init_block_entities","register_late_arrivals"],"static":["BLOCK_ENTITIES"],"struct":["BlockEntityEntry","BlockEntityRegistry","BlockEntityRegistryLock"],"type":["BlockEntityFactory"]};

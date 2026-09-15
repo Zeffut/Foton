@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_CHAT_MESSAGE_LENGTH"],"struct":["SChat","SChatAck"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ConversionReason","ConversionType"],"fn":["convert_to","copy_common_state","replace_entity"],"struct":["ConversionParams"]};

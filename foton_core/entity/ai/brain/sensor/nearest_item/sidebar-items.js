@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DISTANCE_TO_WANTED_ITEM","XZ_RANGE","Y_RANGE"],"struct":["NearestItemSensor"]};

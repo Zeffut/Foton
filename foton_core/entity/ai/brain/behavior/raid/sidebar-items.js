@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["bell","hide","raid_status","sky"]};

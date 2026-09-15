@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["available_slots","shuffle","shuffle_and_split_items"],"trait":["LootFillContainer"]};

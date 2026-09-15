@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"static":["ADVANCEMENT_TREE"],"struct":["AdvancementNode","AdvancementTree"]};

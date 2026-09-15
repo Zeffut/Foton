@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["equipment_slot_for"]};

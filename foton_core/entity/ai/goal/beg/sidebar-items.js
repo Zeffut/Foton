@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EXTRA_LOOK_TICKS","MIN_LOOK_TICKS"],"fn":["set_interested"],"struct":["BegGoal"]};

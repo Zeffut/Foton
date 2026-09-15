@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BUTTON_NEXT_PAGE","BUTTON_PAGE_JUMP_RANGE_START","BUTTON_PREVIOUS_PAGE","BUTTON_TAKE_BOOK"],"fn":["book_on","lectern","turn_page"],"struct":["LecternKind"]};

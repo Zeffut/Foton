@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BASE_UNIT"],"fn":["add_item","add_tag","build_vanilla_burn_times","burn_duration","is_fuel","remove_tag"],"static":["FUEL_VALUES"]};

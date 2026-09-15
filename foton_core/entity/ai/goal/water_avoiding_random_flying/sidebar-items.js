@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AIR_FLYING_HEIGHT","AIR_VERTICAL_DIST","HORIZONTAL_DIST","HOVER_MAX_HEIGHT","HOVER_MIN_HEIGHT","HOVER_VERTICAL_DIST"],"fn":["flying_stroll_position"],"struct":["WaterAvoidingRandomFlyingGoal"],"type":["FlyingStrollPosition"]};

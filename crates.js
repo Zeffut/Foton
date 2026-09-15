@@ -1,0 +1,2 @@
+window.ALL_CRATES = ["foton","foton_bedrock","foton_core","foton_crypto","foton_login","foton_macros","foton_math","foton_plugin","foton_protocol","foton_registry","foton_utils","foton_worldgen"];
+//{"start":21,"fragment_lengths":[7,16,13,15,14,15,13,15,17,17,14,17]}

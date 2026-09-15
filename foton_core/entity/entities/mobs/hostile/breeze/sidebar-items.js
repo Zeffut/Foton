@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FALL_DISTANCE_SOUND_TRIGGER_THRESHOLD","MAX_HEAD_Y_ROT","XP_REWARD"],"mod":["behaviors","breeze_ai","breeze_util"],"struct":["BreezeEntity"]};

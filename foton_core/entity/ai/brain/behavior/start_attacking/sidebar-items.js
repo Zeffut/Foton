@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["StartAttacking"],"type":["AttackCondition","TargetFinder"]};

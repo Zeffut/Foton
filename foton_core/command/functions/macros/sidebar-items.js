@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_CACHE_ENTRIES"],"enum":["MacroEntry"],"fn":["decimal_string","stringify"],"struct":["MacroFunction","StringTemplate"]};

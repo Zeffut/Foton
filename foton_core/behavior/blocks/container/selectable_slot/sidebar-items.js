@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PIXELS_PER_BLOCK_EDGE"],"fn":["hit_slot","relative_hit_coordinates_for_block_face","section"]};

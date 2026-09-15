@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LOOK_AT_TARGET_MAX_DURATION","LOOK_AT_TARGET_MIN_DURATION","SENSORS","SPEED_MULTIPLIER_WHEN_TEMPTED","SPEED_WHEN_ATTACKING"],"fn":["core_activity","fight_activity","idle_activity","make_brain","update_activity"]};

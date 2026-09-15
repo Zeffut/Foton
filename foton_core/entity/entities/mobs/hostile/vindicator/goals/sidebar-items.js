@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DOOR_ATTEMPT_INTERVAL","DOOR_BREAK_SECONDS"],"fn":["breaks_doors_on"],"struct":["RaiderOpenDoorGoal","VindicatorBreakDoorGoal","VindicatorJohnnyAttackGoal"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LOOM_INPUT_SLOTS"],"fn":["loom"],"struct":["LoomKind"]};

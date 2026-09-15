@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["block_state_trigger","changed_dimension","construct_beacon","enter_block","item_used_on_block","item_used_on_location","location","placed_block","player_generates_container_loot","slept_in_bed","slide_down_block","tick"]};

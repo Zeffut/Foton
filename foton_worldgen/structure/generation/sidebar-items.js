@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ColumnBlock"],"fn":["probe_surface_height"],"struct":["GenerationContext","GenerationStub","TerrainHeightSampler","TerrainProbe"],"trait":["StructureGenerationContext"]};

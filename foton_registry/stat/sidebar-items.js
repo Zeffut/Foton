@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["StatValueRegistry"],"fn":["id_of"],"struct":["CustomStat","CustomStatRegistry","Stat","StatType","StatTypeRegistry"],"type":["CustomStatRef","StatTypeRef"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COPPER_GOLEM_POSE","HORIZONTAL_FACING","WATERLOGGED"],"fn":["next_pose","pose_signal"],"struct":["CopperGolemStatueBlock","WeatheringCopperGolemStatueBlock"]};

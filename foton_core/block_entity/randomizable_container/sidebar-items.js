@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LOOT_TABLE_SEED_TAG","LOOT_TABLE_TAG"],"struct":["ContainerLoot","PackedLootTable"]};

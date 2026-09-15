@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["abstract_horse","chested_horse","llama_layer"],"trait":["AbstractHorse"]};

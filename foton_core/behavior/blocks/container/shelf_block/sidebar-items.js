@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COLUMNS","FACING","HOTBAR_SLOTS","MAX_CHAIN_LENGTH","POWERED","ROWS","SIDE_CHAIN_PART","SOUND_PITCH","SOUND_VOLUME","WATERLOGGED"],"enum":["Side"],"struct":["ShelfBlock","ShelfNeighbor"]};

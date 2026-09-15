@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONVERSION_NAUSEA_TICKS","XP_REWARD"],"struct":["PiglinBruteEntity","PiglinBruteState"]};

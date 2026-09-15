@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EventPriority"],"mod":["block","command","command_preprocess","entity","fertilize","inventory","lectern","player","server","world"],"struct":["BlockFertilizeEvent","EventBus","PlayerTakeLecternBookEvent","Registration"],"trait":["Event"],"type":["Handler"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_RCON_CONNECTIONS"],"fn":["default_max_chained_neighbor_updates","default_spam_threshold_seconds","is_loopback_url","validate"],"struct":["BedrockConfig","BugReportsConfig","RconConfig","ServerConfig","ThreadConfig"]};

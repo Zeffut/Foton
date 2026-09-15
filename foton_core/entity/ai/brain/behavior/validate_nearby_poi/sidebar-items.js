@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DISTANCE"],"fn":["bed_is_occupied","bed_is_occupied_by_villager"],"struct":["ValidateNearbyPoi"],"type":["PoiTypeFilter"]};

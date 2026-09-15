@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GOLEM_CHECK_INTERVAL","SAFE_DISTANCE_FROM_DANGER_SQR","VILLAGERS_NEEDED_TO_AGREE_WHEN_PANICKING"],"struct":["VillagerCalmDown","VillagerPanicTrigger"]};

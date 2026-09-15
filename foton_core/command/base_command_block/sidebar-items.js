@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_NAME","NO_LAST_EXECUTION"],"fn":["component_at","local_clock_time"],"struct":["BaseCommandBlock","CommandBlockState"]};

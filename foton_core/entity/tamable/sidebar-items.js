@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLAG_IN_SITTING_POSE","FLAG_TAME","MAX_HORIZONTAL_TELEPORT_DISTANCE","MAX_OWNER_CHAIN_DEPTH","MAX_VERTICAL_TELEPORT_DISTANCE","MIN_HORIZONTAL_TELEPORT_DISTANCE","TELEPORT_ATTEMPTS","TELEPORT_WHEN_DISTANCE_IS_SQ"],"fn":["is_tamed","owner_uuid","set_owner_uuid","set_tamed"],"struct":["TamableAnimalBase"],"trait":["TamableAnimal"]};

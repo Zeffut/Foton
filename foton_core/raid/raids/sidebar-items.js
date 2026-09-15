@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VILLAGE_POI_SEARCH_RADIUS"],"fn":["village_center"],"struct":["PersistentRaid","PersistentRaids","Raids","RaidsState"]};

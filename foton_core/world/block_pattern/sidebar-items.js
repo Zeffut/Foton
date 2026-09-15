@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ALL_DIRECTIONS"],"fn":["has_state","translate_and_rotate"],"struct":["BlockInWorld","BlockPattern","BlockPatternBuilder","BlockPatternMatch","LevelCache"],"type":["BlockPatternPredicate"]};

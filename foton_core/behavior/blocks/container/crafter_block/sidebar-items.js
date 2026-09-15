@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ACCURACY_DEVIATION","CRAFTING","CRAFTING_TICK_DELAY","EJECT_ACCURACY","EJECT_OFFSET","HORIZONTAL_SPAWN_DROP","MAX_CRAFTING_TICKS","ORIENTATION","TRIGGERED","VERTICAL_SPAWN_DROP"],"fn":["eject","set_block_entity_triggered","throw","triangle"],"struct":["CrafterBlock"]};

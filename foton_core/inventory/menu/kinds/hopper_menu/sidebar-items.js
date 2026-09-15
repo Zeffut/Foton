@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HOPPER_SLOTS"],"fn":["hopper"],"struct":["HopperKind"]};

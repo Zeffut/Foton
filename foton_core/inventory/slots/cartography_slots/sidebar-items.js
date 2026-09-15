@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CARTOGRAPHY_ADDITIONAL","CARTOGRAPHY_MAP"],"fn":["is_cartography_material","is_filled_map"],"struct":["CartographyHandler"]};

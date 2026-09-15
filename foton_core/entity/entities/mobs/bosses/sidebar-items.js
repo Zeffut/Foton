@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INVULNERABLE_TICKS"],"fn":["can_destroy"],"mod":["ender_dragon","wither"],"struct":["WitherBoss"]};

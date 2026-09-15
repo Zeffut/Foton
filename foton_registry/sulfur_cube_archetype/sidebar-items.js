@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_KNOCKBACK_MODIFIERS","DEFAULT_SOUND_SETTINGS"],"struct":["SulfurCubeArchetype","SulfurCubeArchetypeRegistry","SulfurCubeAttributeEntry","SulfurCubeContactDamage","SulfurCubeExplosion","SulfurCubeKnockbackModifiers","SulfurCubeSoundSettings"],"type":["SulfurCubeArchetypeRef"]};

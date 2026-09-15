@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BATCH_SIZE","MAX_INTERVAL_INCREASE","MAX_RETRY_PATHFINDING_INTERVAL","MIN_INTERVAL_INCREASE","MIN_REACH_RANGE","RATE","SCAN_RANGE"],"fn":["path_to_candidates"],"struct":["AcquirePoi","JitteredLinearRetry"],"type":["PoiPositionFilter","PoiTypeFilter"]};

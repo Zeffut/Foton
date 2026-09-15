@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FLOWER_SEARCH_RADIUS"],"fn":["generate_tree","has_flowers_near","is_two_by_two_sapling","place_tree"],"static":["ACACIA","AZALEA","BIRCH","CHERRY","DARK_OAK","JUNGLE","MANGROVE","OAK","PALE_OAK","SPRUCE"],"struct":["TreeGrower"]};

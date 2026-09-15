@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_COOLDOWN_BEFORE_RETRYING","PARTIAL_STEP_HORIZONTAL_RANGE","PARTIAL_STEP_VERTICAL_RANGE"],"fn":["squared_distance"],"struct":["MoveToTargetSink"],"type":["ExtraMoveCondition"]};

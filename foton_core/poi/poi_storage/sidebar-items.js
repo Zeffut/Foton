@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_VILLAGE_DISTANCE","NO_VILLAGE_DISTANCE"],"enum":["OccupationStatus"],"fn":["distance_sq","is_village_type","max_tickets_for","resolve_pos","vanilla_shuffle"],"struct":["PointOfInterestStorage"],"type":["PoiColumn"]};

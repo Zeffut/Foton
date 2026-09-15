@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HORIZONTAL_SEARCH","SCAN_RATE","VERTICAL_SEARCH"],"struct":["SecondaryPoiSensor"]};

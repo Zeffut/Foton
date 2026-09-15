@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_FINAL_STATE","EMPTY_ID"],"enum":["JigsawJointType"],"fn":["default_joint_type","identifier_or_empty"],"struct":["JigsawBlockEntity","JigsawSettings","JigsawState"]};

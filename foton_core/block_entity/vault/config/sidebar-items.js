@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_ACTIVATION_RANGE","DEFAULT_DEACTIVATION_RANGE"],"fn":["loot_table_by_name"],"struct":["VaultConfig"]};

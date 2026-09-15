@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EnchantmentRegistrationError"],"fn":["parse_tag_ref"],"mod":["effect","helper"],"struct":["Enchantment","EnchantmentCost","EnchantmentRegistry","OwnedEnchantment"],"type":["EnchantmentRef"]};

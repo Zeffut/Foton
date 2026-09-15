@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ROTATION_STEPS"],"fn":["can_hurt_when_fixed","direction_2d_data_value","direction_3d_data_value","direction_from_3d_data_value"],"struct":["FrameState","ItemFrameEntity"],"trait":["FrameLike"]};

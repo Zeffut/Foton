@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_BOOKSHELVES","OFFER_COUNT"],"fn":["apply_enchantments","available_enchantment_results","draw_weighted","enchanting_table_candidates","enchantment_cost","is_primary_item","max_cost","min_cost","retain_compatible","select_enchantment"],"struct":["EnchantmentInstance"]};

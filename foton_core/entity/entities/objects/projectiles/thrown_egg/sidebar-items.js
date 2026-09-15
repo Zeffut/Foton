@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHICK_AGE","HATCH_CHANCE","QUADRUPLE_CHANCE","QUADRUPLE_COUNT"],"struct":["ThrownEggEntity"]};

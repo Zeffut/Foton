@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COMMON_STRENGTH_RANGE","MAX_STRENGTH","RARE_STRENGTH_CHANCE","SPIT_INACCURACY","SPIT_VELOCITY","STRENGTH_BONUS_CHANCE"],"enum":["LlamaVariant"],"fn":["is_llama","should_follow_mommy"],"struct":["LlamaBase","LlamaState"],"trait":["Llama"]};

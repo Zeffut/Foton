@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BURN_COOL_SPEED","DEFAULT_COOKING_TIME","FURNACE_SLOTS","SLOT_FUEL","SLOT_INPUT","SLOT_RESULT"],"fn":["clamp_to_i16"],"static":["SLOTS_FOR_DOWN","SLOTS_FOR_SIDES","SLOTS_FOR_UP"],"struct":["FurnaceBlockEntity","FurnaceContainer","FurnaceDataSlots"]};

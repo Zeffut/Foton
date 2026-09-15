@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PATROL_LEADER_SPAWN_CHANCE","PATROL_PERSISTENCE_DISTANCE_SQR","PATROL_TARGET_SPREAD","TAG_PATROLLING","TAG_PATROL_LEADER","TAG_PATROL_TARGET"],"fn":["read_patrol_state","write_patrol_state"],"struct":["PatrolState"],"trait":["PatrollingMonster"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HOUSE_SEARCH_RADIUS","NEAR_HOP_ANGLE","NEAR_HOP_HORIZONTAL","NEAR_HOP_VERTICAL","VISITED_MEMORY","WIDE_HOP_ANGLE","WIDE_HOP_HORIZONTAL"],"fn":["closer_to_center_than"],"struct":["RaiderMoveThroughVillageGoal"]};

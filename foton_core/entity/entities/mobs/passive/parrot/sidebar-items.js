@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AMBIENT_IMITATION_CHANCE","COOKIE_POISON_TICKS","FALL_DAMPING","IMITATE_CHANCE","IMITATE_COIN_FLIP","IMITATE_RANGE","RIDE_COOLDOWN_TICKS","TAME_CHANCE"],"enum":["ParrotVariant"],"fn":["check_parrot_spawn_rules"],"mod":["imitation","wander"],"struct":["ParrotEntity"]};

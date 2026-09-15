@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MemoryValue"],"fn":["block_pos_from_nbt","block_pos_to_nbt","global_pos_from_nbt","global_pos_to_nbt","read_block_pos","read_bool","read_global_pos","read_global_pos_list","read_global_pos_set","read_int","read_long","read_uuid"],"macro":[["impl_memory_value_type",1]],"struct":["EntityMemory","Unit"],"trait":["MemoryValueType"]};

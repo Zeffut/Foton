@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ATTACK_DELAY_MIN","ATTACK_DELAY_SPREAD","RANGED_ATTACK_POWER","TIMEOUT"],"enum":["CrossbowState"],"struct":["CrossbowAttack","CrossbowAttackHooks"]};
