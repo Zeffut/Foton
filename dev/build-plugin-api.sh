@@ -29,6 +29,27 @@ fi
 rm -rf "$OUT/classes" "$OUT/generated"
 mkdir -p "$OUT/classes" "$OUT/generated"
 
+# Three Java generators consume Rust registry source emitted by the
+# foton-registry build script. Those files are intentionally ignored, so a
+# fresh checkout must generate them before the plugin API can be built.
+REGISTRY_GENERATED="$REPO/foton-registry/src/generated"
+REGISTRY_INPUTS=(
+  "$REGISTRY_GENERATED/vanilla_entities.rs"
+  "$REGISTRY_GENERATED/vanilla_enchantments.rs"
+  "$REGISTRY_GENERATED/vanilla_potions.rs"
+)
+for registry_input in "${REGISTRY_INPUTS[@]}"; do
+  if [ ! -f "$registry_input" ]; then
+    if ! command -v cargo >/dev/null 2>&1; then
+      echo "cargo is missing; generated plugin API registry inputs are unavailable" >&2
+      exit 1
+    fi
+    echo "generating missing foton-registry sources"
+    cargo check --manifest-path "$REPO/Cargo.toml" -p foton-registry
+    break
+  fi
+done
+
 # Material is sixteen hundred constants over every block and item. It is
 # generated from the same registry files the server itself is built from, so
 # the enum cannot name a block Foton does not have -- and so there is no
@@ -53,8 +74,35 @@ done
 
 # javac reads a file of sources with @, which avoids both mapfile (bash 4+,
 # and macOS ships bash 3.2) and an argument list long enough to overflow exec.
+write_javac_argfile() {
+  local destination="$1"
+  local excluded_name="$2"
+  shift 2
+  python3 - "$destination" "$excluded_name" "$@" <<'PY'
+from pathlib import Path
+import sys
+
+destination = Path(sys.argv[1])
+excluded_name = sys.argv[2]
+roots = (Path(argument) for argument in sys.argv[3:])
+sources = sorted(
+    path
+    for root in roots
+    for path in root.rglob("*.java")
+    if path.name != excluded_name
+)
+
+# javac argument files split on whitespace unless an argument is quoted.
+# Backslashes and double quotes retain their literal value when escaped.
+def quote(argument: str) -> str:
+    return '"' + argument.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+destination.write_text("".join(f"{quote(str(source))}\n" for source in sources), encoding="utf-8")
+PY
+}
+
 SOURCES="$OUT/sources.txt"
-find "$SRC" "$OUT/generated" -name '*.java' | sort > "$SOURCES"
+write_javac_argfile "$SOURCES" "" "$SRC" "$OUT/generated"
 echo "compiling $(wc -l < "$SOURCES" | tr -d ' ') sources"
 # -Xlint:all with no -Werror: the API mirrors another project's shapes and some
 # of its warnings are inherent to that, but they are still worth seeing.
@@ -100,8 +148,8 @@ if [ -d "$FIXTURE_SRC" ]; then
   cp "$FIXTURE_SRC/config.yml" "$EVENT_CLASSES/"
   jar --create --file "$FIX/EventFixture.jar" -C "$EVENT_CLASSES" .
 
-  find "$FIXTURE_SRC/example" -name '*.java' ! -name 'EventFixture.java' \
-    | sort > "$FIX/lifecycle-sources.txt"
+  write_javac_argfile "$FIX/lifecycle-sources.txt" "EventFixture.java" \
+    "$FIXTURE_SRC/example"
   javac -nowarn -d "$LIFECYCLE_CLASSES" -cp "$JAR$LIBS:$CHECK_CLASSES" \
     @"$FIX/lifecycle-sources.txt"
   javac -nowarn -d "$DEPENDENCY_CLASSES" -cp "$JAR$LIBS" \
