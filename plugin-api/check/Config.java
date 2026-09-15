@@ -1,8 +1,12 @@
 import java.io.File;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.plugin.InvalidDescriptionException;
+import org.bukkit.plugin.PluginDescriptionFile;
 
 /** The configuration API, on the behavior plugins actually rely on. */
 final class Config {
@@ -73,6 +77,7 @@ final class Config {
         options();
         defaults();
         file();
+        pluginDescriptors();
     }
 
     /** The options chain, which only works if every setter narrows. */
@@ -127,5 +132,144 @@ final class Config {
 
         target.delete();
         directory.delete();
+    }
+
+    private static void pluginDescriptors() throws Exception {
+        PluginDescriptionFile descriptor = descriptor("""
+            name: Provider
+            version: 1
+            main: example.Provider
+            api-version: '26.2'
+            depend: [Required]
+            softdepend: [Optional]
+            loadbefore: [Consumer]
+            provides: [Vault]
+            libraries: [com.example:fixture-lib:1.0]
+            bootstrapper: example.ProviderBootstrap
+            loader: example.ProviderLoader
+            dependencies:
+              bootstrap:
+                Registry:
+                  load: BEFORE
+                  required: false
+                  join-classpath: true
+              server:
+                Economy:
+                  load: AFTER
+                  required: true
+                  join-classpath: false
+                Defaults: {}
+            """);
+
+        Checks.same(descriptor.getDepend(), List.of("Required"), "legacy depend");
+        Checks.same(descriptor.getSoftDepend(), List.of("Optional"), "legacy softdepend");
+        Checks.same(descriptor.getLoadBefore(), List.of("Consumer"), "legacy loadbefore");
+        Checks.same(descriptor.getProvides(), List.of("Vault"), "provides");
+        Checks.same(descriptor.getLibraries(), List.of("com.example:fixture-lib:1.0"),
+            "libraries");
+        Checks.same(descriptor.getBootstrapper(), "example.ProviderBootstrap", "bootstrapper");
+        Checks.same(descriptor.getLoader(), "example.ProviderLoader", "loader");
+
+        PluginDescriptionFile.Dependency bootstrap =
+            descriptor.getBootstrapDependencies().get("Registry");
+        Checks.same(bootstrap.load(), PluginDescriptionFile.Load.BEFORE,
+            "Paper bootstrap dependency direction");
+        Checks.expect(!bootstrap.required(), "Paper bootstrap dependency required flag");
+        Checks.expect(bootstrap.joinClasspath(),
+            "Paper bootstrap dependency join-classpath flag");
+
+        PluginDescriptionFile.Dependency server =
+            descriptor.getServerDependencies().get("Economy");
+        Checks.same(server.load(), PluginDescriptionFile.Load.AFTER,
+            "Paper server dependency direction");
+        Checks.expect(server.required(), "Paper server dependency required flag");
+        Checks.expect(!server.joinClasspath(),
+            "Paper server dependency join-classpath flag");
+        Checks.same(descriptor.getServerDependencies().get("Defaults"),
+            new PluginDescriptionFile.Dependency(
+                PluginDescriptionFile.Load.OMIT, true, true),
+            "Paper dependency defaults");
+
+        expectImmutable(descriptor.getProvides(), "provides list");
+        expectImmutable(descriptor.getLibraries(), "libraries list");
+        expectImmutable(descriptor.getServerDependencies(), "server dependency map");
+
+        expectInvalid("""
+            name: '   '
+            version: 1
+            main: example.Blank
+            """, "name");
+        expectInvalid("""
+            name: DuplicateAlias
+            version: 1
+            main: example.DuplicateAlias
+            provides: [Vault, vault]
+            """, "provides");
+        expectInvalid("""
+            name: BlankDependency
+            version: 1
+            main: example.BlankDependency
+            depend: ['  ']
+            """, "depend");
+        expectInvalid("""
+            name: Future
+            version: 1
+            main: example.Future
+            api-version: '26.3'
+            """, "api-version");
+        expectInvalid("""
+            name: BadDirection
+            version: 1
+            main: example.BadDirection
+            dependencies:
+              server:
+                Economy:
+                  load: SIDEWAYS
+            """, "dependencies.server.Economy.load");
+        expectInvalid("""
+            name: BadSection
+            version: 1
+            main: example.BadSection
+            dependencies:
+              server: [Economy]
+            """, "dependencies.server");
+        expectInvalid("""
+            name: BadBody
+            version: 1
+            main: example.BadBody
+            dependencies:
+              bootstrap:
+                Registry: BEFORE
+            """, "dependencies.bootstrap.Registry");
+    }
+
+    private static PluginDescriptionFile descriptor(String yaml)
+            throws InvalidDescriptionException {
+        return new PluginDescriptionFile(new StringReader(yaml));
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void expectImmutable(Object value, String what) {
+        try {
+            if (value instanceof List list) {
+                list.add("mutated");
+            } else if (value instanceof Map map) {
+                map.put("mutated", "mutated");
+            }
+            throw new AssertionError(what + " is mutable");
+        } catch (UnsupportedOperationException expected) {
+            // Expected: descriptor collections are safe to share with plugins.
+        }
+    }
+
+    private static void expectInvalid(String yaml, String field) throws Exception {
+        try {
+            descriptor(yaml);
+            throw new AssertionError(field + " descriptor was accepted");
+        } catch (InvalidDescriptionException expected) {
+            Checks.expect(expected.getMessage() != null
+                    && expected.getMessage().contains(field),
+                field + " validation did not name its field: " + expected.getMessage());
+        }
     }
 }

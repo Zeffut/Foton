@@ -1,0 +1,14 @@
+name: PaperConsumer
+version: 1
+main: fixture.dependencies.DependencyPlugins$PaperConsumer
+dependencies:
+  bootstrap:
+    BootstrapProvider:
+      load: BEFORE
+      required: true
+      join-classpath: true
+  server:
+    ServerAfter:
+      load: AFTER
+      required: false
+      join-classpath: false

@@ -21,6 +21,7 @@ public final class Checks {
             && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
             "disabling a plugin should release its custom channels");
         lifecycle(args[1], args[2]);
+        dependencies(args[3], args[4]);
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"
@@ -183,6 +184,98 @@ public final class Checks {
             if (task.getOwner().getName().equals(owner)) count++;
         }
         return count;
+    }
+
+    private static void dependencies(String graphDirectory, String duplicateDirectory)
+            throws Exception {
+        clearDependencyProperties();
+        java.io.ByteArrayOutputStream graphBytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream original = System.out;
+        int enabled;
+        try (java.io.PrintStream capture = new java.io.PrintStream(
+                graphBytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setOut(capture);
+            enabled = foton.PluginHost.loadAll(graphDirectory);
+        } finally {
+            System.setOut(original);
+        }
+        String graphLog = graphBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            same(enabled, 12, "dependency graph enabled count");
+            same(csvProperty("foton.fixture.dependencies.load"), java.util.List.of(
+                "BootstrapProvider", "NoJoinProvider", "NoJoinConsumer", "OptionalA",
+                "OptionalB", "PaperConsumer", "Provider", "Consumer", "ServerAfter",
+                "Unrelated", "ZuluBefore", "AlphaTarget"),
+                "deterministic dependency load order");
+            same(csvProperty("foton.fixture.dependencies.enable"), csvProperty(
+                "foton.fixture.dependencies.load"),
+                "dependency enable order should match load order");
+            same(System.getProperty("foton.fixture.dependencies.alias"), "Provider",
+                "consumer dependency alias lookup");
+            same(System.getProperty("foton.fixture.dependencies.joined"), "true",
+                "join-classpath dependency visibility");
+            same(System.getProperty("foton.fixture.dependencies.isolated"), "true",
+                "join-classpath false dependency isolation");
+            expect(foton.PluginHost.byName("VaUlT") != null
+                    && foton.PluginHost.byName("VaUlT").getName().equals("Provider"),
+                "case-insensitive provided alias lookup");
+            expect(graphLog.contains("optional dependency cycle")
+                    && graphLog.contains("OptionalA") && graphLog.contains("OptionalB"),
+                "optional cycle was not broken with a named diagnostic: " + graphLog);
+            expect(graphLog.contains("required dependency cycle")
+                    && graphLog.contains("RequiredCycleA")
+                    && graphLog.contains("RequiredCycleB"),
+                "required cycle diagnostic did not name every member: " + graphLog);
+            expect(!csvProperty("foton.fixture.dependencies.load").contains("BrokenRequired")
+                    && !csvProperty("foton.fixture.dependencies.load")
+                        .contains("BrokenDependent"),
+                "required dependency failure did not propagate");
+            expect(csvProperty("foton.fixture.dependencies.load").contains("Unrelated"),
+                "unrelated plugin did not continue after dependency failures");
+        } finally {
+            foton.PluginHost.disableAll();
+        }
+
+        clearDependencyProperties();
+        java.io.ByteArrayOutputStream duplicateBytes = new java.io.ByteArrayOutputStream();
+        try (java.io.PrintStream capture = new java.io.PrintStream(
+                duplicateBytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setOut(capture);
+            enabled = foton.PluginHost.loadAll(duplicateDirectory);
+        } finally {
+            System.setOut(original);
+        }
+        String duplicateLog = duplicateBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            same(enabled, 1, "duplicate descriptor isolation");
+            same(csvProperty("foton.fixture.dependencies.load"),
+                java.util.List.of("HealthyDuplicate"),
+                "duplicate names or aliases should reject every conflicting provider");
+            expect(duplicateLog.contains("duplicate alias")
+                    && duplicateLog.contains("AliasOne")
+                    && duplicateLog.contains("AliasTwo"),
+                "duplicate alias diagnostic did not name its providers: " + duplicateLog);
+            expect(duplicateLog.contains("duplicate plugin name")
+                    && duplicateLog.contains("SameName")
+                    && duplicateLog.contains("samename"),
+                "duplicate real-name diagnostic did not name its plugins: " + duplicateLog);
+        } finally {
+            foton.PluginHost.disableAll();
+            clearDependencyProperties();
+        }
+    }
+
+    private static java.util.List<String> csvProperty(String property) {
+        String value = System.getProperty(property, "");
+        return value.isEmpty() ? java.util.List.of() : java.util.List.of(value.split(","));
+    }
+
+    private static void clearDependencyProperties() {
+        System.clearProperty("foton.fixture.dependencies.load");
+        System.clearProperty("foton.fixture.dependencies.enable");
+        System.clearProperty("foton.fixture.dependencies.alias");
+        System.clearProperty("foton.fixture.dependencies.joined");
+        System.clearProperty("foton.fixture.dependencies.isolated");
     }
 
     private static void awaitSchedulerTasks(String owner, int expected) {

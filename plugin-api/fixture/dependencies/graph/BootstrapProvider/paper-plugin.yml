@@ -1,0 +1,3 @@
+name: BootstrapProvider
+version: 1
+main: fixture.dependencies.DependencyPlugins$BootstrapProvider

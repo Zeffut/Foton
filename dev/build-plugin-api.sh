@@ -84,8 +84,9 @@ if [ -d "$FIXTURE_SRC" ]; then
   rm -rf "$FIX"
   EVENT_CLASSES="$FIX/event-classes"
   LIFECYCLE_CLASSES="$FIX/lifecycle-classes"
+  DEPENDENCY_CLASSES="$FIX/dependency-classes"
   CHECK_CLASSES="$FIX/check-classes"
-  mkdir -p "$EVENT_CLASSES" "$LIFECYCLE_CLASSES" "$CHECK_CLASSES"
+  mkdir -p "$EVENT_CLASSES" "$LIFECYCLE_CLASSES" "$DEPENDENCY_CLASSES" "$CHECK_CLASSES"
 
   javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS" "$FIXTURE_SRC"/support/*.java
   javac -nowarn -d "$EVENT_CLASSES" -cp "$JAR$LIBS" \
@@ -98,6 +99,8 @@ if [ -d "$FIXTURE_SRC" ]; then
     | sort > "$FIX/lifecycle-sources.txt"
   javac -nowarn -d "$LIFECYCLE_CLASSES" -cp "$JAR$LIBS:$CHECK_CLASSES" \
     @"$FIX/lifecycle-sources.txt"
+  javac -nowarn -d "$DEPENDENCY_CLASSES" -cp "$JAR$LIBS" \
+    "$REPO"/plugin-api/fixture/dependencies/src/*.java
 
   mkdir -p "$FIX/plugins"
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
@@ -126,13 +129,38 @@ if [ -d "$FIXTURE_SRC" ]; then
   jar --create --file "$REPLACEMENT_PLUGINS/Replacement.jar" \
     -C "$REPLACEMENT_STAGE" .
 
+  for fixture_set in graph duplicates; do
+    SET_PLUGINS="$FIX/dependency-$fixture_set-plugins"
+    mkdir -p "$SET_PLUGINS"
+    for descriptor in "$REPO/plugin-api/fixture/dependencies/$fixture_set"/*/*.yml; do
+      fixture="$(basename "$(dirname "$descriptor")")"
+      STAGE="$FIX/stage-dependency-$fixture_set-$fixture"
+      mkdir -p "$STAGE/fixture/dependencies"
+      cp "$DEPENDENCY_CLASSES/fixture/dependencies/DependencyPlugin.class" \
+        "$DEPENDENCY_CLASSES/fixture/dependencies/DependencyPlugins.class" \
+        "$DEPENDENCY_CLASSES/fixture/dependencies/DependencyPlugins\$$fixture.class" \
+        "$STAGE/fixture/dependencies/"
+      if [ "$fixture" = "BootstrapProvider" ]; then
+        cp "$DEPENDENCY_CLASSES/fixture/dependencies/BootstrapApi.class" \
+          "$STAGE/fixture/dependencies/"
+      fi
+      if [ "$fixture" = "NoJoinProvider" ]; then
+        cp "$DEPENDENCY_CLASSES/fixture/dependencies/NoJoinApi.class" \
+          "$STAGE/fixture/dependencies/"
+      fi
+      cp "$descriptor" "$STAGE/"
+      jar --create --file "$SET_PLUGINS/$fixture.jar" -C "$STAGE" .
+    done
+  done
+
   # Only the original event fixture is parent-visible because older checks
   # inspect its counters directly. Lifecycle classes exist solely in their
   # plugin jars, so the PluginClassLoader owns their classes and lambdas.
   javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS:$EVENT_CLASSES:$CHECK_CLASSES" \
     "$REPO"/plugin-api/check/*.java
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$EVENT_CLASSES" Checks \
-    "$FIX/plugins" "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS"
+    "$FIX/plugins" "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS" \
+    "$FIX/dependency-graph-plugins" "$FIX/dependency-duplicates-plugins"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

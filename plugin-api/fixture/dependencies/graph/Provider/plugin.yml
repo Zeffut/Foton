@@ -1,0 +1,4 @@
+name: Provider
+version: 1
+main: fixture.dependencies.DependencyPlugins$Provider
+provides: [Vault]

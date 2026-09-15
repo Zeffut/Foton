@@ -1,0 +1,9 @@
+name: NoJoinConsumer
+version: 1
+main: fixture.dependencies.DependencyPlugins$NoJoinConsumer
+dependencies:
+  server:
+    NoJoinProvider:
+      load: BEFORE
+      required: true
+      join-classpath: false
