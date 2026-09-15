@@ -136,6 +136,7 @@ fn the_class_path_is_ordered() {
             "gson-2.14.0.jar",
             "guava-33.6.0-jre.jar",
             "joml-1.10.8.jar",
+            "sqlite-jdbc-3.49.1.0.jar",
             "slf4j-api-2.0.17.jar",
             "snakeyaml-2.2.jar",
         ],

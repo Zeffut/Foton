@@ -189,10 +189,12 @@ if [ -d "$FIXTURE_SRC" ]; then
   LIBRARY_CLASSES="$FIX/library-classes"
   LIBRARY_PLUGIN_CLASSES="$FIX/library-plugin-classes"
   PAPER_CLASSES="$FIX/paper-classes"
+  HOST_RUNTIME_CLASSES="$FIX/host-runtime-classes"
+  HOST_DRIVER_CLASSES="$FIX/host-driver-classes"
   CHECK_CLASSES="$FIX/check-classes"
   mkdir -p "$EVENT_CLASSES" "$LIFECYCLE_CLASSES" "$DEPENDENCY_CLASSES" \
     "$LIBRARY_CLASSES" "$LIBRARY_PLUGIN_CLASSES" "$PAPER_CLASSES" \
-    "$CHECK_CLASSES"
+    "$HOST_RUNTIME_CLASSES" "$HOST_DRIVER_CLASSES" "$CHECK_CLASSES"
 
   javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS" "$FIXTURE_SRC"/support/*.java
   javac -nowarn -d "$EVENT_CLASSES" -cp "$JAR$LIBS" \
@@ -215,6 +217,14 @@ if [ -d "$FIXTURE_SRC" ]; then
     "$REPO"/plugin-api/fixture/libraries/src/fixture/libraries/MalformedLibraryPlugin.java
   javac -nowarn -d "$PAPER_CLASSES" -cp "$JAR$LIBS" \
     "$REPO"/plugin-api/fixture/paper/src/example/*.java
+  javac -nowarn -d "$HOST_DRIVER_CLASSES" \
+    "$REPO/plugin-api/fixture/host-runtime/src/fixture/jdbc/HostDriver.java"
+  HOST_DRIVER_JAR="$FIX/HostDriver.jar"
+  jar --create --file "$HOST_DRIVER_JAR" \
+    -C "$HOST_DRIVER_CLASSES" . \
+    -C "$REPO/plugin-api/fixture/host-runtime/host-services" .
+  javac -nowarn -d "$HOST_RUNTIME_CLASSES" -cp "$JAR$LIBS" \
+    "$REPO"/plugin-api/fixture/host-runtime/src/example/*.java
 
   mkdir -p "$FIX/plugins"
   mv "$FIX/EventFixture.jar" "$FIX/plugins/"
@@ -298,6 +308,24 @@ if [ -d "$FIXTURE_SRC" ]; then
   jar --create --file "$REPLACEMENT_PLUGINS/Replacement.jar" \
     -C "$REPLACEMENT_STAGE" .
 
+  HOST_RUNTIME_PLUGINS="$FIX/host-runtime-plugins"
+  JDBC_PLUGINS="$FIX/jdbc-plugins"
+  mkdir -p "$HOST_RUNTIME_PLUGINS" "$JDBC_PLUGINS"
+  for fixture in EnableObserver SelfDisabling; do
+    STAGE="$FIX/stage-host-runtime-$fixture"
+    mkdir -p "$STAGE/example"
+    cp "$HOST_RUNTIME_CLASSES/example/$fixture"Plugin.class "$STAGE/example/"
+    cp "$REPO/plugin-api/fixture/host-runtime/$fixture/plugin.yml" "$STAGE/"
+    jar --create --file "$HOST_RUNTIME_PLUGINS/$fixture.jar" -C "$STAGE" .
+  done
+  JDBC_STAGE="$FIX/stage-host-runtime-JdbcFixture"
+  mkdir -p "$JDBC_STAGE/example"
+  cp "$HOST_RUNTIME_CLASSES/example/JdbcPlugin.class" \
+    "$HOST_RUNTIME_CLASSES/example/PrivateDriver.class" "$JDBC_STAGE/example/"
+  cp "$REPO/plugin-api/fixture/host-runtime/JdbcFixture/plugin.yml" "$JDBC_STAGE/"
+  cp -R "$REPO/plugin-api/fixture/host-runtime/plugin-services/META-INF" "$JDBC_STAGE/"
+  jar --create --file "$JDBC_PLUGINS/JdbcFixture.jar" -C "$JDBC_STAGE" .
+
   for fixture_set in graph duplicates existing cross-call; do
     SET_PLUGINS="$FIX/dependency-$fixture_set-plugins"
     mkdir -p "$SET_PLUGINS"
@@ -348,7 +376,8 @@ if [ -d "$FIXTURE_SRC" ]; then
   # Only the original event fixture is parent-visible because older checks
   # inspect its counters directly. Lifecycle classes exist solely in their
   # plugin jars, so the PluginClassLoader owns their classes and lambdas.
-  javac -nowarn -d "$CHECK_CLASSES" -cp "$JAR$LIBS:$EVENT_CLASSES:$CHECK_CLASSES" \
+  javac -nowarn -d "$CHECK_CLASSES" \
+    -cp "$JAR$LIBS:$EVENT_CLASSES:$CHECK_CLASSES:$HOST_DRIVER_JAR" \
     "$REPO"/plugin-api/check/*.java
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$EVENT_CLASSES" Checks \
     "$FIX/plugins" "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS" \
@@ -357,6 +386,10 @@ if [ -d "$FIXTURE_SRC" ]; then
     "$LIBRARY_PLUGINS" "$MALFORMED_LIBRARY_PLUGINS" \
     "$DESCRIPTOR_CACHE_JAR" "$INTERRUPTED_CACHE_JAR" "$PAPER_PLUGINS" \
     "$OUT/fixture-evidence.json"
+  java -cp "$CHECK_CLASSES:$JAR$LIBS:$HOST_DRIVER_JAR" HostRuntimeCheck \
+    jdbc "$JDBC_PLUGINS"
+  java -cp "$CHECK_CLASSES:$JAR$LIBS:$HOST_DRIVER_JAR" HostRuntimeCheck \
+    self-disable "$HOST_RUNTIME_PLUGINS"
 
   mkdir -p "$REPO/build"
   python3 "$REPO/dev/plugin_api_usage.py" \

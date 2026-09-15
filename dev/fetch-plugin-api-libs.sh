@@ -6,12 +6,12 @@
 # SHA-256 of every jar the build is allowed to see, so an edited, swapped or
 # added jar is a build failure rather than a surprise in the bytecode.
 #
-# The set and the versions are not a matter of taste. They are what
-# `io.papermc.paper:paper-api:26.2.build.121-stable` declares, read from its
-# POM and from `net.kyori:adventure-bom:5.2.0`, so a plugin compiled against
-# real Paper meets the same signatures here. The directory once held Adventure
-# 4.26.1 beside a 5.2.0 logger built against Adventure 5, and it compiled --
-# which is the whole argument for checking rather than trusting a build.
+# The set and the versions are not a matter of taste. Compile-time libraries
+# come from `io.papermc.paper:paper-api:26.2.build.121-stable` and its Adventure
+# BOM. Host runtime libraries, currently Xerial SQLite JDBC, match Paper's
+# server runtime. The directory once held Adventure 4.26.1 beside a 5.2.0
+# logger built against Adventure 5, and it compiled -- which is the whole
+# argument for checking rather than trusting a build.
 #
 #     bash dev/fetch-plugin-api-libs.sh --check  # verify only; what the build runs
 #     bash dev/fetch-plugin-api-libs.sh          # download a missing or changed jar

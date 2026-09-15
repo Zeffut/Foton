@@ -1,0 +1,3 @@
+name: JdbcFixture
+version: 1
+main: example.JdbcPlugin

@@ -98,6 +98,7 @@ public final class PluginHost {
 
     /** Discovers and loads plugins, invoking only their onLoad lifecycle phase. */
     public static int loadAllOnLoad(String directory) {
+        initializeHostJdbcProviders();
         ensureServer();
         List<DiscoveredPlugin> ordered = orderedPlugins(new File(directory));
         Map<DiscoveredPlugin, PluginState> prepared = new java.util.IdentityHashMap<>();
@@ -167,6 +168,29 @@ public final class PluginHost {
         if (org.bukkit.Bukkit.getServer() == null) {
             org.bukkit.Bukkit.setServer(new FotonServer());
         }
+    }
+
+    /** Initializes JDBC services owned by the stable host class loader.
+     *
+     * DriverManager otherwise discovers providers through the calling thread's
+     * context loader. A server embedding the JVM cannot assume that loader can
+     * see the host class path. Deliberately naming the host loader also keeps
+     * plugin-private providers out of DriverManager's process-global registry.
+     */
+    private static void initializeHostJdbcProviders() {
+        HostJdbcProviders.initialize();
+    }
+
+    private static final class HostJdbcProviders {
+        static {
+            for (java.sql.Driver ignored : java.util.ServiceLoader.load(
+                    java.sql.Driver.class, PluginHost.class.getClassLoader())) {
+                // Instantiating a host provider runs its standard JDBC
+                // registration path. The provider remains host-owned.
+            }
+        }
+
+        private static void initialize() {}
     }
 
     private static List<DiscoveredPlugin> orderedPlugins(File dir) {
@@ -1035,6 +1059,10 @@ public final class PluginHost {
         plugin.setEnabled(true);
         FotonLifecycle.dispatchCommands(plugin);
         plugin.onEnable();
+        if (!plugin.isEnabled() || (state != null && state.cleaned.get())) {
+            if (state != null && !state.cleaned.get()) cleanup(plugin);
+            return;
+        }
         EventBridge.dispatch(new org.bukkit.event.server.PluginEnableEvent(plugin));
         if (state != null) state.status = Status.ENABLED;
         System.out.println("[host] enabled " + plugin.getDescription().getFullName());

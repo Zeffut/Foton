@@ -1,9 +1,11 @@
 # Third-party libraries
 
 The Bukkit API this server implements is written against Adventure, Brigadier
-and a handful of ordinary Java libraries. These jars are here so that `javac`
-can resolve those names; nothing in them ships inside the server binary, and
-Foton does not call into any of them at runtime.
+and a handful of ordinary Java libraries. Most jars are here so that `javac`
+can resolve those names. `sqlite-jdbc` is also a server-runtime dependency:
+Paper supplies it on the host class path, and plugins rely on that contract.
+The jars stay beside the API jar and are added to Foton's embedded JVM class
+path; they are not packed into the Rust server binary.
 
 They are committed rather than fetched. The alternative makes a build step
 depend on Maven Central being reachable, and this repository has just spent an
@@ -12,9 +14,11 @@ fails for reasons that are not the code.
 
 ## Which versions, and why these
 
-Every version below is the one `io.papermc.paper:paper-api:26.2.build.121-stable`
-declares, read from its published POM and -- for the Adventure artifacts, whose
-versions the POM leaves to a BOM -- from `net.kyori:adventure-bom:5.2.0`.
+Compile-time versions below are the ones
+`io.papermc.paper:paper-api:26.2.build.121-stable` declares, read from its
+published POM and -- for the Adventure artifacts, whose versions the POM
+leaves to a BOM -- from `net.kyori:adventure-bom:5.2.0`. SQLite JDBC 3.49.1.0
+matches the target Paper server's host-runtime dependency.
 
 That matters more than it looks. A plugin is compiled against real Paper, so
 the signatures it references are Paper's. Compiling our `org.bukkit` against a
@@ -51,6 +55,7 @@ POM, not from memory and not carried over from the previous version.
 | gson | 2.14.0 | Apache-2.0 | POM inside the jar |
 | guava | 33.6.0-jre | Apache-2.0 | `META-INF/LICENSE` inside the jar |
 | joml | 1.10.8 | MIT | Maven Central POM |
+| sqlite-jdbc | 3.49.1.0 | Apache-2.0 | POM inside the jar |
 | slf4j-api | 2.0.17 | MIT | `META-INF/LICENSE.txt` inside the jar |
 | snakeyaml | 2.2 | Apache-2.0 | POM inside the jar |
 
@@ -66,8 +71,8 @@ Minecraft's own dependency set. An unused jar is not worth a license question.
 
 ## When a version changes
 
-Take the new version from paper-api's POM rather than from what is newest.
-Replace the jar, update its SHA-256 in `dev/fetch-plugin-api-libs.sh`, and
-update the row above including where you read the license. A row that says a
-license without saying where it was read is a row that will be wrong
-eventually.
+Take compile-time versions from paper-api's POM rather than from what is
+newest. Take host-runtime versions from the target Paper server build. Replace
+the jar, update its SHA-256 in `manifest.txt`, and update the row above,
+including where you read the license. A row that says a license without saying
+where it was read is a row that will be wrong eventually.
