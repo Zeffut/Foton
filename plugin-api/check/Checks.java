@@ -14,6 +14,7 @@ public final class Checks {
             java.util.Set.of("EventFixture"), java.util.Set.of("EventFixture"), "");
         Config.check();
         Geometry.check();
+        EntityCheck.check();
         InventoryViewCheck.check();
         Items.check();
         Colors.check();

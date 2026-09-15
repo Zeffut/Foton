@@ -1038,6 +1038,15 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
     None
 }
 
+fn entity_by_text(text: &str) -> Option<(Arc<World>, SharedEntity)> {
+    entity_by_uuid(&Uuid::parse_str(text).ok()?)
+}
+
+fn entity_handle(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<(Arc<World>, SharedEntity)> {
+    let text: String = env.get_string(uuid).ok()?.into();
+    entity_by_text(&text)
+}
+
 extern "system" fn set_entity_custom_name_visible(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -5145,13 +5154,193 @@ extern "system" fn entity_position(
     let Some(id) = Uuid::parse_str(&text).ok() else {
         return to_position(&mut env, None);
     };
+    let entity = entity_by_uuid(&id);
     to_position(
         &mut env,
-        entity_by_uuid(&id).map(|(_, entity)| {
-            let p = entity.position();
-            [p.x, p.y, p.z, 0.0, 0.0]
-        }),
+        entity_position_state(entity.as_ref().map(|(_, entity)| entity.as_ref())),
     )
+}
+
+fn entity_position_state(entity: Option<&dyn Entity>) -> Option<[f64; 5]> {
+    entity.map(|entity| {
+        let position = entity.position();
+        let (yaw, pitch) = entity.rotation();
+        [
+            position.x,
+            position.y,
+            position.z,
+            f64::from(yaw),
+            f64::from(pitch),
+        ]
+    })
+}
+
+fn entity_scoreboard_tags_state(entity: Option<&dyn Entity>) -> Option<Vec<String>> {
+    entity.map(Entity::tags)
+}
+
+fn add_entity_scoreboard_tag_state(entity: Option<&dyn Entity>, tag: String) -> bool {
+    entity.is_some_and(|entity| entity.add_tag(tag))
+}
+
+fn remove_entity_scoreboard_tag_state(entity: Option<&dyn Entity>, tag: &str) -> bool {
+    entity.is_some_and(|entity| entity.remove_tag(tag))
+}
+
+fn entity_has_gravity_state(entity: Option<&dyn Entity>) -> bool {
+    entity.is_some_and(|entity| !entity.is_no_gravity())
+}
+
+fn set_entity_gravity_state(entity: Option<&dyn Entity>, gravity: bool) {
+    if let Some(entity) = entity {
+        entity.set_no_gravity(!gravity);
+    }
+}
+
+fn entity_silent_state(entity: Option<&dyn Entity>) -> bool {
+    entity.is_some_and(Entity::is_silent)
+}
+
+fn set_entity_silent_state(entity: Option<&dyn Entity>, silent: bool) {
+    if let Some(entity) = entity {
+        entity.set_silent(silent);
+    }
+}
+
+fn set_entity_rotation_state(entity: Option<&dyn Entity>, yaw: f32, pitch: f32) -> bool {
+    if !yaw.is_finite() || !pitch.is_finite() {
+        return false;
+    }
+    let Some(entity) = entity else {
+        return false;
+    };
+    entity.set_rotation((yaw, pitch));
+    true
+}
+
+fn entity_in_rain_state(entity: Option<&dyn Entity>) -> bool {
+    entity.is_some_and(Entity::is_in_rain)
+}
+
+extern "system" fn entity_scoreboard_tags(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let entity = entity_handle(&mut env, &uuid);
+    let Some(tags) =
+        entity_scoreboard_tags_state(entity.as_ref().map(|(_, entity)| entity.as_ref()))
+    else {
+        return null_mut();
+    };
+    string_array(&mut env, &tags)
+}
+
+extern "system" fn add_entity_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Some((_, entity)) = entity_handle(&mut env, &uuid) else {
+        return 0;
+    };
+    let Ok(tag): Result<String, _> = env.get_string(&tag).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(add_entity_scoreboard_tag_state(Some(entity.as_ref()), tag))
+}
+
+extern "system" fn remove_entity_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Some((_, entity)) = entity_handle(&mut env, &uuid) else {
+        return 0;
+    };
+    let Ok(tag): Result<String, _> = env.get_string(&tag).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(remove_entity_scoreboard_tag_state(
+        Some(entity.as_ref()),
+        &tag,
+    ))
+}
+
+extern "system" fn entity_has_gravity(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let entity = entity_handle(&mut env, &uuid);
+    jboolean::from(entity_has_gravity_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+    ))
+}
+
+extern "system" fn set_entity_gravity(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    gravity: jboolean,
+) {
+    let entity = entity_handle(&mut env, &uuid);
+    set_entity_gravity_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+        gravity != 0,
+    );
+}
+
+extern "system" fn entity_silent(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let entity = entity_handle(&mut env, &uuid);
+    jboolean::from(entity_silent_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+    ))
+}
+
+extern "system" fn set_entity_silent(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    silent: jboolean,
+) {
+    let entity = entity_handle(&mut env, &uuid);
+    set_entity_silent_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+        silent != 0,
+    );
+}
+
+extern "system" fn set_entity_rotation(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    yaw: jfloat,
+    pitch: jfloat,
+) {
+    let entity = entity_handle(&mut env, &uuid);
+    set_entity_rotation_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+        yaw,
+        pitch,
+    );
+}
+
+extern "system" fn entity_in_rain(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Some((_, entity)) = entity_handle(&mut env, &uuid) else {
+        return 0;
+    };
+    jboolean::from(entity_in_rain_state(Some(entity.as_ref())))
 }
 
 extern "system" fn entity_origin(
@@ -12738,6 +12927,51 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             entity_bounding_box as *mut c_void,
         ),
         method(
+            "entityScoreboardTags",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            entity_scoreboard_tags as *mut c_void,
+        ),
+        method(
+            "addEntityScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            add_entity_scoreboard_tag as *mut c_void,
+        ),
+        method(
+            "removeEntityScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            remove_entity_scoreboard_tag as *mut c_void,
+        ),
+        method(
+            "entityHasGravity",
+            "(Ljava/lang/String;)Z",
+            entity_has_gravity as *mut c_void,
+        ),
+        method(
+            "setEntityGravity",
+            "(Ljava/lang/String;Z)V",
+            set_entity_gravity as *mut c_void,
+        ),
+        method(
+            "entitySilent",
+            "(Ljava/lang/String;)Z",
+            entity_silent as *mut c_void,
+        ),
+        method(
+            "setEntitySilent",
+            "(Ljava/lang/String;Z)V",
+            set_entity_silent as *mut c_void,
+        ),
+        method(
+            "setEntityRotation",
+            "(Ljava/lang/String;FF)V",
+            set_entity_rotation as *mut c_void,
+        ),
+        method(
+            "entityInRain",
+            "(Ljava/lang/String;)Z",
+            entity_in_rain as *mut c_void,
+        ),
+        method(
             "entityInvulnerable",
             "(Ljava/lang/String;)Z",
             entity_invulnerable as *mut c_void,
@@ -13739,6 +13973,167 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             effective_permissions as *mut c_void,
         ),
     ]
+}
+
+#[cfg(test)]
+mod entity_bridge_tests {
+    use std::sync::Weak;
+
+    use foton_core::entity::Entity as _;
+    use foton_core::entity::entities::RawEntity;
+    use foton_registry::vanilla_entities;
+    use glam::DVec3;
+
+    use super::{
+        add_entity_scoreboard_tag_state, bindings, entity_by_text, entity_has_gravity_state,
+        entity_in_rain_state, entity_position_state, entity_scoreboard_tags_state,
+        entity_silent_state, remove_entity_scoreboard_tag_state, set_entity_gravity_state,
+        set_entity_rotation_state, set_entity_silent_state,
+    };
+
+    fn entity() -> RawEntity {
+        RawEntity::new(
+            7,
+            DVec3::new(1.25, 64.5, -3.75),
+            Weak::new(),
+            &vanilla_entities::ITEM,
+        )
+    }
+
+    #[test]
+    fn entity_lookup_rejects_invalid_and_missing_uuids() {
+        assert!(entity_by_text("not-a-uuid").is_none());
+        assert!(entity_by_text("00000000-0000-0000-0000-000000000000").is_none());
+    }
+
+    #[test]
+    fn scoreboard_tag_bindings_delegate_and_absence_stays_absent() {
+        let entity = entity();
+
+        assert_eq!(entity_scoreboard_tags_state(None), None);
+        assert!(!add_entity_scoreboard_tag_state(None, "alpha".to_owned()));
+        assert!(!remove_entity_scoreboard_tag_state(None, "alpha"));
+
+        assert!(add_entity_scoreboard_tag_state(
+            Some(&entity),
+            "beta".to_owned()
+        ));
+        assert!(add_entity_scoreboard_tag_state(
+            Some(&entity),
+            "alpha".to_owned()
+        ));
+        assert!(!add_entity_scoreboard_tag_state(
+            Some(&entity),
+            "alpha".to_owned()
+        ));
+        assert_eq!(
+            entity_scoreboard_tags_state(Some(&entity)),
+            Some(vec!["alpha".to_owned(), "beta".to_owned()])
+        );
+        assert!(remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
+        assert!(!remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
+    }
+
+    #[test]
+    fn gravity_bindings_invert_the_native_no_gravity_flag() {
+        let entity = entity();
+
+        assert!(!entity_has_gravity_state(None));
+        set_entity_gravity_state(None, true);
+        assert!(entity_has_gravity_state(Some(&entity)));
+
+        set_entity_gravity_state(Some(&entity), false);
+        assert!(entity.is_no_gravity());
+        assert!(!entity_has_gravity_state(Some(&entity)));
+        set_entity_gravity_state(Some(&entity), true);
+        assert!(!entity.is_no_gravity());
+    }
+
+    #[test]
+    fn silent_bindings_delegate_and_ignore_a_missing_entity() {
+        let entity = entity();
+
+        assert!(!entity_silent_state(None));
+        set_entity_silent_state(None, true);
+        assert!(!entity_silent_state(Some(&entity)));
+
+        set_entity_silent_state(Some(&entity), true);
+        assert!(entity_silent_state(Some(&entity)));
+        set_entity_silent_state(Some(&entity), false);
+        assert!(!entity_silent_state(Some(&entity)));
+    }
+
+    #[test]
+    fn rotation_binding_delegates_only_finite_values() {
+        let entity = entity();
+
+        assert!(!set_entity_rotation_state(None, 45.0, 20.0));
+        assert!(set_entity_rotation_state(Some(&entity), 450.0, 120.0));
+        assert_eq!(entity.rotation(), (90.0, 90.0));
+
+        assert!(!set_entity_rotation_state(Some(&entity), f32::NAN, 0.0));
+        assert!(!set_entity_rotation_state(
+            Some(&entity),
+            0.0,
+            f32::INFINITY
+        ));
+        assert_eq!(entity.rotation(), (90.0, 90.0));
+    }
+
+    #[test]
+    fn entity_position_keeps_the_rotation_from_the_same_snapshot() {
+        let entity = entity();
+        entity.set_rotation((120.0, -35.0));
+
+        assert_eq!(entity_position_state(None), None);
+        assert_eq!(
+            entity_position_state(Some(&entity)),
+            Some([1.25, 64.5, -3.75, 120.0, -35.0])
+        );
+    }
+
+    #[test]
+    fn rain_binding_delegates_to_the_existing_entity_state() {
+        let entity = entity();
+
+        assert!(!entity_in_rain_state(None));
+        assert!(!entity_in_rain_state(Some(&entity)));
+    }
+
+    #[test]
+    fn every_entity_state_native_has_the_java_descriptor_it_serves() {
+        let expected = [
+            (
+                "entityScoreboardTags",
+                "(Ljava/lang/String;)[Ljava/lang/String;",
+            ),
+            (
+                "addEntityScoreboardTag",
+                "(Ljava/lang/String;Ljava/lang/String;)Z",
+            ),
+            (
+                "removeEntityScoreboardTag",
+                "(Ljava/lang/String;Ljava/lang/String;)Z",
+            ),
+            ("entityHasGravity", "(Ljava/lang/String;)Z"),
+            ("setEntityGravity", "(Ljava/lang/String;Z)V"),
+            ("entitySilent", "(Ljava/lang/String;)Z"),
+            ("setEntitySilent", "(Ljava/lang/String;Z)V"),
+            ("setEntityRotation", "(Ljava/lang/String;FF)V"),
+            ("entityInRain", "(Ljava/lang/String;)Z"),
+        ];
+        let methods = bindings();
+
+        for (name, signature) in expected {
+            let method = methods
+                .iter()
+                .find(|method| method.name.to_str().ok() == Some(name));
+            assert_eq!(
+                method.and_then(|method| method.sig.to_str().ok()),
+                Some(signature)
+            );
+        }
+    }
 }
 
 #[cfg(test)]

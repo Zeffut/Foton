@@ -419,6 +419,15 @@ public final class Native {
     public static native double[] entityPosition(String uuid);
     public static native double[] entityOrigin(String uuid);
     public static native double[] entityBoundingBox(String uuid);
+    public static native String[] entityScoreboardTags(String uuid);
+    public static native boolean addEntityScoreboardTag(String uuid, String tag);
+    public static native boolean removeEntityScoreboardTag(String uuid, String tag);
+    public static native boolean entityHasGravity(String uuid);
+    public static native void setEntityGravity(String uuid, boolean gravity);
+    public static native boolean entitySilent(String uuid);
+    public static native void setEntitySilent(String uuid, boolean silent);
+    public static native void setEntityRotation(String uuid, float yaw, float pitch);
+    public static native boolean entityInRain(String uuid);
     public static native boolean entityOnGround(String uuid);
     public static native boolean entityInWater(String uuid);
     public static native boolean entityInvisible(String uuid);

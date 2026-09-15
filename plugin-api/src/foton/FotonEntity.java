@@ -51,8 +51,8 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     @Override public Location getLocation() {
         double[] p = Native.entityPosition(id.toString());
         String world = Native.entityWorld(id.toString());
-        return p == null || world == null ? null
-            : new Location(new FotonWorld(world), p[0], p[1], p[2]);
+        return p == null || p.length < 5 || world == null ? null
+            : new Location(new FotonWorld(world), p[0], p[1], p[2], (float) p[3], (float) p[4]);
     }
     @Override public Location getOrigin() {
         double[] p = Native.entityOrigin(id.toString());

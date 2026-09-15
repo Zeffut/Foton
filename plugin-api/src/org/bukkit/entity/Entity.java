@@ -19,7 +19,12 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default org.bukkit.event.entity.EntityDamageEvent getLastDamageCause() { return null; }
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
 
-    default org.bukkit.util.BoundingBox getBoundingBox() { return null; }
+    default org.bukkit.util.BoundingBox getBoundingBox() {
+        double[] bounds = foton.Native.entityBoundingBox(getUniqueId().toString());
+        return bounds == null || bounds.length < 6 ? null
+            : new org.bukkit.util.BoundingBox(
+                bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], bounds[5]);
+    }
     default float getYaw() { return 0.0f; }
     default float getPitch() { return 0.0f; }
     default boolean isOnGround() { return false; }
@@ -41,6 +46,26 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     UUID getUniqueId();
 
     Location getLocation();
+    default Location getLocation(Location destination) {
+        if (destination == null) return null;
+        Location current = getLocation();
+        if (current == null) return null;
+        destination.setWorld(current.getWorld());
+        destination.setX(current.getX());
+        destination.setY(current.getY());
+        destination.setZ(current.getZ());
+        destination.setYaw(current.getYaw());
+        destination.setPitch(current.getPitch());
+        return destination;
+    }
+    default double getHeight() {
+        org.bukkit.util.BoundingBox bounds = getBoundingBox();
+        return bounds == null ? 0.0 : bounds.getHeight();
+    }
+    default double getWidth() {
+        org.bukkit.util.BoundingBox bounds = getBoundingBox();
+        return bounds == null ? 0.0 : bounds.getWidthX();
+    }
     default Location getOrigin() { return getLocation(); }
     default EntitySnapshot createSnapshot() { return new foton.FotonEntitySnapshot(getType(), getLocation()); }
     default org.bukkit.util.Vector getVelocity() { return new org.bukkit.util.Vector(); }
@@ -49,6 +74,24 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default void setFireTicks(int ticks) { }
     default int getPortalCooldown() { return 0; }
     default void setPortalCooldown(int ticks) { }
+    default boolean hasGravity() { return foton.Native.entityHasGravity(getUniqueId().toString()); }
+    default void setGravity(boolean gravity) { foton.Native.setEntityGravity(getUniqueId().toString(), gravity); }
+    default boolean isSilent() { return foton.Native.entitySilent(getUniqueId().toString()); }
+    default void setSilent(boolean silent) { foton.Native.setEntitySilent(getUniqueId().toString(), silent); }
+    default void setRotation(float yaw, float pitch) { foton.Native.setEntityRotation(getUniqueId().toString(), yaw, pitch); }
+    default boolean isInRain() { return foton.Native.entityInRain(getUniqueId().toString()); }
+    default java.util.Set<String> getScoreboardTags() {
+        String[] tags = foton.Native.entityScoreboardTags(getUniqueId().toString());
+        if (tags == null || tags.length == 0) return java.util.Set.of();
+        return java.util.Collections.unmodifiableSet(
+            new java.util.LinkedHashSet<>(java.util.Arrays.asList(tags)));
+    }
+    default boolean addScoreboardTag(String tag) {
+        return tag != null && foton.Native.addEntityScoreboardTag(getUniqueId().toString(), tag);
+    }
+    default boolean removeScoreboardTag(String tag) {
+        return tag != null && foton.Native.removeEntityScoreboardTag(getUniqueId().toString(), tag);
+    }
     default Location getEyeLocation() {
         Location location = getLocation();
         return location == null ? null : location.add(0.0, 1.62, 0.0);
