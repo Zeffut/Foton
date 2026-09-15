@@ -10,17 +10,21 @@ public final class PotionEffectType {
     /** Modern Bukkit spelling retained alongside the legacy {@link #SLOW}. */
     public static final PotionEffectType SLOWNESS = SLOW;
     public static final PotionEffectType FAST_DIGGING = named("haste");
+    public static final PotionEffectType HASTE = FAST_DIGGING;
     public static final PotionEffectType SLOW_DIGGING = named("mining_fatigue");
     public static final PotionEffectType INCREASE_DAMAGE = named("strength");
+    public static final PotionEffectType STRENGTH = INCREASE_DAMAGE;
     public static final PotionEffectType HEAL = named("instant_health");
     public static final PotionEffectType HARM = named("instant_damage");
     public static final PotionEffectType INSTANT_DAMAGE = HARM;
     public static final PotionEffectType MINING_FATIGUE = SLOW_DIGGING;
     public static final PotionEffectType JUMP = named("jump_boost");
+    public static final PotionEffectType JUMP_BOOST = JUMP;
     public static final PotionEffectType CONFUSION = named("nausea");
     public static final PotionEffectType NAUSEA = CONFUSION;
     public static final PotionEffectType REGENERATION = named("regeneration");
     public static final PotionEffectType DAMAGE_RESISTANCE = named("resistance");
+    public static final PotionEffectType RESISTANCE = DAMAGE_RESISTANCE;
     public static final PotionEffectType FIRE_RESISTANCE = named("fire_resistance");
     public static final PotionEffectType WATER_BREATHING = named("water_breathing");
     public static final PotionEffectType INVISIBILITY = named("invisibility");

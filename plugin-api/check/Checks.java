@@ -18,6 +18,7 @@ public final class Checks {
         InventoryViewCheck.check();
         AdapterCheck.check();
         RecipeChoiceCheck.check();
+        ModernAliasesCheck.check();
         Items.check();
         Colors.check();
         Commands.check();

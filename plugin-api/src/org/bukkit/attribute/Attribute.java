@@ -13,6 +13,11 @@ public enum Attribute implements org.bukkit.Keyed {
 
     /** Paper/Bukkit compatibility alias. */
     public static final Attribute MAX_HEALTH = GENERIC_MAX_HEALTH;
+    public static final Attribute ARMOR = GENERIC_ARMOR;
+    public static final Attribute ARMOR_TOUGHNESS = GENERIC_ARMOR_TOUGHNESS;
+    public static final Attribute KNOCKBACK_RESISTANCE = GENERIC_KNOCKBACK_RESISTANCE;
+    public static final Attribute MOVEMENT_SPEED = GENERIC_MOVEMENT_SPEED;
+    public static final Attribute SCALE = GENERIC_SCALE;
 
     @Override public org.bukkit.NamespacedKey getKey() { return org.bukkit.NamespacedKey.minecraft(name().toLowerCase(java.util.Locale.ROOT).replace('_', '.')); }
 }
