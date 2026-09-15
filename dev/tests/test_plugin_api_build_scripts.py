@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 from pathlib import Path
 import shutil
@@ -20,6 +21,26 @@ GENERATED_REGISTRY_INPUTS = (
 )
 
 
+def add_tar_file(archive: tarfile.TarFile, name: str, contents: bytes = b"payload") -> None:
+    member = tarfile.TarInfo(name)
+    member.size = len(contents)
+    archive.addfile(member, io.BytesIO(contents))
+
+
+def extract_archive_safely(archive: tarfile.TarFile, destination: Path) -> None:
+    base = destination.resolve()
+    members = archive.getmembers()
+    for member in members:
+        if not (member.isfile() or member.isdir()):
+            raise ValueError(f"unsupported archive member: {member.name}")
+        target = (base / member.name).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError as error:
+            raise ValueError(f"archive member escapes destination: {member.name}") from error
+    archive.extractall(destination, members=members)
+
+
 def export_tracked_checkout(destination: Path) -> None:
     archive_path = destination.parent / "checkout.tar"
     with archive_path.open("wb") as archive:
@@ -29,7 +50,7 @@ def export_tracked_checkout(destination: Path) -> None:
             stdout=archive,
         )
     with tarfile.open(archive_path) as archive:
-        archive.extractall(destination, filter="data")
+        extract_archive_safely(archive, destination)
 
     # Exercise the scripts from the working tree, including the change under test.
     for relative in (
@@ -43,6 +64,38 @@ def export_tracked_checkout(destination: Path) -> None:
 
 
 class PluginApiBuildScriptTests(unittest.TestCase):
+    def test_archive_extraction_rejects_parent_traversal(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton archive traversal ", dir="/tmp") as temporary:
+            root = Path(temporary)
+            archive_path = root / "malicious.tar"
+            destination = root / "checkout"
+            outside = root / "outside.txt"
+            with tarfile.open(archive_path, "w") as archive:
+                add_tar_file(archive, "checkout/../../outside.txt")
+
+            with tarfile.open(archive_path) as archive:
+                with self.assertRaises(ValueError):
+                    extract_archive_safely(archive, destination)
+            self.assertFalse(outside.exists())
+
+    def test_archive_extraction_rejects_symbolic_links(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton archive symlink ", dir="/tmp") as temporary:
+            root = Path(temporary)
+            archive_path = root / "malicious.tar"
+            destination = root / "checkout"
+            outside = root / "outside.txt"
+            with tarfile.open(archive_path, "w") as archive:
+                link = tarfile.TarInfo("link")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "../outside.txt"
+                archive.addfile(link)
+                add_tar_file(archive, "link/payload.txt")
+
+            with tarfile.open(archive_path) as archive:
+                with self.assertRaises(ValueError):
+                    extract_archive_safely(archive, destination)
+            self.assertFalse(outside.exists())
+
     def test_fresh_checkout_builds_from_a_path_with_spaces(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton plugin api ", dir="/tmp") as temporary:
             checkout = Path(temporary) / "fresh checkout"
