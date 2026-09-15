@@ -178,3 +178,92 @@ green. No functional concern remains.
 The only observed warning remains the pre-existing macOS debug-linker
 `__eh_frame` size warning during focused `foton-core` tests; it is non-blocking
 and the complete CI run is green.
+
+## Final fix wave
+
+### Changes
+
+- `foton-core/src/chunk_saver/region_manager.rs`
+  - `close_all` now retains every dirty region handle whose header commit
+    fails, while continuing to close successful regions, so a later call can
+    retry the exact pending header.
+  - Chunk writes validate the sector count conversion and
+    `sector_offset + sectors_used` with checked arithmetic before seeking or
+    extending a sparse file.
+  - Corrupt-slot clearing marks the empty header entry dirty before its first
+    header-write await. I/O failure or task cancellation therefore leaves a
+    retryable pending clear instead of a clean, reverted in-memory header.
+  - New region files are fsynced before their directory entry is committed.
+    Missing directories are created level by level with parent-directory
+    syncs. Incompatible-version backup links are synced before removing the
+    source, and the source removal is synced before replacement creation.
+    Directory sync remains a no-op on platforms that do not support opening
+    directories, while preserving identical error propagation elsewhere.
+  - Added targeted failure, cancellation, sparse-boundary, and namespace
+    durability tests.
+- `foton-core/src/server/mod.rs` and `foton-core/src/server/tests.rs`
+  - World construction now enters a dedicated tracker under the same locked
+    admission gate that shutdown closes. Shutdown closes creation admission,
+    drains pending attachments, and waits for both admitted constructions and
+    detached cleanups before persistence can continue.
+  - Added a barrier-driven test proving shutdown waits for an already admitted
+    construction and rejects a late one.
+- `foton-core/src/command/rcon.rs`
+  - RCON output saturation is sticky after the first truncated fragment, so a
+    multibyte character that does not fit cannot leave a gap filled by later
+    fragments. The retained response is always one continuous input prefix.
+- `foton-login/src/authentication.rs`
+  - Renamed `RedirectDowngrade` to `RedirectRejected`; redirect failures now
+    report the endpoint-policy rejection accurately for both downgrades and
+    disallowed remote HTTP targets.
+- `dev/test-counts.json`
+  - Regenerated with `python3 dev/count-tests.py`: 5,548 tests across 19
+    targets.
+
+### TDD evidence
+
+- The UTF-8 RCON regression first failed with 1,048,576 retained bytes instead
+  of the expected 1,048,575-byte continuous prefix; it passed after saturation
+  became sticky.
+- The auth redirect regression first failed to compile because
+  `AuthError::RedirectRejected` did not exist; it then passed against a local
+  302 response targeting disallowed remote HTTP.
+- The sparse write regression first panicked on unchecked `u32` addition; it
+  passed after pre-I/O checked arithmetic and confirms the file remains zero
+  bytes long.
+- The `close_all` regression first failed to compile without header-write
+  injection; after the retry invariant was implemented it demonstrated one
+  failed close followed by a successful commit and reopen.
+- The corrupt-slot failure regression first observed the old slot restored in
+  memory. The cancellation regression paused at the header commit await and
+  cancelled the load. Both now preserve an empty dirty entry that a later
+  `flush_all` commits.
+- The initial-region namespace regression first observed creation succeeding
+  despite an injected directory-sync failure. Backup and directory-creation
+  tests likewise covered the required ordering before the durability changes.
+- The shutdown regression first failed to compile because no tracked creation
+  admission path existed. It now proves shutdown remains pending until the
+  admitted task exits and that post-close admission is rejected.
+
+### Commands and results
+
+- `cargo test -p foton-core chunk_saver::region_manager::tests:: --lib` — 23
+  passed, 0 failed.
+- `cargo test -p foton-core command::rcon::tests:: --lib` — 4 passed, 0
+  failed.
+- `cargo test -p foton-core server::tests::world_creation --lib` plus the exact
+  in-flight shutdown test — 3 passed, 0 failed.
+- `cargo test -p foton-login authentication::tests:: --lib` — 23 passed, 0
+  failed.
+- `cargo fmt --all --check` — passed.
+- `cargo clippy -r -p foton-core -p foton-login --all-targets --all-features -- -D warnings`
+  exposed only mechanical strict-lint issues, which were fixed without lint
+  suppression.
+- The first `bash dev/ci.sh` run passed workspace tests and every non-clippy
+  downstream stage, then reported one unused test import and the expected
+  stale test count (5,538 committed versus 5,548 measured).
+- After removing the import and regenerating the count, a fresh complete
+  `bash dev/ci.sh` run passed formatting, typos, generated configuration,
+  site build, workspace clippy, workspace tests, plugin API, native
+  registration, test counts, and developer tooling, ending with
+  `########## ALL GREEN ##########`.

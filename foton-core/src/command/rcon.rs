@@ -25,25 +25,36 @@ use tokio::sync::oneshot;
 pub const MAX_RCON_OUTPUT_BYTES: usize = 1024 * 1024;
 
 struct BoundedOutputWriter<'a> {
-    buffer: &'a mut String,
+    output: &'a mut PendingRconOutput,
 }
 
 impl fmt::Write for BoundedOutputWriter<'_> {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        let remaining = MAX_RCON_OUTPUT_BYTES.saturating_sub(self.buffer.len());
+        if self.output.saturated {
+            return Ok(());
+        }
+
+        let remaining = MAX_RCON_OUTPUT_BYTES.saturating_sub(self.output.buffer.len());
         let mut end = text.len().min(remaining);
         while !text.is_char_boundary(end) {
             end -= 1;
         }
-        self.buffer.push_str(&text[..end]);
+        self.output.buffer.push_str(&text[..end]);
+        self.output.saturated = end < text.len();
         Ok(())
     }
+}
+
+#[derive(Default)]
+struct PendingRconOutput {
+    buffer: String,
+    saturated: bool,
 }
 
 /// Accumulates one Rcon command's output and delivers it once the command ends.
 pub struct RconOutput {
     connection: u64,
-    buffer: SyncMutex<String>,
+    output: SyncMutex<PendingRconOutput>,
     reply: SyncMutex<Option<oneshot::Sender<String>>>,
 }
 
@@ -54,7 +65,7 @@ impl RconOutput {
         let (sender, receiver) = oneshot::channel();
         let output = Self {
             connection,
-            buffer: SyncMutex::new(String::new()),
+            output: SyncMutex::new(PendingRconOutput::default()),
             reply: SyncMutex::new(Some(sender)),
         };
         (output, receiver)
@@ -78,12 +89,12 @@ impl RconOutput {
     pub(crate) fn record(&self, text: &TextComponent) {
         use std::fmt::Write as _;
 
-        let mut buffer = self.buffer.lock();
+        let mut output = self.output.lock();
         // `Display` resolves translations through the global resolutor, which
         // is the same plain text the console branch logs.
         let _ = write!(
             BoundedOutputWriter {
-                buffer: &mut buffer
+                output: &mut output
             },
             "{text}"
         );
@@ -103,7 +114,8 @@ impl Drop for RconOutput {
         let Some(reply) = self.reply.get_mut().take() else {
             return;
         };
-        let _ = reply.send(mem::take(self.buffer.get_mut()));
+        let output = mem::take(self.output.get_mut());
+        let _ = reply.send(output.buffer);
     }
 }
 
@@ -153,6 +165,21 @@ mod tests {
             .try_recv()
             .expect("dropping the output should deliver its response");
         assert_eq!(response.len(), MAX_RCON_OUTPUT_BYTES);
+        assert!(response.bytes().all(|byte| byte == b'x'));
+    }
+
+    #[test]
+    fn output_stays_a_continuous_prefix_after_utf8_boundary_truncation() {
+        let (output, mut receiver) = RconOutput::new(0);
+        output.record(&TextComponent::plain("x".repeat(MAX_RCON_OUTPUT_BYTES - 1)));
+        output.record(&TextComponent::plain("é"));
+        output.record(&TextComponent::plain("later text must not fill the gap"));
+
+        drop(output);
+        let response = receiver
+            .try_recv()
+            .expect("dropping the output should deliver its response");
+        assert_eq!(response.len(), MAX_RCON_OUTPUT_BYTES - 1);
         assert!(response.bytes().all(|byte| byte == b'x'));
     }
 }

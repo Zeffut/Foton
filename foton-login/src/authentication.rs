@@ -99,9 +99,9 @@ pub enum AuthError {
     /// The authentication server response exceeded the configured size limit.
     #[error("Authentication server response is too large")]
     ResponseTooLarge,
-    /// The authentication server attempted an HTTPS-to-HTTP redirect.
-    #[error("Authentication server attempted an HTTPS-to-HTTP redirect")]
-    RedirectDowngrade,
+    /// The authentication server attempted a redirect forbidden by endpoint policy.
+    #[error("Authentication server redirect was rejected by endpoint policy")]
+    RedirectRejected,
     /// An unknown status code was returned.
     #[error("Unknown Status Code {0}")]
     UnknownStatusCode(StatusCode),
@@ -167,7 +167,7 @@ async fn mojang_authenticate_with_timeout(
         for _ in 0..MAX_RETRIES {
             let response = match client.get(auth_url.clone()).send().await {
                 Ok(response) => response,
-                Err(error) if error.is_redirect() => return Err(AuthError::RedirectDowngrade),
+                Err(error) if error.is_redirect() => return Err(AuthError::RedirectRejected),
                 Err(_) => {
                     last_error = AuthError::FailedResponse;
                     continue;
@@ -488,6 +488,22 @@ mod tests {
         let next = Url::parse("https://auth.example.com/next").expect("valid URL");
 
         assert!(!is_auth_redirect_allowed(&previous, &next, false));
+    }
+
+    #[tokio::test]
+    async fn rejected_remote_http_redirect_has_a_general_diagnostic() {
+        let (url, requests, server) = spawn_http_server(
+            "HTTP/1.1 302 Found\r\nLocation: http://auth.example.com/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_owned(),
+            1,
+        )
+        .await;
+
+        let result = mojang_authenticate("Steve", "abc123", Some(&url), false).await;
+
+        assert!(matches!(result, Err(AuthError::RedirectRejected)));
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        server.await.expect("HTTP test server should finish");
     }
 
     #[tokio::test]

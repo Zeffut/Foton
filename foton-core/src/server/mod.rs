@@ -106,6 +106,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering, Ordering as AtomicOrdering};
 use std::{
     collections::BTreeSet,
+    future::Future,
     io, mem,
     num::NonZero,
     path::{Path, PathBuf},
@@ -431,8 +432,8 @@ pub struct Server {
     pub config: Arc<RuntimeConfig>,
     /// Runtime used by world loading and chunk tasks.
     chunk_runtime: Arc<Runtime>,
-    /// Detached world cleanups that must finish before shutdown persistence.
-    world_cleanup_tasks: TaskTracker,
+    /// Admitted world constructions and cleanups awaited during shutdown.
+    world_tasks: WorldTaskTrackers,
     /// Keys reserved by world creation, attachment, or detached cleanup.
     world_key_reservations: Arc<SyncMutex<FxHashSet<Identifier>>>,
     /// Runtime permission groups and their persistence boundary.
@@ -524,6 +525,20 @@ pub struct Server {
     pub events: EventBus,
     /// Queued domain switches to process after world ticks.
     pending_domain_switches: SyncMutex<Vec<DomainSwitchRequest>>,
+}
+
+struct WorldTaskTrackers {
+    creations: TaskTracker,
+    cleanups: TaskTracker,
+}
+
+impl WorldTaskTrackers {
+    fn new() -> Self {
+        Self {
+            creations: TaskTracker::new(),
+            cleanups: TaskTracker::new(),
+        }
+    }
 }
 
 /// A world removal requested for the next game-tick safe point.
@@ -640,12 +655,11 @@ impl Server {
         }
         let domain = self.worlds.default_domain().to_owned();
         let key = Identifier::new(domain.clone(), name.clone());
-        let reservation = self.reserve_world_key(&key)?;
         let generator_config = self
             .world_generator_registry
             .validate_config(&generator, &toml::Value::Table(Map::new()))?;
         let world_entry = ResolvedWorldConfig {
-            key,
+            key: key.clone(),
             domain,
             name,
             generator,
@@ -660,7 +674,7 @@ impl Server {
         };
         let (sender, receiver) = oneshot::channel();
         let server = Arc::clone(self);
-        self.chunk_runtime.spawn(async move {
+        self.spawn_tracked_world_creation(&key, move |reservation| async move {
             let result = match server
                 .load_world_from_config_tracked(world_entry, reservation)
                 .await
@@ -675,9 +689,29 @@ impl Server {
                 Err(error) => Err(error),
             };
             let _ = sender.send(result);
-        });
+        })?;
         let id = NEXT_WORLD_CREATION_ID.fetch_add(1, Ordering::Relaxed);
         Ok(WorldCreationRequest { id, receiver })
+    }
+
+    fn spawn_tracked_world_creation<F, Fut>(
+        self: &Arc<Self>,
+        key: &Identifier,
+        task: F,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(WorldKeyReservation) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let _admission = self.pending_world_additions.lock();
+        if self.world_creation_closed.load(Ordering::Acquire) {
+            return Err("world creation is closed".to_owned());
+        }
+        let reservation = self.reserve_world_key_without_admission(key)?;
+        self.world_tasks
+            .creations
+            .spawn_on(task(reservation), self.chunk_runtime.handle());
+        Ok(())
     }
 
     /// Publishes the latest server-wide player metadata for synchronous plugin lookups.
@@ -1127,7 +1161,7 @@ impl Server {
         Ok(Server {
             config,
             chunk_runtime,
-            world_cleanup_tasks: TaskTracker::new(),
+            world_tasks: WorldTaskTrackers::new(),
             world_key_reservations: Arc::new(SyncMutex::new(FxHashSet::default())),
             permission_groups,
             cancel_token,
@@ -1218,10 +1252,11 @@ impl Server {
         let pending = {
             let mut pending = self.pending_world_additions.lock();
             self.world_creation_closed.store(true, Ordering::Release);
+            self.world_tasks.creations.close();
             mem::take(&mut *pending)
         };
         for (world, completion, reservation) in pending {
-            self.world_cleanup_tasks.spawn_on(
+            self.world_tasks.cleanups.spawn_on(
                 async move {
                     world.cleanup_without_save().await;
                     drop(reservation);
@@ -1232,15 +1267,26 @@ impl Server {
                 self.chunk_runtime.handle(),
             );
         }
-        self.world_cleanup_tasks.close();
-        self.world_cleanup_tasks.wait().await;
+        self.world_tasks.cleanups.close();
+        tokio::join!(
+            self.world_tasks.creations.wait(),
+            self.world_tasks.cleanups.wait()
+        );
     }
 
+    #[cfg(test)]
     fn reserve_world_key(&self, key: &Identifier) -> Result<WorldKeyReservation, String> {
         let _pending_world_additions = self.pending_world_additions.lock();
         if self.world_creation_closed.load(Ordering::Acquire) {
             return Err("world creation is closed".to_owned());
         }
+        self.reserve_world_key_without_admission(key)
+    }
+
+    fn reserve_world_key_without_admission(
+        &self,
+        key: &Identifier,
+    ) -> Result<WorldKeyReservation, String> {
         let mut reservations = self.world_key_reservations.lock();
         if self.worlds.get(key).is_some() || !reservations.insert(key.clone()) {
             return Err(format!("world {key} is already loaded or busy"));

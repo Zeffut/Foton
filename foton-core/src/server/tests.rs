@@ -25,8 +25,12 @@ use foton_utils::{BlockPos, ChunkPos, types::UpdateFlags};
 use foton_utils::{codec::VarInt, serial::ReadFrom, text::DisplayResolutor};
 use glam::DVec3;
 use text_components::TextComponent;
-use tokio::{fs, runtime::Builder, task::JoinSet, time::sleep};
-use tokio_util::task::TaskTracker;
+use tokio::{
+    fs,
+    runtime::Builder,
+    task::{JoinSet, yield_now},
+    time::sleep,
+};
 use uuid::Uuid;
 
 use crate::behavior::{blocks::PistonBaseBlock, init_behaviors};
@@ -220,9 +224,6 @@ async fn test_server_with_worlds(
     player_permission_states: PermissionSubjectIndex,
     storage_root: &Path,
 ) -> Result<Arc<Server>, String> {
-    // Server fixtures exercise block behavior through the same global registry
-    // as production. Initialize it here so test outcomes do not depend on
-    // another test having run first.
     init_behaviors();
     let worlds = WorldMap::new(default_domain, domains, &[]);
     for world in loaded_worlds {
@@ -265,7 +266,7 @@ async fn test_server_with_worlds(
                 .chunk_map
                 .chunk_runtime,
         ),
-        world_cleanup_tasks: TaskTracker::new(),
+        world_tasks: super::WorldTaskTrackers::new(),
         world_key_reservations: Arc::new(SyncMutex::new(FxHashSet::default())),
         world_save_path: storage_root.to_path_buf(),
         config,
@@ -648,6 +649,69 @@ fn world_creation_closes_admission_and_cleans_pending_additions() {
                 .reserve_world_key(&Identifier::new("main", "after-shutdown"))
                 .is_err()
         );
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn shutdown_waits_for_an_in_flight_world_creation_task() {
+    let world = fresh_test_world_in_domain("main", "spawn");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should initialize");
+    runtime.block_on(async move {
+        let storage_root = test_storage_root("world-creation-in-flight-shutdown");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .expect("test server should initialize");
+        let key = Identifier::new("main", "in-flight");
+        let (started_sender, started_receiver) = channel();
+        let (finish_sender, finish_receiver) = channel();
+        server
+            .spawn_tracked_world_creation(&key, move |reservation| async move {
+                let _reservation = reservation;
+                let _ = started_sender.send(());
+                let _ = finish_receiver.await;
+            })
+            .expect("world creation should enter before shutdown");
+        started_receiver
+            .await
+            .expect("world creation should start running");
+
+        let shutdown_server = Arc::clone(&server);
+        let shutdown = tokio::spawn(async move {
+            shutdown_server.wait_for_world_cleanups().await;
+        });
+        while !server.world_creation_closed.load(Ordering::Acquire) {
+            yield_now().await;
+        }
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must wait while an admitted construction is still running"
+        );
+        assert!(
+            server
+                .spawn_tracked_world_creation(&Identifier::new("main", "too-late"), |_| async {},)
+                .is_err(),
+            "shutdown must close creation admission"
+        );
+
+        finish_sender
+            .send(())
+            .expect("in-flight task should still be waiting");
+        shutdown
+            .await
+            .expect("shutdown task should finish after construction exits");
+        assert!(!server.world_key_reservations.lock().contains(&key));
 
         drop(server);
         if let Err(error) = fs::remove_dir_all(&storage_root).await {

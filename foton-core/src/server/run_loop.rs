@@ -776,7 +776,7 @@ impl Server {
         completion: oneshot::Sender<Result<(), String>>,
         error: String,
     ) {
-        self.world_cleanup_tasks.spawn_on(
+        self.world_tasks.cleanups.spawn_on(
             async move {
                 world.cleanup_without_save().await;
                 drop(reservation);
@@ -864,7 +864,7 @@ impl Server {
                 }
             };
             // Persistence is I/O and must not stall the serialized game tick.
-            self.world_cleanup_tasks.spawn_on(async move {
+            self.world_tasks.cleanups.spawn_on(async move {
                 let result = if save {
                     let mut saved = 0;
                     match world.cleanup(&mut saved).await {
