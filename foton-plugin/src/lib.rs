@@ -24,8 +24,9 @@
 #![cfg_attr(not(test), warn(clippy::expect_used))]
 #![cfg_attr(not(test), warn(clippy::panic, clippy::unreachable, clippy::todo))]
 
+use std::collections::BTreeSet;
 use std::ffi::{CString, NulError, c_void};
-use std::fs::read_dir;
+use std::fs::{read, read_dir};
 use std::io;
 use std::mem;
 use std::path::{Path, PathBuf};
@@ -38,6 +39,7 @@ use foton_utils::locks::SyncMutex;
 use jni::objects::JString;
 use jni::sys::{JNI_OK, JNI_VERSION_1_8, JavaVM as RawJavaVm, JavaVMInitArgs, JavaVMOption};
 use jni::{JavaVM, errors::Error as JniError};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 mod forward;
@@ -48,6 +50,8 @@ const HOST_CLASS: &str = "foton/PluginHost";
 
 /// The class whose methods Foton answers.
 const NATIVE_CLASS: &str = "foton/Native";
+
+const LIBRARY_MANIFEST: &str = include_str!("../../plugin-api/lib/manifest.txt");
 
 /// Why a plugin host could not start, or could not do its job.
 #[derive(Debug, Error)]
@@ -70,6 +74,28 @@ pub enum PluginHostError {
     /// The pinned dependencies referenced by public API signatures are absent.
     #[error("the plugin API dependency directory is unavailable at {0}: {1}")]
     NoLibraryDirectory(PathBuf, #[source] io::Error),
+    /// One expected runtime jar is absent from the configured directory.
+    #[error("pinned runtime library is missing at {0}")]
+    MissingRuntimeLibrary(PathBuf),
+    /// A runtime jar is present without an entry in the authoritative manifest.
+    #[error("runtime library {0} is not in the pinned manifest")]
+    ExtraRuntimeLibrary(PathBuf),
+    /// A runtime jar's bytes differ from the authoritative manifest.
+    #[error("runtime library digest mismatch at {path}: expected {expected}, got {actual}")]
+    RuntimeLibraryDigest {
+        /// The runtime jar whose bytes did not match.
+        path: PathBuf,
+        /// The authoritative manifest digest.
+        expected: String,
+        /// The digest computed from the configured runtime jar.
+        actual: String,
+    },
+    /// The checked-in manifest itself cannot describe an exact pinned set.
+    #[error("the pinned runtime library manifest is invalid: {0}")]
+    InvalidLibraryManifest(String),
+    /// A runtime jar could not be read while validating its digest.
+    #[error("runtime library cannot be read at {0}: {1}")]
+    RuntimeLibraryIo(PathBuf, #[source] io::Error),
     /// Something went wrong on the Java side of the boundary.
     #[error("the plugin host failed: {0}")]
     Java(#[from] JniError),
@@ -127,7 +153,7 @@ impl PluginHostConfig {
             return Err(PluginHostError::NoApiJar(self.api_jar.clone()));
         }
         let mut entries = vec![self.api_jar.to_string_lossy().into_owned()];
-        entries.extend(jars_in(&self.resolved_library_directory())?);
+        entries.extend(validated_jars_in(&self.resolved_library_directory())?);
         Ok(entries.join(if cfg!(target_os = "windows") {
             ";"
         } else {
@@ -137,20 +163,91 @@ impl PluginHostConfig {
 }
 
 /// Every jar directly inside a directory, sorted so a classpath is reproducible.
-fn jars_in(directory: &Path) -> Result<Vec<String>, PluginHostError> {
+fn validated_jars_in(directory: &Path) -> Result<Vec<String>, PluginHostError> {
     let entries = read_dir(directory)
         .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?;
-    let mut jars = Vec::new();
+    let manifest = pinned_libraries()?;
+    let expected_names: BTreeSet<String> =
+        manifest.iter().map(|(name, _)| name.to_owned()).collect();
+    let mut found_names = BTreeSet::new();
     for entry in entries {
         let path = entry
             .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?
             .path();
         if path.is_file() && path.extension().is_some_and(|extension| extension == "jar") {
-            jars.push(path.to_string_lossy().into_owned());
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return Err(PluginHostError::ExtraRuntimeLibrary(path));
+            };
+            if !expected_names.contains(name) {
+                return Err(PluginHostError::ExtraRuntimeLibrary(path));
+            }
+            found_names.insert(name.to_owned());
         }
     }
-    jars.sort();
+
+    let mut jars = Vec::with_capacity(manifest.len());
+    for (name, expected) in manifest {
+        let path = directory.join(&name);
+        if !found_names.contains(&name) {
+            return Err(PluginHostError::MissingRuntimeLibrary(path));
+        }
+        let bytes = match read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => return Err(PluginHostError::RuntimeLibraryIo(path, error)),
+        };
+        let actual = sha256_hex(&bytes);
+        if actual != expected {
+            return Err(PluginHostError::RuntimeLibraryDigest {
+                path,
+                expected,
+                actual,
+            });
+        }
+        jars.push(path.to_string_lossy().into_owned());
+    }
     Ok(jars)
+}
+
+fn pinned_libraries() -> Result<Vec<(String, String)>, PluginHostError> {
+    let mut libraries = Vec::new();
+    let mut names = BTreeSet::new();
+    for (index, line) in LIBRARY_MANIFEST.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() != 4 || fields[3].len() != 64 {
+            return Err(PluginHostError::InvalidLibraryManifest(format!(
+                "line {} has the wrong shape",
+                index + 1
+            )));
+        }
+        let name = format!("{}-{}.jar", fields[1], fields[2]);
+        if !names.insert(name.clone()) {
+            return Err(PluginHostError::InvalidLibraryManifest(format!(
+                "duplicate filename {name}"
+            )));
+        }
+        libraries.push((name, fields[3].to_owned()));
+    }
+    if libraries.is_empty() {
+        return Err(PluginHostError::InvalidLibraryManifest(
+            "no libraries are pinned".to_owned(),
+        ));
+    }
+    Ok(libraries)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = Sha256::digest(bytes);
+    let mut result = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        result.push(char::from(HEX[usize::from(byte >> 4)]));
+        result.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    result
 }
 
 /// A running Java runtime with Foton's plugin host inside it.

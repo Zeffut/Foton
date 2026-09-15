@@ -996,6 +996,7 @@ dependencies = [
  "libloading",
  "log",
  "rustc-hash 2.1.3",
+ "sha2",
  "simdnbt",
  "tempfile",
  "text_components",

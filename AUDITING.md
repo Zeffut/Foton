@@ -75,11 +75,18 @@ python3 dev/plugin_compatibility.py --api-report build/plugin-api-evidence.json 
 ```
 
 Read the resulting `build/plugin-compatibility.json` as four independent kinds
-of evidence. Shared symbol coverage is not a plugin success rate. The ceiling
-excludes plugins that reference NMS or CraftBukkit internals, and event coverage
-requires a Rust call site that reaches the Java event constructor. Fixture
-counts prove only the checked jars and paths; no aggregate plugin-success
-percentage is generated.
+of evidence. Shared symbol coverage is not a plugin success rate. The legacy
+ledger cannot support a current ceiling because it lacks per-plugin class
+incidence and entrypoint reachability; the JSON therefore reports the current
+ceiling as unknown and labels 41/59 as historical. A corpus-backed v2 rewrite
+separates load-bearing internal references from optional adapters. Event
+coverage requires an exact Rust JNI owner, method and descriptor present in the
+compiled API before following the Java path to an event constructor. Fixture
+evidence covers every direct jar in the event, lifecycle, replacement,
+dependency, cross-call alias, library, malformed-library and Paper directories;
+cache and nested decoy jars are excluded. Each jar records discovery, load,
+enable/rejection phase and causal reason. No aggregate plugin-success percentage
+is generated.
 
 ## Layer 2 — in-world
 

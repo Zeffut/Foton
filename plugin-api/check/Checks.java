@@ -5,9 +5,13 @@
  * check that is hard to read is a check nobody fixes when it breaks.
  */
 public final class Checks {
+    private static final FixtureEvidence FIXTURE_EVIDENCE = new FixtureEvidence();
+
     public static void main(String[] args) throws Exception {
         Services.check();
         Events.check(args[0]);
+        FIXTURE_EVIDENCE.record("event", args[0],
+            java.util.Set.of("EventFixture"), java.util.Set.of("EventFixture"), "");
         Config.check();
         Geometry.check();
         InventoryViewCheck.check();
@@ -23,7 +27,8 @@ public final class Checks {
         lifecycle(args[1], args[2]);
         dependencies(args[3], args[4], args[5], args[6]);
         libraries(args[7], args[8], args[9], args[10]);
-        paper(args[11], args[12]);
+        paper(args[11]);
+        FIXTURE_EVIDENCE.write(args[12]);
         YamlCheck.check();
         assertHostIsEmpty();
         System.out.println(
@@ -63,13 +68,21 @@ public final class Checks {
         fixture.LifecycleProbe.reset();
         int enabled;
         int replacementEnabled;
+        java.io.ByteArrayOutputStream lifecycleBytes = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream original = System.out;
         try {
-            enabled = foton.PluginHost.loadAll(directory);
-            replacementEnabled = foton.PluginHost.loadAll(replacementDirectory);
+            try (java.io.PrintStream capture = new java.io.PrintStream(
+                    lifecycleBytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+                System.setOut(capture);
+                enabled = foton.PluginHost.loadAll(directory);
+                replacementEnabled = foton.PluginHost.loadAll(replacementDirectory);
+            }
         } finally {
+            System.setOut(original);
             fixture.LifecycleProbe.releaseAsync();
             fixture.LifecycleProbe.releaseSync();
         }
+        String lifecycleLog = lifecycleBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
         fixture.LifecycleProbe.awaitAsyncFinished();
         fixture.LifecycleProbe.awaitSyncFinished();
         awaitSchedulerTasks("FailingEnable", 1);
@@ -193,6 +206,12 @@ public final class Checks {
         } finally {
             foton.PluginHost.disableAll();
         }
+        FIXTURE_EVIDENCE.record("lifecycle", directory,
+            java.util.Set.of("FailingEnable", "EnableDependent", "Healthy"),
+            java.util.Set.of("Healthy"), lifecycleLog);
+        FIXTURE_EVIDENCE.record("replacement", replacementDirectory,
+            java.util.Set.of("FailingEnable"), java.util.Set.of("FailingEnable"),
+            lifecycleLog);
     }
 
     private static int pendingTasks(String owner) {
@@ -258,6 +277,10 @@ public final class Checks {
                 "required dependency failure did not propagate");
             expect(csvProperty("foton.fixture.dependencies.load").contains("Unrelated"),
                 "unrelated plugin did not continue after dependency failures");
+            java.util.Set<String> graphEnabled = java.util.Set.copyOf(
+                csvProperty("foton.fixture.dependencies.load"));
+            FIXTURE_EVIDENCE.record("dependency", graphDirectory,
+                graphEnabled, graphEnabled, graphLog);
         } finally {
             foton.PluginHost.disableAll();
         }
@@ -285,6 +308,9 @@ public final class Checks {
                     && duplicateLog.contains("SameName")
                     && duplicateLog.contains("samename"),
                 "duplicate real-name diagnostic did not name its plugins: " + duplicateLog);
+            FIXTURE_EVIDENCE.record("dependency", duplicateDirectory,
+                java.util.Set.of("HealthyDuplicate"),
+                java.util.Set.of("HealthyDuplicate"), duplicateLog);
         } finally {
             foton.PluginHost.disableAll();
             clearDependencyProperties();
@@ -323,6 +349,12 @@ public final class Checks {
                     && crossCallLog.contains("AliasVsExistingAlias"),
                 "cross-call collision diagnostics did not name every conflict: "
                     + crossCallLog);
+            FIXTURE_EVIDENCE.record("dependency", existingDirectory,
+                java.util.Set.of("ExistingProvider"),
+                java.util.Set.of("ExistingProvider"), "");
+            FIXTURE_EVIDENCE.record("cross-call-alias", crossCallDirectory,
+                java.util.Set.of("CollisionDependent", "CollisionHealthy"),
+                java.util.Set.of("CollisionDependent", "CollisionHealthy"), crossCallLog);
         } finally {
             foton.PluginHost.disableAll();
             clearDependencyProperties();
@@ -356,6 +388,9 @@ public final class Checks {
             expect(java.util.Arrays.equals(interruptedBefore,
                     java.nio.file.Files.readAllBytes(interrupted)),
                 "an unrelated interrupted cache sibling was published or modified");
+            FIXTURE_EVIDENCE.record("library", directory,
+                java.util.Set.of("LibraryFixture"),
+                java.util.Set.of("LibraryFixture"), "");
         } finally {
             foton.PluginHost.disableAll();
         }
@@ -382,6 +417,8 @@ public final class Checks {
                     "library failure did not name malformed coordinate " + coordinate
                         + ": " + malformedLog);
             }
+            FIXTURE_EVIDENCE.record("malformed-library", malformedDirectory,
+                java.util.Set.of(), java.util.Set.of(), malformedLog);
         } finally {
             foton.PluginHost.disableAll();
             System.clearProperty("foton.fixture.libraries.malformed");
@@ -434,7 +471,7 @@ public final class Checks {
         System.clearProperty("foton.fixture.dependencies.crossCallJoined");
     }
 
-    private static void paper(String directory, String evidencePath) throws Exception {
+    private static void paper(String directory) throws Exception {
         for (String property : java.util.List.of(
                 "foton.fixture.paper.fallback.bootstrap",
                 "foton.fixture.paper.fallback.constructor",
@@ -451,10 +488,12 @@ public final class Checks {
         java.io.PrintStream original = System.out;
         int loaded;
         int enabled;
+        java.util.Set<String> loadedNames;
         try (java.io.PrintStream capture = new java.io.PrintStream(
                 bytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
             System.setOut(capture);
             loaded = foton.PluginHost.loadAllOnLoad(directory);
+            loadedNames = pluginNames();
             enabled = foton.PluginHost.enableAll();
         } finally {
             System.setOut(original);
@@ -511,53 +550,182 @@ public final class Checks {
                 "failed bootstrap lifecycle command leaked");
             same(foton.LifecycleDiagnostics.hostReferences("FailingBootstrap"), 0,
                 "failed bootstrap retained plugin or classloader resources");
-            writeFixtureEvidence(directory, evidencePath, loaded, enabled, log);
+            FIXTURE_EVIDENCE.record("paper", directory, loadedNames,
+                java.util.Set.of("HealthyPaper", "NullBootstrap", "PaperFixture"), log);
         } finally {
             foton.PluginHost.disableAll();
         }
     }
 
-    private static void writeFixtureEvidence(
-            String directory, String output, int loaded, int enabled, String log)
-            throws Exception {
-        java.util.List<java.util.Map<String, String>> rejections = new java.util.ArrayList<>();
-        for (String line : log.lines().toList()) {
-            if (!line.startsWith("[host] ") || !line.contains(".jar failed: ")) continue;
-            int split = line.indexOf(" failed: ");
-            rejections.add(java.util.Map.of(
-                "fixture", line.substring("[host] ".length(), split),
-                "reason", line.substring(split + " failed: ".length())));
+    private static java.util.Set<String> pluginNames() {
+        java.util.Set<String> names = new java.util.TreeSet<>();
+        for (org.bukkit.plugin.Plugin plugin : foton.PluginHost.all()) {
+            names.add(plugin.getName());
         }
-        rejections.sort(java.util.Comparator.comparing(row -> row.get("fixture")));
-        long discovered;
-        try (var entries = java.nio.file.Files.list(java.nio.file.Path.of(directory))) {
-            discovered = entries.filter(path -> path.getFileName().toString().endsWith(".jar"))
-                .count();
-        }
-        same(rejections.size(), (int) (discovered - enabled),
-            "fixture rejection diagnostics count");
+        return java.util.Set.copyOf(names);
+    }
 
-        StringBuilder json = new StringBuilder();
-        json.append("{\n")
-            .append("  \"discovered\": ").append(discovered).append(",\n")
-            .append("  \"enabled\": ").append(enabled).append(",\n")
-            .append("  \"loaded\": ").append(loaded).append(",\n")
-            .append("  \"rejected\": ").append(discovered - enabled).append(",\n")
-            .append("  \"rejections\": [\n");
-        for (int index = 0; index < rejections.size(); index++) {
-            var rejection = rejections.get(index);
-            json.append("    {\n")
-                .append("      \"fixture\": \"")
-                .append(jsonString(rejection.get("fixture"))).append("\",\n")
-                .append("      \"reason\": \"")
-                .append(jsonString(rejection.get("reason"))).append("\"\n")
-                .append("    }");
-            if (index + 1 < rejections.size()) json.append(',');
-            json.append('\n');
+    private record FixtureOutcome(
+            String suite, String fixture, boolean loaded, boolean enabled,
+            String phase, String reason) {}
+
+    private static final class FixtureEvidence {
+        private final java.util.List<FixtureOutcome> outcomes = new java.util.ArrayList<>();
+
+        void record(
+                String suite, String directory, java.util.Set<String> loaded,
+                java.util.Set<String> enabled, String log) throws Exception {
+            java.util.List<java.nio.file.Path> jars;
+            try (var entries = java.nio.file.Files.list(java.nio.file.Path.of(directory))) {
+                jars = entries
+                    .filter(java.nio.file.Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".jar"))
+                    .sorted()
+                    .toList();
+            }
+            for (java.nio.file.Path jar : jars) {
+                String fixture = jar.getFileName().toString();
+                String plugin = pluginName(jar);
+                boolean didLoad = loaded.contains(plugin);
+                boolean didEnable = enabled.contains(plugin);
+                expect(!didEnable || didLoad,
+                    fixture + " enabled without first loading");
+                String phase = didEnable ? "enabled" : (didLoad ? "enable" : "load");
+                String reason = didEnable ? null : rejectionReason(log, fixture, plugin);
+                expect(didEnable || reason != null,
+                    fixture + " rejection has no causal host diagnostic; log=" + log);
+                outcomes.add(new FixtureOutcome(
+                    suite, fixture, didLoad, didEnable, phase, reason));
+            }
         }
-        json.append("  ]\n}\n");
-        java.nio.file.Files.writeString(
-            java.nio.file.Path.of(output), json, java.nio.charset.StandardCharsets.UTF_8);
+
+        void write(String output) throws Exception {
+            outcomes.sort(java.util.Comparator
+                .comparing(FixtureOutcome::suite)
+                .thenComparing(FixtureOutcome::fixture));
+            java.util.Map<String, java.util.List<FixtureOutcome>> suites =
+                new java.util.TreeMap<>();
+            for (FixtureOutcome outcome : outcomes) {
+                suites.computeIfAbsent(outcome.suite(), ignored -> new java.util.ArrayList<>())
+                    .add(outcome);
+            }
+            java.util.Set<String> expected = java.util.Set.of(
+                "cross-call-alias", "dependency", "event", "library", "lifecycle",
+                "malformed-library", "paper", "replacement");
+            same(suites.keySet(), expected, "fixture evidence suite coverage");
+
+            int discovered = outcomes.size();
+            int loaded = count(FixtureOutcome::loaded, outcomes);
+            int enabled = count(FixtureOutcome::enabled, outcomes);
+            int rejected = discovered - enabled;
+            StringBuilder json = new StringBuilder();
+            json.append("{\n")
+                .append("  \"aggregate\": {\n")
+                .append("    \"discovered\": ").append(discovered).append(",\n")
+                .append("    \"enabled\": ").append(enabled).append(",\n")
+                .append("    \"loaded\": ").append(loaded).append(",\n")
+                .append("    \"rejected\": ").append(rejected).append("\n")
+                .append("  },\n")
+                .append("  \"schema_version\": 2,\n")
+                .append("  \"suites\": [\n");
+            int suiteIndex = 0;
+            for (var suite : suites.entrySet()) {
+                appendSuite(json, suite.getKey(), suite.getValue());
+                if (++suiteIndex < suites.size()) json.append(',');
+                json.append('\n');
+            }
+            json.append("  ]\n}\n");
+            java.nio.file.Files.writeString(
+                java.nio.file.Path.of(output), json, java.nio.charset.StandardCharsets.UTF_8);
+        }
+
+        private static int count(
+                java.util.function.Predicate<FixtureOutcome> predicate,
+                java.util.List<FixtureOutcome> rows) {
+            return (int) rows.stream().filter(predicate).count();
+        }
+
+        private static void appendSuite(
+                StringBuilder json, String name, java.util.List<FixtureOutcome> rows) {
+            int loaded = count(FixtureOutcome::loaded, rows);
+            int enabled = count(FixtureOutcome::enabled, rows);
+            json.append("    {\n")
+                .append("      \"discovered\": ").append(rows.size()).append(",\n")
+                .append("      \"enabled\": ").append(enabled).append(",\n")
+                .append("      \"loaded\": ").append(loaded).append(",\n")
+                .append("      \"outcomes\": [\n");
+            for (int index = 0; index < rows.size(); index++) {
+                appendOutcome(json, rows.get(index));
+                if (index + 1 < rows.size()) json.append(',');
+                json.append('\n');
+            }
+            json.append("      ],\n")
+                .append("      \"rejected\": ").append(rows.size() - enabled).append(",\n")
+                .append("      \"suite\": \"").append(jsonString(name)).append("\"\n")
+                .append("    }");
+        }
+
+        private static void appendOutcome(StringBuilder json, FixtureOutcome outcome) {
+            json.append("        {\n")
+                .append("          \"discovered\": true,\n")
+                .append("          \"enabled\": ").append(outcome.enabled()).append(",\n")
+                .append("          \"fixture\": \"")
+                .append(jsonString(outcome.fixture())).append("\",\n")
+                .append("          \"loaded\": ").append(outcome.loaded()).append(",\n")
+                .append("          \"phase\": \"")
+                .append(jsonString(outcome.phase())).append("\",\n")
+                .append("          \"reason\": ");
+            if (outcome.reason() == null) {
+                json.append("null");
+            } else {
+                json.append('"').append(jsonString(outcome.reason())).append('"');
+            }
+            json.append(",\n")
+                .append("          \"rejected\": ").append(!outcome.enabled()).append(",\n")
+                .append("          \"suite\": \"")
+                .append(jsonString(outcome.suite())).append("\"\n")
+                .append("        }");
+        }
+
+        private static String pluginName(java.nio.file.Path jar) throws Exception {
+            try (var archive = new java.util.jar.JarFile(jar.toFile())) {
+                java.util.jar.JarEntry descriptor = archive.getJarEntry("paper-plugin.yml");
+                if (descriptor == null) descriptor = archive.getJarEntry("plugin.yml");
+                if (descriptor == null) {
+                    throw new AssertionError(jar + " has no plugin descriptor");
+                }
+                try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                        archive.getInputStream(descriptor),
+                        java.nio.charset.StandardCharsets.UTF_8))) {
+                    for (String line; (line = reader.readLine()) != null;) {
+                        String trimmed = line.trim();
+                        if (trimmed.startsWith("name:")) {
+                            return trimmed.substring("name:".length()).trim()
+                                .replace("'", "").replace("\"", "");
+                        }
+                    }
+                }
+            }
+            throw new AssertionError(jar + " descriptor has no name");
+        }
+
+        private static String rejectionReason(String log, String fixture, String plugin) {
+            for (String line : log.lines().toList()) {
+                for (String prefix : java.util.List.of(
+                        "[host] " + fixture + " failed: ",
+                        "[host] " + plugin + " failed: ",
+                        "[host] " + plugin + ": ")) {
+                    if (line.startsWith(prefix)) return line.substring(prefix.length());
+                }
+            }
+            for (String line : log.lines().toList()) {
+                if (line.startsWith("[host] ")
+                        && (line.contains(fixture) || line.contains(plugin))) {
+                    return line.substring("[host] ".length());
+                }
+            }
+            return null;
+        }
     }
 
     private static String jsonString(String value) {

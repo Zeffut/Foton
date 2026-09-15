@@ -233,8 +233,8 @@ def _annotation_types(pool, data):
     return result
 
 
-def class_usage(data):
-    """Watched class references and Bukkit event-handler parameter types."""
+def _class_usage(data):
+    """All class references and Bukkit event-handler parameter types."""
     pool, offset = _read_pool(data)
     classes = set()
 
@@ -288,6 +288,12 @@ def class_usage(data):
                     if "/event/" in name and name.endswith("Event")
                 )
 
+    return classes, handler_events
+
+
+def class_usage(data):
+    """Watched class references and Bukkit event-handler parameter types."""
+    classes, handler_events = _class_usage(data)
     watched = {
         name for name in classes
         if any(name.startswith(prefix) for prefix, _ in SURFACE_PREFIXES)
@@ -490,6 +496,82 @@ def scan(jar):
     return found, unreadable
 
 
+DESCRIPTOR_ENTRYPOINT = re.compile(
+    r"^\s*(?:main|bootstrapper)\s*:\s*['\"]?([^\s'#\"]+)", re.MULTILINE)
+
+
+def plugin_incidence(jar):
+    """Per-plugin internal incidence split by descriptor-entrypoint reachability."""
+    class_dependencies = {}
+    internal_members = {}
+    internal_classes = {}
+    entrypoints = set()
+    with zipfile.ZipFile(jar) as archive:
+        for descriptor in ("plugin.yml", "paper-plugin.yml"):
+            if descriptor not in archive.namelist():
+                continue
+            source = archive.read(descriptor).decode("utf-8", errors="replace")
+            entrypoints.update(
+                name.replace(".", "/")
+                for name in DESCRIPTOR_ENTRYPOINT.findall(source)
+            )
+
+        for entry in archive.namelist():
+            if not entry.endswith(".class"):
+                continue
+            data = archive.read(entry)
+            try:
+                owner, _, _ = declares(data)
+                classes, _ = _class_usage(data)
+                members = {
+                    member for surface, member in references(data)
+                    if surface == "internal"
+                }
+            except (NotAClassFile, struct.error, KeyError, IndexError):
+                continue
+            if not owner:
+                continue
+            class_dependencies[owner] = classes
+            internal_members[owner] = members
+            internal_classes[owner] = classes_on_surface(classes, "internal")
+
+    own_classes = set(class_dependencies)
+    complete = bool(entrypoints) and entrypoints <= own_classes
+    reachable = set()
+    if complete:
+        pending = list(entrypoints)
+        while pending:
+            owner = pending.pop()
+            if owner in reachable:
+                continue
+            reachable.add(owner)
+            pending.extend(
+                (class_dependencies.get(owner, set()) & own_classes) - reachable)
+
+    load_bearing_owners = reachable if complete else set()
+    optional_owners = own_classes - load_bearing_owners if complete else set()
+    return {
+        "plugin": pathlib.Path(jar).name,
+        "reachability_status": "complete" if complete else "unknown",
+        "entrypoints": sorted(entrypoints),
+        "entrypoint_reachable_classes": sorted(reachable) if complete else None,
+        "internal": {
+            "load_bearing_classes": sorted(set().union(
+                *(internal_classes.get(owner, set()) for owner in load_bearing_owners)
+            )),
+            "load_bearing_members": sorted(set().union(
+                *(internal_members.get(owner, set()) for owner in load_bearing_owners)
+            )),
+            "optional_adapter_classes": sorted(set().union(
+                *(internal_classes.get(owner, set()) for owner in optional_owners)
+            )),
+            "optional_adapter_members": sorted(set().union(
+                *(internal_members.get(owner, set()) for owner in optional_owners)
+            )),
+        },
+    }
+
+
 def surface_of_class(name):
     """The compatibility surface containing a slash-separated class name."""
     return next(
@@ -547,6 +629,8 @@ def coverage_curve(reachable, ranked):
     plugins. The gap is the useful part -- it says whether effort buys breadth
     or depth.
     """
+    if not reachable:
+        return []
     rows = []
     for k in (100, 250, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, len(ranked)):
         if k > len(ranked):
@@ -586,10 +670,22 @@ RUST_STRING_CONSTANT = re.compile(
 )
 RUST_STATIC_CALL = re.compile(
     r'\bcall_static_method\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,\s*'
-    r'"([A-Za-z_$][A-Za-z0-9_$]*)"',
+    r'"([A-Za-z_$][A-Za-z0-9_$]*)"\s*,\s*"([^"]+)"',
     re.DOTALL,
 )
-RUST_FIRE_METHOD = re.compile(r'"(fire[A-Z][A-Za-z0-9_$]*)"')
+RUST_DYNAMIC_JNI_CALL = re.compile(
+    r'\bcall_static_method\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,\s*'
+    r'method\s*,\s*"([^"]+)"',
+    re.DOTALL,
+)
+# Each entry names a reviewed helper whose method argument is dynamic. A new
+# helper is invisible to compatibility evidence until it is explicitly added
+# here and its concrete call sites still pass compiled-signature validation.
+RUST_DYNAMIC_JNI_HELPERS = frozenset({"world_call", "string_call", "block_call"})
+RUST_FUNCTION = re.compile(
+    r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?:->\s*[^\{]+)?\{",
+    re.DOTALL,
+)
 
 
 def _method_body(source, opening_brace):
@@ -633,21 +729,80 @@ def _java_owner(java_name, imports, package):
     return None
 
 
-def emitted_events(java_source_root: pathlib.Path, rust_source_root: pathlib.Path) -> set[str]:
-    """Events whose Java fire path is called by the Rust bridge."""
-    called_from_rust = set()
-    rust_fire_methods = set()
+def _compiled_method_signatures(api_jar):
+    """Exact owner, method and descriptor triples declared in a compiled jar."""
+    signatures = set()
+    with zipfile.ZipFile(api_jar) as archive:
+        for entry in archive.namelist():
+            if not entry.endswith(".class"):
+                continue
+            try:
+                owner, _, members = declares(archive.read(entry))
+            except (NotAClassFile, struct.error, KeyError, IndexError):
+                continue
+            if not owner:
+                continue
+            for member in members:
+                opening = member.find("(")
+                if opening > 0:
+                    signatures.add((owner, member[:opening], member[opening:]))
+    return signatures
+
+
+def _rust_jni_roots(rust_source_root):
+    """Exact static JNI targets, including reviewed dynamic helper call sites."""
+    roots = set()
     for path in pathlib.Path(rust_source_root).rglob("*.rs"):
         source = path.read_text(encoding="utf-8", errors="replace")
         constants = dict(RUST_STRING_CONSTANT.findall(source))
-        for owner_expression, method in RUST_STATIC_CALL.findall(source):
+        for owner_expression, method, descriptor in RUST_STATIC_CALL.findall(source):
             if owner_expression.startswith('"'):
                 owner = owner_expression[1:-1]
             else:
                 owner = constants.get(owner_expression)
             if owner:
-                called_from_rust.add((owner, method))
-        rust_fire_methods.update(RUST_FIRE_METHOD.findall(source))
+                roots.add((owner, method, descriptor))
+
+        helpers = {}
+        for match in RUST_FUNCTION.finditer(source):
+            helper = match.group(1)
+            if helper not in RUST_DYNAMIC_JNI_HELPERS:
+                continue
+            body = _method_body(source, match.end() - 1)
+            calls = RUST_DYNAMIC_JNI_CALL.findall(body)
+            if len(calls) != 1:
+                continue
+            owner_expression, descriptor = calls[0]
+            owner = (
+                owner_expression[1:-1]
+                if owner_expression.startswith('"')
+                else constants.get(owner_expression)
+            )
+            if owner:
+                helpers[helper] = (owner, descriptor)
+
+        for helper, (owner, descriptor) in helpers.items():
+            call = re.compile(
+                rf"\b{re.escape(helper)}\s*\(\s*[^,\n]+,\s*"
+                r'"([A-Za-z_$][A-Za-z0-9_$]*)"'
+            )
+            for method in call.findall(source):
+                roots.add((owner, method, descriptor))
+    return roots
+
+
+def emitted_events(
+    java_source_root: pathlib.Path,
+    rust_source_root: pathlib.Path,
+    compiled_api_jar: pathlib.Path,
+) -> set[str]:
+    """Events reached by exact, compiled-signature-valid Rust JNI calls."""
+    compiled = _compiled_method_signatures(compiled_api_jar)
+    called_from_rust = {
+        (owner, method)
+        for owner, method, descriptor in _rust_jni_roots(rust_source_root)
+        if (owner, method, descriptor) in compiled
+    }
 
     methods = collections.defaultdict(list)
     for path in pathlib.Path(java_source_root).rglob("*.java"):
@@ -673,10 +828,6 @@ def emitted_events(java_source_root: pathlib.Path, rust_source_root: pathlib.Pat
                 called_owner = _java_owner(receiver, imports, package)
                 calls.add((called_owner or owner, method))
             methods[(owner, match.group(1))].append((events, calls))
-
-    called_from_rust.update(
-        ("foton/EventBridge", method) for method in rust_fire_methods
-    )
 
     emitted = set()
     pending = list(called_from_rust)
@@ -803,7 +954,49 @@ def compatibility_summary(
     emitted_wanted = wanted & expand_event_hierarchy(set(emitted), parents or {})
     missing_events = wanted - emitted_wanted
     scanned = ledger.get("plugins_scanned", 0)
-    reaches_internals = ledger.get("plugins_reaching_internals", 0)
+    historical_reaches = ledger.get("plugins_reaching_internals", 0)
+    incidence = ledger.get("plugin_incidence")
+    current_ceiling = (
+        ledger.get("schema_version") == 2
+        and isinstance(incidence, list)
+        and len(incidence) == scanned
+        and all(row.get("reachability_status") == "complete" for row in incidence)
+    )
+    if current_ceiling:
+        reaches_internals = sum(
+            1 for row in incidence
+            if row["internal"]["load_bearing_members"]
+            or row["internal"]["load_bearing_classes"]
+        )
+        optional_adapters = sum(
+            1 for row in incidence
+            if row["internal"]["optional_adapter_members"]
+            or row["internal"]["optional_adapter_classes"]
+        )
+        ceiling = {
+            "status": "current",
+            "plugins_on_public_api": scanned - reaches_internals,
+            "plugins_reaching_internals": reaches_internals,
+            "plugins_scanned": scanned,
+            "plugins_with_optional_adapters": optional_adapters,
+        }
+    else:
+        ceiling = {
+            "status": "unknown",
+            "reason": (
+                "ledger lacks complete per-plugin class incidence and "
+                "entrypoint reachability evidence"
+            ),
+            "plugins_on_public_api": None,
+            "plugins_reaching_internals": None,
+            "plugins_scanned": scanned,
+            "plugins_with_optional_adapters": None,
+            "historical": {
+                "plugins_on_public_api": max(scanned - historical_reaches, 0),
+                "plugins_reaching_internals": historical_reaches,
+                "plugins_scanned": scanned,
+            },
+        }
     return {
         "api": {
             "all": all_evidence,
@@ -813,11 +1006,7 @@ def compatibility_summary(
             },
             "shared": _member_resolution(shared, provided_members),
         },
-        "ceiling": {
-            "plugins_on_public_api": max(scanned - reaches_internals, 0),
-            "plugins_reaching_internals": reaches_internals,
-            "plugins_scanned": scanned,
-        },
+        "ceiling": ceiling,
         "events": {
             "emitted": len(emitted_wanted),
             "emitted_types": sorted(name.replace("/", ".") for name in emitted_wanted),
@@ -933,7 +1122,8 @@ def report_events(source_root, api_jar, top):
     """
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     wanted = [row for row in ledger["events"] if row["event"].endswith("Event")]
-    constructed = emitted_events(source_root, REPO / "foton-plugin" / "src")
+    constructed = emitted_events(
+        source_root, REPO / "foton-plugin" / "src", api_jar)
 
     # Every ancestor of every constructed event, so a base class counts as
     # reachable when something builds one of its descendants.
@@ -1002,7 +1192,8 @@ def main():
             row for row in ledger["events"] if row["event"].endswith("Event")
         ]
         java_source = args.events or REPO / "plugin-api" / "src"
-        emitted = emitted_events(java_source, REPO / "foton-plugin" / "src")
+        emitted = emitted_events(
+            java_source, REPO / "foton-plugin" / "src", args.covered)
         summary = compatibility_summary(
             ledger,
             provided(args.covered),
@@ -1047,10 +1238,12 @@ def main():
     # computed from. A plugin reaching internals is excluded: no amount of API
     # would make it work, and leaving it in would flatter every number.
     needs = {}
+    incidence_rows = []
 
     for jar in jars:
         try:
             found, unreadable = scan(jar)
+            incidence = plugin_incidence(jar)
         except (zipfile.BadZipFile, OSError) as error:
             failed.append((jar.name, str(error)))
             continue
@@ -1058,7 +1251,14 @@ def main():
             failed.append((jar.name, f"{unreadable} unreadable class files"))
         api_classes = classes_on_surface(found["classes"], "api")
         internal_classes = classes_on_surface(found["classes"], "internal")
-        if found["internal"] or internal_classes:
+        incidence_rows.append(incidence)
+        internal = incidence["internal"]
+        load_bearing_internal = (
+            internal["load_bearing_members"] or internal["load_bearing_classes"]
+        )
+        if incidence["reachability_status"] == "unknown":
+            load_bearing_internal = bool(found["internal"] or internal_classes)
+        if load_bearing_internal:
             reaches_internal.append(jar.name)
         elif found["api"] or api_classes:
             needs[jar.stem] = found["api"] | api_classes
@@ -1127,6 +1327,7 @@ def main():
         LEDGER.write_text(
             json.dumps(
                 {
+                    "schema_version": 2,
                     "plugins_scanned": scanned,
                     "plugins_reaching_internals": len(reaches_internal),
                     "api_members_referenced": len(api),
@@ -1150,6 +1351,8 @@ def main():
                             key=lambda pair: (-pair[1], pair[0]),
                         )
                     ],
+                    "plugin_incidence": sorted(
+                        incidence_rows, key=lambda row: row["plugin"]),
                     "packages": [
                         {"package": p, "plugins": n}
                         for p, n in reach_by(api, plugins_per_member, package_of)

@@ -108,8 +108,27 @@ public final class EventBridge {
 """
 
 RUST_WITHOUT_CALLER = """
+const BRIDGE: &str = "foton/EventBridge";
 fn forward_world_load(env: &mut JNIEnv) {
     env.call_static_method(BRIDGE, "fireWorldLoad", "()V", &[]);
+}
+"""
+
+RUST_WITH_WRONG_DESCRIPTOR = """
+const BRIDGE: &str = "foton/EventBridge";
+fn forward_world_load(env: &mut JNIEnv) {
+    env.call_static_method(
+        BRIDGE, "fireWorldLoad", "(Ljava/lang/String;)V", &[]);
+}
+"""
+
+RUST_DYNAMIC_HELPER_CALL = """
+const BRIDGE: &str = "foton/EventBridge";
+fn world_call(env: &mut JNIEnv, method: &str) {
+    env.call_static_method(BRIDGE, method, "()V", &[]);
+}
+fn forward_world_load(env: &mut JNIEnv) {
+    world_call(env, "fireWorldLoad");
 }
 """
 
@@ -186,7 +205,33 @@ public class InternalClassOnly {
 }
 """
 
+OPTIONAL_ADAPTER_SOURCES = {
+    "example/Main.java": """
+        package example;
+        import org.bukkit.World;
+        public final class Main {
+            public Class<?> worldType() { return World.class; }
+        }
+    """,
+    "example/InternalAdapter.java": """
+        package example;
+        import net.minecraft.FakeInternals;
+        public final class InternalAdapter {
+            public void use() { FakeInternals.reachInside(); }
+        }
+    """,
+}
+
+LOAD_BEARING_INTERNAL_SOURCE = """
+package example;
+import net.minecraft.FakeInternals;
+public final class Main {
+    public void use() { FakeInternals.reachInside(); }
+}
+"""
+
 LEDGER = {
+    "schema_version": 2,
     "plugins_scanned": 3,
     "plugins_reaching_internals": 1,
     "api_members_referenced": 2,
@@ -202,6 +247,44 @@ LEDGER = {
     "api_classes": [
         {"class": "org/bukkit/World", "plugins": 2},
         {"class": "org/bukkit/Server", "plugins": 1},
+    ],
+    "plugin_incidence": [
+        {
+            "plugin": "Public.jar",
+            "reachability_status": "complete",
+            "entrypoints": ["example/Public"],
+            "entrypoint_reachable_classes": ["example/Public"],
+            "internal": {
+                "load_bearing_classes": [],
+                "load_bearing_members": [],
+                "optional_adapter_classes": [],
+                "optional_adapter_members": [],
+            },
+        },
+        {
+            "plugin": "OptionalAdapter.jar",
+            "reachability_status": "complete",
+            "entrypoints": ["example/OptionalAdapter"],
+            "entrypoint_reachable_classes": ["example/OptionalAdapter"],
+            "internal": {
+                "load_bearing_classes": [],
+                "load_bearing_members": [],
+                "optional_adapter_classes": ["net/minecraft/Optional"],
+                "optional_adapter_members": ["net/minecraft/Optional#use()V"],
+            },
+        },
+        {
+            "plugin": "LoadBearing.jar",
+            "reachability_status": "complete",
+            "entrypoints": ["example/LoadBearing"],
+            "entrypoint_reachable_classes": ["example/LoadBearing"],
+            "internal": {
+                "load_bearing_classes": ["net/minecraft/Required"],
+                "load_bearing_members": ["net/minecraft/Required#use()V"],
+                "optional_adapter_classes": [],
+                "optional_adapter_members": [],
+            },
+        },
     ],
 }
 
@@ -271,6 +354,32 @@ STUBS = {
         package org.bukkit.event.world;
         public class WorldUnloadEvent extends WorldEvent { }
     """,
+    "org/bukkit/event/world/WorldLoadEvent.java": """
+        package org.bukkit.event.world;
+        public class WorldLoadEvent extends WorldEvent { }
+    """,
+    "org/bukkit/event/server/PluginEnableEvent.java": """
+        package org.bukkit.event.server;
+        public class PluginEnableEvent extends org.bukkit.event.Event { }
+    """,
+    "org/bukkit/event/server/PluginDisableEvent.java": """
+        package org.bukkit.event.server;
+        public class PluginDisableEvent extends org.bukkit.event.Event { }
+    """,
+    "org/bukkit/event/player/PlayerRegisterChannelEvent.java": """
+        package org.bukkit.event.player;
+        public class PlayerRegisterChannelEvent extends org.bukkit.event.Event { }
+    """,
+    "org/bukkit/event/player/PlayerUnregisterChannelEvent.java": """
+        package org.bukkit.event.player;
+        public class PlayerUnregisterChannelEvent extends org.bukkit.event.Event { }
+    """,
+    "io/papermc/paper/plugin/lifecycle/event/registrar/ReloadableRegistrarEvent.java": """
+        package io.papermc.paper.plugin.lifecycle.event.registrar;
+        public interface ReloadableRegistrarEvent {
+            Object registrar();
+        }
+    """,
     "org/bukkit/event/world/WorldEvent.java": """
         package org.bukkit.event.world;
         public class WorldEvent extends org.bukkit.event.Event { }
@@ -339,6 +448,20 @@ def write_sources(root, sources):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
+
+
+def merge_jars(output, *jars):
+    """Builds one test API jar from independently compiled real class files."""
+    with zipfile.ZipFile(output, "w") as merged:
+        written = set()
+        for jar in jars:
+            with zipfile.ZipFile(jar) as source:
+                for entry in source.namelist():
+                    if entry in written:
+                        continue
+                    merged.writestr(entry, source.read(entry))
+                    written.add(entry)
+    return output
 
 
 def run_main(args, repo, ledger):
@@ -463,8 +586,91 @@ class Scanning(unittest.TestCase):
             [{"class": "net/minecraft/FakeInternals", "plugins": 1}],
         )
 
+    def test_corpus_write_versions_plugin_incidence_and_separates_optional_adapters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            optional = build_jar(
+                OPTIONAL_ADAPTER_SOURCES, root / "optional-adapter")
+            load_bearing = build_jar(
+                {"example/Main.java": LOAD_BEARING_INTERNAL_SOURCE},
+                root / "load-bearing",
+            )
+            with zipfile.ZipFile(optional, "a") as archive:
+                archive.writestr(
+                    "plugin.yml", "name: OptionalAdapter\nmain: example.Main\nversion: 1\n")
+            with zipfile.ZipFile(load_bearing, "a") as archive:
+                archive.writestr(
+                    "plugin.yml", "name: LoadBearing\nmain: example.Main\nversion: 1\n")
+            shutil.copy(optional, corpus / "optional.jar")
+            shutil.copy(load_bearing, corpus / "load-bearing.jar")
+            repo = root / "repo"
+            ledger = repo / "dev" / "plugin-api-usage.json"
+            ledger.parent.mkdir(parents=True)
+
+            result, _ = run_main([corpus, "--write"], repo, ledger)
+            written = json.loads(ledger.read_text(encoding="utf-8"))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(written["schema_version"], 2)
+        incidence = {row["plugin"]: row for row in written["plugin_incidence"]}
+        self.assertEqual(
+            incidence["optional.jar"]["internal"]["load_bearing_members"], [])
+        self.assertEqual(
+            incidence["optional.jar"]["internal"]["optional_adapter_members"],
+            ["net/minecraft/FakeInternals#reachInside()V"],
+        )
+        self.assertEqual(
+            incidence["load-bearing.jar"]["internal"]["load_bearing_members"],
+            ["net/minecraft/FakeInternals#reachInside()V"],
+        )
+
 
 class CompatibilityEvidence(unittest.TestCase):
+    @unittest.skipUnless(
+        (plugin_api_usage.REPO / "plugin-api/build/foton-plugin-api.jar").is_file(),
+        "the repository API jar is built by dev/build-plugin-api.sh",
+    )
+    def test_repository_jni_roots_match_real_compiled_signatures_exactly(self):
+        api = plugin_api_usage.REPO / "plugin-api/build/foton-plugin-api.jar"
+        roots = plugin_api_usage._rust_jni_roots(
+            plugin_api_usage.REPO / "foton-plugin/src")
+        compiled = plugin_api_usage._compiled_method_signatures(api)
+
+        exact = (
+            "foton/EventBridge",
+            "fireJoin",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        )
+        self.assertIn(exact, roots)
+        self.assertIn(exact, compiled)
+        for mismatch in {
+            (
+                "foton/EventBridge",
+                "fireBlockExp",
+                "(Ljava/lang/String;IIILjava/lang/String;)Ljava/lang/String;",
+            ),
+            (
+                "foton/EventBridge",
+                "firePreCreatureSpawn",
+                "(Ljava/lang/String;DDDDLjava/lang/String;Ljava/lang/String;)Z",
+            ),
+            (
+                "foton/EventBridge",
+                "fireCreatureSpawn",
+                "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;)Z",
+            ),
+            (
+                "foton/EventBridge",
+                "fireEntityPortal",
+                "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;"
+                "DDDDLjava/lang/String;)Ljava/lang/String;",
+            ),
+        }:
+            self.assertIn(mismatch, roots)
+            self.assertNotIn(mismatch, compiled)
+
     def test_unlinked_java_fire_method_is_not_emitted(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -476,10 +682,74 @@ class CompatibilityEvidence(unittest.TestCase):
                 JAVA_BRIDGE_WITH_ORPHAN, encoding="utf-8")
             (rust / "forward.rs").write_text(RUST_WITHOUT_CALLER, encoding="utf-8")
 
-            emitted = plugin_api_usage.emitted_events(java, rust)
+            compiled = build_jar(
+                {"foton/EventBridge.java": JAVA_BRIDGE_WITH_ORPHAN},
+                root / "compiled",
+            )
+
+            emitted = plugin_api_usage.emitted_events(java, rust, compiled)
 
         self.assertIn("org/bukkit/event/world/WorldLoadEvent", emitted)
         self.assertNotIn("org/bukkit/event/world/WorldUnloadEvent", emitted)
+
+    def test_same_name_with_wrong_jni_descriptor_is_not_emitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            java = root / "java"
+            rust = root / "rust"
+            java.mkdir()
+            rust.mkdir()
+            (java / "EventBridge.java").write_text(
+                JAVA_BRIDGE_WITH_ORPHAN, encoding="utf-8")
+            (rust / "forward.rs").write_text(
+                RUST_WITH_WRONG_DESCRIPTOR, encoding="utf-8")
+            compiled = build_jar(
+                {"foton/EventBridge.java": JAVA_BRIDGE_WITH_ORPHAN},
+                root / "compiled",
+            )
+
+            emitted = plugin_api_usage.emitted_events(java, rust, compiled)
+
+        self.assertNotIn("org/bukkit/event/world/WorldLoadEvent", emitted)
+
+    def test_exact_jni_owner_name_and_descriptor_is_emitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            java = root / "java"
+            rust = root / "rust"
+            java.mkdir()
+            rust.mkdir()
+            (java / "EventBridge.java").write_text(
+                JAVA_BRIDGE_WITH_ORPHAN, encoding="utf-8")
+            (rust / "forward.rs").write_text(RUST_WITHOUT_CALLER, encoding="utf-8")
+            compiled = build_jar(
+                {"foton/EventBridge.java": JAVA_BRIDGE_WITH_ORPHAN},
+                root / "compiled",
+            )
+
+            emitted = plugin_api_usage.emitted_events(java, rust, compiled)
+
+        self.assertIn("org/bukkit/event/world/WorldLoadEvent", emitted)
+
+    def test_explicit_dynamic_helper_mapping_is_descriptor_validated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            java = root / "java"
+            rust = root / "rust"
+            java.mkdir()
+            rust.mkdir()
+            (java / "EventBridge.java").write_text(
+                JAVA_BRIDGE_WITH_ORPHAN, encoding="utf-8")
+            (rust / "forward.rs").write_text(
+                RUST_DYNAMIC_HELPER_CALL, encoding="utf-8")
+            compiled = build_jar(
+                {"foton/EventBridge.java": JAVA_BRIDGE_WITH_ORPHAN},
+                root / "compiled",
+            )
+
+            emitted = plugin_api_usage.emitted_events(java, rust, compiled)
+
+        self.assertIn("org/bukkit/event/world/WorldLoadEvent", emitted)
 
     def test_jni_entry_points_follow_static_and_instance_java_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -489,7 +759,9 @@ class CompatibilityEvidence(unittest.TestCase):
             write_sources(java, JAVA_JNI_ENTRY_POINTS)
             write_sources(rust, {"bridge.rs": RUST_JNI_ENTRY_POINTS})
 
-            emitted = plugin_api_usage.emitted_events(java, rust)
+            compiled = build_jar(JAVA_JNI_ENTRY_POINTS, root / "compiled")
+
+            emitted = plugin_api_usage.emitted_events(java, rust, compiled)
 
         self.assertEqual(
             emitted,
@@ -543,6 +815,36 @@ class CompatibilityEvidence(unittest.TestCase):
 
         self.assertIsNone(summary["api"]["classes"]["all"]["referenced"])
         self.assertIsNone(summary["api"]["classes"]["shared"]["resolved"])
+
+    def test_legacy_ledger_ceiling_is_historical_not_current(self):
+        legacy = {
+            key: value for key, value in LEDGER.items()
+            if key not in {"schema_version", "plugin_incidence"}
+        }
+
+        summary = plugin_api_usage.compatibility_summary(
+            legacy, PROVIDED, WANTED, EMITTED)
+
+        self.assertEqual(summary["ceiling"]["status"], "unknown")
+        self.assertIsNone(summary["ceiling"]["plugins_on_public_api"])
+        self.assertIsNone(summary["ceiling"]["plugins_reaching_internals"])
+        self.assertEqual(
+            summary["ceiling"]["historical"],
+            {
+                "plugins_on_public_api": 2,
+                "plugins_reaching_internals": 1,
+                "plugins_scanned": 3,
+            },
+        )
+
+    def test_optional_adapter_does_not_lower_current_ceiling(self):
+        summary = plugin_api_usage.compatibility_summary(
+            LEDGER, PROVIDED, WANTED, EMITTED)
+
+        self.assertEqual(summary["ceiling"]["status"], "current")
+        self.assertEqual(summary["ceiling"]["plugins_on_public_api"], 2)
+        self.assertEqual(summary["ceiling"]["plugins_reaching_internals"], 1)
+        self.assertEqual(summary["ceiling"]["plugins_with_optional_adapters"], 1)
 
     def test_summary_json_is_stable_and_newline_terminated(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -619,7 +921,22 @@ class CompatibilityEvidence(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            api = build_jar({}, root / "api")
+            stubs = build_jar({}, root / "api-stubs")
+            bridge = build_jar(
+                {
+                    "foton/EventBridge.java": """
+                        package foton;
+                        import org.bukkit.event.world.WorldUnloadEvent;
+                        public final class EventBridge {
+                            public static void fireWorldUnload() {
+                                new WorldUnloadEvent();
+                            }
+                        }
+                    """,
+                },
+                root / "api-bridge",
+            )
+            api = merge_jars(root / "api.jar", stubs, bridge)
             summary_path = root / "summary.json"
 
             result, output = run_main(

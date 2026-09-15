@@ -80,9 +80,11 @@ The JVM must be **Java 21 or newer** -- the API jar is compiled with
 The API jar defaults to `plugin-api/build/foton-plugin-api.jar`; its bundled,
 digest-pinned `plugin-api/lib` runtime dependency directory is selected
 automatically. Override the jar with `FOTON_PLUGIN_API_JAR`, or override only
-its runtime dependencies with `FOTON_PLUGIN_LIBRARY_DIRECTORY`. With no
-FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
-unchanged.
+its runtime dependencies with `FOTON_PLUGIN_LIBRARY_DIRECTORY`. The override
+must contain exactly the same filenames and SHA-256 digests as
+`plugin-api/lib/manifest.txt`; missing, extra and changed jars are rejected
+before the JVM starts. With no `FOTON_PLUGIN_DIRECTORY`, no JVM is started and
+the normal server path is unchanged.
 
 Compatibility evidence is regenerated and combined with:
 
@@ -95,9 +97,14 @@ python3 dev/plugin_compatibility.py --api-report build/plugin-api-evidence.json 
 
 The combined JSON deliberately separates binary symbols, the corpus ceiling,
 Rust-reachable events and executable fixtures. Shared symbol coverage is not a
-plugin success rate. The ceiling excludes the NMS/CraftBukkit slice, which a
-Rust server cannot provide, and an event counts only when a Rust call site can
-reach its Java construction path.
+plugin success rate. The current legacy corpus ledger has no per-plugin class
+incidence or entrypoint reachability, so its present ceiling is `null`; its old
+41-of-59 public-API figure is retained only as historical evidence. A v2 corpus
+regeneration distinguishes load-bearing internal references from optional
+adapters. An event counts only when an exact Rust JNI owner, method and
+descriptor resolves in the compiled Java API and reaches its construction path.
+The executable fixture report covers 49 jars across all eight suites; it loads
+29, enables 27 and rejects 22 with phase-specific causal diagnostics.
 
 ## License
 

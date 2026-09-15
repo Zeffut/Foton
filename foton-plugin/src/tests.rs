@@ -4,7 +4,7 @@
 //! are driven from a single place and the rest assert on what can be decided
 //! without starting anything.
 
-use std::fs::{create_dir_all, write};
+use std::fs::{copy, create_dir_all, read_dir, remove_file, write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
@@ -21,6 +21,35 @@ fn config() -> PluginHostConfig {
         library_directory: None,
         plugin_directory: PathBuf::from("/nowhere/plugins"),
     }
+}
+
+fn pinned_runtime_config() -> (tempfile::TempDir, PluginHostConfig) {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let api_jar = directory.path().join("build/foton-plugin-api.jar");
+    let libraries = directory.path().join("lib");
+    create_dir_all(api_jar.parent().expect("the API jar has a parent"))
+        .expect("the fixture build directory should exist");
+    create_dir_all(&libraries).expect("the fixture library directory should exist");
+    write(&api_jar, b"not really a jar").expect("the fixture API should write");
+    let committed = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../plugin-api/lib");
+    for entry in read_dir(committed).expect("the committed library directory should exist") {
+        let path = entry
+            .expect("the committed entry should be readable")
+            .path();
+        if path.extension().is_some_and(|extension| extension == "jar") {
+            copy(
+                &path,
+                libraries.join(path.file_name().expect("a committed jar has a name")),
+            )
+            .expect("the pinned jar should copy");
+        }
+    }
+    let config = PluginHostConfig {
+        api_jar,
+        library_directory: Some(libraries),
+        ..config()
+    };
+    (directory, config)
 }
 
 /// An API jar moved as one unit with its pinned dependencies keeps working
@@ -83,19 +112,8 @@ fn a_missing_api_jar_is_reported_before_anything_starts() {
 /// filesystem's mood.
 #[test]
 fn the_class_path_is_ordered() {
-    let directory = tempfile::tempdir().expect("a temporary directory");
-    let jar = directory.path().join("api.jar");
-    write(&jar, b"not really a jar").expect("the fixture should write");
-    for name in ["zebra.jar", "alpha.jar", "middle.jar", "ignored.txt"] {
-        write(directory.path().join(name), b"x").expect("the fixture should write");
-    }
-
-    let config = PluginHostConfig {
-        api_jar: jar,
-        library_directory: Some(directory.path().to_owned()),
-        ..config()
-    };
-    let class_path = config.class_path().expect("the jar exists");
+    let (_directory, config) = pinned_runtime_config();
+    let class_path = config.class_path().expect("the pinned set should validate");
 
     let names: Vec<&str> = class_path
         .split(if cfg!(target_os = "windows") {
@@ -107,12 +125,21 @@ fn the_class_path_is_ordered() {
         .collect();
     assert_eq!(
         names,
-        ["api.jar", "alpha.jar", "api.jar", "middle.jar", "zebra.jar"],
-        "the API jar leads, then the libraries in a fixed order"
-    );
-    assert!(
-        !class_path.contains("ignored.txt"),
-        "only jars belong on a class path: {class_path}"
+        [
+            "foton-plugin-api.jar",
+            "adventure-api-5.2.0.jar",
+            "adventure-key-5.2.0.jar",
+            "adventure-text-logger-slf4j-5.2.0.jar",
+            "adventure-text-serializer-plain-5.2.0.jar",
+            "annotations-26.1.0.jar",
+            "brigadier-1.3.10.jar",
+            "gson-2.14.0.jar",
+            "guava-33.6.0-jre.jar",
+            "joml-1.10.8.jar",
+            "slf4j-api-2.0.17.jar",
+            "snakeyaml-2.2.jar",
+        ],
+        "the API jar leads, then the manifest order is stable"
     );
 }
 
@@ -144,6 +171,68 @@ fn a_missing_runtime_library_directory_is_reported_before_startup() {
             .contains(directory.path().join("lib").to_string_lossy().as_ref()),
         "the startup error should name the missing directory: {error}"
     );
+}
+
+#[test]
+fn the_exact_pinned_runtime_library_set_is_accepted() {
+    let (_directory, config) = pinned_runtime_config();
+
+    let class_path = config.class_path().expect("the pinned set should validate");
+
+    assert!(class_path.contains("adventure-api-5.2.0.jar"));
+    assert!(class_path.contains("snakeyaml-2.2.jar"));
+}
+
+#[test]
+fn a_missing_pinned_runtime_library_is_rejected_with_its_path() {
+    let (_directory, config) = pinned_runtime_config();
+    let missing = config
+        .resolved_library_directory()
+        .join("snakeyaml-2.2.jar");
+    remove_file(&missing).expect("the temporary jar should be removable");
+
+    let error = config
+        .class_path()
+        .expect_err("a missing pin must be rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains(missing.to_string_lossy().as_ref())
+    );
+    assert!(error.to_string().contains("missing"));
+}
+
+#[test]
+fn an_extra_runtime_jar_is_rejected_with_its_path() {
+    let (_directory, config) = pinned_runtime_config();
+    let extra = config.resolved_library_directory().join("decoy.jar");
+    write(&extra, b"decoy").expect("the decoy should write");
+
+    let error = config
+        .class_path()
+        .expect_err("an extra jar must be rejected");
+
+    assert!(error.to_string().contains(extra.to_string_lossy().as_ref()));
+    assert!(error.to_string().contains("not in the pinned manifest"));
+}
+
+#[test]
+fn a_tampered_runtime_jar_is_rejected_with_its_path_and_digests() {
+    let (_directory, config) = pinned_runtime_config();
+    let tampered = config
+        .resolved_library_directory()
+        .join("snakeyaml-2.2.jar");
+    write(&tampered, b"tampered").expect("the temporary jar should be replaceable");
+
+    let error = config
+        .class_path()
+        .expect_err("a changed digest must be rejected");
+    let message = error.to_string();
+
+    assert!(message.contains(tampered.to_string_lossy().as_ref()));
+    assert!(message.contains("expected 1467931448a0817696ae2805b7b8b20"));
+    assert!(message.contains("got d121be3103007b41edf96f8262925f8c"));
 }
 
 use super::PluginHost;
