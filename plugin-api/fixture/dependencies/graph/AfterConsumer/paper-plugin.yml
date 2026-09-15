@@ -1,0 +1,9 @@
+name: AfterConsumer
+version: 1
+main: fixture.dependencies.DependencyPlugins$AfterConsumer
+dependencies:
+  server:
+    AfterProvider:
+      load: AFTER
+      required: true
+      join-classpath: true

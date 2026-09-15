@@ -1,0 +1,4 @@
+name: CollisionDependent
+version: 1
+main: fixture.dependencies.DependencyPlugins$CollisionDependent
+depend: [ExistingAlias]

@@ -1,0 +1,9 @@
+name: AOmitConsumer
+version: 1
+main: fixture.dependencies.DependencyPlugins$AOmitConsumer
+dependencies:
+  server:
+    ZOmitProvider:
+      load: OMIT
+      required: true
+      join-classpath: true

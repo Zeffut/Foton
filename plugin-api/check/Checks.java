@@ -21,7 +21,7 @@ public final class Checks {
             && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
             "disabling a plugin should release its custom channels");
         lifecycle(args[1], args[2]);
-        dependencies(args[3], args[4]);
+        dependencies(args[3], args[4], args[5], args[6]);
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, YAML, configuration,\n"
@@ -186,7 +186,9 @@ public final class Checks {
         return count;
     }
 
-    private static void dependencies(String graphDirectory, String duplicateDirectory)
+    private static void dependencies(
+            String graphDirectory, String duplicateDirectory,
+            String existingDirectory, String crossCallDirectory)
             throws Exception {
         clearDependencyProperties();
         java.io.ByteArrayOutputStream graphBytes = new java.io.ByteArrayOutputStream();
@@ -201,11 +203,13 @@ public final class Checks {
         }
         String graphLog = graphBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
         try {
-            same(enabled, 12, "dependency graph enabled count");
+            same(enabled, 16, "dependency graph enabled count; load="
+                + csvProperty("foton.fixture.dependencies.load") + "; log=" + graphLog);
             same(csvProperty("foton.fixture.dependencies.load"), java.util.List.of(
-                "BootstrapProvider", "NoJoinProvider", "NoJoinConsumer", "OptionalA",
-                "OptionalB", "PaperConsumer", "Provider", "Consumer", "ServerAfter",
-                "Unrelated", "ZuluBefore", "AlphaTarget"),
+                "AfterConsumer", "AfterProvider", "AOmitConsumer", "BootstrapProvider",
+                "NoJoinProvider", "NoJoinConsumer", "OptionalA", "OptionalB",
+                "PaperConsumer", "Provider", "Consumer", "ServerAfter", "Unrelated",
+                "ZOmitProvider", "ZuluBefore", "AlphaTarget"),
                 "deterministic dependency load order");
             same(csvProperty("foton.fixture.dependencies.enable"), csvProperty(
                 "foton.fixture.dependencies.load"),
@@ -216,6 +220,10 @@ public final class Checks {
                 "join-classpath dependency visibility");
             same(System.getProperty("foton.fixture.dependencies.isolated"), "true",
                 "join-classpath false dependency isolation");
+            same(System.getProperty("foton.fixture.dependencies.afterJoined"), "true",
+                "AFTER dependency classpath visibility");
+            same(System.getProperty("foton.fixture.dependencies.omitJoined"), "true",
+                "consumer-first OMIT dependency classpath visibility");
             expect(foton.PluginHost.byName("VaUlT") != null
                     && foton.PluginHost.byName("VaUlT").getName().equals("Provider"),
                 "case-insensitive provided alias lookup");
@@ -263,6 +271,44 @@ public final class Checks {
             foton.PluginHost.disableAll();
             clearDependencyProperties();
         }
+
+        clearDependencyProperties();
+        int existingEnabled = foton.PluginHost.loadAll(existingDirectory);
+        org.bukkit.plugin.Plugin existing = foton.PluginHost.byName("ExistingProvider");
+        java.io.ByteArrayOutputStream crossCallBytes = new java.io.ByteArrayOutputStream();
+        int crossCallEnabled;
+        try (java.io.PrintStream capture = new java.io.PrintStream(
+                crossCallBytes, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setOut(capture);
+            crossCallEnabled = foton.PluginHost.loadAll(crossCallDirectory);
+        } finally {
+            System.setOut(original);
+        }
+        String crossCallLog = crossCallBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            same(existingEnabled, 1, "existing identity fixture enabled count");
+            same(crossCallEnabled, 2, "cross-call identity collision isolation");
+            expect(existing != null
+                    && foton.PluginHost.byName("existingprovider") == existing
+                    && foton.PluginHost.byName("EXISTINGALIAS") == existing,
+                "cross-call collision split real-name and alias lookup");
+            same(csvProperty("foton.fixture.dependencies.load"), java.util.List.of(
+                "ExistingProvider", "CollisionDependent", "CollisionHealthy"),
+                "cross-call collisions loaded a conflicting plugin");
+            same(System.getProperty("foton.fixture.dependencies.crossCallProvider"),
+                "ExistingProvider", "cross-call dependency resolved the wrong provider");
+            same(System.getProperty("foton.fixture.dependencies.crossCallJoined"), "true",
+                "cross-call dependency classpath resolved the wrong provider");
+            expect(crossCallLog.contains("existingalias")
+                    && crossCallLog.contains("RealVsAlias")
+                    && crossCallLog.contains("AliasVsExisting")
+                    && crossCallLog.contains("AliasVsExistingAlias"),
+                "cross-call collision diagnostics did not name every conflict: "
+                    + crossCallLog);
+        } finally {
+            foton.PluginHost.disableAll();
+            clearDependencyProperties();
+        }
     }
 
     private static java.util.List<String> csvProperty(String property) {
@@ -276,6 +322,10 @@ public final class Checks {
         System.clearProperty("foton.fixture.dependencies.alias");
         System.clearProperty("foton.fixture.dependencies.joined");
         System.clearProperty("foton.fixture.dependencies.isolated");
+        System.clearProperty("foton.fixture.dependencies.afterJoined");
+        System.clearProperty("foton.fixture.dependencies.omitJoined");
+        System.clearProperty("foton.fixture.dependencies.crossCallProvider");
+        System.clearProperty("foton.fixture.dependencies.crossCallJoined");
     }
 
     private static void awaitSchedulerTasks(String owner, int expected) {

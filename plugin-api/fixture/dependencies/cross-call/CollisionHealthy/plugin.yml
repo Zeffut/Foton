@@ -1,0 +1,3 @@
+name: CollisionHealthy
+version: 1
+main: fixture.dependencies.DependencyPlugins$CollisionHealthy

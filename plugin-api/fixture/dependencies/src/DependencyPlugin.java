@@ -25,6 +25,21 @@ public class DependencyPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         append("foton.fixture.dependencies.enable");
+        if (getName().equals("AfterConsumer")) {
+            System.setProperty("foton.fixture.dependencies.afterJoined",
+                visible("fixture.dependencies.AfterApi") ? "true" : "false");
+        }
+        if (getName().equals("AOmitConsumer")) {
+            System.setProperty("foton.fixture.dependencies.omitJoined",
+                visible("fixture.dependencies.OmitApi") ? "true" : "false");
+        }
+        if (getName().equals("CollisionDependent")) {
+            Plugin provider = getServer().getPluginManager().getPlugin("eXiStInGaLiAs");
+            System.setProperty("foton.fixture.dependencies.crossCallProvider",
+                provider == null ? "missing" : provider.getName());
+            System.setProperty("foton.fixture.dependencies.crossCallJoined",
+                visible("fixture.dependencies.ExistingApi") ? "true" : "false");
+        }
     }
 
     private void append(String property) {

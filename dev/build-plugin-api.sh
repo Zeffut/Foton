@@ -129,7 +129,7 @@ if [ -d "$FIXTURE_SRC" ]; then
   jar --create --file "$REPLACEMENT_PLUGINS/Replacement.jar" \
     -C "$REPLACEMENT_STAGE" .
 
-  for fixture_set in graph duplicates; do
+  for fixture_set in graph duplicates existing cross-call; do
     SET_PLUGINS="$FIX/dependency-$fixture_set-plugins"
     mkdir -p "$SET_PLUGINS"
     for descriptor in "$REPO/plugin-api/fixture/dependencies/$fixture_set"/*/*.yml; do
@@ -148,6 +148,18 @@ if [ -d "$FIXTURE_SRC" ]; then
         cp "$DEPENDENCY_CLASSES/fixture/dependencies/NoJoinApi.class" \
           "$STAGE/fixture/dependencies/"
       fi
+      if [ "$fixture" = "AfterProvider" ]; then
+        cp "$DEPENDENCY_CLASSES/fixture/dependencies/AfterApi.class" \
+          "$STAGE/fixture/dependencies/"
+      fi
+      if [ "$fixture" = "ZOmitProvider" ]; then
+        cp "$DEPENDENCY_CLASSES/fixture/dependencies/OmitApi.class" \
+          "$STAGE/fixture/dependencies/"
+      fi
+      if [ "$fixture" = "ExistingProvider" ]; then
+        cp "$DEPENDENCY_CLASSES/fixture/dependencies/ExistingApi.class" \
+          "$STAGE/fixture/dependencies/"
+      fi
       cp "$descriptor" "$STAGE/"
       jar --create --file "$SET_PLUGINS/$fixture.jar" -C "$STAGE" .
     done
@@ -160,7 +172,8 @@ if [ -d "$FIXTURE_SRC" ]; then
     "$REPO"/plugin-api/check/*.java
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$EVENT_CLASSES" Checks \
     "$FIX/plugins" "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS" \
-    "$FIX/dependency-graph-plugins" "$FIX/dependency-duplicates-plugins"
+    "$FIX/dependency-graph-plugins" "$FIX/dependency-duplicates-plugins" \
+    "$FIX/dependency-existing-plugins" "$FIX/dependency-cross-call-plugins"
 fi
 
 # A jar that compiles proves nothing about whether a plugin can be loaded

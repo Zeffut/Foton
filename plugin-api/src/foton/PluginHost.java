@@ -33,7 +33,8 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class PluginHost {
     private static final List<Plugin> loaded = new ArrayList<>();
-    private static final Map<String, org.bukkit.plugin.java.PluginClassLoader> pluginLoaders = new HashMap<>();
+    private static final Map<String, org.bukkit.plugin.java.PluginClassLoader> pluginLoaders =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<String, PluginState> states = new HashMap<>();
     private static final Map<Plugin, PluginState> statesByPlugin =
         new java.util.IdentityHashMap<>();
@@ -96,9 +97,21 @@ public final class PluginHost {
     public static int loadAllOnLoad(String directory) {
         ensureServer();
         List<DiscoveredPlugin> ordered = orderedPlugins(new File(directory));
+        Map<DiscoveredPlugin, PluginState> prepared = new java.util.IdentityHashMap<>();
         for (DiscoveredPlugin plugin : ordered) {
             try {
-                load(plugin, false);
+                PluginState state = prepare(plugin);
+                if (state != null) prepared.put(plugin, state);
+            } catch (Throwable error) {
+                System.out.println("[host] " + plugin.jar.getName() + " failed: " + error);
+                error.printStackTrace(System.out);
+            }
+        }
+        for (DiscoveredPlugin plugin : ordered) {
+            PluginState state = prepared.get(plugin);
+            if (state == null) continue;
+            try {
+                load(plugin, state, false);
             } catch (Throwable error) {
                 System.out.println("[host] " + plugin.jar.getName() + " failed: " + error);
                 error.printStackTrace(System.out);
@@ -177,6 +190,7 @@ public final class PluginHost {
         Set<DiscoveredPlugin> rejected = new HashSet<>();
         rejectDuplicateNames(discovered, rejected);
         rejectDuplicateAliases(discovered, rejected);
+        rejectLoadedIdentityConflicts(discovered, rejected);
         Map<String, DiscoveredPlugin> identities = identities(discovered, rejected);
         rejectMissingRequired(discovered, identities, rejected);
         propagateRequiredRejections(discovered, identities, rejected);
@@ -222,6 +236,18 @@ public final class PluginHost {
         }
     }
 
+    private static void rejectLoadedIdentityConflicts(
+            List<DiscoveredPlugin> discovered, Set<DiscoveredPlugin> rejected) {
+        for (DiscoveredPlugin plugin : discovered) {
+            if (rejected.contains(plugin)) continue;
+            IdentityConflict conflict = loadedIdentityConflict(plugin.descriptor);
+            if (conflict == null) continue;
+            System.out.println("[host] " + plugin.descriptor.getName() + ": identity "
+                + conflict.identity + " is already provided by " + conflict.owner.getName());
+            rejected.add(plugin);
+        }
+    }
+
     private static Map<String, DiscoveredPlugin> identities(
             List<DiscoveredPlugin> discovered, Set<DiscoveredPlugin> rejected) {
         Map<String, DiscoveredPlugin> identities = new HashMap<>();
@@ -242,7 +268,9 @@ public final class PluginHost {
         for (DiscoveredPlugin plugin : discovered) {
             if (rejected.contains(plugin)) continue;
             for (String dependency : requiredDependencies(plugin.descriptor)) {
-                if (identities.containsKey(key(dependency))) continue;
+                if (identities.containsKey(key(dependency)) || byName(dependency) != null) {
+                    continue;
+                }
                 System.out.println("[host] " + plugin.descriptor.getName()
                     + ": missing required dependency " + dependency);
                 rejected.add(plugin);
@@ -486,15 +514,38 @@ public final class PluginHost {
         }
     }
 
-    private static boolean load(DiscoveredPlugin discovered, boolean enableNow) throws Throwable {
+    private static PluginState prepare(DiscoveredPlugin discovered) throws Throwable {
         File jar = discovered.jar;
         PluginDescriptionFile descriptor = discovered.descriptor;
-        if (byName(descriptor.getName()) != null) {
-            System.out.println("[host] " + descriptor.getName() + " is already enabled; skipping " + jar.getName());
-            return false;
+        IdentityConflict conflict = loadedIdentityConflict(descriptor);
+        if (conflict != null) {
+            System.out.println("[host] " + descriptor.getName() + ": identity "
+                + conflict.identity + " is already provided by " + conflict.owner.getName()
+                + "; skipping " + jar.getName());
+            return null;
         }
         PluginState state = new PluginState(descriptor);
         registerState(state);
+        try {
+            org.bukkit.plugin.java.PluginClassLoader loader =
+                new HostedPluginClassLoader(pluginUrls(jar), dependencyParent(descriptor));
+            state.loader = loader;
+            File dataFolder = new File(jar.getParentFile(), descriptor.getName());
+            // Before the constructor, not after: a plugin may call getName()
+            // or getLogger() from it, and several do.
+            loader.describe(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
+            registerLoader(descriptor, loader);
+            return state;
+        } catch (Throwable error) {
+            rollback(state);
+            throw error;
+        }
+    }
+
+    private static boolean load(
+            DiscoveredPlugin discovered, PluginState state, boolean enableNow) throws Throwable {
+        File jar = discovered.jar;
+        PluginDescriptionFile descriptor = discovered.descriptor;
         String unavailable = unavailablePriorDependency(descriptor, false);
         if (unavailable != null) {
             System.out.println("[host] " + descriptor.getName()
@@ -503,15 +554,9 @@ public final class PluginHost {
             return false;
         }
 
-        org.bukkit.plugin.java.PluginClassLoader loader = null;
+        org.bukkit.plugin.java.PluginClassLoader loader = state.loader;
         try {
-            loader = new org.bukkit.plugin.java.PluginClassLoader(
-                pluginUrls(jar), dependencyParent(descriptor));
-            state.loader = loader;
             File dataFolder = new File(jar.getParentFile(), descriptor.getName());
-            // Before the constructor, not after: a plugin may call getName()
-            // or getLogger() from it, and several do.
-            loader.describe(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
             Class<?> type = Class.forName(descriptor.getMain(), true, loader);
             Object instance = type.getDeclaredConstructor().newInstance();
             if (!(instance instanceof JavaPlugin candidate)) {
@@ -527,7 +572,6 @@ public final class PluginHost {
             candidate.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
             FotonScheduler.activatePlugin(candidate);
             loaded.add(candidate);
-            registerLoader(descriptor, loader);
             state.status = Status.LOADING;
             candidate.onLoad();
             state.status = Status.LOADED;
@@ -550,7 +594,11 @@ public final class PluginHost {
             return;
         }
         state.cleaned.set(true);
-        if (state.loader != null) close(state.loader, state.descriptor.getName());
+        if (state.loader != null) {
+            org.bukkit.plugin.java.PluginClassLoader loader = state.loader;
+            pluginLoaders.entrySet().removeIf(entry -> entry.getValue() == loader);
+            close(loader, state.descriptor.getName());
+        }
         state.loader = null;
     }
 
@@ -619,18 +667,50 @@ public final class PluginHost {
     }
 
     private static void registerState(PluginState state) {
-        states.put(key(state.descriptor.getName()), state);
-        for (String alias : state.descriptor.getProvides()) {
-            states.put(key(alias), state);
+        List<String> identities = identityKeys(state.descriptor);
+        for (String identity : identities) {
+            PluginState existing = states.get(identity);
+            if (existing != null && existing.plugin != null && loaded.contains(existing.plugin)) {
+                throw new IllegalStateException("plugin identity is already registered: " + identity);
+            }
         }
+        for (String identity : identities) states.put(identity, state);
     }
 
     private static void registerLoader(
             PluginDescriptionFile descriptor,
             org.bukkit.plugin.java.PluginClassLoader loader) {
-        pluginLoaders.put(key(descriptor.getName()), loader);
-        for (String alias : descriptor.getProvides()) {
-            pluginLoaders.put(key(alias), loader);
+        List<String> identities = identityKeys(descriptor);
+        for (String identity : identities) {
+            if (pluginLoaders.containsKey(identity)) {
+                throw new IllegalStateException("plugin identity is already registered: " + identity);
+            }
+        }
+        for (String identity : identities) pluginLoaders.put(identity, loader);
+    }
+
+    private static List<String> identityKeys(PluginDescriptionFile descriptor) {
+        List<String> identities = new ArrayList<>();
+        addDependencyIdentity(identities, descriptor.getName());
+        for (String alias : descriptor.getProvides()) addDependencyIdentity(identities, alias);
+        return identities;
+    }
+
+    private static IdentityConflict loadedIdentityConflict(PluginDescriptionFile descriptor) {
+        for (String identity : identityKeys(descriptor)) {
+            Plugin owner = byName(identity);
+            if (owner != null) return new IdentityConflict(identity, owner);
+        }
+        return null;
+    }
+
+    private static final class IdentityConflict {
+        final String identity;
+        final Plugin owner;
+
+        IdentityConflict(String identity, Plugin owner) {
+            this.identity = identity;
+            this.owner = owner;
         }
     }
 
@@ -670,14 +750,12 @@ public final class PluginHost {
     }
 
     private static ClassLoader dependencyParent(PluginDescriptionFile descriptor) {
-        List<ClassLoader> dependencies = new ArrayList<>();
+        List<String> dependencies = new ArrayList<>();
         for (String name : descriptor.getDepend()) {
-            org.bukkit.plugin.java.PluginClassLoader loader = pluginLoaders.get(name.toLowerCase(java.util.Locale.ROOT));
-            if (loader != null) dependencies.add(loader);
+            addDependencyIdentity(dependencies, name);
         }
         for (String name : descriptor.getSoftDepend()) {
-            org.bukkit.plugin.java.PluginClassLoader loader = pluginLoaders.get(name.toLowerCase(java.util.Locale.ROOT));
-            if (loader != null && !dependencies.contains(loader)) dependencies.add(loader);
+            addDependencyIdentity(dependencies, name);
         }
         addClasspathDependencies(dependencies, descriptor.getBootstrapDependencies());
         addClasspathDependencies(dependencies, descriptor.getServerDependencies());
@@ -685,20 +763,57 @@ public final class PluginHost {
     }
 
     private static void addClasspathDependencies(
-            List<ClassLoader> out,
+            List<String> out,
             Map<String, PluginDescriptionFile.Dependency> dependencies) {
         for (Map.Entry<String, PluginDescriptionFile.Dependency> entry
                 : dependencies.entrySet()) {
             if (!entry.getValue().joinClasspath()) continue;
-            org.bukkit.plugin.java.PluginClassLoader loader = pluginLoaders.get(key(entry.getKey()));
-            if (loader != null && !out.contains(loader)) out.add(loader);
+            addDependencyIdentity(out, entry.getKey());
+        }
+    }
+
+    private static void addDependencyIdentity(List<String> out, String name) {
+        String identity = key(name);
+        if (!out.contains(identity)) out.add(identity);
+    }
+
+    private static final class HostedPluginClassLoader
+            extends org.bukkit.plugin.java.PluginClassLoader {
+        private HostedPluginClassLoader(URL[] urls, ClassLoader parent) {
+            super(urls, parent);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            synchronized (getClassLoadingLock(name)) {
+                Class<?> type = findLoadedClass(name);
+                if (type == null) {
+                    try {
+                        type = PluginHost.class.getClassLoader().loadClass(name);
+                    } catch (ClassNotFoundException ignored) {
+                        // Plugin-owned or dependency-owned class; try those below.
+                    }
+                }
+                if (type == null) {
+                    try {
+                        type = findClass(name);
+                    } catch (ClassNotFoundException ignored) {
+                        // Declared dependency class; delegate below.
+                    }
+                }
+                if (type == null) type = getParent().loadClass(name);
+                if (resolve) resolveClass(type);
+                return type;
+            }
         }
     }
 
     private static final class DependencyClassLoader extends ClassLoader {
-        private final List<ClassLoader> dependencies;
+        private static final ThreadLocal<Set<ClassLoader>> resolving =
+            ThreadLocal.withInitial(HashSet::new);
+        private final List<String> dependencies;
 
-        private DependencyClassLoader(List<ClassLoader> dependencies) {
+        private DependencyClassLoader(List<String> dependencies) {
             super(PluginHost.class.getClassLoader());
             this.dependencies = List.copyOf(dependencies);
         }
@@ -708,11 +823,16 @@ public final class PluginHost {
             try {
                 return super.loadClass(name, resolve);
             } catch (ClassNotFoundException missingFromServer) {
-                for (ClassLoader dependency : dependencies) {
+                for (String identity : dependencies) {
+                    ClassLoader dependency = pluginLoaders.get(identity);
+                    if (dependency == null || !resolving.get().add(dependency)) continue;
                     try {
                         return Class.forName(name, false, dependency);
                     } catch (ClassNotFoundException ignored) {
                         // Try the next declared dependency.
+                    } finally {
+                        resolving.get().remove(dependency);
+                        if (resolving.get().isEmpty()) resolving.remove();
                     }
                 }
                 throw missingFromServer;
