@@ -15,7 +15,7 @@ built API and Java fixture run. It reports four separate measurements:
   per-plugin class incidence and entrypoint reachability needed to distinguish
   load-bearing internals from optional adapters; 41 public-API-only and 18
   internals-reaching plugins remain labeled historical values;
-- events: 94 of 199 listened-for event types have a Java construction path
+- events: 96 of 199 listened-for event types have a Java construction path
   reached by an exact compiled-signature-valid Rust JNI call;
 - fixtures: all eight executable suites discover 49 jars, load 29, enable 27,
   and reject 22 with phase-specific causal diagnostics.
@@ -163,7 +163,10 @@ What this produces, beyond a work queue:
   have, and here they are" is answerable before the plugin is ever run.
 - **An early, quantified answer to the NMS question.** A v2 ledger records each
   plugin's entrypoints, reachable classes and optional adapters. Only
-  load-bearing internal references lower the current ceiling.
+  load-bearing internal references lower the current ceiling. Any unreadable
+  class makes that plugin's reachability evidence unknown, preserves the class
+  entry and parser reason, and prevents an incomplete ledger from publishing a
+  current ceiling.
 
 This is the repository's existing discipline — nothing is guessed, facts are
 generated, coverage is published with its caveats — applied to a second

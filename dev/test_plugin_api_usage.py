@@ -132,6 +132,54 @@ fn forward_world_load(env: &mut JNIEnv) {
 }
 """
 
+JAVA_OVERLOADED_FIRE = """
+package foton;
+
+import org.bukkit.event.world.WorldLoadEvent;
+import org.bukkit.event.world.WorldUnloadEvent;
+
+public final class EventBridge {
+    public static void fireOverloaded(String value) {
+        new WorldLoadEvent();
+    }
+
+    public static void fireOverloaded(int value) {
+        new WorldUnloadEvent();
+    }
+}
+"""
+
+RUST_OVERLOADED_FIRE = """
+const BRIDGE: &str = "foton/EventBridge";
+fn forward(env: &mut JNIEnv) {
+    env.call_static_method(
+        BRIDGE, "fireOverloaded", "(Ljava/lang/String;)V", &[]);
+}
+"""
+
+JAVA_LAMBDA_EVENT = """
+package foton;
+
+import org.bukkit.event.server.PluginDisableEvent;
+
+public final class PluginHost {
+    public static void disableAll() {
+        release(() -> new PluginDisableEvent());
+    }
+
+    private static void release(Runnable action) {
+        action.run();
+    }
+}
+"""
+
+RUST_LAMBDA_EVENT = """
+const HOST: &str = "foton/PluginHost";
+fn shutdown(env: &mut JNIEnv) {
+    env.call_static_method(HOST, "disableAll", "()V", &[]);
+}
+"""
+
 JAVA_JNI_ENTRY_POINTS = {
     "foton/PluginHost.java": """
         package foton;
@@ -230,6 +278,22 @@ public final class Main {
 }
 """
 
+UNREADABLE_ADAPTER_SOURCES = {
+    "example/Main.java": """
+        package example;
+        public final class Main {
+            public Adapter adapter() { return new Adapter(); }
+        }
+    """,
+    "example/Adapter.java": """
+        package example;
+        import net.minecraft.FakeInternals;
+        public final class Adapter {
+            public void use() { FakeInternals.reachInside(); }
+        }
+    """,
+}
+
 LEDGER = {
     "schema_version": 2,
     "plugins_scanned": 3,
@@ -252,8 +316,11 @@ LEDGER = {
         {
             "plugin": "Public.jar",
             "reachability_status": "complete",
+            "reachability_reason": None,
             "entrypoints": ["example/Public"],
             "entrypoint_reachable_classes": ["example/Public"],
+            "unreadable_class_count": 0,
+            "unreadable_classes": [],
             "internal": {
                 "load_bearing_classes": [],
                 "load_bearing_members": [],
@@ -264,8 +331,11 @@ LEDGER = {
         {
             "plugin": "OptionalAdapter.jar",
             "reachability_status": "complete",
+            "reachability_reason": None,
             "entrypoints": ["example/OptionalAdapter"],
             "entrypoint_reachable_classes": ["example/OptionalAdapter"],
+            "unreadable_class_count": 0,
+            "unreadable_classes": [],
             "internal": {
                 "load_bearing_classes": [],
                 "load_bearing_members": [],
@@ -276,8 +346,11 @@ LEDGER = {
         {
             "plugin": "LoadBearing.jar",
             "reachability_status": "complete",
+            "reachability_reason": None,
             "entrypoints": ["example/LoadBearing"],
             "entrypoint_reachable_classes": ["example/LoadBearing"],
+            "unreadable_class_count": 0,
+            "unreadable_classes": [],
             "internal": {
                 "load_bearing_classes": ["net/minecraft/Required"],
                 "load_bearing_members": ["net/minecraft/Required#use()V"],
@@ -571,6 +644,13 @@ class Scanning(unittest.TestCase):
             corpus.mkdir()
             shutil.copy(self.plain, corpus / "plain.jar")
             shutil.copy(self.internal_class_only, corpus / "internal.jar")
+            for jar, name, main in (
+                (corpus / "plain.jar", "Plain", "example.ExamplePlugin"),
+                (corpus / "internal.jar", "Internal", "example.InternalClassOnly"),
+            ):
+                with zipfile.ZipFile(jar, "a") as archive:
+                    archive.writestr(
+                        "plugin.yml", f"name: {name}\nmain: {main}\nversion: 1\n")
             repo = root / "repo"
             ledger = repo / "dev" / "plugin-api-usage.json"
             ledger.parent.mkdir(parents=True)
@@ -579,7 +659,8 @@ class Scanning(unittest.TestCase):
             written = json.loads(ledger.read_text(encoding="utf-8"))
 
         self.assertEqual(result, 0)
-        self.assertIn("plugins reaching past the public API: 1 of 2", output)
+        self.assertIn("plugins known to reach past the public API: 1 of 2", output)
+        self.assertIn("plugins with unknown entrypoint reachability: 0 of 2", output)
         self.assertEqual(written["plugins_reaching_internals"], 1)
         self.assertEqual(
             written["internal_classes"],
@@ -626,6 +707,48 @@ class Scanning(unittest.TestCase):
             ["net/minecraft/FakeInternals#reachInside()V"],
         )
 
+    def test_unreadable_referenced_adapter_makes_only_its_plugin_ceiling_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            corpus = root / "corpus"
+            corpus.mkdir()
+            source = build_jar(
+                UNREADABLE_ADAPTER_SOURCES, root / "unreadable-adapter")
+            unreadable = corpus / "unreadable.jar"
+            with (
+                zipfile.ZipFile(source) as original,
+                zipfile.ZipFile(unreadable, "w") as rewritten,
+            ):
+                for entry in original.infolist():
+                    data = original.read(entry)
+                    if entry.filename == "example/Adapter.class":
+                        data = b"not a class file"
+                    rewritten.writestr(entry, data)
+                rewritten.writestr(
+                    "plugin.yml",
+                    "name: UnreadableAdapter\nmain: example.Main\nversion: 1\n",
+                )
+            repo = root / "repo"
+            ledger = repo / "dev" / "plugin-api-usage.json"
+            ledger.parent.mkdir(parents=True)
+
+            result, _ = run_main([corpus, "--write"], repo, ledger)
+            written = json.loads(ledger.read_text(encoding="utf-8"))
+            summary = plugin_api_usage.compatibility_summary(
+                written, PROVIDED, WANTED, EMITTED)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(written["plugins_reachability_unknown"], 1)
+        row = written["plugin_incidence"][0]
+        self.assertEqual(row["reachability_status"], "unknown")
+        self.assertEqual(row["unreadable_class_count"], 1)
+        self.assertEqual(
+            row["unreadable_classes"],
+            [{"entry": "example/Adapter.class", "reason": "bad magic"}],
+        )
+        self.assertEqual(summary["ceiling"]["status"], "unknown")
+        self.assertIsNone(summary["ceiling"]["plugins_on_public_api"])
+
 
 class CompatibilityEvidence(unittest.TestCase):
     @unittest.skipUnless(
@@ -670,6 +793,31 @@ class CompatibilityEvidence(unittest.TestCase):
         }:
             self.assertIn(mismatch, roots)
             self.assertNotIn(mismatch, compiled)
+
+    @unittest.skipUnless(
+        (plugin_api_usage.REPO / "plugin-api/build/foton-plugin-api.jar").is_file(),
+        "the repository API jar is built by dev/build-plugin-api.sh",
+    )
+    def test_repository_spawn_location_helper_has_two_exact_compiled_roots(self):
+        api = plugin_api_usage.REPO / "plugin-api/build/foton-plugin-api.jar"
+        roots = plugin_api_usage._rust_jni_roots(
+            plugin_api_usage.REPO / "foton-plugin/src")
+        compiled = plugin_api_usage._compiled_method_signatures(api)
+        expected = {
+            (
+                "foton/EventBridge",
+                "firePlayerRespawn",
+                "(Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;",
+            ),
+            (
+                "foton/EventBridge",
+                "firePlayerSpawnLocation",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        }
+
+        self.assertLessEqual(expected, roots)
+        self.assertLessEqual(expected, compiled)
 
     def test_unlinked_java_fire_method_is_not_emitted(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -750,6 +898,48 @@ class CompatibilityEvidence(unittest.TestCase):
             emitted = plugin_api_usage.emitted_events(java, rust, compiled)
 
         self.assertIn("org/bukkit/event/world/WorldLoadEvent", emitted)
+
+    def test_exact_java_overload_does_not_traverse_same_named_body(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            java = root / "java"
+            rust = root / "rust"
+            java.mkdir()
+            rust.mkdir()
+            (java / "EventBridge.java").write_text(
+                JAVA_OVERLOADED_FIRE, encoding="utf-8")
+            (rust / "forward.rs").write_text(
+                RUST_OVERLOADED_FIRE, encoding="utf-8")
+            compiled = build_jar(
+                {"foton/EventBridge.java": JAVA_OVERLOADED_FIRE},
+                root / "compiled",
+            )
+
+            emitted = plugin_api_usage.emitted_events(java, rust, compiled)
+
+        self.assertEqual(
+            emitted, {"org/bukkit/event/world/WorldLoadEvent"})
+
+    def test_exact_java_graph_follows_lambda_implementation_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            java = root / "java"
+            rust = root / "rust"
+            java.mkdir()
+            rust.mkdir()
+            (java / "PluginHost.java").write_text(
+                JAVA_LAMBDA_EVENT, encoding="utf-8")
+            (rust / "forward.rs").write_text(
+                RUST_LAMBDA_EVENT, encoding="utf-8")
+            compiled = build_jar(
+                {"foton/PluginHost.java": JAVA_LAMBDA_EVENT},
+                root / "compiled",
+            )
+
+            emitted = plugin_api_usage.emitted_events(java, rust, compiled)
+
+        self.assertEqual(
+            emitted, {"org/bukkit/event/server/PluginDisableEvent"})
 
     def test_jni_entry_points_follow_static_and_instance_java_paths(self):
         with tempfile.TemporaryDirectory() as directory:

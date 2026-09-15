@@ -79,9 +79,11 @@ of evidence. Shared symbol coverage is not a plugin success rate. The legacy
 ledger cannot support a current ceiling because it lacks per-plugin class
 incidence and entrypoint reachability; the JSON therefore reports the current
 ceiling as unknown and labels 41/59 as historical. A corpus-backed v2 rewrite
-separates load-bearing internal references from optional adapters. Event
-coverage requires an exact Rust JNI owner, method and descriptor present in the
-compiled API before following the Java path to an event constructor. Fixture
+separates load-bearing internal references from optional adapters; a plugin
+with any unreadable class remains unknown, with the entry and parse reason
+retained. Event coverage is currently 96/199 and requires an exact Rust JNI
+owner, method and descriptor present in the compiled API before following exact
+owner/name/descriptor Java bytecode edges to an event constructor. Fixture
 evidence covers every direct jar in the event, lifecycle, replacement,
 dependency, cross-call alias, library, malformed-library and Paper directories;
 cache and nested decoy jars are excluded. Each jar records discovery, load,

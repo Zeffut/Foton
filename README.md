@@ -101,8 +101,11 @@ plugin success rate. The current legacy corpus ledger has no per-plugin class
 incidence or entrypoint reachability, so its present ceiling is `null`; its old
 41-of-59 public-API figure is retained only as historical evidence. A v2 corpus
 regeneration distinguishes load-bearing internal references from optional
-adapters. An event counts only when an exact Rust JNI owner, method and
-descriptor resolves in the compiled Java API and reaches its construction path.
+adapters; any unreadable plugin class keeps that plugin's reachability evidence
+unknown with the unreadable entry and reason retained. An event counts only
+when an exact Rust JNI owner, method and descriptor resolves in the compiled
+Java API and reaches its construction path through the exact compiled method
+graph. Current event evidence is 96 of 199 listened-for types.
 The executable fixture report covers 49 jars across all eight suites; it loads
 29, enables 27 and rejects 22 with phase-specific causal diagnostics.
 

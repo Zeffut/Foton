@@ -506,6 +506,7 @@ def plugin_incidence(jar):
     internal_members = {}
     internal_classes = {}
     entrypoints = set()
+    unreadable_classes = []
     with zipfile.ZipFile(jar) as archive:
         for descriptor in ("plugin.yml", "paper-plugin.yml"):
             if descriptor not in archive.namelist():
@@ -527,7 +528,11 @@ def plugin_incidence(jar):
                     member for surface, member in references(data)
                     if surface == "internal"
                 }
-            except (NotAClassFile, struct.error, KeyError, IndexError):
+            except (NotAClassFile, struct.error, KeyError, IndexError) as error:
+                unreadable_classes.append({
+                    "entry": entry,
+                    "reason": str(error) or type(error).__name__,
+                })
                 continue
             if not owner:
                 continue
@@ -536,7 +541,11 @@ def plugin_incidence(jar):
             internal_classes[owner] = classes_on_surface(classes, "internal")
 
     own_classes = set(class_dependencies)
-    complete = bool(entrypoints) and entrypoints <= own_classes
+    complete = (
+        not unreadable_classes
+        and bool(entrypoints)
+        and entrypoints <= own_classes
+    )
     reachable = set()
     if complete:
         pending = list(entrypoints)
@@ -550,11 +559,23 @@ def plugin_incidence(jar):
 
     load_bearing_owners = reachable if complete else set()
     optional_owners = own_classes - load_bearing_owners if complete else set()
+    if unreadable_classes:
+        reachability_reason = "one or more plugin classes were unreadable"
+    elif not entrypoints:
+        reachability_reason = "no descriptor entrypoint was found"
+    elif not entrypoints <= own_classes:
+        reachability_reason = "one or more descriptor entrypoints were unreadable or absent"
+    else:
+        reachability_reason = None
     return {
         "plugin": pathlib.Path(jar).name,
         "reachability_status": "complete" if complete else "unknown",
+        "reachability_reason": reachability_reason,
         "entrypoints": sorted(entrypoints),
         "entrypoint_reachable_classes": sorted(reachable) if complete else None,
+        "unreadable_class_count": len(unreadable_classes),
+        "unreadable_classes": sorted(
+            unreadable_classes, key=lambda row: row["entry"]),
         "internal": {
             "load_bearing_classes": sorted(set().union(
                 *(internal_classes.get(owner, set()) for owner in load_bearing_owners)
@@ -648,23 +669,6 @@ def coverage_curve(reachable, ranked):
     return rows
 
 
-JAVA_METHOD = re.compile(
-    r"\b(?:(?:public|protected|private|static|final|synchronized|default)\s+)*"
-    r"(?:<[^>{}]+>\s+)?[\w.$<>\[\], ?]+\s+"
-    r"([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws\s+[^{}]+)?\{"
-)
-JAVA_CONSTRUCTOR = re.compile(
-    r"\bnew\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\("
-)
-JAVA_EVENT_VALUE = re.compile(
-    r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*Event)\s+"
-    r"[A-Za-z_$][\w$]*\s*="
-)
-JAVA_CALL = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\(")
-JAVA_OWNED_CALL = re.compile(
-    r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\."
-    r"([A-Za-z_$][\w$]*)\s*\("
-)
 RUST_STRING_CONSTANT = re.compile(
     r'\bconst\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]+)"'
 )
@@ -682,6 +686,18 @@ RUST_DYNAMIC_JNI_CALL = re.compile(
 # helper is invisible to compatibility evidence until it is explicitly added
 # here and its concrete call sites still pass compiled-signature validation.
 RUST_DYNAMIC_JNI_HELPERS = frozenset({"world_call", "string_call", "block_call"})
+RUST_REVIEWED_DYNAMIC_CALLS = {
+    "spawn_location_call_named": {
+        "firePlayerRespawn": (
+            "foton/EventBridge",
+            "(Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;",
+        ),
+        "firePlayerSpawnLocation": (
+            "foton/EventBridge",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        ),
+    },
+}
 RUST_FUNCTION = re.compile(
     r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?:->\s*[^\{]+)?\{",
     re.DOTALL,
@@ -703,32 +719,6 @@ def _method_body(source, opening_brace):
     return source[opening_brace + 1:offset - 1]
 
 
-def _event_name(java_name, imports, package):
-    """Resolves a Java event type to the slash-separated binary name."""
-    if "." in java_name:
-        resolved = java_name.replace(".", "/")
-    elif java_name in imports:
-        resolved = imports[java_name].replace(".", "/")
-    elif package:
-        resolved = f"{package.replace('.', '/')}/{java_name}"
-    else:
-        return None
-    if "/event/" not in resolved or not resolved.endswith("Event"):
-        return None
-    return resolved
-
-
-def _java_owner(java_name, imports, package):
-    """Resolves a Java class expression to a slash-separated owner."""
-    if "." in java_name:
-        return java_name.replace(".", "/")
-    if java_name in imports:
-        return imports[java_name].replace(".", "/")
-    if java_name[:1].isupper() and package:
-        return f"{package.replace('.', '/')}/{java_name}"
-    return None
-
-
 def _compiled_method_signatures(api_jar):
     """Exact owner, method and descriptor triples declared in a compiled jar."""
     signatures = set()
@@ -747,6 +737,169 @@ def _compiled_method_signatures(api_jar):
                 if opening > 0:
                     signatures.add((owner, member[:opening], member[opening:]))
     return signatures
+
+
+def _member_reference(pool, index):
+    """Resolve one method-reference constant to an exact JVM method triple."""
+    entry = pool.get(index)
+    if not entry or entry[0] not in (TAG_METHODREF, TAG_INTERFACE_METHODREF):
+        return None
+    class_index, name_and_type_index = struct.unpack(">HH", entry[1])
+    owner = _class_name(pool, class_index)
+    name_and_type = pool.get(name_and_type_index)
+    if not owner or not name_and_type or name_and_type[0] != TAG_NAME_AND_TYPE:
+        return None
+    name_index, descriptor_index = struct.unpack(">HH", name_and_type[1])
+    name = _utf8(pool, name_index)
+    descriptor = _utf8(pool, descriptor_index)
+    if not name or not descriptor:
+        return None
+    return owner, name, descriptor
+
+
+def _event_type(name):
+    return "/event/" in name and name.endswith("Event")
+
+
+def _code_edges(pool, code, bootstrap_calls):
+    """Exact invoked methods and constructed event types in one Code body."""
+    calls = set()
+    events = set()
+    offset = 0
+    one_byte = {0x10, 0x12, *range(0x15, 0x1a), *range(0x36, 0x3b), 0xa9, 0xbc}
+    two_bytes = {
+        0x11, 0x13, 0x14, 0x84,
+        *range(0x99, 0xa9),
+        *range(0xb2, 0xb9),
+        0xbb, 0xbd, 0xc0, 0xc1, 0xc6, 0xc7,
+    }
+    while offset < len(code):
+        opcode = code[offset]
+        offset += 1
+        if opcode in (0xb6, 0xb7, 0xb8, 0xb9):
+            index = struct.unpack_from(">H", code, offset)[0]
+            reference = _member_reference(pool, index)
+            if reference:
+                calls.add(reference)
+        elif opcode == 0xbb:
+            index = struct.unpack_from(">H", code, offset)[0]
+            name = _class_name(pool, index)
+            if name and _event_type(name):
+                events.add(name)
+        elif opcode == 0xba:
+            index = struct.unpack_from(">H", code, offset)[0]
+            entry = pool.get(index)
+            if entry and entry[0] == TAG_INVOKE_DYNAMIC:
+                bootstrap_index, name_and_type_index = struct.unpack(">HH", entry[1])
+                calls.update(bootstrap_calls.get(bootstrap_index, ()))
+                name_and_type = pool.get(name_and_type_index)
+                if name_and_type and name_and_type[0] == TAG_NAME_AND_TYPE:
+                    _, descriptor_index = struct.unpack(">HH", name_and_type[1])
+                    descriptor = _utf8(pool, descriptor_index) or ""
+                    events.update(
+                        name for name in _descriptor_classes(descriptor)
+                        if _event_type(name)
+                    )
+
+        if opcode == 0xaa:  # tableswitch, padded to a four-byte boundary
+            offset += (-offset) % 4
+            _, low, high = struct.unpack_from(">iii", code, offset)
+            offset += 12 + 4 * (high - low + 1)
+        elif opcode == 0xab:  # lookupswitch
+            offset += (-offset) % 4
+            _, pairs = struct.unpack_from(">ii", code, offset)
+            offset += 8 + 8 * pairs
+        elif opcode == 0xc4:  # wide
+            modified = code[offset]
+            offset += 5 if modified == 0x84 else 3
+        elif opcode in (0xb9, 0xba):
+            offset += 4
+        elif opcode in (0xc5,):
+            offset += 3
+        elif opcode in (0xc8, 0xc9):
+            offset += 4
+        elif opcode in one_byte:
+            offset += 1
+        elif opcode in two_bytes:
+            offset += 2
+    return events, calls
+
+
+def _compiled_method_graph(api_jar):
+    """Compiled Java methods indexed by exact owner, name and descriptor."""
+    methods = {}
+    with zipfile.ZipFile(api_jar) as archive:
+        for entry in archive.namelist():
+            if not entry.endswith(".class"):
+                continue
+            try:
+                data = archive.read(entry)
+                pool, offset = _read_pool(data)
+                offset += 2  # access_flags
+                this_index, _, interface_count = struct.unpack_from(">HHH", data, offset)
+                offset += 6 + 2 * interface_count
+                owner = _class_name(pool, this_index)
+                field_count = struct.unpack_from(">H", data, offset)[0]
+                offset += 2
+                for _ in range(field_count):
+                    attribute_count = struct.unpack_from(">H", data, offset + 6)[0]
+                    offset += 8
+                    for _ in range(attribute_count):
+                        length = struct.unpack_from(">I", data, offset + 2)[0]
+                        offset += 6 + length
+
+                method_count = struct.unpack_from(">H", data, offset)[0]
+                offset += 2
+                method_code = []
+                for _ in range(method_count):
+                    _, name_index, descriptor_index, attribute_count = struct.unpack_from(
+                        ">HHHH", data, offset)
+                    offset += 8
+                    name = _utf8(pool, name_index)
+                    descriptor = _utf8(pool, descriptor_index)
+                    code = b""
+                    for _ in range(attribute_count):
+                        attribute_name_index, length = struct.unpack_from(">HI", data, offset)
+                        offset += 6
+                        attribute_name = _utf8(pool, attribute_name_index)
+                        if attribute_name == "Code":
+                            code_length = struct.unpack_from(">I", data, offset + 4)[0]
+                            code = data[offset + 8:offset + 8 + code_length]
+                        offset += length
+                    if owner and name and descriptor:
+                        method_code.append(((owner, name, descriptor), code))
+
+                bootstrap_calls = collections.defaultdict(set)
+                class_attribute_count = struct.unpack_from(">H", data, offset)[0]
+                offset += 2
+                for _ in range(class_attribute_count):
+                    attribute_name_index, length = struct.unpack_from(">HI", data, offset)
+                    offset += 6
+                    attribute_name = _utf8(pool, attribute_name_index)
+                    if attribute_name == "BootstrapMethods":
+                        bootstrap_count = struct.unpack_from(">H", data, offset)[0]
+                        bootstrap_offset = offset + 2
+                        for bootstrap_index in range(bootstrap_count):
+                            _, argument_count = struct.unpack_from(
+                                ">HH", data, bootstrap_offset)
+                            bootstrap_offset += 4
+                            for _ in range(argument_count):
+                                argument_index = struct.unpack_from(
+                                    ">H", data, bootstrap_offset)[0]
+                                bootstrap_offset += 2
+                                argument = pool.get(argument_index)
+                                if argument and argument[0] == TAG_METHOD_HANDLE:
+                                    _, reference_index = struct.unpack(">BH", argument[1])
+                                    reference = _member_reference(pool, reference_index)
+                                    if reference:
+                                        bootstrap_calls[bootstrap_index].add(reference)
+                    offset += length
+
+                for node, code in method_code:
+                    methods[node] = _code_edges(pool, code, bootstrap_calls)
+            except (NotAClassFile, struct.error, KeyError, IndexError):
+                continue
+    return methods
 
 
 def _rust_jni_roots(rust_source_root):
@@ -788,6 +941,16 @@ def _rust_jni_roots(rust_source_root):
             )
             for method in call.findall(source):
                 roots.add((owner, method, descriptor))
+        for helper, reviewed in RUST_REVIEWED_DYNAMIC_CALLS.items():
+            call = re.compile(
+                rf"\b{re.escape(helper)}\s*\(\s*[^,\n]+,\s*"
+                r'"([A-Za-z_$][A-Za-z0-9_$]*)"'
+            )
+            for method in call.findall(source):
+                target = reviewed.get(method)
+                if target:
+                    owner, descriptor = target
+                    roots.add((owner, method, descriptor))
     return roots
 
 
@@ -797,37 +960,9 @@ def emitted_events(
     compiled_api_jar: pathlib.Path,
 ) -> set[str]:
     """Events reached by exact, compiled-signature-valid Rust JNI calls."""
-    compiled = _compiled_method_signatures(compiled_api_jar)
-    called_from_rust = {
-        (owner, method)
-        for owner, method, descriptor in _rust_jni_roots(rust_source_root)
-        if (owner, method, descriptor) in compiled
-    }
-
-    methods = collections.defaultdict(list)
-    for path in pathlib.Path(java_source_root).rglob("*.java"):
-        source = path.read_text(encoding="utf-8", errors="replace")
-        package_match = re.search(r"^\s*package\s+([\w.]+)\s*;", source, re.MULTILINE)
-        package = package_match.group(1) if package_match else ""
-        owner = f"{package.replace('.', '/')}/{path.stem}" if package else path.stem
-        imports = {
-            name.rsplit(".", 1)[-1]: name
-            for name in re.findall(r"^\s*import\s+([\w.]+)\s*;", source, re.MULTILINE)
-        }
-        for match in JAVA_METHOD.finditer(source):
-            body = _method_body(source, match.end() - 1)
-            events = {
-                event
-                for name in (
-                    JAVA_CONSTRUCTOR.findall(body) + JAVA_EVENT_VALUE.findall(body)
-                )
-                if (event := _event_name(name, imports, package)) is not None
-            }
-            calls = {(owner, name) for name in JAVA_CALL.findall(body)}
-            for receiver, method in JAVA_OWNED_CALL.findall(body):
-                called_owner = _java_owner(receiver, imports, package)
-                calls.add((called_owner or owner, method))
-            methods[(owner, match.group(1))].append((events, calls))
+    del java_source_root  # The compiled jar is the authoritative exact graph.
+    methods = _compiled_method_graph(compiled_api_jar)
+    called_from_rust = _rust_jni_roots(rust_source_root) & methods.keys()
 
     emitted = set()
     pending = list(called_from_rust)
@@ -837,7 +972,9 @@ def emitted_events(
         if node in reached:
             continue
         reached.add(node)
-        for events, calls in methods.get(node, ()):
+        evidence = methods.get(node)
+        if evidence:
+            events, calls = evidence
             emitted.update(events)
             pending.extend(calls - reached)
     return emitted
@@ -956,11 +1093,32 @@ def compatibility_summary(
     scanned = ledger.get("plugins_scanned", 0)
     historical_reaches = ledger.get("plugins_reaching_internals", 0)
     incidence = ledger.get("plugin_incidence")
+    def complete_incidence(row):
+        internal = row.get("internal")
+        return (
+            row.get("reachability_status") == "complete"
+            and row.get("unreadable_class_count") == 0
+            and row.get("unreadable_classes") == []
+            and isinstance(row.get("entrypoints"), list)
+            and bool(row["entrypoints"])
+            and isinstance(row.get("entrypoint_reachable_classes"), list)
+            and isinstance(internal, dict)
+            and all(
+                isinstance(internal.get(key), list)
+                for key in (
+                    "load_bearing_classes",
+                    "load_bearing_members",
+                    "optional_adapter_classes",
+                    "optional_adapter_members",
+                )
+            )
+        )
+
     current_ceiling = (
         ledger.get("schema_version") == 2
         and isinstance(incidence, list)
         and len(incidence) == scanned
-        and all(row.get("reachability_status") == "complete" for row in incidence)
+        and all(complete_incidence(row) for row in incidence)
     )
     if current_ceiling:
         reaches_internals = sum(
@@ -1233,6 +1391,7 @@ def main():
     plugins_per_event = collections.Counter()
     surface_of = {}
     reaches_internal = []
+    reachability_unknown = []
     failed = []
     # What each plugin that could ever run needs, which is what the curve is
     # computed from. A plugin reaching internals is excluded: no amount of API
@@ -1256,9 +1415,9 @@ def main():
         load_bearing_internal = (
             internal["load_bearing_members"] or internal["load_bearing_classes"]
         )
-        if incidence["reachability_status"] == "unknown":
-            load_bearing_internal = bool(found["internal"] or internal_classes)
-        if load_bearing_internal:
+        if incidence["reachability_status"] != "complete":
+            reachability_unknown.append(jar.name)
+        elif load_bearing_internal:
             reaches_internal.append(jar.name)
         elif found["api"] or api_classes:
             needs[jar.stem] = found["api"] | api_classes
@@ -1283,9 +1442,13 @@ def main():
     print(f"corpus: {scanned} plugins read, {len(jars)} jars found")
     print(f"distinct API members referenced: {len(api)}")
     print(
-        f"plugins reaching past the public API: {len(reaches_internal)}"
+        f"plugins known to reach past the public API: {len(reaches_internal)}"
         f" of {scanned}"
         f" ({100 * len(reaches_internal) // max(scanned, 1)}%) -- these can never run"
+    )
+    print(
+        f"plugins with unknown entrypoint reachability: {len(reachability_unknown)}"
+        f" of {scanned}"
     )
     if failed:
         print(f"problems: {len(failed)}")
@@ -1330,6 +1493,7 @@ def main():
                     "schema_version": 2,
                     "plugins_scanned": scanned,
                     "plugins_reaching_internals": len(reaches_internal),
+                    "plugins_reachability_unknown": len(reachability_unknown),
                     "api_members_referenced": len(api),
                     "api_members_kept_at_least": SHARED_BY,
                     "api_members": [
