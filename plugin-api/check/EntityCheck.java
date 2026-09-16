@@ -10,6 +10,7 @@ final class EntityCheck {
         generatedClassLookupPreservesPaperAbstractAndSpecializedDefaults();
         generatedWrapperSupportMatchesRuntimeWrappers();
         entityContractsPreservePaperInheritance();
+        paperDeprecationMetadataIsExact();
         dimensionsComeFromTheBoundingBox();
         destinationLocationIsFilledInPlace();
         missingEntityStillReturnsDestination();
@@ -106,14 +107,21 @@ final class EntityCheck {
                     && method.getParameterCount() == 1),
             "Ageable must not add a setBaby(boolean) declaration absent from Paper");
         Checks.expect(java.util.Arrays.asList(org.bukkit.entity.MushroomCow.class.getInterfaces())
-                .contains(org.bukkit.entity.AbstractCow.class),
-            "MushroomCow must directly extend AbstractCow rather than Cow");
+                .equals(java.util.List.of(org.bukkit.entity.AbstractCow.class,
+                    io.papermc.paper.entity.Shearable.class)),
+            "MushroomCow must directly extend AbstractCow and Paper Shearable");
         Checks.expect(org.bukkit.entity.Creature.class.isAssignableFrom(
                 org.bukkit.entity.AbstractCubeMob.class),
             "AbstractCubeMob must inherit Creature");
         Checks.expect(org.bukkit.entity.AbstractCubeMob.class.isAssignableFrom(
                 org.bukkit.entity.Slime.class),
             "Slime must inherit AbstractCubeMob");
+        Checks.expect(org.bukkit.entity.Enemy.class.isAssignableFrom(
+                org.bukkit.entity.Slime.class),
+            "Slime must implement Enemy");
+        Checks.expect(java.util.Arrays.stream(org.bukkit.entity.Slime.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("getSize")),
+            "Slime must inherit getSize without redeclaring it");
         Checks.expect(org.bukkit.entity.Fireball.class.isAssignableFrom(
                 org.bukkit.entity.SizedFireball.class),
             "SizedFireball must inherit Fireball");
@@ -129,6 +137,23 @@ final class EntityCheck {
         Checks.expect(!org.bukkit.entity.TippedArrow.class.isAssignableFrom(
                 foton.FotonArrow.class),
             "ordinary arrows must not claim tipped-arrow identity");
+    }
+
+    private static void paperDeprecationMetadataIsExact() {
+        for (String name : java.util.List.of("canBreed", "setBreed")) {
+            try {
+                Class<?>[] parameters = name.equals("setBreed")
+                    ? new Class<?>[] { boolean.class } : new Class<?>[0];
+                Deprecated deprecated = org.bukkit.entity.Ageable.class
+                    .getDeclaredMethod(name, parameters)
+                    .getAnnotation(Deprecated.class);
+                Checks.expect(deprecated != null && deprecated.since().equals("1.16.2")
+                        && !deprecated.forRemoval(),
+                    "Ageable." + name + " must carry Paper's 1.16.2 deprecation metadata");
+            } catch (ReflectiveOperationException error) {
+                throw new AssertionError("Ageable breeding ABI is missing", error);
+            }
+        }
     }
 
     private static void suppliedRegistryTypeSelectsTheWrapperWithoutAnotherLookup() {

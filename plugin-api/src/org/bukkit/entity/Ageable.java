@@ -9,6 +9,8 @@ public interface Ageable extends Creature {
     void setBaby();
     void setAdult();
     boolean isAdult();
+    @Deprecated(since = "1.16.2")
     boolean canBreed();
+    @Deprecated(since = "1.16.2")
     void setBreed(boolean breed);
 }

@@ -172,6 +172,36 @@ impl MobEffectInstanceDetails {
         }
     }
 
+    #[must_use]
+    pub const fn amplifier(&self) -> i32 {
+        self.amplifier
+    }
+
+    #[must_use]
+    pub const fn duration(&self) -> i32 {
+        self.duration
+    }
+
+    #[must_use]
+    pub const fn ambient(&self) -> bool {
+        self.ambient
+    }
+
+    #[must_use]
+    pub const fn show_particles(&self) -> bool {
+        self.show_particles
+    }
+
+    #[must_use]
+    pub const fn show_icon(&self) -> bool {
+        self.show_icon
+    }
+
+    #[must_use]
+    pub fn hidden_effect(&self) -> Option<&Self> {
+        self.hidden_effect.as_deref()
+    }
+
     fn to_nbt_compound(&self) -> NbtCompound {
         let mut compound = NbtCompound::new();
         if self.amplifier != 0 {

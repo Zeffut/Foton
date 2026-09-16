@@ -147,6 +147,13 @@ impl MobEffectInstance {
         self
     }
 
+    /// Attaches the lower-priority fallback retained behind this visible effect.
+    #[must_use]
+    pub fn with_hidden_effect(mut self, hidden_effect: Self) -> Self {
+        self.hidden_effect = Some(Box::new(hidden_effect));
+        self
+    }
+
     /// Returns the mob effect.
     #[must_use]
     pub const fn effect(&self) -> MobEffectRef {
@@ -181,6 +188,12 @@ impl MobEffectInstance {
     #[must_use]
     pub const fn show_icon(&self) -> bool {
         self.show_icon
+    }
+
+    /// Returns the lower-priority fallback retained by vanilla effect merging.
+    #[must_use]
+    pub fn hidden_effect(&self) -> Option<&Self> {
+        self.hidden_effect.as_deref()
     }
 
     /// Returns whether this effect uses vanilla's infinite-duration sentinel.

@@ -78,14 +78,14 @@ use foton_core::entity::entities::objects::explosives::PrimedTntEntity;
 use foton_core::entity::entities::objects::items::ExperienceOrbEntity;
 use foton_core::entity::entities::objects::items::FallingBlockEntity;
 use foton_core::entity::entities::objects::items::ItemEntity;
-use foton_core::entity::entities::objects::projectiles::ArrowEntity;
 use foton_core::entity::entities::objects::projectiles::FireworkRocketEntity;
+use foton_core::entity::entities::objects::projectiles::{ArrowEntity, ArrowPickup};
 use foton_core::entity::entities::objects::projectiles::{
     DragonFireballEntity, LargeFireballEntity, SmallFireballEntity,
 };
 use foton_core::entity::entities::objects::vehicles::{BoatEntity, RaftEntity};
 use foton_core::entity::spawn_util::{
-    SpawnEntityInitialization, spawn_entity_at, spawn_entity_at_initialized,
+    SpawnEntityInitialization, create_entity_at, create_entity_at_initialized, prepare_then_publish,
 };
 use foton_core::entity::spellcaster_illager::{IllagerSpell, SpellcasterIllager};
 use foton_core::entity::{
@@ -120,11 +120,13 @@ use foton_protocol::packets::game::{
     CSetDefaultSpawnPosition, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CStopSound,
     CSystemChat, CTabList, SoundSource,
 };
+use foton_registry::MobEffectInstance as RegistryMobEffectInstance;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::data_components::components::{
-    CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
+    CustomModelData, ItemEnchantments, ItemLore, SuspiciousStewEffect, SuspiciousStewEffects,
+    TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
     CUSTOM_MODEL_DATA, CUSTOM_NAME, DAMAGE, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
@@ -6745,6 +6747,467 @@ extern "system" fn arrow_custom_effects(
     string_array(&mut env, &effects)
 }
 
+extern "system" fn arrow_property(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    property: JString<'_>,
+) -> jstring {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(property): Result<String, _> = env.get_string(&property).map(Into::into) else {
+        return null_mut();
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return null_mut();
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return null_mut();
+    };
+    let value = match property.as_str() {
+        "damage" => match arrow.base_damage() {
+            f64::INFINITY => "Infinity".to_owned(),
+            f64::NEG_INFINITY => "-Infinity".to_owned(),
+            damage => damage.to_string(),
+        },
+        "pierce" => arrow.pierce_level().to_string(),
+        "critical" => arrow.is_crit_arrow().to_string(),
+        "in_block" => arrow.is_in_ground().to_string(),
+        "attached" => arrow
+            .attached_blocks()
+            .into_iter()
+            .map(|pos| format!("{},{},{}", pos.x(), pos.y(), pos.z()))
+            .collect::<Vec<_>>()
+            .join(";"),
+        "pickup" => match arrow.pickup() {
+            ArrowPickup::Disallowed => "DISALLOWED".to_owned(),
+            ArrowPickup::Allowed => "ALLOWED".to_owned(),
+            ArrowPickup::CreativeOnly => "CREATIVE_ONLY".to_owned(),
+        },
+        "crossbow" => arrow
+            .weapon_item()
+            .is_some_and(|weapon| weapon.is(&vanilla_items::CROSSBOW))
+            .to_string(),
+        "item" => describe_slot(&arrow.pickup_item()),
+        "weapon" => {
+            let Some(item) = arrow.weapon_item() else {
+                return null_mut();
+            };
+            describe_slot(&item)
+        }
+        "lifetime" => arrow.lifetime_ticks().to_string(),
+        "sound" => arrow.hit_sound().key.to_string(),
+        _ => return null_mut(),
+    };
+    to_java(&mut env, Some(value))
+}
+
+extern "system" fn set_arrow_property(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    property: JString<'_>,
+    value: JString<'_>,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(property): Result<String, _> = env.get_string(&property).map(Into::into) else {
+        return 0;
+    };
+    let Ok(value): Result<String, _> = env.get_string(&value).map(Into::into) else {
+        return 0;
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return 0;
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return 0;
+    };
+    let changed = match property.as_str() {
+        "damage" => match value.as_str() {
+            "Infinity" => Some(f64::INFINITY),
+            "-Infinity" => Some(f64::NEG_INFINITY),
+            _ => value.parse::<f64>().ok(),
+        }
+        .filter(|damage| *damage >= 0.0)
+        .is_some_and(|damage| {
+            arrow.set_base_damage(damage);
+            true
+        }),
+        "pierce" => value.parse::<i8>().ok().is_some_and(|level| {
+            arrow.set_pierce_level(level);
+            true
+        }),
+        "critical" => value.parse::<bool>().ok().is_some_and(|critical| {
+            arrow.set_crit_arrow(critical);
+            true
+        }),
+        "pickup" => match value.as_str() {
+            "DISALLOWED" => {
+                arrow.set_pickup(ArrowPickup::Disallowed);
+                true
+            }
+            "ALLOWED" => {
+                arrow.set_pickup(ArrowPickup::Allowed);
+                true
+            }
+            "CREATIVE_ONLY" => {
+                arrow.set_pickup(ArrowPickup::CreativeOnly);
+                true
+            }
+            _ => false,
+        },
+        "item" => parse_slot(&value).is_some_and(|item| {
+            arrow.set_ammo_item(item);
+            true
+        }),
+        "weapon" => parse_slot(&value).is_some_and(|item| {
+            arrow.set_weapon_item(Some(item));
+            true
+        }),
+        "lifetime" => value.parse::<i32>().ok().is_some_and(|ticks| {
+            arrow.set_lifetime_ticks(ticks);
+            true
+        }),
+        "sound" => Identifier::from_str(&value)
+            .ok()
+            .and_then(|key| REGISTRY.sound_events.by_key(&key))
+            .is_some_and(|sound| {
+                arrow.set_hit_sound(sound);
+                true
+            }),
+        _ => false,
+    };
+    jboolean::from(changed)
+}
+
+extern "system" fn set_arrow_potion_color(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    color: jint,
+    present: jboolean,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(arrow) = entity.downcast_ref::<ArrowEntity>()
+    {
+        let color = if present != 0 { color } else { -1 };
+        arrow.set_potion_color(Some(color));
+    }
+}
+
+extern "system" fn add_arrow_custom_effect(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    effect_name: JString<'_>,
+    duration: jint,
+    amplifier: jint,
+    ambient: jboolean,
+    particles: jboolean,
+    icon: jboolean,
+    overwrite: jboolean,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(effect_name): Result<String, _> = env.get_string(&effect_name).map(Into::into) else {
+        return 0;
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return 0;
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return 0;
+    };
+    let Ok(key) = Identifier::from_str(&format!("minecraft:{effect_name}")) else {
+        return 0;
+    };
+    let Some(effect) = REGISTRY.mob_effects.by_key(&key) else {
+        return 0;
+    };
+    let mut effects = arrow
+        .ammo_potion_contents()
+        .map(|contents| contents.custom_effects().to_vec())
+        .unwrap_or_default();
+    if let Some(index) = effects
+        .iter()
+        .position(|current| current.effect() == effect)
+    {
+        if overwrite == 0 {
+            return 0;
+        }
+        effects.remove(index);
+    }
+    effects.push(RegistryMobEffectInstance::new(
+        effect,
+        duration,
+        amplifier,
+        ambient != 0,
+        particles != 0,
+        icon != 0,
+        None,
+    ));
+    arrow.set_custom_effects(effects);
+    1
+}
+
+extern "system" fn remove_arrow_custom_effect(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    effect_name: JString<'_>,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(effect_name): Result<String, _> = env.get_string(&effect_name).map(Into::into) else {
+        return 0;
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return 0;
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return 0;
+    };
+    let mut effects = arrow
+        .ammo_potion_contents()
+        .map(|contents| contents.custom_effects().to_vec())
+        .unwrap_or_default();
+    let before = effects.len();
+    effects.retain(|effect| effect.effect().key.path != effect_name);
+    if effects.len() == before {
+        return 0;
+    }
+    arrow.set_custom_effects(effects);
+    1
+}
+
+extern "system" fn clear_arrow_custom_effects(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(arrow) = entity.downcast_ref::<ArrowEntity>()
+    {
+        arrow.set_custom_effects(Vec::new());
+    }
+}
+
+extern "system" fn set_arrow_shooter(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    shooter: JString<'_>,
+    reset_pickup: jboolean,
+) {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(shooter_text): Result<String, _> = env.get_string(&shooter).map(Into::into) else {
+        return;
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return;
+    };
+    let shooter_id = Uuid::parse_str(&shooter_text).ok();
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return;
+    };
+    arrow.set_owner_uuid(shooter_id);
+    if reset_pickup != 0
+        && let Some(shooter) =
+            shooter_id.and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity))
+    {
+        arrow.apply_owner_pickup_reset(shooter.as_ref());
+    }
+}
+
+extern "system" fn mushroom_cow_stew_effects(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let Ok(text) = env.get_string(&uuid) else {
+        return null_mut();
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return null_mut();
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return null_mut();
+    };
+    let Some(cow) = entity.downcast_ref::<MushroomCowEntity>() else {
+        return null_mut();
+    };
+    let effects = cow
+        .stew_effects()
+        .map(|effects| {
+            effects
+                .effects()
+                .iter()
+                .map(|effect| format!("{}|{}", effect.effect().key.path, effect.duration()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    string_array(&mut env, &effects)
+}
+
+extern "system" fn set_mushroom_cow_stew_effects(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    encoded: JObjectArray<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return 0;
+    };
+    let Some(values) = read_string_array(&mut env, &encoded) else {
+        return 0;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return 0;
+    };
+    let Some(cow) = entity.downcast_ref::<MushroomCowEntity>() else {
+        return 0;
+    };
+    let mut effects = Vec::with_capacity(values.len());
+    for value in values {
+        let Some((effect_name, duration)) = value.split_once('|') else {
+            return 0;
+        };
+        let Ok(key) = Identifier::from_str(&format!("minecraft:{effect_name}")) else {
+            return 0;
+        };
+        let Some(effect) = REGISTRY.mob_effects.by_key(&key) else {
+            return 0;
+        };
+        let Ok(duration) = duration.parse::<i32>() else {
+            return 0;
+        };
+        effects.push(SuspiciousStewEffect::new(effect, duration));
+    }
+    cow.set_stew_effects((!effects.is_empty()).then(|| SuspiciousStewEffects::new(effects)));
+    1
+}
+
+extern "system" fn mushroom_cow_ready_to_shear(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return 0;
+    };
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| {
+        entity
+            .downcast_ref::<MushroomCowEntity>()
+            .is_some_and(MushroomCowEntity::ready_for_shearing)
+    }))
+}
+
+extern "system" fn shear_mushroom_cow(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    source: JString<'_>,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    let Ok(source): Result<String, _> = env.get_string(&source).map(Into::into) else {
+        return;
+    };
+    let sound_source = match source.as_str() {
+        "MASTER" => SoundSource::Master,
+        "MUSIC" => SoundSource::Music,
+        "RECORD" => SoundSource::Records,
+        "WEATHER" => SoundSource::Weather,
+        "BLOCK" => SoundSource::Blocks,
+        "HOSTILE" => SoundSource::Hostile,
+        "NEUTRAL" => SoundSource::Neutral,
+        "PLAYER" => SoundSource::Players,
+        "AMBIENT" => SoundSource::Ambient,
+        "VOICE" => SoundSource::Voice,
+        "UI" => SoundSource::Ui,
+        _ => return,
+    };
+    let Some((world, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(cow) = entity.downcast_ref::<MushroomCowEntity>() else {
+        return;
+    };
+    cow.shear_with_sound_source(
+        world.as_ref(),
+        &ItemStack::new(&vanilla_items::SHEARS),
+        sound_source,
+    );
+}
+
 extern "system" fn air_supply(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
     let Ok(text) = env.get_string(&uuid) else {
         return 300;
@@ -10814,7 +11277,7 @@ extern "system" fn spawn_entity(
     };
     let position = DVec3::new(x, y, z);
     let entity = if initialization_text.is_empty() {
-        spawn_entity_at(&world, &type_key, position)
+        create_entity_at(&world, &type_key, position)
     } else {
         let Some(registry) = REGISTRY.get() else {
             return null_mut();
@@ -10825,7 +11288,7 @@ extern "system" fn spawn_entity(
         let Some(potion) = registry.potions.by_key(&potion_key) else {
             return null_mut();
         };
-        spawn_entity_at_initialized(
+        create_entity_at_initialized(
             &world,
             &type_key,
             position,
@@ -10835,7 +11298,97 @@ extern "system" fn spawn_entity(
     let Some(entity) = entity else {
         return null_mut();
     };
-    to_java(&mut env, Some(entity.uuid().to_string()))
+    match prepare_then_publish(&world, entity, |entity| {
+        env.new_string(entity.uuid().to_string())
+    }) {
+        Ok(uuid) => uuid.into_raw(),
+        Err(_) => null_mut(),
+    }
+}
+
+extern "system" fn spawn_entity_pending(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    type_name: JString<'_>,
+    initialization: JString<'_>,
+) -> jstring {
+    let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(type_text): Result<String, _> = env.get_string(&type_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(initialization_text): Result<String, _> =
+        env.get_string(&initialization).map(Into::into)
+    else {
+        return null_mut();
+    };
+    let Ok(world_key) = Identifier::from_str(&world_text) else {
+        return null_mut();
+    };
+    let Ok(type_key) = Identifier::from_str(&format!("minecraft:{type_text}")) else {
+        return null_mut();
+    };
+    let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
+        return null_mut();
+    };
+    let position = DVec3::new(x, y, z);
+    let entity = if initialization_text.is_empty() {
+        create_entity_at(&world, &type_key, position)
+    } else {
+        let Some(registry) = REGISTRY.get() else {
+            return null_mut();
+        };
+        let Ok(potion_key) = Identifier::from_str(&initialization_text) else {
+            return null_mut();
+        };
+        let Some(potion) = registry.potions.by_key(&potion_key) else {
+            return null_mut();
+        };
+        create_entity_at_initialized(
+            &world,
+            &type_key,
+            position,
+            SpawnEntityInitialization::ArrowPotion(potion),
+        )
+    };
+    let Some(entity) = entity else {
+        return null_mut();
+    };
+    let Ok(uuid) = env.new_string(entity.uuid().to_string()) else {
+        return null_mut();
+    };
+    world.begin_pending_spawn(entity);
+    uuid.into_raw()
+}
+
+extern "system" fn finish_pending_spawn(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    entity_uuid: JString<'_>,
+    publish: jboolean,
+) -> jboolean {
+    let Some(world) = world(&mut env, &world_name) else {
+        return 0;
+    };
+    let Ok(uuid_text): Result<String, _> = env.get_string(&entity_uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(uuid) = Uuid::parse_str(&uuid_text) else {
+        return 0;
+    };
+    let Some(entity) = world.take_pending_spawn(&uuid) else {
+        return 0;
+    };
+    if publish == 0 {
+        return 1;
+    }
+    jboolean::from(world.try_add_entity(entity).is_ok())
 }
 
 extern "system" fn set_world_game_rule(
@@ -12362,6 +12915,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             spawn_entity as *mut c_void,
         ),
         method(
+            "spawnEntityPending",
+            "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            spawn_entity_pending as *mut c_void,
+        ),
+        method(
+            "finishPendingSpawn",
+            "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+            finish_pending_spawn as *mut c_void,
+        ),
+        method(
             "worldGameRule",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
             world_game_rule as *mut c_void,
@@ -12885,6 +13448,26 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "mushroomCowVariant",
             "(Ljava/lang/String;)Ljava/lang/String;",
             mushroom_cow_variant as *mut c_void,
+        ),
+        method(
+            "mushroomCowStewEffects",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            mushroom_cow_stew_effects as *mut c_void,
+        ),
+        method(
+            "setMushroomCowStewEffects",
+            "(Ljava/lang/String;[Ljava/lang/String;)Z",
+            set_mushroom_cow_stew_effects as *mut c_void,
+        ),
+        method(
+            "mushroomCowReadyToShear",
+            "(Ljava/lang/String;)Z",
+            mushroom_cow_ready_to_shear as *mut c_void,
+        ),
+        method(
+            "shearMushroomCow",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            shear_mushroom_cow as *mut c_void,
         ),
         method(
             "setZombieNautilusVariant",
@@ -13871,6 +14454,41 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "arrowCustomEffects",
             "(Ljava/lang/String;)[Ljava/lang/String;",
             arrow_custom_effects as *mut c_void,
+        ),
+        method(
+            "arrowProperty",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            arrow_property as *mut c_void,
+        ),
+        method(
+            "setArrowProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            set_arrow_property as *mut c_void,
+        ),
+        method(
+            "setArrowPotionColor",
+            "(Ljava/lang/String;IZ)V",
+            set_arrow_potion_color as *mut c_void,
+        ),
+        method(
+            "addArrowCustomEffect",
+            "(Ljava/lang/String;Ljava/lang/String;IIZZZZ)Z",
+            add_arrow_custom_effect as *mut c_void,
+        ),
+        method(
+            "removeArrowCustomEffect",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            remove_arrow_custom_effect as *mut c_void,
+        ),
+        method(
+            "clearArrowCustomEffects",
+            "(Ljava/lang/String;)V",
+            clear_arrow_custom_effects as *mut c_void,
+        ),
+        method(
+            "setArrowShooter",
+            "(Ljava/lang/String;Ljava/lang/String;Z)V",
+            set_arrow_shooter as *mut c_void,
         ),
         method(
             "airSupply",

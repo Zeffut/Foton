@@ -382,6 +382,35 @@ impl<'a> WorldCollisionProvider<'a> {
         )
     }
 
+    /// Returns the positions whose collision shapes intersect `aabb`.
+    ///
+    /// Paper exposes this query for embedded arrows. The positions are resolved
+    /// from the live world on demand, so callers never retain stale block state.
+    #[must_use]
+    pub fn block_collision_positions(
+        &self,
+        aabb: &WorldAabb,
+        context: BlockCollisionContext,
+    ) -> Vec<BlockPos> {
+        let bounds = BlockCollisionSearchBounds::from_aabb(aabb);
+        let mut positions = Vec::new();
+        let _ =
+            self.visit_block_collision_candidates(bounds, |block_pos, block_state, cursor_type| {
+                let collision_shape = self.get_collision_shape(block_state, block_pos, context);
+                if should_query_collision_shape(block_state, &collision_shape, cursor_type)
+                    && collision_shape
+                        .boxes
+                        .iter()
+                        .map(|shape| translate_collision_shape(shape, block_pos))
+                        .any(|shape| aabb.intersects(shape))
+                {
+                    positions.push(block_pos);
+                }
+                ControlFlow::<()>::Continue(())
+            });
+        positions
+    }
+
     /// Finds the block supporting an entity within `aabb`.
     ///
     /// Mirrors vanilla `CollisionGetter.findSupportingBlock`: among colliding

@@ -9,6 +9,7 @@ public final class SpawnBridgeCheck {
     public static int spawnCalls;
     private static boolean cancelSpawns = true;
     private static java.util.UUID spawnedBee;
+    private static org.bukkit.entity.TippedArrow configuredArrow;
 
     public static void install() {
         var owner = new org.bukkit.plugin.java.JavaPlugin() {};
@@ -189,6 +190,169 @@ public final class SpawnBridgeCheck {
             throw new AssertionError("ordinary Arrow identity and potion state must remain ordinary");
         }
 
+        int beforeCallback = world.getEntities().size();
+        org.bukkit.entity.TippedArrow configured = world.spawn(
+            location, org.bukkit.entity.TippedArrow.class, pending -> {
+                if (world.getEntities().size() != beforeCallback) {
+                    throw new AssertionError("spawn callback must run before world publication");
+                }
+                if (!(pending instanceof foton.FotonTippedArrow)
+                        || pending.getBasePotionType() != org.bukkit.potion.PotionType.WATER) {
+                    throw new AssertionError("callback must receive the live initialized wrapper");
+                }
+                pending.setCritical(true);
+                pending.setDamage(7.25);
+                pending.setColor(org.bukkit.Color.fromARGB(0x7f123456));
+                pending.setShooter((org.bukkit.projectiles.ProjectileSource) cow, false);
+                if (!cow.equals(pending.getShooter())) {
+                    throw new AssertionError("pending Arrow owner lookup must use the live entity");
+                }
+            });
+        configuredArrow = configured;
+        if (world.getEntities().size() != beforeCallback + 1
+                || !configured.isCritical() || configured.getDamage() != 7.25
+                || configured.getColor() == null
+                || configured.getColor().asARGB() != 0x7f123456) {
+            throw new AssertionError("successful callback must publish its one live mutated entity");
+        }
+
+        int beforeFailure = world.getEntities().size();
+        RuntimeException marker = new RuntimeException("spawn callback marker");
+        try {
+            world.spawn(location, org.bukkit.entity.TippedArrow.class, pending -> {
+                pending.setCritical(true);
+                throw marker;
+            });
+            throw new AssertionError("throwing callback must propagate");
+        } catch (RuntimeException actual) {
+            if (actual != marker) throw actual;
+        }
+        if (world.getEntities().size() != beforeFailure) {
+            throw new AssertionError("throwing callback must publish no orphan");
+        }
+
+        configured.setBasePotionData(new org.bukkit.potion.PotionData(
+            org.bukkit.potion.PotionType.SWIFTNESS, false, false));
+        if (configured.getBasePotionData() == null
+                || configured.getBasePotionData().getType() != org.bukkit.potion.PotionType.SWIFTNESS) {
+            throw new AssertionError("deprecated potion-data bridge must mutate native potion state");
+        }
+        configured.setColor(null);
+        if (configured.getColor() != null) {
+            throw new AssertionError("null Arrow color must override the base-potion display color");
+        }
+        configured.setColor(org.bukkit.Color.fromARGB(0x7f123456));
+        var luck = new org.bukkit.potion.PotionEffect(
+            org.bukkit.potion.PotionEffectType.LUCK, 80, 2, true, false, true);
+        if (!configured.addCustomEffect(luck, false)
+                || !configured.hasCustomEffects()
+                || !configured.hasCustomEffect(org.bukkit.potion.PotionEffectType.LUCK)
+                || configured.getCustomEffects().size() != 1
+                || !configured.removeCustomEffect(org.bukkit.potion.PotionEffectType.LUCK)
+                || configured.hasCustomEffects()) {
+            throw new AssertionError("Arrow custom effects must mutate live native potion contents");
+        }
+        configured.setPierceLevel(5);
+        configured.setPickupStatus(org.bukkit.entity.AbstractArrow.PickupStatus.CREATIVE_ONLY);
+        configured.setLifetimeTicks(411);
+        configured.setHitSound(org.bukkit.Sound.ENTITY_ARROW_HIT_PLAYER);
+        configured.setWeapon(new org.bukkit.inventory.ItemStack(org.bukkit.Material.CROSSBOW));
+        configured.setShooter((org.bukkit.projectiles.ProjectileSource) cow, false);
+        configured.setKnockbackStrength(-3);
+        if (configured.getKnockbackStrength() != 0) {
+            throw new AssertionError("Paper 26.2 knockback strength setter must remain a no-op");
+        }
+        configured.setKnockbackStrength(9);
+        if (configured.getPierceLevel() != 5
+                || configured.getPickupStatus()
+                    != org.bukkit.entity.AbstractArrow.PickupStatus.CREATIVE_ONLY
+                || configured.getLifetimeTicks() != 411
+                || configured.getHitSound() != org.bukkit.Sound.ENTITY_ARROW_HIT_PLAYER
+                || configured.getWeapon() == null
+                || configured.getWeapon().getType() != org.bukkit.Material.CROSSBOW
+                || !configured.isShotFromCrossbow()
+                || configured.getKnockbackStrength() != 0
+                || configured.isInBlock()
+                || !configured.getAttachedBlocks().isEmpty()
+                || configured.getShooter() == null
+                || !configured.getShooter().equals(cow)) {
+            throw new AssertionError("AbstractArrow native state must round-trip through Paper API: "
+                + "pierce=" + configured.getPierceLevel()
+                + ", pickup=" + configured.getPickupStatus()
+                + ", lifetime=" + configured.getLifetimeTicks()
+                + ", sound=" + configured.getHitSound()
+                + ", weapon=" + configured.getWeapon()
+                + ", crossbow=" + configured.isShotFromCrossbow()
+                + ", knockback=" + configured.getKnockbackStrength()
+                + ", inBlock=" + configured.isInBlock()
+                + ", attached=" + configured.getAttachedBlocks()
+                + ", shooter=" + configured.getShooter()
+                + ", nativeShooter=" + foton.Native.entityProjectileOwner(
+                    configured.getUniqueId().toString()));
+        }
+        configured.setShooter(null, false);
+        if (configured.getShooter() != null
+                || foton.Native.entityProjectileOwner(configured.getUniqueId().toString()) != null) {
+            throw new AssertionError("clearing an Arrow shooter must clear native ownership");
+        }
+        configured.setShooter((org.bukkit.projectiles.ProjectileSource) cow, false);
+        configured.setDamage(Double.POSITIVE_INFINITY);
+        if (!Double.isInfinite(configured.getDamage()) || configured.getDamage() < 0.0) {
+            throw new AssertionError("Paper accepts positive infinite AbstractArrow damage");
+        }
+        expectIllegalArgument(() -> configured.setDamage(Double.NaN));
+        expectIllegalArgument(() -> configured.setDamage(-1.0));
+        configured.setDamage(7.25);
+        configured.setWeapon(new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR));
+        if (configured.getWeapon() == null
+                || configured.getWeapon().getType() != org.bukkit.Material.AIR) {
+            throw new AssertionError("AbstractArrow AIR weapon must remain a non-null live stack");
+        }
+        configured.setWeapon(new org.bukkit.inventory.ItemStack(org.bukkit.Material.CROSSBOW));
+        configured.setItemStack(new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR));
+        if (configured.getItemStack() == null
+                || configured.getItemStack().getType() != org.bukkit.Material.ARROW) {
+            throw new AssertionError(
+                "AbstractArrow AIR pickup item must reset to the vanilla default arrow");
+        }
+        configured.setItemStack(new org.bukkit.inventory.ItemStack(org.bukkit.Material.STONE, 3));
+        if (configured.getItemStack() == null
+                || configured.getItemStack().getType() != org.bukkit.Material.STONE
+                || configured.getItemStack().getAmount() != 3) {
+            throw new AssertionError("AbstractArrow pickup item must round-trip native state");
+        }
+        expectIllegalArgument(() -> configured.setPierceLevel(128));
+
+        org.bukkit.entity.MushroomCow mushroom = world.spawn(
+            location, org.bukkit.entity.MushroomCow.class);
+        var entry = io.papermc.paper.potion.SuspiciousEffectEntry.create(
+            org.bukkit.potion.PotionEffectType.LUCK, 321);
+        if (!mushroom.addEffectToNextStew(entry, false)
+                || !mushroom.hasEffectsForNextStew()
+                || !mushroom.hasEffectForNextStew(org.bukkit.potion.PotionEffectType.LUCK)
+                || mushroom.getStewEffects().size() != 1
+                || mushroom.getStewEffects().get(0).duration() != 321) {
+            throw new AssertionError("MushroomCow stew effects must use live native state");
+        }
+        var replacement = io.papermc.paper.potion.SuspiciousEffectEntry.create(
+            org.bukkit.potion.PotionEffectType.LUCK, 654);
+        if (mushroom.addEffectToNextStew(replacement, false)
+                || !mushroom.addEffectToNextStew(replacement, true)
+                || !mushroom.addEffectToNextStew(replacement, true)
+                || mushroom.getEffectsForNextStew().get(0).getDuration() != 654
+                || !mushroom.removeEffectFromNextStew(org.bukkit.potion.PotionEffectType.LUCK)
+                || mushroom.hasEffectsForNextStew()) {
+            throw new AssertionError("MushroomCow overwrite and removal must update native state");
+        }
+        mushroom.setStewEffects(java.util.List.of(entry, replacement));
+        if (mushroom.getStewEffects().size() != 2 || !mushroom.readyToBeSheared()) {
+            throw new AssertionError("MushroomCow full effect list and shear readiness must stay live");
+        }
+        mushroom.clearEffectsForNextStew();
+        if (mushroom.hasEffectsForNextStew()) {
+            throw new AssertionError("MushroomCow stew effects must clear live native state");
+        }
+
         int entityCount = world.getEntities().size();
         expectIllegalArgument(() -> world.spawn(location, (Class) null));
         expectIllegalArgument(() -> world.spawn(location, org.bukkit.entity.Entity.class));
@@ -201,6 +365,26 @@ public final class SpawnBridgeCheck {
             worldName, location.getX(), location.getY(), location.getZ(), "arrow", "minecraft:not_a_potion");
         if (malformed != null || world.getEntities().size() != entityCount) {
             throw new AssertionError("malformed initialized spawns must fail before publication");
+        }
+    }
+
+    public static String configuredArrowId() {
+        return configuredArrow.getUniqueId().toString();
+    }
+
+    public static void assertConfiguredArrowAttached(int x, int y, int z) {
+        if (!configuredArrow.isInBlock()) {
+            throw new AssertionError("a block-hit Arrow must report isInBlock=true");
+        }
+        if (configuredArrow.getHitSound() != org.bukkit.Sound.ENTITY_ARROW_HIT) {
+            throw new AssertionError("block impact must reset the configured hit sound");
+        }
+        java.util.List<org.bukkit.block.Block> attached = configuredArrow.getAttachedBlocks();
+        org.bukkit.block.Block first = configuredArrow.getAttachedBlock();
+        if (attached.size() != 1 || first == null
+                || attached.get(0).getX() != x || attached.get(0).getY() != y
+                || attached.get(0).getZ() != z || !first.equals(attached.get(0))) {
+            throw new AssertionError("attached blocks must reflect the live collision: " + attached);
         }
     }
 

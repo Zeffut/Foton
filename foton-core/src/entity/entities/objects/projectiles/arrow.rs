@@ -12,15 +12,20 @@ use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::mob_effect::instance::MobEffectInstance as RegistryMobEffectInstance;
 use foton_registry::potion::PotionRef;
+use foton_registry::sound_event::SoundEventRef;
 use foton_registry::vanilla_entity_data::ArrowEntityData;
 use foton_registry::{
-    RegistryReference, sound_events, vanilla_damage_types, vanilla_entities, vanilla_items,
+    RegistryExt as _, RegistryReference, sound_events, vanilla_damage_types, vanilla_entities,
+    vanilla_items,
 };
+use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::SyncMutex;
 use foton_utils::types::Difficulty;
-use foton_utils::{DowncastType, DowncastTypeKey};
+use foton_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier, WorldAabb};
 use glam::DVec3;
 
+use crate::behavior::BlockCollisionContext;
+use crate::block_entity::block_state_nbt;
 use crate::enchantment_helper::{self, EnchantmentDamageContext};
 use crate::entity::damage::DamageSource;
 use crate::entity::{
@@ -32,13 +37,13 @@ use crate::event::Event as _;
 use crate::event::ProjectileLaunchEvent;
 use crate::inventory::container::Container as _;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
-use crate::physics::MoverType;
+use crate::physics::{MoverType, WorldCollisionProvider};
 use crate::player::Player;
 use crate::world::{ClipHitResult, World};
 use foton_registry::data_components::components::PotionContents;
 use foton_registry::data_components::vanilla_components::{POTION_CONTENTS, POTION_DURATION_SCALE};
 use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
-use simdnbt::owned::NbtCompound;
+use simdnbt::owned::{NbtCompound, NbtTag};
 
 /// Damage an arrow carries before speed is taken into account.
 ///
@@ -143,6 +148,12 @@ struct ArrowState {
     fired_from_weapon: Option<ItemStack>,
     /// The ammunition item, including `PotionContents` for tipped arrows.
     fired_from_ammo: Option<ItemStack>,
+    /// Block state hit when the arrow became embedded.
+    ///
+    /// Vanilla parity: `AbstractArrow.lastState` / `inBlockState`.
+    last_state: Option<BlockStateId>,
+    /// Sound played when the arrow lands.
+    hit_sound: SoundEventRef,
     /// Entities this shot has already gone through.
     ///
     /// Vanilla parity: `AbstractArrow.piercingIgnoreEntityIds`. It is what
@@ -162,6 +173,8 @@ impl ArrowState {
             pickup: ArrowPickup::Disallowed,
             fired_from_weapon: None,
             fired_from_ammo: None,
+            last_state: None,
+            hit_sound: &sound_events::ENTITY_ARROW_HIT,
             piercing_ignore_entity_ids: Vec::new(),
         }
     }
@@ -320,15 +333,13 @@ impl ArrowEntity {
             effect.is_ambient(),
             effect.is_visible(),
             effect.show_icon(),
-            None,
+            effect.hidden_effect().map(component_details_from_core),
         );
         let contents = self
             .ammo_potion_contents()
             .unwrap_or_else(PotionContents::empty)
             .with_effect_added(custom_effect);
-        let mut ammo = self
-            .ammo_item()
-            .unwrap_or_else(|| ItemStack::new(&vanilla_items::TIPPED_ARROW));
+        let mut ammo = self.pickup_item();
         ammo.set(POTION_CONTENTS, contents);
         self.set_ammo_item(ammo);
     }
@@ -410,7 +421,8 @@ impl ArrowEntity {
         *self.entity_data.lock().abstract_arrow.pierce_level.get()
     }
 
-    fn set_pierce_level(&self, pierce_level: i8) {
+    /// Sets how many entities this arrow may pierce.
+    pub fn set_pierce_level(&self, pierce_level: i8) {
         self.entity_data
             .lock()
             .abstract_arrow
@@ -457,6 +469,14 @@ impl ArrowEntity {
         self.state.lock().fired_from_weapon = weapon;
     }
 
+    /// Replaces Paper's live weapon field without replaying constructor logic.
+    ///
+    /// `CraftAbstractArrow#setWeapon` assigns `firedFromWeapon` directly; in
+    /// particular, it does not recompute the arrow's pierce level.
+    pub fn set_weapon_item(&self, weapon: Option<ItemStack>) {
+        self.state.lock().fired_from_weapon = weapon;
+    }
+
     /// Returns the weapon this arrow was loosed from.
     ///
     /// Vanilla parity: `AbstractArrow.getWeaponItem`.
@@ -486,12 +506,49 @@ impl ArrowEntity {
 
     /// Records the ammunition item used to create this arrow.
     pub fn set_ammo_item(&self, ammo: ItemStack) {
+        let ammo = if ammo.is_empty() {
+            ItemStack::new(&vanilla_items::ARROW)
+        } else {
+            ammo
+        };
         let color = ammo
             .get(POTION_CONTENTS)
             .filter(|contents| **contents != PotionContents::empty())
             .map_or(-1, PotionContents::color);
         self.state.lock().fired_from_ammo = Some(ammo);
         self.entity_data.lock().id_effect_color.set(color);
+    }
+
+    /// Changes only the explicit potion color while preserving all other contents.
+    pub fn set_potion_color(&self, color: Option<i32>) {
+        let previous = self
+            .ammo_potion_contents()
+            .unwrap_or_else(PotionContents::empty);
+        let contents = PotionContents::new(
+            previous.potion(),
+            color,
+            previous.custom_effects().to_vec(),
+            previous.custom_name().map(ToOwned::to_owned),
+        );
+        let mut ammo = self.pickup_item();
+        ammo.set(POTION_CONTENTS, contents);
+        self.set_ammo_item(ammo);
+    }
+
+    /// Replaces the custom potion-effect list without changing the base potion or color.
+    pub fn set_custom_effects(&self, effects: Vec<RegistryMobEffectInstance>) {
+        let previous = self
+            .ammo_potion_contents()
+            .unwrap_or_else(PotionContents::empty);
+        let contents = PotionContents::new(
+            previous.potion(),
+            previous.custom_color(),
+            effects,
+            previous.custom_name().map(ToOwned::to_owned),
+        );
+        let mut ammo = self.pickup_item();
+        ammo.set(POTION_CONTENTS, contents);
+        self.set_ammo_item(ammo);
     }
 
     /// Changes the base potion in the arrow's native ammunition component.
@@ -505,9 +562,7 @@ impl ArrowEntity {
             previous.custom_effects().to_vec(),
             previous.custom_name().map(ToOwned::to_owned),
         );
-        let mut ammo = self
-            .ammo_item()
-            .unwrap_or_else(|| ItemStack::new(&vanilla_items::TIPPED_ARROW));
+        let mut ammo = self.pickup_item();
         ammo.set(POTION_CONTENTS, contents);
         self.set_ammo_item(ammo);
     }
@@ -603,6 +658,51 @@ impl ArrowEntity {
         self.state.lock().base_damage = damage;
     }
 
+    /// Returns the persisted age used by arrow despawning.
+    #[must_use]
+    pub fn lifetime_ticks(&self) -> i32 {
+        self.state.lock().life
+    }
+
+    /// Sets the persisted age used by arrow despawning.
+    pub fn set_lifetime_ticks(&self, ticks: i32) {
+        self.state.lock().life = ticks;
+    }
+
+    /// Returns the blocks currently retaining this arrow.
+    #[must_use]
+    pub fn attached_blocks(&self) -> Vec<BlockPos> {
+        if !self.is_in_ground() {
+            return Vec::new();
+        }
+        let Some(world) = self.level() else {
+            return Vec::new();
+        };
+        let position = self.position();
+        let point = WorldAabb::new(
+            position.x, position.y, position.z, position.x, position.y, position.z,
+        )
+        .inflate(0.06);
+        WorldCollisionProvider::new(&world)
+            .block_collision_positions(&point, BlockCollisionContext::empty())
+    }
+
+    /// Returns the configured impact sound.
+    #[must_use]
+    pub fn hit_sound(&self) -> SoundEventRef {
+        self.state.lock().hit_sound
+    }
+
+    /// Sets the configured impact sound.
+    pub fn set_hit_sound(&self, sound: SoundEventRef) {
+        self.state.lock().hit_sound = sound;
+    }
+
+    /// Applies vanilla's owner-dependent pickup reset when Paper requests it.
+    pub fn apply_owner_pickup_reset(&self, shooter: &dyn Entity) {
+        self.apply_owner_pickup(shooter);
+    }
+
     /// Points the arrow along its current velocity.
     ///
     /// Vanilla parity: the rotation block of `AbstractArrow.tick`.
@@ -612,20 +712,6 @@ impl ArrowEntity {
         let yaw = movement.x.atan2(movement.z).to_degrees() as f32;
         let pitch = movement.y.atan2(horizontal).to_degrees() as f32;
         self.set_rotation((yaw, pitch));
-    }
-
-    /// Counts down the lifetime of a stuck arrow.
-    ///
-    /// Vanilla parity: `AbstractArrow.tickDespawn`.
-    fn tick_despawn(&self) {
-        let expired = {
-            let mut state = self.state.lock();
-            state.life += 1;
-            state.life >= DESPAWN_TICKS
-        };
-        if expired {
-            self.set_removed(RemovalReason::Discarded);
-        }
     }
 }
 
@@ -638,6 +724,14 @@ impl Entity for ArrowEntity {
         self.entity_type
     }
 
+    fn projectile_owner_uuid(&self) -> Option<uuid::Uuid> {
+        self.owner_uuid()
+    }
+
+    fn projectile_owner(&self) -> Option<SharedEntity> {
+        self.get_owner()
+    }
+
     /// Vanilla parity: `AbstractArrow.getSlot`, whose one slot is what a player picking it up receives.
     fn slot_item(&self, slot: i32) -> Option<ItemStack> {
         if slot == CONTENTS_SLOT {
@@ -647,32 +741,41 @@ impl Entity for ArrowEntity {
     }
 
     fn tick(&self) {
-        // Vanilla parity: the `if (this.shakeTime > 0) this.shakeTime--;` of
-        // `AbstractArrow.tick`, which runs whether or not the arrow has landed.
-        {
-            let mut state = self.state.lock();
-            state.shake_time = (state.shake_time - 1).max(0);
-        }
-
         if self.is_in_ground() {
-            self.tick_despawn();
-            let should_decay = {
+            let (expired, decayed) = {
                 let mut state = self.state.lock();
+                state.shake_time = (state.shake_time - 1).max(0);
+                state.life += 1;
                 state.in_ground_time += 1;
-                state.in_ground_time >= EXPOSED_POTION_DECAY_TICKS
+                let should_decay = state.in_ground_time >= EXPOSED_POTION_DECAY_TICKS
                     && state
                         .fired_from_ammo
                         .as_ref()
                         .and_then(|ammo| ammo.get(POTION_CONTENTS))
-                        .is_some_and(|contents| *contents != PotionContents::empty())
+                        .is_some_and(|contents| *contents != PotionContents::empty());
+                if should_decay {
+                    state.fired_from_ammo = Some(ItemStack::new(&vanilla_items::ARROW));
+                }
+                (state.life >= DESPAWN_TICKS, should_decay)
             };
-            if should_decay {
-                self.set_ammo_item(ItemStack::new(&vanilla_items::ARROW));
+            if decayed {
+                // Vanilla emits status 0 before the color synchronization caused
+                // by replacing the pickup stack. Never hold arrow state while
+                // broadcasting packets or taking the synced-data lock.
+                self.broadcast_entity_event(EntityStatus::TippedArrow);
+                self.entity_data.lock().id_effect_color.set(-1);
+            }
+            if expired {
+                self.set_removed(RemovalReason::Discarded);
             }
             return;
         }
 
-        self.state.lock().in_ground_time = 0;
+        {
+            let mut state = self.state.lock();
+            state.shake_time = (state.shake_time - 1).max(0);
+            state.in_ground_time = 0;
+        }
 
         // Vanilla parity: the `if (this.isInWater()) applyInertia(getWaterInertia())`
         // that opens the airborne branch of `AbstractArrow.tick`, before the
@@ -745,9 +848,24 @@ impl Entity for ArrowEntity {
         self.save_projectile(nbt);
         let state = self.state.lock();
         nbt.insert("life", state.life as i16);
+        nbt.insert("shake", state.shake_time as i8);
         nbt.insert("inGround", i8::from(self.is_in_ground()));
+        nbt.insert("pickup", state.pickup as i8);
+        nbt.insert("damage", state.base_damage);
+        nbt.insert("crit", i8::from(self.is_crit_arrow()));
+        nbt.insert("PierceLevel", self.pierce_level());
+        nbt.insert("SoundEvent", state.hit_sound.key.to_string());
+        if let Some(block_state) = state.last_state {
+            nbt.insert(
+                "inBlockState",
+                NbtTag::Compound(block_state_nbt::save(block_state)),
+            );
+        }
         if let Some(ammo) = &state.fired_from_ammo {
             nbt.insert("item", ammo.to_nbt_tag_ref());
+        }
+        if let Some(weapon) = &state.fired_from_weapon {
+            nbt.insert("weapon", weapon.to_nbt_tag_ref());
         }
     }
 
@@ -757,8 +875,28 @@ impl Entity for ArrowEntity {
             let mut state = self.state.lock();
             state.life = i32::from(nbt.short("life").unwrap_or(0));
             state.in_ground_time = 0;
+            state.shake_time = i32::from(nbt.byte("shake").unwrap_or(0).cast_unsigned());
+            state.base_damage = nbt.double("damage").unwrap_or(DEFAULT_BASE_DAMAGE);
+            state.pickup = match nbt.byte("pickup").unwrap_or(0) {
+                1 => ArrowPickup::Allowed,
+                2 => ArrowPickup::CreativeOnly,
+                _ => ArrowPickup::Disallowed,
+            };
+            state.last_state = nbt.compound("inBlockState").and_then(block_state_nbt::load);
+            if let Some(sound) = nbt
+                .string("SoundEvent")
+                .and_then(|value| value.to_str().parse::<Identifier>().ok())
+                .and_then(|key| foton_registry::REGISTRY.sound_events.by_key(&key))
+            {
+                state.hit_sound = sound;
+            }
+            state.fired_from_weapon = nbt
+                .compound("weapon")
+                .and_then(|item| ItemStack::from_borrowed_compound(&item));
         }
         self.set_in_ground(nbt.byte("inGround").is_some_and(|value| value != 0));
+        self.set_crit_arrow(nbt.byte("crit").is_some_and(|value| value != 0));
+        self.set_pierce_level(nbt.byte("PierceLevel").unwrap_or(0));
         if let Some(ammo) = nbt
             .compound("item")
             .and_then(|item| ItemStack::from_borrowed_compound(&item))
@@ -959,13 +1097,12 @@ impl Projectile for ArrowEntity {
         }
 
         self.play_sound(
-            &sound_events::ENTITY_ARROW_HIT,
+            self.hit_sound(),
             1.0,
             1.2 / 0.2f32.mul_add(rand::random::<f32>(), 0.9),
         );
 
-        // TODO: vanilla also runs the firing weapon's post-attack enchantment
-        // effects and its knockback here; Foton's arrows carry no weapon yet.
+        // TODO: vanilla also runs the firing weapon's post-attack enchantment effects here.
         if self.pierce_level() <= 0 {
             self.set_removed(RemovalReason::Discarded);
         }
@@ -994,7 +1131,7 @@ impl Projectile for ArrowEntity {
 
         self.set_velocity(DVec3::ZERO);
         self.play_sound(
-            &sound_events::ENTITY_ARROW_HIT,
+            self.hit_sound(),
             1.0,
             1.2 / 0.2f32.mul_add(rand::random::<f32>(), 0.9),
         );
@@ -1006,6 +1143,10 @@ impl Projectile for ArrowEntity {
             state.life = 0;
             state.in_ground_time = 0;
             state.shake_time = SHAKE_TIME;
+            state.last_state = self
+                .level()
+                .map(|world| world.get_block_state(hit.block_pos));
+            state.hit_sound = &sound_events::ENTITY_ARROW_HIT;
             // Vanilla parity: `resetPiercedEntities`, which closes
             // `onHitBlock` right after the pierce level is zeroed. A landed
             // arrow that is picked up and shot again starts its quota over.
@@ -1022,18 +1163,49 @@ fn scaled_effect_duration(duration: i32, scale: f32) -> i32 {
     }
 }
 
-const fn core_effect_from_component(effect: &RegistryMobEffectInstance) -> MobEffectInstance {
+fn core_effect_from_component(effect: &RegistryMobEffectInstance) -> MobEffectInstance {
     core_effect_from_component_with_duration(effect, effect.duration())
 }
 
-const fn core_effect_from_component_with_duration(
+fn core_effect_from_component_with_duration(
     effect: &RegistryMobEffectInstance,
     duration: i32,
 ) -> MobEffectInstance {
-    MobEffectInstance::with_duration(effect.effect(), duration, effect.amplifier())
+    let visible = MobEffectInstance::with_duration(effect.effect(), duration, effect.amplifier())
         .with_ambient(effect.ambient())
         .with_visible(effect.show_particles())
-        .with_show_icon(effect.show_icon())
+        .with_show_icon(effect.show_icon());
+    let Some(hidden) = effect.hidden_effect() else {
+        return visible;
+    };
+    visible.with_hidden_effect(core_effect_from_details(effect.effect(), hidden))
+}
+
+fn core_effect_from_details(
+    effect: foton_registry::mob_effect::MobEffectRef,
+    details: &foton_registry::MobEffectInstanceDetails,
+) -> MobEffectInstance {
+    let visible = MobEffectInstance::with_duration(effect, details.duration(), details.amplifier())
+        .with_ambient(details.ambient())
+        .with_visible(details.show_particles())
+        .with_show_icon(details.show_icon());
+    let Some(hidden) = details.hidden_effect() else {
+        return visible;
+    };
+    visible.with_hidden_effect(core_effect_from_details(effect, hidden))
+}
+
+fn component_details_from_core(
+    effect: &MobEffectInstance,
+) -> foton_registry::MobEffectInstanceDetails {
+    foton_registry::MobEffectInstanceDetails::new(
+        effect.amplifier(),
+        effect.duration(),
+        effect.is_ambient(),
+        effect.is_visible(),
+        effect.show_icon(),
+        effect.hidden_effect().map(component_details_from_core),
+    )
 }
 
 /// Vanilla parity: `RandomSource.triangle`.
@@ -1046,25 +1218,37 @@ mod tests {
     use std::io::Cursor;
     use std::sync::Arc;
 
+    use foton_protocol::packet_traits::EncodedPacket;
     use foton_registry::data_components::vanilla_components::{
         POTION_CONTENTS, POTION_DURATION_SCALE,
     };
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::packets::play::C_ENTITY_EVENT;
     use foton_registry::{
-        init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_items,
+        MobEffectInstance as RegistryMobEffectInstance, MobEffectInstanceDetails,
+    };
+    use foton_registry::{
+        init_vanilla_registry, sound_events, vanilla_blocks, vanilla_entities, vanilla_items,
         vanilla_mob_effects, vanilla_potions,
     };
+    use foton_utils::codec::VarInt;
+    use foton_utils::locks::SyncMutex;
+    use foton_utils::serial::ReadFrom as _;
     use foton_utils::types::UpdateFlags;
     use foton_utils::{BlockPos, ChunkPos};
     use glam::DVec3;
     use simdnbt::borrow::read_compound;
-    use simdnbt::owned::NbtCompound;
+    use simdnbt::owned::{NbtCompound, NbtTag};
 
     use crate::behavior::init_behaviors;
     use crate::entity::entities::PigEntity;
     use crate::entity::{
         Entity, LivingEntity, MobEffectInstance, RemovalReason, SharedEntity, next_entity_id,
     };
-    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+    use crate::player::{PlayerConnection, ResetReason};
+    use crate::test_support::{
+        RecordingConnection, TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk,
+    };
     use crate::world::World;
 
     use crate::entity::projectile::Projectile as _;
@@ -1123,6 +1307,7 @@ mod tests {
             contents.potion().map(|potion| potion.value()),
             Some(&vanilla_potions::WATER)
         );
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::ARROW);
         arrow.set_base_potion(None);
         assert!(
             arrow
@@ -1160,19 +1345,90 @@ mod tests {
             .mob_effect(&vanilla_mob_effects::LUCK)
             .unwrap_or_else(|| panic!("the custom potion effect must hit the target"));
         assert_eq!(base_effect.duration(), expected_base_duration);
-        assert_eq!(custom_effect.duration(), 10);
+        assert_eq!(
+            custom_effect.duration(),
+            ((80.0 * scale).floor() as i32).max(1)
+        );
         assert_eq!(custom_effect.amplifier(), 2);
     }
 
     #[test]
-    fn water_tipped_arrow_keeps_pickup_identity_and_synchronized_color() {
+    fn tipped_arrow_scales_only_the_visible_effect_and_preserves_hidden_chain() {
+        let world = arrow_world("tipped_arrow_hidden_effect_chain");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        let pig = spawn_pig(&world, DVec3::new(1.0, 0.0, 0.0));
+        let deepest = MobEffectInstanceDetails::new(4, 600, true, false, true, None);
+        let hidden = MobEffectInstanceDetails::new(3, 400, false, true, false, Some(deepest));
+        let custom = RegistryMobEffectInstance::new(
+            &vanilla_mob_effects::LUCK,
+            80,
+            2,
+            true,
+            false,
+            true,
+            Some(hidden),
+        );
+        let mut ammo = ItemStack::new(&vanilla_items::TIPPED_ARROW);
+        ammo.set(
+            POTION_CONTENTS,
+            PotionContents::new(None, None, vec![custom], None),
+        );
+        arrow.set_ammo_item(ammo);
+
+        let target: SharedEntity = pig.clone();
+        arrow.do_post_hurt_effects(&target);
+
+        let visible = pig
+            .mob_effect(&vanilla_mob_effects::LUCK)
+            .unwrap_or_else(|| panic!("the custom effect must hit the target"));
+        assert_eq!(
+            (
+                visible.duration(),
+                visible.amplifier(),
+                visible.is_ambient(),
+                visible.is_visible(),
+                visible.show_icon()
+            ),
+            (10, 2, true, false, true)
+        );
+        let hidden = visible
+            .hidden_effect()
+            .unwrap_or_else(|| panic!("the first hidden fallback must survive"));
+        assert_eq!(
+            (
+                hidden.duration(),
+                hidden.amplifier(),
+                hidden.is_ambient(),
+                hidden.is_visible(),
+                hidden.show_icon()
+            ),
+            (400, 3, false, true, false)
+        );
+        let deepest = hidden
+            .hidden_effect()
+            .unwrap_or_else(|| panic!("the nested hidden fallback must survive"));
+        assert_eq!(
+            (
+                deepest.duration(),
+                deepest.amplifier(),
+                deepest.is_ambient(),
+                deepest.is_visible(),
+                deepest.show_icon()
+            ),
+            (600, 4, true, false, true)
+        );
+        assert!(deepest.hidden_effect().is_none());
+    }
+
+    #[test]
+    fn potion_mutation_keeps_pickup_identity_and_synchronized_color() {
         let world = arrow_world("water_tipped_arrow_pickup");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
 
         arrow.set_base_potion(Some(&vanilla_potions::WATER));
 
         let pickup = arrow.pickup_item();
-        assert_eq!(pickup.item(), &*vanilla_items::TIPPED_ARROW);
+        assert_eq!(pickup.item(), &*vanilla_items::ARROW);
         assert!(
             pickup
                 .get(POTION_CONTENTS)
@@ -1201,7 +1457,7 @@ mod tests {
     }
 
     #[test]
-    fn tipped_arrow_persists_pickup_potion_and_custom_effects() {
+    fn potion_bearing_arrow_persists_pickup_potion_and_custom_effects() {
         let world = arrow_world("tipped_arrow_persistence");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
         arrow.add_effect(MobEffectInstance::with_duration(
@@ -1226,7 +1482,7 @@ mod tests {
         loaded.load_additional((&borrowed).into());
 
         let pickup = loaded.pickup_item();
-        assert_eq!(pickup.item(), &*vanilla_items::TIPPED_ARROW);
+        assert_eq!(pickup.item(), &*vanilla_items::ARROW);
         let contents = pickup
             .get(POTION_CONTENTS)
             .unwrap_or_else(|| panic!("loaded tipped arrow must retain potion contents"));
@@ -1243,6 +1499,64 @@ mod tests {
     }
 
     #[test]
+    fn abstract_arrow_api_state_round_trips_through_vanilla_nbt_fields() {
+        let world = arrow_world("abstract_arrow_api_persistence");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        arrow.set_base_damage(7.25);
+        arrow.set_lifetime_ticks(411);
+        arrow.set_pickup(super::ArrowPickup::CreativeOnly);
+        arrow.set_fired_from_weapon(Some(ItemStack::new(&vanilla_items::CROSSBOW)));
+        arrow.set_crit_arrow(true);
+        arrow.set_pierce_level(5);
+        arrow.set_hit_sound(&sound_events::ENTITY_ARROW_HIT_PLAYER);
+        {
+            let mut state = arrow.state.lock();
+            state.shake_time = 6;
+            state.last_state = Some(vanilla_blocks::STONE.default_state());
+        }
+        arrow.set_in_ground(true);
+
+        let mut saved = NbtCompound::new();
+        arrow.save_additional(&mut saved);
+        assert!(matches!(
+            saved.get("inBlockState"),
+            Some(NbtTag::Compound(_))
+        ));
+        assert!(saved.get("inBlockX").is_none());
+        assert!(saved.get("inBlockY").is_none());
+        assert!(saved.get("inBlockZ").is_none());
+        let mut bytes = Vec::new();
+        saved.write(&mut bytes);
+        let borrowed = read_compound(&mut Cursor::new(bytes.as_slice()))
+            .unwrap_or_else(|_| panic!("saved abstract-arrow NBT must reborrow"));
+        let loaded = ArrowEntity::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            DVec3::ZERO,
+            Arc::downgrade(&world),
+        );
+        loaded.load_additional((&borrowed).into());
+
+        assert_eq!(loaded.base_damage(), 7.25);
+        assert_eq!(loaded.lifetime_ticks(), 411);
+        assert_eq!(loaded.pickup(), super::ArrowPickup::CreativeOnly);
+        assert!(
+            loaded
+                .weapon_item()
+                .is_some_and(|item| item.is(&vanilla_items::CROSSBOW))
+        );
+        assert!(loaded.is_crit_arrow());
+        assert_eq!(loaded.pierce_level(), 5);
+        assert_eq!(loaded.hit_sound(), &sound_events::ENTITY_ARROW_HIT_PLAYER);
+        assert_eq!(
+            loaded.state.lock().last_state,
+            Some(vanilla_blocks::STONE.default_state())
+        );
+        assert_eq!(loaded.shake_time(), 6);
+        assert!(loaded.is_in_ground());
+    }
+
+    #[test]
     fn exposed_tipped_arrow_decays_exactly_on_tick_600() {
         let world = arrow_world("tipped_arrow_decay_boundary");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
@@ -1252,7 +1566,7 @@ mod tests {
         for _ in 0..599 {
             Entity::tick(arrow.as_ref());
         }
-        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::TIPPED_ARROW);
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::ARROW);
         assert!(arrow.ammo_potion_color().is_some());
         assert!(!arrow.is_removed());
 
@@ -1262,6 +1576,52 @@ mod tests {
         assert!(arrow.ammo_potion_contents().is_none());
         assert_eq!(*arrow.entity_data.lock().id_effect_color.get(), -1);
         assert!(!arrow.is_removed());
+    }
+
+    #[test]
+    fn tipped_arrow_decay_broadcasts_status_zero_before_color_sync() {
+        let world = arrow_world("tipped_arrow_decay_event");
+        let sent = Arc::new(SyncMutex::new(Vec::new()));
+        let connection = Arc::new(PlayerConnection::Other(Box::new(RecordingConnection::new(
+            Arc::clone(&sent),
+        ))));
+        let observer = TestPlayerBuilder::new(Arc::clone(&world), "Observer", next_entity_id())
+            .connection(connection)
+            .build();
+        assert!(world.add_player(Arc::clone(&observer), ResetReason::InitialJoin));
+        let _ = observer.mark_joined_world();
+        observer
+            .chunk_sender
+            .lock()
+            .mark_chunk_sent_for_test(ChunkPos::new(0, 0));
+        sent.lock().clear();
+
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        arrow.set_base_potion(Some(&vanilla_potions::WATER));
+        arrow.set_in_ground(true);
+        for _ in 0..600 {
+            Entity::tick(arrow.as_ref());
+        }
+
+        let events = sent
+            .lock()
+            .iter()
+            .filter_map(entity_event_payload)
+            .collect::<Vec<_>>();
+        assert_eq!(events, vec![(arrow.id(), 0)]);
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::ARROW);
+        assert_eq!(*arrow.entity_data.lock().id_effect_color.get(), -1);
+    }
+
+    fn entity_event_payload(packet: &EncodedPacket) -> Option<(i32, i32)> {
+        let mut cursor = Cursor::new(packet.encoded_data.as_slice());
+        VarInt::read(&mut cursor).ok()?;
+        if VarInt::read(&mut cursor).ok()?.0 != C_ENTITY_EVENT {
+            return None;
+        }
+        let entity_id = i32::read(&mut cursor).ok()?;
+        let status = VarInt::read(&mut cursor).ok()?.0;
+        Some((entity_id, status))
     }
 
     #[test]
@@ -1329,7 +1689,7 @@ mod tests {
         for _ in 0..599 {
             Entity::tick(&loaded);
         }
-        assert_eq!(loaded.pickup_item().item(), &*vanilla_items::TIPPED_ARROW);
+        assert_eq!(loaded.pickup_item().item(), &*vanilla_items::ARROW);
         assert!(!loaded.is_removed());
 
         Entity::tick(&loaded);
@@ -1454,11 +1814,26 @@ mod tests {
         fly_until_it_lands(&arrow);
 
         assert!(arrow.is_in_ground(), "the arrow should have stuck");
+        assert_eq!(
+            arrow.attached_blocks(),
+            vec![BlockPos::new(WALL_X, 64, 8)],
+            "Paper queries the live collision retaining the embedded arrow"
+        );
         let overshoot = f64::from(WALL_X) - arrow.position().x;
         assert!(
             (overshoot - 0.05).abs() < 1.0e-6,
             "the arrow should settle a twentieth of a block off the face it hit, \
              but it stopped {overshoot} short of it"
+        );
+
+        assert!(world.set_block(
+            BlockPos::new(WALL_X, 64, 8),
+            vanilla_blocks::AIR.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        assert!(
+            arrow.attached_blocks().is_empty(),
+            "attached blocks must be queried from current collision state, not cached at impact"
         );
     }
 

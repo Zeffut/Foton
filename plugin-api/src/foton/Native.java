@@ -103,6 +103,8 @@ public final class Native {
     public static native boolean worldThundering(String world);
     public static native void setWorldThundering(String world, boolean thundering);
     public static native String spawnEntity(String world, double x, double y, double z, String type, String initialization);
+    public static native String spawnEntityPending(String world, double x, double y, double z, String type, String initialization);
+    public static native boolean finishPendingSpawn(String world, String uuid, boolean publish);
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
@@ -232,6 +234,14 @@ public final class Native {
     public static native String arrowPotion(String uuid);
     public static native void setArrowPotion(String uuid, String potion);
     public static native int arrowPotionColor(String uuid);
+    public static native void setArrowPotionColor(String uuid, int color, boolean present);
+    public static native boolean addArrowCustomEffect(String uuid, String effect, int duration,
+        int amplifier, boolean ambient, boolean particles, boolean icon, boolean overwrite);
+    public static native boolean removeArrowCustomEffect(String uuid, String effect);
+    public static native void clearArrowCustomEffects(String uuid);
+    public static native String arrowProperty(String uuid, String property);
+    public static native boolean setArrowProperty(String uuid, String property, String value);
+    public static native void setArrowShooter(String uuid, String shooter, boolean resetPickupStatus);
     public static native boolean entityRemoveWhenFarAway(String uuid);
     public static native boolean entityPersistent(String uuid);
     public static native void setEntityPersistent(String uuid, boolean persistent);
@@ -364,6 +374,10 @@ public final class Native {
     public static native String parrotVariant(String uuid);
     public static native void setMushroomCowVariant(String uuid, String variant);
     public static native String mushroomCowVariant(String uuid);
+    public static native String[] mushroomCowStewEffects(String uuid);
+    public static native boolean setMushroomCowStewEffects(String uuid, String[] effects);
+    public static native boolean mushroomCowReadyToShear(String uuid);
+    public static native void shearMushroomCow(String uuid, String source);
     public static native void setFrogVariant(String uuid, String variant);
     public static native String frogVariant(String uuid);
     public static native void setChickenVariant(String uuid, String variant);

@@ -197,6 +197,11 @@ public final class FotonWorld implements World {
     }
 
     @Override public <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) {
+        return spawn(location, clazz, null);
+    }
+
+    @Override public <T extends org.bukkit.entity.Entity> T spawn(
+            Location location, Class<T> clazz, java.util.function.Consumer<? super T> function) {
         if (clazz == null) {
             throw new IllegalArgumentException("Entity class cannot be null");
         }
@@ -212,19 +217,40 @@ public final class FotonWorld implements World {
         String initialization = clazz == org.bukkit.entity.TippedArrow.class
             ? "minecraft:water"
             : "";
-        org.bukkit.entity.Entity entity = spawnEntity(location, type, initialization);
-        if (entity == null) {
+        if (location == null) {
+            throw new IllegalArgumentException("Location cannot be null");
+        }
+        String id = Native.spawnEntityPending(
+            name, location.getX(), location.getY(), location.getZ(), type.getName(), initialization);
+        if (id == null) {
             throw new IllegalArgumentException("Unable to spawn entity class: " + clazz.getName());
         }
-        if (clazz == org.bukkit.entity.TippedArrow.class) {
-            entity = new FotonTippedArrow(entity.getUniqueId());
+        boolean published = false;
+        try {
+            org.bukkit.entity.Entity entity;
+            try {
+                entity = FotonEntity.handle(UUID.fromString(id));
+            } catch (IllegalArgumentException error) {
+                throw new IllegalArgumentException(
+                    "Unable to wrap spawned entity class: " + clazz.getName(), error);
+            }
+            if (clazz == org.bukkit.entity.TippedArrow.class) {
+                entity = new FotonTippedArrow(entity.getUniqueId());
+            }
+            if (!clazz.isInstance(entity)) {
+                throw new IllegalArgumentException(
+                    "Spawned wrapper does not implement requested class: " + clazz.getName());
+            }
+            T result = clazz.cast(entity);
+            if (function != null) function.accept(result);
+            if (!Native.finishPendingSpawn(name, id, true)) {
+                throw new IllegalArgumentException("Unable to publish entity class: " + clazz.getName());
+            }
+            published = true;
+            return result;
+        } finally {
+            if (!published) Native.finishPendingSpawn(name, id, false);
         }
-        if (!clazz.isInstance(entity)) {
-            entity.remove();
-            throw new IllegalArgumentException(
-                "Spawned wrapper does not implement requested class: " + clazz.getName());
-        }
-        return clazz.cast(entity);
     }
 
     @Override

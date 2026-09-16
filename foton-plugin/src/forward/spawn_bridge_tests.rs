@@ -8,7 +8,7 @@ use std::sync::Weak;
 
 use foton_core::block_entity::BlockEntity as _;
 use foton_core::block_entity::entities::{BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR, BeehiveBlockEntity};
-use foton_core::entity::entities::{BatEntity, BeeEntity};
+use foton_core::entity::entities::{ArrowEntity, BatEntity, BeeEntity};
 use foton_core::entity::{Entity as _, PrepublicationTestAnimal, SharedEntity, next_entity_id};
 use foton_core::permission::{PermissionGroupManager, PermissionGroupsConfig};
 use foton_registry::{vanilla_blocks, vanilla_entities};
@@ -288,9 +288,52 @@ fn live_beehive_release_returns_java_provenance(
         env.exception_describe()?;
         env.exception_clear()?;
     }
+    contracts?;
+
+    let arrow_id = env
+        .call_static_method(
+            "SpawnBridgeCheck",
+            "configuredArrowId",
+            "()Ljava/lang/String;",
+            &[],
+        )?
+        .l()?;
+    let arrow_id = Uuid::parse_str(
+        env.get_string(&jni::objects::JString::from(arrow_id))?
+            .to_str()?,
+    )?;
+    let arrow = world
+        .get_entity_by_uuid(&arrow_id)
+        .ok_or("configured Arrow was not published")?;
+    let arrow = arrow
+        .downcast_ref::<ArrowEntity>()
+        .ok_or("configured Arrow has the wrong native type")?;
+    let wall = BlockPos::new(12, 64, 8);
+    assert!(world.set_block(
+        wall,
+        vanilla_blocks::STONE.default_state(),
+        UpdateFlags::UPDATE_NONE,
+    ));
+    let _ = arrow.try_set_position(DVec3::new(11.5, 64.5, 8.5));
+    arrow.set_velocity(DVec3::new(1.0, 0.0, 0.0));
+    for _ in 0..4 {
+        arrow.tick();
+        if arrow.is_in_ground() {
+            break;
+        }
+    }
+    env.call_static_method(
+        "SpawnBridgeCheck",
+        "assertConfiguredArrowAttached",
+        "(III)V",
+        &[
+            JValue::Int(wall.x()),
+            JValue::Int(wall.y()),
+            JValue::Int(wall.z()),
+        ],
+    )?;
     server.cancel_token.cancel();
     host.disable_all()?;
-    contracts?;
     result?;
     Ok(())
 }

@@ -363,9 +363,19 @@ impl MushroomCowEntity {
     /// vanilla does, so they are placed while this mooshroom is still in the
     /// world and before the cow joins it.
     pub fn shear(&self, world: &World, tool: &ItemStack) {
+        self.shear_with_sound_source(world, tool, SoundSource::Players);
+    }
+
+    /// Forces shearing with the caller-selected Paper sound category.
+    pub fn shear_with_sound_source(
+        &self,
+        world: &World,
+        tool: &ItemStack,
+        sound_source: SoundSource,
+    ) {
         world.play_sound_at(
             &sound_events::ENTITY_MOOSHROOM_SHEAR,
-            SoundSource::Players,
+            sound_source,
             self.position(),
             1.0,
             1.0,

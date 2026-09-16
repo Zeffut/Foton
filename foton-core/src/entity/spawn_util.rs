@@ -23,7 +23,7 @@ use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use glam::DVec3;
 
 use crate::entity::entities::ArrowEntity;
-use crate::entity::{ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
+use crate::entity::{AddEntityError, ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
 use crate::physics::WorldCollisionProvider;
 use crate::physics::collision::CollisionWorld as _;
 use crate::world::World;
@@ -55,6 +55,32 @@ pub enum SpawnEntityInitialization {
     ArrowPotion(PotionRef),
 }
 
+/// A failure before or during publication of a freshly constructed entity.
+#[derive(Debug)]
+pub enum PreparedPublicationError<E> {
+    /// The caller could not prepare its return value, so insertion was never attempted.
+    Preparation(E),
+    /// The return value was ready, but the world refused the entity.
+    Publication(AddEntityError),
+}
+
+/// Runs a fallible preparation step before making `entity` world-visible.
+///
+/// This ordering is important for JNI callers: a Java return object must exist
+/// before insertion, otherwise an allocation failure can strand an entity the
+/// caller can never identify.
+pub fn prepare_then_publish<T, E>(
+    world: &Arc<World>,
+    entity: SharedEntity,
+    prepare: impl FnOnce(&SharedEntity) -> Result<T, E>,
+) -> Result<T, PreparedPublicationError<E>> {
+    let prepared = prepare(&entity).map_err(PreparedPublicationError::Preparation)?;
+    world
+        .try_add_entity(entity)
+        .map_err(PreparedPublicationError::Publication)?;
+    Ok(prepared)
+}
+
 /// Creates and inserts an entity at an exact Bukkit-requested position.
 #[must_use]
 pub fn spawn_entity_at(
@@ -62,15 +88,25 @@ pub fn spawn_entity_at(
     key: &Identifier,
     position: DVec3,
 ) -> Option<SharedEntity> {
+    let entity = create_entity_at(world, key, position)?;
+    world.try_add_entity(Arc::clone(&entity)).ok()?;
+    Some(entity)
+}
+
+/// Creates an entity at an exact position without publishing it.
+#[must_use]
+pub fn create_entity_at(
+    world: &Arc<World>,
+    key: &Identifier,
+    position: DVec3,
+) -> Option<SharedEntity> {
     let entity_type = REGISTRY.entity_types.by_key(key)?;
-    let entity = ENTITIES.create(
+    ENTITIES.create(
         entity_type,
         next_entity_id(),
         position,
         Arc::downgrade(world),
-    )?;
-    world.try_add_entity(Arc::clone(&entity)).ok()?;
-    Some(entity)
+    )
 }
 
 /// Creates and inserts an entity whose requested state must precede publication.
@@ -81,12 +117,14 @@ pub fn spawn_entity_at_initialized(
     position: DVec3,
     initialization: SpawnEntityInitialization,
 ) -> Option<SharedEntity> {
-    let entity = create_entity_at(world, key, position, initialization)?;
+    let entity = create_entity_at_initialized(world, key, position, initialization)?;
     world.try_add_entity(Arc::clone(&entity)).ok()?;
     Some(entity)
 }
 
-fn create_entity_at(
+/// Creates an initialized entity without making it world-visible.
+#[must_use]
+pub fn create_entity_at_initialized(
     world: &Arc<World>,
     key: &Identifier,
     position: DVec3,
@@ -175,7 +213,7 @@ mod initialized_spawn_tests {
     use std::sync::Arc;
 
     use foton_registry::data_components::components::PotionContents;
-    use foton_registry::{init_vanilla_registry, vanilla_entities, vanilla_potions};
+    use foton_registry::{init_vanilla_registry, vanilla_entities, vanilla_items, vanilla_potions};
     use foton_utils::{ChunkPos, Downcast as _};
 
     use super::*;
@@ -188,7 +226,7 @@ mod initialized_spawn_tests {
         let world = fresh_test_world("initialized_tipped_arrow");
         insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
 
-        let entity = create_entity_at(
+        let entity = create_entity_at_initialized(
             &world,
             &vanilla_entities::ARROW.key,
             DVec3::new(8.5, 64.0, 8.5),
@@ -200,6 +238,7 @@ mod initialized_spawn_tests {
             .as_ref()
             .downcast_ref::<ArrowEntity>()
             .unwrap_or_else(|| panic!("the constructed entity must be an arrow"));
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::TIPPED_ARROW);
         assert!(
             arrow
                 .ammo_potion_contents()
@@ -217,6 +256,59 @@ mod initialized_spawn_tests {
             .get_entity_by_uuid(&entity.uuid())
             .unwrap_or_else(|| panic!("the initialized entity must be observable after insertion"));
         assert!(Arc::ptr_eq(&published, &entity));
+    }
+
+    #[test]
+    fn failed_return_value_preparation_never_publishes_the_entity() {
+        init_vanilla_registry();
+        let world = fresh_test_world("failed_spawn_return_preparation");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let entity: SharedEntity = Arc::new(ArrowEntity::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        let uuid = entity.uuid();
+
+        let result = prepare_then_publish(&world, entity, |_| Err::<(), _>("new string failed"));
+
+        assert!(matches!(
+            result,
+            Err(PreparedPublicationError::Preparation("new string failed"))
+        ));
+        assert!(world.get_entity_by_uuid(&uuid).is_none());
+        assert!(world.accessible_entities().is_empty());
+    }
+
+    #[test]
+    fn rejected_publication_drops_the_prepared_unpublished_entity() {
+        init_vanilla_registry();
+        let world = fresh_test_world("rejected_spawn_publication");
+        let entity: SharedEntity = Arc::new(ArrowEntity::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            DVec3::new(512.5, 64.0, 512.5),
+            Arc::downgrade(&world),
+        ));
+        let uuid = entity.uuid();
+        let mut prepared = false;
+
+        let result = prepare_then_publish(&world, entity, |_| {
+            prepared = true;
+            Ok::<_, ()>(uuid.to_string())
+        });
+
+        assert!(
+            prepared,
+            "the return value must be prepared before insertion"
+        );
+        assert!(matches!(
+            result,
+            Err(PreparedPublicationError::Publication(_))
+        ));
+        assert!(world.get_entity_by_uuid(&uuid).is_none());
+        assert!(world.accessible_entities().is_empty());
     }
 
     #[test]
