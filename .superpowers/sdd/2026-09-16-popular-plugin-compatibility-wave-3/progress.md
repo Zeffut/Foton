@@ -38,7 +38,7 @@
 
 ## Tasks
 
-- [ ] Task 1 — entity wrapper identity and class-to-key spawning (in review; implementation `ba7cd62e0`, first review fix `2febe9169`, second review fix `4656276e6`, third review fix `c409748ca`; independent re-reviews pending)
+- [ ] Task 1 — entity wrapper identity and class-to-key spawning (in review; implementation `ba7cd62e0`, first review fix `2febe9169`, second review fix `4656276e6`, third review fix `c409748ca`, fourth review fix `ad27d7bc0`; independent re-reviews pending)
 - [ ] Task 2 — live `BrewEvent` and `PrepareItemEnchantEvent`
 - [ ] Task 3 — exact on-demand ray tracing
 - [ ] Task 4 — live `ItemDisplay` / `TextDisplay` / `Allay` / `ChestBoat` identity and holder plumbing
@@ -96,6 +96,24 @@ Task 1 has no direct residual count; it is a correctness prerequisite. Task-leve
   edited, no per-goal branches or idle compatibility work were added, and
   external selector disables remain separate from the transient mob mask.
 - Third review status: in review; independent specification and quality
+  approvals are still required, so Task 1 remains unchecked.
+- Fourth review fix: `ad27d7bc0bf4050e661e1d59936f49ca69c492fd`
+  makes the Paper Ageable/Animals/Cow hierarchy and declarations exact, moves
+  Breedable to age-based semantics independent of love state, validates
+  negative love ticks before JNI, makes live-animal pre-publication registry
+  access safe, constructs WATER TippedArrow state before publication, and adds
+  exact Vanilla 600-tick exposed-potion decay alongside 1200-tick despawn.
+- Fourth review evidence: exact 5/5 Paper public ABI diff; all 8
+  generator/stale-source tests; 23 focused initialized-spawn/Arrow core tests;
+  2 registry tests; 31 plugin unit tests; 520/520 native registration; three
+  isolated real-JVM/JNI fixtures; 836-source/1015-class API build and harness;
+  workspace all-targets, touched-crate Clippy, formatting, and diff checks pass.
+- Fourth review performance/scope: the only new tick work is the exact decay
+  check inside Arrow's existing in-ground branch; spawn initialization is
+  request-driven, registry lifecycle handling is a guarded JNI request, no
+  generated Rust or extracted data was edited, and temporary evidence was
+  removed.
+- Fourth review status: in review; independent specification and quality
   approvals are still required, so Task 1 remains unchecked.
 
 ## Review protocol

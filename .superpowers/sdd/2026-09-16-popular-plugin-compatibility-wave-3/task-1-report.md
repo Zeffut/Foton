@@ -7,8 +7,10 @@ Task 1 is **in review**. The original implementation is `ba7cd62e0`
 commit is `2febe9169` (`fix(plugin): validate entity class metadata`). The
 second-round review fix is `4656276e6` (`fix(plugin): complete Paper class
 spawn contracts`). The third-round review fix is `c409748ca`
-(`fix(plugin): complete third Task 1 review repair`). Independent specification
-and quality re-review remain pending, so the task is not recorded as complete.
+(`fix(plugin): complete third Task 1 review repair`). The fourth-round review
+fix is `ad27d7bc0` (`fix(plugin): complete fourth Task 1 review repair`).
+Independent specification and quality re-review remain pending, so the task is
+not recorded as complete.
 
 ## Result
 
@@ -66,6 +68,31 @@ preflights generated exact wrapper support before native insertion; null,
 unsupported, and mismatched classes throw `IllegalArgumentException`, and the
 defensive postcondition removes any unexpected native entity.
 
+The fourth repair makes the Paper hierarchy and public declarations exact:
+`Ageable -> Creature`, `Breedable -> Ageable`, `Animals -> Breedable`, and
+`AbstractCow -> Animals`, with `Cow` transitively a `Creature` and `Mob`.
+Paper's nine abstract `Ageable` methods now have live inherited wrapper
+implementations. `canBreed` reads `AgeableMob.age == 0`; `setBreed(false)`
+sets an adult age to 6000 and leaves babies unchanged; `setBreed(true)` sets
+age to zero. None of those operations modifies love ticks or breed cause, and
+negative love-mode ticks are rejected in Java before JNI.
+
+All new Animals/Breedable registry reads now use optional publication access.
+The isolated lifecycle fixture registers a live Rust `Entity + Animal` by UUID
+without publishing the vanilla registry, then exercises both nonempty
+`Material.WHEAT` and `ItemStack(WHEAT)` calls through a real JVM/JNI boundary.
+
+Class-based `TippedArrow` spawn now carries a WATER initialization payload into
+native construction. The Arrow's ammo component, potion state, and synchronized
+color are complete before `try_add_entity`; invalid potion/type combinations
+return before publication. A separate ordinary Arrow path remains unchanged.
+
+Vanilla's exposed tipped-arrow decay now runs in the existing in-ground Arrow
+tick path. Nonempty `PotionContents` includes custom effects/color/name, so it
+decays to ordinary-arrow pickup contents and synchronized color `-1` exactly on
+tick 600. The separate persisted lifetime still despawns at 1200, while the
+unsaved exposure counter restarts after reload, matching local Vanilla.
+
 ## TDD RED evidence
 
 The original wrapper and underscored-key REDs remain recorded in `ba7cd62e0`.
@@ -108,6 +135,21 @@ The review findings added these fresh RED cycles:
     pickup identity, absent synchronized fallback color, and missing potion
     ammunition persistence. The class-spawn regression exposed Egg insertion
     followed by a null return, plus non-Paper null/unsupported handling.
+12. The fourth-round core RED failed compilation on absent
+    `SpawnEntityInitialization`, `create_entity_at`,
+    `spawn_entity_at_initialized`, and `ArrowState.in_ground_time`. The Java
+    RED failed compilation because the test called the missing six-argument
+    native spawn descriptor.
+13. Direct hierarchy assertions exposed `Ageable extends LivingEntity` instead
+    of Paper's `Creature`; the final `javap` comparison also exposed the extra
+    local `setBaby(boolean)` declaration and default-vs-abstract method flags.
+14. The live breeding assertions exposed `canBreed` reading love mode and
+    `setBreed` mutating love ticks rather than age. Boundary checks cover adult
+    cooldown, baby no-op, instant maturation, and love/cause independence.
+15. Mutating the repaired breed-item path back to direct `REGISTRY.items`
+    access made the isolated live-animal JVM test panic at `Registry not init`
+    and abort with SIGABRT. Restoring `REGISTRY.get()` made the same command
+    pass.
 
 ## Fresh GREEN evidence
 
@@ -166,6 +208,52 @@ component rather than a copied value.
 - `cargo check --workspace --all-targets` — passed in 16.49s.
 - `cargo fmt --all --check` and `git diff --check` — passed.
 
+## Fourth review repair evidence
+
+The implementation source commit is
+`ad27d7bc0bf4050e661e1d59936f49ca69c492fd`. Paper behavior was verified from
+the local source checkout at exact Paper commit
+`a2a42c5b12249aaba42a347327fd930a1f94af06` (API build
+`26.2.build.121-stable`): `CraftAgeable.canBreed()` is `getAge() == 0`,
+`setBreed(true)` sets age zero, and `setBreed(false)` sets an adult age to
+6000. Local target-version Vanilla `Arrow.java` uses
+`EXPOSED_POTION_DECAY_TIME = 600`, tests nonempty complete `PotionContents`,
+and replaces pickup ammo with `Items.ARROW`; `AbstractArrow` persists `life`
+and `inGround` but not `inGroundTime`, with despawn at 1200.
+
+- Paper public ABI comparison with `javap -public` — exact diff match for
+  `Ageable`, `Breedable`, `Animals`, `AbstractCow`, and `Cow` (5/5), including
+  direct inheritance and abstract method flags.
+- `python3 -m unittest dev.tests.test_plugin_api_build_scripts` — 8 passed in
+  41.876s.
+- `bash dev/build-plugin-api.sh --check` — 836 sources compiled, 1015 classes
+  written, and the Java/API harness passed; only the optional external fixture
+  boot was skipped because `FOTON_PLUGIN_FIXTURE` was unset.
+- Initialized-spawn core tests — 2 passed, 4451 filtered out; the tests inspect
+  WATER ammo/color before publication and prove type mismatch publishes
+  nothing.
+- Arrow-focused core tests — 21 passed, 4432 filtered out, including exact
+  599/600, custom-effect-only, ordinary-arrow, save/reload, and 1200-despawn
+  behavior.
+- Potion-content registry tests — 2 passed, 473 filtered out.
+- `cargo test -p foton-plugin --lib -- --nocapture` — 31 passed and 5 ignored;
+  the ignored real-JVM tests were run separately below.
+- Native descriptor registration — 1 passed, 35 filtered out.
+- `python3 dev/check-natives.py` — 520 declared and 520 registered; no gaps.
+- Isolated pre-publication live-animal JVM/JNI regression — 1 passed, 35
+  filtered out; its direct-registry mutation aborts with SIGABRT as recorded
+  above.
+- Isolated pre-publication stale-Arrow JVM/JNI regression — 1 passed, 35
+  filtered out.
+- Full real-JVM/JNI spawn bridge — 1 passed, 35 filtered out; it covers exact
+  adult/baby/cooldown/love semantics, the `-1` love-tick boundary, nonempty
+  breed items, preinitialized WATER TippedArrow, and malformed no-orphan spawn.
+- `cargo check --workspace --all-targets` — passed in 31.68s.
+- `cargo clippy -p foton-core -p foton-plugin --lib -- -D warnings` — passed in
+  9.52s.
+- `cargo fmt --all --check` and `git diff --check` — passed before the source
+  commit.
+
 ## Scope and performance audit
 
 The review fixes change only Task 1-related generator, API, core/native, test,
@@ -182,4 +270,4 @@ The ignored reusable `plugin-api/build/` output remains untracked.
 
 The findings have implementation and fresh verification evidence, but Task 1
 must remain in review until both the specification and quality re-reviews
-approve `ba7cd62e0..c409748ca`. No later Wave 3 task is marked started here.
+approve `ba7cd62e0..ad27d7bc0`. No later Wave 3 task is marked started here.
