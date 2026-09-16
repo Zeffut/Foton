@@ -84,7 +84,7 @@ use foton_core::entity::entities::objects::vehicles::{BoatEntity, RaftEntity};
 use foton_core::entity::spawn_util::spawn_entity_at;
 use foton_core::entity::spellcaster_illager::{IllagerSpell, SpellcasterIllager};
 use foton_core::entity::{
-    Entity, EntitySpawnReason, LlamaVariant, MobEffectInstance, is_tamed, owner_uuid,
+    Entity, LlamaVariant, MobEffectInstance, PluginSpawnReason, is_tamed, owner_uuid,
     set_owner_uuid, set_tamed, start_riding_entities,
 };
 use foton_core::inventory::container::Container;
@@ -5127,22 +5127,17 @@ extern "system" fn entity_spawn_reason(
     }) else {
         return null_mut();
     };
-    let Some((_world, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let reason = entity
-        .base()
-        .spawn_reason()
-        .map_or("DEFAULT", |reason| match reason {
-            EntitySpawnReason::Natural => "NATURAL",
-            EntitySpawnReason::ChunkGeneration => "DEFAULT",
-            EntitySpawnReason::Spawner | EntitySpawnReason::TrialSpawner => "SPAWNER",
-            EntitySpawnReason::Breeding => "BREEDING",
-            EntitySpawnReason::Command => "COMMAND",
-            _ => "CUSTOM",
-        });
-    to_java(&mut env, Some(reason.to_owned()))
+    let entity = entity_by_uuid(&id);
+    let reason = entity_spawn_reason_state(entity.as_ref().map(|(_, entity)| entity.as_ref()));
+    to_java(&mut env, Some(reason.as_str().to_owned()))
 }
+
+fn entity_spawn_reason_state(entity: Option<&dyn Entity>) -> PluginSpawnReason {
+    entity
+        .and_then(|entity| entity.base().plugin_spawn_reason())
+        .unwrap_or_default()
+}
+
 extern "system" fn entity_position(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -14359,6 +14354,42 @@ mod entity_bridge_tests {
             thread::sleep(Duration::from_millis(1));
         }
         panic!("rain test chunks did not become ready");
+    }
+
+    #[test]
+    fn spawn_reason_query_preserves_override_and_defaults_without_custom() {
+        use foton_core::entity::{EntitySpawnReason, PluginSpawnReason};
+        let entity = entity();
+        assert_eq!(
+            super::entity_spawn_reason_state(None),
+            PluginSpawnReason::Default
+        );
+        assert_eq!(
+            super::entity_spawn_reason_state(Some(&entity)),
+            PluginSpawnReason::Default
+        );
+        for (vanilla, expected) in [
+            (
+                EntitySpawnReason::ChunkGeneration,
+                PluginSpawnReason::ChunkGen,
+            ),
+            (
+                EntitySpawnReason::TrialSpawner,
+                PluginSpawnReason::TrialSpawner,
+            ),
+            (EntitySpawnReason::Load, PluginSpawnReason::Default),
+        ] {
+            entity.base().set_spawn_reason(vanilla);
+            assert_eq!(super::entity_spawn_reason_state(Some(&entity)), expected);
+        }
+        entity
+            .base()
+            .set_plugin_spawn_reason(PluginSpawnReason::Beehive);
+        assert_eq!(
+            super::entity_spawn_reason_state(Some(&entity)),
+            PluginSpawnReason::Beehive
+        );
+        assert_eq!(entity.base().spawn_reason(), Some(EntitySpawnReason::Load));
     }
 
     #[test]

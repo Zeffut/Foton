@@ -61,6 +61,9 @@ run "cargo test --workspace"                       cargo test --workspace
 # is why Build Release failed on the runner while passing on every developer's
 # machine, where the file was left over from an earlier build.
 run "plugin api builds"                            bash dev/build-plugin-api.sh --check
+# This test needs the built API and runs in its own process because a JVM
+# cannot be restarted inside the ordinary Rust test process.
+run "spawn events cross JNI"                       cargo test -p foton-plugin --lib spawn_bridge_dispatches -- --ignored
 # RegisterNatives is all-or-nothing: one registered method the class does
 # not declare and no plugin loads at all, one declared method left
 # unregistered and the first plugin to call it takes an

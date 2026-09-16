@@ -21,6 +21,7 @@ use glam::DVec3;
 
 use crate::behavior::BlockCollisionContext;
 use crate::entity::ENTITIES;
+use crate::entity::PluginSpawnReason;
 use crate::entity::{Entity, EntitySpawnReason, SpawnGroupData, next_entity_id};
 use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
 use crate::physics::{CollisionWorld as _, WorldCollisionProvider};
@@ -315,7 +316,7 @@ impl World {
                     center.y,
                     center.z,
                     entity_type.key.to_string(),
-                    "Natural".to_owned(),
+                    PluginSpawnReason::Natural,
                 );
                 self.fire_event(&mut pre_spawn);
                 if pre_spawn.is_cancelled() {
@@ -349,7 +350,7 @@ impl World {
                     entity.position().x,
                     entity.position().y,
                     entity.position().z,
-                    "Natural".to_owned(),
+                    PluginSpawnReason::Natural,
                 );
                 self.begin_pending_spawn(Arc::clone(&entity));
                 self.fire_event(&mut spawn_event);

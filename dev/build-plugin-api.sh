@@ -158,7 +158,8 @@ javac --release 21 -nowarn -d "$PAPER_BINARY_CLASSES" \
   "$REPO/plugin-api/check/PaperAttributeConsumer.java" \
   "$REPO/plugin-api/check/PaperAttributeOldEnumConsumer.java" \
   "$REPO/plugin-api/check/PaperResolvableProfileConsumer.java" \
-  "$REPO/plugin-api/check/PaperRecipeChoiceConsumer.java"
+  "$REPO/plugin-api/check/PaperRecipeChoiceConsumer.java" \
+  "$REPO/plugin-api/check/PaperSpawnReasonConsumer.java"
 javac --release 21 -nowarn -d "$FOTON_BINARY_RUNNER_CLASSES" \
   -cp "$PAPER_BINARY_CLASSES:$JAR$LIBS" \
   "$REPO/plugin-api/check/FotonAttributeBinaryRunner.java" \
@@ -175,6 +176,8 @@ java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
   FotonResolvableProfileBinaryRunner
 java -cp "$PAPER_BINARY_CLASSES:$FOTON_BINARY_RUNNER_CLASSES:$JAR$LIBS" \
   FotonRecipeChoiceBinaryRunner
+
+java -cp "$PAPER_BINARY_CLASSES:$JAR$LIBS" PaperSpawnReasonConsumer
 
 # The fixture plugin exercises the parts of the event path that are easy to get
 # wrong: a rewrite that has to travel back, a veto that has to travel back, and
@@ -391,6 +394,8 @@ if [ -d "$FIXTURE_SRC" ]; then
   javac -nowarn -d "$CHECK_CLASSES" \
     -cp "$JAR$LIBS:$EVENT_CLASSES:$CHECK_CLASSES:$HOST_DRIVER_JAR" \
     "$REPO"/plugin-api/check/*.java
+  java -cp "$CHECK_CLASSES:$JAR$LIBS" SpawnReasonCheck
+  java -cp "$CHECK_CLASSES:$JAR$LIBS" SpawnReasonCheck fallback
   java -cp "$CHECK_CLASSES:$JAR$LIBS:$EVENT_CLASSES" Checks \
     "$FIX/plugins" "$LIFECYCLE_PLUGINS" "$REPLACEMENT_PLUGINS" \
     "$FIX/dependency-graph-plugins" "$FIX/dependency-duplicates-plugins" \

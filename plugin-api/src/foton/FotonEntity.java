@@ -114,10 +114,7 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
         catch (IllegalArgumentException ignored) { return null; }
     }
     @Override public org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason getEntitySpawnReason() {
-        String reason = Native.entitySpawnReason(id.toString());
-        if (reason == null) return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT;
-        try { return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.valueOf(reason); }
-        catch (IllegalArgumentException ignored) { return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CUSTOM; }
+        return EventBridge.spawnReason(Native.entitySpawnReason(id.toString()));
     }
     @Override public org.bukkit.entity.SpawnCategory getSpawnCategory() {
         String category = Native.entitySpawnCategory(id.toString());

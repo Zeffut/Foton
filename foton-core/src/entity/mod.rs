@@ -895,10 +895,10 @@ pub use projectile::{
 };
 pub use raider::{RaidStatus, Raider, RaiderState};
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
-pub use spawn::EntitySpawnReason;
 pub(crate) use spawn::{
     AgeableMobGroupData, AxolotlGroupData, HorseGroupData, LlamaGroupData, SpawnGroupData,
 };
+pub use spawn::{EntitySpawnReason, PluginSpawnReason};
 pub use spellcaster_illager::{IllagerSpell, SpellcasterIllager, SpellcasterState};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
 pub use synced_data::{EntitySyncedData, LivingEntitySyncedData};

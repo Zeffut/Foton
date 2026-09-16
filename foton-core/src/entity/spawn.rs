@@ -68,6 +68,189 @@ impl EntitySpawnReason {
     }
 }
 
+/// Paper 26.2 spawn provenance, independent of vanilla's gameplay reason.
+/// `Custom` is reserved for an explicitly plugin-originated spawn request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PluginSpawnReason {
+    /// Paper `NATURAL`.
+    Natural,
+    /// Paper `JOCKEY`.
+    Jockey,
+    /// Paper `CHUNK_GEN`.
+    ChunkGen,
+    /// Paper `SPAWNER`.
+    Spawner,
+    /// Paper `TRIAL_SPAWNER`.
+    TrialSpawner,
+    /// Paper `EGG`.
+    Egg,
+    /// Paper `SPAWNER_EGG`.
+    SpawnerEgg,
+    /// Paper `LIGHTNING`.
+    Lightning,
+    /// Paper `BUILD_SNOWMAN`.
+    BuildSnowman,
+    /// Paper `BUILD_IRONGOLEM`.
+    BuildIronGolem,
+    /// Paper `BUILD_COPPERGOLEM`.
+    BuildCopperGolem,
+    /// Paper `BUILD_WITHER`.
+    BuildWither,
+    /// Paper `VILLAGE_DEFENSE`.
+    VillageDefense,
+    /// Paper `VILLAGE_INVASION`.
+    VillageInvasion,
+    /// Paper `BREEDING`.
+    Breeding,
+    /// Paper `SLIME_SPLIT`.
+    SlimeSplit,
+    /// Paper `REINFORCEMENTS`.
+    Reinforcements,
+    /// Paper `NETHER_PORTAL`.
+    NetherPortal,
+    /// Paper `DISPENSE_EGG`.
+    DispenseEgg,
+    /// Paper `INFECTION`.
+    Infection,
+    /// Paper `CURED`.
+    Cured,
+    /// Paper `OCELOT_BABY`.
+    OcelotBaby,
+    /// Paper `SILVERFISH_BLOCK`.
+    SilverfishBlock,
+    /// Paper `MOUNT`.
+    Mount,
+    /// Paper `TRAP`.
+    Trap,
+    /// Paper `ENDER_PEARL`.
+    EnderPearl,
+    /// Paper `SHOULDER_ENTITY`.
+    ShoulderEntity,
+    /// Paper `DROWNED`.
+    Drowned,
+    /// Paper `SHEARED`.
+    Sheared,
+    /// Paper `EXPLOSION`.
+    Explosion,
+    /// Paper `RAID`.
+    Raid,
+    /// Paper `PATROL`.
+    Patrol,
+    /// Paper `BEEHIVE`.
+    Beehive,
+    /// Paper `PIGLIN_ZOMBIFIED`.
+    PiglinZombified,
+    /// Paper `SPELL`.
+    Spell,
+    /// Paper `FROZEN`.
+    Frozen,
+    /// Paper `METAMORPHOSIS`.
+    Metamorphosis,
+    /// Paper `DUPLICATION`.
+    Duplication,
+    /// Paper `COMMAND`.
+    Command,
+    /// Paper `ENCHANTMENT`.
+    Enchantment,
+    /// Paper `OMINOUS_ITEM_SPAWNER`.
+    OminousItemSpawner,
+    /// Paper `BUCKET`.
+    Bucket,
+    /// Paper `POTION_EFFECT`.
+    PotionEffect,
+    /// Paper `REANIMATE`.
+    Reanimate,
+    /// Paper `REHYDRATION`.
+    Rehydration,
+    /// Paper `CUSTOM`.
+    Custom,
+    #[default]
+    /// Paper `DEFAULT`.
+    Default,
+}
+
+impl PluginSpawnReason {
+    /// The stable Paper name serialized by the JNI bridge.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Natural => "NATURAL",
+            Self::Jockey => "JOCKEY",
+            Self::ChunkGen => "CHUNK_GEN",
+            Self::Spawner => "SPAWNER",
+            Self::TrialSpawner => "TRIAL_SPAWNER",
+            Self::Egg => "EGG",
+            Self::SpawnerEgg => "SPAWNER_EGG",
+            Self::Lightning => "LIGHTNING",
+            Self::BuildSnowman => "BUILD_SNOWMAN",
+            Self::BuildIronGolem => "BUILD_IRONGOLEM",
+            Self::BuildCopperGolem => "BUILD_COPPERGOLEM",
+            Self::BuildWither => "BUILD_WITHER",
+            Self::VillageDefense => "VILLAGE_DEFENSE",
+            Self::VillageInvasion => "VILLAGE_INVASION",
+            Self::Breeding => "BREEDING",
+            Self::SlimeSplit => "SLIME_SPLIT",
+            Self::Reinforcements => "REINFORCEMENTS",
+            Self::NetherPortal => "NETHER_PORTAL",
+            Self::DispenseEgg => "DISPENSE_EGG",
+            Self::Infection => "INFECTION",
+            Self::Cured => "CURED",
+            Self::OcelotBaby => "OCELOT_BABY",
+            Self::SilverfishBlock => "SILVERFISH_BLOCK",
+            Self::Mount => "MOUNT",
+            Self::Trap => "TRAP",
+            Self::EnderPearl => "ENDER_PEARL",
+            Self::ShoulderEntity => "SHOULDER_ENTITY",
+            Self::Drowned => "DROWNED",
+            Self::Sheared => "SHEARED",
+            Self::Explosion => "EXPLOSION",
+            Self::Raid => "RAID",
+            Self::Patrol => "PATROL",
+            Self::Beehive => "BEEHIVE",
+            Self::PiglinZombified => "PIGLIN_ZOMBIFIED",
+            Self::Spell => "SPELL",
+            Self::Frozen => "FROZEN",
+            Self::Metamorphosis => "METAMORPHOSIS",
+            Self::Duplication => "DUPLICATION",
+            Self::Command => "COMMAND",
+            Self::Enchantment => "ENCHANTMENT",
+            Self::OminousItemSpawner => "OMINOUS_ITEM_SPAWNER",
+            Self::Bucket => "BUCKET",
+            Self::PotionEffect => "POTION_EFFECT",
+            Self::Reanimate => "REANIMATE",
+            Self::Rehydration => "REHYDRATION",
+            Self::Custom => "CUSTOM",
+            Self::Default => "DEFAULT",
+        }
+    }
+}
+
+impl From<EntitySpawnReason> for PluginSpawnReason {
+    fn from(reason: EntitySpawnReason) -> Self {
+        match reason {
+            EntitySpawnReason::Natural => Self::Natural,
+            EntitySpawnReason::ChunkGeneration => Self::ChunkGen,
+            EntitySpawnReason::Spawner => Self::Spawner,
+            EntitySpawnReason::Breeding => Self::Breeding,
+            EntitySpawnReason::Jockey => Self::Jockey,
+            EntitySpawnReason::Reinforcement => Self::Reinforcements,
+            EntitySpawnReason::Bucket => Self::Bucket,
+            EntitySpawnReason::SpawnItemUse => Self::SpawnerEgg,
+            EntitySpawnReason::Command => Self::Command,
+            EntitySpawnReason::Dispenser => Self::DispenseEgg,
+            EntitySpawnReason::Patrol => Self::Patrol,
+            EntitySpawnReason::TrialSpawner => Self::TrialSpawner,
+            EntitySpawnReason::Structure
+            | EntitySpawnReason::MobSummoned
+            | EntitySpawnReason::Event
+            | EntitySpawnReason::Conversion
+            | EntitySpawnReason::Triggered
+            | EntitySpawnReason::Load
+            | EntitySpawnReason::DimensionTravel => Self::Default,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpawnGroupData {
     AgeableMob(AgeableMobGroupData),
@@ -317,6 +500,57 @@ impl AgeableMobGroupData {
 #[cfg(test)]
 mod tests {
     use super::AgeableMobGroupData;
+    use foton_registry::vanilla_entities;
+    use std::sync::Weak;
+
+    #[test]
+    fn plugin_spawn_provenance_maps_every_vanilla_reason_without_custom() {
+        use super::EntitySpawnReason as V;
+        use crate::entity::{Entity as _, entities::RawEntity};
+        let entity = RawEntity::new(7, glam::DVec3::ZERO, Weak::new(), &vanilla_entities::ITEM);
+        assert_eq!(entity.base().spawn_reason(), None);
+        assert_eq!(entity.base().plugin_spawn_reason(), None);
+        for (vanilla, expected) in [
+            (V::Natural, "NATURAL"),
+            (V::ChunkGeneration, "CHUNK_GEN"),
+            (V::Spawner, "SPAWNER"),
+            (V::Structure, "DEFAULT"),
+            (V::Breeding, "BREEDING"),
+            (V::MobSummoned, "DEFAULT"),
+            (V::Jockey, "JOCKEY"),
+            (V::Event, "DEFAULT"),
+            (V::Conversion, "DEFAULT"),
+            (V::Reinforcement, "REINFORCEMENTS"),
+            (V::Triggered, "DEFAULT"),
+            (V::Bucket, "BUCKET"),
+            (V::SpawnItemUse, "SPAWNER_EGG"),
+            (V::Command, "COMMAND"),
+            (V::Dispenser, "DISPENSE_EGG"),
+            (V::Patrol, "PATROL"),
+            (V::TrialSpawner, "TRIAL_SPAWNER"),
+            (V::Load, "DEFAULT"),
+            (V::DimensionTravel, "DEFAULT"),
+        ] {
+            entity.base().set_spawn_reason(vanilla);
+            assert_eq!(entity.base().spawn_reason(), Some(vanilla));
+            assert_eq!(
+                entity
+                    .base()
+                    .plugin_spawn_reason()
+                    .map(super::PluginSpawnReason::as_str),
+                Some(expected)
+            );
+        }
+        entity.base().set_spawn_reason(V::Load);
+        entity
+            .base()
+            .set_plugin_spawn_reason(super::PluginSpawnReason::Beehive);
+        assert_eq!(entity.base().spawn_reason(), Some(V::Load));
+        assert_eq!(
+            entity.base().plugin_spawn_reason(),
+            Some(super::PluginSpawnReason::Beehive)
+        );
+    }
 
     #[test]
     fn ageable_group_data_increments_before_later_baby_rolls_can_apply() {

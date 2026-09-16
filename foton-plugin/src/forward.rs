@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::natives;
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
+use foton_core::entity::PluginSpawnReason;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
@@ -1712,7 +1713,7 @@ fn pre_creature_spawn_call(
     y: f64,
     z: f64,
     entity_type: &str,
-    reason: &str,
+    reason: PluginSpawnReason,
 ) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
@@ -1723,13 +1724,13 @@ fn pre_creature_spawn_call(
     let Ok(entity_type) = env.new_string(entity_type) else {
         return true;
     };
-    let Ok(reason) = env.new_string(reason) else {
+    let Ok(reason) = env.new_string(reason.as_str()) else {
         return true;
     };
     env.call_static_method(
         BRIDGE,
         "firePreCreatureSpawn",
-        "(Ljava/lang/String;DDDDLjava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Z",
         &[
             JValue::Object(&world),
             JValue::Double(x),
@@ -1749,7 +1750,7 @@ fn creature_spawn_call(
     x: f64,
     y: f64,
     z: f64,
-    reason: &str,
+    reason: PluginSpawnReason,
 ) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
@@ -1760,13 +1761,13 @@ fn creature_spawn_call(
     let Ok(world) = env.new_string(world) else {
         return true;
     };
-    let Ok(reason) = env.new_string(reason) else {
+    let Ok(reason) = env.new_string(reason.as_str()) else {
         return true;
     };
     env.call_static_method(
         BRIDGE,
         "fireCreatureSpawn",
-        "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;)Z",
+        "(Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;)Z",
         &[
             JValue::Object(&entity),
             JValue::Object(&world),
@@ -3563,3 +3564,6 @@ fn plugin_message_call(vm: &JavaVM, uuid: &str, channel: &str, payload: &[u8]) {
         ],
     );
 }
+
+#[cfg(test)]
+mod spawn_bridge_tests;

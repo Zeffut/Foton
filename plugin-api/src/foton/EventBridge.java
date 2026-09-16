@@ -381,18 +381,18 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    private static org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason spawnReason(String reason) {
+    static org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason spawnReason(String reason) {
         if (reason == null) return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT;
         try {
             return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.valueOf(
                 reason.toUpperCase(java.util.Locale.ROOT));
         } catch (IllegalArgumentException error) {
-            return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CUSTOM;
+            return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT;
         }
     }
 
     public static boolean firePreCreatureSpawn(String world, double x, double y, double z, String type, String reason) {
-        org.bukkit.entity.EntityType entityType = org.bukkit.entity.EntityType.fromName(type);
+        org.bukkit.entity.EntityType entityType = org.bukkit.Registry.ENTITY_TYPE.get(org.bukkit.NamespacedKey.fromString(type));
         if (entityType == null) return true;
         org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason spawnReason = spawnReason(reason);
         com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event =

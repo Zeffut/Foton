@@ -36,11 +36,18 @@ use uuid::Uuid;
 use crate::entity::fluid_contact::EntityFluidContact;
 use crate::entity::{
     EntityLevelCallback, EntityMoveError, EntitySpawnReason, InsideBlockEffectType,
-    NullEntityCallback, RemovalReason, SharedEntity,
+    NullEntityCallback, PluginSpawnReason, RemovalReason, SharedEntity,
 };
 use crate::physics::EntityPhysicsState;
 use crate::portal::{PortalKind, PortalProcessResult, PortalProcessor};
 use crate::world::World;
+
+/// Both views of a spawn are guarded by the same existing provenance lock.
+#[derive(Default)]
+struct SpawnProvenance {
+    vanilla: Option<EntitySpawnReason>,
+    plugin: Option<PluginSpawnReason>,
+}
 
 const PISTON_MOVEMENT_LIMIT: f64 = 0.51;
 const PISTON_ZERO_MOVEMENT_EPSILON: f64 = 1.0e-7;
@@ -393,7 +400,7 @@ pub struct EntityBase {
     ///
     /// This is set by the vanilla mob finalization path. Entities restored
     /// from disk intentionally have no new spawn reason.
-    spawn_reason: SyncMutex<Option<EntitySpawnReason>>,
+    spawn_reason: SyncMutex<SpawnProvenance>,
     /// Removal and tick bookkeeping.
     lifecycle: SyncMutex<EntityLifecycleState>,
     /// Passenger, vehicle, and boarding-cooldown state.
@@ -456,7 +463,7 @@ impl EntityBase {
             world: SyncMutex::new(world),
             state: SyncMutex::new(state),
             save_data: SyncMutex::new(EntityBaseSaveData::new()),
-            spawn_reason: SyncMutex::new(None),
+            spawn_reason: SyncMutex::new(SpawnProvenance::default()),
             movement_trace: SyncMutex::new(EntityMovementTrace::default()),
             lifecycle: SyncMutex::new(EntityLifecycleState::new()),
             relationships: SyncMutex::new(EntityRelationshipState::default()),
@@ -498,13 +505,27 @@ impl EntityBase {
     /// Returns the reason supplied by vanilla when this entity was spawned.
     #[inline]
     pub fn spawn_reason(&self) -> Option<EntitySpawnReason> {
-        *self.spawn_reason.lock()
+        self.spawn_reason.lock().vanilla
     }
 
     /// Records the reason supplied by vanilla during spawn finalization.
     #[inline]
     pub fn set_spawn_reason(&self, reason: EntitySpawnReason) {
-        *self.spawn_reason.lock() = Some(reason);
+        *self.spawn_reason.lock() = SpawnProvenance {
+            vanilla: Some(reason),
+            plugin: Some(reason.into()),
+        };
+    }
+
+    /// Returns the plugin-visible provenance without changing vanilla semantics.
+    #[must_use]
+    pub fn plugin_spawn_reason(&self) -> Option<PluginSpawnReason> {
+        self.spawn_reason.lock().plugin
+    }
+
+    /// Records precise call-site provenance, preserving the vanilla reason.
+    pub fn set_plugin_spawn_reason(&self, reason: PluginSpawnReason) {
+        self.spawn_reason.lock().plugin = Some(reason);
     }
 
     /// Gets the entity's current position.

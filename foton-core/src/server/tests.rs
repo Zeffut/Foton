@@ -88,6 +88,8 @@ use foton_utils::Identifier;
 use foton_utils::types::GameType;
 use tokio::sync::oneshot::channel;
 
+mod beehive_spawn;
+
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,
     closed: AtomicBool,

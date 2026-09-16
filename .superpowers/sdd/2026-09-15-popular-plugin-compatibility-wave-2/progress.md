@@ -26,7 +26,7 @@
 - [x] Task 2 — entity truth bridge (`7bf2c0835`, `b0165146a`, `6fe94f1b1`; spec and quality approved)
 - [x] Task 3 — exact adapters (`5f7467ac9` through `49c66a52b`; spec and quality approved)
 - [x] Task 4 — modern aliases (`8eff093d9` through `634280adf`; spec and quality approved)
-- [ ] Task 5 — host JDBC runtime/self-disable lifecycle (`d7fdc5609`, `abb708f06`; implementation, focused verification, and Zelda SQLite runtime gate complete; awaiting review)
+- [x] Task 5 — host JDBC runtime/self-disable lifecycle (`d7fdc5609`, `abb708f06`; spec and quality approved; Zelda SQLite runtime gate complete)
 - [ ] Task 6 — additional live-backed API (original 11-error compile scope plus separate 47-value spawn-reason/BEEHIVE runtime gate)
 - [ ] Task 7 — Zelda evidence and final verification
 
@@ -53,3 +53,11 @@
 
 - Paper 26.2 enum oracle: <https://github.com/PaperMC/Paper/blob/ver/26.2/paper-api/src/main/java/org/bukkit/event/entity/CreatureSpawnEvent.java>
 - Paper 26.2 beehive ordering oracle: <https://github.com/PaperMC/Paper/blob/ver/26.2/paper-server/patches/sources/net/minecraft/world/level/block/entity/BeehiveBlockEntity.java.patch>
+
+## Task 6 SpawnReason/BEEHIVE implementation
+
+- Scope base: `936a4fa18469641c42c411adf61924d642c43474`; only spawn provenance, event forwarding, beehive release, and their checks.
+- RED: Java exact ABI returned 9 instead of 47 constants; absent/unknown parser returned CUSTOM; Paper-compiled consumer failed with NoSuchFieldError BEEHIVE.
+- RED: both real-server beehive tests observed zero CreatureSpawnEvent callbacks instead of one; new core/native provenance APIs failed compilation before implementation.
+- Ruling: correct both existing spawn JNI descriptors (three doubles, not four) and resolve pre-spawn entity names through the existing keyed registry — the real JNI cancellation test proved both paths were silently bypassed; without this, typed spawn events would still not reach plugins.
+- Status: implementation and focused verification complete; one follow-up remains to assert the live inserted bee's `getEntitySpawnReason()` through Java/JNI, and unrelated Task 6 API remains pending.

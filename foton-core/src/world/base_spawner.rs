@@ -28,6 +28,7 @@ use simdnbt::borrow::{NbtCompound as NbtCompoundView, read_compound};
 use simdnbt::owned::NbtCompound;
 
 use crate::chunk::light::LightLayer;
+use crate::entity::PluginSpawnReason;
 use crate::entity::{ENTITIES, Entity, EntitySpawnReason, SharedEntity, next_entity_id};
 use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
 use crate::physics::{WorldCollisionProvider, has_collision};
@@ -339,7 +340,7 @@ impl BaseSpawner {
             spawn_pos.y,
             spawn_pos.z,
             entity_type.key.to_string(),
-            "Spawner".to_owned(),
+            PluginSpawnReason::Spawner,
         );
         world.fire_event(&mut pre_spawn);
         if pre_spawn.is_cancelled() {
@@ -391,7 +392,7 @@ impl BaseSpawner {
             entity.position().x,
             entity.position().y,
             entity.position().z,
-            "Spawner".to_owned(),
+            PluginSpawnReason::Spawner,
         );
         world.begin_pending_spawn(Arc::clone(&entity));
         world.fire_event(&mut spawn_event);
@@ -588,7 +589,7 @@ pub(crate) fn load_spawner_entity(
     entity_type: EntityTypeRef,
     position: DVec3,
     spawn_data: &SpawnData,
-    _reason: EntitySpawnReason,
+    reason: EntitySpawnReason,
 ) -> Option<SharedEntity> {
     if !ENTITIES.has_factory(entity_type) {
         return None;
@@ -608,6 +609,7 @@ pub(crate) fn load_spawner_entity(
         Err(error) => log::warn!("spawner entity tag could not be re-read: {error}"),
     }
 
+    entity.base().set_spawn_reason(reason);
     Some(entity)
 }
 
@@ -618,7 +620,28 @@ mod tests {
     use simdnbt::owned::NbtCompound;
 
     use super::*;
+    use crate::entity::init_entities;
     use crate::test_support::fresh_test_world;
+    use foton_registry::vanilla_entities;
+
+    #[test]
+    fn configured_spawner_keeps_provenance_without_finalizing_a_mob() {
+        let world = fresh_test_world("spawner_provenance");
+        init_entities();
+        let spawn_data = SpawnData::default();
+        let entity = load_spawner_entity(
+            &world,
+            &vanilla_entities::BEE,
+            DVec3::ZERO,
+            &spawn_data,
+            EntitySpawnReason::TrialSpawner,
+        )
+        .expect("configured spawner can load a bee");
+        assert_eq!(
+            entity.base().spawn_reason(),
+            Some(EntitySpawnReason::TrialSpawner)
+        );
+    }
 
     struct CountingOwner {
         events: AtomicI32,
