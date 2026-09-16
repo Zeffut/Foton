@@ -534,6 +534,37 @@ impl BlockEntityStorage {
         (true, lifecycle_dispatchers)
     }
 
+    /// Mutates the exact current owner and stages its state callback without replacing it.
+    #[must_use]
+    pub(crate) fn update_and_apply_if_same_staged<F>(
+        &self,
+        pos: BlockPos,
+        block_entity: &SharedBlockEntity,
+        block_state: BlockStateId,
+        update: F,
+    ) -> Option<LifecycleDispatchers>
+    where
+        F: FnOnce(),
+    {
+        let dispatch_state = {
+            let entries = self.entries.write();
+            if !entries
+                .entities
+                .get(&pos)
+                .is_some_and(|current| Arc::ptr_eq(current, block_entity))
+            {
+                return None;
+            }
+            update();
+            block_entity.base().queue_block_state_change(block_state)
+        };
+        let mut lifecycle_dispatchers = LifecycleDispatchers::new();
+        if dispatch_state {
+            lifecycle_dispatchers.push(Arc::clone(block_entity));
+        }
+        Some(lifecycle_dispatchers)
+    }
+
     /// Removes `expected` only while it still owns `pos`, staging its callback.
     #[must_use]
     pub(crate) fn remove_if_same_staged(

@@ -296,6 +296,52 @@ impl World {
         true
     }
 
+    /// Atomically commits a property-only state change and an in-place entity update.
+    ///
+    /// The exact entity remains installed. Its update and the new block state are committed
+    /// before lifecycle, placement, neighbor, or client callbacks run.
+    #[must_use]
+    pub(crate) fn update_block_with_entity_if_unchanged<F>(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        expected_state: BlockStateId,
+        expected_entity: &SharedBlockEntity,
+        new_state: BlockStateId,
+        flags: UpdateFlags,
+        update: F,
+    ) -> bool
+    where
+        F: FnOnce(),
+    {
+        if !self.is_in_valid_bounds(pos) {
+            return false;
+        }
+
+        let chunk_pos = Self::chunk_pos_for_block(pos);
+        let Some(result) = self
+            .chunk_map
+            .with_full_chunk(chunk_pos, |chunk| {
+                chunk.update_block_with_entity_if_unchanged(
+                    pos,
+                    expected_state,
+                    expected_entity,
+                    new_state,
+                    flags,
+                    update,
+                )
+            })
+            .flatten()
+        else {
+            return false;
+        };
+
+        let FullChunkBlockSetResult::Changed(old_state) = result else {
+            return false;
+        };
+        self.finish_block_set(pos, old_state, new_state, flags, Self::UPDATE_LIMIT);
+        true
+    }
+
     pub(super) fn finish_block_set(
         self: &Arc<Self>,
         pos: BlockPos,

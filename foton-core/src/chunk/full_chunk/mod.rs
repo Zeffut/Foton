@@ -111,6 +111,17 @@ pub(crate) enum FullChunkBlockSetResult {
     Stale(BlockStateId),
 }
 
+enum BlockEntityStateTransaction<'a> {
+    Replace {
+        expected: Option<&'a SharedBlockEntity>,
+        replacement: &'a SharedBlockEntity,
+    },
+    Update {
+        expected: &'a SharedBlockEntity,
+        apply: Box<dyn FnOnce() + 'a>,
+    },
+}
+
 enum PendingPromotionCommit {
     Retry,
     Complete {
@@ -1658,7 +1669,43 @@ impl FullChunkRef<'_> {
             Some(expected_state),
             new_state,
             flags,
-            Some((expected_entity, replacement)),
+            Some(BlockEntityStateTransaction::Replace {
+                expected: expected_entity,
+                replacement,
+            }),
+        )
+    }
+
+    /// Conditionally updates a same-block entity in place with its owning state.
+    pub(crate) fn update_block_with_entity_if_unchanged<F>(
+        &self,
+        pos: BlockPos,
+        expected_state: BlockStateId,
+        expected_entity: &SharedBlockEntity,
+        new_state: BlockStateId,
+        flags: UpdateFlags,
+        update: F,
+    ) -> Option<FullChunkBlockSetResult>
+    where
+        F: FnOnce(),
+    {
+        let valid = expected_entity.get_block_pos() == pos
+            && ChunkPos::from_block_pos(pos) == self.chunk.pos
+            && expected_state.get_block() == new_state.get_block()
+            && new_state.has_block_entity()
+            && expected_entity.is_valid_block_state(new_state);
+        if !valid {
+            return Some(FullChunkBlockSetResult::Stale(self.get_block_state(pos)));
+        }
+        self.set_block_state_inner(
+            pos,
+            Some(expected_state),
+            new_state,
+            flags,
+            Some(BlockEntityStateTransaction::Update {
+                expected: expected_entity,
+                apply: Box::new(update),
+            }),
         )
     }
 
@@ -1672,7 +1719,7 @@ impl FullChunkRef<'_> {
         expected_state: Option<BlockStateId>,
         state: BlockStateId,
         flags: UpdateFlags,
-        replacement: Option<(Option<&SharedBlockEntity>, &SharedBlockEntity)>,
+        mut entity_transaction: Option<BlockEntityStateTransaction<'_>>,
     ) -> Option<FullChunkBlockSetResult> {
         let y = pos.0.y;
 
@@ -1698,7 +1745,8 @@ impl FullChunkRef<'_> {
             was_empty,
             is_empty,
             detached_block_entity,
-            replacement_lifecycle_dispatchers,
+            transaction_lifecycle_dispatchers,
+            transaction_applied,
         ) = loop {
             let mut section_guard = section.write();
             let observed_state = section_guard.states.get(local_x, local_y, local_z);
@@ -1733,44 +1781,56 @@ impl FullChunkRef<'_> {
                 false
             };
 
-            let replacement_commit = if let Some((expected_entity, replacement)) = replacement {
-                let Some(committed) = self.chunk.block_entity_storage().replace_if_same_staged(
-                    pos,
-                    expected_entity,
+            let transaction_commit = match entity_transaction.take() {
+                Some(BlockEntityStateTransaction::Replace {
+                    expected,
                     replacement,
-                    state,
-                ) else {
-                    return Some(FullChunkBlockSetResult::Stale(observed_state));
-                };
-                Some(committed)
-            } else {
-                None
+                }) => {
+                    let Some((detached, lifecycle_dispatchers)) = self
+                        .chunk
+                        .block_entity_storage()
+                        .replace_if_same_staged(pos, expected, replacement, state)
+                    else {
+                        return Some(FullChunkBlockSetResult::Stale(observed_state));
+                    };
+                    Some((Some(detached), lifecycle_dispatchers))
+                }
+                Some(BlockEntityStateTransaction::Update { expected, apply }) => {
+                    let Some(lifecycle_dispatchers) = self
+                        .chunk
+                        .block_entity_storage()
+                        .update_and_apply_if_same_staged(pos, expected, state, apply)
+                    else {
+                        return Some(FullChunkBlockSetResult::Stale(observed_state));
+                    };
+                    Some((None, lifecycle_dispatchers))
+                }
+                None => None,
             };
 
             let was_empty = section_guard.is_empty();
             let old_state = section_guard.set_block_state(local_x, local_y, local_z, state);
             debug_assert_eq!(old_state, observed_state);
-            let (detached_block_entity, replacement_lifecycle_dispatchers) = replacement_commit
-                .map_or_else(
-                    || {
-                        (
-                            detach_block_entity.then(|| {
-                                self.chunk
-                                    .block_entity_storage()
-                                    .detach_and_queue_removal(pos)
-                            }),
-                            LifecycleDispatchers::new(),
-                        )
-                    },
-                    |(detached, lifecycle_dispatchers)| (Some(detached), lifecycle_dispatchers),
-                );
+            let transaction_applied = transaction_commit.is_some();
+            let (detached_block_entity, transaction_lifecycle_dispatchers) = transaction_commit
+                .unwrap_or_else(|| {
+                    (
+                        detach_block_entity.then(|| {
+                            self.chunk
+                                .block_entity_storage()
+                                .detach_and_queue_removal(pos)
+                        }),
+                        LifecycleDispatchers::new(),
+                    )
+                });
             let is_empty = section_guard.is_empty();
             break (
                 old_state,
                 was_empty,
                 is_empty,
                 detached_block_entity,
-                replacement_lifecycle_dispatchers,
+                transaction_lifecycle_dispatchers,
+                transaction_applied,
             );
         };
 
@@ -1825,8 +1885,7 @@ impl FullChunkRef<'_> {
             level.queue_light_change_after_block_set(pos, old_state, state, empty_section_change);
         }
 
-        let replaced_entity_ownership = replacement.is_some();
-        let mut lifecycle_dispatchers = replacement_lifecycle_dispatchers;
+        let mut lifecycle_dispatchers = transaction_lifecycle_dispatchers;
         if let Some(DetachedBlockEntity {
             entity: Some(block_entity),
             dispatch_removed,
@@ -1842,7 +1901,7 @@ impl FullChunkRef<'_> {
                 lifecycle_dispatchers.push(block_entity);
             }
         }
-        if replaced_entity_ownership || !lifecycle_dispatchers.is_empty() {
+        if transaction_applied || !lifecycle_dispatchers.is_empty() {
             self.finish_block_entity_change(pos, lifecycle_dispatchers);
         }
 
@@ -1863,7 +1922,7 @@ impl FullChunkRef<'_> {
             // placement callbacks for the stale request.
             let current_state = section.read().states.get(local_x, local_y, local_z);
             if current_state.get_block() != new_block {
-                return Some(if replaced_entity_ownership {
+                return Some(if transaction_applied {
                     FullChunkBlockSetResult::Changed(old_state)
                 } else {
                     FullChunkBlockSetResult::Stale(current_state)
@@ -1878,7 +1937,7 @@ impl FullChunkRef<'_> {
 
         // Block-entity reconciliation is an exact-state transaction. Placement callbacks or
         // concurrent writers that replace this request own the resulting entity instead.
-        if state.has_block_entity() && !replaced_entity_ownership {
+        if state.has_block_entity() && !transaction_applied {
             self.reconcile_block_entity_after_set(pos, state);
         }
 

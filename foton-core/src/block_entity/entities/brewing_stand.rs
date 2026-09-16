@@ -32,7 +32,9 @@ use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as Nbt
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase, ImplicitComponentInput};
+use crate::block_entity::{
+    BlockEntity, BlockEntityBase, ImplicitComponentInput, SharedBlockEntity,
+};
 use crate::event::BrewEvent;
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef, SharedContainer};
@@ -173,6 +175,12 @@ thread_local! {
     static BREW_SNAPSHOT_CAPTURES: Cell<usize> = const { Cell::new(0) };
     static BREW_WORLD_EFFECTS: Cell<usize> = const { Cell::new(0) };
     static BREW_PRE_REMOVE_OBSERVED_IDENTITY: Cell<Option<u64>> = const { Cell::new(None) };
+    static BREW_REENTER_STATE_CALLBACK: Cell<bool> = const { Cell::new(false) };
+    static BREW_STATE_CALLBACK_COUNT: Cell<usize> = const { Cell::new(0) };
+    static BREW_STATE_CALLBACK_OBSERVED_STATE: Cell<Option<BlockStateId>> = const { Cell::new(None) };
+    static BREW_STATE_CALLBACK_OBSERVED_IDENTITY: Cell<Option<u64>> = const { Cell::new(None) };
+    static BREW_STATE_CALLBACK_OBSERVED_DIAMOND: Cell<bool> = const { Cell::new(false) };
+    static BREW_STATE_CALLBACK_STILL_CURRENT: Cell<bool> = const { Cell::new(false) };
 }
 
 impl BrewCompletionSnapshot {
@@ -389,7 +397,44 @@ impl BrewingStandBlockEntity {
     /// factory before changing the block state. Keeping this narrow lifecycle commit separate
     /// prevents a replacement from acquiring a later rejectable snapshot-validation step.
     pub fn apply_replacement_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
-        self.commit_visible_state_snapshot(snapshot);
+        let mut container = self.container.lock();
+        container.items = snapshot.items;
+        container.brew_time = snapshot.brew_time;
+        container.recipe_brew_time = snapshot.recipe_brew_time;
+        container.fuel = snapshot.fuel;
+        container.custom_name = snapshot.custom_name;
+        container.lock = snapshot.lock;
+        container.brewing_ingredient =
+            (container.brew_time > 0).then(|| container.items[SLOT_INGREDIENT].clone());
+        self.publish_data(&container);
+    }
+
+    /// Applies a snapshot together with a property-only block-state change.
+    #[must_use]
+    pub fn apply_state_snapshot_with_state(
+        &self,
+        world: &Arc<World>,
+        current_entity: &SharedBlockEntity,
+        state: BlockStateId,
+        snapshot: BrewingStandStateSnapshot,
+        flags: UpdateFlags,
+    ) -> bool {
+        if snapshot.identity != self.identity
+            || !Self::is_valid_state_snapshot(&snapshot)
+            || !ptr::eq(current_entity.base(), self.base())
+        {
+            return false;
+        }
+        let pos = self.get_block_pos();
+        let current_state = self.get_block_state();
+        world.update_block_with_entity_if_unchanged(
+            pos,
+            current_state,
+            current_entity,
+            state,
+            flags,
+            || self.commit_visible_state_snapshot(snapshot),
+        )
     }
 
     fn commit_visible_state_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
@@ -616,6 +661,42 @@ impl BlockEntity for BrewingStandBlockEntity {
             },
             |event| world.fire_event(event),
         );
+    }
+
+    fn on_block_state_changed(&self, _state: BlockStateId) {
+        #[cfg(test)]
+        {
+            if !BREW_REENTER_STATE_CALLBACK.with(|enabled| enabled.replace(false)) {
+                return;
+            }
+            BREW_STATE_CALLBACK_COUNT.with(|count| count.set(count.get() + 1));
+            let Some(world) = self.get_level() else {
+                return;
+            };
+            let pos = self.get_block_pos();
+            BREW_STATE_CALLBACK_OBSERVED_STATE.with(|observed| {
+                observed.set(Some(world.get_block_state(pos)));
+            });
+            let Some(current) = world.get_block_entity(pos) else {
+                return;
+            };
+            let Some(brewing) = current.downcast_ref::<Self>() else {
+                return;
+            };
+            BREW_STATE_CALLBACK_OBSERVED_IDENTITY
+                .with(|identity| identity.set(Some(brewing.identity())));
+            BREW_STATE_CALLBACK_OBSERVED_DIAMOND.with(|observed| {
+                observed.set(brewing.state_snapshot().items[0].is(&vanilla_items::DIAMOND));
+            });
+            let _ = world.set_block_entity(Arc::clone(&current));
+            BREW_STATE_CALLBACK_STILL_CURRENT.with(|observed| {
+                observed.set(
+                    world
+                        .get_block_entity(pos)
+                        .is_some_and(|after| Arc::ptr_eq(&after, &current)),
+                );
+            });
+        }
     }
 
     fn pre_remove_side_effects(&self, pos: BlockPos, _state: BlockStateId) {
@@ -1205,7 +1286,7 @@ mod tests {
     }
 
     #[test]
-    fn replacement_snapshot_leaves_the_constructor_brew_guard_empty() {
+    fn active_replacement_snapshot_reconstructs_the_ingredient_guard_for_the_next_tick() {
         let world = fresh_test_world("replacement_snapshot_ingredient_guard");
         let pos = BlockPos::new(3, 64, -2);
         let stand = BrewingStandBlockEntity::new(
@@ -1214,12 +1295,63 @@ mod tests {
             vanilla_blocks::BREWING_STAND.default_state(),
         );
         let mut snapshot = stand.state_snapshot();
+        snapshot.items[0] = water_bottle();
         snapshot.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
         snapshot.brew_time = 10;
 
         stand.apply_replacement_snapshot(snapshot);
+        stand.tick_with_brew_dispatch(&world, || false, |_| {});
 
-        assert!(stand.container.lock().brewing_ingredient.is_none());
+        let container = stand.container.lock();
+        assert_eq!(container.brew_time, 9);
+        assert!(
+            container
+                .brewing_ingredient
+                .as_ref()
+                .is_some_and(|ingredient| ingredient.is(&vanilla_items::NETHER_WART))
+        );
+    }
+
+    #[test]
+    fn property_transaction_exposes_state_and_snapshot_before_reentrant_callback() {
+        let (world, stand, _) = ready_stand("property_transaction_callback");
+        let pos = stand.get_block_pos();
+        let old_state = world.get_block_state(pos);
+        let new_state = old_state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true);
+        let expected: SharedBlockEntity = stand.clone();
+        let mut snapshot = stand.state_snapshot();
+        snapshot.items[0] = ItemStack::new(&vanilla_items::DIAMOND);
+        BREW_REENTER_STATE_CALLBACK.with(|enabled| enabled.set(true));
+        BREW_STATE_CALLBACK_COUNT.with(|count| count.set(0));
+        BREW_STATE_CALLBACK_OBSERVED_STATE.with(|state| state.set(None));
+        BREW_STATE_CALLBACK_OBSERVED_IDENTITY.with(|identity| identity.set(None));
+        BREW_STATE_CALLBACK_OBSERVED_DIAMOND.with(|observed| observed.set(false));
+        BREW_STATE_CALLBACK_STILL_CURRENT.with(|current| current.set(false));
+
+        assert!(stand.apply_state_snapshot_with_state(
+            &world,
+            &expected,
+            new_state,
+            snapshot,
+            UpdateFlags::UPDATE_CLIENTS,
+        ));
+
+        assert_eq!(BREW_STATE_CALLBACK_COUNT.with(Cell::get), 1);
+        assert_eq!(
+            BREW_STATE_CALLBACK_OBSERVED_STATE.with(Cell::get),
+            Some(new_state)
+        );
+        assert_eq!(
+            BREW_STATE_CALLBACK_OBSERVED_IDENTITY.with(Cell::get),
+            Some(stand.identity())
+        );
+        assert!(BREW_STATE_CALLBACK_OBSERVED_DIAMOND.with(Cell::get));
+        assert!(BREW_STATE_CALLBACK_STILL_CURRENT.with(Cell::get));
+        assert!(
+            world
+                .get_block_entity(pos)
+                .is_some_and(|current| Arc::ptr_eq(&current, &expected))
+        );
     }
 
     #[test]

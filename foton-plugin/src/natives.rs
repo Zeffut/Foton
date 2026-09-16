@@ -12109,7 +12109,7 @@ fn apply_brewing_snapshot(
     ) {
         return false;
     }
-    if current_state == state {
+    if current_state.get_block() == state.get_block() {
         let Some(brewing) = current else {
             return false;
         };
@@ -12125,7 +12125,19 @@ fn apply_brewing_snapshot(
         target.fuel = snapshot.fuel;
         target.custom_name = snapshot.custom_name;
         target.lock = snapshot.lock;
-        return brewing.apply_state_snapshot(target);
+        if current_state == state {
+            return brewing.apply_state_snapshot(target);
+        }
+        let Some(current_entity) = current_entity.as_ref() else {
+            return false;
+        };
+        return brewing.apply_state_snapshot_with_state(
+            world,
+            current_entity,
+            state,
+            target,
+            brewing_update_flags(apply_physics),
+        );
     }
     if !BLOCK_ENTITIES.has_factory(&BREWING_STAND_BLOCK_ENTITY) {
         return false;
@@ -16923,7 +16935,8 @@ mod slot_codec_tests {
 mod brewing_bridge_tests {
     use foton_core::behavior::init_behaviors;
     use foton_core::block_entity::entities::{BREWING_STAND_SLOTS, BrewingStandBlockEntity};
-    use foton_core::block_entity::init_block_entities;
+    use foton_core::block_entity::{BlockEntity as _, init_block_entities};
+    use foton_core::entity::entities::ItemEntity;
     use foton_core::world::{LevelReader as _, World};
     use foton_registry::blocks::block_state_ext::BlockStateExt as _;
     use foton_registry::blocks::properties::BlockStateProperties;
@@ -16936,6 +16949,7 @@ mod brewing_bridge_tests {
     };
     use foton_registry::item_predicate::LockCode;
     use foton_registry::item_stack::ItemStack;
+    use foton_registry::potion_brewing::potion_item;
     use foton_registry::{
         ItemStackTemplate, REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference,
         init_vanilla_registry, vanilla_blocks, vanilla_items, vanilla_potions,
@@ -17406,6 +17420,41 @@ mod brewing_bridge_tests {
     }
 
     #[test]
+    fn forced_active_replacement_keeps_brewing_on_its_first_tick() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(6, 64, -3);
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::DIRT.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = potion_item(&vanilla_items::POTION, &vanilla_potions::WATER);
+        items[3] = ItemStack::new(&vanilla_items::NETHER_WART);
+        let mut active = snapshot(items);
+        active.brew_time = 10;
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            active,
+            true,
+            false,
+        ));
+        let entity = world
+            .get_block_entity(pos)
+            .expect("forced replacement must install a block entity");
+        let brewing = entity
+            .downcast_ref::<BrewingStandBlockEntity>()
+            .expect("forced replacement must install a brewing stand");
+
+        brewing.tick(&world);
+
+        assert_eq!(brewing.state_snapshot().brew_time, 9);
+    }
+
+    #[test]
     fn successful_real_apply_updates_the_placed_entity_state() {
         let world = loaded_bridge_world();
         let pos = BlockPos::new(7, 64, -2);
@@ -17428,6 +17477,112 @@ mod brewing_bridge_tests {
             Some(3),
             "the real placed entity must expose the committed state to its update path"
         );
+    }
+
+    #[test]
+    fn forced_property_update_preserves_the_exact_entity_and_drops_no_inventory() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(8, 64, -2);
+        let initial_state = vanilla_blocks::BREWING_STAND.default_state();
+        let requested_state = initial_state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true);
+        assert!(world.set_block(pos, initial_state, UpdateFlags::UPDATE_NONE));
+        let original = world
+            .get_block_entity(pos)
+            .expect("the brewing stand must own a block entity");
+        let identity = original
+            .downcast_ref::<BrewingStandBlockEntity>()
+            .expect("the block entity must be a brewing stand")
+            .identity();
+
+        let mut old_items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        old_items[0] = ItemStack::new(&vanilla_items::POTION);
+        old_items[3] = ItemStack::new(&vanilla_items::NETHER_WART);
+        let mut initial_snapshot = snapshot(old_items);
+        initial_snapshot.identity = identity;
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            initial_state,
+            initial_snapshot,
+            false,
+            false,
+        ));
+
+        let mut requested_items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        requested_items[1] = ItemStack::new(&vanilla_items::DIAMOND);
+        requested_items[3] = ItemStack::new(&vanilla_items::REDSTONE);
+        let mut requested = snapshot(requested_items.clone());
+        requested.identity = identity.wrapping_add(1);
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            requested_state,
+            requested,
+            true,
+            true,
+        ));
+
+        let current = world
+            .get_block_entity(pos)
+            .expect("the property update must keep a block entity");
+        assert!(
+            Arc::ptr_eq(&current, &original),
+            "same-block property updates must keep the exact current Arc"
+        );
+        assert_eq!(world.get_block_state(pos), requested_state);
+        assert_eq!(
+            current
+                .downcast_ref::<BrewingStandBlockEntity>()
+                .expect("the preserved entity must remain a brewing stand")
+                .state_snapshot()
+                .items,
+            requested_items,
+            "callbacks must observe and retain the complete requested inventory"
+        );
+        let dropped_items = world
+            .accessible_entities()
+            .into_iter()
+            .filter(|entity| entity.downcast_ref::<ItemEntity>().is_some())
+            .count();
+        assert_eq!(
+            dropped_items, 0,
+            "a same-block property update must not run destructive pre-remove effects"
+        );
+    }
+
+    #[test]
+    fn genuine_brewing_stand_removal_still_drops_its_inventory() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(9, 64, -2);
+        let brewing = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, brewing, UpdateFlags::UPDATE_NONE));
+        let identity = installed_brewing_identity(&world, pos);
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = ItemStack::new(&vanilla_items::DIAMOND);
+        let mut populated = snapshot(items);
+        populated.identity = identity;
+        assert!(apply_brewing_snapshot(
+            &world, pos, brewing, populated, false, false,
+        ));
+
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::DIRT.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        ));
+
+        let dropped_diamonds = world
+            .accessible_entities()
+            .into_iter()
+            .filter_map(|entity| {
+                entity
+                    .downcast_ref::<ItemEntity>()
+                    .map(ItemEntity::get_item)
+            })
+            .filter(|item| item.is(&vanilla_items::DIAMOND))
+            .count();
+        assert_eq!(dropped_diamonds, 1);
     }
 
     fn lamp_receives_a_power_loss_callback(apply_physics: bool) -> bool {
