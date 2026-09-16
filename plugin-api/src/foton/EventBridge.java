@@ -7,6 +7,7 @@ import org.bukkit.Location;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.inventory.PrepareGrindstoneEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.event.inventory.BrewEvent;
 import org.bukkit.event.block.CrafterCraftEvent;
 
 import java.lang.reflect.Method;
@@ -271,6 +272,42 @@ public final class EventBridge {
         for (int i = 0; i < event.getRemainingItems().size(); i++) {
             if (i > 0) out.append("\u001e");
             out.append(FotonInventory.encode(event.getRemainingItems().get(i)));
+        }
+        return out.toString();
+    }
+
+    /** Dispatches a completed brew against a detached five-slot snapshot. */
+    public static String fireBrew(String world, int x, int y, int z, String contents,
+            String results, int fuelLevel) {
+        String[] encodedContents = contents == null ? new String[0] : contents.split("\u001e", -1);
+        ItemStack[] slots = new ItemStack[5];
+        for (int slot = 0; slot < slots.length; slot++) {
+            slots[slot] = FotonInventory.decode(
+                slot < encodedContents.length ? encodedContents[slot] : "");
+        }
+        FotonBlock block = new FotonBlock(new FotonWorld(world), x, y, z);
+        FotonBrewingStand holder = FotonBrewingStand.eventSnapshot(block, slots, fuelLevel);
+        FotonBrewerInventory inventory = holder.getInventory();
+        java.util.List<ItemStack> mutableResults = new java.util.ArrayList<>();
+        if (results != null && !results.isEmpty()) {
+            for (String encoded : results.split("\u001e", -1)) {
+                mutableResults.add(FotonInventory.decode(encoded));
+            }
+        }
+        BrewEvent event = new BrewEvent(block, inventory, mutableResults, fuelLevel);
+        dispatch(event);
+
+        StringBuilder out = new StringBuilder(event.isCancelled() ? "1" : "0");
+        out.append('\u001f');
+        ItemStack[] changedContents = inventory.getContents();
+        for (int slot = 0; slot < changedContents.length; slot++) {
+            if (slot > 0) out.append('\u001e');
+            out.append(FotonInventory.encode(changedContents[slot]));
+        }
+        out.append('\u001f');
+        for (int slot = 0; slot < event.getResults().size(); slot++) {
+            if (slot > 0) out.append('\u001e');
+            out.append(FotonInventory.encode(event.getResults().get(slot)));
         }
         return out.toString();
     }

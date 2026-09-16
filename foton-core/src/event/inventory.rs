@@ -5,6 +5,98 @@ use foton_registry::item_stack::ItemStack;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use uuid::Uuid;
 
+/// Fired after a brewing stand calculates its three vanilla bottle results,
+/// before the five-slot inventory snapshot is committed.
+pub struct BrewEvent {
+    world: String,
+    position: foton_utils::BlockPos,
+    contents: Vec<ItemStack>,
+    results: Vec<ItemStack>,
+    fuel_level: i32,
+    cancelled: bool,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies this concrete event type.
+unsafe impl DowncastType for BrewEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/brew");
+}
+impl Event for BrewEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+impl BrewEvent {
+    /// Creates the completion event exposed to the plugin bridge.
+    #[must_use]
+    pub const fn new(
+        world: String,
+        position: foton_utils::BlockPos,
+        contents: Vec<ItemStack>,
+        results: Vec<ItemStack>,
+        fuel_level: i32,
+    ) -> Self {
+        Self {
+            world,
+            position,
+            contents,
+            results,
+            fuel_level,
+            cancelled: false,
+        }
+    }
+
+    /// Loaded-world identifier containing the brewing stand.
+    #[must_use]
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+
+    /// Brewing stand position.
+    #[must_use]
+    pub const fn position(&self) -> foton_utils::BlockPos {
+        self.position
+    }
+
+    /// Mutable snapshot of all five brewing stand slots.
+    #[must_use]
+    pub fn contents(&self) -> &[ItemStack] {
+        &self.contents
+    }
+
+    /// Mutable snapshot of all five brewing stand slots.
+    pub const fn contents_mut(&mut self) -> &mut Vec<ItemStack> {
+        &mut self.contents
+    }
+
+    /// Candidate bottle results. Missing trailing entries clear those slots.
+    #[must_use]
+    pub fn results(&self) -> &[ItemStack] {
+        &self.results
+    }
+
+    /// Candidate bottle results. Missing trailing entries clear those slots.
+    pub const fn results_mut(&mut self) -> &mut Vec<ItemStack> {
+        &mut self.results
+    }
+
+    /// Remaining completed brews in the already-consumed blaze powder.
+    #[must_use]
+    pub const fn fuel_level(&self) -> i32 {
+        self.fuel_level
+    }
+
+    /// Whether a listener cancelled this completion.
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Cancels or re-enables this completion.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}
+
 /// Fired when an external inventory view has been opened for a player.
 pub struct InventoryOpenEvent {
     player_id: Uuid,

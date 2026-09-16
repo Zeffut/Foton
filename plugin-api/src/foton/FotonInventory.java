@@ -309,6 +309,15 @@ public final class FotonInventory implements PlayerInventory {
             result.setItemMeta(meta);
         }
         if (result.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
+            for (String field : encoded) if (field.startsWith("basepotionhex=")) {
+                String key = new String(hexDecode(field.substring(14)),
+                    java.nio.charset.StandardCharsets.UTF_8);
+                int separator = key.indexOf(':');
+                String potionName = (separator < 0 ? key : key.substring(separator + 1))
+                    .toUpperCase(java.util.Locale.ROOT);
+                try { meta.setBasePotionType(org.bukkit.potion.PotionType.valueOf(potionName)); }
+                catch (IllegalArgumentException ignored) { }
+            }
             String encodedEffects = null;
             for (int i = 1; i < encoded.length; i++) {
                 if (encoded[i].startsWith("potioneffects=")) {
@@ -349,7 +358,8 @@ public final class FotonInventory implements PlayerInventory {
             || field.startsWith("model=") || field.startsWith("modelfloat=")
             || field.startsWith("modelflag=") || field.startsWith("modelstrhex=")
             || field.startsWith("modelcolor=") || field.startsWith("itemmodelhex=")
-            || field.startsWith("tooltipstylehex=") || field.startsWith("potioneffects=")
+            || field.startsWith("tooltipstylehex=") || field.startsWith("basepotionhex=")
+            || field.startsWith("potioneffects=")
             || field.equals("hidetooltip") || field.equals("unbreakable");
     }
 
@@ -422,16 +432,23 @@ public final class FotonInventory implements PlayerInventory {
                 value += "\u001dlorehex=" + hex;
             }
         }
-        if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta && !meta.getCustomEffects().isEmpty()) {
-            StringBuilder effects = new StringBuilder("\u001dpotioneffects=");
-            for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) effects
-                .append(effect.getType().getKey().getKey()).append(',')
-                .append(effect.getDuration()).append(',')
-                .append(effect.getAmplifier()).append(',')
-                .append(effect.isAmbient()).append(',')
-                .append(effect.hasParticles()).append(',')
-                .append(effect.hasIcon()).append(';');
-            value += effects;
+        if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
+            if (meta.getBasePotionType() != null) {
+                value += "\u001dbasepotionhex=" + hexEncode(
+                    "minecraft:" + meta.getBasePotionType().name()
+                        .toLowerCase(java.util.Locale.ROOT));
+            }
+            if (!meta.getCustomEffects().isEmpty()) {
+                StringBuilder effects = new StringBuilder("\u001dpotioneffects=");
+                for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) effects
+                    .append(effect.getType().getKey().getKey()).append(',')
+                    .append(effect.getDuration()).append(',')
+                    .append(effect.getAmplifier()).append(',')
+                    .append(effect.isAmbient()).append(',')
+                    .append(effect.hasParticles()).append(',')
+                    .append(effect.hasIcon()).append(';');
+                value += effects;
+            }
         }
         return value;
     }

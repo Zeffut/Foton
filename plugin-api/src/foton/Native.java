@@ -108,6 +108,7 @@ public final class Native {
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
+    public static native String brewingStandState(String world, int x, int y, int z);
     public static native boolean jukeboxIsPlaying(String world, int x, int y, int z);
     public static native String jukeboxRecord(String world, int x, int y, int z);
     public static native void jukeboxSetRecord(String world, int x, int y, int z, String item);

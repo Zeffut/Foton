@@ -58,7 +58,7 @@ pub use entity::{
 };
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{
-    CrafterCraftEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
+    BrewEvent, CrafterCraftEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
     InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
 };
 pub use lectern::PlayerTakeLecternBookEvent;

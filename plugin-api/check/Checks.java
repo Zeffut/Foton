@@ -10,6 +10,7 @@ public final class Checks {
     public static void main(String[] args) throws Exception {
         Services.check();
         Events.check(args[0]);
+        BrewingCheck.check();
         FIXTURE_EVIDENCE.record("event", args[0],
             java.util.Set.of("EventFixture"), java.util.Set.of("EventFixture"), "");
         Config.check();

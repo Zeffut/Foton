@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
+use foton_core::block_entity::entities::BrewingStandBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
@@ -152,8 +153,8 @@ use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
-    REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
-    vanilla_items,
+    REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference, TaggedRegistryExt as _,
+    vanilla_entities, vanilla_items,
 };
 use foton_registry::{stat::Stat, vanilla_custom_stats};
 use foton_utils::entity_events::EntityStatus;
@@ -8904,6 +8905,10 @@ fn append_potion_effects(value: &mut String, stack: &ItemStack) {
     let Some(contents) = stack.get(POTION_CONTENTS) else {
         return;
     };
+    if let Some(potion) = contents.potion() {
+        value.push_str("\u{1d}basepotionhex=");
+        value.push_str(&hex_encode(potion.value().key.to_string().as_bytes()));
+    }
     if contents.custom_effects().is_empty() {
         return;
     }
@@ -9216,14 +9221,21 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
                     && !value.starts_with("modelcolor=")
                     && !value.starts_with("itemmodelhex=")
                     && !value.starts_with("tooltipstylehex=")
+                    && !value.starts_with("basepotionhex=")
                     && *value != "hidetooltip"
                     && *value != "unbreakable"
             })
         });
+    let base_potion = metadata
+        .iter()
+        .find_map(|value| value.strip_prefix("basepotionhex="))
+        .and_then(|encoded| String::from_utf8(hex_decode(encoded)).ok())
+        .and_then(|name| name.parse::<Identifier>().ok())
+        .and_then(|key| REGISTRY.potions.by_key(&key))
+        .map(RegistryReference::new);
+    let mut custom = Vec::new();
     if let Some(effects) = effects {
-        use foton_registry::data_components::components::PotionContents;
         use foton_registry::mob_effect::instance::MobEffectInstance;
-        let mut custom = Vec::new();
         for field in effects.split(';') {
             let parts = field.split(',').collect::<Vec<_>>();
             let (name, duration, amplifier, ambient, show_particles, show_icon) = match parts[..] {
@@ -9273,12 +9285,13 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
                 None,
             ));
         }
-        if !custom.is_empty() {
-            stack.set(
-                POTION_CONTENTS,
-                PotionContents::new(None, None, custom, None),
-            );
-        }
+    }
+    if base_potion.is_some() || !custom.is_empty() {
+        use foton_registry::data_components::components::PotionContents;
+        stack.set(
+            POTION_CONTENTS,
+            PotionContents::new(base_potion, None, custom, None),
+        );
     }
     Some(stack)
 }
@@ -11714,6 +11727,24 @@ extern "system" fn hopper_inventory_slot(
     to_java(&mut env, value)
 }
 
+extern "system" fn brewing_stand_state(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jstring {
+    let value = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
+            let [brew_time, fuel] = brewing.brewing_state();
+            Some(format!("{brew_time}\u{001f}{fuel}"))
+        });
+    to_java(&mut env, value)
+}
+
 extern "system" fn hopper_set_inventory_slot(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -13072,6 +13103,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "hopperInventorySlot",
             "(Ljava/lang/String;IIII)Ljava/lang/String;",
             hopper_inventory_slot as *mut c_void,
+        ),
+        method(
+            "brewingStandState",
+            "(Ljava/lang/String;III)Ljava/lang/String;",
+            brewing_stand_state as *mut c_void,
         ),
         method(
             "hopperSetInventorySlot",
@@ -16153,7 +16189,10 @@ mod slot_codec_tests {
     use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
     use foton_registry::item_stack::ItemStack;
     use foton_registry::mob_effect::instance::MobEffectInstance;
-    use foton_registry::{init_vanilla_registry, vanilla_items, vanilla_mob_effects};
+    use foton_registry::{
+        RegistryReference, init_vanilla_registry, vanilla_items, vanilla_mob_effects,
+        vanilla_potions,
+    };
 
     use super::{describe_slot, parse_slot};
 
@@ -16168,6 +16207,32 @@ mod slot_codec_tests {
 
         assert!(encoded.split('\u{1d}').any(|field| field == "damage=37"));
         assert_eq!(decoded.get_damage_value(), 37);
+        assert!(ItemStack::matches(&decoded, &original));
+    }
+
+    #[test]
+    fn slot_codec_round_trip_preserves_base_potion_identity() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::POTION);
+        original.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                Some(RegistryReference::new(&vanilla_potions::WATER)),
+                None,
+                Vec::new(),
+                None,
+            ),
+        );
+
+        let encoded = describe_slot(&original);
+        let decoded = parse_slot(&encoded).expect("described base potion should parse");
+
+        assert!(
+            encoded
+                .split('\u{1d}')
+                .any(|field| field.starts_with("basepotionhex="))
+        );
+        assert_eq!(decoded.get(POTION_CONTENTS), original.get(POTION_CONTENTS));
         assert!(ItemStack::matches(&decoded, &original));
     }
 

@@ -23,8 +23,8 @@ use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
     BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
     BlockFertilizeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
-    BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent,
-    CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent,
+    BlockPreDispenseEvent, BlockSpreadEvent, BrewEvent, ChunkLoadEvent, ChunkPopulateEvent,
+    ChunkUnloadEvent, CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent,
     EntityDamageByEntityEvent, EntityDeathEvent, EntityExplodeEvent, EntityMountEvent,
     EntityPickupItemEvent, EntityPortalEvent, EntityPushedByEntityAttackEvent,
     EntityRegainHealthEvent, EntityRemoveFromWorldEvent, EntityResurrectEvent,
@@ -280,6 +280,57 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             .collect::<Option<Vec<_>>>();
         if let Some(remaining) = remaining {
             event.set_remaining_items(remaining);
+        }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<BrewEvent, _>(owner(), move |event| {
+        let contents = event
+            .contents()
+            .iter()
+            .map(natives::describe_slot)
+            .collect::<Vec<_>>()
+            .join("\u{001e}");
+        let results = event
+            .results()
+            .iter()
+            .map(natives::describe_slot)
+            .collect::<Vec<_>>()
+            .join("\u{001e}");
+        let Some(answer) = brew_call(
+            &jvm,
+            event.world(),
+            event.position(),
+            &contents,
+            &results,
+            event.fuel_level(),
+        ) else {
+            return;
+        };
+        let mut fields = answer.splitn(3, '\u{001f}');
+        let cancelled = fields.next() == Some("1");
+        let Some(contents) = fields.next() else {
+            return;
+        };
+        let Some(results) = fields.next() else {
+            return;
+        };
+        let contents = contents
+            .split('\u{001e}')
+            .map(natives::parse_slot)
+            .collect::<Option<Vec<_>>>();
+        let results = if results.is_empty() {
+            Some(Vec::new())
+        } else {
+            results
+                .split('\u{001e}')
+                .map(natives::parse_slot)
+                .collect::<Option<Vec<_>>>()
+        };
+        if let (Some(contents), Some(results)) = (contents, results) {
+            *event.contents_mut() = contents;
+            *event.results_mut() = results;
+            event.set_cancelled(cancelled);
         }
     });
 
@@ -1425,6 +1476,42 @@ fn crafter_craft_call(
         "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
         &[JValue::Object(&world), JValue::from(position.x()), JValue::from(position.y()), JValue::from(position.z()), JValue::Object(&recipe), JValue::Object(&result), JValue::Object(&remaining)],
     ).ok()?.l().ok().and_then(|value| {
+        let binding = JString::from(value);
+        let text = env.get_string(&binding).ok()?;
+        Some(text.to_string_lossy().into_owned())
+    })
+}
+
+fn brew_call(
+    vm: &JavaVM,
+    world: &str,
+    position: BlockPos,
+    contents: &str,
+    results: &str,
+    fuel_level: i32,
+) -> Option<String> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let world = env.new_string(world).ok()?;
+    let contents = env.new_string(contents).ok()?;
+    let results = env.new_string(results).ok()?;
+    env.call_static_method(
+        BRIDGE,
+        "fireBrew",
+        "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
+        &[
+            JValue::Object(&world),
+            JValue::from(position.x()),
+            JValue::from(position.y()),
+            JValue::from(position.z()),
+            JValue::Object(&contents),
+            JValue::Object(&results),
+            JValue::from(fuel_level),
+        ],
+    )
+    .ok()?
+    .l()
+    .ok()
+    .and_then(|value| {
         let binding = JString::from(value);
         let text = env.get_string(&binding).ok()?;
         Some(text.to_string_lossy().into_owned())

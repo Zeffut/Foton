@@ -150,6 +150,9 @@ public final class FotonBlock implements Block {
         if (getType() == Material.HOPPER) {
             return new FotonHopper(this, getBlockData());
         }
+        if (getType() == Material.BREWING_STAND) {
+            return FotonBrewingStand.placedSnapshot(this, getBlockData());
+        }
         if (getType() == Material.CRAFTER) {
             return new FotonCrafter(this, getBlockData());
         }
