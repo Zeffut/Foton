@@ -26,6 +26,8 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     @Override public void setInvulnerable(boolean invulnerable) { Native.setEntityInvulnerable(id.toString(), invulnerable); }
     @Override public boolean isGlowing() { return Native.entityGlowing(id.toString()); }
     @Override public void setGlowing(boolean glowing) { Native.setEntityGlowing(id.toString(), glowing); }
+    @Override public float getFallDistance() { return Native.entityFallDistance(id.toString()); }
+    @Override public void setFallDistance(float distance) { Native.setEntityFallDistance(id.toString(), distance); }
     private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
         new java.util.concurrent.ConcurrentHashMap<>();
     private final UUID id;
@@ -122,6 +124,19 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
         if (category == null) return org.bukkit.entity.SpawnCategory.MISC;
         try { return org.bukkit.entity.SpawnCategory.valueOf(category.toUpperCase(java.util.Locale.ROOT)); }
         catch (IllegalArgumentException ignored) { return org.bukkit.entity.SpawnCategory.MISC; }
+    }
+    @Override public java.util.List<Entity> getNearbyEntities(double x, double y, double z) {
+        String[] ids = Native.entityNearby(getUniqueId().toString(), x, y, z);
+        if (ids == null || ids.length == 0) return java.util.List.of();
+        java.util.ArrayList<Entity> result = new java.util.ArrayList<>(ids.length);
+        for (String value : ids) {
+            try {
+                UUID nearbyId = UUID.fromString(value);
+                Entity nearby = FotonEntity.handle(nearbyId);
+                if (nearby != null) result.add(nearby);
+            } catch (IllegalArgumentException ignored) { }
+        }
+        return java.util.Collections.unmodifiableList(result);
     }
     @Override public int getEntityId() { return Native.entityId(id.toString()); }
     @Override public boolean teleport(Location location) {

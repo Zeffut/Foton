@@ -219,7 +219,7 @@ final class Items {
             ((org.bukkit.inventory.meta.PotionMeta) legacyPotion.getItemMeta()).getCustomEffects().get(0);
         Checks.expect(legacyPotion.getOpaqueNbt().equals("{foo:1b}")
             && legacyEffect.equals(new org.bukkit.potion.PotionEffect(
-                org.bukkit.potion.PotionEffectType.SPEED, 20, 1)),
+                org.bukkit.potion.PotionEffectType.SPEED, 20, 1, false, true, true)),
             "legacy unlabeled potion effects remain distinct from opaque NBT");
         Checks.same(read.getAmount(), 32, "decoded amount");
 

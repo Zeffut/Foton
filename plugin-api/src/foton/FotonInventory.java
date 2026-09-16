@@ -425,7 +425,7 @@ public final class FotonInventory implements PlayerInventory {
         if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta && !meta.getCustomEffects().isEmpty()) {
             StringBuilder effects = new StringBuilder("\u001dpotioneffects=");
             for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) effects
-                .append(effect.getType().getName()).append(',')
+                .append(effect.getType().getKey().getKey()).append(',')
                 .append(effect.getDuration()).append(',')
                 .append(effect.getAmplifier()).append(',')
                 .append(effect.isAmbient()).append(',')

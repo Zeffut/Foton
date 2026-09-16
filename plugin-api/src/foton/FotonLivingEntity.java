@@ -108,18 +108,18 @@ public class FotonLivingEntity extends FotonEntity implements LivingEntity {
         if (effect == null || effect.getType() == null) return false;
         org.bukkit.potion.PotionEffect old = getPotionEffect(effect.getType());
         String action = old == null ? "ADDED" : "CHANGED";
-        if (!EventBridge.firePotionEffect(getUniqueId().toString(), effect.getType().getName(),
+        if (!EventBridge.firePotionEffect(getUniqueId().toString(), effect.getType().getKey().getKey(),
                 old == null ? -1 : old.getDuration(), old == null ? -1 : old.getAmplifier(),
                 effect.getDuration(), effect.getAmplifier(), action)) return false;
-        return Native.addPotionEffect(getUniqueId().toString(), effect.getType().getName(), effect.getDuration(), effect.getAmplifier());
+        return Native.addPotionEffect(getUniqueId().toString(), effect.getType().getKey().getKey(), effect.getDuration(), effect.getAmplifier());
     }
     @Override public void removePotionEffect(org.bukkit.potion.PotionEffectType type) {
         if (type == null) return;
         org.bukkit.potion.PotionEffect old = getPotionEffect(type);
         if (old == null) return;
-        if (EventBridge.firePotionEffect(getUniqueId().toString(), type.getName(),
+        if (EventBridge.firePotionEffect(getUniqueId().toString(), type.getKey().getKey(),
                 old.getDuration(), old.getAmplifier(), -1, -1, "REMOVED"))
-            Native.removePotionEffect(getUniqueId().toString(), type.getName());
+            Native.removePotionEffect(getUniqueId().toString(), type.getKey().getKey());
     }
     @Override public org.bukkit.inventory.EntityEquipment getEquipment() {
         return new FotonEntityEquipment(getUniqueId().toString());

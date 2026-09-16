@@ -69,17 +69,80 @@ def export_tracked_checkout(destination: Path) -> None:
         "dev/gen-entity-type.py",
         "dev/gen-enchantment.py",
         "dev/gen-potion-type.py",
+        "dev/gen-potion-effect-type.py",
         "foton-registry/build_assets/attributes.json",
+        "foton-registry/build_assets/mob_effects.json",
+        "plugin-api/check/Checks.java",
+        "plugin-api/check/EntityCheck.java",
         "plugin-api/check/FotonPotionLookupRunner.java",
+        "plugin-api/check/Items.java",
+        "plugin-api/check/ModernAliasesCheck.java",
         "plugin-api/check/PaperAttributeConsumer.java",
-        "plugin-api/src/org/bukkit/potion/PotionEffectType.java",
+        "plugin-api/check/PotionEffectCheck.java",
+        "plugin-api/check/SpawnBridgeCheck.java",
+        "plugin-api/lib/jspecify-1.0.0.jar",
+        "plugin-api/lib/manifest.txt",
+        "plugin-api/src/foton/FotonAreaEffectCloud.java",
+        "plugin-api/src/foton/FotonArrow.java",
+        "plugin-api/src/foton/FotonEntity.java",
+        "plugin-api/src/foton/FotonFireball.java",
+        "plugin-api/src/foton/FotonInventory.java",
+        "plugin-api/src/foton/FotonLivingEntity.java",
+        "plugin-api/src/foton/FotonMushroomCow.java",
+        "plugin-api/src/foton/FotonPlayer.java",
+        "plugin-api/src/foton/FotonProjectile.java",
+        "plugin-api/src/foton/Native.java",
+        "plugin-api/src/io/papermc/paper/entity/Shearable.java",
+        "plugin-api/src/io/papermc/paper/potion/SuspiciousEffectEntry.java",
+        "plugin-api/src/io/papermc/paper/world/flag/FeatureDependant.java",
+        "plugin-api/src/org/bukkit/FeatureFlag.java",
+        "plugin-api/src/org/bukkit/Registry.java",
+        "plugin-api/src/org/bukkit/configuration/serialization/SerializableAs.java",
+        "plugin-api/src/org/bukkit/entity/AbstractArrow.java",
+        "plugin-api/src/org/bukkit/entity/Arrow.java",
+        "plugin-api/src/org/bukkit/entity/Entity.java",
+        "plugin-api/src/org/bukkit/entity/MushroomCow.java",
+        "plugin-api/src/org/bukkit/event/entity/EntityTransformEvent.java",
+        "plugin-api/src/org/bukkit/potion/PotionEffect.java",
+        "plugin-api/src/org/bukkit/potion/PotionEffectTypeWrapper.java",
+        "plugin-api/src/org/bukkit/potion/PotionEffectTypeCategory.java",
         "update-minecraft-src.sh",
     ):
-        shutil.copy2(ROOT / relative, destination / relative)
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, target)
     (destination / "plugin-api/src/org/bukkit/attribute/Attribute.java").unlink(missing_ok=True)
+    (destination / "plugin-api/src/org/bukkit/potion/PotionEffectType.java").unlink(missing_ok=True)
 
 
 class PluginApiBuildScriptTests(unittest.TestCase):
+    def test_potion_effect_type_generation_uses_registry_data_and_native_behavior(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton potion effect types ", dir="/tmp") as temporary:
+            output = Path(temporary)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "dev/gen-potion-effect-type.py",
+                    "foton-registry/build_assets/mob_effects.json",
+                    str(output),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            generated = (output / "org/bukkit/potion/PotionEffectType.java").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual(generated.count("static final PotionEffectType "), 80)
+            self.assertIn('35, "raid_omen", "minecraft:raid_omen"', generated)
+            self.assertIn('2, "slowness", "SLOW"', generated)
+            self.assertIn("foton.Native.mobEffectInstant(name)", generated)
+            self.assertNotIn("value.getName().equalsIgnoreCase(name)", generated)
+            self.assertNotIn('name in {"instant_health"', generated)
+
     def test_generated_entity_classes_are_backed_by_api_sources_or_planned_interfaces(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton entity types ", dir="/tmp") as temporary:
             output = Path(temporary)

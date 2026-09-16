@@ -18,6 +18,19 @@ use glam::DVec3;
 use crate::natives::register_prepublication_test_entity;
 
 #[test]
+fn conversion_reasons_use_exact_paper_names() {
+    assert_eq!(conversion_reason_name(ConversionReason::Sheared), "SHEARED");
+    assert_eq!(
+        conversion_reason_name(ConversionReason::PiglinZombification),
+        "PIGLIN_ZOMBIFIED"
+    );
+    assert_eq!(
+        conversion_reason_name(ConversionReason::Poison),
+        "METAMORPHOSIS"
+    );
+}
+
+#[test]
 #[ignore = "requires the built plugin API; dev/ci.sh runs this after the Java build"]
 fn spawn_bridge_dispatches_cancellation_and_queries_released_bee() -> Result<(), Box<dyn Error>> {
     let (_scratch, host) = spawn_check_host()?;

@@ -10,6 +10,7 @@ use foton_macros::entity_behavior;
 use foton_protocol::packets::game::{CGameEvent, GameEventType};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::item_stack::ItemStack;
+use foton_registry::mob_effect::MobEffectRef;
 use foton_registry::mob_effect::instance::MobEffectInstance as RegistryMobEffectInstance;
 use foton_registry::potion::PotionRef;
 use foton_registry::sound_event::SoundEventRef;
@@ -21,13 +22,16 @@ use foton_registry::{
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::SyncMutex;
 use foton_utils::types::Difficulty;
-use foton_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey, Identifier, WorldAabb};
+use foton_utils::{
+    BlockPos, BlockStateId, Downcast as _, DowncastType, DowncastTypeKey, Identifier, WorldAabb,
+};
 use glam::DVec3;
 
 use crate::behavior::BlockCollisionContext;
 use crate::block_entity::block_state_nbt;
 use crate::enchantment_helper::{self, EnchantmentDamageContext};
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::OminousItemSpawnerEntity;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, Projectile,
     ProjectileBase, ProjectileDeflection, ProjectileHit, RemovalReason, SharedEntity,
@@ -37,7 +41,7 @@ use crate::event::Event as _;
 use crate::event::ProjectileLaunchEvent;
 use crate::inventory::container::Container as _;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
-use crate::physics::{MoverType, WorldCollisionProvider};
+use crate::physics::{CollisionWorld as _, MoverType, WorldCollisionProvider};
 use crate::player::Player;
 use crate::world::{ClipHitResult, World};
 use foton_registry::data_components::components::PotionContents;
@@ -573,7 +577,9 @@ impl ArrowEntity {
     /// becomes collectable unless the ammunition already marked it otherwise.
     fn apply_owner_pickup(&self, shooter: &dyn Entity) {
         let mut state = self.state.lock();
-        if shooter.entity_type() == &vanilla_entities::PLAYER
+        if shooter.downcast_ref::<OminousItemSpawnerEntity>().is_some() {
+            state.pickup = ArrowPickup::Disallowed;
+        } else if shooter.entity_type() == &vanilla_entities::PLAYER
             && state.pickup == ArrowPickup::Disallowed
         {
             state.pickup = ArrowPickup::Allowed;
@@ -713,6 +719,42 @@ impl ArrowEntity {
         let pitch = movement.y.atan2(horizontal).to_degrees() as f32;
         self.set_rotation((yaw, pitch));
     }
+
+    /// Returns whether the block collision retaining this arrow has disappeared.
+    ///
+    /// Vanilla parity: `AbstractArrow.shouldFall`.
+    fn should_fall(&self) -> bool {
+        if !self.is_in_ground() {
+            return false;
+        }
+        let Some(world) = self.level() else {
+            return false;
+        };
+        let position = self.position();
+        let point = WorldAabb::new(
+            position.x, position.y, position.z, position.x, position.y, position.z,
+        )
+        .inflate(0.06);
+        !WorldCollisionProvider::new(&world)
+            .has_collision_with_context(&point, BlockCollisionContext::empty())
+    }
+
+    /// Releases an embedded arrow after its retaining collision disappears.
+    ///
+    /// Vanilla parity: `AbstractArrow.startFalling`.
+    fn start_falling(&self) {
+        self.set_in_ground(false);
+        let velocity = self.velocity();
+        self.set_velocity(
+            velocity
+                * DVec3::new(
+                    f64::from(rand::random::<f32>() * 0.2),
+                    f64::from(rand::random::<f32>() * 0.2),
+                    f64::from(rand::random::<f32>() * 0.2),
+                ),
+        );
+        self.state.lock().life = 0;
+    }
 }
 
 impl Entity for ArrowEntity {
@@ -742,6 +784,17 @@ impl Entity for ArrowEntity {
 
     fn tick(&self) {
         if self.is_in_ground() {
+            let block_changed = self.level().is_some_and(|world| {
+                let current = world.get_block_state(self.block_position());
+                self.state.lock().last_state != Some(current)
+            });
+            if block_changed && self.should_fall() {
+                self.start_falling();
+                let mut state = self.state.lock();
+                state.shake_time = (state.shake_time - 1).max(0);
+                state.in_ground_time += 1;
+                return;
+            }
             let (expired, decayed) = {
                 let mut state = self.state.lock();
                 state.shake_time = (state.shake_time - 1).max(0);
@@ -1164,25 +1217,29 @@ fn scaled_effect_duration(duration: i32, scale: f32) -> i32 {
 }
 
 fn core_effect_from_component(effect: &RegistryMobEffectInstance) -> MobEffectInstance {
-    core_effect_from_component_with_duration(effect, effect.duration())
-}
-
-fn core_effect_from_component_with_duration(
-    effect: &RegistryMobEffectInstance,
-    duration: i32,
-) -> MobEffectInstance {
-    let visible = MobEffectInstance::with_duration(effect.effect(), duration, effect.amplifier())
-        .with_ambient(effect.ambient())
-        .with_visible(effect.show_particles())
-        .with_show_icon(effect.show_icon());
+    let visible =
+        MobEffectInstance::with_duration(effect.effect(), effect.duration(), effect.amplifier())
+            .with_ambient(effect.ambient())
+            .with_visible(effect.show_particles())
+            .with_show_icon(effect.show_icon());
     let Some(hidden) = effect.hidden_effect() else {
         return visible;
     };
     visible.with_hidden_effect(core_effect_from_details(effect.effect(), hidden))
 }
 
+const fn core_effect_from_component_with_duration(
+    effect: &RegistryMobEffectInstance,
+    duration: i32,
+) -> MobEffectInstance {
+    MobEffectInstance::with_duration(effect.effect(), duration, effect.amplifier())
+        .with_ambient(effect.ambient())
+        .with_visible(effect.show_particles())
+        .with_show_icon(effect.show_icon())
+}
+
 fn core_effect_from_details(
-    effect: foton_registry::mob_effect::MobEffectRef,
+    effect: MobEffectRef,
     details: &foton_registry::MobEffectInstanceDetails,
 ) -> MobEffectInstance {
     let visible = MobEffectInstance::with_duration(effect, details.duration(), details.amplifier())
@@ -1241,7 +1298,8 @@ mod tests {
     use simdnbt::owned::{NbtCompound, NbtTag};
 
     use crate::behavior::init_behaviors;
-    use crate::entity::entities::PigEntity;
+    use crate::chunk::player_chunk_view::PlayerChunkView;
+    use crate::entity::entities::{OminousItemSpawnerEntity, PigEntity};
     use crate::entity::{
         Entity, LivingEntity, MobEffectInstance, RemovalReason, SharedEntity, next_entity_id,
     };
@@ -1280,6 +1338,13 @@ mod tests {
         arrow
     }
 
+    fn embed_arrow_in_stone(world: &Arc<World>, arrow: &ArrowEntity) {
+        let stone = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(BlockPos::ZERO, stone, UpdateFlags::UPDATE_NONE));
+        arrow.state.lock().last_state = Some(stone);
+        arrow.set_in_ground(true);
+    }
+
     fn spawn_pig(world: &Arc<World>, position: DVec3) -> Arc<PigEntity> {
         let pig = Arc::new(PigEntity::new(
             &vanilla_entities::PIG,
@@ -1291,6 +1356,23 @@ mod tests {
             .try_add_entity(Arc::clone(&pig) as SharedEntity)
             .expect("the test chunk is loaded, so the pig should attach");
         pig
+    }
+
+    #[test]
+    fn ominous_item_spawner_owner_disallows_arrow_pickup() {
+        let world = arrow_world("ominous_item_spawner_arrow_pickup");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        let spawner = OminousItemSpawnerEntity::new(
+            &vanilla_entities::OMINOUS_ITEM_SPAWNER,
+            next_entity_id(),
+            DVec3::ZERO,
+            Arc::downgrade(&world),
+        );
+        arrow.set_pickup(super::ArrowPickup::Allowed);
+
+        arrow.apply_owner_pickup_reset(&spawner);
+
+        assert_eq!(arrow.pickup(), super::ArrowPickup::Disallowed);
     }
 
     #[test]
@@ -1324,7 +1406,7 @@ mod tests {
         let pig = spawn_pig(&world, DVec3::new(1.0, 0.0, 0.0));
         arrow.set_base_potion(Some(&vanilla_potions::SWIFTNESS));
         arrow.add_effect(MobEffectInstance::with_duration(
-            &vanilla_mob_effects::LUCK,
+            vanilla_mob_effects::LUCK,
             80,
             2,
         ));
@@ -1342,7 +1424,7 @@ mod tests {
             .mob_effect(base.effect)
             .unwrap_or_else(|| panic!("the base potion effect must hit the target"));
         let custom_effect = pig
-            .mob_effect(&vanilla_mob_effects::LUCK)
+            .mob_effect(vanilla_mob_effects::LUCK)
             .unwrap_or_else(|| panic!("the custom potion effect must hit the target"));
         assert_eq!(base_effect.duration(), expected_base_duration);
         assert_eq!(
@@ -1353,14 +1435,14 @@ mod tests {
     }
 
     #[test]
-    fn tipped_arrow_scales_only_the_visible_effect_and_preserves_hidden_chain() {
+    fn tipped_arrow_scaling_drops_the_stored_hidden_chain_on_application() {
         let world = arrow_world("tipped_arrow_hidden_effect_chain");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
         let pig = spawn_pig(&world, DVec3::new(1.0, 0.0, 0.0));
         let deepest = MobEffectInstanceDetails::new(4, 600, true, false, true, None);
         let hidden = MobEffectInstanceDetails::new(3, 400, false, true, false, Some(deepest));
         let custom = RegistryMobEffectInstance::new(
-            &vanilla_mob_effects::LUCK,
+            vanilla_mob_effects::LUCK,
             80,
             2,
             true,
@@ -1379,7 +1461,7 @@ mod tests {
         arrow.do_post_hurt_effects(&target);
 
         let visible = pig
-            .mob_effect(&vanilla_mob_effects::LUCK)
+            .mob_effect(vanilla_mob_effects::LUCK)
             .unwrap_or_else(|| panic!("the custom effect must hit the target"));
         assert_eq!(
             (
@@ -1391,33 +1473,10 @@ mod tests {
             ),
             (10, 2, true, false, true)
         );
-        let hidden = visible
-            .hidden_effect()
-            .unwrap_or_else(|| panic!("the first hidden fallback must survive"));
-        assert_eq!(
-            (
-                hidden.duration(),
-                hidden.amplifier(),
-                hidden.is_ambient(),
-                hidden.is_visible(),
-                hidden.show_icon()
-            ),
-            (400, 3, false, true, false)
+        assert!(
+            visible.hidden_effect().is_none(),
+            "CraftPotionUtil.fromBukkit drops hidden fallbacks when applying a scaled effect"
         );
-        let deepest = hidden
-            .hidden_effect()
-            .unwrap_or_else(|| panic!("the nested hidden fallback must survive"));
-        assert_eq!(
-            (
-                deepest.duration(),
-                deepest.amplifier(),
-                deepest.is_ambient(),
-                deepest.is_visible(),
-                deepest.show_icon()
-            ),
-            (600, 4, true, false, true)
-        );
-        assert!(deepest.hidden_effect().is_none());
     }
 
     #[test]
@@ -1461,7 +1520,7 @@ mod tests {
         let world = arrow_world("tipped_arrow_persistence");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
         arrow.add_effect(MobEffectInstance::with_duration(
-            &vanilla_mob_effects::LUCK,
+            vanilla_mob_effects::LUCK,
             80,
             1,
         ));
@@ -1493,12 +1552,16 @@ mod tests {
         assert_eq!(contents.custom_effects().len(), 1);
         assert_eq!(
             contents.custom_effects()[0].effect(),
-            &*vanilla_mob_effects::LUCK
+            vanilla_mob_effects::LUCK
         );
         assert_eq!(contents.custom_effects()[0].duration(), 80);
     }
 
     #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "NBT must preserve this exact f64 bit pattern"
+    )]
     fn abstract_arrow_api_state_round_trips_through_vanilla_nbt_fields() {
         let world = arrow_world("abstract_arrow_api_persistence");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
@@ -1561,7 +1624,7 @@ mod tests {
         let world = arrow_world("tipped_arrow_decay_boundary");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
         arrow.set_base_potion(Some(&vanilla_potions::WATER));
-        arrow.set_in_ground(true);
+        embed_arrow_in_stone(&world, &arrow);
 
         for _ in 0..599 {
             Entity::tick(arrow.as_ref());
@@ -1582,27 +1645,61 @@ mod tests {
     fn tipped_arrow_decay_broadcasts_status_zero_before_color_sync() {
         let world = arrow_world("tipped_arrow_decay_event");
         let sent = Arc::new(SyncMutex::new(Vec::new()));
-        let connection = Arc::new(PlayerConnection::Other(Box::new(RecordingConnection::new(
-            Arc::clone(&sent),
-        ))));
+        let observed_arrow = Arc::new(SyncMutex::new(None::<Arc<ArrowEntity>>));
+        let observed_colors = Arc::new(SyncMutex::new(Vec::new()));
+        let arrow_slot = Arc::clone(&observed_arrow);
+        let colors = Arc::clone(&observed_colors);
+        let recording =
+            RecordingConnection::new(Arc::clone(&sent)).with_observer(Arc::new(move |packet| {
+                let Some((entity_id, 0)) = entity_event_payload(packet) else {
+                    return;
+                };
+                let arrow = arrow_slot.lock().as_ref().cloned();
+                if let Some(arrow) = arrow
+                    && arrow.id() == entity_id
+                {
+                    colors
+                        .lock()
+                        .push(*arrow.entity_data.lock().id_effect_color.get());
+                }
+            }));
+        let connection = Arc::new(PlayerConnection::Other(Box::new(recording)));
         let observer = TestPlayerBuilder::new(Arc::clone(&world), "Observer", next_entity_id())
             .connection(connection)
             .build();
         assert!(world.add_player(Arc::clone(&observer), ResetReason::InitialJoin));
         let _ = observer.mark_joined_world();
+        observer.set_client_loaded(true);
         observer
             .chunk_sender
             .lock()
             .mark_chunk_sent_for_test(ChunkPos::new(0, 0));
+        world
+            .player_area_map
+            .on_player_join(&observer, &PlayerChunkView::new(ChunkPos::new(0, 0), 2));
         sent.lock().clear();
 
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
         arrow.set_base_potion(Some(&vanilla_potions::WATER));
-        arrow.set_in_ground(true);
+        embed_arrow_in_stone(&world, &arrow);
+        let color_before_decay = *arrow.entity_data.lock().id_effect_color.get();
+        assert_ne!(color_before_decay, -1);
+        *observed_arrow.lock() = Some(Arc::clone(&arrow));
+        assert!(
+            world
+                .get_packet_tracking_players(ChunkPos::new(0, 0))
+                .contains(&observer.id())
+        );
         for _ in 0..600 {
             Entity::tick(arrow.as_ref());
         }
+        assert!(
+            world
+                .get_packet_tracking_players(ChunkPos::new(0, 0))
+                .contains(&observer.id())
+        );
 
+        assert_eq!(*observed_colors.lock(), vec![color_before_decay]);
         let events = sent
             .lock()
             .iter()
@@ -1633,7 +1730,7 @@ mod tests {
             80,
             0,
         ));
-        arrow.set_in_ground(true);
+        embed_arrow_in_stone(&world, &arrow);
 
         for _ in 0..600 {
             Entity::tick(arrow.as_ref());
@@ -1648,7 +1745,7 @@ mod tests {
     fn ordinary_arrow_is_unchanged_at_the_potion_decay_boundary() {
         let world = arrow_world("ordinary_arrow_decay_boundary");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
-        arrow.set_in_ground(true);
+        embed_arrow_in_stone(&world, &arrow);
 
         for _ in 0..600 {
             Entity::tick(arrow.as_ref());
@@ -1664,7 +1761,7 @@ mod tests {
         let world = arrow_world("tipped_arrow_decay_reload");
         let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
         arrow.set_base_potion(Some(&vanilla_potions::WATER));
-        arrow.set_in_ground(true);
+        embed_arrow_in_stone(&world, &arrow);
         for _ in 0..599 {
             Entity::tick(arrow.as_ref());
         }
@@ -1834,6 +1931,32 @@ mod tests {
         assert!(
             arrow.attached_blocks().is_empty(),
             "attached blocks must be queried from current collision state, not cached at impact"
+        );
+        let previous_position = arrow.position();
+        arrow.set_lifetime_ticks(77);
+        Entity::tick(arrow.as_ref());
+        assert!(
+            !arrow.is_in_ground(),
+            "removing the retaining block must release the arrow"
+        );
+        assert_eq!(
+            arrow.lifetime_ticks(),
+            0,
+            "startFalling must reset despawn age"
+        );
+        assert_eq!(arrow.state.lock().in_ground_time, 1);
+        assert_eq!(arrow.position(), previous_position);
+
+        Entity::tick(arrow.as_ref());
+        assert_eq!(arrow.state.lock().in_ground_time, 0);
+        assert!(
+            arrow.velocity().y < 0.0,
+            "gravity must resume once the arrow is airborne"
+        );
+        assert_ne!(
+            arrow.position(),
+            previous_position,
+            "the released arrow must move again"
         );
     }
 

@@ -35,13 +35,11 @@ public final class FotonMushroomCow extends FotonAnimals implements org.bukkit.e
         java.util.Objects.requireNonNull(entry, "entry");
         java.util.ArrayList<io.papermc.paper.potion.SuspiciousEffectEntry> effects =
             new java.util.ArrayList<>(getStewEffects());
-        for (int index = 0; index < effects.size(); index++) {
-            if (effects.get(index).effect().equals(entry.effect())) {
-                if (!overwrite) return false;
-                effects.set(index, entry);
-                setStewEffects(effects);
-                return true;
-            }
+        if (!overwrite && hasEffectForNextStew(entry.effect())) {
+            return false;
+        }
+        if (overwrite) {
+            removeEffectFromNextStew(entry.effect());
         }
         effects.add(entry);
         setStewEffects(effects);
@@ -89,7 +87,7 @@ public final class FotonMushroomCow extends FotonAnimals implements org.bukkit.e
         for (int index = 0; index < effects.size(); index++) {
             io.papermc.paper.potion.SuspiciousEffectEntry entry =
                 java.util.Objects.requireNonNull(effects.get(index), "effect");
-            encoded[index] = entry.effect().getName() + "|" + entry.duration();
+            encoded[index] = entry.effect().getKey().getKey() + "|" + entry.duration();
         }
         if (!Native.setMushroomCowStewEffects(getUniqueId().toString(), encoded)) {
             throw new IllegalArgumentException("Invalid suspicious stew effects");

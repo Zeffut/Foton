@@ -10,10 +10,43 @@ final class EntityCheck {
         generatedClassLookupPreservesPaperAbstractAndSpecializedDefaults();
         generatedWrapperSupportMatchesRuntimeWrappers();
         entityContractsPreservePaperInheritance();
+        entityAbiMatchesPaper26();
+        transformReasonsMatchPaper26();
         paperDeprecationMetadataIsExact();
         dimensionsComeFromTheBoundingBox();
         destinationLocationIsFilledInPlace();
         missingEntityStillReturnsDestination();
+    }
+
+    private static void entityAbiMatchesPaper26() {
+        assertEntityMethod("getPassengers", java.util.List.class);
+        assertEntityMethod("getNearbyEntities", java.util.List.class,
+            double.class, double.class, double.class);
+        assertEntityMethod("getFallDistance", float.class);
+        assertEntityMethod("setFallDistance", void.class, float.class);
+    }
+
+    private static void assertEntityMethod(String name, Class<?> returnType,
+            Class<?>... parameterTypes) {
+        try {
+            java.lang.reflect.Method method = org.bukkit.entity.Entity.class
+                .getDeclaredMethod(name, parameterTypes);
+            Checks.same(method.getReturnType(), returnType,
+                "Entity." + name + " return type");
+            Checks.expect(java.lang.reflect.Modifier.isAbstract(method.getModifiers()),
+                "Entity." + name + " must be an abstract Paper contract");
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("Entity." + name + " Paper ABI is missing", error);
+        }
+    }
+
+    private static void transformReasonsMatchPaper26() {
+        Checks.same(java.util.Arrays.stream(
+                org.bukkit.event.entity.EntityTransformEvent.TransformReason.values())
+                .map(Enum::name).toList(),
+            java.util.List.of("CURED", "FROZEN", "INFECTION", "DROWNED", "SHEARED",
+                "LIGHTNING", "SPLIT", "PIGLIN_ZOMBIFIED", "METAMORPHOSIS", "UNKNOWN"),
+            "EntityTransformEvent Paper reasons");
     }
 
     private static void generatedClassLookupPreservesUnderscoredRegistryKeys() {

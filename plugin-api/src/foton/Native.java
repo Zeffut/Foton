@@ -227,6 +227,7 @@ public final class Native {
     public static native void setAirSupply(String uuid, int ticks);
     public static native int maxAirSupply(String uuid);
     public static native String[] entityPotionEffects(String uuid);
+    public static native boolean mobEffectInstant(String key);
     public static native String[] areaEffectCloudEffects(String uuid);
     public static native boolean addAreaEffectCloudEffect(String uuid, String type, int duration, int amplifier, boolean ambient, boolean particles, boolean icon, boolean override);
     public static native void clearAreaEffectCloudEffects(String uuid);
@@ -235,13 +236,12 @@ public final class Native {
     public static native void setArrowPotion(String uuid, String potion);
     public static native int arrowPotionColor(String uuid);
     public static native void setArrowPotionColor(String uuid, int color, boolean present);
-    public static native boolean addArrowCustomEffect(String uuid, String effect, int duration,
-        int amplifier, boolean ambient, boolean particles, boolean icon, boolean overwrite);
+    public static native boolean addArrowCustomEffect(String uuid, String effect,
+        boolean overwrite);
     public static native boolean removeArrowCustomEffect(String uuid, String effect);
     public static native void clearArrowCustomEffects(String uuid);
     public static native String arrowProperty(String uuid, String property);
     public static native boolean setArrowProperty(String uuid, String property, String value);
-    public static native void setArrowShooter(String uuid, String shooter, boolean resetPickupStatus);
     public static native boolean entityRemoveWhenFarAway(String uuid);
     public static native boolean entityPersistent(String uuid);
     public static native void setEntityPersistent(String uuid, boolean persistent);
@@ -305,8 +305,6 @@ public final class Native {
     public static native void removeEntity(String uuid);
     public static native String spellcasterSpell(String uuid);
     public static native void setSpellcasterSpell(String uuid, String spell);
-    public static native String projectileShooter(String uuid);
-    public static native void setProjectileShooter(String uuid, String owner);
     public static native String entityType(String uuid);
     public static native String hangingFacing(String uuid);
     public static native boolean setHangingFacing(String uuid, String face, boolean force);
@@ -490,7 +488,9 @@ public final class Native {
     public static native void setEntityPortalCooldown(String uuid, int ticks);
     public static native int entityId(String uuid);
     public static native String entityProjectileOwner(String uuid);
-    public static native boolean setEntityProjectileOwner(String uuid, String owner);
+    public static native org.bukkit.projectiles.ProjectileSource entityProjectileSource(String uuid);
+    public static native boolean setEntityProjectileSource(String uuid, String owner,
+        org.bukkit.projectiles.ProjectileSource source, boolean resetPickupStatus);
     public static native String entityCustomName(String uuid);
     public static native boolean entityCustomNameVisible(String uuid);
     public static native void setEntityCustomNameVisible(String uuid, boolean visible);

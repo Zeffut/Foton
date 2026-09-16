@@ -139,15 +139,6 @@ final class ModernAliasesCheck {
 
     private static void potionAliasesPreserveCanonicalIdentity()
             throws ReflectiveOperationException {
-        assertPotionAlias(org.bukkit.potion.PotionEffectType.HASTE,
-            org.bukkit.potion.PotionEffectType.FAST_DIGGING);
-        assertPotionAlias(org.bukkit.potion.PotionEffectType.JUMP_BOOST,
-            org.bukkit.potion.PotionEffectType.JUMP);
-        assertPotionAlias(org.bukkit.potion.PotionEffectType.RESISTANCE,
-            org.bukkit.potion.PotionEffectType.DAMAGE_RESISTANCE);
-        assertPotionAlias(org.bukkit.potion.PotionEffectType.STRENGTH,
-            org.bukkit.potion.PotionEffectType.INCREASE_DAMAGE);
-
         java.util.Map<String, org.bukkit.potion.PotionEffectType> canonicalByName =
             new java.util.HashMap<>();
         for (java.lang.reflect.Field field
@@ -155,16 +146,14 @@ final class ModernAliasesCheck {
             if (field.getType() != org.bukkit.potion.PotionEffectType.class) continue;
             org.bukkit.potion.PotionEffectType value =
                 (org.bukkit.potion.PotionEffectType) field.get(null);
-            org.bukkit.potion.PotionEffectType existing =
-                canonicalByName.putIfAbsent(value.getName(), value);
-            Checks.expect(existing == null || existing == value,
-                "potion effect fields contain duplicate objects for " + value.getName());
+            String name = value.getKey().getKey();
+            org.bukkit.potion.PotionEffectType existing = canonicalByName.putIfAbsent(name, value);
+            Checks.expect(existing == null,
+                "Paper 26.2 potion fields must be one-to-one for " + name);
+            Checks.expect(org.bukkit.Registry.MOB_EFFECT.get(value.getKey()) == value,
+                "mob effect registry must retain canonical identity for " + name);
         }
-    }
-
-    private static void assertPotionAlias(org.bukkit.potion.PotionEffectType alias,
-            org.bukkit.potion.PotionEffectType canonical) {
-        Checks.expect(alias == canonical,
-            "modern potion alias should preserve canonical identity for " + canonical);
+        Checks.same(canonicalByName.size(), 40,
+            "Paper 26.2 potion constants must cover the full extracted registry");
     }
 }

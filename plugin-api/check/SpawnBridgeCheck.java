@@ -68,6 +68,12 @@ public final class SpawnBridgeCheck {
     public static void assertClassSpawnContracts(String worldName) {
         var world = new foton.FotonWorld(worldName);
         var location = new org.bukkit.Location(world, 8.5, 64.0, 8.5);
+        if (!org.bukkit.potion.PotionEffectType.INSTANT_HEALTH.isInstant()
+                || !org.bukkit.potion.PotionEffectType.INSTANT_DAMAGE.isInstant()
+                || !org.bukkit.potion.PotionEffectType.SATURATION.isInstant()
+                || org.bukkit.potion.PotionEffectType.LUCK.isInstant()) {
+            throw new AssertionError("PotionEffectType instantaneous state must use native registry behavior");
+        }
 
         org.bukkit.entity.AbstractCow cow = world.spawn(
             location, org.bukkit.entity.AbstractCow.class);
@@ -217,9 +223,12 @@ public final class SpawnBridgeCheck {
         }
 
         int beforeFailure = world.getEntities().size();
+        java.util.concurrent.atomic.AtomicReference<java.util.UUID> failedPending =
+            new java.util.concurrent.atomic.AtomicReference<>();
         RuntimeException marker = new RuntimeException("spawn callback marker");
         try {
             world.spawn(location, org.bukkit.entity.TippedArrow.class, pending -> {
+                failedPending.set(pending.getUniqueId());
                 pending.setCritical(true);
                 throw marker;
             });
@@ -229,6 +238,10 @@ public final class SpawnBridgeCheck {
         }
         if (world.getEntities().size() != beforeFailure) {
             throw new AssertionError("throwing callback must publish no orphan");
+        }
+        if (failedPending.get() == null
+                || foton.Native.entityType(failedPending.get().toString()) != null) {
+            throw new AssertionError("throwing callback must remove its pending native entity");
         }
 
         configured.setBasePotionData(new org.bukkit.potion.PotionData(
@@ -252,7 +265,27 @@ public final class SpawnBridgeCheck {
                 || configured.hasCustomEffects()) {
             throw new AssertionError("Arrow custom effects must mutate live native potion contents");
         }
+        var deepestLuck = new org.bukkit.potion.PotionEffect(
+            org.bukkit.potion.PotionEffectType.LUCK, 600, 4, true, false, true);
+        var hiddenLuck = new org.bukkit.potion.PotionEffect(
+            org.bukkit.potion.PotionEffectType.LUCK, 400, 3, false, true, false, deepestLuck);
+        var visibleLuck = new org.bukkit.potion.PotionEffect(
+            org.bukkit.potion.PotionEffectType.LUCK, 80, 2, true, false, true, hiddenLuck);
+        if (!configured.addCustomEffect(visibleLuck, false)) {
+            throw new AssertionError("recursive Arrow effect must be accepted");
+        }
+        org.bukkit.potion.PotionEffect roundTripped = configured.getCustomEffects().get(0);
+        if (roundTripped.getHiddenPotionEffect() == null
+                || roundTripped.getHiddenPotionEffect().getHiddenPotionEffect() == null
+                || roundTripped.getHiddenPotionEffect().getDuration() != 400
+                || roundTripped.getHiddenPotionEffect().getHiddenPotionEffect().getDuration() != 600) {
+            throw new AssertionError("Arrow custom-effect hidden chain must round-trip recursively");
+        }
+        if (!configured.removeCustomEffect(org.bukkit.potion.PotionEffectType.LUCK)) {
+            throw new AssertionError("recursive Arrow effect must remain removable");
+        }
         configured.setPierceLevel(5);
+        configured.setFallDistance(4.25f);
         configured.setPickupStatus(org.bukkit.entity.AbstractArrow.PickupStatus.CREATIVE_ONLY);
         configured.setLifetimeTicks(411);
         configured.setHitSound(org.bukkit.Sound.ENTITY_ARROW_HIT_PLAYER);
@@ -264,6 +297,7 @@ public final class SpawnBridgeCheck {
         }
         configured.setKnockbackStrength(9);
         if (configured.getPierceLevel() != 5
+                || configured.getFallDistance() != 4.25f
                 || configured.getPickupStatus()
                     != org.bukkit.entity.AbstractArrow.PickupStatus.CREATIVE_ONLY
                 || configured.getLifetimeTicks() != 411
@@ -278,6 +312,7 @@ public final class SpawnBridgeCheck {
                 || !configured.getShooter().equals(cow)) {
             throw new AssertionError("AbstractArrow native state must round-trip through Paper API: "
                 + "pierce=" + configured.getPierceLevel()
+                + ", fallDistance=" + configured.getFallDistance()
                 + ", pickup=" + configured.getPickupStatus()
                 + ", lifetime=" + configured.getLifetimeTicks()
                 + ", sound=" + configured.getHitSound()
@@ -289,6 +324,17 @@ public final class SpawnBridgeCheck {
                 + ", shooter=" + configured.getShooter()
                 + ", nativeShooter=" + foton.Native.entityProjectileOwner(
                     configured.getUniqueId().toString()));
+        }
+        java.util.List<org.bukkit.entity.Entity> nearby =
+            configured.getNearbyEntities(2.0, 2.0, 2.0);
+        if (nearby.stream().noneMatch(entity -> entity.equals(cow))) {
+            throw new AssertionError("Entity nearby list must be a live native query");
+        }
+        org.bukkit.projectiles.ProjectileSource customSource =
+            new org.bukkit.projectiles.ProjectileSource() { };
+        configured.setShooter(customSource, false);
+        if (configured.getShooter() != customSource) {
+            throw new AssertionError("non-Entity ProjectileSource identity must round-trip");
         }
         configured.setShooter(null, false);
         if (configured.getShooter() != null
@@ -339,7 +385,10 @@ public final class SpawnBridgeCheck {
         if (mushroom.addEffectToNextStew(replacement, false)
                 || !mushroom.addEffectToNextStew(replacement, true)
                 || !mushroom.addEffectToNextStew(replacement, true)
-                || mushroom.getEffectsForNextStew().get(0).getDuration() != 654
+                || mushroom.getStewEffects().size() != 3
+                || mushroom.getStewEffects().get(0).duration() != 321
+                || mushroom.getStewEffects().get(1).duration() != 654
+                || mushroom.getStewEffects().get(2).duration() != 654
                 || !mushroom.removeEffectFromNextStew(org.bukkit.potion.PotionEffectType.LUCK)
                 || mushroom.hasEffectsForNextStew()) {
             throw new AssertionError("MushroomCow overwrite and removal must update native state");

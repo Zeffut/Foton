@@ -7,7 +7,10 @@ import org.bukkit.event.HandlerList;
 
 /** Fired before an entity conversion is inserted into the world. */
 public class EntityTransformEvent extends EntityEvent implements Cancellable {
-    public enum TransformReason { CURED, DROWNED, FROZEN, INFECTION, LIGHTNING, PIGLIN_ZOMBIFICATION, POISON, SPLIT, UNKNOWN }
+    public enum TransformReason {
+        CURED, FROZEN, INFECTION, DROWNED, SHEARED, LIGHTNING, SPLIT,
+        PIGLIN_ZOMBIFIED, METAMORPHOSIS, UNKNOWN
+    }
     private final Entity transformed;
     private final TransformReason reason;
     private boolean cancelled;

@@ -6,7 +6,7 @@ public final class FotonPotionLookupRunner {
     private FotonPotionLookupRunner() {}
 
     public static void main(String[] args) throws IllegalAccessException {
-        int unnumberedEffects = 0;
+        int checkedEffects = 0;
         for (Field field : org.bukkit.potion.PotionEffectType.class.getFields()) {
             if (field.getType() != org.bukkit.potion.PotionEffectType.class
                     || !Modifier.isStatic(field.getModifiers())) {
@@ -14,17 +14,16 @@ public final class FotonPotionLookupRunner {
             }
             org.bukkit.potion.PotionEffectType canonical =
                 (org.bukkit.potion.PotionEffectType) field.get(null);
-            assertCanonical(canonical.getName(), canonical);
-            assertCanonical("minecraft:" + canonical.getName(), canonical);
-            if (canonical.getId() < 0) {
-                unnumberedEffects++;
-            } else if (org.bukkit.potion.PotionEffectType.getById(canonical.getId()) != canonical) {
+            assertCanonical(canonical.getKey().getKey(), canonical);
+            assertCanonical(canonical.getKey().toString(), canonical);
+            if (org.bukkit.potion.PotionEffectType.getById(canonical.getId()) != canonical) {
                 throw new AssertionError(
                     "potion lookup by id did not return the canonical instance for " + field.getName());
             }
+            checkedEffects++;
         }
-        if (unnumberedEffects != 4) {
-            throw new AssertionError("expected all four unnumbered potion effects to be checked");
+        if (checkedEffects != 40) {
+            throw new AssertionError("expected all 40 Paper 26.2 potion effects to be checked");
         }
         if (org.bukkit.potion.PotionEffectType.getByName("foton:unknown") != null) {
             throw new AssertionError("unknown potion lookup must return null");

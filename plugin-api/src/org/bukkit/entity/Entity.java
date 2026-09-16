@@ -12,9 +12,9 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
      * <p>Declared here rather than only on {@code LivingEntity} because
      * plugins reference it through {@code Entity} -- an arrow's or a boat's
      * fall distance is as real as a zombie's. */
-    default float getFallDistance() { return 0.0f; }
+    float getFallDistance();
 
-    default void setFallDistance(float distance) { }
+    void setFallDistance(float distance);
 
     default org.bukkit.event.entity.EntityDamageEvent getLastDamageCause() { return null; }
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
@@ -106,7 +106,7 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default Entity getVehicle() { return null; }
     default boolean isInsideVehicle() { return getVehicle() != null; }
     default boolean leaveVehicle() { return false; }
-    default java.util.List<Entity> getPassengers() { return java.util.Collections.emptyList(); }
+    java.util.List<Entity> getPassengers();
     /** Returns true when this entity has no passengers. */
     default boolean isEmpty() { return getPassengers().isEmpty(); }
     default boolean addPassenger(Entity passenger) { return false; }
@@ -119,15 +119,7 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default boolean eject() { return false; }
     default SpawnCategory getSpawnCategory() { return SpawnCategory.MISC; }
     default org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason getEntitySpawnReason() { return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT; }
-    default java.util.Collection<Entity> getNearbyEntities(double x, double y, double z) {
-        Location location = getLocation();
-        World world = getWorld();
-        if (location == null || world == null) return java.util.Collections.emptyList();
-        java.util.ArrayList<Entity> result = new java.util.ArrayList<>();
-        for (Entity entity : world.getNearbyEntities(location, x, y, z))
-            if (entity != this && !getUniqueId().equals(entity.getUniqueId())) result.add(entity);
-        return java.util.Collections.unmodifiableList(result);
-    }
+    java.util.List<Entity> getNearbyEntities(double x, double y, double z);
 
     int getEntityId();
 

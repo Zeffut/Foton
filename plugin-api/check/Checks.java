@@ -19,6 +19,7 @@ public final class Checks {
         AdapterCheck.check();
         RecipeChoiceCheck.check();
         ModernAliasesCheck.check();
+        PotionEffectCheck.check();
         LiveBackedApiCheck.check();
         Items.check();
         Colors.check();

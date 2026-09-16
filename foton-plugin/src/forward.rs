@@ -537,7 +537,9 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<EntityRemoveFromWorldEvent, _>(owner(), move |event| {
-        remove_call(&jvm, &event.entity().to_string());
+        let entity = event.entity();
+        remove_call(&jvm, &entity.to_string());
+        natives::remove_projectile_source(&entity);
     });
 
     let jvm = Arc::clone(&vm);
@@ -2947,17 +2949,7 @@ fn transform_call(
     let Ok(transformed) = env.new_string(transformed.to_string()) else {
         return true;
     };
-    let reason = match reason {
-        ConversionReason::Cured => "CURED",
-        ConversionReason::Drowned => "DROWNED",
-        ConversionReason::Frozen => "FROZEN",
-        ConversionReason::Infection => "INFECTION",
-        ConversionReason::Lightning => "LIGHTNING",
-        ConversionReason::PiglinZombification => "PIGLIN_ZOMBIFICATION",
-        ConversionReason::Poison => "POISON",
-        ConversionReason::Split => "SPLIT",
-        ConversionReason::Unknown => "UNKNOWN",
-    };
+    let reason = conversion_reason_name(reason);
     let Ok(reason) = env.new_string(reason) else {
         return true;
     };
@@ -2974,6 +2966,21 @@ fn transform_call(
     .ok()
     .and_then(|value| value.z().ok())
     .unwrap_or(true)
+}
+
+const fn conversion_reason_name(reason: ConversionReason) -> &'static str {
+    match reason {
+        ConversionReason::Cured => "CURED",
+        ConversionReason::Drowned => "DROWNED",
+        ConversionReason::Frozen => "FROZEN",
+        ConversionReason::Infection => "INFECTION",
+        ConversionReason::Lightning => "LIGHTNING",
+        ConversionReason::Sheared => "SHEARED",
+        ConversionReason::PiglinZombification => "PIGLIN_ZOMBIFIED",
+        ConversionReason::Poison => "METAMORPHOSIS",
+        ConversionReason::Split => "SPLIT",
+        ConversionReason::Unknown => "UNKNOWN",
+    }
 }
 
 fn pre_login_call(

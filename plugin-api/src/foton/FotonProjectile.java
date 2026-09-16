@@ -9,6 +9,8 @@ public class FotonProjectile extends FotonEntity implements Projectile {
     public FotonProjectile(UUID id) { super(id); }
 
     @Override public ProjectileSource getShooter() {
+        ProjectileSource retained = Native.entityProjectileSource(getUniqueId().toString());
+        if (retained != null) return retained;
         String owner = Native.entityProjectileOwner(getUniqueId().toString());
         if (owner == null) return null;
         try {
@@ -22,8 +24,13 @@ public class FotonProjectile extends FotonEntity implements Projectile {
     }
 
     @Override public void setShooter(ProjectileSource source) {
+        setProjectileShooter(source, false);
+    }
+
+    protected final void setProjectileShooter(ProjectileSource source, boolean resetPickupStatus) {
         String owner = source instanceof org.bukkit.entity.Entity entity
             ? entity.getUniqueId().toString() : null;
-        Native.setEntityProjectileOwner(getUniqueId().toString(), owner == null ? "" : owner);
+        Native.setEntityProjectileSource(getUniqueId().toString(), owner == null ? "" : owner,
+            source, resetPickupStatus);
     }
 }

@@ -38,7 +38,7 @@ use crate::entity::ai::goal::{
     BreedGoal, FloatGoal, FollowParentGoal, LookAtPlayerGoal, PanicGoal, RandomLookAroundGoal,
     TemptGoal, WaterAvoidingRandomStrollGoal,
 };
-use crate::entity::conversion::ConversionReason::Lightning;
+use crate::entity::conversion::ConversionReason::Sheared;
 use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::CowEntity;
@@ -385,7 +385,7 @@ impl MushroomCowEntity {
         // Vanilla's `ConversionParams.single(this, false, false)`.
         convert_to(
             self,
-            ConversionParams::single(false, false).with_reason(Lightning),
+            ConversionParams::single(false, false).with_reason(Sheared),
             |id, position, level| CowEntity::new(&vanilla_entities::COW, id, position, level),
             |_cow| {
                 let position = self.position();

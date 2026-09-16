@@ -132,6 +132,7 @@ fn the_class_path_is_ordered() {
             "adventure-text-logger-slf4j-5.2.0.jar",
             "adventure-text-serializer-plain-5.2.0.jar",
             "annotations-26.1.0.jar",
+            "jspecify-1.0.0.jar",
             "brigadier-1.3.10.jar",
             "gson-2.14.0.jar",
             "guava-33.6.0-jre.jar",

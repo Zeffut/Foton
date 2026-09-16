@@ -67,30 +67,61 @@ public class FotonArrow extends FotonProjectile implements Arrow {
         ArrayList<PotionEffect> result = new ArrayList<>();
         for (String value : encoded) {
             String[] fields = value.split("\\|", -1);
-            if (fields.length != 6) continue;
+            if (fields.length < 6 || (fields.length - 6) % 5 != 0) continue;
             try {
                 PotionEffectType type = PotionEffectType.getByName(fields[0]);
-                if (type != null) result.add(new PotionEffect(type,
+                if (type == null) continue;
+                PotionEffect hidden = null;
+                for (int offset = fields.length - 5; offset >= 6; offset -= 5) {
+                    hidden = decodeEffectDetails(type, fields, offset, hidden);
+                }
+                result.add(new PotionEffect(type,
                     Integer.parseInt(fields[1]), Integer.parseInt(fields[2]),
                     Boolean.parseBoolean(fields[3]), Boolean.parseBoolean(fields[4]),
-                    Boolean.parseBoolean(fields[5])));
+                    Boolean.parseBoolean(fields[5]), hidden));
             } catch (NumberFormatException ignored) { }
         }
         return Collections.unmodifiableList(result);
+    }
+
+    private static PotionEffect decodeEffectDetails(PotionEffectType type, String[] fields,
+            int offset, PotionEffect hidden) {
+        return new PotionEffect(type,
+            Integer.parseInt(fields[offset]), Integer.parseInt(fields[offset + 1]),
+            Boolean.parseBoolean(fields[offset + 2]),
+            Boolean.parseBoolean(fields[offset + 3]),
+            Boolean.parseBoolean(fields[offset + 4]), hidden);
+    }
+
+    private static String encodeEffect(PotionEffect effect) {
+        StringBuilder encoded = new StringBuilder(effect.getType().getKey().getKey())
+            .append('|').append(effect.getDuration())
+            .append('|').append(effect.getAmplifier())
+            .append('|').append(effect.isAmbient())
+            .append('|').append(effect.hasParticles())
+            .append('|').append(effect.hasIcon());
+        for (PotionEffect hidden = effect.getHiddenPotionEffect(); hidden != null;
+                hidden = hidden.getHiddenPotionEffect()) {
+            encoded.append('|').append(hidden.getDuration())
+                .append('|').append(hidden.getAmplifier())
+                .append('|').append(hidden.isAmbient())
+                .append('|').append(hidden.hasParticles())
+                .append('|').append(hidden.hasIcon());
+        }
+        return encoded.toString();
     }
 
     @Override public boolean hasCustomEffects() { return !getCustomEffects().isEmpty(); }
 
     @Override public boolean addCustomEffect(PotionEffect effect, boolean overwrite) {
         java.util.Objects.requireNonNull(effect, "effect");
-        return Native.addArrowCustomEffect(getUniqueId().toString(), effect.getType().getName(),
-            effect.getDuration(), effect.getAmplifier(), effect.isAmbient(), effect.hasParticles(),
-            effect.hasIcon(), overwrite);
+        return Native.addArrowCustomEffect(getUniqueId().toString(), encodeEffect(effect),
+            overwrite);
     }
 
     @Override public boolean removeCustomEffect(PotionEffectType type) {
         java.util.Objects.requireNonNull(type, "type");
-        return Native.removeArrowCustomEffect(getUniqueId().toString(), type.getName());
+        return Native.removeArrowCustomEffect(getUniqueId().toString(), type.getKey().getKey());
     }
 
     @Override public boolean hasCustomEffect(PotionEffectType type) {
@@ -191,8 +222,6 @@ public class FotonArrow extends FotonProjectile implements Arrow {
     }
     @Override public void setShooter(
             org.bukkit.projectiles.ProjectileSource source, boolean resetPickupStatus) {
-        String shooter = source instanceof org.bukkit.entity.Entity entity
-            ? entity.getUniqueId().toString() : "";
-        Native.setArrowShooter(getUniqueId().toString(), shooter, resetPickupStatus);
+        setProjectileShooter(source, resetPickupStatus);
     }
 }
