@@ -27,6 +27,9 @@ lines = [
     "    public boolean canEnchantItem(org.bukkit.inventory.ItemStack item) {",
     "        return item != null && foton.Native.enchantmentCanEnchant(key.getKey(), item.getType().getKeyName());",
     "    }",
+    "    public boolean conflictsWith(Enchantment other) {",
+    "        return other != null && foton.Native.enchantmentsConflict(key.toString(), other.key.toString());",
+    "    }",
     "    public String getName() { return key.getKey().toUpperCase(java.util.Locale.ROOT); }",
     "    @Override public NamespacedKey getKey() { return key; }",
 ]

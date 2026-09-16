@@ -5,7 +5,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.command.CommandSender;
 
 /** A player on the server, as a plugin sees one. */
-public interface Player extends HumanEntity {
+public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
     default void playEffect(org.bukkit.EntityEffect effect) { }
     default void playEffect(org.bukkit.Location location, org.bukkit.Effect effect, Object data) {
         if (location != null && location.getWorld() != null && data instanceof Number number)

@@ -69,6 +69,7 @@ public final class Tag<T extends Keyed> {
     public static final Tag<Material> ITEMS_HARNESSES = new Tag<>(NamespacedKey.minecraft("harnesses"), Material.class, "items");
     public static final Tag<Material> ITEMS_HEAD_ARMOR = new Tag<>(NamespacedKey.minecraft("head_armor"), Material.class, "items");
     public static final Tag<Material> ITEMS_LEG_ARMOR = new Tag<>(NamespacedKey.minecraft("leg_armor"), Material.class, "items");
+    public static final Tag<Material> ITEMS_TRIMMABLE_ARMOR = new Tag<>(NamespacedKey.minecraft("trimmable_armor"), Material.class, "items");
     public static final Tag<Material> ITEMS_SKULLS = new Tag<>(NamespacedKey.minecraft("skulls"), Material.class, "items");
     public static final Tag<Material> ITEMS_SPEARS = new Tag<>(NamespacedKey.minecraft("spears"), Material.class, "items");
     public static final Tag<Material> LANTERNS = new Tag<>(NamespacedKey.minecraft("lanterns"), Material.class, "blocks");

@@ -31,8 +31,12 @@ public final class GameRule<T> {
     public static final GameRule<Boolean> SHOW_DEATH_MESSAGES = bool("showDeathMessages");
     public static final GameRule<Boolean> DO_MOB_SPAWNING = bool("doMobSpawning");
     public static final GameRule<Boolean> DO_FIRE_TICK = bool("doFireTick");
+    public static final GameRule<Boolean> ANNOUNCE_ADVANCEMENTS = bool("show_advancement_messages");
+    public static final GameRule<Boolean> DO_INSOMNIA = bool("spawn_phantoms");
+    public static final GameRule<Boolean> DO_PATROL_SPAWNING = bool("spawn_patrols");
+    public static final GameRule<Boolean> DO_TRADER_SPAWNING = bool("spawn_wandering_traders");
     public static final GameRule<Integer> RANDOM_TICK_SPEED = integer("randomTickSpeed");
     public static GameRule<?>[] values() {
-        return new GameRule<?>[]{DO_DAYLIGHT_CYCLE, DO_WEATHER_CYCLE, KEEP_INVENTORY, MOB_GRIEFING, PVP, SHOW_DEATH_MESSAGES, DO_MOB_SPAWNING, DO_FIRE_TICK, RANDOM_TICK_SPEED};
+        return new GameRule<?>[]{DO_DAYLIGHT_CYCLE, DO_WEATHER_CYCLE, KEEP_INVENTORY, MOB_GRIEFING, PVP, SHOW_DEATH_MESSAGES, DO_MOB_SPAWNING, DO_FIRE_TICK, ANNOUNCE_ADVANCEMENTS, DO_INSOMNIA, DO_PATROL_SPAWNING, DO_TRADER_SPAWNING, RANDOM_TICK_SPEED};
     }
 }

@@ -19,6 +19,7 @@ public final class Checks {
         AdapterCheck.check();
         RecipeChoiceCheck.check();
         ModernAliasesCheck.check();
+        LiveBackedApiCheck.check();
         Items.check();
         Colors.check();
         Commands.check();

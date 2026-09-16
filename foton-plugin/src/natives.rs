@@ -407,6 +407,40 @@ extern "system" fn enchantment_can_enchant(
     jboolean::from(enchantment.can_enchant(item))
 }
 
+fn enchantments_conflict_state(first: &str, second: &str) -> bool {
+    let Ok(first) = first.parse::<Identifier>() else {
+        return false;
+    };
+    let Ok(second) = second.parse::<Identifier>() else {
+        return false;
+    };
+    let Some(first) = REGISTRY.enchantments.by_key(&first) else {
+        return false;
+    };
+    let Some(second) = REGISTRY.enchantments.by_key(&second) else {
+        return false;
+    };
+    !foton_registry::enchantment::Enchantment::are_compatible(first, second)
+}
+
+extern "system" fn enchantments_conflict(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    first: JString<'_>,
+    second: JString<'_>,
+) -> jboolean {
+    let Ok(first) = env.get_string(&first) else {
+        return 0;
+    };
+    let Ok(second) = env.get_string(&second) else {
+        return 0;
+    };
+    jboolean::from(enchantments_conflict_state(
+        first.to_str().unwrap_or_default(),
+        second.to_str().unwrap_or_default(),
+    ))
+}
+
 fn parse_item_snbt_patch(input: &str) -> Option<NbtCompound> {
     let text = input.trim();
     let compound = if text.starts_with('{') {
@@ -476,14 +510,21 @@ extern "system" fn is_tagged(
     let Ok(value) = env.get_string(&value) else {
         return 0;
     };
-    let Ok(tag) = String::from(tag).parse::<Identifier>() else {
-        return 0;
+    jboolean::from(is_tagged_state(
+        &String::from(registry),
+        &String::from(tag),
+        &String::from(value),
+    ))
+}
+
+fn is_tagged_state(registry: &str, tag: &str, value: &str) -> bool {
+    let Ok(tag) = tag.parse::<Identifier>() else {
+        return false;
     };
-    let Ok(value) = String::from(value).parse::<Identifier>() else {
-        return 0;
+    let Ok(value) = value.parse::<Identifier>() else {
+        return false;
     };
-    let registry = String::from(registry);
-    let answer = match registry.as_str() {
+    match registry {
         "minecraft:items" | "items" => REGISTRY
             .items
             .by_key(&value)
@@ -493,8 +534,7 @@ extern "system" fn is_tagged(
             .by_key(&value)
             .is_some_and(|block| REGISTRY.blocks.is_in_tag(block, &tag)),
         _ => false,
-    };
-    jboolean::from(answer)
+    }
 }
 
 extern "system" fn tag_values(
@@ -11669,6 +11709,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             enchantment_can_enchant as *mut c_void,
         ),
         method(
+            "enchantmentsConflict",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            enchantments_conflict as *mut c_void,
+        ),
+        method(
             "dyeFireworkColor",
             "(I)I",
             dye_firework_color as *mut c_void,
@@ -14192,11 +14237,12 @@ pub(crate) mod entity_bridge_tests {
 
     use super::{
         EquipmentSlotRequestError, add_entity_scoreboard_tag_state, bindings,
-        clear_entity_equipment_state, entity_by_text, entity_equipment_slot_state,
-        entity_has_gravity_state, entity_in_rain_state, entity_position_state,
-        entity_scoreboard_tags_state, entity_silent_state, equipment_slot_from_index,
-        remove_entity_scoreboard_tag_state, set_entity_equipment_slot_state,
-        set_entity_gravity_state, set_entity_rotation_state, set_entity_silent_state,
+        clear_entity_equipment_state, enchantments_conflict_state, entity_by_text,
+        entity_equipment_slot_state, entity_has_gravity_state, entity_in_rain_state,
+        entity_position_state, entity_scoreboard_tags_state, entity_silent_state,
+        equipment_slot_from_index, is_tagged_state, remove_entity_scoreboard_tag_state,
+        set_entity_equipment_slot_state, set_entity_gravity_state, set_entity_rotation_state,
+        set_entity_silent_state,
     };
 
     fn entity() -> RawEntity {
@@ -14653,6 +14699,51 @@ pub(crate) mod entity_bridge_tests {
         );
         assert!(remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
         assert!(!remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
+    }
+
+    #[test]
+    fn live_registry_bridge_resolves_namespaced_tags_and_enchantment_conflicts() {
+        init_vanilla_registry();
+
+        assert!(is_tagged_state(
+            "items",
+            "minecraft:trimmable_armor",
+            "minecraft:diamond_chestplate"
+        ));
+        assert!(!is_tagged_state(
+            "items",
+            "minecraft:trimmable_armor",
+            "minecraft:elytra"
+        ));
+
+        assert!(enchantments_conflict_state(
+            "minecraft:infinity",
+            "minecraft:infinity"
+        ));
+        assert!(enchantments_conflict_state(
+            "minecraft:infinity",
+            "minecraft:mending"
+        ));
+        assert!(enchantments_conflict_state(
+            "minecraft:mending",
+            "minecraft:infinity"
+        ));
+        assert!(!enchantments_conflict_state(
+            "minecraft:sharpness",
+            "minecraft:unbreaking"
+        ));
+        assert!(!enchantments_conflict_state(
+            "example:infinity",
+            "minecraft:mending"
+        ));
+        assert!(!enchantments_conflict_state(
+            "minecraft:missing",
+            "minecraft:mending"
+        ));
+        assert!(bindings().iter().any(|method| {
+            method.name.to_str().ok() == Some("enchantmentsConflict")
+                && method.sig.to_str().ok() == Some("(Ljava/lang/String;Ljava/lang/String;)Z")
+        }));
     }
 
     #[test]

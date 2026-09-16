@@ -44,6 +44,8 @@ use thiserror::Error;
 
 mod forward;
 mod natives;
+#[cfg(test)]
+mod natives_live_api_tests;
 
 /// The class the Java side exposes to this one.
 const HOST_CLASS: &str = "foton/PluginHost";
