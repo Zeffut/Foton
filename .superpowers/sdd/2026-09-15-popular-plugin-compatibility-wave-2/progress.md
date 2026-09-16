@@ -64,3 +64,11 @@
 - [x] Task 6 SpawnReason fix round 1 — extend the isolated JVM fixture with a real server and the existing isolated world fixture; release one bee, obtain it from the world, and assert Java `Entity#getEntitySpawnReason()` returns `BEEHIVE` for that exact UUID.
 - [x] Live Java/JNI provenance gate — temporary native-query mutation produced `AssertionError: Inserted bee: expected BEEHIVE, got DEFAULT`; mutation restored via `apply_patch`, then the live test passed. Production behavior is unchanged.
 - Fix-round verification: live JNI gate 1 passed; plugin unit suite 30 passed (live gate separately invoked); core beehive suite 2 passed; spawn suite 3 passed; formatting and diff whitespace checks passed. Full evidence: `task-6-spawnreason-fix-report.md`.
+
+## Task 6 SpawnReason quality fix round 2
+
+- Base: `6a110a89a6bbdce0524fa4636ac2a10f6f2ddaff`.
+- Finding: plugin-visible provenance is not serialized, so a persisted BEEHIVE entity reloads as DEFAULT.
+- Ruling: use Paper's exact `Paper.SpawnReason` persisted representation; recognized values restore into the existing provenance snapshot/lock, while absent, malformed, or unknown values restore DEFAULT and never CUSTOM. Old saves remain readable without a migration framework.
+- Status: complete. `Paper.SpawnReason` now round-trips through the existing entity NBT payload and provenance lock; absent, unknown, and malformed values restore `DEFAULT` without changing Vanilla provenance.
+- Verification: focused round-trip 3 passed; entity persistence 16 passed; core provenance 3 passed; beehive 2 passed; plugin unit suite 30 passed plus the isolated live Java/JNI spawn bridge; JNI integration 1 passed; touched-crate check, formatting, and diff checks passed. Full evidence: `task-6-spawnreason-fix-round-2-report.md`.

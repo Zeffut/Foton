@@ -223,6 +223,61 @@ impl PluginSpawnReason {
             Self::Default => "DEFAULT",
         }
     }
+
+    /// Restores a Paper-persisted spawn reason by its enum name.
+    #[must_use]
+    pub(crate) const fn from_paper_name(name: &str) -> Option<Self> {
+        match name.as_bytes() {
+            b"NATURAL" => Some(Self::Natural),
+            b"JOCKEY" => Some(Self::Jockey),
+            b"CHUNK_GEN" => Some(Self::ChunkGen),
+            b"SPAWNER" => Some(Self::Spawner),
+            b"TRIAL_SPAWNER" => Some(Self::TrialSpawner),
+            b"EGG" => Some(Self::Egg),
+            b"SPAWNER_EGG" => Some(Self::SpawnerEgg),
+            b"LIGHTNING" => Some(Self::Lightning),
+            b"BUILD_SNOWMAN" => Some(Self::BuildSnowman),
+            b"BUILD_IRONGOLEM" => Some(Self::BuildIronGolem),
+            b"BUILD_COPPERGOLEM" => Some(Self::BuildCopperGolem),
+            b"BUILD_WITHER" => Some(Self::BuildWither),
+            b"VILLAGE_DEFENSE" => Some(Self::VillageDefense),
+            b"VILLAGE_INVASION" => Some(Self::VillageInvasion),
+            b"BREEDING" => Some(Self::Breeding),
+            b"SLIME_SPLIT" => Some(Self::SlimeSplit),
+            b"REINFORCEMENTS" => Some(Self::Reinforcements),
+            b"NETHER_PORTAL" => Some(Self::NetherPortal),
+            b"DISPENSE_EGG" => Some(Self::DispenseEgg),
+            b"INFECTION" => Some(Self::Infection),
+            b"CURED" => Some(Self::Cured),
+            b"OCELOT_BABY" => Some(Self::OcelotBaby),
+            b"SILVERFISH_BLOCK" => Some(Self::SilverfishBlock),
+            b"MOUNT" => Some(Self::Mount),
+            b"TRAP" => Some(Self::Trap),
+            b"ENDER_PEARL" => Some(Self::EnderPearl),
+            b"SHOULDER_ENTITY" => Some(Self::ShoulderEntity),
+            b"DROWNED" => Some(Self::Drowned),
+            b"SHEARED" => Some(Self::Sheared),
+            b"EXPLOSION" => Some(Self::Explosion),
+            b"RAID" => Some(Self::Raid),
+            b"PATROL" => Some(Self::Patrol),
+            b"BEEHIVE" => Some(Self::Beehive),
+            b"PIGLIN_ZOMBIFIED" => Some(Self::PiglinZombified),
+            b"SPELL" => Some(Self::Spell),
+            b"FROZEN" => Some(Self::Frozen),
+            b"METAMORPHOSIS" => Some(Self::Metamorphosis),
+            b"DUPLICATION" => Some(Self::Duplication),
+            b"COMMAND" => Some(Self::Command),
+            b"ENCHANTMENT" => Some(Self::Enchantment),
+            b"OMINOUS_ITEM_SPAWNER" => Some(Self::OminousItemSpawner),
+            b"BUCKET" => Some(Self::Bucket),
+            b"POTION_EFFECT" => Some(Self::PotionEffect),
+            b"REANIMATE" => Some(Self::Reanimate),
+            b"REHYDRATION" => Some(Self::Rehydration),
+            b"CUSTOM" => Some(Self::Custom),
+            b"DEFAULT" => Some(Self::Default),
+            _ => None,
+        }
+    }
 }
 
 impl From<EntitySpawnReason> for PluginSpawnReason {
