@@ -38,7 +38,7 @@
 
 ## Tasks
 
-- [ ] Task 1 — entity wrapper identity and class-to-key spawning
+- [x] Task 1 — entity wrapper identity and class-to-key spawning (`ba7cd62e0`; self-review and focused evidence complete)
 - [ ] Task 2 — live `BrewEvent` and `PrepareItemEnchantEvent`
 - [ ] Task 3 — exact on-demand ray tracing
 - [ ] Task 4 — live `ItemDisplay` / `TextDisplay` / `Allay` / `ChestBoat` identity and holder plumbing
@@ -59,6 +59,17 @@
 | **Total** | **41** | **2–7** | **Final Zelda compile count: 0.** |
 
 Task 1 has no direct residual count; it is a correctness prerequisite. Task-level javac deltas may differ because missing types currently mask later member diagnostics. Only Task 8 publishes the final exact count.
+
+## Task 1 implementation
+
+- Base: `79d1250a32ec651706c7934b663dfb404eb21329`; worktree and branch preflight were clean and exact.
+- Implementation: `ba7cd62e0` (`fix(plugin): preserve entity wrapper identity`).
+- RED: the wrapper check reached the Java harness and failed on the existing second `Native.entityType("block_display")` lookup; the class mapping check separately failed compilation because `FotonEntityFactory.typeFor(Class)` was absent.
+- GREEN: the focused Java/API harness and `bash dev/build-plugin-api.sh --check` passed; native registration, focused `foton-plugin` Rust check, Rust formatting, Python generator compilation, and diff whitespace checks passed.
+- Mutation: restoring the second wrapper lookup reproduced the exact Java harness failure; restoration returned the full API check to green.
+- Performance: every wrapper creation resolves one native type exactly once; no cache, polling, synchronization, JNI tick call, or other tick work was added.
+- Scope: generated `EntityType` output now carries registry-derived class-to-type cases, including `BlockDisplay` and future `ItemDisplay`; no generated source, extracted JSON, Rust source, or test-count ledger was edited.
+- Report: `.superpowers/sdd/2026-09-16-popular-plugin-compatibility-wave-3/task-1-report.md`.
 
 ## Review protocol
 
