@@ -88,3 +88,32 @@
 | Approved Task 6 spawn → remaining Task 6 | Shared Native declarations/registration → one additional enchantment binding | Keep spawn paths unchanged and validate all native descriptors. |
 | Remaining Task 6 internal | Focused failing API/JNI tests → minimal live adapters | Tests must use extracted tags and registry exclusivity, not copied data. |
 | Remaining Task 6 → Task 7 | Verified committed adapters → later Zelda/full-wave evidence | Do not claim the expected 11-error reduction as measured in this scoped task. |
+
+## Task 6 reviewed registry-publication defects
+
+- Base: `6db5628030917c6432d8e29b41f9b312fe86afe9`.
+- Scope: add non-initializing registry observation for JNI calls made during
+  legal plugin `onLoad`; isolate both real-JNI lifecycle tests and run them
+  explicitly after the plugin API build in CI.
+- TDD invariant: the pre-publication generated-Java/JNI regression must fail
+  against the base implementation before production edits.
+
+| Scope pair | Producer / consumer | Finding |
+|---|---|---|
+| Plugin `onLoad` → registry JNI | Legal pre-publication API calls → conflict/can-enchant/tag natives | Return false/empty without panic, abort, blocking, or implicit registry initialization. |
+| Registry publication → existing live JNI | Published singleton → request-time tag/enchantment queries | Preserve current live-backed behavior after publication. |
+| Plugin API build → isolated JNI tests | Built jar/JDK → real generated-Java coverage | Keep lightweight cargo tests earlier; explicitly run both isolated JNI tests after the API build. |
+
+## Task 6 live-backed quality fix round 1
+
+- Base: `6db5628030917c6432d8e29b41f9b312fe86afe9`.
+- Scope: make the four registry-backed JNI paths safe before `REGISTRY` publication, and isolate/schedule the post-publication JVM gate after plugin API construction in CI.
+- Ruling: preserve the pre-task untracked root `build/` outside the worktree while this fix runs; clean only a new root `build/` created by this task, then restore the prior artifact unchanged.
+- Status: implementation complete; the isolated RED aborted before publication and GREEN returned the documented defaults without publishing the registry.
+
+| Scope pair | Producer / consumer | Finding |
+|---|---|---|
+| `RegistryLock` → plugin native helpers | Fallible publication state → false/empty JNI fallbacks | Compatible; accessor must not initialize or panic and post-publication deref semantics remain unchanged. |
+| Pre-publication JVM fixture → global registry | Fresh isolated process → generated Java calls | Must run before any fixture publishes `REGISTRY`; ordinary in-process ordering is not sufficient. |
+| Plugin API build → live-registry JVM gate | Built JAR → explicit ignored test | CI must build/check the API first, then invoke the ignored gate explicitly. |
+| Quality fix internal | RED regression → minimal production change | Consistent; no production change before an observed failing test. |

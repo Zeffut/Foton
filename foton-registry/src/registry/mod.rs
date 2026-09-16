@@ -106,6 +106,14 @@ use std::{
 pub struct RegistryLock(OnceLock<Registry>);
 
 impl RegistryLock {
+    /// Observes publication without initializing the registry.
+    ///
+    /// Returns the published registry, or `None` while bootstrap is still in progress.
+    #[must_use]
+    pub fn get(&self) -> Option<&Registry> {
+        self.0.get()
+    }
+
     #[expect(clippy::result_large_err)]
     pub fn init(&self, value: Registry) -> Result<(), Registry> {
         self.0.set(value)
@@ -825,7 +833,7 @@ mod tests {
     use crate::enchantment_effect::EnchantmentEffects;
     use crate::vanilla_enchantments;
 
-    use super::{Registry, RegistryExt, build_vanilla_registry};
+    use super::{Registry, RegistryExt, RegistryLock, build_vanilla_registry};
 
     fn biome_with_refs(carvers: Vec<Identifier>, features: Vec<Vec<Identifier>>) -> &'static Biome {
         Box::leak(Box::new(Biome {
@@ -858,6 +866,15 @@ mod tests {
             features,
             id: OnceLock::new(),
         }))
+    }
+
+    #[test]
+    fn registry_lock_reports_absence_until_publication() {
+        let lock = RegistryLock(OnceLock::new());
+
+        assert!(lock.get().is_none());
+        assert!(lock.init(Registry::new_empty()).is_ok());
+        assert!(lock.get().is_some());
     }
 
     #[test]

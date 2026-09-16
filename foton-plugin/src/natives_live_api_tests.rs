@@ -1,4 +1,5 @@
 use std::env::var_os;
+use std::error::Error;
 use std::fs::read_dir;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -39,7 +40,93 @@ fn java_home() -> Option<PathBuf> {
 }
 
 #[test]
-fn generated_java_apis_reach_live_registry_natives() -> Result<(), Box<dyn std::error::Error>> {
+#[ignore = "requires a prebuilt plugin API JAR and JDK; dev/ci.sh runs it in isolation"]
+fn generated_java_apis_are_safe_before_registry_publication() -> Result<(), Box<dyn Error>> {
+    assert!(foton_registry::REGISTRY.get().is_none());
+    let java_home = java_home().ok_or("Java installation required for pre-publication JNI test")?;
+    let root = repo();
+    let api_jar = root.join("plugin-api/build/foton-plugin-api.jar");
+    if !api_jar.is_file() {
+        return Err("run dev/build-plugin-api.sh before the pre-publication JNI test".into());
+    }
+    let host = PluginHost::start(
+        &PluginHostConfig {
+            java_home,
+            api_jar,
+            library_directory: Some(root.join("plugin-api/lib")),
+            plugin_directory: root.join("plugin-api/build/no-plugins"),
+        },
+        &Weak::new(),
+    )?;
+    let mut env = host.vm.attach_current_thread()?;
+
+    let tag = env
+        .get_static_field(
+            "org/bukkit/Tag",
+            "ITEMS_TRIMMABLE_ARMOR",
+            "Lorg/bukkit/Tag;",
+        )?
+        .l()?;
+    let material = env
+        .get_static_field(
+            "org/bukkit/Material",
+            "DIAMOND_CHESTPLATE",
+            "Lorg/bukkit/Material;",
+        )?
+        .l()?;
+    let tagged = env
+        .call_method(
+            &tag,
+            "isTagged",
+            "(Lorg/bukkit/Keyed;)Z",
+            &[JValue::Object(&material)],
+        )?
+        .z()?;
+    assert!(!tagged);
+    let values = env
+        .call_method(&tag, "getValues", "()Ljava/util/Set;", &[])?
+        .l()?;
+    assert_eq!(env.call_method(&values, "size", "()I", &[])?.i()?, 0);
+
+    let enchantment_class = "org/bukkit/enchantments/Enchantment";
+    let enchantment_descriptor = "Lorg/bukkit/enchantments/Enchantment;";
+    let infinity = env
+        .get_static_field(enchantment_class, "INFINITY", enchantment_descriptor)?
+        .l()?;
+    let mending = env
+        .get_static_field(enchantment_class, "MENDING", enchantment_descriptor)?
+        .l()?;
+    assert!(
+        !env.call_method(
+            &infinity,
+            "conflictsWith",
+            "(Lorg/bukkit/enchantments/Enchantment;)Z",
+            &[JValue::Object(&mending)],
+        )?
+        .z()?
+    );
+
+    let item = env.new_object(
+        "org/bukkit/inventory/ItemStack",
+        "(Lorg/bukkit/Material;)V",
+        &[JValue::Object(&material)],
+    )?;
+    assert!(
+        !env.call_method(
+            &infinity,
+            "canEnchantItem",
+            "(Lorg/bukkit/inventory/ItemStack;)Z",
+            &[JValue::Object(&item)],
+        )?
+        .z()?
+    );
+    assert!(foton_registry::REGISTRY.get().is_none());
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires the built plugin API jar and a JDK"]
+fn generated_java_apis_reach_live_registry_natives() -> Result<(), Box<dyn Error>> {
     let java_home = java_home().ok_or("Java installation required for live JNI API test")?;
     let root = repo();
     let api_jar = root.join("plugin-api/build/foton-plugin-api.jar");

@@ -394,12 +394,15 @@ extern "system" fn enchantment_can_enchant(
     let Ok(item) = env.get_string(&item) else {
         return 0;
     };
-    let Some(enchantment) = REGISTRY.enchantments.by_key(&Identifier::vanilla(
+    let Some(registry) = REGISTRY.get() else {
+        return 0;
+    };
+    let Some(enchantment) = registry.enchantments.by_key(&Identifier::vanilla(
         enchantment.to_str().unwrap_or_default().to_owned(),
     )) else {
         return 0;
     };
-    let Some(item) = REGISTRY.items.by_key(&Identifier::vanilla(
+    let Some(item) = registry.items.by_key(&Identifier::vanilla(
         item.to_str().unwrap_or_default().to_owned(),
     )) else {
         return 0;
@@ -414,10 +417,13 @@ fn enchantments_conflict_state(first: &str, second: &str) -> bool {
     let Ok(second) = second.parse::<Identifier>() else {
         return false;
     };
-    let Some(first) = REGISTRY.enchantments.by_key(&first) else {
+    let Some(registry) = REGISTRY.get() else {
         return false;
     };
-    let Some(second) = REGISTRY.enchantments.by_key(&second) else {
+    let Some(first) = registry.enchantments.by_key(&first) else {
+        return false;
+    };
+    let Some(second) = registry.enchantments.by_key(&second) else {
         return false;
     };
     !foton_registry::enchantment::Enchantment::are_compatible(first, second)
@@ -517,22 +523,25 @@ extern "system" fn is_tagged(
     ))
 }
 
-fn is_tagged_state(registry: &str, tag: &str, value: &str) -> bool {
+fn is_tagged_state(registry_name: &str, tag: &str, value: &str) -> bool {
     let Ok(tag) = tag.parse::<Identifier>() else {
         return false;
     };
     let Ok(value) = value.parse::<Identifier>() else {
         return false;
     };
-    match registry {
-        "minecraft:items" | "items" => REGISTRY
+    let Some(registry) = REGISTRY.get() else {
+        return false;
+    };
+    match registry_name {
+        "minecraft:items" | "items" => registry
             .items
             .by_key(&value)
-            .is_some_and(|item| REGISTRY.items.is_in_tag(item, &tag)),
-        "minecraft:blocks" | "blocks" => REGISTRY
+            .is_some_and(|item| registry.items.is_in_tag(item, &tag)),
+        "minecraft:blocks" | "blocks" => registry
             .blocks
             .by_key(&value)
-            .is_some_and(|block| REGISTRY.blocks.is_in_tag(block, &tag)),
+            .is_some_and(|block| registry.blocks.is_in_tag(block, &tag)),
         _ => false,
     }
 }
@@ -549,17 +558,20 @@ extern "system" fn tag_values(
     let Ok(tag) = env.get_string(&tag) else {
         return null_mut();
     };
+    let registry_name = String::from(registry);
+    let Some(registry) = REGISTRY.get() else {
+        return string_array(&mut env, &[]);
+    };
     let Ok(tag) = String::from(tag).parse::<Identifier>() else {
         return null_mut();
     };
-    let registry = String::from(registry);
-    let values: Vec<String> = match registry.as_str() {
-        "minecraft:items" | "items" => REGISTRY
+    let values: Vec<String> = match registry_name.as_str() {
+        "minecraft:items" | "items" => registry
             .items
             .iter_tag(&tag)
             .map(|entry| entry.key().to_string())
             .collect(),
-        "minecraft:blocks" | "blocks" => REGISTRY
+        "minecraft:blocks" | "blocks" => registry
             .blocks
             .iter_tag(&tag)
             .map(|entry| entry.key().to_string())
@@ -14699,6 +14711,21 @@ pub(crate) mod entity_bridge_tests {
         );
         assert!(remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
         assert!(!remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
+    }
+
+    #[test]
+    fn pre_publication_registry_helpers_return_fallbacks() {
+        assert!(foton_registry::REGISTRY.get().is_none());
+        assert!(!enchantments_conflict_state(
+            "minecraft:infinity",
+            "minecraft:mending"
+        ));
+        assert!(!is_tagged_state(
+            "items",
+            "minecraft:trimmable_armor",
+            "minecraft:diamond_chestplate"
+        ));
+        assert!(foton_registry::REGISTRY.get().is_none());
     }
 
     #[test]
