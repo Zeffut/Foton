@@ -38,7 +38,7 @@
 
 ## Tasks
 
-- [ ] Task 1 — entity wrapper identity and class-to-key spawning (in review; implementation `ba7cd62e0`, first review fix `2febe9169`, second review fix `4656276e6`; both re-reviews pending)
+- [ ] Task 1 — entity wrapper identity and class-to-key spawning (in review; implementation `ba7cd62e0`, first review fix `2febe9169`, second review fix `4656276e6`, third review fix `c409748ca`; independent re-reviews pending)
 - [ ] Task 2 — live `BrewEvent` and `PrepareItemEnchantEvent`
 - [ ] Task 3 — exact on-demand ray tracing
 - [ ] Task 4 — live `ItemDisplay` / `TextDisplay` / `Allay` / `ChestBoat` identity and holder plumbing
@@ -83,6 +83,20 @@ Task 1 has no direct residual count; it is a correctness prerequisite. Task-leve
   native registration, workspace all-targets, formatting, and diff checks pass.
 - Second review status: in review; both re-review approvals remain pending, so
   Task 1 stays unchecked.
+- Third review fix: `c409748ca9dceced9db63ac5676377de583ee09f`
+  adds the exact Paper 26.2 Animals/Cow hierarchy and live state, dead-slime
+  resize semantics, pre-publication JNI safety, transient Ravager target
+  controls, complete Arrow ammunition potion behavior/persistence, and atomic
+  class-spawn validation with generated wrapper metadata.
+- Third review evidence: exact 6/6 Paper ABI diff; all 8 generator/stale-source
+  tests; 29 focused core/registry tests; both native registration checks; both
+  isolated real-JVM/JNI fixtures; 836-source/1015-class API build and harness;
+  narrow and workspace all-target checks; formatting and diff checks pass.
+- Third review performance/scope: no generated Rust or extracted data was
+  edited, no per-goal branches or idle compatibility work were added, and
+  external selector disables remain separate from the transient mob mask.
+- Third review status: in review; independent specification and quality
+  approvals are still required, so Task 1 remains unchecked.
 
 ## Review protocol
 
