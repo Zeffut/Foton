@@ -1,0 +1,89 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-09-16-popular-plugin-compatibility-wave-3.md
+
+- Documentation base: `5fa4936d6bc58c114d8bcee0e6c5d6520a8cf55a`.
+- Foton implementation base: `5fa4936d6bc58c114d8bcee0e6c5d6520a8cf55a`.
+- Zelda gate base: `3d7dc062b4353bced69f8383f52c961a5d42e17f`.
+- Compile baseline: 41 errors on an 86-entry classpath containing zero `paper-api` jars; delta from valid Wave 2 baseline is `-351` / `-89.54%`.
+- Runtime baseline: SQLite opens; `zones.db` and `players.db` pass `PRAGMA integrity_check`; `SpawnReason.BEEHIVE` passes; first Foton-owned blocker is missing `org.bukkit.event.inventory.BrewEvent` during listener reflection.
+- Design: `docs/superpowers/specs/2026-09-16-popular-plugin-compatibility-wave-3-design.md`.
+
+## Rulings
+
+- The 41 measured Zelda diagnostics are the compile-scope oracle. Javac cascades are remeasured after every checkpoint; newly exposed members require evidence before implementation.
+- Fix entity wrapper identity and generated class-to-key spawning before ray/entity/event work.
+- `BrewEvent` and `PrepareItemEnchantEvent` ship together because one Zelda listener class declares both parameter types.
+- All events are connected at their exact native timing boundary; declarations without dispatch/mutation/cancellation are rejected.
+- Java state is either an immutable event snapshot or a façade over native state. No persistent Java-only entity, inventory, component, registry, or block-data cache.
+- Locks are released before JNI/event callbacks.
+- Block rays delegate `World::clip`; entity rays use the loaded-entity spatial query and nearest live AABB. No chunk-loading claim.
+- Display state exposed as durable API must use normal entity persistence; no fake defaults/no-op setters.
+- Chest-boat holder identity is carried as an entity UUID. Refill/player-history API is omitted because backing state does not exist; plugins calling omitted methods remain ABI-incompatible.
+- Banner, instrument, and age data come from existing registries/components/extracted assets via generators. Extracted JSON and generated source are never edited directly.
+- `MusicInstrument.create(...)` is omitted because dynamic plugin registry registration does not exist; plugins calling it remain ABI-incompatible.
+- No new idle/tick work. Every dispatch/query is charged to an existing operation or plugin request.
+- Final success means zero Zelda compile residuals, measured runtime evidence, green `bash dev/ci.sh`, whole-branch approval, and a clean repository. It does not mean 100% Paper/plugin-market compatibility.
+
+## Dependency review
+
+| Producer | Consumer | Contract |
+|---|---|---|
+| Task 1 | Tasks 3, 4, 6 | Single-pass `wrapEntity(UUID, type)` and generated class-to-`EntityType` mapping preserve real wrapper identity. |
+| Task 2 | Task 8 runtime | Both parameter types in `VanillaSuppressor` resolve, and live brew/enchant behavior is connected before runtime requalification. |
+| Task 3 | Zelda rune compile/runtime | Ray results expose exact hit data; entity predicates receive typed wrappers from Task 1. |
+| Task 4 | Tasks 6 and 8 | Display/Allay/chest-boat wrappers and inventory-holder UUIDs are live and persistent where claimed. |
+| Task 5 | Zelda item/crop paths | Components and age data round-trip through existing native registries/codecs; no copied data. |
+| Task 6 | Task 8 lifecycle runtime | Load/unload/dismount/place events fire while affected entities remain resolvable and before irreversible effects. |
+| Task 7 | Task 8 final compile/runtime | Drop, armor, and smithing mutations/cancellation are committed at existing operation boundaries. |
+| Tasks 1–7 | Task 8 | Every residual family is committed, reviewed, and independently green before full CI/evidence. |
+
+## Tasks
+
+- [ ] Task 1 — entity wrapper identity and class-to-key spawning
+- [ ] Task 2 — live `BrewEvent` and `PrepareItemEnchantEvent`
+- [ ] Task 3 — exact on-demand ray tracing
+- [ ] Task 4 — live `ItemDisplay` / `TextDisplay` / `Allay` / `ChestBoat` identity and holder plumbing
+- [ ] Task 5 — `BannerPatternLayers` / `MusicInstrument` + meta / generated `Ageable`
+- [ ] Task 6 — `EntitiesLoadEvent` / `EntitiesUnloadEvent` / `EntityDismountEvent` / `EntityPlaceEvent`
+- [ ] Task 7 — `BlockDropItemEvent` / `PlayerArmorChangeEvent` / `PrepareSmithingEvent` / `SmithItemEvent`
+- [ ] Task 8 — exact Zelda rebaseline, runtime, `dev/ci.sh`, and whole-branch review
+
+## Residual accounting
+
+| Family | Baseline | Owning task | Required closing evidence |
+|---|---:|---:|---|
+| Ray tracing | 7 | 3 | All `FluidCollisionMode` / `RayTraceResult` diagnostics absent. |
+| Entities/displays | 11 | 4 | All four entity symbols compile and live wrapper fixture passes. |
+| Events/lifecycle | 19 | 2, 6, 7 | All ten event classes compile and operation-timing tests pass. |
+| Inventory/meta/data | 3 | 5 | Banner/instrument/meta native round-trips pass. |
+| Block data | 1 | 5 | Generated material-specific `Ageable` behavior passes. |
+| **Total** | **41** | **2–7** | **Final Zelda compile count: 0.** |
+
+Task 1 has no direct residual count; it is a correctness prerequisite. Task-level javac deltas may differ because missing types currently mask later member diagnostics. Only Task 8 publishes the final exact count.
+
+## Review protocol
+
+For each task:
+
+1. Fresh implementer reads the Wave 3 spec, plan task, this ledger, and `AGENTS.md`.
+2. Implementer records the exact RED command/output before production changes.
+3. Implementer records focused GREEN commands, performance audit, and commit SHA.
+4. Fresh specification reviewer approves or returns findings.
+5. Fresh quality reviewer approves or returns findings.
+6. A fresh fixer handles findings; affected verification and both reviews repeat until approved.
+7. Only then mark the task complete and advance.
+
+## Final evidence template
+
+- Exact Foton SHA:
+- Exact Zelda SHA: `3d7dc062b4353bced69f8383f52c961a5d42e17f`
+- Maven classpath entries:
+- Residual Paper jars: expected 0
+- Zelda compile errors: expected 0
+- Delta from 392 baseline: expected `-392` / `-100%`
+- Runtime SQLite integrity:
+- Zelda enable result / first remaining runtime blocker:
+- `bash dev/ci.sh` result:
+- Whole-branch specification review:
+- Whole-branch quality review:
+- Deferred ABI gaps: chest-boat refill/player-history; `MusicInstrument.create(...)`; unloaded-chunk ray side effects; historical NMS ceiling
+- Repository cleanliness:

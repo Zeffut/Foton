@@ -27,8 +27,17 @@
 - [x] Task 3 — exact adapters (`5f7467ac9` through `49c66a52b`; spec and quality approved)
 - [x] Task 4 — modern aliases (`8eff093d9` through `634280adf`; spec and quality approved)
 - [x] Task 5 — host JDBC runtime/self-disable lifecycle (`d7fdc5609`, `abb708f06`; spec and quality approved; Zelda SQLite runtime gate complete)
-- [ ] Task 6 — additional live-backed API (original 11-error compile scope plus separate 47-value spawn-reason/BEEHIVE runtime gate)
+- [x] Task 6 — additional live-backed API (approved at `5fa4936d6bc58c114d8bcee0e6c5d6520a8cf55a`; original 11-error compile scope plus separate 47-value spawn-reason/BEEHIVE runtime gate)
 - [ ] Task 7 — Zelda evidence and final verification
+
+## Exact post-Task-6 Zelda rebaseline
+
+- Foton: `5fa4936d6bc58c114d8bcee0e6c5d6520a8cf55a`.
+- Zelda: `3d7dc062b4353bced69f8383f52c961a5d42e17f`.
+- Foton-only Maven classpath: 86 entries and zero `paper-api` jars.
+- Compile result: 41 errors, down 351 from the valid 392-error baseline (`-89.54%`). The residual families are ray tracing 7, entities/displays 11, events/lifecycle 19, inventory/meta/data 3, and block data 1.
+- Runtime result: SQLite opens and both databases pass `PRAGMA integrity_check`; `SpawnReason.BEEHIVE` no longer blocks Zelda. The next Foton-owned blocker is `NoClassDefFoundError: org/bukkit/event/inventory/BrewEvent` while `EventBridge.register` resolves listener parameter types.
+- Task 6 specification and quality review are approved. Wave 2 final CI/evidence Task 7 is intentionally still open; Wave 3 owns the measured 41-error remainder and subsequent runtime blockers.
 
 ## Task 3 preflight
 
