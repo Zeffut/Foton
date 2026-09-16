@@ -14714,21 +14714,6 @@ pub(crate) mod entity_bridge_tests {
     }
 
     #[test]
-    fn pre_publication_registry_helpers_return_fallbacks() {
-        assert!(foton_registry::REGISTRY.get().is_none());
-        assert!(!enchantments_conflict_state(
-            "minecraft:infinity",
-            "minecraft:mending"
-        ));
-        assert!(!is_tagged_state(
-            "items",
-            "minecraft:trimmable_armor",
-            "minecraft:diamond_chestplate"
-        ));
-        assert!(foton_registry::REGISTRY.get().is_none());
-    }
-
-    #[test]
     fn live_registry_bridge_resolves_namespaced_tags_and_enchantment_conflicts() {
         init_vanilla_registry();
 

@@ -110,6 +110,9 @@
 - Scope: make the four registry-backed JNI paths safe before `REGISTRY` publication, and isolate/schedule the post-publication JVM gate after plugin API construction in CI.
 - Ruling: preserve the pre-task untracked root `build/` outside the worktree while this fix runs; clean only a new root `build/` created by this task, then restore the prior artifact unchanged.
 - Status: implementation complete; the isolated RED aborted before publication and GREEN returned the documented defaults without publishing the registry.
+- Reviewer follow-up: removed the redundant ordinary pre-publication helper
+  test because sibling tests can publish the process-global registry; retained
+  the isolated real-JNI gate and regenerated the Unix test count.
 
 | Scope pair | Producer / consumer | Finding |
 |---|---|---|
