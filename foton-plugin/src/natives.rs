@@ -10,7 +10,7 @@
 //! (such as runtime recipes) expose their own synchronized write path.
 
 use std::fmt::Write;
-use std::io::Cursor;
+use std::io::{Cursor, Error as IoError, Result as IoResult, Write as IoWrite};
 use std::mem;
 use std::ptr::null_mut;
 use std::str::{self, FromStr as _};
@@ -21,7 +21,6 @@ use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
-use foton_core::block_entity::BLOCK_ENTITIES;
 use foton_core::block_entity::entities::BannerBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
@@ -29,6 +28,7 @@ use foton_core::block_entity::entities::LecternBlockEntity;
 use foton_core::block_entity::entities::SpawnerBlockEntity;
 use foton_core::block_entity::entities::{BREWING_STAND_SLOTS, BrewingStandBlockEntity};
 use foton_core::block_entity::entities::{SignBlockEntity, SignText};
+use foton_core::block_entity::{BLOCK_ENTITIES, SharedBlockEntity};
 use foton_core::boss_event::ServerBossEvent;
 use foton_core::chunk::chunk_request::ChunkRequestState;
 use foton_core::chunk::light::LightLayer;
@@ -126,6 +126,7 @@ use foton_registry::MobEffectInstance as RegistryMobEffectInstance;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
+use foton_registry::data_components::DataComponentPatch;
 use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, SuspiciousStewEffect, SuspiciousStewEffects,
     TooltipDisplay,
@@ -161,6 +162,7 @@ use foton_registry::{
     vanilla_blocks, vanilla_entities, vanilla_items,
 };
 use foton_registry::{stat::Stat, vanilla_custom_stats};
+use foton_utils::codec::VarInt;
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
@@ -185,7 +187,7 @@ use jni::sys::{
     jboolean, jbyte, jbyteArray, jdouble, jdoubleArray, jfloat, jint, jlong, jobject, jobjectArray,
     jstring,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use simdnbt::owned::NbtCompound;
 use simdnbt::owned::NbtTag;
 use text_components::{TextComponent, content::Content as TextContent};
@@ -9061,6 +9063,14 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     let mut encoded = text.trim().split('\u{1d}');
     let text = encoded.next().unwrap_or_default();
     let metadata = encoded.collect::<Vec<_>>();
+    if metadata
+        .iter()
+        .filter(|value| value.starts_with("lorehex="))
+        .count()
+        > 256
+    {
+        return None;
+    }
     if text.is_empty() {
         return Some(ItemStack::empty());
     }
@@ -11732,11 +11742,20 @@ extern "system" fn hopper_inventory_slot(
     to_java(&mut env, value)
 }
 
-const BREWING_SNAPSHOT_HEADER: &[u8; 4] = b"FBS\x01";
+const BREWING_SNAPSHOT_HEADER: &[u8; 4] = b"FBS\x02";
 const MAX_BREWING_SNAPSHOT_BYTES: usize = 1 << 20;
+const MAX_BREWING_ITEM_BYTES: usize = 256 * 1024;
+const MAX_BREWING_COMPONENTS: usize = 256;
+const MAX_BREWING_OPAQUE_NBT_BYTES: usize = 256 * 1024;
+const MAX_BREWING_TEXT_BYTES: usize = 64 * 1024;
+const MAX_BREWING_LOCK_BYTES: usize = 64 * 1024;
 
 const fn brewing_payload_length_is_valid(length: usize) -> bool {
     length <= MAX_BREWING_SNAPSHOT_BYTES
+}
+
+const fn brewing_item_payload_length_is_valid(length: usize) -> bool {
+    length <= MAX_BREWING_ITEM_BYTES
 }
 
 struct BrewingBridgeSnapshot {
@@ -11749,38 +11768,123 @@ struct BrewingBridgeSnapshot {
     lock: LockCode,
 }
 
-fn append_brewing_blob(output: &mut Vec<u8>, bytes: &[u8]) -> Option<()> {
-    let length = u32::try_from(bytes.len()).ok()?;
-    output.extend_from_slice(&length.to_be_bytes());
-    output.extend_from_slice(bytes);
-    Some(())
+struct BrewingPayloadWriter {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl BrewingPayloadWriter {
+    const fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit,
+        }
+    }
+
+    fn begin_blob(&mut self) -> Option<usize> {
+        let offset = self.bytes.len();
+        self.write_all(&0_u32.to_be_bytes()).ok()?;
+        Some(offset)
+    }
+
+    fn finish_blob(&mut self, offset: usize, field_limit: usize) -> Option<()> {
+        let body_start = offset.checked_add(4)?;
+        let length = self.bytes.len().checked_sub(body_start)?;
+        if length > field_limit {
+            return None;
+        }
+        let length = u32::try_from(length).ok()?;
+        self.bytes
+            .get_mut(offset..body_start)?
+            .copy_from_slice(&length.to_be_bytes());
+        Some(())
+    }
+
+    fn write_optional_blob(&mut self, value: Option<&[u8]>, field_limit: usize) -> Option<()> {
+        let Some(value) = value else {
+            return self.write_all(&u32::MAX.to_be_bytes()).ok();
+        };
+        if value.len() > field_limit {
+            return None;
+        }
+        let length = u32::try_from(value.len()).ok()?;
+        self.write_all(&length.to_be_bytes()).ok()?;
+        self.write_all(value).ok()
+    }
+
+    fn into_inner(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+impl IoWrite for BrewingPayloadWriter {
+    fn write(&mut self, bytes: &[u8]) -> IoResult<usize> {
+        let Some(length) = self.bytes.len().checked_add(bytes.len()) else {
+            return Err(IoError::other("brewing payload length overflow"));
+        };
+        if length > self.limit {
+            return Err(IoError::other("brewing payload exceeds its byte limit"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}
+
+fn write_brewing_item(output: &mut BrewingPayloadWriter, item: &ItemStack) -> Option<()> {
+    item.validate_persistent_encoding().ok()?;
+    if item.components_patch().len() > MAX_BREWING_COMPONENTS {
+        return None;
+    }
+    item.write(output).ok()?;
+    output.write_optional_blob(
+        item.opaque_nbt().map(str::as_bytes),
+        MAX_BREWING_OPAQUE_NBT_BYTES,
+    )
+}
+
+fn append_brewing_item(output: &mut BrewingPayloadWriter, item: &ItemStack) -> Option<()> {
+    let offset = output.begin_blob()?;
+    write_brewing_item(output, item)?;
+    output.finish_blob(offset, MAX_BREWING_ITEM_BYTES)
+}
+
+fn encode_brewing_item(item: &ItemStack) -> Option<Vec<u8>> {
+    let mut output = BrewingPayloadWriter::new(MAX_BREWING_ITEM_BYTES);
+    write_brewing_item(&mut output, item)?;
+    Some(output.into_inner())
 }
 
 fn encode_brewing_snapshot(snapshot: &BrewingBridgeSnapshot) -> Option<Vec<u8>> {
     if snapshot.items.len() != BREWING_STAND_SLOTS {
         return None;
     }
-    let mut output = Vec::new();
-    output.extend_from_slice(BREWING_SNAPSHOT_HEADER);
-    output.extend_from_slice(&snapshot.identity.to_be_bytes());
-    output.extend_from_slice(&snapshot.brew_time.to_be_bytes());
-    output.extend_from_slice(&snapshot.recipe_brew_time.to_be_bytes());
-    output.extend_from_slice(&snapshot.fuel.to_be_bytes());
+    let mut output = BrewingPayloadWriter::new(MAX_BREWING_SNAPSHOT_BYTES);
+    output.write_all(BREWING_SNAPSHOT_HEADER).ok()?;
+    output.write_all(&snapshot.identity.to_be_bytes()).ok()?;
+    output.write_all(&snapshot.brew_time.to_be_bytes()).ok()?;
+    output
+        .write_all(&snapshot.recipe_brew_time.to_be_bytes())
+        .ok()?;
+    output.write_all(&snapshot.fuel.to_be_bytes()).ok()?;
     for item in &snapshot.items {
-        append_brewing_blob(&mut output, describe_slot(item).as_bytes())?;
+        append_brewing_item(&mut output, item)?;
     }
     match &snapshot.custom_name {
         Some(name) => {
-            let mut encoded = Vec::new();
-            name.write(&mut encoded).ok()?;
-            append_brewing_blob(&mut output, &encoded)?;
+            let offset = output.begin_blob()?;
+            name.write(&mut output).ok()?;
+            output.finish_blob(offset, MAX_BREWING_TEXT_BYTES)?;
         }
-        None => output.extend_from_slice(&u32::MAX.to_be_bytes()),
+        None => output.write_all(&u32::MAX.to_be_bytes()).ok()?,
     }
-    let mut lock = Vec::new();
-    snapshot.lock.write(&mut lock).ok()?;
-    append_brewing_blob(&mut output, &lock)?;
-    (output.len() <= MAX_BREWING_SNAPSHOT_BYTES).then_some(output)
+    let offset = output.begin_blob()?;
+    snapshot.lock.write(&mut output).ok()?;
+    output.finish_blob(offset, MAX_BREWING_LOCK_BYTES)?;
+    Some(output.into_inner())
 }
 
 struct BrewingPayloadReader<'a> {
@@ -11812,14 +11916,96 @@ impl<'a> BrewingPayloadReader<'a> {
         Some(u64::from_be_bytes(self.take(8)?.try_into().ok()?))
     }
 
-    fn blob(&mut self) -> Option<&'a [u8]> {
+    fn blob(&mut self, field_limit: usize) -> Option<&'a [u8]> {
         let length = usize::try_from(self.u32()?).ok()?;
+        if length > field_limit {
+            return None;
+        }
         self.take(length)
     }
 
     const fn is_finished(&self) -> bool {
         self.cursor == self.bytes.len()
     }
+}
+
+fn read_brewing_component_count(input: &mut Cursor<&[u8]>) -> Option<usize> {
+    usize::try_from(VarInt::read(input).ok()?.0).ok()
+}
+
+fn read_brewing_item(bytes: &[u8]) -> Option<ItemStack> {
+    if bytes.len() > MAX_BREWING_ITEM_BYTES {
+        return None;
+    }
+    let mut input = Cursor::new(bytes);
+    let count = VarInt::read(&mut input).ok()?.0;
+    let mut item = if count == 0 {
+        ItemStack::empty()
+    } else {
+        if count < 0 {
+            return None;
+        }
+        let item_id = usize::try_from(VarInt::read(&mut input).ok()?.0).ok()?;
+        let item_type = REGISTRY.items.by_id(item_id)?;
+        let added_count = read_brewing_component_count(&mut input)?;
+        let removed_count = read_brewing_component_count(&mut input)?;
+        if added_count.checked_add(removed_count)? > MAX_BREWING_COMPONENTS {
+            return None;
+        }
+
+        let mut patch = DataComponentPatch::new();
+        let mut seen = FxHashSet::default();
+        for _ in 0..added_count {
+            let component_id = usize::try_from(VarInt::read(&mut input).ok()?.0).ok()?;
+            let key = REGISTRY
+                .data_components
+                .get_key_by_id(component_id)?
+                .clone();
+            if !seen.insert(key.clone()) {
+                return None;
+            }
+            let component = REGISTRY.data_components.by_id(component_id)?;
+            let data = component.read_network(&mut input).ok()?;
+            if !patch.set_raw(key, data) {
+                return None;
+            }
+        }
+        for _ in 0..removed_count {
+            let component_id = usize::try_from(VarInt::read(&mut input).ok()?.0).ok()?;
+            let key = REGISTRY
+                .data_components
+                .get_key_by_id(component_id)?
+                .clone();
+            if !seen.insert(key.clone()) || !patch.remove_raw(key) {
+                return None;
+            }
+        }
+        ItemStack::with_count_and_patch(item_type, count, patch)
+    };
+
+    let opaque_length = u32::from_be_bytes({
+        let start = usize::try_from(input.position()).ok()?;
+        let end = start.checked_add(4)?;
+        let bytes: [u8; 4] = input.get_ref().get(start..end)?.try_into().ok()?;
+        input.set_position(u64::try_from(end).ok()?);
+        bytes
+    });
+    if opaque_length != u32::MAX {
+        let opaque_length = usize::try_from(opaque_length).ok()?;
+        if opaque_length > MAX_BREWING_OPAQUE_NBT_BYTES {
+            return None;
+        }
+        let start = usize::try_from(input.position()).ok()?;
+        let end = start.checked_add(opaque_length)?;
+        let opaque = str::from_utf8(input.get_ref().get(start..end)?).ok()?;
+        item.set_opaque_nbt(Some(opaque.to_owned()));
+        input.set_position(u64::try_from(end).ok()?);
+    }
+    if usize::try_from(input.position()).ok()? != bytes.len() {
+        return None;
+    }
+    item.validate_persistent_encoding().ok()?;
+    Some(item)
 }
 
 fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
@@ -11839,20 +12025,23 @@ fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
     }
     let mut items = Vec::with_capacity(BREWING_STAND_SLOTS);
     for _ in 0..BREWING_STAND_SLOTS {
-        let encoded = str::from_utf8(input.blob()?).ok()?;
-        items.push(parse_brewing_snapshot_slot(encoded)?);
+        items.push(read_brewing_item(input.blob(MAX_BREWING_ITEM_BYTES)?)?);
     }
     let custom_name = match input.u32()? {
         u32::MAX => None,
         length => {
-            let encoded = input.take(usize::try_from(length).ok()?)?;
+            let length = usize::try_from(length).ok()?;
+            if length > MAX_BREWING_TEXT_BYTES {
+                return None;
+            }
+            let encoded = input.take(length)?;
             let mut cursor = Cursor::new(encoded);
             let name = TextComponent::read(&mut cursor).ok()?;
             let consumed = usize::try_from(cursor.position()).ok()?;
             Some((consumed == encoded.len()).then_some(name)?)
         }
     };
-    let encoded_lock = input.blob()?;
+    let encoded_lock = input.blob(MAX_BREWING_LOCK_BYTES)?;
     let mut cursor = Cursor::new(encoded_lock);
     let lock = LockCode::read(&mut cursor).ok()?;
     if usize::try_from(cursor.position()).ok()? != encoded_lock.len() || !input.is_finished() {
@@ -11867,166 +12056,6 @@ fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
         custom_name,
         lock,
     })
-}
-
-/// Decodes the self-describing item text stored only inside brewing snapshots.
-///
-/// General native inventory APIs retain their permissive legacy parser. A snapshot is a complete
-/// transactional payload, so accepting fields that the decoder silently drops would turn a
-/// successful apply into data loss. The validator consumes each recognized component before the
-/// legacy parser constructs the item.
-fn parse_brewing_snapshot_slot(text: &str) -> Option<ItemStack> {
-    validate_brewing_snapshot_slot(text)?;
-    parse_slot(text)
-}
-
-fn strict_hex_decode(value: &str) -> Option<Vec<u8>> {
-    if value.len() % 2 != 0 {
-        return None;
-    }
-    (0..value.len())
-        .step_by(2)
-        .map(|index| u8::from_str_radix(value.get(index..index + 2)?, 16).ok())
-        .collect()
-}
-
-fn valid_brewing_potion_effects(value: &str) -> bool {
-    if value.is_empty() {
-        return false;
-    }
-    value.split_terminator(';').all(|effect| {
-        let fields = effect.split(',').collect::<Vec<_>>();
-        let (name, duration, amplifier, flags) = match fields.as_slice() {
-            [name, duration, amplifier] => (*name, *duration, *amplifier, None),
-            [name, duration, amplifier, ambient, particles, icon] => (
-                *name,
-                *duration,
-                *amplifier,
-                Some([*ambient, *particles, *icon]),
-            ),
-            _ => return false,
-        };
-        if name.is_empty() || duration.parse::<i32>().is_err() || amplifier.parse::<i32>().is_err()
-        {
-            return false;
-        }
-        if let Some(flags) = flags
-            && flags.iter().any(|flag| flag.parse::<bool>().is_err())
-        {
-            return false;
-        }
-        let Ok(key) = format!("minecraft:{name}").parse::<Identifier>() else {
-            return false;
-        };
-        REGISTRY.mob_effects.by_key(&key).is_some()
-    })
-}
-
-fn valid_brewing_enchantment(value: &str) -> bool {
-    let Some((key, level)) = value.rsplit_once(':') else {
-        return false;
-    };
-    let Some(key) = strict_hex_decode(key).and_then(|bytes| String::from_utf8(bytes).ok()) else {
-        return false;
-    };
-    key.parse::<Identifier>().is_ok() && level.parse::<u32>().is_ok()
-}
-
-fn validate_brewing_snapshot_slot(text: &str) -> Option<()> {
-    let mut fields = text.split('\u{1d}');
-    let item = fields.next()?;
-    if item.is_empty() {
-        return fields.next().is_none().then_some(());
-    }
-    let (name, count) = item.rsplit_once(' ')?;
-    let key: Identifier = name.parse().ok()?;
-    if REGISTRY.items.by_key(&key).is_none() || count.parse::<i32>().ok()? <= 0 {
-        return None;
-    }
-
-    let mut nbt = false;
-    let mut damage = false;
-    let mut name = false;
-    let mut tooltip_style = false;
-    let mut item_model = false;
-    let mut legacy_model = false;
-    let mut model_parts = false;
-    let mut base_potion = false;
-    let mut potion_effects = false;
-    let mut legacy_effects = false;
-    for field in fields {
-        let valid = if let Some(value) = field.strip_prefix("nbthex=") {
-            !nbt && strict_hex_decode(value)
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .is_some()
-        } else if let Some(value) = field.strip_prefix("damage=") {
-            !damage && value.parse::<i32>().is_ok()
-        } else if let Some(value) = field.strip_prefix("namehex=") {
-            !name
-                && strict_hex_decode(value)
-                    .and_then(|bytes| String::from_utf8(bytes).ok())
-                    .is_some()
-        } else if let Some(value) = field.strip_prefix("lorehex=") {
-            strict_hex_decode(value)
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .is_some()
-        } else if field == "unbreakable" || field == "hidetooltip" {
-            true
-        } else if let Some(value) = field.strip_prefix("tooltipstylehex=") {
-            !tooltip_style
-                && strict_hex_decode(value)
-                    .and_then(|bytes| String::from_utf8(bytes).ok())
-                    .is_some_and(|value| value.parse::<Identifier>().is_ok())
-        } else if let Some(value) = field.strip_prefix("itemmodelhex=") {
-            !item_model
-                && strict_hex_decode(value)
-                    .and_then(|bytes| String::from_utf8(bytes).ok())
-                    .is_some_and(|value| value.parse::<Identifier>().is_ok())
-        } else if let Some(value) = field.strip_prefix("model=") {
-            !legacy_model && value.parse::<f32>().is_ok_and(f32::is_finite)
-        } else if let Some(value) = field.strip_prefix("modelfloat=") {
-            value.parse::<f32>().is_ok_and(f32::is_finite)
-        } else if let Some(value) = field.strip_prefix("modelflag=") {
-            value.parse::<bool>().is_ok()
-        } else if let Some(value) = field.strip_prefix("modelstrhex=") {
-            strict_hex_decode(value)
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .is_some()
-        } else if let Some(value) = field.strip_prefix("modelcolor=") {
-            value.parse::<i32>().is_ok()
-        } else if let Some(value) = field.strip_prefix("enchhex=") {
-            valid_brewing_enchantment(value)
-        } else if let Some(value) = field.strip_prefix("storedenchhex=") {
-            valid_brewing_enchantment(value)
-        } else if let Some(value) = field.strip_prefix("basepotionhex=") {
-            !base_potion
-                && strict_hex_decode(value)
-                    .and_then(|bytes| String::from_utf8(bytes).ok())
-                    .and_then(|value| value.parse::<Identifier>().ok())
-                    .is_some_and(|key| REGISTRY.potions.by_key(&key).is_some())
-        } else if let Some(value) = field.strip_prefix("potioneffects=") {
-            !potion_effects && valid_brewing_potion_effects(value)
-        } else {
-            !legacy_effects && valid_brewing_potion_effects(field)
-        };
-        if !valid {
-            return None;
-        }
-        nbt |= field.starts_with("nbthex=");
-        damage |= field.starts_with("damage=");
-        name |= field.starts_with("namehex=");
-        tooltip_style |= field.starts_with("tooltipstylehex=");
-        item_model |= field.starts_with("itemmodelhex=");
-        legacy_model |= field.starts_with("model=");
-        model_parts |= field.starts_with("modelfloat=")
-            || field.starts_with("modelflag=")
-            || field.starts_with("modelstrhex=")
-            || field.starts_with("modelcolor=");
-        base_potion |= field.starts_with("basepotionhex=");
-        potion_effects |= field.starts_with("potioneffects=");
-        legacy_effects |= !field.contains('=');
-    }
-    (!legacy_model || !model_parts).then_some(())
 }
 
 const fn brewing_update_flags(apply_physics: bool) -> UpdateFlags {
@@ -12070,7 +12099,7 @@ fn apply_brewing_snapshot(
     let current = current_entity
         .as_deref()
         .and_then(|entity| entity.downcast_ref::<BrewingStandBlockEntity>());
-    let current_identity = current.map(|brewing| brewing.state_snapshot().identity);
+    let current_identity = current.map(BrewingStandBlockEntity::identity);
     if !brewing_apply_matches(
         current_state,
         current_identity,
@@ -12085,10 +12114,11 @@ fn apply_brewing_snapshot(
             return false;
         };
         let mut target = brewing.state_snapshot();
-        target.identity = snapshot.identity;
-        if force {
-            target.identity = brewing.state_snapshot().identity;
-        }
+        target.identity = if force {
+            brewing.identity()
+        } else {
+            snapshot.identity
+        };
         target.items = snapshot.items;
         target.brew_time = snapshot.brew_time;
         target.recipe_brew_time = snapshot.recipe_brew_time;
@@ -12100,15 +12130,11 @@ fn apply_brewing_snapshot(
     if !BLOCK_ENTITIES.has_factory(&BREWING_STAND_BLOCK_ENTITY) {
         return false;
     }
-    if !world.set_block(pos, state, brewing_update_flags(apply_physics)) {
-        return false;
-    }
-    let Some(entity) = world.get_block_entity(pos) else {
-        return false;
-    };
-    let Some(brewing) = entity.downcast_ref::<BrewingStandBlockEntity>() else {
-        return false;
-    };
+    let brewing = Arc::new(BrewingStandBlockEntity::new(
+        Arc::downgrade(world),
+        pos,
+        state,
+    ));
     let mut target = brewing.state_snapshot();
     target.items = snapshot.items;
     target.brew_time = snapshot.brew_time;
@@ -12117,7 +12143,15 @@ fn apply_brewing_snapshot(
     target.custom_name = snapshot.custom_name;
     target.lock = snapshot.lock;
     brewing.apply_replacement_snapshot(target);
-    true
+    let replacement: SharedBlockEntity = brewing;
+    world.replace_block_with_entity_if_unchanged(
+        pos,
+        current_state,
+        current_entity.as_ref(),
+        state,
+        replacement,
+        brewing_update_flags(apply_physics),
+    )
 }
 
 extern "system" fn brewing_stand_snapshot(
@@ -12159,7 +12193,7 @@ extern "system" fn brewing_stand_live_item(
     z: jint,
     identity: jlong,
     slot: jint,
-) -> jstring {
+) -> jbyteArray {
     let value = world(&mut env, &name)
         .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
         .and_then(|entity| {
@@ -12167,9 +12201,13 @@ extern "system" fn brewing_stand_live_item(
             let slot = usize::try_from(slot).ok()?;
             brewing
                 .live_item(brewing_identity_from_java(identity), slot)
-                .map(|item| describe_slot(&item))
+                .and_then(|item| encode_brewing_item(&item))
         });
-    to_java(&mut env, value)
+    let Some(value) = value else {
+        return null_mut();
+    };
+    env.byte_array_from_slice(&value)
+        .map_or_else(|_| null_mut(), JByteArray::into_raw)
 }
 
 extern "system" fn brewing_stand_set_live_item(
@@ -12181,7 +12219,7 @@ extern "system" fn brewing_stand_set_live_item(
     z: jint,
     identity: jlong,
     slot: jint,
-    item: JString<'_>,
+    item: JByteArray<'_>,
 ) -> jboolean {
     if !on_tick() {
         return 0;
@@ -12189,10 +12227,19 @@ extern "system" fn brewing_stand_set_live_item(
     let Some(slot) = usize::try_from(slot).ok() else {
         return 0;
     };
-    let Ok(encoded): Result<String, _> = env.get_string(&item).map(Into::into) else {
+    let Ok(item_length) = env.get_array_length(&item) else {
         return 0;
     };
-    let Some(item) = parse_slot(&encoded) else {
+    let Ok(item_length) = usize::try_from(item_length) else {
+        return 0;
+    };
+    if !brewing_item_payload_length_is_valid(item_length) {
+        return 0;
+    }
+    let Ok(encoded) = env.convert_byte_array(&item) else {
+        return 0;
+    };
+    let Some(item) = read_brewing_item(&encoded) else {
         return 0;
     };
     let changed = world(&mut env, &name)
@@ -13646,12 +13693,12 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "brewingStandLiveItem",
-            "(Ljava/lang/String;IIIJI)Ljava/lang/String;",
+            "(Ljava/lang/String;IIIJI)[B",
             brewing_stand_live_item as *mut c_void,
         ),
         method(
             "brewingStandSetLiveItem",
-            "(Ljava/lang/String;IIIJILjava/lang/String;)Z",
+            "(Ljava/lang/String;IIIJI[B)Z",
             brewing_stand_set_live_item as *mut c_void,
         ),
         method(
@@ -16859,6 +16906,17 @@ mod slot_codec_tests {
         assert!(effects.custom_effects()[0].show_icon());
         assert_eq!(decoded.opaque_nbt(), Some("{foo:1b}"));
     }
+
+    #[test]
+    fn legacy_slot_parser_rejects_more_than_256_lore_lines() {
+        init_vanilla_registry();
+        let mut encoded = "minecraft:stone 1".to_owned();
+        for _ in 0..257 {
+            encoded.push_str("\u{1d}lorehex=78");
+        }
+
+        assert!(parse_slot(&encoded).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -16869,22 +16927,34 @@ mod brewing_bridge_tests {
     use foton_core::world::{LevelReader as _, World};
     use foton_registry::blocks::block_state_ext::BlockStateExt as _;
     use foton_registry::blocks::properties::BlockStateProperties;
-    use foton_registry::data_components::components::PotionContents;
-    use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
+    use foton_registry::data_components::components::{
+        Filterable, FireworkExplosion, FireworkExplosionShape, Fireworks, ItemContainerContents,
+        ItemLore, PotionContents, WrittenBookContent,
+    };
+    use foton_registry::data_components::vanilla_components::{
+        CONTAINER, CUSTOM_NAME, FIREWORKS, ITEM_NAME, LORE, POTION_CONTENTS, WRITTEN_BOOK_CONTENT,
+    };
     use foton_registry::item_predicate::LockCode;
     use foton_registry::item_stack::ItemStack;
     use foton_registry::{
-        RegistryReference, init_vanilla_registry, vanilla_blocks, vanilla_items, vanilla_potions,
+        ItemStackTemplate, REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference,
+        init_vanilla_registry, vanilla_blocks, vanilla_items, vanilla_potions,
     };
+    use foton_utils::Identifier;
+    use foton_utils::codec::VarInt;
+    use foton_utils::serial::WriteTo as _;
     use foton_utils::types::UpdateFlags;
     use foton_utils::{BlockPos, Downcast as _};
     use std::sync::Arc;
     use text_components::TextComponent;
+    use text_components::format::Color;
 
     use super::{
-        BrewingBridgeSnapshot, MAX_BREWING_SNAPSHOT_BYTES, apply_brewing_snapshot, bindings,
-        brewing_apply_matches, brewing_payload_length_is_valid, brewing_update_flags,
-        decode_brewing_snapshot, encode_brewing_snapshot,
+        BrewingBridgeSnapshot, MAX_BREWING_ITEM_BYTES, MAX_BREWING_SNAPSHOT_BYTES,
+        apply_brewing_snapshot, bindings, brewing_apply_matches,
+        brewing_item_payload_length_is_valid, brewing_payload_length_is_valid,
+        brewing_update_flags, decode_brewing_snapshot, encode_brewing_item,
+        encode_brewing_snapshot, read_brewing_item,
     };
 
     fn snapshot(items: Vec<ItemStack>) -> BrewingBridgeSnapshot {
@@ -16946,7 +17016,21 @@ mod brewing_bridge_tests {
     fn versioned_snapshot_round_trip_preserves_every_bridge_field() {
         init_vanilla_registry();
         let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
-        items[0] = ItemStack::new(&vanilla_items::POTION);
+        let mut potion = ItemStack::new(&vanilla_items::POTION);
+        potion.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                Some(RegistryReference::new(&vanilla_potions::WATER)),
+                Some(0x12_34_56),
+                Vec::new(),
+                None,
+            ),
+        );
+        items[0] = potion;
+        let mut renamed = ItemStack::new(&vanilla_items::DIAMOND_SWORD);
+        renamed.remove(ITEM_NAME);
+        renamed.set_opaque_nbt(Some("{bridge:{unknown:1b}}".to_owned()));
+        items[1] = renamed;
         items[3] = ItemStack::new(&vanilla_items::NETHER_WART);
         let snapshot = BrewingBridgeSnapshot {
             identity: 0x0102_0304_0506_0708,
@@ -16959,7 +17043,7 @@ mod brewing_bridge_tests {
         };
 
         let encoded = encode_brewing_snapshot(&snapshot).expect("snapshot should encode");
-        assert_eq!(&encoded[..4], b"FBS\x01");
+        assert_eq!(&encoded[..4], b"FBS\x02");
         let decoded = decode_brewing_snapshot(&encoded).expect("snapshot should decode");
 
         assert_eq!(decoded.identity, snapshot.identity);
@@ -16968,16 +17052,148 @@ mod brewing_bridge_tests {
         assert_eq!(decoded.fuel, snapshot.fuel);
         assert_eq!(decoded.custom_name, snapshot.custom_name);
         assert_eq!(decoded.lock, snapshot.lock);
-        assert!(
-            decoded
-                .items
-                .iter()
-                .zip(&snapshot.items)
-                .all(|(actual, expected)| ItemStack::matches(actual, expected))
-        );
+        assert_eq!(decoded.items, snapshot.items);
         let mut trailing = encoded;
         trailing.push(0);
         assert!(decode_brewing_snapshot(&trailing).is_none());
+    }
+
+    #[test]
+    fn item_codec_exactly_preserves_diverse_components_and_removals() {
+        init_vanilla_registry();
+        let mut rich_name = TextComponent::plain("Root");
+        rich_name.format.color = Some(Color::Aqua);
+        let mut child = TextComponent::plain(" child");
+        child.format.bold = Some(true);
+        rich_name.children.push(child);
+
+        let mut potion = ItemStack::new(&vanilla_items::POTION);
+        potion.set(CUSTOM_NAME, rich_name.clone());
+        potion.set(
+            POTION_CONTENTS,
+            PotionContents::new(None, Some(0x65_43_21), Vec::new(), Some("named".to_owned())),
+        );
+
+        let mut sword = ItemStack::new(&vanilla_items::DIAMOND_SWORD);
+        sword.remove(ITEM_NAME);
+        sword.set(
+            LORE,
+            ItemLore::new(vec![rich_name, TextComponent::plain("second")])
+                .expect("two lore lines are valid"),
+        );
+        sword.set_opaque_nbt(Some("{bridge:{opaque:[I;1,2,3]}}".to_owned()));
+
+        let mut rocket = ItemStack::new(&vanilla_items::FIREWORK_ROCKET);
+        rocket.set(
+            FIREWORKS,
+            Fireworks::new(
+                3,
+                vec![FireworkExplosion::new(
+                    FireworkExplosionShape::Creeper,
+                    vec![0x11_22_33],
+                    vec![0x44_55_66],
+                    true,
+                    true,
+                )],
+            )
+            .expect("one firework explosion is valid"),
+        );
+
+        let mut book = ItemStack::new(&vanilla_items::WRITTEN_BOOK);
+        book.set(
+            WRITTEN_BOOK_CONTENT,
+            WrittenBookContent::new(
+                Filterable::pass_through("Bridge book".to_owned()),
+                "Foton".to_owned(),
+                2,
+                vec![Filterable::pass_through(TextComponent::plain("Page"))],
+                true,
+            )
+            .expect("written book fixture is valid"),
+        );
+
+        let mut container = ItemStack::new(&vanilla_items::CHEST);
+        container.set(
+            CONTAINER,
+            ItemContainerContents::new(vec![
+                None,
+                Some(ItemStackTemplate::new(&vanilla_items::DIAMOND)),
+            ])
+            .expect("two container slots are valid"),
+        );
+
+        let original = vec![potion, sword, rocket, book, container];
+        let encoded = encode_brewing_snapshot(&snapshot(original.clone()))
+            .expect("diverse snapshot should encode");
+        let decoded = decode_brewing_snapshot(&encoded).expect("diverse snapshot should decode");
+
+        assert_eq!(decoded.items, original);
+    }
+
+    #[test]
+    fn live_item_codec_rejects_duplicate_unknown_malformed_and_trailing_data() {
+        init_vanilla_registry();
+        let valid = encode_brewing_item(&ItemStack::new(&vanilla_items::STONE))
+            .expect("stone should encode");
+
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        assert!(read_brewing_item(&trailing).is_none());
+        assert!(read_brewing_item(&valid[..valid.len() - 1]).is_none());
+
+        let item_name: Identifier = "minecraft:item_name"
+            .parse()
+            .expect("vanilla component identifier is valid");
+        let item_name_id = REGISTRY
+            .data_components
+            .id_from_key(&item_name)
+            .expect("item name component is registered");
+        let mut duplicate = Vec::new();
+        VarInt(1)
+            .write(&mut duplicate)
+            .expect("count should encode");
+        VarInt(vanilla_items::STONE.id() as i32)
+            .write(&mut duplicate)
+            .expect("item id should encode");
+        VarInt(0)
+            .write(&mut duplicate)
+            .expect("added count should encode");
+        VarInt(2)
+            .write(&mut duplicate)
+            .expect("removed count should encode");
+        for _ in 0..2 {
+            VarInt(item_name_id as i32)
+                .write(&mut duplicate)
+                .expect("component id should encode");
+        }
+        duplicate.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(read_brewing_item(&duplicate).is_none());
+
+        let mut unknown = Vec::new();
+        VarInt(1).write(&mut unknown).expect("count should encode");
+        VarInt(vanilla_items::STONE.id() as i32)
+            .write(&mut unknown)
+            .expect("item id should encode");
+        VarInt(0)
+            .write(&mut unknown)
+            .expect("added count should encode");
+        VarInt(1)
+            .write(&mut unknown)
+            .expect("removed count should encode");
+        VarInt(i32::MAX)
+            .write(&mut unknown)
+            .expect("unknown component id should encode");
+        unknown.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(read_brewing_item(&unknown).is_none());
+    }
+
+    #[test]
+    fn live_item_codec_preflight_rejects_oversize_payloads() {
+        assert!(brewing_item_payload_length_is_valid(MAX_BREWING_ITEM_BYTES));
+        assert!(!brewing_item_payload_length_is_valid(
+            MAX_BREWING_ITEM_BYTES + 1
+        ));
+        assert!(read_brewing_item(&vec![0; MAX_BREWING_ITEM_BYTES + 1]).is_none());
     }
 
     #[test]
@@ -17131,11 +17347,16 @@ mod brewing_bridge_tests {
         let state = vanilla_blocks::BREWING_STAND.default_state();
         assert!(world.set_block(pos, state, UpdateFlags::UPDATE_NONE));
         let identity = installed_brewing_identity(&world, pos);
-        let mut stale = snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]);
-        stale.identity = identity.wrapping_add(1);
+        let mut stale_snapshot = snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]);
+        stale_snapshot.identity = identity.wrapping_add(1);
 
         assert!(!apply_brewing_snapshot(
-            &world, pos, state, stale, false, false,
+            &world,
+            pos,
+            state,
+            stale_snapshot,
+            false,
+            false,
         ));
         assert_eq!(installed_brewing_identity(&world, pos), identity);
     }
@@ -17249,14 +17470,8 @@ mod brewing_bridge_tests {
     fn brewing_bridge_bindings_match_the_java_contract() {
         let expected = [
             ("brewingStandSnapshot", "(Ljava/lang/String;III)[B"),
-            (
-                "brewingStandLiveItem",
-                "(Ljava/lang/String;IIIJI)Ljava/lang/String;",
-            ),
-            (
-                "brewingStandSetLiveItem",
-                "(Ljava/lang/String;IIIJILjava/lang/String;)Z",
-            ),
+            ("brewingStandLiveItem", "(Ljava/lang/String;IIIJI)[B"),
+            ("brewingStandSetLiveItem", "(Ljava/lang/String;IIIJI[B)Z"),
             (
                 "brewingStandApply",
                 "(Ljava/lang/String;IIILjava/lang/String;[BZZ)Z",

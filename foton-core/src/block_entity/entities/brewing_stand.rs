@@ -14,6 +14,8 @@ use std::{
 };
 
 #[cfg(test)]
+use foton_utils::Downcast as _;
+#[cfg(test)]
 use std::cell::Cell;
 
 use foton_registry::blocks::block_state_ext::BlockStateExt;
@@ -170,6 +172,7 @@ struct BrewCompletionEffects {
 thread_local! {
     static BREW_SNAPSHOT_CAPTURES: Cell<usize> = const { Cell::new(0) };
     static BREW_WORLD_EFFECTS: Cell<usize> = const { Cell::new(0) };
+    static BREW_PRE_REMOVE_OBSERVED_IDENTITY: Cell<Option<u64>> = const { Cell::new(None) };
 }
 
 impl BrewCompletionSnapshot {
@@ -297,6 +300,12 @@ impl BrewingStandBlockEntity {
         }
     }
 
+    /// Returns this placed instance's stable bridge identity without cloning its state.
+    #[must_use]
+    pub const fn identity(&self) -> u64 {
+        self.identity
+    }
+
     /// Returns the progress values shared with open menus.
     #[must_use]
     pub fn data(&self) -> Arc<BrewingStandDataSlots> {
@@ -364,11 +373,13 @@ impl BrewingStandBlockEntity {
         if !self.is_current_in(&world, self.get_block_pos()) {
             return false;
         }
-        self.commit_state_snapshot(snapshot);
+        self.commit_visible_state_snapshot(snapshot);
+        self.set_changed();
+        world.send_block_updated(self.get_block_pos());
         true
     }
 
-    fn is_valid_state_snapshot(snapshot: &BrewingStandStateSnapshot) -> bool {
+    const fn is_valid_state_snapshot(snapshot: &BrewingStandStateSnapshot) -> bool {
         snapshot.items.len() == BREWING_STAND_SLOTS && snapshot.recipe_brew_time > 0
     }
 
@@ -378,10 +389,10 @@ impl BrewingStandBlockEntity {
     /// factory before changing the block state. Keeping this narrow lifecycle commit separate
     /// prevents a replacement from acquiring a later rejectable snapshot-validation step.
     pub fn apply_replacement_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
-        self.commit_state_snapshot(snapshot);
+        self.commit_visible_state_snapshot(snapshot);
     }
 
-    fn commit_state_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
+    fn commit_visible_state_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
         {
             let mut container = self.container.lock();
             container.items = snapshot.items;
@@ -390,13 +401,7 @@ impl BrewingStandBlockEntity {
             container.fuel = snapshot.fuel;
             container.custom_name = snapshot.custom_name;
             container.lock = snapshot.lock;
-            container.brewing_ingredient =
-                (container.brew_time > 0).then(|| container.items[SLOT_INGREDIENT].clone());
             self.publish_data(&container);
-        }
-        self.set_changed();
-        if let Some(world) = self.get_level() {
-            world.send_block_updated(self.get_block_pos());
         }
     }
 
@@ -624,6 +629,14 @@ impl BlockEntity for BrewingStandBlockEntity {
         let Some(world) = self.get_level() else {
             return;
         };
+        #[cfg(test)]
+        BREW_PRE_REMOVE_OBSERVED_IDENTITY.with(|observed| {
+            observed.set(world.get_block_entity(pos).and_then(|entity| {
+                entity
+                    .downcast_ref::<BrewingStandBlockEntity>()
+                    .map(Self::identity)
+            }));
+        });
         for item in items {
             world.drop_item_stack(pos, item);
         }
@@ -1175,6 +1188,107 @@ mod tests {
                 .iter()
                 .all(|property| !updated.get_value(*property)),
             "the next tick must publish bottle occupancy from the applied inventory"
+        );
+    }
+
+    #[test]
+    fn snapshot_ingredient_swap_preserves_the_active_brew_guard() {
+        let (world, stand, _) = ready_stand("plugin_snapshot_ingredient_guard");
+        let mut snapshot = stand.state_snapshot();
+        snapshot.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::REDSTONE);
+        snapshot.brew_time = 10;
+
+        assert!(stand.apply_state_snapshot(snapshot));
+        stand.tick_with_brew_dispatch(&world, || false, |_| {});
+
+        assert_eq!(stand.container.lock().brew_time, 0);
+    }
+
+    #[test]
+    fn replacement_snapshot_leaves_the_constructor_brew_guard_empty() {
+        let world = fresh_test_world("replacement_snapshot_ingredient_guard");
+        let pos = BlockPos::new(3, 64, -2);
+        let stand = BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+        );
+        let mut snapshot = stand.state_snapshot();
+        snapshot.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
+        snapshot.brew_time = 10;
+
+        stand.apply_replacement_snapshot(snapshot);
+
+        assert!(stand.container.lock().brewing_ingredient.is_none());
+    }
+
+    #[test]
+    fn conditional_replacement_is_visible_before_removal_callbacks() {
+        let (world, stand, _) = ready_stand("replacement_visible_to_removal_callback");
+        let pos = stand.get_block_pos();
+        let old_state = world.get_block_state(pos);
+        let new_state = old_state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true);
+        let replacement = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            new_state,
+        ));
+        let expected: SharedBlockEntity = stand;
+        let replacement_entity: SharedBlockEntity = replacement.clone();
+        BREW_PRE_REMOVE_OBSERVED_IDENTITY.with(|observed| observed.set(None));
+
+        assert!(world.replace_block_with_entity_if_unchanged(
+            pos,
+            old_state,
+            Some(&expected),
+            new_state,
+            Arc::clone(&replacement_entity),
+            UpdateFlags::UPDATE_CLIENTS,
+        ));
+
+        assert_eq!(
+            BREW_PRE_REMOVE_OBSERVED_IDENTITY.with(Cell::get),
+            Some(replacement.identity())
+        );
+        assert!(
+            world
+                .get_block_entity(pos)
+                .is_some_and(|current| Arc::ptr_eq(&current, &replacement_entity))
+        );
+    }
+
+    #[test]
+    fn conditional_replacement_rejects_a_stale_owner_without_mutation() {
+        let (world, stand, _) = ready_stand("stale_conditional_replacement_owner");
+        let pos = stand.get_block_pos();
+        let state = world.get_block_state(pos);
+        let intervening: SharedBlockEntity = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            state,
+        ));
+        assert!(world.set_block_entity(Arc::clone(&intervening)));
+        let stale_owner: SharedBlockEntity = stand;
+        let replacement: SharedBlockEntity = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true),
+        ));
+
+        assert!(!world.replace_block_with_entity_if_unchanged(
+            pos,
+            state,
+            Some(&stale_owner),
+            state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true),
+            replacement,
+            UpdateFlags::UPDATE_NONE,
+        ));
+
+        assert_eq!(world.get_block_state(pos), state);
+        assert!(
+            world
+                .get_block_entity(pos)
+                .is_some_and(|current| Arc::ptr_eq(&current, &intervening))
         );
     }
 

@@ -252,6 +252,50 @@ impl World {
         }
     }
 
+    /// Atomically installs a prepared block entity with a conditional block-state change.
+    ///
+    /// Validation and ownership matching happen before either value changes. Once committed,
+    /// the desired state and exact entity are both installed before lifecycle, placement,
+    /// neighbor, or client callbacks run.
+    #[must_use]
+    pub fn replace_block_with_entity_if_unchanged(
+        self: &Arc<Self>,
+        pos: BlockPos,
+        expected_state: BlockStateId,
+        expected_entity: Option<&SharedBlockEntity>,
+        new_state: BlockStateId,
+        replacement: SharedBlockEntity,
+        flags: UpdateFlags,
+    ) -> bool {
+        if !self.is_in_valid_bounds(pos) {
+            return false;
+        }
+
+        let chunk_pos = Self::chunk_pos_for_block(pos);
+        let Some(result) = self
+            .chunk_map
+            .with_full_chunk(chunk_pos, |chunk| {
+                chunk.replace_block_with_entity_if_unchanged(
+                    pos,
+                    expected_state,
+                    expected_entity,
+                    new_state,
+                    &replacement,
+                    flags,
+                )
+            })
+            .flatten()
+        else {
+            return false;
+        };
+
+        let FullChunkBlockSetResult::Changed(old_state) = result else {
+            return false;
+        };
+        self.finish_block_set(pos, old_state, new_state, flags, Self::UPDATE_LIMIT);
+        true
+    }
+
     pub(super) fn finish_block_set(
         self: &Arc<Self>,
         pos: BlockPos,
