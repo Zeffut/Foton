@@ -38,7 +38,7 @@
 
 ## Tasks
 
-- [ ] Task 1 — entity wrapper identity and class-to-key spawning (in review; implementation `ba7cd62e0`, first review fix `2febe9169`, second review fix `4656276e6`, third review fix `c409748ca`, fourth review fix `ad27d7bc0`; independent re-reviews pending)
+- [x] Task 1 — entity wrapper identity and class-to-key spawning (complete at `243bcd76ff7fc5315517d7094ab0db0b630457a2` on 2026-09-16 after independent specification and quality approvals)
 - [ ] Task 2 — live `BrewEvent` and `PrepareItemEnchantEvent`
 - [ ] Task 3 — exact on-demand ray tracing
 - [ ] Task 4 — live `ItemDisplay` / `TextDisplay` / `Allay` / `ChestBoat` identity and holder plumbing
@@ -73,7 +73,8 @@ Task 1 has no direct residual count; it is a correctness prerequisite. Task-leve
 - Performance: every wrapper creation resolves one native type exactly once; no cache, polling, synchronization, JNI tick call, or other tick work was added.
 - Scope: generated `EntityType` output carries only validated source-backed classes, Paper 26.2 aliases/defaults, and the explicit Task 4 allowlist. Stale consumed registry constants are refreshed before Java generation. No generated source, extracted JSON, production Rust, or test-count ledger was edited.
 - Report: `.superpowers/sdd/2026-09-16-popular-plugin-compatibility-wave-3/task-1-report.md`.
-- Review status: in review; specification and quality re-review approvals are both still required before checking Task 1 complete.
+- Review status: complete at `243bcd76ff7fc5315517d7094ab0db0b630457a2`
+  on 2026-09-16 after independent specification and quality approvals.
 - Second review fix: `4656276e6` adds the four Paper 26.2 class-spawn
   contracts/defaults and live-backed state. `AbstractCubeMob` persists
   `Paper.canWander` and toggles existing MOVE/JUMP/LOOK selector controls,
@@ -81,8 +82,8 @@ Task 1 has no direct residual count; it is a correctness prerequisite. Task-leve
 - Second review evidence: 832 Java sources/1008 classes and the API harness,
   all 8 build-script tests, 7 focused core tests, the isolated live-JNI fixture,
   native registration, workspace all-targets, formatting, and diff checks pass.
-- Second review status: in review; both re-review approvals remain pending, so
-  Task 1 stays unchecked.
+- Second review status at that checkpoint: in review; both re-review approvals
+  were still pending, so Task 1 stayed unchecked.
 - Third review fix: `c409748ca9dceced9db63ac5676377de583ee09f`
   adds the exact Paper 26.2 Animals/Cow hierarchy and live state, dead-slime
   resize semantics, pre-publication JNI safety, transient Ravager target
@@ -95,8 +96,8 @@ Task 1 has no direct residual count; it is a correctness prerequisite. Task-leve
 - Third review performance/scope: no generated Rust or extracted data was
   edited, no per-goal branches or idle compatibility work were added, and
   external selector disables remain separate from the transient mob mask.
-- Third review status: in review; independent specification and quality
-  approvals are still required, so Task 1 remains unchecked.
+- Third review status at that checkpoint: in review; independent specification
+  and quality approvals were still required, so Task 1 remained unchecked.
 - Fourth review fix: `ad27d7bc0bf4050e661e1d59936f49ca69c492fd`
   makes the Paper Ageable/Animals/Cow hierarchy and declarations exact, moves
   Breedable to age-based semantics independent of love state, validates
@@ -113,8 +114,34 @@ Task 1 has no direct residual count; it is a correctness prerequisite. Task-leve
   request-driven, registry lifecycle handling is a guarded JNI request, no
   generated Rust or extracted data was edited, and temporary evidence was
   removed.
-- Fourth review status: in review; independent specification and quality
-  approvals are still required, so Task 1 remains unchecked.
+- Fourth review status at that checkpoint: in review; independent specification
+  and quality approvals were still required, so Task 1 remained unchecked.
+- Fifth review repair: `d07f51624` closes callback/publication ordering,
+  no-orphan spawn rollback, Arrow/MushroomCow/PotionEffect ABI and behavior,
+  exact shearing transform reason, and the remaining live class-spawn gaps.
+- Sixth review repair: `63f67ef54`, followed by lint-gate commits
+  `f0ed19eeb` and `3c0770d95`, closes the remaining Paper/Vanilla semantic
+  regressions and makes the strict all-target lint gate clean without runtime
+  workarounds.
+- Seventh review repair: `1941d2294` corrects the directional hidden-effect
+  conversion, preserves exact fall-distance behavior and public annotations,
+  makes nearby-entity results mutable, keeps instant-effect queries safe before
+  registry publication, and makes projectile-source ownership atomic, O(1),
+  and leak-free across rollback/removal.
+- Eighth and final review repair: `243bcd76f` closes the deterministic
+  projectile-source/remove race and rejects NaN/infinite spawn coordinates
+  before pending allocation or publication.
+- Final evidence: 844 Java sources / 1032 classes; generators 10/10; plugin
+  tests 34; seven targeted JVM/JNI fixtures in the final gate (an expanded
+  repair pass also exercised eight); core entity tests 2119; native descriptors
+  533/533; workspace all-target check; release Clippy with all targets and
+  features under `-D warnings`; formatting and diff checks all green.
+- Final review: independent specification and quality reviews both approved
+  HEAD `243bcd76ff7fc5315517d7094ab0db0b630457a2` on 2026-09-16. Reviewer
+  commit IDs are intentionally not inferred.
+- Reservations outside Task 1: the historical complete `Entity` surface and
+  FotonExtractor-backed `instantaneous` data remain broader foundation work.
+  Wave 3 makes no claim of 100% Paper or plugin-market compatibility.
 
 ## Review protocol
 

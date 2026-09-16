@@ -42,7 +42,7 @@
 - Produce: generated `Class<? extends Entity> -> EntityType` lookup used by `World.spawn(Location, Class<T>, ...)`.
 - Preserve: stale UUID handling and all existing wrapper classes.
 
-- [ ] **Step 1: Add the failing wrapper test**
+- [x] **Step 1: Add the failing wrapper test**
 
   Add checks that call the current wrapper with a real UUID/type pair and assert an underscored type is not looked up as a UUID:
 
@@ -53,15 +53,15 @@
   require(EntityType.ITEM_DISPLAY == FotonEntityFactory.typeFor(ItemDisplay.class));
   ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
   Run `bash dev/build-plugin-api.sh --check` and the Java check harness. Expected: `item_display` falls back to `FotonEntity`, and class-to-type lookup is absent or derives `itemdisplay`.
 
-- [ ] **Step 3: Generate exact class-to-registry metadata**
+- [x] **Step 3: Generate exact class-to-registry metadata**
 
   Extend `dev/gen-entity-type.py` from the existing entity registry input so the generated Java mapping contains the canonical class and `EntityType` identity. Do not edit generated Java by hand and do not infer snake case at runtime.
 
-- [ ] **Step 4: Make wrapping single-pass**
+- [x] **Step 4: Make wrapping single-pass**
 
   Change `FotonWorld.wrapEntity` to switch on the supplied type and update every caller to resolve `Native.entityType(uuid.toString())` exactly once. `FotonEntity.handle()` becomes:
 
@@ -71,11 +71,11 @@
   return wrapped == null ? this : wrapped;
   ```
 
-- [ ] **Step 5: Run GREEN and mutation check**
+- [x] **Step 5: Run GREEN and mutation check**
 
   Run the Java check harness, `bash dev/build-plugin-api.sh --check`, `python3 dev/check-natives.py --quiet`, `git diff --check`, and a mutation that restores the second lookup to prove the wrapper test fails.
 
-- [ ] **Step 6: Commit checkpoint**
+- [x] **Step 6: Commit checkpoint**
 
   ```bash
   git add dev/gen-entity-type.py dev/build-plugin-api.sh plugin-api/src/foton plugin-api/check

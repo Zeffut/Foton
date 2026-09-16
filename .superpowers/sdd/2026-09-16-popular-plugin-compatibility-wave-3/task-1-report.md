@@ -2,15 +2,19 @@
 
 ## Status
 
-Task 1 is **in review**. The original implementation is `ba7cd62e0`
+Task 1 is **complete** at
+`243bcd76ff7fc5315517d7094ab0db0b630457a2` on 2026-09-16 after independent
+specification and quality approvals. The original implementation is `ba7cd62e0`
 (`fix(plugin): preserve entity wrapper identity`) and the review-fix source
 commit is `2febe9169` (`fix(plugin): validate entity class metadata`). The
 second-round review fix is `4656276e6` (`fix(plugin): complete Paper class
 spawn contracts`). The third-round review fix is `c409748ca`
 (`fix(plugin): complete third Task 1 review repair`). The fourth-round review
-fix is `ad27d7bc0` (`fix(plugin): complete fourth Task 1 review repair`).
-Independent specification and quality re-review remain pending, so the task is
-not recorded as complete.
+fix is `ad27d7bc0` (`fix(plugin): complete fourth Task 1 review repair`). The
+fifth through eighth repair sequence is `d07f51624`, `63f67ef54`,
+`f0ed19eeb`, `3c0770d95`, `1941d2294`, and `243bcd76f`. Reviewer commit IDs
+are not inferred because the final approvals reviewed the stated HEAD rather
+than introducing source commits.
 
 ## Result
 
@@ -266,8 +270,45 @@ per-goal branch or other new idle/tick compatibility work was added.
 `build/plugin-api-evidence.json` and task-created temporary logs were removed.
 The ignored reusable `plugin-api/build/` output remains untracked.
 
-## Re-review gate
+## Fifth through eighth review repairs
 
-The findings have implementation and fresh verification evidence, but Task 1
-must remain in review until both the specification and quality re-reviews
-approve `ba7cd62e0..ad27d7bc0`. No later Wave 3 task is marked started here.
+- `d07f51624` fixes callback-before-publication and rollback behavior, closes
+  the reviewed Arrow, MushroomCow, potion, shearing, and class-spawn ABI gaps,
+  and strengthens no-orphan and event-order tests.
+- `63f67ef54` completes the sixth semantic repair. `f0ed19eeb` removes the
+  newly introduced plugin-test lint failures, and `3c0770d95` closes the
+  remaining strict core-test lint gate without changing production behavior.
+- `1941d2294` aligns hidden-effect conversion direction, fall distance,
+  annotations, and mutable nearby-entity results with Paper; it also makes
+  pre-publication instant-effect queries safe and projectile-source state
+  atomic, O(1), and cleaned on every rollback/removal path.
+- `243bcd76f` closes the final deterministic projectile-source/remove race and
+  validates all three spawn coordinates against NaN and both infinities before
+  JNI allocation, pending insertion, or publication.
+
+## Final verification
+
+The final approved HEAD is
+`243bcd76ff7fc5315517d7094ab0db0b630457a2`.
+
+- Plugin API build: 844 Java sources and 1032 classes.
+- Generator suite: 10/10.
+- Plugin tests: 34 passed.
+- JVM/JNI gate: seven targeted fixtures in the final reviewed pass; an expanded
+  corrective pass also ran eight successfully.
+- Core entity tests: 2119 passed.
+- JNI descriptor registration: 533 declared / 533 registered.
+- `cargo check --workspace --all-targets`: passed.
+- Release Clippy across the workspace, all targets and all features, with
+  `-D warnings`: passed.
+- `cargo fmt --all --check` and `git diff --check`: passed.
+
+## Final review gate
+
+Independent specification and quality reviews both approved HEAD
+`243bcd76ff7fc5315517d7094ab0db0b630457a2` on 2026-09-16. Task 1 is closed;
+no later Wave 3 task is marked started here.
+
+The historical complete Paper `Entity` surface and FotonExtractor-backed
+`instantaneous` extraction remain explicit reservations outside Task 1. This
+closure does not claim 100% Paper or plugin-market compatibility.
