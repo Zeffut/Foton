@@ -120,6 +120,24 @@ fn generated_java_apis_are_safe_before_registry_publication() -> Result<(), Box<
         )?
         .z()?
     );
+
+    let potion_effect_type = "org/bukkit/potion/PotionEffectType";
+    let potion_effect_descriptor = "Lorg/bukkit/potion/PotionEffectType;";
+    for (name, expected) in [
+        ("INSTANT_HEALTH", true),
+        ("INSTANT_DAMAGE", true),
+        ("SATURATION", true),
+        ("LUCK", false),
+    ] {
+        let effect = env
+            .get_static_field(potion_effect_type, name, potion_effect_descriptor)?
+            .l()?;
+        let instantaneous = env.call_method(&effect, "isInstant", "()Z", &[])?.z()?;
+        assert_eq!(
+            instantaneous, expected,
+            "pre-publication {name} instant state"
+        );
+    }
     assert!(foton_registry::REGISTRY.get().is_none());
     Ok(())
 }

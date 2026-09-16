@@ -489,6 +489,7 @@ public final class Native {
     public static native int entityId(String uuid);
     public static native String entityProjectileOwner(String uuid);
     public static native org.bukkit.projectiles.ProjectileSource entityProjectileSource(String uuid);
+    public static native Object entityProjectileShooter(String uuid);
     public static native boolean setEntityProjectileSource(String uuid, String owner,
         org.bukkit.projectiles.ProjectileSource source, boolean resetPickupStatus);
     public static native String entityCustomName(String uuid);

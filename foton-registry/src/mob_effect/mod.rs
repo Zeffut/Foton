@@ -88,9 +88,18 @@ impl MobEffect {
     /// rather than in registry data, so it is mirrored as the same fixed set.
     #[must_use]
     pub fn is_instantaneous(&self) -> bool {
-        self.key == crate::vanilla_mob_effects::INSTANT_HEALTH.key
-            || self.key == crate::vanilla_mob_effects::INSTANT_DAMAGE.key
-            || self.key == crate::vanilla_mob_effects::SATURATION.key
+        Self::is_instantaneous_key(&self.key)
+    }
+
+    /// Returns the class-hierarchy instantaneous property for a vanilla effect key.
+    ///
+    /// This key-only form is also usable while the runtime registry is still being
+    /// assembled, such as during plugin `onLoad`.
+    #[must_use]
+    pub fn is_instantaneous_key(key: &Identifier) -> bool {
+        *key == crate::vanilla_mob_effects::INSTANT_HEALTH.key
+            || *key == crate::vanilla_mob_effects::INSTANT_DAMAGE.key
+            || *key == crate::vanilla_mob_effects::SATURATION.key
     }
 
     /// Creates the particle options synchronized for one effect instance.

@@ -127,8 +127,9 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     }
     @Override public java.util.List<Entity> getNearbyEntities(double x, double y, double z) {
         String[] ids = Native.entityNearby(getUniqueId().toString(), x, y, z);
-        if (ids == null || ids.length == 0) return java.util.List.of();
-        java.util.ArrayList<Entity> result = new java.util.ArrayList<>(ids.length);
+        java.util.ArrayList<Entity> result = new java.util.ArrayList<>(
+            ids == null ? 0 : ids.length);
+        if (ids == null) return result;
         for (String value : ids) {
             try {
                 UUID nearbyId = UUID.fromString(value);
@@ -136,7 +137,7 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
                 if (nearby != null) result.add(nearby);
             } catch (IllegalArgumentException ignored) { }
         }
-        return java.util.Collections.unmodifiableList(result);
+        return result;
     }
     @Override public int getEntityId() { return Native.entityId(id.toString()); }
     @Override public boolean teleport(Location location) {

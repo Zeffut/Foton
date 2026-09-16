@@ -140,8 +140,44 @@ class PluginApiBuildScriptTests(unittest.TestCase):
             self.assertIn('35, "raid_omen", "minecraft:raid_omen"', generated)
             self.assertIn('2, "slowness", "SLOW"', generated)
             self.assertIn("foton.Native.mobEffectInstant(name)", generated)
+            self.assertIn(
+                "@org.jetbrains.annotations.NotNull\n"
+                "        public net.kyori.adventure.text.format.TextColor getColor()",
+                generated,
+            )
             self.assertNotIn("value.getName().equalsIgnoreCase(name)", generated)
             self.assertNotIn('name in {"instant_health"', generated)
+
+    def test_task_one_paper_annotations_and_projectile_bridge_shape(self) -> None:
+        potion = (ROOT / "plugin-api/src/org/bukkit/potion/PotionEffect.java").read_text(
+            encoding="utf-8"
+        )
+        feature_depending = (
+            ROOT / "plugin-api/src/io/papermc/paper/world/flag/FeatureDependant.java"
+        ).read_text(encoding="utf-8")
+        feature_flag = (ROOT / "plugin-api/src/org/bukkit/FeatureFlag.java").read_text(
+            encoding="utf-8"
+        )
+        entity = (ROOT / "plugin-api/src/org/bukkit/entity/Entity.java").read_text(
+            encoding="utf-8"
+        )
+        projectile = (ROOT / "plugin-api/src/foton/FotonProjectile.java").read_text(
+            encoding="utf-8"
+        )
+        natives = (ROOT / "foton-plugin/src/natives.rs").read_text(encoding="utf-8")
+
+        self.assertIn('@Deprecated(since = "1.13")', potion)
+        self.assertIn('@org.jetbrains.annotations.Contract("-> null")', potion)
+        self.assertIn("@org.jspecify.annotations.NullMarked", feature_depending)
+        self.assertIn("@org.jetbrains.annotations.ApiStatus.NonExtendable", feature_depending)
+        self.assertIn("java.util.@org.jetbrains.annotations.Unmodifiable Set", feature_depending)
+        self.assertIn("@org.jetbrains.annotations.ApiStatus.Experimental\n"
+                      "    FeatureFlag MINECART_IMPROVEMENTS", feature_flag)
+        self.assertIn('@Deprecated(since = "1.20")\n    FeatureFlag UPDATE_1_20', feature_flag)
+        self.assertIn("@org.jetbrains.annotations.NotNull\n"
+                      "    java.util.List<Entity> getNearbyEntities", entity)
+        self.assertIn("Native.entityProjectileShooter", projectile)
+        self.assertNotIn("prune_projectile_sources", natives)
 
     def test_generated_entity_classes_are_backed_by_api_sources_or_planned_interfaces(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton entity types ", dir="/tmp") as temporary:

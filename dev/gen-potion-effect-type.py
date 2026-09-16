@@ -157,6 +157,7 @@ def render(effects: list[dict[str, object]]) -> str:
         "",
         "        private final net.kyori.adventure.text.format.TextColor color;",
         "        Category(net.kyori.adventure.text.format.TextColor color) { this.color = color; }",
+        "        @org.jetbrains.annotations.NotNull",
         "        public net.kyori.adventure.text.format.TextColor getColor() { return color; }",
         "    }",
         "}",

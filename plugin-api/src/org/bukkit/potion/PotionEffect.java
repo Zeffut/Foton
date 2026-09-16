@@ -27,25 +27,29 @@ public class PotionEffect implements org.bukkit.configuration.serialization.Conf
         this.hiddenEffect = hiddenEffect;
     }
 
-    public PotionEffect(PotionEffectType type, int duration, int amplifier,
+    public PotionEffect(@org.jetbrains.annotations.NotNull PotionEffectType type,
+            int duration, int amplifier,
             boolean ambient, boolean particles, boolean icon) {
         this(type, duration, amplifier, ambient, particles, icon, null);
     }
 
-    public PotionEffect(PotionEffectType type, int duration, int amplifier,
+    public PotionEffect(@org.jetbrains.annotations.NotNull PotionEffectType type,
+            int duration, int amplifier,
             boolean ambient, boolean particles) {
         this(type, duration, amplifier, ambient, particles, particles);
     }
 
-    public PotionEffect(PotionEffectType type, int duration, int amplifier, boolean ambient) {
+    public PotionEffect(@org.jetbrains.annotations.NotNull PotionEffectType type,
+            int duration, int amplifier, boolean ambient) {
         this(type, duration, amplifier, ambient, true);
     }
 
-    public PotionEffect(PotionEffectType type, int duration, int amplifier) {
+    public PotionEffect(@org.jetbrains.annotations.NotNull PotionEffectType type,
+            int duration, int amplifier) {
         this(type, duration, amplifier, true);
     }
 
-    public PotionEffect(java.util.Map<String, Object> data) {
+    public PotionEffect(@org.jetbrains.annotations.NotNull java.util.Map<String, Object> data) {
         this(effectType(data), integer(data, "duration"), integer(data, "amplifier"),
             bool(data, "ambient", false), bool(data, "has-particles", true),
             bool(data, "has-icon", bool(data, "has-particles", true)),
@@ -75,33 +79,42 @@ public class PotionEffect implements org.bukkit.configuration.serialization.Conf
         return value instanceof Boolean flag ? flag : fallback;
     }
 
-    public PotionEffect withType(PotionEffectType value) {
+    @org.jetbrains.annotations.NotNull
+    public PotionEffect withType(@org.jetbrains.annotations.NotNull PotionEffectType value) {
         return new PotionEffect(value, duration, amplifier, ambient, particles, icon);
     }
 
+    @org.jetbrains.annotations.NotNull
     public PotionEffect withDuration(int value) {
         return new PotionEffect(type, value, amplifier, ambient, particles, icon);
     }
 
+    @org.jetbrains.annotations.NotNull
     public PotionEffect withAmplifier(int value) {
         return new PotionEffect(type, duration, value, ambient, particles, icon);
     }
 
+    @org.jetbrains.annotations.NotNull
     public PotionEffect withAmbient(boolean value) {
         return new PotionEffect(type, duration, amplifier, value, particles, icon);
     }
 
+    @org.jetbrains.annotations.NotNull
     public PotionEffect withParticles(boolean value) {
         return new PotionEffect(type, duration, amplifier, ambient, value, icon);
     }
 
+    @org.jetbrains.annotations.NotNull
     public PotionEffect withIcon(boolean value) {
         return new PotionEffect(type, duration, amplifier, ambient, particles, value);
     }
 
+    @org.jetbrains.annotations.Nullable
     public PotionEffect getHiddenPotionEffect() { return hiddenEffect; }
 
-    @Override public java.util.Map<String, Object> serialize() {
+    @Override
+    @org.jetbrains.annotations.NotNull
+    public java.util.Map<String, Object> serialize() {
         java.util.Map<String, Object> values = new java.util.LinkedHashMap<>();
         values.put("effect", type.getKey().toString());
         values.put("duration", duration);
@@ -113,7 +126,7 @@ public class PotionEffect implements org.bukkit.configuration.serialization.Conf
         return java.util.Collections.unmodifiableMap(values);
     }
 
-    public boolean apply(org.bukkit.entity.LivingEntity entity) {
+    public boolean apply(@org.jetbrains.annotations.NotNull org.bukkit.entity.LivingEntity entity) {
         return entity.addPotionEffect(this);
     }
 
@@ -131,12 +144,16 @@ public class PotionEffect implements org.bukkit.configuration.serialization.Conf
     public int getAmplifier() { return amplifier; }
     public int getDuration() { return duration; }
     public boolean isInfinite() { return duration == INFINITE_DURATION; }
-    public boolean isShorterThan(PotionEffect other) {
+    public boolean isShorterThan(@org.jetbrains.annotations.NotNull PotionEffect other) {
         return !isInfinite() && (duration < other.duration || other.isInfinite());
     }
+    @org.jetbrains.annotations.NotNull
     public PotionEffectType getType() { return type; }
     public boolean isAmbient() { return ambient; }
     public boolean hasParticles() { return particles; }
+    @Deprecated(since = "1.13")
+    @org.jetbrains.annotations.Nullable
+    @org.jetbrains.annotations.Contract("-> null")
     public org.bukkit.Color getColor() { return null; }
     public boolean hasIcon() { return icon; }
 

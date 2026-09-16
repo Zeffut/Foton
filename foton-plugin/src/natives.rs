@@ -88,8 +88,8 @@ use foton_core::entity::spawn_util::{
 };
 use foton_core::entity::spellcaster_illager::{IllagerSpell, SpellcasterIllager};
 use foton_core::entity::{
-    Animal, Entity, LlamaVariant, MobEffectInstance, PluginSpawnReason, is_tamed, owner_uuid,
-    set_owner_uuid, set_tamed, start_riding_entities,
+    Animal, Entity, LlamaVariant, MobEffectInstance, PluginSpawnReason, RemovalReason, is_tamed,
+    owner_uuid, set_owner_uuid, set_tamed, start_riding_entities,
 };
 use foton_core::inventory::container::Container;
 use foton_core::inventory::equipment::EquipmentSlot;
@@ -119,6 +119,7 @@ use foton_protocol::packets::game::{
     CSetDefaultSpawnPosition, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CStopSound,
     CSystemChat, CTabList, SoundSource,
 };
+use foton_registry::MobEffectInstance as RegistryMobEffectInstance;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
@@ -150,7 +151,6 @@ use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
-use foton_registry::{MobEffectInstance as RegistryMobEffectInstance, MobEffectInstanceDetails};
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
     vanilla_items,
@@ -321,29 +321,21 @@ fn projectile_sources() -> &'static SyncRwLock<FxHashMap<Uuid, GlobalRef>> {
     PROJECTILE_SOURCES.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
+#[cfg(test)]
+pub(crate) fn projectile_source_count() -> usize {
+    projectile_sources().read().len()
+}
+
 pub(crate) fn remove_projectile_source(id: &Uuid) {
     let stale = { projectile_sources().write().remove(id) };
     drop(stale);
 }
 
-fn prune_projectile_sources() {
-    let ids = {
-        projectile_sources()
-            .read()
-            .keys()
-            .copied()
-            .collect::<Vec<_>>()
-    };
-    let stale_ids = ids
-        .into_iter()
-        .filter(|id| entity_by_uuid(id).is_none())
-        .collect::<Vec<_>>();
+fn discard_unpublished_entity(entity: &SharedEntity) {
     let stale = {
         let mut sources = projectile_sources().write();
-        stale_ids
-            .into_iter()
-            .filter_map(|id| sources.remove(&id))
-            .collect::<Vec<_>>()
+        entity.set_removed(RemovalReason::Discarded);
+        sources.remove(&entity.uuid())
     };
     drop(stale);
 }
@@ -1414,11 +1406,12 @@ extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: 
     else {
         return;
     };
-    remove_projectile_source(&id);
     let Some((world, entity)) = entity_by_uuid(&id) else {
+        remove_projectile_source(&id);
         return;
     };
     let _ = world.remove_entity(entity.id());
+    remove_projectile_source(&id);
 }
 
 extern "system" fn entity_world(
@@ -6327,7 +6320,14 @@ extern "system" fn entity_projectile_owner(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return null_mut();
     };
-    let owner = entity_by_uuid(&id).and_then(|(_, entity)| entity.projectile_owner_uuid());
+    let owner = entity_by_uuid(&id).and_then(|(_, entity)| {
+        let sources = projectile_sources().read();
+        if sources.contains_key(&id) {
+            None
+        } else {
+            entity.projectile_owner_uuid()
+        }
+    });
     to_java(&mut env, owner.map(|value| value.to_string()))
 }
 
@@ -6342,17 +6342,47 @@ extern "system" fn entity_projectile_source(
     let Ok(id) = Uuid::parse_str(&uuid) else {
         return null_mut();
     };
-    prune_projectile_sources();
-    if entity_by_uuid(&id).is_none() {
-        remove_projectile_source(&id);
-        return null_mut();
-    }
     let source = { projectile_sources().read().get(&id).cloned() };
     let Some(source) = source else {
         return null_mut();
     };
     env.new_local_ref(source.as_obj())
         .map_or(null_mut(), JObject::into_raw)
+}
+
+extern "system" fn entity_projectile_shooter(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobject {
+    let Ok(uuid): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = Uuid::parse_str(&uuid) else {
+        return null_mut();
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return null_mut();
+    };
+    let (source, owner) = {
+        let sources = projectile_sources().read();
+        let source = sources.get(&id).cloned();
+        let owner = if source.is_none() {
+            entity.projectile_owner_uuid()
+        } else {
+            None
+        };
+        (source, owner)
+    };
+    if let Some(source) = source {
+        return env
+            .new_local_ref(source.as_obj())
+            .map_or(null_mut(), JObject::into_raw);
+    }
+    owner
+        .and_then(|owner| env.new_string(owner.to_string()).ok())
+        .map_or(null_mut(), JString::into_raw)
+        .cast()
 }
 
 extern "system" fn set_entity_projectile_source(
@@ -6397,18 +6427,12 @@ extern "system" fn set_entity_projectile_source(
         None
     };
 
-    projectile.set_owner_uuid(owner);
-    if reset_pickup != 0
-        && let Some(arrow) = entity.downcast_ref::<ArrowEntity>()
-        && let Some(shooter) =
-            owner.and_then(|owner| entity_by_uuid(&owner).map(|(_, entity)| entity))
-    {
-        arrow.apply_owner_pickup_reset(shooter.as_ref());
-    }
-
-    prune_projectile_sources();
     let replaced = {
         let mut sources = projectile_sources().write();
+        if entity.is_removed() {
+            return 0;
+        }
+        projectile.set_owner_uuid(owner);
         if let Some(source) = source {
             sources.insert(id, source)
         } else {
@@ -6416,6 +6440,13 @@ extern "system" fn set_entity_projectile_source(
         }
     };
     drop(replaced);
+    if reset_pickup != 0
+        && let Some(arrow) = entity.downcast_ref::<ArrowEntity>()
+        && let Some(shooter) =
+            owner.and_then(|owner| entity_by_uuid(&owner).map(|(_, entity)| entity))
+    {
+        arrow.apply_owner_pickup_reset(shooter.as_ref());
+    }
     1
 }
 
@@ -6431,9 +6462,16 @@ extern "system" fn mob_effect_instant(
         return 0;
     };
     REGISTRY
-        .mob_effects
-        .by_key(&key)
-        .is_some_and(MobEffect::is_instantaneous)
+        .get()
+        .map_or_else(
+            || MobEffect::is_instantaneous_key(&key),
+            |registry| {
+                registry
+                    .mob_effects
+                    .by_key(&key)
+                    .is_some_and(MobEffect::is_instantaneous)
+            },
+        )
         .into()
 }
 
@@ -6862,25 +6900,11 @@ fn parse_arrow_custom_effect(encoded: &str) -> Option<RegistryMobEffectInstance>
     let ambient = fields.next()?.parse::<bool>().ok()?;
     let particles = fields.next()?.parse::<bool>().ok()?;
     let icon = fields.next()?.parse::<bool>().ok()?;
-
-    let mut details = Vec::new();
-    while let Some(duration) = fields.next() {
-        details.push((
-            duration.parse::<i32>().ok()?,
-            fields.next()?.parse::<i32>().ok()?,
-            fields.next()?.parse::<bool>().ok()?,
-            fields.next()?.parse::<bool>().ok()?,
-            fields.next()?.parse::<bool>().ok()?,
-        ));
-    }
-    let mut hidden = None;
-    for (duration, amplifier, ambient, particles, icon) in details.into_iter().rev() {
-        hidden = Some(MobEffectInstanceDetails::new(
-            amplifier, duration, ambient, particles, icon, hidden,
-        ));
+    if fields.next().is_some() {
+        return None;
     }
     Some(RegistryMobEffectInstance::new(
-        effect, duration, amplifier, ambient, particles, icon, hidden,
+        effect, duration, amplifier, ambient, particles, icon, None,
     ))
 }
 
@@ -7921,7 +7945,7 @@ extern "system" fn set_entity_fall_distance(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return;
     };
-    entity.set_fall_distance(f64::from(distance.max(0.0)));
+    entity.set_fall_distance(f64::from(distance));
 }
 
 extern "system" fn player_food_saturation(
@@ -11456,9 +11480,14 @@ extern "system" fn finish_pending_spawn(
         return 0;
     };
     if publish == 0 {
+        discard_unpublished_entity(&entity);
         return 1;
     }
-    jboolean::from(world.try_add_entity(entity).is_ok())
+    let published = world.try_add_entity(Arc::clone(&entity)).is_ok();
+    if !published {
+        discard_unpublished_entity(&entity);
+    }
+    jboolean::from(published)
 }
 
 extern "system" fn set_world_game_rule(
@@ -14456,6 +14485,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             entity_projectile_source as *mut c_void,
         ),
         method(
+            "entityProjectileShooter",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            entity_projectile_shooter as *mut c_void,
+        ),
+        method(
             "setEntityProjectileSource",
             "(Ljava/lang/String;Ljava/lang/String;Lorg/bukkit/projectiles/ProjectileSource;Z)Z",
             set_entity_projectile_source as *mut c_void,
@@ -16044,7 +16078,7 @@ mod arrow_effect_bridge_tests {
     };
 
     #[test]
-    fn arrow_effect_codec_preserves_the_complete_hidden_chain() {
+    fn native_arrow_effect_encoding_preserves_hidden_but_bukkit_addition_drops_it() {
         init_vanilla_registry();
         let deepest = MobEffectInstanceDetails::new(4, 600, true, false, true, None);
         let hidden = MobEffectInstanceDetails::new(3, 400, false, true, false, Some(deepest));
@@ -16059,8 +16093,17 @@ mod arrow_effect_bridge_tests {
         );
 
         let encoded = encode_arrow_custom_effect(&original);
-        let decoded = parse_arrow_custom_effect(&encoded)
-            .unwrap_or_else(|| panic!("encoded Arrow effect must decode: {encoded}"));
+        assert_eq!(
+            encoded, "luck|80|2|true|false|true|400|3|false|true|false|600|4|true|false|true",
+            "native Arrow reads must retain the complete hidden-effect chain"
+        );
+        assert!(
+            parse_arrow_custom_effect(&encoded).is_none(),
+            "Bukkit addition must reject the native-only hidden payload"
+        );
+        let visible = "luck|80|2|true|false|true";
+        let decoded = parse_arrow_custom_effect(visible)
+            .unwrap_or_else(|| panic!("visible Arrow effect must decode: {visible}"));
 
         assert_eq!(decoded.effect(), vanilla_mob_effects::LUCK);
         assert_eq!(decoded.duration(), 80);
@@ -16068,21 +16111,7 @@ mod arrow_effect_bridge_tests {
         assert!(decoded.ambient());
         assert!(!decoded.show_particles());
         assert!(decoded.show_icon());
-        let first = decoded
-            .hidden_effect()
-            .unwrap_or_else(|| panic!("first hidden effect must survive"));
-        assert_eq!((first.duration(), first.amplifier()), (400, 3));
-        assert!(!first.ambient());
-        assert!(first.show_particles());
-        assert!(!first.show_icon());
-        let second = first
-            .hidden_effect()
-            .unwrap_or_else(|| panic!("nested hidden effect must survive"));
-        assert_eq!((second.duration(), second.amplifier()), (600, 4));
-        assert!(second.ambient());
-        assert!(!second.show_particles());
-        assert!(second.show_icon());
-        assert!(second.hidden_effect().is_none());
+        assert!(decoded.hidden_effect().is_none());
     }
 
     #[test]

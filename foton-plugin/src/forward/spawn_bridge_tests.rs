@@ -22,7 +22,7 @@ use jni::objects::{JObject, JString};
 use tokio::runtime::Builder as RuntimeBuilder;
 
 use crate::natives::entity_bridge_tests::{equipment_test_config, rain_test_world};
-use crate::natives::register_prepublication_test_entity;
+use crate::natives::{projectile_source_count, register_prepublication_test_entity};
 
 #[test]
 fn conversion_reasons_use_exact_paper_names() {
@@ -330,6 +330,17 @@ fn assert_class_spawn_contracts(
         env.exception_clear()?;
     }
     contracts?;
+    assert_eq!(
+        projectile_source_count(),
+        0,
+        "a rolled-back pending spawn must release its custom ProjectileSource GlobalRef"
+    );
+    env.call_static_method(
+        "SpawnBridgeCheck",
+        "assertFailedCustomSourceSpawnsAreUnresolvable",
+        "()V",
+        &[],
+    )?;
     Ok(())
 }
 

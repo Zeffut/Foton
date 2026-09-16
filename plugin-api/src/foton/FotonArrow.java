@@ -93,29 +93,21 @@ public class FotonArrow extends FotonProjectile implements Arrow {
             Boolean.parseBoolean(fields[offset + 4]), hidden);
     }
 
-    private static String encodeEffect(PotionEffect effect) {
-        StringBuilder encoded = new StringBuilder(effect.getType().getKey().getKey())
+    private static String encodeVisibleEffect(PotionEffect effect) {
+        return new StringBuilder(effect.getType().getKey().getKey())
             .append('|').append(effect.getDuration())
             .append('|').append(effect.getAmplifier())
             .append('|').append(effect.isAmbient())
             .append('|').append(effect.hasParticles())
-            .append('|').append(effect.hasIcon());
-        for (PotionEffect hidden = effect.getHiddenPotionEffect(); hidden != null;
-                hidden = hidden.getHiddenPotionEffect()) {
-            encoded.append('|').append(hidden.getDuration())
-                .append('|').append(hidden.getAmplifier())
-                .append('|').append(hidden.isAmbient())
-                .append('|').append(hidden.hasParticles())
-                .append('|').append(hidden.hasIcon());
-        }
-        return encoded.toString();
+            .append('|').append(effect.hasIcon())
+            .toString();
     }
 
     @Override public boolean hasCustomEffects() { return !getCustomEffects().isEmpty(); }
 
     @Override public boolean addCustomEffect(PotionEffect effect, boolean overwrite) {
         java.util.Objects.requireNonNull(effect, "effect");
-        return Native.addArrowCustomEffect(getUniqueId().toString(), encodeEffect(effect),
+        return Native.addArrowCustomEffect(getUniqueId().toString(), encodeVisibleEffect(effect),
             overwrite);
     }
 

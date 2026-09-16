@@ -10,6 +10,8 @@ public final class SpawnBridgeCheck {
     private static boolean cancelSpawns = true;
     private static java.util.UUID spawnedBee;
     private static org.bukkit.entity.TippedArrow configuredArrow;
+    private static java.util.UUID rolledBackCustomSourceArrow;
+    private static java.util.UUID failedPublishCustomSourceArrow;
 
     public static void install() {
         var owner = new org.bukkit.plugin.java.JavaPlugin() {};
@@ -275,16 +277,27 @@ public final class SpawnBridgeCheck {
             throw new AssertionError("recursive Arrow effect must be accepted");
         }
         org.bukkit.potion.PotionEffect roundTripped = configured.getCustomEffects().get(0);
-        if (roundTripped.getHiddenPotionEffect() == null
-                || roundTripped.getHiddenPotionEffect().getHiddenPotionEffect() == null
-                || roundTripped.getHiddenPotionEffect().getDuration() != 400
-                || roundTripped.getHiddenPotionEffect().getHiddenPotionEffect().getDuration() != 600) {
-            throw new AssertionError("Arrow custom-effect hidden chain must round-trip recursively");
+        if (roundTripped.getHiddenPotionEffect() != null
+                || roundTripped.getDuration() != 80
+                || roundTripped.getAmplifier() != 2
+                || !roundTripped.isAmbient()
+                || roundTripped.hasParticles()
+                || !roundTripped.hasIcon()) {
+            throw new AssertionError(
+                "Paper Arrow.addCustomEffect must discard hidden effects but preserve visible details");
         }
         if (!configured.removeCustomEffect(org.bukkit.potion.PotionEffectType.LUCK)) {
             throw new AssertionError("recursive Arrow effect must remain removable");
         }
         configured.setPierceLevel(5);
+        configured.setFallDistance(-3.5f);
+        if (configured.getFallDistance() != -3.5f) {
+            throw new AssertionError("negative Entity fall distance must round-trip exactly");
+        }
+        configured.setFallDistance(Float.NaN);
+        if (!Float.isNaN(configured.getFallDistance())) {
+            throw new AssertionError("NaN Entity fall distance must round-trip exactly");
+        }
         configured.setFallDistance(4.25f);
         configured.setPickupStatus(org.bukkit.entity.AbstractArrow.PickupStatus.CREATIVE_ONLY);
         configured.setLifetimeTicks(411);
@@ -330,12 +343,18 @@ public final class SpawnBridgeCheck {
         if (nearby.stream().noneMatch(entity -> entity.equals(cow))) {
             throw new AssertionError("Entity nearby list must be a live native query");
         }
+        int nearbySize = nearby.size();
+        nearby.add(configured);
+        if (nearby.size() != nearbySize + 1) {
+            throw new AssertionError("Entity nearby result must be a mutable ArrayList copy");
+        }
         org.bukkit.projectiles.ProjectileSource customSource =
             new org.bukkit.projectiles.ProjectileSource() { };
         configured.setShooter(customSource, false);
         if (configured.getShooter() != customSource) {
             throw new AssertionError("non-Entity ProjectileSource identity must round-trip");
         }
+        assertConcurrentShooterSnapshots(configured, cow, customSource);
         configured.setShooter(null, false);
         if (configured.getShooter() != null
                 || foton.Native.entityProjectileOwner(configured.getUniqueId().toString()) != null) {
@@ -415,6 +434,43 @@ public final class SpawnBridgeCheck {
         if (malformed != null || world.getEntities().size() != entityCount) {
             throw new AssertionError("malformed initialized spawns must fail before publication");
         }
+
+        RuntimeException rollbackMarker = new RuntimeException("custom source rollback marker");
+        try {
+            world.spawn(location, org.bukkit.entity.TippedArrow.class, pending -> {
+                rolledBackCustomSourceArrow = pending.getUniqueId();
+                pending.setShooter(new org.bukkit.projectiles.ProjectileSource() { }, false);
+                throw rollbackMarker;
+            });
+            throw new AssertionError("throwing custom-source callback must propagate");
+        } catch (RuntimeException actual) {
+            if (actual != rollbackMarker) throw actual;
+        }
+
+        String unpublished = foton.Native.spawnEntityPending(
+            worldName, 1_048_576.5, 64.0, 1_048_576.5, "arrow", "minecraft:water");
+        if (unpublished == null) {
+            throw new AssertionError("far pending Arrow must be created before publication fails");
+        }
+        failedPublishCustomSourceArrow = java.util.UUID.fromString(unpublished);
+        var unpublishedArrow = new foton.FotonTippedArrow(failedPublishCustomSourceArrow);
+        unpublishedArrow.setShooter(new org.bukkit.projectiles.ProjectileSource() { }, false);
+        if (foton.Native.finishPendingSpawn(worldName, unpublished, true)) {
+            throw new AssertionError("publishing into an unloaded far chunk must fail");
+        }
+    }
+
+    public static void assertFailedCustomSourceSpawnsAreUnresolvable() {
+        for (java.util.UUID id : java.util.List.of(
+                rolledBackCustomSourceArrow, failedPublishCustomSourceArrow)) {
+            String value = id.toString();
+            if (foton.Native.entityType(value) != null
+                    || foton.Native.entityProjectileSource(value) != null
+                    || foton.Native.entityProjectileShooter(value) != null) {
+                throw new AssertionError(
+                    "failed pending spawn retained a resolvable ProjectileSource: " + id);
+            }
+        }
     }
 
     public static String configuredArrowId() {
@@ -435,6 +491,56 @@ public final class SpawnBridgeCheck {
                 || attached.get(0).getZ() != z || !first.equals(attached.get(0))) {
             throw new AssertionError("attached blocks must reflect the live collision: " + attached);
         }
+    }
+
+    private static void assertConcurrentShooterSnapshots(org.bukkit.entity.Arrow arrow,
+            org.bukkit.entity.AbstractCow cow,
+            org.bukkit.projectiles.ProjectileSource customSource) {
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+            new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        Runnable customWriter = () -> {
+            try {
+                start.await();
+                for (int i = 0; i < 2_000; i++) arrow.setShooter(customSource, false);
+            } catch (Throwable error) {
+                failure.compareAndSet(null, error);
+            }
+        };
+        Runnable entityWriter = () -> {
+            try {
+                start.await();
+                for (int i = 0; i < 2_000; i++) {
+                    arrow.setShooter((org.bukkit.projectiles.ProjectileSource) cow, false);
+                }
+            } catch (Throwable error) {
+                failure.compareAndSet(null, error);
+            }
+        };
+        Thread first = new Thread(customWriter, "foton-custom-shooter-writer");
+        Thread second = new Thread(entityWriter, "foton-entity-shooter-writer");
+        first.start();
+        second.start();
+        start.countDown();
+        for (int i = 0; i < 4_000; i++) {
+            org.bukkit.projectiles.ProjectileSource observed = arrow.getShooter();
+            if (observed != customSource && !cow.equals(observed)) {
+                failure.compareAndSet(null, new AssertionError(
+                    "concurrent shooter snapshot exposed a hybrid state: " + observed));
+                break;
+            }
+        }
+        try {
+            first.join();
+            second.join();
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("concurrent shooter check was interrupted", error);
+        }
+        if (failure.get() != null) {
+            throw new AssertionError("concurrent shooter transaction failed", failure.get());
+        }
+        arrow.setShooter((org.bukkit.projectiles.ProjectileSource) cow, false);
     }
 
     private static void expectIllegalArgument(Runnable action) {

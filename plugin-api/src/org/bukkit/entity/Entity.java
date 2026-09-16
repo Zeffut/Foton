@@ -119,6 +119,7 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default boolean eject() { return false; }
     default SpawnCategory getSpawnCategory() { return SpawnCategory.MISC; }
     default org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason getEntitySpawnReason() { return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT; }
+    @org.jetbrains.annotations.NotNull
     java.util.List<Entity> getNearbyEntities(double x, double y, double z);
 
     int getEntityId();

@@ -9,10 +9,9 @@ public class FotonProjectile extends FotonEntity implements Projectile {
     public FotonProjectile(UUID id) { super(id); }
 
     @Override public ProjectileSource getShooter() {
-        ProjectileSource retained = Native.entityProjectileSource(getUniqueId().toString());
-        if (retained != null) return retained;
-        String owner = Native.entityProjectileOwner(getUniqueId().toString());
-        if (owner == null) return null;
+        Object shooter = Native.entityProjectileShooter(getUniqueId().toString());
+        if (shooter instanceof ProjectileSource retained) return retained;
+        if (!(shooter instanceof String owner)) return null;
         try {
             UUID id = UUID.fromString(owner);
             String type = Native.entityType(owner);
