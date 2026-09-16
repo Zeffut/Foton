@@ -259,9 +259,8 @@ impl<T: ReadFrom> PrefixedRead for Vec<T> {
         let len: usize = P::read(data)?
             .try_into()
             .map_err(|_| Error::other("Invalid Prefix"))?;
-
         if len > bound {
-            Err(Error::other("To long"))?;
+            return Err(Error::other("To long"));
         }
         let mut items = Vec::with_capacity(len);
         for _ in 0..len {
@@ -290,7 +289,7 @@ mod tests {
 
     use crate::{
         codec::VarInt,
-        serial::{WriteTo as _, prefixed_read::read_utf},
+        serial::{PrefixedRead as _, WriteTo as _, prefixed_read::read_utf},
     };
 
     fn encoded_string(bytes: &[u8]) -> Vec<u8> {
@@ -375,5 +374,37 @@ mod tests {
 
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
         assert_eq!(cursor.position(), 1);
+    }
+
+    #[test]
+    fn vector_prefix_keeps_the_requested_prefix_codec() {
+        let bytes = [0, 1, 0x7f];
+        let mut cursor = Cursor::new(bytes.as_slice());
+
+        let values = Vec::<u8>::read_prefixed_bound::<u16>(&mut cursor, 2)
+            .expect("a u16 prefix of one should decode one byte");
+
+        assert_eq!(values, vec![0x7f]);
+        assert_eq!(cursor.position(), bytes.len() as u64);
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct ZeroByte;
+
+    impl crate::serial::ReadFrom for ZeroByte {
+        fn read(_data: &mut Cursor<&[u8]>) -> std::io::Result<Self> {
+            Ok(Self)
+        }
+    }
+
+    #[test]
+    fn vector_of_zero_byte_elements_does_not_assume_input_bytes_per_element() {
+        let bytes = [2];
+        let mut cursor = Cursor::new(bytes.as_slice());
+
+        let values = Vec::<ZeroByte>::read_prefixed_bound::<VarInt>(&mut cursor, 2)
+            .expect("zero-byte element codecs may legally consume no body bytes");
+
+        assert_eq!(values, vec![ZeroByte, ZeroByte]);
     }
 }

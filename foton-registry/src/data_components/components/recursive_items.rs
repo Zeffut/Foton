@@ -6,7 +6,10 @@ use std::io::{Cursor, Error, Result, Write};
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
 use foton_utils::nbt::NbtNumeric as _;
-use foton_utils::serial::{ReadFrom, WriteTo};
+use foton_utils::serial::{
+    ReadFrom, WriteTo,
+    budget::{DEFAULT_COLLECTION_ALLOCATION_BUDGET, collection_capacity, read_collection_count},
+};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
 
@@ -583,7 +586,10 @@ impl WriteTo for ItemContainerContents {
 impl ReadFrom for ItemContainerContents {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_count(data, Some(Self::MAX_SIZE))?;
-        let mut items = Vec::with_capacity(count);
+        let mut items = Vec::with_capacity(collection_capacity::<Option<ItemStackTemplate>>(
+            count,
+            DEFAULT_COLLECTION_ALLOCATION_BUDGET,
+        )?);
         for _ in 0..count {
             items.push(if bool::read(data)? {
                 Some(ItemStackTemplate::read(data)?)
@@ -738,7 +744,10 @@ fn read_template_list(
     max: Option<usize>,
 ) -> Result<Vec<ItemStackTemplate>> {
     let count = read_count(data, max)?;
-    let mut items = Vec::with_capacity(count.min(65_536));
+    let mut items = Vec::with_capacity(collection_capacity::<ItemStackTemplate>(
+        count,
+        DEFAULT_COLLECTION_ALLOCATION_BUDGET,
+    )?);
     for _ in 0..count {
         items.push(ItemStackTemplate::read(data)?);
     }
@@ -758,16 +767,7 @@ fn write_count(count: usize, max: Option<usize>, writer: &mut impl Write) -> Res
 }
 
 fn read_count(data: &mut Cursor<&[u8]>, max: Option<usize>) -> Result<usize> {
-    let count = VarInt::read(data)?.0;
-    let count = usize::try_from(count).map_err(|_| Error::other("Negative list length"))?;
-    if let Some(max) = max
-        && count > max
-    {
-        return Err(Error::other(format!(
-            "{count} elements exceeded max size of {max}"
-        )));
-    }
-    Ok(count)
+    read_collection_count(data, max, 1)
 }
 
 #[cfg_attr(
@@ -841,6 +841,7 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
 mod tests {
     use std::io::Cursor;
 
+    use foton_utils::codec::VarInt;
     use foton_utils::hash::HashComponent;
     use foton_utils::serial::{ReadFrom, WriteTo};
     use simdnbt::borrow::read_tag;
@@ -849,6 +850,7 @@ mod tests {
 
     use super::{
         BundleContents, ChargedProjectiles, ItemContainerContents, SulfurCubeContent, UseRemainder,
+        read_template_list,
     };
     use crate::data_components::DataComponentPatch;
     use crate::data_components::components::{BeehiveOccupant, Bees, CustomData, EntityData};
@@ -857,6 +859,19 @@ mod tests {
     };
     use crate::init_vanilla_registry;
     use crate::{ItemStackTemplate, REGISTRY, vanilla_entities, vanilla_items};
+
+    #[test]
+    fn template_list_huge_count_is_rejected_before_the_truncated_body() {
+        let mut encoded = Vec::new();
+        VarInt(i32::MAX)
+            .write(&mut encoded)
+            .expect("count should encode");
+
+        let error = read_template_list(&mut Cursor::new(encoded.as_slice()), None)
+            .expect_err("a count with no remaining template bytes must fail preflight");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
 
     fn round_trip<T>(value: T)
     where

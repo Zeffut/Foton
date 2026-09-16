@@ -5,13 +5,18 @@ use std::io::{Cursor, Error, Result, Write};
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
 use foton_utils::nbt::NbtNumeric as _;
-use foton_utils::serial::{PrefixedRead, PrefixedWrite, ReadFrom, WriteTo};
+use foton_utils::serial::{
+    PrefixedRead, PrefixedWrite, ReadFrom, WriteTo,
+    budget::{DEFAULT_COLLECTION_ALLOCATION_BUDGET, collection_capacity, read_collection_count},
+    write::write_nbt_tag_bounded,
+};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
 use text_components::TextComponent;
 
 const MAX_NETWORK_STRING_LENGTH: usize = 32_767;
 const MAX_NETWORK_STRING_BYTES: usize = MAX_NETWORK_STRING_LENGTH * 3;
+const MAX_NETWORK_NBT_TEMPORARY_BYTES: usize = 1024 * 1024;
 
 /// Raw text paired with the optional server-filtered projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +128,10 @@ impl WriteTo for WritableBookContent {
 impl ReadFrom for WritableBookContent {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_bounded_count(data, Self::MAX_PAGES)?;
-        let mut pages = Vec::with_capacity(count);
+        let mut pages = Vec::with_capacity(collection_capacity::<Filterable<String>>(
+            count,
+            DEFAULT_COLLECTION_ALLOCATION_BUDGET,
+        )?);
         for _ in 0..count {
             pages.push(read_filterable_string(data, Self::PAGE_EDIT_LENGTH)?);
         }
@@ -325,7 +333,10 @@ impl ReadFrom for WrittenBookContent {
         let author = read_network_string(data, MAX_NETWORK_STRING_LENGTH)?;
         let generation = VarInt::read(data)?.0;
         let count = read_count(data)?;
-        let mut pages = Vec::with_capacity(count.min(65_536));
+        let mut pages = Vec::with_capacity(collection_capacity::<Filterable<TextComponent>>(
+            count,
+            DEFAULT_COLLECTION_ALLOCATION_BUDGET,
+        )?);
         for _ in 0..count {
             pages.push(read_filterable_component(data)?);
         }
@@ -491,9 +502,11 @@ fn read_filterable_component(data: &mut Cursor<&[u8]>) -> Result<Filterable<Text
 }
 
 fn write_component_network(component: &TextComponent, writer: &mut impl Write) -> Result<()> {
-    let mut encoded = Vec::new();
-    component.to_codec_nbt().write(&mut encoded);
-    writer.write_all(&encoded)
+    write_nbt_tag_bounded(
+        &component.to_codec_nbt(),
+        MAX_NETWORK_NBT_TEMPORARY_BYTES,
+        writer,
+    )
 }
 
 fn write_network_string(value: &str, max_length: usize, writer: &mut impl Write) -> Result<()> {
@@ -534,18 +547,11 @@ fn write_count(count: usize, writer: &mut impl Write) -> Result<()> {
 }
 
 fn read_bounded_count(data: &mut Cursor<&[u8]>, max: usize) -> Result<usize> {
-    let count = read_count(data)?;
-    if count > max {
-        return Err(Error::other(format!(
-            "Collection size {count} exceeds {max}"
-        )));
-    }
-    Ok(count)
+    read_collection_count(data, Some(max), 1)
 }
 
 fn read_count(data: &mut Cursor<&[u8]>) -> Result<usize> {
-    let count = VarInt::read(data)?.0;
-    usize::try_from(count).map_err(|_| Error::other(format!("Negative collection size: {count}")))
+    read_collection_count(data, None, 1)
 }
 
 struct FilterableStringHash<'a>(&'a Filterable<String>);
@@ -618,13 +624,19 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::{Cursor, Error, ErrorKind, Result, Write};
 
-    use foton_utils::serial::{ReadFrom as _, WriteTo as _};
+    use foton_utils::{
+        codec::VarInt,
+        serial::{ReadFrom as _, WriteTo as _},
+    };
     use simdnbt::ToNbtTag as _;
     use text_components::TextComponent;
 
-    use super::{Filterable, WritableBookContent, WrittenBookContent};
+    use super::{
+        Filterable, WritableBookContent, WrittenBookContent, write_component_network,
+        write_filterable_string, write_network_string,
+    };
     use crate::data_components::vanilla_components::WRITABLE_BOOK_CONTENT;
     use crate::init_vanilla_registry;
     use crate::{REGISTRY, RegistryExt};
@@ -699,5 +711,62 @@ mod tests {
             item.components.get(WRITABLE_BOOK_CONTENT),
             Some(WritableBookContent::empty())
         );
+    }
+
+    #[test]
+    fn written_book_huge_page_count_is_rejected_before_the_truncated_body() {
+        let mut encoded = Vec::new();
+        write_filterable_string(
+            &Filterable::pass_through(String::new()),
+            WrittenBookContent::TITLE_MAX_LENGTH,
+            &mut encoded,
+        )
+        .expect("empty title should encode");
+        write_network_string(&String::new(), 32_767, &mut encoded)
+            .expect("empty author should encode");
+        VarInt(0)
+            .write(&mut encoded)
+            .expect("generation should encode");
+        VarInt(i32::MAX)
+            .write(&mut encoded)
+            .expect("page count should encode");
+
+        let error = WrittenBookContent::read(&mut Cursor::new(encoded.as_slice()))
+            .expect_err("a count with no remaining page bytes must fail preflight");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+    }
+
+    struct OneMiBWriter {
+        written: usize,
+    }
+
+    impl Write for OneMiBWriter {
+        fn write(&mut self, bytes: &[u8]) -> Result<usize> {
+            if self.written.saturating_add(bytes.len()) > 1024 * 1024 {
+                return Err(Error::new(
+                    ErrorKind::WriteZero,
+                    "component exceeds one MiB",
+                ));
+            }
+            self.written += bytes.len();
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn oversized_text_component_is_preflighted_before_writing_to_a_one_mib_sink() {
+        let component = TextComponent::plain("x".repeat(1024 * 1024));
+        let mut writer = OneMiBWriter { written: 0 };
+
+        let error = write_component_network(&component, &mut writer)
+            .expect_err("oversized text must be rejected before a bounded sink is touched");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(writer.written, 0);
     }
 }

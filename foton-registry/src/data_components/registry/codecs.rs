@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use super::{
     BorrowedNbtTag, Component, ComponentData, Cursor, DowncastType, DowncastTypeKey, FromNbtTag,
     HashComponent, Identifier, OwnedNbtTag, ReadFrom, Result, ToNbtTag, WriteTo, read_tag,
@@ -6,7 +8,7 @@ use super::{
 pub type NetworkReader = fn(&mut Cursor<&[u8]>) -> Result<ComponentData>;
 
 /// Writer function for serializing a component to network format.
-pub type NetworkWriter = fn(&ComponentData, &mut Vec<u8>) -> Result<()>;
+pub type NetworkWriter = fn(&ComponentData, &mut dyn Write) -> Result<()>;
 
 /// Reader function for deserializing a component from NBT format.
 pub type NbtReader = fn(BorrowedNbtTag) -> Option<ComponentData>;
@@ -51,14 +53,30 @@ pub(super) fn read_typed_network<T: Component + ReadFrom>(
     Ok(ComponentData::new(T::read(cursor)?))
 }
 
+pub(crate) fn write_to_network<T: WriteTo>(value: &T, writer: &mut dyn Write) -> Result<()> {
+    value.write(&mut DynWriter(writer))
+}
+
 pub(super) fn write_typed_network<T: DowncastType + WriteTo>(
     data: &ComponentData,
-    writer: &mut Vec<u8>,
+    writer: &mut dyn Write,
 ) -> Result<()> {
     let Some(value) = data.downcast_ref::<T>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    write_to_network(value, writer)
+}
+
+struct DynWriter<'a>(&'a mut dyn Write);
+
+impl Write for DynWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
 }
 
 pub(super) fn read_typed_nbt<T: Component + FromNbtTag>(
@@ -164,6 +182,11 @@ impl ComponentEntry {
 
     /// Encodes this component's network value after validating its concrete type.
     pub fn write_network(&self, data: &ComponentData, writer: &mut Vec<u8>) -> Result<()> {
+        self.write_network_to(data, writer)
+    }
+
+    /// Encodes this component directly to a caller-supplied network sink.
+    pub fn write_network_to(&self, data: &ComponentData, writer: &mut dyn Write) -> Result<()> {
         if !self.validates(data) {
             return Err(std::io::Error::other(format!(
                 "Component value type does not match {}",

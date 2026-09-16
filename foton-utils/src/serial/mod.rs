@@ -1,6 +1,8 @@
 //! This module contains traits for serializing and deserializing data.
 use std::io::{Cursor, Result, Write};
 
+/// Budget and preflight helpers for bounded decoding.
+pub mod budget;
 /// A module for reading prefixed data.
 pub mod prefixed_read;
 /// A module for writing prefixed data.

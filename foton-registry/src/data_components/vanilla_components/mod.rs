@@ -397,10 +397,10 @@ fn varint_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<Compone
 }
 
 /// Network writer for VarInt-encoded i32 components.
-fn varint_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::{codec::VarInt, serial::WriteTo};
+fn varint_writer(data: &ComponentData, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
+    use foton_utils::codec::VarInt;
     if let Some(v) = data.downcast_ref::<i32>() {
-        VarInt(*v).write(writer)
+        crate::data_components::registry::codecs::write_to_network(&VarInt(*v), writer)
     } else {
         Err(std::io::Error::other("Component type mismatch"))
     }
@@ -411,12 +411,11 @@ fn float_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<Componen
     Ok(ComponentData::new(f32::read(cursor)?))
 }
 
-fn float_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo;
+fn float_writer(data: &ComponentData, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
     let Some(value) = data.downcast_ref::<f32>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 fn bool_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<ComponentData> {
@@ -424,12 +423,11 @@ fn bool_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<Component
     Ok(ComponentData::new(bool::read(cursor)?))
 }
 
-fn bool_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo;
+fn bool_writer(data: &ComponentData, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
     let Some(value) = data.downcast_ref::<bool>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 fn text_component_network_reader(
@@ -441,13 +439,12 @@ fn text_component_network_reader(
 
 fn text_component_network_writer(
     data: &ComponentData,
-    writer: &mut Vec<u8>,
+    writer: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
     let Some(value) = data.downcast_ref::<TextComponent>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    foton_utils::serial::write::write_nbt_tag_bounded(&value.to_codec_nbt(), 1024 * 1024, writer)
 }
 
 fn text_component_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
@@ -466,12 +463,14 @@ fn custom_data_codec_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Res
     CustomData::read_codec_network(cursor).map(ComponentData::new)
 }
 
-fn custom_data_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
+fn custom_data_writer(
+    data: &ComponentData,
+    writer: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
     let Some(value) = data.downcast_ref::<CustomData>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 #[expect(
@@ -482,7 +481,7 @@ fn unit_reader(_cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<Componen
     Ok(ComponentData::new(()))
 }
 
-fn unit_writer(data: &ComponentData, _writer: &mut Vec<u8>) -> std::io::Result<()> {
+fn unit_writer(data: &ComponentData, _writer: &mut dyn std::io::Write) -> std::io::Result<()> {
     if data.downcast_ref::<()>().is_some() {
         Ok(())
     } else {
@@ -500,9 +499,11 @@ fn codec_unit_network_reader(
         .ok_or_else(|| std::io::Error::other("Unit codec network value is not a compound"))
 }
 
-fn codec_unit_network_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    unit_nbt_writer(data)?.write(writer);
-    Ok(())
+fn codec_unit_network_writer(
+    data: &ComponentData,
+    writer: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    crate::data_components::registry::codecs::write_to_network(&unit_nbt_writer(data)?, writer)
 }
 
 fn ranged_i32_nbt_reader<const MIN: i32, const MAX: i32>(
@@ -600,13 +601,12 @@ fn jukebox_playable_network_reader(
 
 fn jukebox_playable_network_writer(
     data: &ComponentData,
-    writer: &mut Vec<u8>,
+    writer: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo;
     let Some(value) = data.downcast_ref::<JukeboxPlayable>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 fn jukebox_playable_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
@@ -629,12 +629,14 @@ fn fireworks_network_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Res
     Fireworks::read(cursor).map(ComponentData::new)
 }
 
-fn fireworks_network_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
+fn fireworks_network_writer(
+    data: &ComponentData,
+    writer: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
     let Some(value) = data.downcast_ref::<Fireworks>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 fn fireworks_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtTag> {
@@ -653,13 +655,12 @@ fn painting_variant_network_reader(
 
 fn painting_variant_network_writer(
     data: &ComponentData,
-    writer: &mut Vec<u8>,
+    writer: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
     let Some(value) = data.downcast_ref::<PaintingVariantComponent>() else {
         return Err(std::io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 fn painting_variant_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {

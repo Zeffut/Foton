@@ -37,7 +37,7 @@ use super::vanilla_components::{
 };
 use crate::{sound_event::SoundEventHolder, sound_events};
 
-mod codecs;
+pub(crate) mod codecs;
 mod component_map;
 mod patch;
 mod patch_network;
