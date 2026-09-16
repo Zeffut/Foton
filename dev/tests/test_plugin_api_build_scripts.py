@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -79,6 +80,37 @@ def export_tracked_checkout(destination: Path) -> None:
 
 
 class PluginApiBuildScriptTests(unittest.TestCase):
+    def test_generated_entity_classes_are_backed_by_api_sources_or_planned_interfaces(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton entity types ", dir="/tmp") as temporary:
+            output = Path(temporary)
+            result = subprocess.run(
+                [sys.executable, "dev/gen-entity-type.py", str(output)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            generated = (output / "org/bukkit/entity/EntityType.java").read_text(
+                encoding="utf-8"
+            )
+            emitted = set(
+                re.findall(
+                    r'case "(org\.bukkit\.entity\.[A-Za-z0-9_.]+)"', generated
+                )
+            )
+            source_classes = {
+                ".".join(source.relative_to(ROOT / "plugin-api/src").with_suffix("").parts)
+                for source in (ROOT / "plugin-api/src/org/bukkit/entity").rglob("*.java")
+            }
+            planned_interfaces = {
+                "org.bukkit.entity.Allay",
+                "org.bukkit.entity.ItemDisplay",
+                "org.bukkit.entity.TextDisplay",
+            }
+            self.assertEqual(emitted - source_classes - planned_interfaces, set())
+
     def test_archive_extraction_rejects_parent_traversal(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton archive traversal ", dir="/tmp") as temporary:
             root = Path(temporary)
@@ -147,9 +179,7 @@ class PluginApiBuildScriptTests(unittest.TestCase):
             fake_cargo = fake_bin / "cargo"
             fake_cargo.write_text(
                 """#!/bin/sh
-if [ "$1" = "clean" ]; then
-  : > "$FOTON_TEST_CARGO_INVALIDATED"
-elif [ "$1" = "check" ] && [ -f "$FOTON_TEST_CARGO_INVALIDATED" ]; then
+if [ "$1" = "check" ]; then
   cp "$FOTON_TEST_REGISTRY_BACKUP"/*.rs "$FOTON_TEST_REGISTRY_OUTPUT/"
 fi
 exit 0
@@ -159,9 +189,6 @@ exit 0
             fake_cargo.chmod(0o755)
             cached_environment = environment.copy()
             cached_environment["PATH"] = f"{fake_bin}:{cached_environment['PATH']}"
-            cached_environment["FOTON_TEST_CARGO_INVALIDATED"] = str(
-                Path(temporary) / "cargo-invalidated"
-            )
             cached_environment["FOTON_TEST_REGISTRY_BACKUP"] = str(backup)
             cached_environment["FOTON_TEST_REGISTRY_OUTPUT"] = str(generated)
             cached_result = subprocess.run(
@@ -209,6 +236,59 @@ exit 0
             self.assertIn("foton-registry build did not generate", output)
             for filename in GENERATED_REGISTRY_INPUTS:
                 self.assertIn(filename, output)
+
+    def test_existing_stale_entity_registry_is_refreshed_before_java_generation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton stale entity registry ", dir="/tmp") as temporary:
+            root = Path(temporary)
+            checkout = root / "existing checkout"
+            checkout.mkdir()
+            export_tracked_checkout(checkout)
+
+            generated = checkout / "foton-registry/src/generated"
+            generated.mkdir(parents=True, exist_ok=True)
+            backups = root / "registry-backup"
+            backups.mkdir()
+            for filename in GENERATED_REGISTRY_INPUTS:
+                shutil.copy2(ROOT / "foton-registry/src/generated" / filename, backups / filename)
+                shutil.copy2(backups / filename, generated / filename)
+            stale_marker = "pub static STALE_CHECKOUT_ENTITY: u8 = 0;\n"
+            (generated / "vanilla_entities.rs").write_text(stale_marker, encoding="utf-8")
+
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            fake_cargo = fake_bin / "cargo"
+            fake_cargo.write_text(
+                """#!/bin/sh
+if [ "$1" = "check" ]; then
+  : > "$FOTON_TEST_CARGO_INVALIDATED"
+  cp "$FOTON_TEST_REGISTRY_BACKUP"/*.rs "$FOTON_TEST_REGISTRY_OUTPUT/"
+fi
+exit 0
+""",
+                encoding="utf-8",
+            )
+            fake_cargo.chmod(0o755)
+
+            environment = interpreter_environment()
+            environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+            environment["FOTON_TEST_CARGO_INVALIDATED"] = str(root / "cargo-invalidated")
+            environment["FOTON_TEST_REGISTRY_BACKUP"] = str(backups)
+            environment["FOTON_TEST_REGISTRY_OUTPUT"] = str(generated)
+            result = subprocess.run(
+                ["bash", "dev/build-plugin-api.sh"],
+                cwd=checkout,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(Path(environment["FOTON_TEST_CARGO_INVALIDATED"]).is_file())
+            self.assertNotIn(
+                "STALE_CHECKOUT_ENTITY",
+                (generated / "vanilla_entities.rs").read_text(encoding="utf-8"),
+            )
 
     def test_minecraft_source_preserves_spaced_target_as_one_gradle_argument(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton minecraft source ", dir="/tmp") as temporary:

@@ -31,25 +31,54 @@ mkdir -p "$OUT/classes" "$OUT/generated"
 
 # Java generators consume extracted registry assets and Rust registry source
 # emitted by the foton-registry build script. The Rust files are intentionally
-# ignored, so a fresh checkout must generate them before the plugin API builds.
+# ignored and can survive a branch checkout, so an existing entity source is
+# accepted only when its consumed constants match the extracted registry.
 REGISTRY_GENERATED="$REPO/foton-registry/src/generated"
 REGISTRY_INPUTS=(
   "$REGISTRY_GENERATED/vanilla_entities.rs"
   "$REGISTRY_GENERATED/vanilla_enchantments.rs"
   "$REGISTRY_GENERATED/vanilla_potions.rs"
 )
+entity_registry_is_current() {
+  python3 - "$REPO/foton-registry/build_assets/entities.json" \
+    "$REGISTRY_GENERATED/vanilla_entities.rs" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
+
+asset = Path(sys.argv[1])
+generated = Path(sys.argv[2])
+if not generated.is_file():
+    raise SystemExit(1)
+expected = [entry["name"].upper() for entry in json.loads(asset.read_text(encoding="utf-8"))]
+actual = re.findall(r"pub static ([A-Z][A-Z0-9_]*)\s*:", generated.read_text(encoding="utf-8"))
+raise SystemExit(0 if actual == expected else 1)
+PY
+}
+
+GENERATE_REGISTRY=false
 for registry_input in "${REGISTRY_INPUTS[@]}"; do
   if [ ! -f "$registry_input" ]; then
-    if ! command -v cargo >/dev/null 2>&1; then
-      echo "cargo is missing; generated plugin API registry inputs are unavailable" >&2
-      exit 1
-    fi
-    echo "generating missing foton-registry sources"
-    cargo clean --manifest-path "$REPO/Cargo.toml" -p foton-registry
-    cargo check --manifest-path "$REPO/Cargo.toml" -p foton-registry
+    GENERATE_REGISTRY=true
     break
   fi
 done
+if ! entity_registry_is_current; then
+  GENERATE_REGISTRY=true
+fi
+if [ "$GENERATE_REGISTRY" = true ]; then
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "cargo is missing; generated plugin API registry inputs are unavailable" >&2
+    exit 1
+  fi
+  echo "refreshing missing or stale foton-registry sources"
+  # Updating this tracked input's timestamp invalidates only the registry build
+  # script. Unlike cargo clean, it preserves dependency artifacts and cannot
+  # trigger an otherwise unnecessary asset rebuild.
+  touch "$REPO/foton-registry/build/build.rs"
+  cargo check --manifest-path "$REPO/Cargo.toml" -p foton-registry
+fi
 MISSING_REGISTRY_INPUTS=()
 for registry_input in "${REGISTRY_INPUTS[@]}"; do
   if [ ! -f "$registry_input" ]; then
@@ -61,6 +90,10 @@ if [ "${#MISSING_REGISTRY_INPUTS[@]}" -ne 0 ]; then
   for registry_input in "${MISSING_REGISTRY_INPUTS[@]}"; do
     echo "  ${registry_input#"$REPO/"}" >&2
   done
+  exit 1
+fi
+if ! entity_registry_is_current; then
+  echo "foton-registry generated stale vanilla_entities.rs" >&2
   exit 1
 fi
 

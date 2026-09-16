@@ -5,6 +5,8 @@ final class EntityCheck {
     static void check() {
         suppliedRegistryTypeSelectsTheWrapperWithoutAnotherLookup();
         generatedClassLookupPreservesUnderscoredRegistryKeys();
+        generatedClassLookupUsesCanonicalPaperClasses();
+        generatedClassLookupPreservesPaperDefaultsAndAmbiguity();
         dimensionsComeFromTheBoundingBox();
         destinationLocationIsFilledInPlace();
         missingEntityStillReturnsDestination();
@@ -15,6 +17,40 @@ final class EntityCheck {
             foton.FotonEntityFactory.typeFor(org.bukkit.entity.BlockDisplay.class),
             org.bukkit.entity.EntityType.BLOCK_DISPLAY,
             "BlockDisplay class-to-entity type");
+    }
+
+    private static void generatedClassLookupUsesCanonicalPaperClasses() {
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.TNTPrimed.class),
+            org.bukkit.entity.EntityType.TNT, "TNTPrimed class-to-entity type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.EnderCrystal.class),
+            org.bukkit.entity.EntityType.END_CRYSTAL, "EnderCrystal class-to-entity type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.Firework.class),
+            org.bukkit.entity.EntityType.FIREWORK_ROCKET, "Firework class-to-entity type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.MushroomCow.class),
+            org.bukkit.entity.EntityType.MOOSHROOM, "MushroomCow class-to-entity type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.ThrownExpBottle.class),
+            org.bukkit.entity.EntityType.EXPERIENCE_BOTTLE,
+            "ThrownExpBottle class-to-entity type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.FishHook.class),
+            org.bukkit.entity.EntityType.FISHING_BOBBER, "FishHook class-to-entity type");
+    }
+
+    private static void generatedClassLookupPreservesPaperDefaultsAndAmbiguity() {
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.AbstractArrow.class),
+            org.bukkit.entity.EntityType.ARROW, "AbstractArrow defaults to Arrow");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.AbstractHorse.class),
+            org.bukkit.entity.EntityType.HORSE, "AbstractHorse defaults to Horse");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.Fireball.class),
+            org.bukkit.entity.EntityType.FIREBALL, "Fireball defaults to the large fireball type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.Minecart.class),
+            org.bukkit.entity.EntityType.MINECART, "Minecart defaults to the rideable type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.ThrownPotion.class),
+            org.bukkit.entity.EntityType.SPLASH_POTION,
+            "ThrownPotion defaults to the splash potion type");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.Boat.class), null,
+            "Boat is ambiguous across registry variants");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.Fish.class), null,
+            "Fish is ambiguous across registry variants");
     }
 
     private static void suppliedRegistryTypeSelectsTheWrapperWithoutAnotherLookup() {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Bukkit EntityType constants from Steel's extracted registry."""
+"""Generate Bukkit EntityType constants from Foton's extracted registry."""
 import re
 import sys
 from pathlib import Path
@@ -14,12 +14,107 @@ out.parent.mkdir(parents=True, exist_ok=True)
 if "UNKNOWN" not in names:
     names.insert(0, "UNKNOWN")
 body = ",\n    ".join(names)
+
+# Paper 26.2 EntityType metadata differs from registry-name PascalCase for
+# these entries. Keep this narrow list aligned with the upstream API metadata;
+# regular names are derived only when Foton actually carries that Bukkit
+# interface source.
+PAPER_CLASS_ALIASES = {
+    "ACACIA_BOAT": "org.bukkit.entity.boat.AcaciaBoat",
+    "ACACIA_CHEST_BOAT": "org.bukkit.entity.boat.AcaciaChestBoat",
+    "BAMBOO_CHEST_RAFT": "org.bukkit.entity.boat.BambooChestRaft",
+    "BAMBOO_RAFT": "org.bukkit.entity.boat.BambooRaft",
+    "BIRCH_BOAT": "org.bukkit.entity.boat.BirchBoat",
+    "BIRCH_CHEST_BOAT": "org.bukkit.entity.boat.BirchChestBoat",
+    "CHERRY_BOAT": "org.bukkit.entity.boat.CherryBoat",
+    "CHERRY_CHEST_BOAT": "org.bukkit.entity.boat.CherryChestBoat",
+    "CHEST_MINECART": "org.bukkit.entity.minecart.StorageMinecart",
+    "COMMAND_BLOCK_MINECART": "org.bukkit.entity.minecart.CommandMinecart",
+    "DARK_OAK_BOAT": "org.bukkit.entity.boat.DarkOakBoat",
+    "DARK_OAK_CHEST_BOAT": "org.bukkit.entity.boat.DarkOakChestBoat",
+    "END_CRYSTAL": "org.bukkit.entity.EnderCrystal",
+    "EXPERIENCE_BOTTLE": "org.bukkit.entity.ThrownExpBottle",
+    "EYE_OF_ENDER": "org.bukkit.entity.EnderSignal",
+    "FIREBALL": "org.bukkit.entity.LargeFireball",
+    "FIREWORK_ROCKET": "org.bukkit.entity.Firework",
+    "FISHING_BOBBER": "org.bukkit.entity.FishHook",
+    "FURNACE_MINECART": "org.bukkit.entity.minecart.PoweredMinecart",
+    "HOPPER_MINECART": "org.bukkit.entity.minecart.HopperMinecart",
+    "JUNGLE_BOAT": "org.bukkit.entity.boat.JungleBoat",
+    "JUNGLE_CHEST_BOAT": "org.bukkit.entity.boat.JungleChestBoat",
+    "LEASH_KNOT": "org.bukkit.entity.LeashHitch",
+    "LIGHTNING_BOLT": "org.bukkit.entity.LightningStrike",
+    "MANGROVE_BOAT": "org.bukkit.entity.boat.MangroveBoat",
+    "MANGROVE_CHEST_BOAT": "org.bukkit.entity.boat.MangroveChestBoat",
+    "MINECART": "org.bukkit.entity.minecart.RideableMinecart",
+    "MOOSHROOM": "org.bukkit.entity.MushroomCow",
+    "OAK_BOAT": "org.bukkit.entity.boat.OakBoat",
+    "OAK_CHEST_BOAT": "org.bukkit.entity.boat.OakChestBoat",
+    "PALE_OAK_BOAT": "org.bukkit.entity.boat.PaleOakBoat",
+    "PALE_OAK_CHEST_BOAT": "org.bukkit.entity.boat.PaleOakChestBoat",
+    "PUFFERFISH": "org.bukkit.entity.PufferFish",
+    "SNOW_GOLEM": "org.bukkit.entity.Snowman",
+    "SPAWNER_MINECART": "org.bukkit.entity.minecart.SpawnerMinecart",
+    "SPRUCE_BOAT": "org.bukkit.entity.boat.SpruceBoat",
+    "SPRUCE_CHEST_BOAT": "org.bukkit.entity.boat.SpruceChestBoat",
+    "TNT": "org.bukkit.entity.TNTPrimed",
+    "TNT_MINECART": "org.bukkit.entity.minecart.ExplosiveMinecart",
+    "ZOMBIFIED_PIGLIN": "org.bukkit.entity.PigZombie",
+}
+
+# CraftRegionAccessor converts these API supertypes to a concrete default
+# before consulting Paper's class metadata. Generic Boat and Fish deliberately
+# have no default because their registry variant is ambiguous.
+PAPER_SPAWN_DEFAULTS = {
+    "org.bukkit.entity.AbstractArrow": "ARROW",
+    "org.bukkit.entity.AbstractHorse": "HORSE",
+    "org.bukkit.entity.Fireball": "FIREBALL",
+    "org.bukkit.entity.Minecart": "MINECART",
+    "org.bukkit.entity.ThrownPotion": "SPLASH_POTION",
+}
+
+# Wave 3 Task 4 adds these interfaces. Keeping this allowlist explicit lets
+# Task 1 emit their stable metadata without accepting arbitrary future guesses.
+PLANNED_ENTITY_INTERFACES = {
+    "org.bukkit.entity.Allay",
+    "org.bukkit.entity.ItemDisplay",
+    "org.bukkit.entity.TextDisplay",
+}
+
+entity_source_root = repo / "plugin-api/src"
+entity_source_classes = {
+    ".".join(path.relative_to(entity_source_root).with_suffix("").parts)
+    for path in (entity_source_root / "org/bukkit/entity").rglob("*.java")
+}
+allowed_entity_classes = entity_source_classes | PLANNED_ENTITY_INTERFACES
+
+
+def register_class(mapping, class_name, entity_type):
+    if class_name not in allowed_entity_classes:
+        return
+    previous = mapping.setdefault(class_name, entity_type)
+    if previous != entity_type:
+        raise SystemExit(
+            f"ambiguous Bukkit entity class {class_name}: {previous} and {entity_type}"
+        )
+
+
+class_to_type = {}
+for name in names:
+    if name == "UNKNOWN":
+        continue
+    regular_class = "".join(part.title() for part in name.lower().split("_"))
+    class_name = PAPER_CLASS_ALIASES.get(name, f"org.bukkit.entity.{regular_class}")
+    register_class(class_to_type, class_name, name)
+
+for class_name, entity_type in PAPER_SPAWN_DEFAULTS.items():
+    if entity_type not in names:
+        raise SystemExit(f"Paper spawn default references missing entity type {entity_type}")
+    register_class(class_to_type, class_name, entity_type)
+
 class_to_type_cases = "\n".join(
-    "            case \"org.bukkit.entity."
-    + "".join(part.title() for part in name.lower().split("_"))
-    + f"\" -> {name};"
-    for name in names
-    if name != "UNKNOWN"
+    f'            case "{class_name}" -> {entity_type};'
+    for class_name, entity_type in sorted(class_to_type.items())
 )
 entity_classes = {
     "PLAYER": "FotonPlayer", "VILLAGER": "FotonVillager", "COW": "FotonCow",

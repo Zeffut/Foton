@@ -8,8 +8,8 @@ use std::sync::Weak;
 
 use foton_core::block_entity::BlockEntity as _;
 use foton_core::block_entity::entities::{BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR, BeehiveBlockEntity};
-use foton_core::entity::entities::BeeEntity;
-use foton_core::entity::next_entity_id;
+use foton_core::entity::entities::{BatEntity, BeeEntity};
+use foton_core::entity::{Entity as _, SharedEntity, next_entity_id};
 use foton_core::permission::{PermissionGroupManager, PermissionGroupsConfig};
 use foton_registry::{vanilla_blocks, vanilla_entities};
 use foton_utils::{BlockPos, Downcast as _, WorldAabb, types::UpdateFlags};
@@ -211,8 +211,52 @@ fn live_beehive_release_returns_java_provenance(
         env.exception_describe()?;
         env.exception_clear()?;
     }
+    let bat = Arc::new(BatEntity::new(
+        &vanilla_entities::BAT,
+        next_entity_id(),
+        DVec3::new(9.5, 64.5, 9.5),
+        Arc::downgrade(&world),
+    ));
+    world.try_add_entity(Arc::clone(&bat) as SharedEntity)?;
+    let living = java_entity_handle(&mut env, bat.uuid())?;
+    assert!(
+        env.is_instance_of(&living, "foton/FotonLivingEntity")?,
+        "an unhandled living type must use the living fallback"
+    );
+    let stale = java_entity_handle(
+        &mut env,
+        Uuid::from_u128(0x00000000_0000_0000_0000_000000000099),
+    )?;
+    assert!(env.is_instance_of(&stale, "foton/FotonEntity")?);
+    assert!(
+        !env.is_instance_of(&stale, "foton/FotonLivingEntity")?,
+        "a stale UUID must remain the generic non-living wrapper"
+    );
     server.cancel_token.cancel();
     host.disable_all()?;
     result?;
     Ok(())
+}
+
+fn java_entity_handle<'local>(
+    env: &mut jni::JNIEnv<'local>,
+    uuid: Uuid,
+) -> Result<jni::objects::JObject<'local>, Box<dyn Error>> {
+    let uuid_text = env.new_string(uuid.to_string())?;
+    let uuid = env
+        .call_static_method(
+            "java/util/UUID",
+            "fromString",
+            "(Ljava/lang/String;)Ljava/util/UUID;",
+            &[JValue::Object(&uuid_text)],
+        )?
+        .l()?;
+    Ok(env
+        .call_static_method(
+            "foton/FotonEntity",
+            "handle",
+            "(Ljava/util/UUID;)Lfoton/FotonEntity;",
+            &[JValue::Object(&uuid)],
+        )?
+        .l()?)
 }
