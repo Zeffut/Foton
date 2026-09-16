@@ -7,6 +7,8 @@ import com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent;
 public final class SpawnBridgeCheck {
     public static int preCalls;
     public static int spawnCalls;
+    private static boolean cancelSpawns = true;
+    private static java.util.UUID spawnedBee;
 
     public static void install() {
         var owner = new org.bukkit.plugin.java.JavaPlugin() {};
@@ -22,12 +24,30 @@ public final class SpawnBridgeCheck {
             (ignored, event) -> {
                 var spawn = (CreatureSpawnEvent) event;
                 if (spawn.getSpawnReason() == CreatureSpawnEvent.SpawnReason.BEEHIVE) spawnCalls++;
-                spawn.setCancelled(true);
+                spawnedBee = spawn.getEntity().getUniqueId();
+                spawn.setCancelled(cancelSpawns);
             }, owner);
     }
 
     public static boolean absentEntityIsDefault() {
         return new foton.FotonEntity(java.util.UUID.randomUUID()).getEntitySpawnReason()
             == CreatureSpawnEvent.SpawnReason.DEFAULT;
+    }
+
+    public static void allowBeehiveRelease() {
+        cancelSpawns = false;
+        spawnCalls = 0;
+        spawnedBee = null;
+    }
+
+    public static void assertReleasedBee(String uuid) {
+        org.bukkit.entity.Entity bee = new foton.FotonEntity(java.util.UUID.fromString(uuid));
+        if (spawnCalls != 1 || !bee.getUniqueId().equals(spawnedBee)) {
+            throw new AssertionError("Inserted bee must be the one observed in the BEEHIVE event");
+        }
+        CreatureSpawnEvent.SpawnReason actual = bee.getEntitySpawnReason();
+        if (actual != CreatureSpawnEvent.SpawnReason.BEEHIVE) {
+            throw new AssertionError("Inserted bee: expected BEEHIVE, got " + actual);
+        }
     }
 }

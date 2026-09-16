@@ -14165,7 +14165,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
 }
 
 #[cfg(test)]
-mod entity_bridge_tests {
+pub(crate) mod entity_bridge_tests {
     use std::sync::{Arc, Weak};
     use std::thread;
     use std::time::Duration;
@@ -14234,7 +14234,7 @@ mod entity_bridge_tests {
         }
     }
 
-    fn equipment_test_config() -> Arc<RuntimeConfig> {
+    pub(crate) fn equipment_test_config() -> Arc<RuntimeConfig> {
         Arc::new(RuntimeConfig {
             max_players: 1,
             view_distance: 2,
@@ -14284,7 +14284,7 @@ mod entity_bridge_tests {
         })
     }
 
-    fn rain_test_world() -> Arc<World> {
+    pub(crate) fn rain_test_world() -> Arc<World> {
         init_vanilla_registry();
         let runtime = Arc::new(
             match tokio::runtime::Builder::new_multi_thread()

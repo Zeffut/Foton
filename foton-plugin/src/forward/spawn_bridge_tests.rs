@@ -6,9 +6,18 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Weak;
 
+use foton_core::block_entity::BlockEntity as _;
+use foton_core::block_entity::entities::{BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR, BeehiveBlockEntity};
+use foton_core::entity::entities::BeeEntity;
+use foton_core::entity::next_entity_id;
+use foton_core::permission::{PermissionGroupManager, PermissionGroupsConfig};
+use foton_registry::{vanilla_blocks, vanilla_entities};
+use foton_utils::{BlockPos, Downcast as _, WorldAabb, types::UpdateFlags};
+use glam::DVec3;
+
 #[test]
 #[ignore = "requires the built plugin API; dev/ci.sh runs this after the Java build"]
-fn spawn_bridge_dispatches_and_returns_java_cancellation() -> Result<(), Box<dyn Error>> {
+fn spawn_bridge_dispatches_cancellation_and_queries_released_bee() -> Result<(), Box<dyn Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let scratch = tempfile::tempdir()?;
     let java_home = if let Some(home) = var_os("JAVA_HOME") {
@@ -97,5 +106,113 @@ fn spawn_bridge_dispatches_and_returns_java_cancellation() -> Result<(), Box<dyn
         env.call_static_method("SpawnBridgeCheck", "absentEntityIsDefault", "()Z", &[])?
             .z()?
     );
+    drop(env);
+    live_beehive_release_returns_java_provenance(&host)?;
+    Ok(())
+}
+
+fn live_test_server() -> Result<(tempfile::TempDir, Arc<Server>), Box<dyn Error>> {
+    // Server configuration requires a relative save path; TempDir removes only
+    // this test's directory, including when the Java assertion fails.
+    let storage = tempfile::Builder::new()
+        .prefix(".spawn-bridge-")
+        .tempdir_in(".")?;
+    let mut worlds: foton_core::config::WorldsConfig = toml::from_str(
+        r#"
+        seed = "0"
+        [storage]
+        type = "foton:ram"
+        [domains.minecraft]
+        default = true
+        [[domains.minecraft.worlds]]
+        name = "spawn_bridge"
+        generator = "foton:empty"
+        default = true
+        [domains.minecraft.worlds.config]
+        dimension_type = "minecraft:overworld"
+        "#,
+    )?;
+    worlds.save_path = storage
+        .path()
+        .file_name()
+        .ok_or("test storage directory has no name")?
+        .to_string_lossy()
+        .into_owned();
+    let runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()?,
+    );
+    let mut config = (*crate::natives::entity_bridge_tests::equipment_test_config()).clone();
+    // This offline test needs no external Minecraft services.
+    config.services_server = Some("http://127.0.0.1:0".to_owned());
+    let server = Arc::new(runtime.block_on(foton_core::server::Server::new(
+        Arc::clone(&runtime),
+        Default::default(),
+        config,
+        worlds,
+        PermissionGroupManager::transient(PermissionGroupsConfig::default())?,
+    ))?);
+    Ok((storage, server))
+}
+
+fn live_beehive_release_returns_java_provenance(
+    host: &crate::PluginHost,
+) -> Result<(), Box<dyn Error>> {
+    let (_storage, server) = live_test_server()?;
+    let world = crate::natives::entity_bridge_tests::rain_test_world();
+    server
+        .worlds
+        .insert(world.key.clone(), Arc::clone(&world))?;
+    server.attach_worlds();
+    host.bind_server(&Arc::downgrade(&server));
+    let mut env = host.vm.attach_current_thread()?;
+    env.call_static_method("SpawnBridgeCheck", "allowBeehiveRelease", "()V", &[])?;
+
+    let pos = BlockPos::new(8, 64, 8);
+    assert!(world.set_block(
+        pos,
+        vanilla_blocks::BEEHIVE.default_state(),
+        UpdateFlags::UPDATE_ALL
+    ));
+    let block_entity = world
+        .get_block_entity(pos)
+        .ok_or("placed hive is missing")?;
+    let hive = block_entity
+        .downcast_ref::<BeehiveBlockEntity>()
+        .ok_or("placed block entity is not a beehive")?;
+    let bee = BeeEntity::new(
+        &vanilla_entities::BEE,
+        next_entity_id(),
+        DVec3::new(8.5, 64.5, 8.5),
+        Arc::downgrade(&world),
+    );
+    bee.set_has_nectar(true);
+    hive.add_occupant(&bee);
+    for _ in 0..=BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR + 1 {
+        hive.tick(&world);
+    }
+    assert_eq!(hive.occupant_count(), 0, "the bee must leave the hive");
+    let released = world.get_entities_in_aabb_matching(
+        &WorldAabb::new(4.0, 60.0, 4.0, 13.0, 69.0, 13.0),
+        |entity| entity.entity_type() == &vanilla_entities::BEE,
+    );
+    assert_eq!(released.len(), 1, "exactly one bee must be inserted");
+    assert!(world.get_entity_by_id(released[0].id()).is_some());
+    let uuid = env.new_string(released[0].uuid().to_string())?;
+    let result = env.call_static_method(
+        "SpawnBridgeCheck",
+        "assertReleasedBee",
+        "(Ljava/lang/String;)V",
+        &[(&uuid).into()],
+    );
+    if result.is_err() && env.exception_check()? {
+        env.exception_describe()?;
+        env.exception_clear()?;
+    }
+    server.cancel_token.cancel();
+    host.disable_all()?;
+    result?;
     Ok(())
 }

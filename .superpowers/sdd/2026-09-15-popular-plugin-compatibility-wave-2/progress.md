@@ -60,4 +60,7 @@
 - RED: Java exact ABI returned 9 instead of 47 constants; absent/unknown parser returned CUSTOM; Paper-compiled consumer failed with NoSuchFieldError BEEHIVE.
 - RED: both real-server beehive tests observed zero CreatureSpawnEvent callbacks instead of one; new core/native provenance APIs failed compilation before implementation.
 - Ruling: correct both existing spawn JNI descriptors (three doubles, not four) and resolve pre-spawn entity names through the existing keyed registry — the real JNI cancellation test proved both paths were silently bypassed; without this, typed spawn events would still not reach plugins.
-- Status: implementation and focused verification complete; one follow-up remains to assert the live inserted bee's `getEntitySpawnReason()` through Java/JNI, and unrelated Task 6 API remains pending.
+- Status: implementation and focused verification complete; fix round 1 closes the live inserted bee's `getEntitySpawnReason()` Java/JNI gate. Unrelated Task 6 API remains pending.
+- [x] Task 6 SpawnReason fix round 1 — extend the isolated JVM fixture with a real server and the existing isolated world fixture; release one bee, obtain it from the world, and assert Java `Entity#getEntitySpawnReason()` returns `BEEHIVE` for that exact UUID.
+- [x] Live Java/JNI provenance gate — temporary native-query mutation produced `AssertionError: Inserted bee: expected BEEHIVE, got DEFAULT`; mutation restored via `apply_patch`, then the live test passed. Production behavior is unchanged.
+- Fix-round verification: live JNI gate 1 passed; plugin unit suite 30 passed (live gate separately invoked); core beehive suite 2 passed; spawn suite 3 passed; formatting and diff whitespace checks passed. Full evidence: `task-6-spawnreason-fix-report.md`.
