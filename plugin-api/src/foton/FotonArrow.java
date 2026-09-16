@@ -9,13 +9,26 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
 /** Arrow handle backed by the arrow's server-side mob-effect list. */
-public final class FotonArrow extends FotonProjectile implements Arrow {
+public class FotonArrow extends FotonProjectile implements Arrow {
     public FotonArrow(UUID id) { super(id); }
 
-    @Override public org.bukkit.potion.PotionData getBasePotionData() {
+    @Override public void setBasePotionType(org.bukkit.potion.PotionType type) {
+        Native.setArrowPotion(getUniqueId().toString(),
+            type == null ? "" : "minecraft:" + type.name().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    @Override public org.bukkit.potion.PotionType getBasePotionType() {
         String value = Native.arrowPotion(getUniqueId().toString());
         if (value == null) return null;
         String name = value.substring(value.indexOf(':') + 1).toUpperCase(java.util.Locale.ROOT);
+        try { return org.bukkit.potion.PotionType.valueOf(name); }
+        catch (IllegalArgumentException ignored) { return null; }
+    }
+
+    @Override public org.bukkit.potion.PotionData getBasePotionData() {
+        org.bukkit.potion.PotionType type = getBasePotionType();
+        if (type == null) return null;
+        String name = type.name();
         boolean extended = name.startsWith("LONG_");
         boolean upgraded = name.startsWith("STRONG_");
         if (extended) name = name.substring(5);

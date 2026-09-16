@@ -230,6 +230,7 @@ public final class Native {
     public static native void clearAreaEffectCloudEffects(String uuid);
     public static native String[] arrowCustomEffects(String uuid);
     public static native String arrowPotion(String uuid);
+    public static native void setArrowPotion(String uuid, String potion);
     public static native int arrowPotionColor(String uuid);
     public static native boolean entityRemoveWhenFarAway(String uuid);
     public static native boolean entityPersistent(String uuid);
@@ -375,6 +376,8 @@ public final class Native {
     public static native void setTropicalFishBodyColor(String uuid, int color);
     public static native int slimeSize(String uuid);
     public static native void setSlimeSize(String uuid, int size);
+    public static native boolean cubeMobCanWander(String uuid);
+    public static native void setCubeMobWander(String uuid, boolean canWander);
     public static native void setCreeperPowered(String uuid, boolean powered);
     public static native boolean creeperPowered(String uuid);
     public static native void setGoatScreaming(String uuid, boolean screaming);

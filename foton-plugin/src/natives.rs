@@ -1279,6 +1279,12 @@ extern "system" fn entity_item_stack(
     if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
         return to_java(&mut env, Some(describe_slot(&frame.framed_item())));
     }
+    if let Some(fireball) = entity.as_ref().downcast_ref::<LargeFireballEntity>() {
+        return to_java(&mut env, Some(describe_slot(&fireball.item())));
+    }
+    if let Some(fireball) = entity.as_ref().downcast_ref::<SmallFireballEntity>() {
+        return to_java(&mut env, Some(describe_slot(&fireball.item())));
+    }
     null_mut()
 }
 
@@ -1312,6 +1318,10 @@ extern "system" fn set_entity_item_stack(
         item.set_item(stack);
     } else if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
         frame.set_item(stack);
+    } else if let Some(fireball) = entity.as_ref().downcast_ref::<LargeFireballEntity>() {
+        fireball.set_item(stack);
+    } else if let Some(fireball) = entity.as_ref().downcast_ref::<SmallFireballEntity>() {
+        fireball.set_item(stack);
     }
 }
 
@@ -2882,9 +2892,6 @@ extern "system" fn set_slime_size(
     uuid: JString<'_>,
     size: jint,
 ) {
-    if size <= 0 {
-        return;
-    }
     let Ok(text) = env.get_string(&uuid) else {
         return;
     };
@@ -2898,6 +2905,49 @@ extern "system" fn set_slime_size(
         return;
     };
     slime.set_cube_size(size, true);
+}
+
+extern "system" fn cube_mob_can_wander(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
+        return 0;
+    };
+    entity_by_uuid(&id)
+        .and_then(|(_, entity)| {
+            entity
+                .as_ref()
+                .downcast_ref::<SlimeEntity>()
+                .map(SlimeEntity::can_wander)
+        })
+        .is_some_and(|can_wander| can_wander)
+        .into()
+}
+
+extern "system" fn set_cube_mob_wander(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    can_wander: jboolean,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(slime) = entity.as_ref().downcast_ref::<SlimeEntity>() else {
+        return;
+    };
+    slime.set_wander(can_wander != 0);
 }
 
 extern "system" fn set_creeper_powered(
@@ -6334,6 +6384,39 @@ extern "system" fn arrow_potion(
             })
     });
     to_java(&mut env, value)
+}
+
+extern "system" fn set_arrow_potion(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    potion: JString<'_>,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
+        return;
+    };
+    let Ok(potion_text) = env.get_string(&potion) else {
+        return;
+    };
+    let potion = potion_text.to_str().ok().and_then(|value| {
+        if value.is_empty() {
+            None
+        } else {
+            Identifier::from_str(value)
+                .ok()
+                .and_then(|key| REGISTRY.potions.by_key(&key))
+        }
+    });
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(arrow) = entity.as_ref().downcast_ref::<ArrowEntity>() else {
+        return;
+    };
+    arrow.set_base_potion(potion);
 }
 
 extern "system" fn arrow_potion_color(
@@ -12772,6 +12855,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_slime_size as *mut c_void,
         ),
         method(
+            "cubeMobCanWander",
+            "(Ljava/lang/String;)Z",
+            cube_mob_can_wander as *mut c_void,
+        ),
+        method(
+            "setCubeMobWander",
+            "(Ljava/lang/String;Z)V",
+            set_cube_mob_wander as *mut c_void,
+        ),
+        method(
             "setCreeperPowered",
             "(Ljava/lang/String;Z)V",
             set_creeper_powered as *mut c_void,
@@ -13421,6 +13514,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "arrowPotion",
             "(Ljava/lang/String;)Ljava/lang/String;",
             arrow_potion as *mut c_void,
+        ),
+        method(
+            "setArrowPotion",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_arrow_potion as *mut c_void,
         ),
         method(
             "arrowPotionColor",

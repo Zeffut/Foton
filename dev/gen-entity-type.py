@@ -67,10 +67,14 @@ PAPER_CLASS_ALIASES = {
 # have no default because their registry variant is ambiguous.
 PAPER_SPAWN_DEFAULTS = {
     "org.bukkit.entity.AbstractArrow": "ARROW",
+    "org.bukkit.entity.AbstractCow": "COW",
+    "org.bukkit.entity.AbstractCubeMob": "SLIME",
     "org.bukkit.entity.AbstractHorse": "HORSE",
     "org.bukkit.entity.Fireball": "FIREBALL",
     "org.bukkit.entity.Minecart": "MINECART",
+    "org.bukkit.entity.SizedFireball": "FIREBALL",
     "org.bukkit.entity.ThrownPotion": "SPLASH_POTION",
+    "org.bukkit.entity.TippedArrow": "ARROW",
 }
 
 # Wave 3 Task 4 adds these interfaces. Keeping this allowlist explicit lets

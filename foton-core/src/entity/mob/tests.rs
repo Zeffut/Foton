@@ -322,9 +322,7 @@ fn mob_control_flags_enable_goals_without_controller_or_boat() {
     let mob = DespawnTestMob::new(None, false);
     {
         let mut selector = mob.mob_base().goal_selector().lock();
-        selector.disable_control(GoalControl::Move);
-        selector.disable_control(GoalControl::Jump);
-        selector.disable_control(GoalControl::Look);
+        selector.set_mob_controls(false, false, false);
     }
 
     mob.update_control_flags();

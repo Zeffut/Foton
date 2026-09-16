@@ -10,8 +10,11 @@ use foton_macros::entity_behavior;
 use foton_protocol::packets::game::{CGameEvent, GameEventType};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::item_stack::ItemStack;
+use foton_registry::potion::PotionRef;
 use foton_registry::vanilla_entity_data::ArrowEntityData;
-use foton_registry::{sound_events, vanilla_damage_types, vanilla_entities, vanilla_items};
+use foton_registry::{
+    RegistryReference, sound_events, vanilla_damage_types, vanilla_entities, vanilla_items,
+};
 use foton_utils::locks::SyncMutex;
 use foton_utils::types::Difficulty;
 use foton_utils::{DowncastType, DowncastTypeKey};
@@ -430,6 +433,24 @@ impl ArrowEntity {
     /// Records the ammunition item used to create this arrow.
     pub fn set_ammo_item(&self, ammo: ItemStack) {
         self.state.lock().fired_from_ammo = Some(ammo);
+    }
+
+    /// Changes the base potion in the arrow's native ammunition component.
+    pub fn set_base_potion(&self, potion: Option<PotionRef>) {
+        let previous = self
+            .ammo_potion_contents()
+            .unwrap_or_else(PotionContents::empty);
+        let contents = PotionContents::new(
+            potion.map(RegistryReference::new),
+            previous.custom_color(),
+            previous.custom_effects().to_vec(),
+            previous.custom_name().map(ToOwned::to_owned),
+        );
+        let mut ammo = self
+            .ammo_item()
+            .unwrap_or_else(|| ItemStack::new(&vanilla_items::TIPPED_ARROW));
+        ammo.set(POTION_CONTENTS, contents);
+        self.set_ammo_item(ammo);
     }
 
     /// Applies vanilla's owner-dependent pickup rule.
@@ -901,7 +922,9 @@ fn triangle(mode: f64, deviation: f64) -> f64 {
 mod tests {
     use std::sync::Arc;
 
-    use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_entities};
+    use foton_registry::{
+        init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_potions,
+    };
     use foton_utils::types::UpdateFlags;
     use foton_utils::{BlockPos, ChunkPos};
     use glam::DVec3;
@@ -952,6 +975,26 @@ mod tests {
             .try_add_entity(Arc::clone(&pig) as SharedEntity)
             .expect("the test chunk is loaded, so the pig should attach");
         pig
+    }
+
+    #[test]
+    fn base_potion_uses_the_arrows_native_ammunition_state() {
+        let world = arrow_world("arrow_base_potion_state");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+
+        assert!(arrow.ammo_potion_contents().is_none());
+        arrow.set_base_potion(Some(&vanilla_potions::WATER));
+        let contents = arrow
+            .ammo_potion_contents()
+            .unwrap_or_else(|| panic!("WATER must be stored in the arrow ammunition"));
+        assert!(contents.is(&vanilla_potions::WATER));
+        arrow.set_base_potion(None);
+        assert!(
+            arrow
+                .ammo_potion_contents()
+                .is_some_and(|contents| contents.potion().is_none()),
+            "clearing the base potion must preserve a native, potionless contents value"
+        );
     }
 
     /// Flies an arrow into whatever is in front of it, one tick at a time,

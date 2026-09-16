@@ -232,8 +232,20 @@ fn live_beehive_release_returns_java_provenance(
         !env.is_instance_of(&stale, "foton/FotonLivingEntity")?,
         "a stale UUID must remain the generic non-living wrapper"
     );
+    let world_name = env.new_string(world.key.to_string())?;
+    let contracts = env.call_static_method(
+        "SpawnBridgeCheck",
+        "assertClassSpawnContracts",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&world_name)],
+    );
+    if contracts.is_err() && env.exception_check()? {
+        env.exception_describe()?;
+        env.exception_clear()?;
+    }
     server.cancel_token.cancel();
     host.disable_all()?;
+    contracts?;
     result?;
     Ok(())
 }

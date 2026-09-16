@@ -192,6 +192,10 @@ public final class FotonWorld implements World {
 
     @Override public <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) {
         org.bukkit.entity.Entity entity = spawnEntity(location, FotonEntityFactory.typeFor(clazz));
+        if (clazz == org.bukkit.entity.TippedArrow.class && entity instanceof FotonArrow arrow) {
+            arrow.setBasePotionType(org.bukkit.potion.PotionType.WATER);
+            entity = new FotonTippedArrow(arrow.getUniqueId());
+        }
         return clazz != null && clazz.isInstance(entity) ? clazz.cast(entity) : null;
     }
 
@@ -313,8 +317,10 @@ public final class FotonWorld implements World {
         if ("splash_potion".equalsIgnoreCase(type) || "lingering_potion".equalsIgnoreCase(type)) return new FotonThrownPotion(uuid);
         if (isVehicleType(type)) return new FotonVehicle(uuid);
         if ("arrow".equalsIgnoreCase(type) || "spectral_arrow".equalsIgnoreCase(type)) return new FotonArrow(uuid);
+        if ("fireball".equalsIgnoreCase(type) || "small_fireball".equalsIgnoreCase(type))
+            return new FotonSizedFireball(uuid);
         if (type != null && switch (type.toLowerCase(java.util.Locale.ROOT)) {
-            case "fireball", "small_fireball", "dragon_fireball", "wither_skull" -> true;
+            case "dragon_fireball", "wither_skull" -> true;
             default -> false;
         }) return new FotonFireball(uuid);
         if (isProjectileType(type)) return new FotonProjectile(uuid);

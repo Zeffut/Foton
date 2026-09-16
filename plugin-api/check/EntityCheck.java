@@ -7,6 +7,8 @@ final class EntityCheck {
         generatedClassLookupPreservesUnderscoredRegistryKeys();
         generatedClassLookupUsesCanonicalPaperClasses();
         generatedClassLookupPreservesPaperDefaultsAndAmbiguity();
+        generatedClassLookupPreservesPaperAbstractAndSpecializedDefaults();
+        entityContractsPreservePaperInheritance();
         dimensionsComeFromTheBoundingBox();
         destinationLocationIsFilledInPlace();
         missingEntityStillReturnsDestination();
@@ -51,6 +53,47 @@ final class EntityCheck {
             "Boat is ambiguous across registry variants");
         Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.Fish.class), null,
             "Fish is ambiguous across registry variants");
+    }
+
+    private static void generatedClassLookupPreservesPaperAbstractAndSpecializedDefaults() {
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.AbstractCow.class),
+            org.bukkit.entity.EntityType.COW, "AbstractCow defaults to Cow");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.AbstractCubeMob.class),
+            org.bukkit.entity.EntityType.SLIME, "AbstractCubeMob defaults to Slime");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.SizedFireball.class),
+            org.bukkit.entity.EntityType.FIREBALL, "SizedFireball defaults to Fireball");
+        Checks.same(foton.FotonEntityFactory.typeFor(org.bukkit.entity.TippedArrow.class),
+            org.bukkit.entity.EntityType.ARROW, "TippedArrow defaults to Arrow");
+    }
+
+    private static void entityContractsPreservePaperInheritance() {
+        Checks.expect(org.bukkit.entity.Animal.class.isAssignableFrom(
+                org.bukkit.entity.AbstractCow.class),
+            "AbstractCow must preserve Foton's animal hierarchy");
+        Checks.expect(org.bukkit.entity.AbstractCow.class.isAssignableFrom(
+                org.bukkit.entity.Cow.class),
+            "Cow must inherit AbstractCow");
+        Checks.expect(org.bukkit.entity.Creature.class.isAssignableFrom(
+                org.bukkit.entity.AbstractCubeMob.class),
+            "AbstractCubeMob must inherit Creature");
+        Checks.expect(org.bukkit.entity.AbstractCubeMob.class.isAssignableFrom(
+                org.bukkit.entity.Slime.class),
+            "Slime must inherit AbstractCubeMob");
+        Checks.expect(org.bukkit.entity.Fireball.class.isAssignableFrom(
+                org.bukkit.entity.SizedFireball.class),
+            "SizedFireball must inherit Fireball");
+        Checks.expect(org.bukkit.entity.SizedFireball.class.isAssignableFrom(
+                foton.FotonSizedFireball.class),
+            "the sized fireball wrapper must expose SizedFireball");
+        Checks.expect(org.bukkit.entity.Arrow.class.isAssignableFrom(
+                org.bukkit.entity.TippedArrow.class),
+            "TippedArrow must inherit Arrow");
+        Checks.expect(org.bukkit.entity.TippedArrow.class.isAssignableFrom(
+                foton.FotonTippedArrow.class),
+            "the tipped arrow wrapper must expose TippedArrow");
+        Checks.expect(!org.bukkit.entity.TippedArrow.class.isAssignableFrom(
+                foton.FotonArrow.class),
+            "ordinary arrows must not claim tipped-arrow identity");
     }
 
     private static void suppliedRegistryTypeSelectsTheWrapperWithoutAnotherLookup() {

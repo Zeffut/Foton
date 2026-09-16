@@ -254,12 +254,22 @@ exit 0
             stale_marker = "pub static STALE_CHECKOUT_ENTITY: u8 = 0;\n"
             (generated / "vanilla_entities.rs").write_text(stale_marker, encoding="utf-8")
 
+            build_script_input = checkout / "foton-registry/build/build.rs"
+            invalidation_barrier = root / "invalidation-barrier"
+            os.utime(build_script_input, ns=(1_000_000_000, 1_000_000_000))
+            invalidation_barrier.write_text("cargo may regenerate only after build.rs changes\n")
+            os.utime(invalidation_barrier, ns=(2_000_000_000, 2_000_000_000))
+
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
             fake_cargo = fake_bin / "cargo"
             fake_cargo.write_text(
                 """#!/bin/sh
 if [ "$1" = "check" ]; then
+  if [ ! "$FOTON_TEST_BUILD_SCRIPT" -nt "$FOTON_TEST_INVALIDATION_BARRIER" ]; then
+    echo "registry build script was not invalidated before cargo" >&2
+    exit 23
+  fi
   : > "$FOTON_TEST_CARGO_INVALIDATED"
   cp "$FOTON_TEST_REGISTRY_BACKUP"/*.rs "$FOTON_TEST_REGISTRY_OUTPUT/"
 fi
@@ -272,6 +282,8 @@ exit 0
             environment = interpreter_environment()
             environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
             environment["FOTON_TEST_CARGO_INVALIDATED"] = str(root / "cargo-invalidated")
+            environment["FOTON_TEST_BUILD_SCRIPT"] = str(build_script_input)
+            environment["FOTON_TEST_INVALIDATION_BARRIER"] = str(invalidation_barrier)
             environment["FOTON_TEST_REGISTRY_BACKUP"] = str(backups)
             environment["FOTON_TEST_REGISTRY_OUTPUT"] = str(generated)
             result = subprocess.run(

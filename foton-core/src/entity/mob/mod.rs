@@ -52,7 +52,7 @@ use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::ai::control::{
     BodyRotationInput, MobControls, MoveControlOperation, rotate_if_necessary, rotate_towards,
 };
-use crate::entity::ai::goal::{GoalControl, GoalSelector};
+use crate::entity::ai::goal::GoalSelector;
 use crate::entity::ai::navigation::PathNavigation;
 use crate::entity::ai::path::{PathType, PathfindingContext, PathfindingMalus};
 use crate::entity::ai::sensing::Sensing;
@@ -2983,9 +2983,7 @@ pub trait Mob: LivingEntity + MobSource {
             .is_none_or(|vehicle| !vehicle.entity_type().is_abstract_boat);
 
         let mut selector = self.mob_base().goal_selector().lock();
-        selector.set_control(GoalControl::Move, no_controller);
-        selector.set_control(GoalControl::Jump, no_controller && not_in_boat);
-        selector.set_control(GoalControl::Look, no_controller);
+        selector.set_mob_controls(no_controller, no_controller && not_in_boat, no_controller);
     }
 
     /// Override this to change how the head follows the body, and call
