@@ -14,7 +14,8 @@ public class FotonProjectile extends FotonEntity implements Projectile {
         try {
             UUID id = UUID.fromString(owner);
             String type = Native.entityType(owner);
-            return "player".equalsIgnoreCase(type) ? new FotonPlayer(id) : FotonEntity.handle(id);
+            org.bukkit.entity.Entity entity = FotonWorld.wrapEntity(id, type);
+            return entity instanceof ProjectileSource source ? source : null;
         } catch (IllegalArgumentException error) {
             return null;
         }

@@ -14,6 +14,13 @@ out.parent.mkdir(parents=True, exist_ok=True)
 if "UNKNOWN" not in names:
     names.insert(0, "UNKNOWN")
 body = ",\n    ".join(names)
+class_to_type_cases = "\n".join(
+    "            case \"org.bukkit.entity."
+    + "".join(part.title() for part in name.lower().split("_"))
+    + f"\" -> {name};"
+    for name in names
+    if name != "UNKNOWN"
+)
 entity_classes = {
     "PLAYER": "FotonPlayer", "VILLAGER": "FotonVillager", "COW": "FotonCow",
     "PIG": "FotonPig", "CHICKEN": "FotonChicken", "NAUTILUS": "FotonNautilus", "ZOMBIE": "FotonZombie", "ZOMBIE_NAUTILUS": "FotonZombieNautilus", "ZOMBIE_VILLAGER": "FotonZombieVillager",
@@ -62,6 +69,12 @@ out.write_text(
     "        for (EntityType type : values()) if (type.key.equals(normalized)) return type;\n"
     "        return null;\n"
     "    }\n"
+    "    /** Returns the registry type for a canonical Bukkit entity class. */\n"
+    "    public static EntityType fromEntityClass(Class<? extends Entity> entityClass) {\n"
+    "        if (entityClass == null) return null;\n"
+    "        return switch (entityClass.getName()) {\n"
+    + class_to_type_cases + "\n"
+    + "            default -> null;\n        };\n    }\n"
     "}\n",
     encoding="utf-8",
 )

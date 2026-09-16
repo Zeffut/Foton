@@ -191,8 +191,7 @@ public final class FotonWorld implements World {
     }
 
     @Override public <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) {
-        String name = clazz == null ? null : clazz.getSimpleName().replaceFirst("Entity$", "");
-        org.bukkit.entity.Entity entity = spawnEntity(location, name == null ? null : org.bukkit.entity.EntityType.fromName(name));
+        org.bukkit.entity.Entity entity = spawnEntity(location, FotonEntityFactory.typeFor(clazz));
         return clazz != null && clazz.isInstance(entity) ? clazz.cast(entity) : null;
     }
 
@@ -234,7 +233,8 @@ public final class FotonWorld implements World {
         for (String id : ids) {
             try {
                 UUID uuid = UUID.fromString(id);
-                entities.add(wrapEntity(uuid, id));
+                String type = Native.entityType(id);
+                entities.add(wrapEntity(uuid, type));
             } catch (IllegalArgumentException ignored) {
                 // Native UUIDs are validated before they cross this boundary.
             }
@@ -242,8 +242,7 @@ public final class FotonWorld implements World {
         return java.util.Collections.unmodifiableList(entities);
     }
 
-    static org.bukkit.entity.Entity wrapEntity(UUID uuid, String id) {
-        String type = Native.entityType(id);
+    static org.bukkit.entity.Entity wrapEntity(UUID uuid, String type) {
         if ("lightning_bolt".equalsIgnoreCase(type)) return new FotonLightningStrike(uuid);
         if ("player".equalsIgnoreCase(type)) return new FotonPlayer(uuid);
         if ("iron_golem".equalsIgnoreCase(type)) return new FotonIronGolem(uuid);
@@ -319,7 +318,7 @@ public final class FotonWorld implements World {
             default -> false;
         }) return new FotonFireball(uuid);
         if (isProjectileType(type)) return new FotonProjectile(uuid);
-        if (Native.entityIsLiving(id)) {
+        if (Native.entityIsLiving(uuid.toString())) {
             if (isFlyingMonsterType(type)) return new FotonFlyingMonster(uuid);
             if (isMonsterType(type)) return new FotonMonster(uuid);
             if (isTameableType(type)) return new FotonTameableEntity(uuid);

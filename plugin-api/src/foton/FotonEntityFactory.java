@@ -2,6 +2,11 @@ package foton;
 
 /** Parses and creates Steel's compact entity snapshot representation. */
 public final class FotonEntityFactory implements org.bukkit.entity.EntityFactory {
+    public static org.bukkit.entity.EntityType typeFor(
+            Class<? extends org.bukkit.entity.Entity> entityClass) {
+        return org.bukkit.entity.EntityType.fromEntityClass(entityClass);
+    }
+
     @Override public org.bukkit.entity.EntitySnapshot createEntitySnapshot(String data) {
         if (data == null) return null;
         int at = data.indexOf('@');

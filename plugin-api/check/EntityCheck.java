@@ -3,9 +3,40 @@ final class EntityCheck {
     private EntityCheck() {}
 
     static void check() {
+        suppliedRegistryTypeSelectsTheWrapperWithoutAnotherLookup();
+        generatedClassLookupPreservesUnderscoredRegistryKeys();
         dimensionsComeFromTheBoundingBox();
         destinationLocationIsFilledInPlace();
         missingEntityStillReturnsDestination();
+    }
+
+    private static void generatedClassLookupPreservesUnderscoredRegistryKeys() {
+        Checks.same(
+            foton.FotonEntityFactory.typeFor(org.bukkit.entity.BlockDisplay.class),
+            org.bukkit.entity.EntityType.BLOCK_DISPLAY,
+            "BlockDisplay class-to-entity type");
+    }
+
+    private static void suppliedRegistryTypeSelectsTheWrapperWithoutAnotherLookup() {
+        java.util.UUID id =
+            java.util.UUID.fromString("00000000-0000-0000-0000-000000000001");
+        org.bukkit.entity.Entity wrapped;
+        try {
+            java.lang.reflect.Method method = foton.FotonWorld.class.getDeclaredMethod(
+                "wrapEntity", java.util.UUID.class, String.class);
+            method.setAccessible(true);
+            wrapped = (org.bukkit.entity.Entity) method.invoke(null, id, "block_display");
+        } catch (java.lang.reflect.InvocationTargetException error) {
+            if (error.getCause() instanceof Error cause) throw cause;
+            if (error.getCause() instanceof RuntimeException cause) throw cause;
+            throw new AssertionError("entity wrapper failed", error.getCause());
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("entity wrapper contract is missing", error);
+        }
+
+        Checks.same(wrapped.getUniqueId(), id, "entity wrapper UUID");
+        Checks.expect(wrapped instanceof foton.FotonBlockDisplay,
+            "block_display should use its typed wrapper");
     }
 
     private static void dimensionsComeFromTheBoundingBox() {
