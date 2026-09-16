@@ -1,4 +1,4 @@
-# Wave 2 SDD progress
+# SDD ledger — plan: docs/superpowers/plans/2026-09-15-popular-plugin-compatibility-wave-2.md
 
 - Plan base: `8a0f97d5793b127d3981e6c14902bf267ed674cc`
 - Foton functional baseline: `75f78b09351b3aa622dffd311831c7d61b566d38`
@@ -72,3 +72,19 @@
 - Ruling: use Paper's exact `Paper.SpawnReason` persisted representation; recognized values restore into the existing provenance snapshot/lock, while absent, malformed, or unknown values restore DEFAULT and never CUSTOM. Old saves remain readable without a migration framework.
 - Status: complete. `Paper.SpawnReason` now round-trips through the existing entity NBT payload and provenance lock; absent, unknown, and malformed values restore `DEFAULT` without changing Vanilla provenance.
 - Verification: focused round-trip 3 passed; entity persistence 16 passed; core provenance 3 passed; beehive 2 passed; plugin unit suite 30 passed plus the isolated live Java/JNI spawn bridge; JNI integration 1 passed; touched-crate check, formatting, and diff checks passed. Full evidence: `task-6-spawnreason-fix-round-2-report.md`.
+
+## Task 6 remaining live-backed APIs
+
+- Base: `097eb4554183e4030dd3fdc8bedcf591ee4a147b`; tracked checkout verified clean.
+- Task 5: approved (unchanged); Task 6 SpawnReason/BEEHIVE: approved through this base (unchanged).
+- Scope: player hierarchy, four live game-rule aliases, live trimmable-armor tag, generated enchantment conflict API and request-time JNI bridge only.
+- Status: implementation `638b70df5` and verification report `a547386a9` complete; all requested RED/GREEN evidence is recorded in `task-6-live-backed-report.md`. The independent review launched afterward was interrupted before a verdict.
+- Verification: plugin API build passed with 826 Java sources; real JVM/JNI test 1/1; plugin 32 unit + 1 integration; registry 474 unit + 1 doctest; 508/508 native declarations registered; touched-crate checks, formatting, and diff checks passed.
+- Baseline: local Minecraft source commit `e31ff098` targets 26.2, matching workspace `0.15.2+mc26.2`.
+
+| Scope pair | Producer / consumer | Finding |
+|---|---|---|
+| Task 5 → remaining Task 6 | Existing live players and Java host → corrected interface hierarchy | Preserve implementations/state; compile-only implementation consequences permitted. |
+| Approved Task 6 spawn → remaining Task 6 | Shared Native declarations/registration → one additional enchantment binding | Keep spawn paths unchanged and validate all native descriptors. |
+| Remaining Task 6 internal | Focused failing API/JNI tests → minimal live adapters | Tests must use extracted tags and registry exclusivity, not copied data. |
+| Remaining Task 6 → Task 7 | Verified committed adapters → later Zelda/full-wave evidence | Do not claim the expected 11-error reduction as measured in this scoped task. |

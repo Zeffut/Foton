@@ -70,6 +70,9 @@ the actual JVM successfully.
   — passed 1/1 focused registry bridge test.
 - `cargo test -p foton-plugin` — passed 32 unit tests plus 1 integration test;
   1 pre-existing spawn bridge test remained ignored by its own annotation.
+- `JAVA_HOME=$(/usr/libexec/java_home) cargo test -p foton-plugin --test bridge -- --nocapture`
+  — controller verification passed 1/1 with the JDK explicitly selected, so the
+  older integration test exercised the JVM rather than its no-JDK early return.
 - `cargo test -p foton-registry` — passed 474 unit tests and 1 compile-fail
   doctest; 5 documentation examples remained ignored.
 - `cargo check -p foton-plugin -p foton-registry --all-targets` — passed.
