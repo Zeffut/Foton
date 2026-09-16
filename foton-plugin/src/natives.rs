@@ -10,9 +10,10 @@
 //! (such as runtime recipes) expose their own synchronized write path.
 
 use std::fmt::Write;
+use std::io::Cursor;
 use std::mem;
 use std::ptr::null_mut;
-use std::str::FromStr as _;
+use std::str::{self, FromStr as _};
 #[cfg(test)]
 use std::sync::LazyLock;
 use std::sync::{Arc, OnceLock, Weak};
@@ -21,11 +22,11 @@ use std::time::{Duration, Instant};
 
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
-use foton_core::block_entity::entities::BrewingStandBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
 use foton_core::block_entity::entities::SpawnerBlockEntity;
+use foton_core::block_entity::entities::{BREWING_STAND_SLOTS, BrewingStandBlockEntity};
 use foton_core::block_entity::entities::{SignBlockEntity, SignText};
 use foton_core::boss_event::ServerBossEvent;
 use foton_core::chunk::chunk_request::ChunkRequestState;
@@ -141,6 +142,7 @@ use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
 use foton_registry::game_rules::GameRuleType;
 use foton_registry::game_rules::GameRuleValue;
+use foton_registry::item_predicate::LockCode;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::mob_effect::MobEffect;
 use foton_registry::particle_type::ParticleData;
@@ -154,13 +156,13 @@ use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference, TaggedRegistryExt as _,
-    vanilla_entities, vanilla_items,
+    vanilla_blocks, vanilla_entities, vanilla_items,
 };
 use foton_registry::{stat::Stat, vanilla_custom_stats};
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
-use foton_utils::serial::OptionalNbt;
+use foton_utils::serial::{OptionalNbt, ReadFrom as _, WriteTo as _};
 use foton_utils::text::DisplayResolutor;
 use foton_utils::translations::CONTAINER_CARTOGRAPHY_TABLE;
 use foton_utils::translations::CONTAINER_CRAFTING;
@@ -178,7 +180,8 @@ use glam::DVec3;
 use jni::JNIEnv;
 use jni::objects::{GlobalRef, JByteArray, JClass, JDoubleArray, JObject, JObjectArray, JString};
 use jni::sys::{
-    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jlong, jobject, jobjectArray, jstring,
+    jboolean, jbyte, jbyteArray, jdouble, jdoubleArray, jfloat, jint, jlong, jobject, jobjectArray,
+    jstring,
 };
 use rustc_hash::FxHashMap;
 use simdnbt::owned::NbtCompound;
@@ -11727,6 +11730,338 @@ extern "system" fn hopper_inventory_slot(
     to_java(&mut env, value)
 }
 
+const BREWING_SNAPSHOT_HEADER: &[u8; 4] = b"FBS\x01";
+const MAX_BREWING_SNAPSHOT_BYTES: usize = 1 << 20;
+
+struct BrewingBridgeSnapshot {
+    identity: u64,
+    items: Vec<ItemStack>,
+    brew_time: i32,
+    recipe_brew_time: i32,
+    fuel: i32,
+    custom_name: Option<TextComponent>,
+    lock: LockCode,
+}
+
+fn append_brewing_blob(output: &mut Vec<u8>, bytes: &[u8]) -> Option<()> {
+    let length = u32::try_from(bytes.len()).ok()?;
+    output.extend_from_slice(&length.to_be_bytes());
+    output.extend_from_slice(bytes);
+    Some(())
+}
+
+fn encode_brewing_snapshot(snapshot: &BrewingBridgeSnapshot) -> Option<Vec<u8>> {
+    if snapshot.items.len() != BREWING_STAND_SLOTS {
+        return None;
+    }
+    let mut output = Vec::new();
+    output.extend_from_slice(BREWING_SNAPSHOT_HEADER);
+    output.extend_from_slice(&snapshot.identity.to_be_bytes());
+    output.extend_from_slice(&snapshot.brew_time.to_be_bytes());
+    output.extend_from_slice(&snapshot.recipe_brew_time.to_be_bytes());
+    output.extend_from_slice(&snapshot.fuel.to_be_bytes());
+    for item in &snapshot.items {
+        append_brewing_blob(&mut output, describe_slot(item).as_bytes())?;
+    }
+    match &snapshot.custom_name {
+        Some(name) => {
+            let mut encoded = Vec::new();
+            name.write(&mut encoded).ok()?;
+            append_brewing_blob(&mut output, &encoded)?;
+        }
+        None => output.extend_from_slice(&u32::MAX.to_be_bytes()),
+    }
+    let mut lock = Vec::new();
+    snapshot.lock.write(&mut lock).ok()?;
+    append_brewing_blob(&mut output, &lock)?;
+    (output.len() <= MAX_BREWING_SNAPSHOT_BYTES).then_some(output)
+}
+
+struct BrewingPayloadReader<'a> {
+    bytes: &'a [u8],
+    cursor: usize,
+}
+
+impl<'a> BrewingPayloadReader<'a> {
+    const fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, cursor: 0 }
+    }
+
+    fn take(&mut self, length: usize) -> Option<&'a [u8]> {
+        let end = self.cursor.checked_add(length)?;
+        let value = self.bytes.get(self.cursor..end)?;
+        self.cursor = end;
+        Some(value)
+    }
+
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_be_bytes(self.take(4)?.try_into().ok()?))
+    }
+
+    fn i32(&mut self) -> Option<i32> {
+        Some(i32::from_be_bytes(self.take(4)?.try_into().ok()?))
+    }
+
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_be_bytes(self.take(8)?.try_into().ok()?))
+    }
+
+    fn blob(&mut self) -> Option<&'a [u8]> {
+        let length = usize::try_from(self.u32()?).ok()?;
+        self.take(length)
+    }
+
+    const fn is_finished(&self) -> bool {
+        self.cursor == self.bytes.len()
+    }
+}
+
+fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
+    if bytes.len() > MAX_BREWING_SNAPSHOT_BYTES {
+        return None;
+    }
+    let mut input = BrewingPayloadReader::new(bytes);
+    if input.take(BREWING_SNAPSHOT_HEADER.len())? != BREWING_SNAPSHOT_HEADER {
+        return None;
+    }
+    let identity = input.u64()?;
+    let brew_time = input.i32()?;
+    let recipe_brew_time = input.i32()?;
+    let fuel = input.i32()?;
+    if recipe_brew_time <= 0 {
+        return None;
+    }
+    let mut items = Vec::with_capacity(BREWING_STAND_SLOTS);
+    for _ in 0..BREWING_STAND_SLOTS {
+        let encoded = str::from_utf8(input.blob()?).ok()?;
+        items.push(parse_slot(encoded)?);
+    }
+    let custom_name = match input.u32()? {
+        u32::MAX => None,
+        length => {
+            let encoded = input.take(usize::try_from(length).ok()?)?;
+            let mut cursor = Cursor::new(encoded);
+            let name = TextComponent::read(&mut cursor).ok()?;
+            let consumed = usize::try_from(cursor.position()).ok()?;
+            Some((consumed == encoded.len()).then_some(name)?)
+        }
+    };
+    let encoded_lock = input.blob()?;
+    let mut cursor = Cursor::new(encoded_lock);
+    let lock = LockCode::read(&mut cursor).ok()?;
+    if usize::try_from(cursor.position()).ok()? != encoded_lock.len() || !input.is_finished() {
+        return None;
+    }
+    Some(BrewingBridgeSnapshot {
+        identity,
+        items,
+        brew_time,
+        recipe_brew_time,
+        fuel,
+        custom_name,
+        lock,
+    })
+}
+
+const fn brewing_update_flags(apply_physics: bool) -> UpdateFlags {
+    if apply_physics {
+        UpdateFlags::UPDATE_ALL
+    } else {
+        UpdateFlags::UPDATE_CLIENTS
+    }
+}
+
+fn brewing_apply_matches(
+    current_state: BlockStateId,
+    current_identity: Option<u64>,
+    desired_state: BlockStateId,
+    snapshot_identity: u64,
+    force: bool,
+) -> bool {
+    desired_state.get_block() == &vanilla_blocks::BREWING_STAND
+        && (force
+            || (current_state.get_block() == desired_state.get_block()
+                && current_identity == Some(snapshot_identity)))
+}
+
+const fn brewing_identity_from_java(identity: jlong) -> u64 {
+    u64::from_ne_bytes(identity.to_ne_bytes())
+}
+
+fn apply_brewing_snapshot(
+    world: &Arc<World>,
+    pos: BlockPos,
+    state: BlockStateId,
+    mut snapshot: BrewingBridgeSnapshot,
+    force: bool,
+    apply_physics: bool,
+) -> bool {
+    let current_state = world.get_block_state(pos);
+    let current_entity = world.get_block_entity(pos);
+    let current = current_entity
+        .as_deref()
+        .and_then(|entity| entity.downcast_ref::<BrewingStandBlockEntity>());
+    let current_identity = current.map(|brewing| brewing.state_snapshot().identity);
+    if !brewing_apply_matches(
+        current_state,
+        current_identity,
+        state,
+        snapshot.identity,
+        force,
+    ) {
+        return false;
+    }
+    if current_state != state && !world.set_block(pos, state, brewing_update_flags(apply_physics)) {
+        return false;
+    }
+    let Some(entity) = world.get_block_entity(pos) else {
+        return false;
+    };
+    let Some(brewing) = entity.downcast_ref::<BrewingStandBlockEntity>() else {
+        return false;
+    };
+    if force {
+        snapshot.identity = brewing.state_snapshot().identity;
+    }
+    let mut target = brewing.state_snapshot();
+    target.identity = snapshot.identity;
+    target.items = snapshot.items;
+    target.brew_time = snapshot.brew_time;
+    target.recipe_brew_time = snapshot.recipe_brew_time;
+    target.fuel = snapshot.fuel;
+    target.custom_name = snapshot.custom_name;
+    target.lock = snapshot.lock;
+    brewing.apply_state_snapshot(target)
+}
+
+extern "system" fn brewing_stand_snapshot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jbyteArray {
+    let encoded = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
+            let snapshot = brewing.state_snapshot();
+            encode_brewing_snapshot(&BrewingBridgeSnapshot {
+                identity: snapshot.identity,
+                items: snapshot.items,
+                brew_time: snapshot.brew_time,
+                recipe_brew_time: snapshot.recipe_brew_time,
+                fuel: snapshot.fuel,
+                custom_name: snapshot.custom_name,
+                lock: snapshot.lock,
+            })
+        });
+    let Some(encoded) = encoded else {
+        return null_mut();
+    };
+    env.byte_array_from_slice(&encoded)
+        .map_or_else(|_| null_mut(), JByteArray::into_raw)
+}
+
+extern "system" fn brewing_stand_live_item(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    identity: jlong,
+    slot: jint,
+) -> jstring {
+    let value = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
+            let slot = usize::try_from(slot).ok()?;
+            brewing
+                .live_item(brewing_identity_from_java(identity), slot)
+                .map(|item| describe_slot(&item))
+        });
+    to_java(&mut env, value)
+}
+
+extern "system" fn brewing_stand_set_live_item(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    identity: jlong,
+    slot: jint,
+    item: JString<'_>,
+) -> jboolean {
+    if !on_tick() {
+        return 0;
+    }
+    let Some(slot) = usize::try_from(slot).ok() else {
+        return 0;
+    };
+    let Ok(encoded): Result<String, _> = env.get_string(&item).map(Into::into) else {
+        return 0;
+    };
+    let Some(item) = parse_slot(&encoded) else {
+        return 0;
+    };
+    let changed = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            entity
+                .downcast_ref::<BrewingStandBlockEntity>()
+                .map(|brewing| {
+                    brewing.set_live_item(brewing_identity_from_java(identity), slot, item)
+                })
+        })
+        .unwrap_or(false);
+    jboolean::from(changed)
+}
+
+extern "system" fn brewing_stand_apply(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    state: JString<'_>,
+    payload: JByteArray<'_>,
+    force: jboolean,
+    apply_physics: jboolean,
+) -> jboolean {
+    if !on_tick() {
+        return 0;
+    }
+    let Ok(state): Result<String, _> = env.get_string(&state).map(Into::into) else {
+        return 0;
+    };
+    let Some(state) = parse_state(&state) else {
+        return 0;
+    };
+    let Ok(payload) = env.convert_byte_array(&payload) else {
+        return 0;
+    };
+    let Some(snapshot) = decode_brewing_snapshot(&payload) else {
+        return 0;
+    };
+    let Some(world) = world(&mut env, &name) else {
+        return 0;
+    };
+    jboolean::from(apply_brewing_snapshot(
+        &world,
+        BlockPos::new(x, y, z),
+        state,
+        snapshot,
+        force != 0,
+        apply_physics != 0,
+    ))
+}
+
 extern "system" fn brewing_stand_state(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -11739,8 +12074,8 @@ extern "system" fn brewing_stand_state(
         .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
         .and_then(|entity| {
             let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
-            let [brew_time, fuel] = brewing.brewing_state();
-            Some(format!("{brew_time}\u{001f}{fuel}"))
+            let snapshot = brewing.state_snapshot();
+            Some(format!("{}\u{001f}{}", snapshot.brew_time, snapshot.fuel))
         });
     to_java(&mut env, value)
 }
@@ -13108,6 +13443,26 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "brewingStandState",
             "(Ljava/lang/String;III)Ljava/lang/String;",
             brewing_stand_state as *mut c_void,
+        ),
+        method(
+            "brewingStandSnapshot",
+            "(Ljava/lang/String;III)[B",
+            brewing_stand_snapshot as *mut c_void,
+        ),
+        method(
+            "brewingStandLiveItem",
+            "(Ljava/lang/String;IIIJI)Ljava/lang/String;",
+            brewing_stand_live_item as *mut c_void,
+        ),
+        method(
+            "brewingStandSetLiveItem",
+            "(Ljava/lang/String;IIIJILjava/lang/String;)Z",
+            brewing_stand_set_live_item as *mut c_void,
+        ),
+        method(
+            "brewingStandApply",
+            "(Ljava/lang/String;IIILjava/lang/String;[BZZ)Z",
+            brewing_stand_apply as *mut c_void,
         ),
         method(
             "hopperSetInventorySlot",
@@ -16308,6 +16663,110 @@ mod slot_codec_tests {
         assert!(effects.custom_effects()[0].show_particles());
         assert!(effects.custom_effects()[0].show_icon());
         assert_eq!(decoded.opaque_nbt(), Some("{foo:1b}"));
+    }
+}
+
+#[cfg(test)]
+mod brewing_bridge_tests {
+    use foton_core::block_entity::entities::BREWING_STAND_SLOTS;
+    use foton_registry::item_predicate::LockCode;
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_items};
+    use foton_utils::types::UpdateFlags;
+    use text_components::TextComponent;
+
+    use super::{
+        BrewingBridgeSnapshot, bindings, brewing_apply_matches, brewing_update_flags,
+        decode_brewing_snapshot, encode_brewing_snapshot,
+    };
+
+    #[test]
+    fn versioned_snapshot_round_trip_preserves_every_bridge_field() {
+        init_vanilla_registry();
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = ItemStack::new(&vanilla_items::POTION);
+        items[3] = ItemStack::new(&vanilla_items::NETHER_WART);
+        let snapshot = BrewingBridgeSnapshot {
+            identity: 0x0102_0304_0506_0708,
+            items,
+            brew_time: 37,
+            recipe_brew_time: 240,
+            fuel: 11,
+            custom_name: Some(TextComponent::plain("Bridge brewer")),
+            lock: LockCode::NO_LOCK,
+        };
+
+        let encoded = encode_brewing_snapshot(&snapshot).expect("snapshot should encode");
+        assert_eq!(&encoded[..4], b"FBS\x01");
+        let decoded = decode_brewing_snapshot(&encoded).expect("snapshot should decode");
+
+        assert_eq!(decoded.identity, snapshot.identity);
+        assert_eq!(decoded.brew_time, snapshot.brew_time);
+        assert_eq!(decoded.recipe_brew_time, snapshot.recipe_brew_time);
+        assert_eq!(decoded.fuel, snapshot.fuel);
+        assert_eq!(decoded.custom_name, snapshot.custom_name);
+        assert_eq!(decoded.lock, snapshot.lock);
+        assert!(
+            decoded
+                .items
+                .iter()
+                .zip(&snapshot.items)
+                .all(|(actual, expected)| ItemStack::matches(actual, expected))
+        );
+        let mut trailing = encoded;
+        trailing.push(0);
+        assert!(decode_brewing_snapshot(&trailing).is_none());
+    }
+
+    #[test]
+    fn brewing_update_physics_controls_neighbor_notifications() {
+        assert_eq!(brewing_update_flags(false), UpdateFlags::UPDATE_CLIENTS);
+        assert_eq!(brewing_update_flags(true), UpdateFlags::UPDATE_ALL);
+    }
+
+    #[test]
+    fn brewing_apply_requires_type_and_identity_unless_forced() {
+        init_vanilla_registry();
+        let brewing = vanilla_blocks::BREWING_STAND.default_state();
+        let dirt = vanilla_blocks::DIRT.default_state();
+
+        assert!(brewing_apply_matches(brewing, Some(7), brewing, 7, false));
+        assert!(!brewing_apply_matches(brewing, Some(8), brewing, 7, false));
+        assert!(!brewing_apply_matches(dirt, None, brewing, 7, false));
+        assert!(brewing_apply_matches(brewing, Some(8), brewing, 7, true));
+        assert!(brewing_apply_matches(dirt, None, brewing, 7, true));
+        assert!(!brewing_apply_matches(brewing, Some(7), dirt, 7, true));
+    }
+
+    #[test]
+    fn brewing_bridge_bindings_match_the_java_contract() {
+        let expected = [
+            ("brewingStandSnapshot", "(Ljava/lang/String;III)[B"),
+            (
+                "brewingStandLiveItem",
+                "(Ljava/lang/String;IIIJI)Ljava/lang/String;",
+            ),
+            (
+                "brewingStandSetLiveItem",
+                "(Ljava/lang/String;IIIJILjava/lang/String;)Z",
+            ),
+            (
+                "brewingStandApply",
+                "(Ljava/lang/String;IIILjava/lang/String;[BZZ)Z",
+            ),
+        ];
+        let methods = bindings();
+
+        for (name, signature) in expected {
+            let method = methods
+                .iter()
+                .find(|method| method.name.to_str().ok() == Some(name));
+            assert_eq!(
+                method.and_then(|method| method.sig.to_str().ok()),
+                Some(signature),
+                "missing or mismatched native {name}"
+            );
+        }
     }
 }
 

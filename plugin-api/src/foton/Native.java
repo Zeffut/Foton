@@ -109,6 +109,13 @@ public final class Native {
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
     public static native String brewingStandState(String world, int x, int y, int z);
+    public static native byte[] brewingStandSnapshot(String world, int x, int y, int z);
+    public static native String brewingStandLiveItem(String world, int x, int y, int z,
+        long identity, int slot);
+    public static native boolean brewingStandSetLiveItem(String world, int x, int y, int z,
+        long identity, int slot, String item);
+    public static native boolean brewingStandApply(String world, int x, int y, int z,
+        String blockState, byte[] snapshot, boolean force, boolean applyPhysics);
     public static native boolean jukeboxIsPlaying(String world, int x, int y, int z);
     public static native String jukeboxRecord(String world, int x, int y, int z);
     public static native void jukeboxSetRecord(String world, int x, int y, int z, String item);
