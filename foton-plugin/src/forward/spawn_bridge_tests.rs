@@ -9,11 +9,13 @@ use std::sync::Weak;
 use foton_core::block_entity::BlockEntity as _;
 use foton_core::block_entity::entities::{BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR, BeehiveBlockEntity};
 use foton_core::entity::entities::{BatEntity, BeeEntity};
-use foton_core::entity::{Entity as _, SharedEntity, next_entity_id};
+use foton_core::entity::{Entity as _, PrepublicationTestAnimal, SharedEntity, next_entity_id};
 use foton_core::permission::{PermissionGroupManager, PermissionGroupsConfig};
 use foton_registry::{vanilla_blocks, vanilla_entities};
 use foton_utils::{BlockPos, Downcast as _, WorldAabb, types::UpdateFlags};
 use glam::DVec3;
+
+use crate::natives::register_prepublication_test_entity;
 
 #[test]
 #[ignore = "requires the built plugin API; dev/ci.sh runs this after the Java build"]
@@ -74,6 +76,28 @@ fn stale_arrow_potion_before_registry_publication_is_safe() -> Result<(), Box<dy
         "()V",
         &[],
     )?;
+    drop(env);
+    host.disable_all()?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires the built plugin API and must run alone before registry publication"]
+fn live_animal_breed_items_before_registry_publication_are_safe() -> Result<(), Box<dyn Error>> {
+    assert!(foton_registry::REGISTRY.get().is_none());
+    let animal = Arc::new(PrepublicationTestAnimal::new(next_entity_id()));
+    register_prepublication_test_entity(Arc::clone(&animal) as SharedEntity);
+
+    let (_scratch, host) = spawn_check_host()?;
+    let mut env = host.vm.attach_current_thread()?;
+    let uuid = env.new_string(animal.uuid().to_string())?;
+    env.call_static_method(
+        "SpawnBridgeCheck",
+        "assertPrePublicationLiveAnimalBreedItems",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&uuid)],
+    )?;
+    assert!(foton_registry::REGISTRY.get().is_none());
     drop(env);
     host.disable_all()?;
     Ok(())

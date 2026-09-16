@@ -102,7 +102,7 @@ public final class Native {
     public static native void setWorldThunderDuration(String world, int ticks);
     public static native boolean worldThundering(String world);
     public static native void setWorldThundering(String world, boolean thundering);
-    public static native String spawnEntity(String world, double x, double y, double z, String type);
+    public static native String spawnEntity(String world, double x, double y, double z, String type, String initialization);
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);

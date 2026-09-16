@@ -29,6 +29,7 @@ simdnbt.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+foton-core = { path = "../foton-core", features = ["test-support"] }
 rayon.workspace = true
 tempfile = "3"
 tokio.workspace = true

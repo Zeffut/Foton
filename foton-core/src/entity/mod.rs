@@ -793,6 +793,8 @@ pub mod entities;
 mod entity;
 pub mod equine;
 mod fluid_contact;
+#[cfg(feature = "test-support")]
+mod prepublication_test_animal;
 #[expect(warnings)]
 #[rustfmt::skip]
 #[path = "generated/entities.rs"]
@@ -887,6 +889,8 @@ pub use movement_sync::{
 pub(crate) use nautilus::{AbstractNautilus, AbstractNautilusBase};
 pub use neutral_mob::NeutralMob;
 pub use patrolling_monster::{PatrolState, PatrollingMonster};
+#[cfg(feature = "test-support")]
+pub use prepublication_test_animal::PrepublicationTestAnimal;
 pub use projectile::{
     EntityHitResult, HurtingProjectile, HurtingProjectileBase, INITIAL_ACCELERATION_POWER,
     Projectile, ProjectileBase, ProjectileDeflection, ProjectileEventSource, ProjectileHit,

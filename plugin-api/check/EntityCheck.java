@@ -80,15 +80,31 @@ final class EntityCheck {
     }
 
     private static void entityContractsPreservePaperInheritance() {
-        Checks.expect(java.util.Arrays.asList(org.bukkit.entity.AbstractCow.class.getInterfaces())
-                .contains(org.bukkit.entity.Animals.class),
+        Checks.expect(java.util.Arrays.equals(org.bukkit.entity.Ageable.class.getInterfaces(),
+                new Class<?>[] { org.bukkit.entity.Creature.class }),
+            "Ageable must directly extend Creature");
+        Checks.expect(java.util.Arrays.equals(org.bukkit.entity.Breedable.class.getInterfaces(),
+                new Class<?>[] { org.bukkit.entity.Ageable.class }),
+            "Breedable must directly extend Ageable");
+        Checks.expect(java.util.Arrays.equals(org.bukkit.entity.Animals.class.getInterfaces(),
+                new Class<?>[] { org.bukkit.entity.Breedable.class }),
+            "Animals must directly extend Breedable");
+        Checks.expect(java.util.Arrays.equals(org.bukkit.entity.AbstractCow.class.getInterfaces(),
+                new Class<?>[] { org.bukkit.entity.Animals.class }),
             "AbstractCow must directly extend Paper's Animals contract");
-        Checks.expect(org.bukkit.entity.Breedable.class.isAssignableFrom(
-                org.bukkit.entity.Animals.class),
-            "Animals must preserve Paper's Breedable hierarchy");
-        Checks.expect(org.bukkit.entity.AbstractCow.class.isAssignableFrom(
+        Checks.expect(java.util.Arrays.equals(org.bukkit.entity.Cow.class.getInterfaces(),
+                new Class<?>[] { org.bukkit.entity.AbstractCow.class }),
+            "Cow must directly extend AbstractCow");
+        Checks.expect(org.bukkit.entity.Creature.class.isAssignableFrom(
                 org.bukkit.entity.Cow.class),
-            "Cow must inherit AbstractCow");
+            "Cow must transitively inherit Creature");
+        Checks.expect(org.bukkit.entity.Mob.class.isAssignableFrom(
+                org.bukkit.entity.Cow.class),
+            "Cow must transitively inherit Mob");
+        Checks.expect(java.util.Arrays.stream(org.bukkit.entity.Ageable.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("setBaby")
+                    && method.getParameterCount() == 1),
+            "Ageable must not add a setBaby(boolean) declaration absent from Paper");
         Checks.expect(java.util.Arrays.asList(org.bukkit.entity.MushroomCow.class.getInterfaces())
                 .contains(org.bukkit.entity.AbstractCow.class),
             "MushroomCow must directly extend AbstractCow rather than Cow");

@@ -13,12 +13,16 @@ use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::blocks::properties::Direction;
 use foton_registry::blocks::shapes::is_face_full;
 use foton_registry::entity_type::EntityTypeRef;
+use foton_registry::potion::PotionRef;
 use foton_registry::vanilla_block_tags::BlockTag;
-use foton_registry::{REGISTRY, RegistryExt as _, TaggedRegistryExt as _, vanilla_blocks};
+use foton_registry::{
+    REGISTRY, RegistryExt as _, TaggedRegistryExt as _, vanilla_blocks, vanilla_entities,
+};
 use foton_utils::Identifier;
 use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use glam::DVec3;
 
+use crate::entity::entities::ArrowEntity;
 use crate::entity::{ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
 use crate::physics::WorldCollisionProvider;
 use crate::physics::collision::CollisionWorld as _;
@@ -44,6 +48,13 @@ pub enum SpawnStrategy {
     LegacyIronGolem,
 }
 
+/// State that must exist on an entity before it becomes observable in a world.
+#[derive(Debug, Clone, Copy)]
+pub enum SpawnEntityInitialization {
+    /// Creates a vanilla arrow carrying the given base potion.
+    ArrowPotion(PotionRef),
+}
+
 /// Creates and inserts an entity at an exact Bukkit-requested position.
 #[must_use]
 pub fn spawn_entity_at(
@@ -60,6 +71,42 @@ pub fn spawn_entity_at(
     )?;
     world.try_add_entity(Arc::clone(&entity)).ok()?;
     Some(entity)
+}
+
+/// Creates and inserts an entity whose requested state must precede publication.
+#[must_use]
+pub fn spawn_entity_at_initialized(
+    world: &Arc<World>,
+    key: &Identifier,
+    position: DVec3,
+    initialization: SpawnEntityInitialization,
+) -> Option<SharedEntity> {
+    let entity = create_entity_at(world, key, position, initialization)?;
+    world.try_add_entity(Arc::clone(&entity)).ok()?;
+    Some(entity)
+}
+
+fn create_entity_at(
+    world: &Arc<World>,
+    key: &Identifier,
+    position: DVec3,
+    initialization: SpawnEntityInitialization,
+) -> Option<SharedEntity> {
+    let entity_type = REGISTRY.entity_types.by_key(key)?;
+    match initialization {
+        SpawnEntityInitialization::ArrowPotion(potion)
+            if entity_type == &vanilla_entities::ARROW =>
+        {
+            Some(Arc::new(ArrowEntity::new_with_base_potion(
+                entity_type,
+                next_entity_id(),
+                position,
+                Arc::downgrade(world),
+                potion,
+            )))
+        }
+        SpawnEntityInitialization::ArrowPotion(_) => None,
+    }
 }
 
 impl SpawnStrategy {
@@ -121,6 +168,74 @@ fn is_refused_underfoot(state: BlockStateId) -> bool {
     REGISTRY.blocks.is_in_tag(block, &BlockTag::LEAVES)
         || REGISTRY.blocks.is_in_tag(block, &BlockTag::IMPERMEABLE)
         || REGISTRY.blocks.is_in_tag(block, &BlockTag::C_GLASS_PANES)
+}
+
+#[cfg(test)]
+mod initialized_spawn_tests {
+    use std::sync::Arc;
+
+    use foton_registry::data_components::components::PotionContents;
+    use foton_registry::{init_vanilla_registry, vanilla_entities, vanilla_potions};
+    use foton_utils::{ChunkPos, Downcast as _};
+
+    use super::*;
+    use crate::entity::entities::ArrowEntity;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    #[test]
+    fn tipped_arrow_is_water_before_publication() {
+        init_vanilla_registry();
+        let world = fresh_test_world("initialized_tipped_arrow");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let entity = create_entity_at(
+            &world,
+            &vanilla_entities::ARROW.key,
+            DVec3::new(8.5, 64.0, 8.5),
+            SpawnEntityInitialization::ArrowPotion(&vanilla_potions::WATER),
+        )
+        .unwrap_or_else(|| panic!("the initialized arrow must construct"));
+        assert!(world.get_entity_by_uuid(&entity.uuid()).is_none());
+        let arrow = entity
+            .as_ref()
+            .downcast_ref::<ArrowEntity>()
+            .unwrap_or_else(|| panic!("the constructed entity must be an arrow"));
+        assert!(
+            arrow
+                .ammo_potion_contents()
+                .is_some_and(|contents| contents.is(&vanilla_potions::WATER))
+        );
+        assert_eq!(
+            arrow.ammo_potion_color(),
+            Some(PotionContents::BASE_POTION_COLOR)
+        );
+
+        world
+            .try_add_entity(Arc::clone(&entity))
+            .unwrap_or_else(|error| panic!("initialized entity must publish: {error}"));
+        let published = world
+            .get_entity_by_uuid(&entity.uuid())
+            .unwrap_or_else(|| panic!("the initialized entity must be observable after insertion"));
+        assert!(Arc::ptr_eq(&published, &entity));
+    }
+
+    #[test]
+    fn arrow_initialization_mismatch_cannot_publish_an_entity() {
+        init_vanilla_registry();
+        let world = fresh_test_world("invalid_initialized_arrow");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let before = world.accessible_entities().len();
+
+        let entity = spawn_entity_at_initialized(
+            &world,
+            &vanilla_entities::COW.key,
+            DVec3::new(8.5, 64.0, 8.5),
+            SpawnEntityInitialization::ArrowPotion(&vanilla_potions::WATER),
+        );
+
+        assert!(entity.is_none());
+        assert_eq!(world.accessible_entities().len(), before);
+    }
 }
 
 /// Tries to put one mob of `entity_type` on the ground near `start`.

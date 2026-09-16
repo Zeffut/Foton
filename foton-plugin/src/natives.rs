@@ -13,6 +13,8 @@ use std::fmt::Write;
 use std::mem;
 use std::ptr::null_mut;
 use std::str::FromStr as _;
+#[cfg(test)]
+use std::sync::LazyLock;
 use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
@@ -82,7 +84,9 @@ use foton_core::entity::entities::objects::projectiles::{
     DragonFireballEntity, LargeFireballEntity, SmallFireballEntity,
 };
 use foton_core::entity::entities::objects::vehicles::{BoatEntity, RaftEntity};
-use foton_core::entity::spawn_util::spawn_entity_at;
+use foton_core::entity::spawn_util::{
+    SpawnEntityInitialization, spawn_entity_at, spawn_entity_at_initialized,
+};
 use foton_core::entity::spellcaster_illager::{IllagerSpell, SpellcasterIllager};
 use foton_core::entity::{
     Animal, Entity, LlamaVariant, MobEffectInstance, PluginSpawnReason, is_tamed, owner_uuid,
@@ -128,6 +132,7 @@ use foton_registry::data_components::vanilla_components::{
     STORED_ENCHANTMENTS, TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT,
     WRITTEN_BOOK_CONTENT,
 };
+use foton_registry::enchantment::Enchantment;
 use foton_registry::entity_data::{Quaternionf, Vector3f};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
@@ -427,7 +432,7 @@ fn enchantments_conflict_state(first: &str, second: &str) -> bool {
     let Some(second) = registry.enchantments.by_key(&second) else {
         return false;
     };
-    !foton_registry::enchantment::Enchantment::are_compatible(first, second)
+    !Enchantment::are_compatible(first, second)
 }
 
 extern "system" fn enchantments_conflict(
@@ -1089,6 +1094,29 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
             return Some((Arc::clone(world), entity));
         }
     }
+    None
+}
+
+#[cfg(test)]
+static PREPUBLICATION_TEST_ENTITIES: LazyLock<SyncMutex<FxHashMap<Uuid, SharedEntity>>> =
+    LazyLock::new(|| SyncMutex::new(FxHashMap::default()));
+
+#[cfg(test)]
+pub(crate) fn register_prepublication_test_entity(entity: SharedEntity) {
+    PREPUBLICATION_TEST_ENTITIES
+        .lock()
+        .insert(entity.uuid(), entity);
+}
+
+fn animal_entity_by_uuid(uuid: &Uuid) -> Option<SharedEntity> {
+    if let Some((_, entity)) = entity_by_uuid(uuid) {
+        return Some(entity);
+    }
+    #[cfg(test)]
+    {
+        return PREPUBLICATION_TEST_ENTITIES.lock().get(uuid).cloned();
+    }
+    #[cfg(not(test))]
     None
 }
 
@@ -4473,10 +4501,10 @@ extern "system" fn entity_can_breed(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return 0;
     };
-    let Some(animal) = entity.as_ref().as_animal() else {
+    let Some(ageable) = entity.as_ref().as_ageable_mob() else {
         return 0;
     };
-    (animal.in_love_time() > 0).into()
+    (ageable.get_age() == 0).into()
 }
 
 extern "system" fn set_entity_breed(
@@ -4494,10 +4522,14 @@ extern "system" fn set_entity_breed(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return;
     };
-    let Some(animal) = entity.as_ref().as_animal() else {
+    let Some(ageable) = entity.as_ref().as_ageable_mob() else {
         return;
     };
-    animal.set_in_love_time(if breed != 0 { 600 } else { 0 });
+    if breed != 0 {
+        ageable.set_age(0);
+    } else if ageable.get_age() >= 0 {
+        ageable.set_age(6000);
+    }
 }
 
 extern "system" fn animal_breed_cause(
@@ -4609,13 +4641,16 @@ extern "system" fn animal_is_breed_item(
     let Ok(item_key) = Identifier::from_str(&item_text) else {
         return 0;
     };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
+    let Some(entity) = animal_entity_by_uuid(&id) else {
         return 0;
     };
     let Some(animal) = entity.as_ref().as_animal() else {
         return 0;
     };
-    let Some(item) = REGISTRY.items.by_key(&item_key) else {
+    let Some(registry) = REGISTRY.get() else {
+        return 0;
+    };
+    let Some(item) = registry.items.by_key(&item_key) else {
         return 0;
     };
     animal.is_food(&ItemStack::new(item)).into()
@@ -10755,11 +10790,17 @@ extern "system" fn spawn_entity(
     y: jdouble,
     z: jdouble,
     type_name: JString<'_>,
+    initialization: JString<'_>,
 ) -> jstring {
     let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
         return null_mut();
     };
     let Ok(type_text): Result<String, _> = env.get_string(&type_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(initialization_text): Result<String, _> =
+        env.get_string(&initialization).map(Into::into)
+    else {
         return null_mut();
     };
     let Ok(world_key) = Identifier::from_str(&world_text) else {
@@ -10771,7 +10812,27 @@ extern "system" fn spawn_entity(
     let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
         return null_mut();
     };
-    let Some(entity) = spawn_entity_at(&world, &type_key, DVec3::new(x, y, z)) else {
+    let position = DVec3::new(x, y, z);
+    let entity = if initialization_text.is_empty() {
+        spawn_entity_at(&world, &type_key, position)
+    } else {
+        let Some(registry) = REGISTRY.get() else {
+            return null_mut();
+        };
+        let Ok(potion_key) = Identifier::from_str(&initialization_text) else {
+            return null_mut();
+        };
+        let Some(potion) = registry.potions.by_key(&potion_key) else {
+            return null_mut();
+        };
+        spawn_entity_at_initialized(
+            &world,
+            &type_key,
+            position,
+            SpawnEntityInitialization::ArrowPotion(potion),
+        )
+    };
+    let Some(entity) = entity else {
         return null_mut();
     };
     to_java(&mut env, Some(entity.uuid().to_string()))
@@ -12297,7 +12358,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "spawnEntity",
-            "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
+            "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
             spawn_entity as *mut c_void,
         ),
         method(

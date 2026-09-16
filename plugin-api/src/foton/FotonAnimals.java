@@ -33,6 +33,9 @@ abstract class FotonAnimals extends FotonLivingEntity implements org.bukkit.enti
     }
 
     @Override public void setLoveModeTicks(int ticks) {
+        if (ticks < 0) {
+            throw new IllegalArgumentException("Love mode ticks cannot be negative");
+        }
         Native.setAnimalLoveTicks(getUniqueId().toString(), ticks);
     }
 

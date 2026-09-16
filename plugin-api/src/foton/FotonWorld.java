@@ -184,8 +184,14 @@ public final class FotonWorld implements World {
     }
 
     @Override public org.bukkit.entity.Entity spawnEntity(Location location, org.bukkit.entity.EntityType type) {
+        return spawnEntity(location, type, "");
+    }
+
+    private org.bukkit.entity.Entity spawnEntity(
+            Location location, org.bukkit.entity.EntityType type, String initialization) {
         if (location == null || type == null) return null;
-        String id = Native.spawnEntity(name, location.getX(), location.getY(), location.getZ(), type.getName());
+        String id = Native.spawnEntity(
+            name, location.getX(), location.getY(), location.getZ(), type.getName(), initialization);
         try { return id == null ? null : FotonEntity.handle(UUID.fromString(id)); }
         catch (IllegalArgumentException ignored) { return null; }
     }
@@ -203,13 +209,15 @@ public final class FotonWorld implements World {
                 "Entity class has no compatible Foton wrapper: " + clazz.getName());
         }
 
-        org.bukkit.entity.Entity entity = spawnEntity(location, type);
+        String initialization = clazz == org.bukkit.entity.TippedArrow.class
+            ? "minecraft:water"
+            : "";
+        org.bukkit.entity.Entity entity = spawnEntity(location, type, initialization);
         if (entity == null) {
             throw new IllegalArgumentException("Unable to spawn entity class: " + clazz.getName());
         }
-        if (clazz == org.bukkit.entity.TippedArrow.class && entity instanceof FotonArrow arrow) {
-            arrow.setBasePotionType(org.bukkit.potion.PotionType.WATER);
-            entity = new FotonTippedArrow(arrow.getUniqueId());
+        if (clazz == org.bukkit.entity.TippedArrow.class) {
+            entity = new FotonTippedArrow(entity.getUniqueId());
         }
         if (!clazz.isInstance(entity)) {
             entity.remove();

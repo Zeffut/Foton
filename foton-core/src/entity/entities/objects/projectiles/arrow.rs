@@ -65,6 +65,11 @@ const WATER_INERTIA: f64 = 0.6;
 /// Vanilla parity: the 1200-tick limit in `AbstractArrow.tickDespawn`.
 const DESPAWN_TICKS: i32 = 1200;
 
+/// Ticks a tipped arrow must remain exposed in the ground before becoming ordinary.
+///
+/// Vanilla parity: `Arrow.EXPOSED_POTION_DECAY_TIME`.
+const EXPOSED_POTION_DECAY_TICKS: i32 = 600;
+
 /// Ticks a freshly landed arrow wobbles for.
 ///
 /// Vanilla parity: `AbstractArrow.SHAKE_TIME`. It is also what keeps a player
@@ -122,6 +127,10 @@ struct ArrowState {
     base_damage: f64,
     /// Ticks spent stuck in a block.
     life: i32,
+    /// Consecutive ticks spent exposed while stuck in a block.
+    ///
+    /// Vanilla parity: `AbstractArrow.inGroundTime`, which is deliberately not saved.
+    in_ground_time: i32,
     /// Ticks left of the landing wobble.
     ///
     /// Vanilla parity: `AbstractArrow.shakeTime`.
@@ -148,6 +157,7 @@ impl ArrowState {
         Self {
             base_damage: DEFAULT_BASE_DAMAGE,
             life: 0,
+            in_ground_time: 0,
             shake_time: 0,
             pickup: ArrowPickup::Disallowed,
             fired_from_weapon: None,
@@ -176,12 +186,47 @@ impl ArrowEntity {
     /// Creates an arrow at `position`.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {
+        Self::new_with_ammo(entity_type, id, position, world, None)
+    }
+
+    /// Creates a tipped arrow whose potion state is complete before publication.
+    #[must_use]
+    pub fn new_with_base_potion(
+        entity_type: EntityTypeRef,
+        id: i32,
+        position: DVec3,
+        world: Weak<World>,
+        potion: PotionRef,
+    ) -> Self {
+        let contents =
+            PotionContents::new(Some(RegistryReference::new(potion)), None, Vec::new(), None);
+        let mut ammo = ItemStack::new(&vanilla_items::TIPPED_ARROW);
+        ammo.set(POTION_CONTENTS, contents);
+        Self::new_with_ammo(entity_type, id, position, world, Some(ammo))
+    }
+
+    fn new_with_ammo(
+        entity_type: EntityTypeRef,
+        id: i32,
+        position: DVec3,
+        world: Weak<World>,
+        ammo: Option<ItemStack>,
+    ) -> Self {
+        let color = ammo
+            .as_ref()
+            .and_then(|stack| stack.get(POTION_CONTENTS))
+            .filter(|contents| **contents != PotionContents::empty())
+            .map_or(-1, PotionContents::color);
+        let mut entity_data = ArrowEntityData::new();
+        entity_data.id_effect_color.set(color);
+        let mut state = ArrowState::new();
+        state.fired_from_ammo = ammo;
         Self {
             base: EntityBase::new(id, position, entity_type.dimensions, world),
             entity_type,
-            entity_data: SyncMutex::new(ArrowEntityData::new()),
+            entity_data: SyncMutex::new(entity_data),
             projectile_base: ProjectileBase::new(),
-            state: SyncMutex::new(ArrowState::new()),
+            state: SyncMutex::new(state),
         }
     }
 
@@ -611,8 +656,23 @@ impl Entity for ArrowEntity {
 
         if self.is_in_ground() {
             self.tick_despawn();
+            let should_decay = {
+                let mut state = self.state.lock();
+                state.in_ground_time += 1;
+                state.in_ground_time >= EXPOSED_POTION_DECAY_TICKS
+                    && state
+                        .fired_from_ammo
+                        .as_ref()
+                        .and_then(|ammo| ammo.get(POTION_CONTENTS))
+                        .is_some_and(|contents| *contents != PotionContents::empty())
+            };
+            if should_decay {
+                self.set_ammo_item(ItemStack::new(&vanilla_items::ARROW));
+            }
             return;
         }
+
+        self.state.lock().in_ground_time = 0;
 
         // Vanilla parity: the `if (this.isInWater()) applyInertia(getWaterInertia())`
         // that opens the airborne branch of `AbstractArrow.tick`, before the
@@ -683,13 +743,22 @@ impl Entity for ArrowEntity {
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
         self.save_projectile(nbt);
-        if let Some(ammo) = self.ammo_item() {
+        let state = self.state.lock();
+        nbt.insert("life", state.life as i16);
+        nbt.insert("inGround", i8::from(self.is_in_ground()));
+        if let Some(ammo) = &state.fired_from_ammo {
             nbt.insert("item", ammo.to_nbt_tag_ref());
         }
     }
 
     fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
         self.load_projectile(nbt);
+        {
+            let mut state = self.state.lock();
+            state.life = i32::from(nbt.short("life").unwrap_or(0));
+            state.in_ground_time = 0;
+        }
+        self.set_in_ground(nbt.byte("inGround").is_some_and(|value| value != 0));
         if let Some(ammo) = nbt
             .compound("item")
             .and_then(|item| ItemStack::from_borrowed_compound(&item))
@@ -935,6 +1004,7 @@ impl Projectile for ArrowEntity {
         {
             let mut state = self.state.lock();
             state.life = 0;
+            state.in_ground_time = 0;
             state.shake_time = SHAKE_TIME;
             // Vanilla parity: `resetPiercedEntities`, which closes
             // `onHitBlock` right after the pierce level is zeroed. A landed
@@ -999,7 +1069,7 @@ mod tests {
 
     use crate::entity::projectile::Projectile as _;
 
-    use super::{ArrowEntity, PotionContents, SHAKE_TIME};
+    use super::{ArrowEntity, DESPAWN_TICKS, PotionContents, SHAKE_TIME};
 
     /// The block face an arrow is fired at in the landing tests.
     const WALL_X: i32 = 12;
@@ -1170,6 +1240,104 @@ mod tests {
             &*vanilla_mob_effects::LUCK
         );
         assert_eq!(contents.custom_effects()[0].duration(), 80);
+    }
+
+    #[test]
+    fn exposed_tipped_arrow_decays_exactly_on_tick_600() {
+        let world = arrow_world("tipped_arrow_decay_boundary");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        arrow.set_base_potion(Some(&vanilla_potions::WATER));
+        arrow.set_in_ground(true);
+
+        for _ in 0..599 {
+            Entity::tick(arrow.as_ref());
+        }
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::TIPPED_ARROW);
+        assert!(arrow.ammo_potion_color().is_some());
+        assert!(!arrow.is_removed());
+
+        Entity::tick(arrow.as_ref());
+
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::ARROW);
+        assert!(arrow.ammo_potion_contents().is_none());
+        assert_eq!(*arrow.entity_data.lock().id_effect_color.get(), -1);
+        assert!(!arrow.is_removed());
+    }
+
+    #[test]
+    fn custom_effect_only_arrow_uses_the_same_exposed_decay_boundary() {
+        let world = arrow_world("custom_effect_arrow_decay_boundary");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        arrow.add_effect(MobEffectInstance::with_duration(
+            vanilla_mob_effects::LUCK,
+            80,
+            0,
+        ));
+        arrow.set_in_ground(true);
+
+        for _ in 0..600 {
+            Entity::tick(arrow.as_ref());
+        }
+
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::ARROW);
+        assert!(arrow.effects().is_empty());
+        assert_eq!(*arrow.entity_data.lock().id_effect_color.get(), -1);
+    }
+
+    #[test]
+    fn ordinary_arrow_is_unchanged_at_the_potion_decay_boundary() {
+        let world = arrow_world("ordinary_arrow_decay_boundary");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        arrow.set_in_ground(true);
+
+        for _ in 0..600 {
+            Entity::tick(arrow.as_ref());
+        }
+
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::ARROW);
+        assert!(arrow.ammo_potion_contents().is_none());
+        assert!(!arrow.is_removed());
+    }
+
+    #[test]
+    fn save_reload_preserves_lifetime_but_restarts_exposed_potion_time() {
+        let world = arrow_world("tipped_arrow_decay_reload");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        arrow.set_base_potion(Some(&vanilla_potions::WATER));
+        arrow.set_in_ground(true);
+        for _ in 0..599 {
+            Entity::tick(arrow.as_ref());
+        }
+
+        let mut saved = NbtCompound::new();
+        arrow.save_additional(&mut saved);
+        let mut bytes = Vec::new();
+        saved.write(&mut bytes);
+        let borrowed = read_compound(&mut Cursor::new(bytes.as_slice()))
+            .unwrap_or_else(|_| panic!("saved arrow NBT must reborrow"));
+        let loaded = ArrowEntity::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            DVec3::ZERO,
+            Arc::downgrade(&world),
+        );
+        loaded.load_additional((&borrowed).into());
+
+        assert!(loaded.is_in_ground());
+        assert_eq!(loaded.state.lock().life, 599);
+        assert_eq!(loaded.state.lock().in_ground_time, 0);
+        for _ in 0..599 {
+            Entity::tick(&loaded);
+        }
+        assert_eq!(loaded.pickup_item().item(), &*vanilla_items::TIPPED_ARROW);
+        assert!(!loaded.is_removed());
+
+        Entity::tick(&loaded);
+        assert_eq!(loaded.pickup_item().item(), &*vanilla_items::ARROW);
+        assert!(!loaded.is_removed());
+        Entity::tick(&loaded);
+        assert_eq!(loaded.state.lock().life, DESPAWN_TICKS);
+        assert!(loaded.is_removed());
     }
 
     /// Flies an arrow into whatever is in front of it, one tick at a time,

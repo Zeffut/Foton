@@ -60,6 +60,19 @@ public class FotonLivingEntity extends FotonEntity implements LivingEntity {
             Double.parseDouble(values[0]), Double.parseDouble(values[1])); }
         catch (NumberFormatException ignored) { return null; }
     }
+    public int getAge() { return Native.entityAge(getUniqueId().toString()); }
+    public void setAge(int age) { Native.setEntityAge(getUniqueId().toString(), age); }
+    public void setAgeLock(boolean lock) {
+        Native.setEntityAgeLock(getUniqueId().toString(), lock);
+    }
+    public boolean getAgeLock() { return Native.entityAgeLock(getUniqueId().toString()); }
+    public void setBaby() { Native.entitySetBaby(getUniqueId().toString(), true); }
+    public void setAdult() { Native.entitySetBaby(getUniqueId().toString(), false); }
+    public boolean isAdult() { return !Native.entityIsBaby(getUniqueId().toString()); }
+    public boolean canBreed() { return Native.entityCanBreed(getUniqueId().toString()); }
+    public void setBreed(boolean breed) {
+        Native.setEntityBreed(getUniqueId().toString(), breed);
+    }
     public FotonLivingEntity(UUID id) { super(id); }
     @Override public double getHealth() { return Native.health(getUniqueId().toString()); }
     @Override public void setHealth(double value) { Native.setHealth(getUniqueId().toString(), value); }
