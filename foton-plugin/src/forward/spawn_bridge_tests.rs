@@ -8,13 +8,20 @@ use std::sync::Weak;
 
 use foton_core::block_entity::BlockEntity as _;
 use foton_core::block_entity::entities::{BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR, BeehiveBlockEntity};
+use foton_core::config::WorldsConfig;
 use foton_core::entity::entities::{ArrowEntity, BatEntity, BeeEntity};
 use foton_core::entity::{Entity as _, PrepublicationTestAnimal, SharedEntity, next_entity_id};
 use foton_core::permission::{PermissionGroupManager, PermissionGroupsConfig};
+use foton_core::server::Server;
+use foton_core::world::World;
 use foton_registry::{vanilla_blocks, vanilla_entities};
 use foton_utils::{BlockPos, Downcast as _, WorldAabb, types::UpdateFlags};
 use glam::DVec3;
+use jni::JNIEnv;
+use jni::objects::{JObject, JString};
+use tokio::runtime::Builder as RuntimeBuilder;
 
+use crate::natives::entity_bridge_tests::{equipment_test_config, rain_test_world};
 use crate::natives::register_prepublication_test_entity;
 
 #[test]
@@ -169,13 +176,17 @@ fn spawn_check_host() -> Result<(tempfile::TempDir, crate::PluginHost), Box<dyn 
     Ok((scratch, host))
 }
 
+#[expect(
+    clippy::default_trait_access,
+    reason = "CancellationToken is not re-exported by foton-core or a direct dependency here"
+)]
 fn live_test_server() -> Result<(tempfile::TempDir, Arc<Server>), Box<dyn Error>> {
     // Server configuration requires a relative save path; TempDir removes only
     // this test's directory, including when the Java assertion fails.
     let storage = tempfile::Builder::new()
         .prefix(".spawn-bridge-")
         .tempdir_in(".")?;
-    let mut worlds: foton_core::config::WorldsConfig = toml::from_str(
+    let mut worlds: WorldsConfig = toml::from_str(
         r#"
         seed = "0"
         [storage]
@@ -197,15 +208,15 @@ fn live_test_server() -> Result<(tempfile::TempDir, Arc<Server>), Box<dyn Error>
         .to_string_lossy()
         .into_owned();
     let runtime = Arc::new(
-        tokio::runtime::Builder::new_multi_thread()
+        RuntimeBuilder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
             .build()?,
     );
-    let mut config = (*crate::natives::entity_bridge_tests::equipment_test_config()).clone();
+    let mut config = (*equipment_test_config()).clone();
     // This offline test needs no external Minecraft services.
     config.services_server = Some("http://127.0.0.1:0".to_owned());
-    let server = Arc::new(runtime.block_on(foton_core::server::Server::new(
+    let server = Arc::new(runtime.block_on(Server::new(
         Arc::clone(&runtime),
         Default::default(),
         config,
@@ -219,7 +230,7 @@ fn live_beehive_release_returns_java_provenance(
     host: &crate::PluginHost,
 ) -> Result<(), Box<dyn Error>> {
     let (_storage, server) = live_test_server()?;
-    let world = crate::natives::entity_bridge_tests::rain_test_world();
+    let world = rain_test_world();
     server
         .worlds
         .insert(world.key.clone(), Arc::clone(&world))?;
@@ -269,27 +280,44 @@ fn live_beehive_release_returns_java_provenance(
         env.exception_describe()?;
         env.exception_clear()?;
     }
+    assert_java_entity_fallbacks(&mut env, &world)?;
+    assert_class_spawn_contracts(&mut env, &world)?;
+    assert_configured_arrow_attached(&mut env, &world)?;
+    server.cancel_token.cancel();
+    host.disable_all()?;
+    result?;
+    Ok(())
+}
+
+fn assert_java_entity_fallbacks(
+    env: &mut JNIEnv<'_>,
+    world: &Arc<World>,
+) -> Result<(), Box<dyn Error>> {
     let bat = Arc::new(BatEntity::new(
         &vanilla_entities::BAT,
         next_entity_id(),
         DVec3::new(9.5, 64.5, 9.5),
-        Arc::downgrade(&world),
+        Arc::downgrade(world),
     ));
     world.try_add_entity(Arc::clone(&bat) as SharedEntity)?;
-    let living = java_entity_handle(&mut env, bat.uuid())?;
+    let living = java_entity_handle(env, bat.uuid())?;
     assert!(
         env.is_instance_of(&living, "foton/FotonLivingEntity")?,
         "an unhandled living type must use the living fallback"
     );
-    let stale = java_entity_handle(
-        &mut env,
-        Uuid::from_u128(0x00000000_0000_0000_0000_000000000099),
-    )?;
+    let stale = java_entity_handle(env, Uuid::from_u128(0x00000000_0000_0000_0000_000000000099))?;
     assert!(env.is_instance_of(&stale, "foton/FotonEntity")?);
     assert!(
         !env.is_instance_of(&stale, "foton/FotonLivingEntity")?,
         "a stale UUID must remain the generic non-living wrapper"
     );
+    Ok(())
+}
+
+fn assert_class_spawn_contracts(
+    env: &mut JNIEnv<'_>,
+    world: &Arc<World>,
+) -> Result<(), Box<dyn Error>> {
     let world_name = env.new_string(world.key.to_string())?;
     let contracts = env.call_static_method(
         "SpawnBridgeCheck",
@@ -302,7 +330,13 @@ fn live_beehive_release_returns_java_provenance(
         env.exception_clear()?;
     }
     contracts?;
+    Ok(())
+}
 
+fn assert_configured_arrow_attached(
+    env: &mut JNIEnv<'_>,
+    world: &Arc<World>,
+) -> Result<(), Box<dyn Error>> {
     let arrow_id = env
         .call_static_method(
             "SpawnBridgeCheck",
@@ -311,10 +345,7 @@ fn live_beehive_release_returns_java_provenance(
             &[],
         )?
         .l()?;
-    let arrow_id = Uuid::parse_str(
-        env.get_string(&jni::objects::JString::from(arrow_id))?
-            .to_str()?,
-    )?;
+    let arrow_id = Uuid::parse_str(env.get_string(&JString::from(arrow_id))?.to_str()?)?;
     let arrow = world
         .get_entity_by_uuid(&arrow_id)
         .ok_or("configured Arrow was not published")?;
@@ -345,16 +376,13 @@ fn live_beehive_release_returns_java_provenance(
             JValue::Int(wall.z()),
         ],
     )?;
-    server.cancel_token.cancel();
-    host.disable_all()?;
-    result?;
     Ok(())
 }
 
 fn java_entity_handle<'local>(
-    env: &mut jni::JNIEnv<'local>,
+    env: &mut JNIEnv<'local>,
     uuid: Uuid,
-) -> Result<jni::objects::JObject<'local>, Box<dyn Error>> {
+) -> Result<JObject<'local>, Box<dyn Error>> {
     let uuid_text = env.new_string(uuid.to_string())?;
     let uuid = env
         .call_static_method(

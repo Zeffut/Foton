@@ -15353,7 +15353,7 @@ pub(crate) mod entity_bridge_tests {
     use foton_core::chunk::chunk_request::{ChunkRequestState, ChunkTicketKind};
     use foton_core::chunk::status::ChunkStatus;
     use foton_core::config::RuntimeConfig;
-    use foton_core::entity::Entity as _;
+    use foton_core::entity::Entity;
     use foton_core::entity::entities::{ArmorStandEntity, HorseEntity, RawEntity};
     use foton_core::inventory::container::Container as _;
     use foton_core::inventory::equipment::EquipmentSlot;
@@ -15368,6 +15368,9 @@ pub(crate) mod entity_bridge_tests {
     use foton_utils::{ChunkPos, Identifier};
     use glam::DVec3;
     use text_components::TextComponent;
+    use tokio::runtime::Builder as RuntimeBuilder;
+    use toml::Value as TomlValue;
+    use toml::map::Map as TomlMap;
     use uuid::Uuid;
 
     use super::{
@@ -15468,7 +15471,7 @@ pub(crate) mod entity_bridge_tests {
     pub(crate) fn rain_test_world() -> Arc<World> {
         init_vanilla_registry();
         let runtime = Arc::new(
-            match tokio::runtime::Builder::new_multi_thread()
+            match RuntimeBuilder::new_multi_thread()
                 .worker_threads(1)
                 .enable_all()
                 .build()
@@ -15488,7 +15491,7 @@ pub(crate) mod entity_bridge_tests {
             },
         );
         let dimension_type = &vanilla_dimension_types::OVERWORLD;
-        let generator_config = toml::Value::Table(toml::map::Map::new());
+        let generator_config = TomlValue::Table(TomlMap::new());
         let generation_settings = WorldGenerationSettings::from_generator_config(
             Identifier::vanilla_static("empty"),
             &generator_config,
@@ -15583,7 +15586,7 @@ pub(crate) mod entity_bridge_tests {
     fn equipment_bridge_reads_and_writes_body_and_saddle_on_a_horse() {
         init_vanilla_registry();
         let horse = HorseEntity::new(&vanilla_entities::HORSE, 8, DVec3::ZERO, Weak::new());
-        let horse = &horse as &dyn foton_core::entity::Entity;
+        let horse = &horse as &dyn Entity;
 
         for (index, slot) in [
             EquipmentSlot::MainHand,
@@ -15624,7 +15627,7 @@ pub(crate) mod entity_bridge_tests {
         init_vanilla_registry();
         let player = equipment_test_player();
         player.inventory.lock().set_selected_slot(4);
-        let entity = player.as_ref() as &dyn foton_core::entity::Entity;
+        let entity = player.as_ref() as &dyn Entity;
 
         for (bridge_slot, inventory_slot, encoded) in [
             (0, 4, "minecraft:diamond_sword 1"),
@@ -15676,7 +15679,7 @@ pub(crate) mod entity_bridge_tests {
         init_vanilla_registry();
         let stand =
             ArmorStandEntity::new(&vanilla_entities::ARMOR_STAND, 9, DVec3::ZERO, Weak::new());
-        let entity = &stand as &dyn foton_core::entity::Entity;
+        let entity = &stand as &dyn Entity;
 
         assert_eq!(
             set_entity_equipment_slot_state(Some(entity), 6, "minecraft:stone 2"),
@@ -15701,7 +15704,7 @@ pub(crate) mod entity_bridge_tests {
         init_vanilla_registry();
         let stand =
             ArmorStandEntity::new(&vanilla_entities::ARMOR_STAND, 11, DVec3::ZERO, Weak::new());
-        let entity = &stand as &dyn foton_core::entity::Entity;
+        let entity = &stand as &dyn Entity;
 
         for slot in 0..8 {
             assert_eq!(
@@ -15750,7 +15753,7 @@ pub(crate) mod entity_bridge_tests {
     fn equipment_bridge_clear_updates_player_inventory_once() {
         init_vanilla_registry();
         let player = equipment_test_player();
-        let entity = player.as_ref() as &dyn foton_core::entity::Entity;
+        let entity = player.as_ref() as &dyn Entity;
         let living = entity
             .as_living_entity()
             .expect("a player should expose living equipment");
