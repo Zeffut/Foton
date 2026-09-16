@@ -21,6 +21,7 @@ use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
+use foton_core::block_entity::BLOCK_ENTITIES;
 use foton_core::block_entity::entities::BannerBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
@@ -151,6 +152,7 @@ use foton_registry::recipe::{
 };
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
+use foton_registry::vanilla_block_entity_types::BREWING_STAND as BREWING_STAND_BLOCK_ENTITY;
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
@@ -11733,6 +11735,10 @@ extern "system" fn hopper_inventory_slot(
 const BREWING_SNAPSHOT_HEADER: &[u8; 4] = b"FBS\x01";
 const MAX_BREWING_SNAPSHOT_BYTES: usize = 1 << 20;
 
+const fn brewing_payload_length_is_valid(length: usize) -> bool {
+    length <= MAX_BREWING_SNAPSHOT_BYTES
+}
+
 struct BrewingBridgeSnapshot {
     identity: u64,
     items: Vec<ItemStack>,
@@ -11817,7 +11823,7 @@ impl<'a> BrewingPayloadReader<'a> {
 }
 
 fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
-    if bytes.len() > MAX_BREWING_SNAPSHOT_BYTES {
+    if !brewing_payload_length_is_valid(bytes.len()) {
         return None;
     }
     let mut input = BrewingPayloadReader::new(bytes);
@@ -11834,7 +11840,7 @@ fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
     let mut items = Vec::with_capacity(BREWING_STAND_SLOTS);
     for _ in 0..BREWING_STAND_SLOTS {
         let encoded = str::from_utf8(input.blob()?).ok()?;
-        items.push(parse_slot(encoded)?);
+        items.push(parse_brewing_snapshot_slot(encoded)?);
     }
     let custom_name = match input.u32()? {
         u32::MAX => None,
@@ -11861,6 +11867,166 @@ fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
         custom_name,
         lock,
     })
+}
+
+/// Decodes the self-describing item text stored only inside brewing snapshots.
+///
+/// General native inventory APIs retain their permissive legacy parser. A snapshot is a complete
+/// transactional payload, so accepting fields that the decoder silently drops would turn a
+/// successful apply into data loss. The validator consumes each recognized component before the
+/// legacy parser constructs the item.
+fn parse_brewing_snapshot_slot(text: &str) -> Option<ItemStack> {
+    validate_brewing_snapshot_slot(text)?;
+    parse_slot(text)
+}
+
+fn strict_hex_decode(value: &str) -> Option<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(value.get(index..index + 2)?, 16).ok())
+        .collect()
+}
+
+fn valid_brewing_potion_effects(value: &str) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    value.split_terminator(';').all(|effect| {
+        let fields = effect.split(',').collect::<Vec<_>>();
+        let (name, duration, amplifier, flags) = match fields.as_slice() {
+            [name, duration, amplifier] => (*name, *duration, *amplifier, None),
+            [name, duration, amplifier, ambient, particles, icon] => (
+                *name,
+                *duration,
+                *amplifier,
+                Some([*ambient, *particles, *icon]),
+            ),
+            _ => return false,
+        };
+        if name.is_empty() || duration.parse::<i32>().is_err() || amplifier.parse::<i32>().is_err()
+        {
+            return false;
+        }
+        if let Some(flags) = flags
+            && flags.iter().any(|flag| flag.parse::<bool>().is_err())
+        {
+            return false;
+        }
+        let Ok(key) = format!("minecraft:{name}").parse::<Identifier>() else {
+            return false;
+        };
+        REGISTRY.mob_effects.by_key(&key).is_some()
+    })
+}
+
+fn valid_brewing_enchantment(value: &str) -> bool {
+    let Some((key, level)) = value.rsplit_once(':') else {
+        return false;
+    };
+    let Some(key) = strict_hex_decode(key).and_then(|bytes| String::from_utf8(bytes).ok()) else {
+        return false;
+    };
+    key.parse::<Identifier>().is_ok() && level.parse::<u32>().is_ok()
+}
+
+fn validate_brewing_snapshot_slot(text: &str) -> Option<()> {
+    let mut fields = text.split('\u{1d}');
+    let item = fields.next()?;
+    if item.is_empty() {
+        return fields.next().is_none().then_some(());
+    }
+    let (name, count) = item.rsplit_once(' ')?;
+    let key: Identifier = name.parse().ok()?;
+    if REGISTRY.items.by_key(&key).is_none() || count.parse::<i32>().ok()? <= 0 {
+        return None;
+    }
+
+    let mut nbt = false;
+    let mut damage = false;
+    let mut name = false;
+    let mut tooltip_style = false;
+    let mut item_model = false;
+    let mut legacy_model = false;
+    let mut model_parts = false;
+    let mut base_potion = false;
+    let mut potion_effects = false;
+    let mut legacy_effects = false;
+    for field in fields {
+        let valid = if let Some(value) = field.strip_prefix("nbthex=") {
+            !nbt && strict_hex_decode(value)
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .is_some()
+        } else if let Some(value) = field.strip_prefix("damage=") {
+            !damage && value.parse::<i32>().is_ok()
+        } else if let Some(value) = field.strip_prefix("namehex=") {
+            !name
+                && strict_hex_decode(value)
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .is_some()
+        } else if let Some(value) = field.strip_prefix("lorehex=") {
+            strict_hex_decode(value)
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .is_some()
+        } else if field == "unbreakable" || field == "hidetooltip" {
+            true
+        } else if let Some(value) = field.strip_prefix("tooltipstylehex=") {
+            !tooltip_style
+                && strict_hex_decode(value)
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .is_some_and(|value| value.parse::<Identifier>().is_ok())
+        } else if let Some(value) = field.strip_prefix("itemmodelhex=") {
+            !item_model
+                && strict_hex_decode(value)
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .is_some_and(|value| value.parse::<Identifier>().is_ok())
+        } else if let Some(value) = field.strip_prefix("model=") {
+            !legacy_model && value.parse::<f32>().is_ok_and(f32::is_finite)
+        } else if let Some(value) = field.strip_prefix("modelfloat=") {
+            value.parse::<f32>().is_ok_and(f32::is_finite)
+        } else if let Some(value) = field.strip_prefix("modelflag=") {
+            value.parse::<bool>().is_ok()
+        } else if let Some(value) = field.strip_prefix("modelstrhex=") {
+            strict_hex_decode(value)
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .is_some()
+        } else if let Some(value) = field.strip_prefix("modelcolor=") {
+            value.parse::<i32>().is_ok()
+        } else if let Some(value) = field.strip_prefix("enchhex=") {
+            valid_brewing_enchantment(value)
+        } else if let Some(value) = field.strip_prefix("storedenchhex=") {
+            valid_brewing_enchantment(value)
+        } else if let Some(value) = field.strip_prefix("basepotionhex=") {
+            !base_potion
+                && strict_hex_decode(value)
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .and_then(|value| value.parse::<Identifier>().ok())
+                    .is_some_and(|key| REGISTRY.potions.by_key(&key).is_some())
+        } else if let Some(value) = field.strip_prefix("potioneffects=") {
+            !potion_effects && valid_brewing_potion_effects(value)
+        } else {
+            !legacy_effects && valid_brewing_potion_effects(field)
+        };
+        if !valid {
+            return None;
+        }
+        nbt |= field.starts_with("nbthex=");
+        damage |= field.starts_with("damage=");
+        name |= field.starts_with("namehex=");
+        tooltip_style |= field.starts_with("tooltipstylehex=");
+        item_model |= field.starts_with("itemmodelhex=");
+        legacy_model |= field.starts_with("model=");
+        model_parts |= field.starts_with("modelfloat=")
+            || field.starts_with("modelflag=")
+            || field.starts_with("modelstrhex=")
+            || field.starts_with("modelcolor=");
+        base_potion |= field.starts_with("basepotionhex=");
+        potion_effects |= field.starts_with("potioneffects=");
+        legacy_effects |= !field.contains('=');
+    }
+    (!legacy_model || !model_parts).then_some(())
 }
 
 const fn brewing_update_flags(apply_physics: bool) -> UpdateFlags {
@@ -11892,10 +12058,13 @@ fn apply_brewing_snapshot(
     world: &Arc<World>,
     pos: BlockPos,
     state: BlockStateId,
-    mut snapshot: BrewingBridgeSnapshot,
+    snapshot: BrewingBridgeSnapshot,
     force: bool,
     apply_physics: bool,
 ) -> bool {
+    if snapshot.items.len() != BREWING_STAND_SLOTS || snapshot.recipe_brew_time <= 0 {
+        return false;
+    }
     let current_state = world.get_block_state(pos);
     let current_entity = world.get_block_entity(pos);
     let current = current_entity
@@ -11911,7 +12080,27 @@ fn apply_brewing_snapshot(
     ) {
         return false;
     }
-    if current_state != state && !world.set_block(pos, state, brewing_update_flags(apply_physics)) {
+    if current_state == state {
+        let Some(brewing) = current else {
+            return false;
+        };
+        let mut target = brewing.state_snapshot();
+        target.identity = snapshot.identity;
+        if force {
+            target.identity = brewing.state_snapshot().identity;
+        }
+        target.items = snapshot.items;
+        target.brew_time = snapshot.brew_time;
+        target.recipe_brew_time = snapshot.recipe_brew_time;
+        target.fuel = snapshot.fuel;
+        target.custom_name = snapshot.custom_name;
+        target.lock = snapshot.lock;
+        return brewing.apply_state_snapshot(target);
+    }
+    if !BLOCK_ENTITIES.has_factory(&BREWING_STAND_BLOCK_ENTITY) {
+        return false;
+    }
+    if !world.set_block(pos, state, brewing_update_flags(apply_physics)) {
         return false;
     }
     let Some(entity) = world.get_block_entity(pos) else {
@@ -11920,18 +12109,15 @@ fn apply_brewing_snapshot(
     let Some(brewing) = entity.downcast_ref::<BrewingStandBlockEntity>() else {
         return false;
     };
-    if force {
-        snapshot.identity = brewing.state_snapshot().identity;
-    }
     let mut target = brewing.state_snapshot();
-    target.identity = snapshot.identity;
     target.items = snapshot.items;
     target.brew_time = snapshot.brew_time;
     target.recipe_brew_time = snapshot.recipe_brew_time;
     target.fuel = snapshot.fuel;
     target.custom_name = snapshot.custom_name;
     target.lock = snapshot.lock;
-    brewing.apply_state_snapshot(target)
+    brewing.apply_replacement_snapshot(target);
+    true
 }
 
 extern "system" fn brewing_stand_snapshot(
@@ -12043,6 +12229,15 @@ extern "system" fn brewing_stand_apply(
     let Some(state) = parse_state(&state) else {
         return 0;
     };
+    let Ok(payload_length) = env.get_array_length(&payload) else {
+        return 0;
+    };
+    let Ok(payload_length) = usize::try_from(payload_length) else {
+        return 0;
+    };
+    if !brewing_payload_length_is_valid(payload_length) {
+        return 0;
+    }
     let Ok(payload) = env.convert_byte_array(&payload) else {
         return 0;
     };
@@ -16668,17 +16863,84 @@ mod slot_codec_tests {
 
 #[cfg(test)]
 mod brewing_bridge_tests {
-    use foton_core::block_entity::entities::BREWING_STAND_SLOTS;
+    use foton_core::behavior::init_behaviors;
+    use foton_core::block_entity::entities::{BREWING_STAND_SLOTS, BrewingStandBlockEntity};
+    use foton_core::block_entity::init_block_entities;
+    use foton_core::world::{LevelReader as _, World};
+    use foton_registry::blocks::block_state_ext::BlockStateExt as _;
+    use foton_registry::blocks::properties::BlockStateProperties;
+    use foton_registry::data_components::components::PotionContents;
+    use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
     use foton_registry::item_predicate::LockCode;
     use foton_registry::item_stack::ItemStack;
-    use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_items};
+    use foton_registry::{
+        RegistryReference, init_vanilla_registry, vanilla_blocks, vanilla_items, vanilla_potions,
+    };
     use foton_utils::types::UpdateFlags;
+    use foton_utils::{BlockPos, Downcast as _};
+    use std::sync::Arc;
     use text_components::TextComponent;
 
     use super::{
-        BrewingBridgeSnapshot, bindings, brewing_apply_matches, brewing_update_flags,
+        BrewingBridgeSnapshot, MAX_BREWING_SNAPSHOT_BYTES, apply_brewing_snapshot, bindings,
+        brewing_apply_matches, brewing_payload_length_is_valid, brewing_update_flags,
         decode_brewing_snapshot, encode_brewing_snapshot,
     };
+
+    fn snapshot(items: Vec<ItemStack>) -> BrewingBridgeSnapshot {
+        BrewingBridgeSnapshot {
+            identity: 7,
+            items,
+            brew_time: 37,
+            recipe_brew_time: 240,
+            fuel: 11,
+            custom_name: Some(TextComponent::plain("Bridge brewer")),
+            lock: LockCode::NO_LOCK,
+        }
+    }
+
+    fn loaded_bridge_world() -> Arc<World> {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        super::entity_bridge_tests::rain_test_world()
+    }
+
+    fn installed_brewing_identity(world: &Arc<World>, pos: BlockPos) -> u64 {
+        world
+            .get_block_entity(pos)
+            .and_then(|entity| {
+                entity
+                    .downcast_ref::<BrewingStandBlockEntity>()
+                    .map(|brewing| brewing.state_snapshot().identity)
+            })
+            .expect("test brewing stand must be installed")
+    }
+
+    fn replace_snapshot_blob(encoded: &mut Vec<u8>, length_offset: usize, replacement: &[u8]) {
+        let start = length_offset + 4;
+        let original_length = u32::from_be_bytes(
+            encoded[length_offset..start]
+                .try_into()
+                .expect("test blob length is present"),
+        ) as usize;
+        encoded.splice(start..start + original_length, replacement.iter().copied());
+        encoded[length_offset..start].copy_from_slice(&(replacement.len() as u32).to_be_bytes());
+    }
+
+    fn custom_name_length_offset(encoded: &[u8]) -> usize {
+        let mut offset = 4 + 8 + 4 + 4 + 4;
+        for _ in 0..BREWING_STAND_SLOTS {
+            let start = offset + 4;
+            let length = u32::from_be_bytes(
+                encoded[offset..start]
+                    .try_into()
+                    .expect("test item length is present"),
+            ) as usize;
+            offset = start + length;
+        }
+        offset
+    }
 
     #[test]
     fn versioned_snapshot_round_trip_preserves_every_bridge_field() {
@@ -16736,6 +16998,251 @@ mod brewing_bridge_tests {
         assert!(brewing_apply_matches(brewing, Some(8), brewing, 7, true));
         assert!(brewing_apply_matches(dirt, None, brewing, 7, true));
         assert!(!brewing_apply_matches(brewing, Some(7), dirt, 7, true));
+    }
+
+    #[test]
+    fn malformed_snapshot_item_metadata_is_rejected() {
+        init_vanilla_registry();
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = ItemStack::new(&vanilla_items::POTION);
+        let mut encoded =
+            encode_brewing_snapshot(&snapshot(items)).expect("test snapshot should encode");
+        let item_length_offset = 4 + 8 + 4 + 4 + 4;
+        let replacement = b"minecraft:potion 1\x1dunknown=metadata";
+        replace_snapshot_blob(&mut encoded, item_length_offset, replacement);
+
+        assert!(
+            decode_brewing_snapshot(&encoded).is_none(),
+            "snapshot item metadata must not be silently discarded"
+        );
+    }
+
+    #[test]
+    fn malformed_known_snapshot_item_components_are_rejected() {
+        init_vanilla_registry();
+        for malformed in [
+            b"minecraft:potion 1\x1dnbthex=0".as_slice(),
+            b"minecraft:potion 1\x1ddamage=not-a-number".as_slice(),
+            b"minecraft:potion 1\x1dpotioneffects=speed,20".as_slice(),
+        ] {
+            let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+            items[0] = ItemStack::new(&vanilla_items::POTION);
+            let mut encoded =
+                encode_brewing_snapshot(&snapshot(items)).expect("test snapshot should encode");
+            replace_snapshot_blob(&mut encoded, 4 + 8 + 4 + 4 + 4, malformed);
+            assert!(decode_brewing_snapshot(&encoded).is_none());
+        }
+    }
+
+    #[test]
+    fn malformed_or_trailing_text_component_payload_is_rejected() {
+        init_vanilla_registry();
+        let encoded =
+            encode_brewing_snapshot(&snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]))
+                .expect("test snapshot should encode");
+        let name_offset = custom_name_length_offset(&encoded);
+        for replacement in [b"{".as_slice(), b"{}\x00".as_slice()] {
+            let mut malformed = encoded.clone();
+            replace_snapshot_blob(&mut malformed, name_offset, replacement);
+            assert!(decode_brewing_snapshot(&malformed).is_none());
+        }
+    }
+
+    #[test]
+    fn strict_snapshot_slot_decoder_preserves_valid_potion_metadata() {
+        init_vanilla_registry();
+        let mut potion = ItemStack::new(&vanilla_items::POTION);
+        potion.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                Some(RegistryReference::new(&vanilla_potions::WATER)),
+                None,
+                Vec::new(),
+                None,
+            ),
+        );
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = potion.clone();
+
+        let encoded =
+            encode_brewing_snapshot(&snapshot(items)).expect("test snapshot should encode");
+        let decoded = decode_brewing_snapshot(&encoded).expect("valid snapshot should decode");
+
+        assert_eq!(
+            decoded.items[0].get(POTION_CONTENTS),
+            potion.get(POTION_CONTENTS)
+        );
+    }
+
+    #[test]
+    fn brewing_payload_limit_includes_the_one_mebibyte_boundary() {
+        assert!(brewing_payload_length_is_valid(MAX_BREWING_SNAPSHOT_BYTES));
+        assert!(!brewing_payload_length_is_valid(
+            MAX_BREWING_SNAPSHOT_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn rejected_force_apply_leaves_the_real_world_unchanged() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(3, 64, -2);
+        let dirt = vanilla_blocks::DIRT.default_state();
+        let brewing = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, dirt, UpdateFlags::UPDATE_NONE));
+
+        assert!(
+            !apply_brewing_snapshot(&world, pos, brewing, snapshot(Vec::new()), true, false),
+            "an invalid complete snapshot must reject"
+        );
+        assert_eq!(
+            world.get_block_state(pos),
+            dirt,
+            "a rejected apply must not leave a replacement block behind"
+        );
+        assert!(
+            world.get_block_entity(pos).is_none(),
+            "a rejected apply must not create a brewing stand entity"
+        );
+    }
+
+    #[test]
+    fn real_apply_rejects_type_mismatch_without_force() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(4, 64, -2);
+        let dirt = vanilla_blocks::DIRT.default_state();
+        assert!(world.set_block(pos, dirt, UpdateFlags::UPDATE_NONE));
+
+        assert!(!apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]),
+            false,
+            false,
+        ));
+        assert_eq!(world.get_block_state(pos), dirt);
+        assert!(world.get_block_entity(pos).is_none());
+    }
+
+    #[test]
+    fn real_apply_rejects_a_stale_brewing_stand_identity() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(5, 64, -2);
+        let state = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_NONE));
+        let identity = installed_brewing_identity(&world, pos);
+        let mut stale = snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]);
+        stale.identity = identity.wrapping_add(1);
+
+        assert!(!apply_brewing_snapshot(
+            &world, pos, state, stale, false, false,
+        ));
+        assert_eq!(installed_brewing_identity(&world, pos), identity);
+    }
+
+    #[test]
+    fn forced_real_apply_replaces_the_block_and_commits_the_snapshot() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(6, 64, -2);
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::DIRT.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = ItemStack::new(&vanilla_items::POTION);
+        items[4] = ItemStack::new(&vanilla_items::BLAZE_POWDER);
+        let expected = snapshot(items);
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            expected,
+            true,
+            false,
+        ));
+        assert_eq!(
+            world.get_block_state(pos),
+            vanilla_blocks::BREWING_STAND.default_state()
+        );
+        let entity = world
+            .get_block_entity(pos)
+            .expect("forced replacement must install a block entity");
+        let brewing = entity
+            .downcast_ref::<BrewingStandBlockEntity>()
+            .expect("forced replacement must install a brewing stand entity");
+        let actual = brewing.state_snapshot();
+        assert!(actual.items[0].is(&vanilla_items::POTION));
+        assert!(actual.items[4].is(&vanilla_items::BLAZE_POWDER));
+        assert_eq!(actual.brew_time, 37);
+        assert_eq!(actual.recipe_brew_time, 240);
+        assert_eq!(actual.fuel, 11);
+        assert_eq!(
+            actual.custom_name,
+            Some(TextComponent::plain("Bridge brewer"))
+        );
+    }
+
+    #[test]
+    fn successful_real_apply_updates_the_placed_entity_state() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(7, 64, -2);
+        let state = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_NONE));
+        let identity = installed_brewing_identity(&world, pos);
+        let mut expected = snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]);
+        expected.identity = identity;
+        expected.fuel = 3;
+
+        assert!(apply_brewing_snapshot(
+            &world, pos, state, expected, false, false,
+        ));
+        assert_eq!(
+            world.get_block_entity(pos).and_then(|entity| {
+                entity
+                    .downcast_ref::<BrewingStandBlockEntity>()
+                    .map(|brewing| brewing.state_snapshot().fuel)
+            }),
+            Some(3),
+            "the real placed entity must expose the committed state to its update path"
+        );
+    }
+
+    fn lamp_receives_a_power_loss_callback(apply_physics: bool) -> bool {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(8, 64, -2);
+        let lamp_pos = pos.east();
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::REDSTONE_BLOCK.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        ));
+        assert!(
+            world.set_block(
+                lamp_pos,
+                vanilla_blocks::REDSTONE_LAMP
+                    .default_state()
+                    .set_value(&BlockStateProperties::LIT, true),
+                UpdateFlags::UPDATE_NONE,
+            )
+        );
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]),
+            true,
+            apply_physics,
+        ));
+        world.has_scheduled_block_tick(lamp_pos, &vanilla_blocks::REDSTONE_LAMP)
+    }
+
+    #[test]
+    fn real_apply_physics_controls_neighbor_behavior() {
+        assert!(!lamp_receives_a_power_loss_callback(false));
+        assert!(lamp_receives_a_power_loss_callback(true));
     }
 
     #[test]

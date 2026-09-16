@@ -355,10 +355,7 @@ impl BrewingStandBlockEntity {
     /// Applies one complete Bukkit snapshot under the block entity's state lock.
     #[must_use]
     pub fn apply_state_snapshot(&self, snapshot: BrewingStandStateSnapshot) -> bool {
-        if snapshot.identity != self.identity
-            || snapshot.items.len() != BREWING_STAND_SLOTS
-            || snapshot.recipe_brew_time <= 0
-        {
+        if snapshot.identity != self.identity || !Self::is_valid_state_snapshot(&snapshot) {
             return false;
         }
         let Some(world) = self.get_level() else {
@@ -367,6 +364,24 @@ impl BrewingStandBlockEntity {
         if !self.is_current_in(&world, self.get_block_pos()) {
             return false;
         }
+        self.commit_state_snapshot(snapshot);
+        true
+    }
+
+    fn is_valid_state_snapshot(snapshot: &BrewingStandStateSnapshot) -> bool {
+        snapshot.items.len() == BREWING_STAND_SLOTS && snapshot.recipe_brew_time > 0
+    }
+
+    /// Commits a snapshot immediately after this stand was created by a validated replacement.
+    ///
+    /// The replacement path has already checked the payload and the registered brewing-stand
+    /// factory before changing the block state. Keeping this narrow lifecycle commit separate
+    /// prevents a replacement from acquiring a later rejectable snapshot-validation step.
+    pub fn apply_replacement_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
+        self.commit_state_snapshot(snapshot);
+    }
+
+    fn commit_state_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
         {
             let mut container = self.container.lock();
             container.items = snapshot.items;
@@ -380,8 +395,9 @@ impl BrewingStandBlockEntity {
             self.publish_data(&container);
         }
         self.set_changed();
-        world.send_block_updated(self.get_block_pos());
-        true
+        if let Some(world) = self.get_level() {
+            world.send_block_updated(self.get_block_pos());
+        }
     }
 
     /// Returns the name an anvil gave this brewing stand, if any.
