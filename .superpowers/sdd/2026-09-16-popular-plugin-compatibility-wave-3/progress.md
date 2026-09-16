@@ -38,7 +38,7 @@
 
 ## Tasks
 
-- [ ] Task 1 — entity wrapper identity and class-to-key spawning (in review; implementation `ba7cd62e0`, review fix `2febe9169`; both re-reviews pending)
+- [ ] Task 1 — entity wrapper identity and class-to-key spawning (in review; implementation `ba7cd62e0`, first review fix `2febe9169`, second review fix `4656276e6`; both re-reviews pending)
 - [ ] Task 2 — live `BrewEvent` and `PrepareItemEnchantEvent`
 - [ ] Task 3 — exact on-demand ray tracing
 - [ ] Task 4 — live `ItemDisplay` / `TextDisplay` / `Allay` / `ChestBoat` identity and holder plumbing
@@ -74,6 +74,15 @@ Task 1 has no direct residual count; it is a correctness prerequisite. Task-leve
 - Scope: generated `EntityType` output carries only validated source-backed classes, Paper 26.2 aliases/defaults, and the explicit Task 4 allowlist. Stale consumed registry constants are refreshed before Java generation. No generated source, extracted JSON, production Rust, or test-count ledger was edited.
 - Report: `.superpowers/sdd/2026-09-16-popular-plugin-compatibility-wave-3/task-1-report.md`.
 - Review status: in review; specification and quality re-review approvals are both still required before checking Task 1 complete.
+- Second review fix: `4656276e6` adds the four Paper 26.2 class-spawn
+  contracts/defaults and live-backed state. `AbstractCubeMob` persists
+  `Paper.canWander` and toggles existing MOVE/JUMP/LOOK selector controls,
+  immediately stopping running goals without per-goal tick checks.
+- Second review evidence: 832 Java sources/1008 classes and the API harness,
+  all 8 build-script tests, 7 focused core tests, the isolated live-JNI fixture,
+  native registration, workspace all-targets, formatting, and diff checks pass.
+- Second review status: in review; both re-review approvals remain pending, so
+  Task 1 stays unchecked.
 
 ## Review protocol
 

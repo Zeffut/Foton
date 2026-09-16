@@ -4,8 +4,10 @@
 
 Task 1 is **in review**. The original implementation is `ba7cd62e0`
 (`fix(plugin): preserve entity wrapper identity`) and the review-fix source
-commit is `2febe9169` (`fix(plugin): validate entity class metadata`). Both
-required re-reviews remain pending, so the task is not recorded as complete.
+commit is `2febe9169` (`fix(plugin): validate entity class metadata`). The
+second-round review fix is `4656276e6` (`fix(plugin): complete Paper class
+spawn contracts`). Both required re-reviews remain pending, so the task is not
+recorded as complete.
 
 ## Result
 
@@ -30,10 +32,24 @@ registry input forces the registry build script to rerun before any Java
 generator executes. Current verified input does not invoke Cargo. The generator
 has no Paper jar, download, or runtime-network dependency.
 
+The second review fix adds Paper 26.2's `AbstractCow`, `AbstractCubeMob`,
+`SizedFireball`, and deprecated `TippedArrow` class-spawn defaults. The live
+wrappers are distinct where identity matters: `SizedFireball` uses native
+large/small-fireball item state, while `TippedArrow` is returned only for that
+class-spawn path and receives native `minecraft:water` potion contents before
+control returns. An ordinary `Arrow` remains a `FotonArrow` with no base
+potion.
+
+`AbstractCubeMob` size delegates to existing clamped cube state. Its persistent
+`Paper.canWander` value disables MOVE/JUMP/LOOK once in the existing goal
+selector and immediately stops running intersecting goals. The four cube goals
+contain no wander branch, scan, JNI call, allocation, or lock in their tick
+paths.
+
 ## TDD RED evidence
 
 The original wrapper and underscored-key REDs remain recorded in `ba7cd62e0`.
-The review findings added three fresh RED cycles:
+The review findings added these fresh RED cycles:
 
 1. `bash dev/build-plugin-api.sh --check` reached `EntityCheck` and exited 1
    with `TNTPrimed class-to-entity type: expected TNT, got null`.
@@ -47,15 +63,30 @@ The review findings added three fresh RED cycles:
    --nocapture` fail at `an unhandled living type must use the living fallback`.
    Restoring the UUID made the same fixture pass; the stale UUID assertion also
    passed.
+4. The second-round Java/API RED failed with 21 diagnostics for the four absent
+   Paper contracts and wrappers. Focused Rust REDs failed on absent cube wander
+   state and the native arrow potion setter.
+5. The first cube implementation put `canWander` branches in four goal paths.
+   The corrected selector test proves the goals remain eligible while selector
+   controls stop and restore the registered four-goal set.
+6. The live-JNI size regression failed because `setSize(0)` was ignored; after
+   removing the Java/JNI guards it reaches core's native 1..127 clamp.
+7. Removing only the production build-script `touch` made the strengthened
+   stale-registry test fail with exit 23; restoring it returned the test to
+   green.
 
 ## Fresh GREEN evidence
 
 - `python3 -m unittest dev.tests.test_plugin_api_build_scripts` — 8 passed.
-- `bash dev/build-plugin-api.sh --check` — 826 Java sources compiled, 1002
+- `bash dev/build-plugin-api.sh --check` — 832 Java sources compiled, 1008
   classes written, and the Java/API harness passed. The optional external
   plugin boot was skipped because `FOTON_PLUGIN_FIXTURE` was unset.
-- `cargo test -p foton-plugin --lib spawn_bridge_dispatches -- --ignored
-  --nocapture` — 1 passed, including the living/stale fallback assertions.
+- Focused `foton-core` tests — 7 passed across cube wander state/control,
+  rider-control preservation, arrow potion contents, and fireball item state.
+- `cargo test -p foton-plugin
+  spawn_bridge_dispatches_cancellation_and_queries_released_bee -- --ignored
+  --nocapture` — 1 passed in an isolated JVM, including all four class-spawn
+  identity/state paths and the prior living/stale assertions.
 - `python3 dev/check-natives.py --quiet` — passed.
 - `cargo check -p foton-plugin --all-targets` — passed.
 - `cargo check --workspace --all-targets` — passed.
@@ -69,12 +100,12 @@ no new online lookup was introduced by Task 1.
 
 ## Scope and performance audit
 
-The review fix changes Task 1's generator, build script, Java check, build-script
-tests, and an isolated existing JNI test fixture. It does not modify generated
-source, extracted JSON, production Rust, registry publication, the test-count
-ledger, a tick path, or a cache. Runtime wrapper construction remains one native
-type lookup plus the existing living fallback only when no specific wrapper
-matches.
+The second review fix changes only Task 1-related generator, API, core/native,
+test, report, and ledger files. It does not modify generated source, extracted
+JSON, registry publication, or the test-count ledger. Runtime wrapper creation
+still performs one native type lookup. Wander changes are operation-driven and
+reuse the selector's cached disabled-control mask; no per-goal or other new
+per-tick work was added.
 
 `build/plugin-api-evidence.json` and task-created temporary logs were removed.
 The ignored reusable `plugin-api/build/` output remains untracked.
@@ -83,4 +114,4 @@ The ignored reusable `plugin-api/build/` output remains untracked.
 
 The findings have implementation and fresh verification evidence, but Task 1
 must remain in review until both the specification and quality re-reviews
-approve `ba7cd62e0..2febe9169`. No later Wave 3 task is marked started here.
+approve `ba7cd62e0..4656276e6`. No later Wave 3 task is marked started here.
