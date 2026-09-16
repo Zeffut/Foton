@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:pot_decorations` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -106,7 +110,8 @@ impl ReadFrom for PotDecorations {
                 Self::MAX_DECORATIONS
             )));
         }
-        let mut items = Vec::with_capacity(count);
+        budget::check_collection_input(data, count, 1)?;
+        let mut items = budget::read_vec(count, count)?;
         for _ in 0..count {
             let id = VarInt::read(data)?.0;
             let id =
@@ -156,6 +161,20 @@ impl HashComponent for PotDecorations {
             hasher.put_component_hash(&item.key.to_string());
         }
         hasher.end_list();
+    }
+}
+
+impl nbt_encode::NbtEncode for PotDecorations {
+    fn nbt_id(&self) -> u8 {
+        9
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        writer.write_all(&[8])?;
+        writer.write_all(&4_i32.to_be_bytes())?;
+        for item in self.ordered() {
+            item.key.write_nbt_payload(writer, depth + 1)?;
+        }
+        Ok(())
     }
 }
 

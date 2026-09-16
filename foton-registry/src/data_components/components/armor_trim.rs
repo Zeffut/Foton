@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:trim` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
@@ -94,6 +97,20 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl nbt_encode::NbtEncode for ArmorTrim {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("material", &(self.material), writer, depth)?;
+        field("pattern", &(self.pattern), writer, depth)?;
+        end(writer)
+    }
 }
 
 #[cfg(test)]

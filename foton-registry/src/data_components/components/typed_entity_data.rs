@@ -1,5 +1,8 @@
 //! Typed entity and block-entity item component data.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -182,7 +185,7 @@ fn typed_data_id(data: &CustomData) -> Option<Identifier> {
 fn write_registry_id<T: RegistryEntry>(value: &T, writer: &mut impl Write) -> Result<()> {
     let id = value
         .try_id()
-        .ok_or_else(|| Error::other(format!("Unknown registry value: {}", value.key())))?;
+        .ok_or_else(|| Error::other("Unknown registry value"))?;
     let id = i32::try_from(id)
         .map_err(|_| Error::other(format!("Registry id out of protocol range: {id}")))?;
     VarInt(id).write(writer)
@@ -191,6 +194,62 @@ fn write_registry_id<T: RegistryEntry>(value: &T, writer: &mut impl Write) -> Re
 fn read_registry_id(data: &mut Cursor<&[u8]>, name: &str) -> Result<usize> {
     let id = VarInt::read(data)?.0;
     usize::try_from(id).map_err(|_| Error::other(format!("Negative {name} id: {id}")))
+}
+
+impl nbt_encode::NbtEncode for EntityData {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        foton_utils::serial::nbt_stream::write_compound_fields(
+            self.data.as_compound(),
+            writer,
+            depth,
+        )?;
+        field("id", &self.entity_type.key, writer, depth)?;
+        end(writer)
+    }
+}
+impl nbt_encode::NbtEncode for BlockEntityData {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        foton_utils::serial::nbt_stream::write_compound_fields(
+            self.data.as_compound(),
+            writer,
+            depth,
+        )?;
+        field("id", &self.block_entity_type.key, writer, depth)?;
+        end(writer)
+    }
+}
+
+impl EntityData {
+    pub(crate) fn write_bounded(&self, budget: usize, writer: &mut dyn Write) -> Result<()> {
+        let mut writer = foton_utils::serial::nbt_stream::LimitedWriter::new(writer, budget);
+        write_registry_id(self.entity_type, &mut writer)?;
+        foton_utils::serial::nbt_stream::write_compound_bounded(
+            self.data.as_compound(),
+            writer.remaining(),
+            &mut writer,
+        )
+    }
+}
+impl BlockEntityData {
+    pub(crate) fn write_bounded(&self, budget: usize, writer: &mut dyn Write) -> Result<()> {
+        let mut writer = foton_utils::serial::nbt_stream::LimitedWriter::new(writer, budget);
+        write_registry_id(self.block_entity_type, &mut writer)?;
+        foton_utils::serial::nbt_stream::write_compound_bounded(
+            self.data.as_compound(),
+            writer.remaining(),
+            &mut writer,
+        )
+    }
 }
 
 #[cfg(test)]

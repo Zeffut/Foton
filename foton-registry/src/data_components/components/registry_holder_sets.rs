@@ -1,5 +1,8 @@
 //! Components backed by registry holder sets.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::hash::{ComponentHasher, HashComponent};
@@ -131,6 +134,31 @@ impl FromNbtTag for Repairable {
 impl HashComponent for Repairable {
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         self.clone().to_nbt_tag().hash_component(hasher);
+    }
+}
+
+impl nbt_encode::NbtEncode for DamageResistant {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("types", &(self.types), writer, depth)?;
+        end(writer)
+    }
+}
+impl nbt_encode::NbtEncode for Repairable {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("items", &(self.items), writer, depth)?;
+        end(writer)
     }
 }
 

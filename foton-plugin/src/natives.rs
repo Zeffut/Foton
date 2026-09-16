@@ -9,6 +9,7 @@
 //! World mutations remain scheduler-owned; narrowly scoped plugin registries
 //! (such as runtime recipes) expose their own synchronized write path.
 
+use foton_utils::serial::budget;
 use std::fmt::Write;
 use std::io::{Cursor, Error as IoError, Result as IoResult, Write as IoWrite};
 use std::mem;
@@ -26,7 +27,9 @@ use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
 use foton_core::block_entity::entities::SpawnerBlockEntity;
-use foton_core::block_entity::entities::{BREWING_STAND_SLOTS, BrewingStandBlockEntity};
+use foton_core::block_entity::entities::{
+    BREWING_STAND_SLOTS, BrewingStandBlockEntity, BrewingStandStateSnapshot, BrewingStandStateView,
+};
 use foton_core::block_entity::entities::{SignBlockEntity, SignText};
 use foton_core::block_entity::{BLOCK_ENTITIES, SharedBlockEntity};
 use foton_core::boss_event::ServerBossEvent;
@@ -167,6 +170,7 @@ use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
 use foton_utils::serial::{OptionalNbt, ReadFrom as _, WriteTo as _};
+use foton_utils::serial::{budget::DecodeBudget, text_stream::write_bounded};
 use foton_utils::text::DisplayResolutor;
 use foton_utils::translations::CONTAINER_CARTOGRAPHY_TABLE;
 use foton_utils::translations::CONTAINER_CRAFTING;
@@ -11771,6 +11775,8 @@ struct BrewingBridgeSnapshot {
 struct BrewingPayloadWriter {
     bytes: Vec<u8>,
     limit: usize,
+    length: usize,
+    counting: bool,
 }
 
 impl BrewingPayloadWriter {
@@ -11778,25 +11784,29 @@ impl BrewingPayloadWriter {
         Self {
             bytes: Vec::new(),
             limit,
+            length: 0,
+            counting: false,
         }
     }
 
     fn begin_blob(&mut self) -> Option<usize> {
-        let offset = self.bytes.len();
+        let offset = self.length;
         self.write_all(&0_u32.to_be_bytes()).ok()?;
         Some(offset)
     }
 
     fn finish_blob(&mut self, offset: usize, field_limit: usize) -> Option<()> {
         let body_start = offset.checked_add(4)?;
-        let length = self.bytes.len().checked_sub(body_start)?;
+        let length = self.length.checked_sub(body_start)?;
         if length > field_limit {
             return None;
         }
         let length = u32::try_from(length).ok()?;
-        self.bytes
-            .get_mut(offset..body_start)?
-            .copy_from_slice(&length.to_be_bytes());
+        if !self.counting {
+            self.bytes
+                .get_mut(offset..body_start)?
+                .copy_from_slice(&length.to_be_bytes());
+        }
         Some(())
     }
 
@@ -11819,11 +11829,27 @@ impl BrewingPayloadWriter {
 
 impl IoWrite for BrewingPayloadWriter {
     fn write(&mut self, bytes: &[u8]) -> IoResult<usize> {
-        let Some(length) = self.bytes.len().checked_add(bytes.len()) else {
+        let Some(length) = self.length.checked_add(bytes.len()) else {
             return Err(IoError::other("brewing payload length overflow"));
         };
         if length > self.limit {
             return Err(IoError::other("brewing payload exceeds its byte limit"));
+        }
+        self.length = length;
+        if self.counting {
+            return Ok(bytes.len());
+        }
+        if length > self.bytes.capacity() {
+            let capacity = self
+                .bytes
+                .capacity()
+                .saturating_mul(2)
+                .max(64)
+                .max(length)
+                .min(self.limit);
+            self.bytes
+                .try_reserve_exact(capacity - self.bytes.len())
+                .map_err(IoError::other)?;
         }
         self.bytes.extend_from_slice(bytes);
         Ok(bytes.len())
@@ -11835,11 +11861,43 @@ impl IoWrite for BrewingPayloadWriter {
 }
 
 fn write_brewing_item(output: &mut BrewingPayloadWriter, item: &ItemStack) -> Option<()> {
-    item.validate_persistent_encoding().ok()?;
+    use foton_registry::data_components::ComponentPatchEntry;
     if item.components_patch().len() > MAX_BREWING_COMPONENTS {
         return None;
     }
-    item.write(output).ok()?;
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    for (key, value) in item.components_patch().iter() {
+        let id = REGISTRY.data_components.id_from_key(key)?;
+        match value {
+            ComponentPatchEntry::Set(value) => added.push((id, value)),
+            ComponentPatchEntry::Removed => removed.push(id),
+        }
+    }
+    added.sort_unstable_by_key(|(id, _)| *id);
+    removed.sort_unstable();
+    VarInt(item.count).write(output).ok()?;
+    VarInt(i32::try_from(item.item.id()).ok()?)
+        .write(output)
+        .ok()?;
+    VarInt(i32::try_from(added.len()).ok()?)
+        .write(output)
+        .ok()?;
+    VarInt(i32::try_from(removed.len()).ok()?)
+        .write(output)
+        .ok()?;
+    for (id, value) in added {
+        VarInt(i32::try_from(id).ok()?).write(output).ok()?;
+        let remaining = output.limit.checked_sub(output.length)?;
+        REGISTRY
+            .data_components
+            .by_id(id)?
+            .write_network_bounded(value, remaining, output)
+            .ok()?;
+    }
+    for id in removed {
+        VarInt(i32::try_from(id).ok()?).write(output).ok()?;
+    }
     output.write_optional_blob(
         item.opaque_nbt().map(str::as_bytes),
         MAX_BREWING_OPAQUE_NBT_BYTES,
@@ -11848,7 +11906,11 @@ fn write_brewing_item(output: &mut BrewingPayloadWriter, item: &ItemStack) -> Op
 
 fn append_brewing_item(output: &mut BrewingPayloadWriter, item: &ItemStack) -> Option<()> {
     let offset = output.begin_blob()?;
-    write_brewing_item(output, item)?;
+    let limit = output.limit;
+    output.limit = limit.min(output.length.checked_add(MAX_BREWING_ITEM_BYTES)?);
+    let result = write_brewing_item(output, item);
+    output.limit = limit;
+    result?;
     output.finish_blob(offset, MAX_BREWING_ITEM_BYTES)
 }
 
@@ -11858,11 +11920,36 @@ fn encode_brewing_item(item: &ItemStack) -> Option<Vec<u8>> {
     Some(output.into_inner())
 }
 
+#[cfg(test)]
 fn encode_brewing_snapshot(snapshot: &BrewingBridgeSnapshot) -> Option<Vec<u8>> {
+    encode_brewing_state(&BrewingStandStateView {
+        identity: snapshot.identity,
+        items: &snapshot.items,
+        brew_time: snapshot.brew_time,
+        recipe_brew_time: snapshot.recipe_brew_time,
+        fuel: snapshot.fuel,
+        custom_name: snapshot.custom_name.as_ref(),
+        lock: &snapshot.lock,
+    })
+}
+
+fn encode_brewing_state(snapshot: &BrewingStandStateView<'_>) -> Option<Vec<u8>> {
+    // Reject aggregate/field overflow before retaining a snapshot-sized output.
+    let mut count = BrewingPayloadWriter::new(MAX_BREWING_SNAPSHOT_BYTES);
+    count.counting = true;
+    write_brewing_snapshot(snapshot, &mut count)?;
+    let mut output = BrewingPayloadWriter::new(MAX_BREWING_SNAPSHOT_BYTES);
+    write_brewing_snapshot(snapshot, &mut output)?;
+    Some(output.into_inner())
+}
+
+fn write_brewing_snapshot(
+    snapshot: &BrewingStandStateView<'_>,
+    output: &mut BrewingPayloadWriter,
+) -> Option<()> {
     if snapshot.items.len() != BREWING_STAND_SLOTS {
         return None;
     }
-    let mut output = BrewingPayloadWriter::new(MAX_BREWING_SNAPSHOT_BYTES);
     output.write_all(BREWING_SNAPSHOT_HEADER).ok()?;
     output.write_all(&snapshot.identity.to_be_bytes()).ok()?;
     output.write_all(&snapshot.brew_time.to_be_bytes()).ok()?;
@@ -11870,21 +11957,32 @@ fn encode_brewing_snapshot(snapshot: &BrewingBridgeSnapshot) -> Option<Vec<u8>> 
         .write_all(&snapshot.recipe_brew_time.to_be_bytes())
         .ok()?;
     output.write_all(&snapshot.fuel.to_be_bytes()).ok()?;
-    for item in &snapshot.items {
-        append_brewing_item(&mut output, item)?;
+    for item in snapshot.items {
+        append_brewing_item(output, item)?;
     }
     match &snapshot.custom_name {
         Some(name) => {
             let offset = output.begin_blob()?;
-            name.write(&mut output).ok()?;
+            write_bounded(
+                name,
+                MAX_BREWING_TEXT_BYTES.min(output.limit.checked_sub(output.length)?),
+                output,
+            )
+            .ok()?;
             output.finish_blob(offset, MAX_BREWING_TEXT_BYTES)?;
         }
         None => output.write_all(&u32::MAX.to_be_bytes()).ok()?,
     }
     let offset = output.begin_blob()?;
-    snapshot.lock.write(&mut output).ok()?;
+    snapshot
+        .lock
+        .write_bounded(
+            MAX_BREWING_LOCK_BYTES.min(output.limit.checked_sub(output.length)?),
+            output,
+        )
+        .ok()?;
     output.finish_blob(offset, MAX_BREWING_LOCK_BYTES)?;
-    Some(output.into_inner())
+    Some(())
 }
 
 struct BrewingPayloadReader<'a> {
@@ -11929,22 +12027,40 @@ impl<'a> BrewingPayloadReader<'a> {
     }
 }
 
+fn read_brewing_item_after_length_check(
+    length: usize,
+    copy: impl FnOnce() -> Option<Vec<u8>>,
+) -> Option<ItemStack> {
+    if !brewing_item_payload_length_is_valid(length) {
+        return None;
+    }
+    let bytes = copy()?;
+    if bytes.len() != length {
+        return None;
+    }
+    read_brewing_item(&bytes)
+}
+
 fn read_brewing_component_count(input: &mut Cursor<&[u8]>) -> Option<usize> {
     usize::try_from(VarInt::read(input).ok()?.0).ok()
 }
 
 fn read_brewing_item(bytes: &[u8]) -> Option<ItemStack> {
+    DecodeBudget::new(512 * 1024)
+        .decode(|| {
+            read_brewing_item_inner(bytes).ok_or_else(|| IoError::other("Invalid brewing item"))
+        })
+        .ok()
+}
+
+fn read_brewing_item_inner(bytes: &[u8]) -> Option<ItemStack> {
+    use foton_registry::data_components::ComponentPatchEntry;
     if bytes.len() > MAX_BREWING_ITEM_BYTES {
         return None;
     }
     let mut input = Cursor::new(bytes);
     let count = VarInt::read(&mut input).ok()?.0;
-    let mut item = if count == 0 {
-        ItemStack::empty()
-    } else {
-        if count < 0 {
-            return None;
-        }
+    let mut item = {
         let item_id = usize::try_from(VarInt::read(&mut input).ok()?.0).ok()?;
         let item_type = REGISTRY.items.by_id(item_id)?;
         let added_count = read_brewing_component_count(&mut input)?;
@@ -11953,6 +12069,8 @@ fn read_brewing_item(bytes: &[u8]) -> Option<ItemStack> {
             return None;
         }
 
+        budget::charge_map::<Identifier, ComponentPatchEntry>(added_count + removed_count).ok()?;
+        budget::charge_map::<Identifier, ()>(added_count + removed_count).ok()?;
         let mut patch = DataComponentPatch::new();
         let mut seen = FxHashSet::default();
         for _ in 0..added_count {
@@ -11980,7 +12098,7 @@ fn read_brewing_item(bytes: &[u8]) -> Option<ItemStack> {
                 return None;
             }
         }
-        ItemStack::with_count_and_patch(item_type, count, patch)
+        ItemStack::from_raw_parts(item_type, count, patch)
     };
 
     let opaque_length = u32::from_be_bytes({
@@ -11998,17 +12116,29 @@ fn read_brewing_item(bytes: &[u8]) -> Option<ItemStack> {
         let start = usize::try_from(input.position()).ok()?;
         let end = start.checked_add(opaque_length)?;
         let opaque = str::from_utf8(input.get_ref().get(start..end)?).ok()?;
+        budget::charge::<u8>(opaque.len()).ok()?;
         item.set_opaque_nbt(Some(opaque.to_owned()));
         input.set_position(u64::try_from(end).ok()?);
     }
     if usize::try_from(input.position()).ok()? != bytes.len() {
         return None;
     }
-    item.validate_persistent_encoding().ok()?;
+    if encode_brewing_item(&item)?.as_slice() != bytes {
+        return None;
+    }
     Some(item)
 }
 
 fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
+    DecodeBudget::new(512 * 1024)
+        .decode(|| {
+            decode_brewing_snapshot_inner(bytes)
+                .ok_or_else(|| IoError::other("Invalid brewing snapshot"))
+        })
+        .ok()
+}
+
+fn decode_brewing_snapshot_inner(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
     if !brewing_payload_length_is_valid(bytes.len()) {
         return None;
     }
@@ -12023,6 +12153,7 @@ fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
     if recipe_brew_time <= 0 {
         return None;
     }
+    budget::charge::<ItemStack>(BREWING_STAND_SLOTS).ok()?;
     let mut items = Vec::with_capacity(BREWING_STAND_SLOTS);
     for _ in 0..BREWING_STAND_SLOTS {
         items.push(read_brewing_item(input.blob(MAX_BREWING_ITEM_BYTES)?)?);
@@ -12038,13 +12169,27 @@ fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
             let mut cursor = Cursor::new(encoded);
             let name = TextComponent::read(&mut cursor).ok()?;
             let consumed = usize::try_from(cursor.position()).ok()?;
-            Some((consumed == encoded.len()).then_some(name)?)
+            if consumed != encoded.len() {
+                return None;
+            }
+            let mut canonical_name = BrewingPayloadWriter::new(MAX_BREWING_TEXT_BYTES);
+            write_bounded(&name, MAX_BREWING_TEXT_BYTES, &mut canonical_name).ok()?;
+            if canonical_name.bytes != encoded {
+                return None;
+            }
+            Some(name)
         }
     };
     let encoded_lock = input.blob(MAX_BREWING_LOCK_BYTES)?;
     let mut cursor = Cursor::new(encoded_lock);
     let lock = LockCode::read(&mut cursor).ok()?;
     if usize::try_from(cursor.position()).ok()? != encoded_lock.len() || !input.is_finished() {
+        return None;
+    }
+    let mut canonical_lock = BrewingPayloadWriter::new(MAX_BREWING_LOCK_BYTES);
+    lock.write_bounded(MAX_BREWING_LOCK_BYTES, &mut canonical_lock)
+        .ok()?;
+    if canonical_lock.bytes != encoded_lock {
         return None;
     }
     Some(BrewingBridgeSnapshot {
@@ -12113,18 +12258,19 @@ fn apply_brewing_snapshot(
         let Some(brewing) = current else {
             return false;
         };
-        let mut target = brewing.state_snapshot();
-        target.identity = if force {
-            brewing.identity()
-        } else {
-            snapshot.identity
+        let target = BrewingStandStateSnapshot {
+            identity: if force {
+                brewing.identity()
+            } else {
+                snapshot.identity
+            },
+            items: snapshot.items,
+            brew_time: snapshot.brew_time,
+            recipe_brew_time: snapshot.recipe_brew_time,
+            fuel: snapshot.fuel,
+            custom_name: snapshot.custom_name,
+            lock: snapshot.lock,
         };
-        target.items = snapshot.items;
-        target.brew_time = snapshot.brew_time;
-        target.recipe_brew_time = snapshot.recipe_brew_time;
-        target.fuel = snapshot.fuel;
-        target.custom_name = snapshot.custom_name;
-        target.lock = snapshot.lock;
         if current_state == state {
             return brewing.apply_state_snapshot(target);
         }
@@ -12178,16 +12324,7 @@ extern "system" fn brewing_stand_snapshot(
         .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
         .and_then(|entity| {
             let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
-            let snapshot = brewing.state_snapshot();
-            encode_brewing_snapshot(&BrewingBridgeSnapshot {
-                identity: snapshot.identity,
-                items: snapshot.items,
-                brew_time: snapshot.brew_time,
-                recipe_brew_time: snapshot.recipe_brew_time,
-                fuel: snapshot.fuel,
-                custom_name: snapshot.custom_name,
-                lock: snapshot.lock,
-            })
+            brewing.with_state(|snapshot| encode_brewing_state(&snapshot))
         });
     let Some(encoded) = encoded else {
         return null_mut();
@@ -12212,8 +12349,12 @@ extern "system" fn brewing_stand_live_item(
             let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
             let slot = usize::try_from(slot).ok()?;
             brewing
-                .live_item(brewing_identity_from_java(identity), slot)
-                .and_then(|item| encode_brewing_item(&item))
+                .with_live_item(
+                    brewing_identity_from_java(identity),
+                    slot,
+                    encode_brewing_item,
+                )
+                .flatten()
         });
     let Some(value) = value else {
         return null_mut();
@@ -12245,13 +12386,9 @@ extern "system" fn brewing_stand_set_live_item(
     let Ok(item_length) = usize::try_from(item_length) else {
         return 0;
     };
-    if !brewing_item_payload_length_is_valid(item_length) {
-        return 0;
-    }
-    let Ok(encoded) = env.convert_byte_array(&item) else {
-        return 0;
-    };
-    let Some(item) = read_brewing_item(&encoded) else {
+    let Some(item) =
+        read_brewing_item_after_length_check(item_length, || env.convert_byte_array(&item).ok())
+    else {
         return 0;
     };
     let changed = world(&mut env, &name)
@@ -12328,8 +12465,8 @@ extern "system" fn brewing_stand_state(
         .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
         .and_then(|entity| {
             let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
-            let snapshot = brewing.state_snapshot();
-            Some(format!("{}\u{001f}{}", snapshot.brew_time, snapshot.fuel))
+            let (brew_time, fuel) = brewing.with_state(|state| (state.brew_time, state.fuel));
+            Some(format!("{brew_time}\u{001f}{fuel}"))
         });
     to_java(&mut env, value)
 }
@@ -16057,7 +16194,7 @@ pub(crate) mod entity_bridge_tests {
     use foton_utils::{ChunkPos, Identifier};
     use glam::DVec3;
     use text_components::TextComponent;
-    use tokio::runtime::Builder as RuntimeBuilder;
+    use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
     use toml::Value as TomlValue;
     use toml::map::Map as TomlMap;
     use uuid::Uuid;
@@ -16158,6 +16295,12 @@ pub(crate) mod entity_bridge_tests {
     }
 
     pub(crate) fn rain_test_world() -> Arc<World> {
+        rain_test_world_with_worker_observer(|_, _| {})
+    }
+
+    pub(crate) fn rain_test_world_with_worker_observer(
+        observe: impl FnOnce(&Runtime, &rayon::ThreadPool),
+    ) -> Arc<World> {
         init_vanilla_registry();
         let runtime = Arc::new(
             match RuntimeBuilder::new_multi_thread()
@@ -16179,6 +16322,7 @@ pub(crate) mod entity_bridge_tests {
                 Err(error) => panic!("rain test generation pool should start: {error}"),
             },
         );
+        observe(&runtime, &generation_pool);
         let dimension_type = &vanilla_dimension_types::OVERWORLD;
         let generator_config = TomlValue::Table(TomlMap::new());
         let generation_settings = WorldGenerationSettings::from_generator_config(
@@ -16933,6 +17077,11 @@ mod slot_codec_tests {
 
 #[cfg(test)]
 mod brewing_bridge_tests {
+    mod brewing_reachable_gaps;
+    mod brewing_review_regressions;
+    mod brewing_union_jni;
+    #[path = "brewing_recursive_bounds.rs"]
+    mod recursive_bounds;
     use foton_core::behavior::init_behaviors;
     use foton_core::block_entity::entities::{BREWING_STAND_SLOTS, BrewingStandBlockEntity};
     use foton_core::block_entity::{BlockEntity as _, init_block_entities};
@@ -16940,6 +17089,7 @@ mod brewing_bridge_tests {
     use foton_core::world::{LevelReader as _, World};
     use foton_registry::blocks::block_state_ext::BlockStateExt as _;
     use foton_registry::blocks::properties::BlockStateProperties;
+    use foton_registry::data_component_predicate::DataComponentMatchers;
     use foton_registry::data_components::components::{
         Filterable, FireworkExplosion, FireworkExplosionShape, Fireworks, ItemContainerContents,
         ItemLore, PotionContents, WrittenBookContent,
@@ -16947,19 +17097,23 @@ mod brewing_bridge_tests {
     use foton_registry::data_components::vanilla_components::{
         CONTAINER, CUSTOM_NAME, FIREWORKS, ITEM_NAME, LORE, POTION_CONTENTS, WRITTEN_BOOK_CONTENT,
     };
-    use foton_registry::item_predicate::LockCode;
+    use foton_registry::item_predicate::{IntBounds, ItemPredicate, LockCode};
     use foton_registry::item_stack::ItemStack;
     use foton_registry::potion_brewing::potion_item;
     use foton_registry::{
-        ItemStackTemplate, REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference,
-        init_vanilla_registry, vanilla_blocks, vanilla_items, vanilla_potions,
+        ItemStackTemplate, REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryHolderSet,
+        RegistryReference, init_vanilla_registry, vanilla_blocks, vanilla_items, vanilla_potions,
     };
     use foton_utils::Identifier;
     use foton_utils::codec::VarInt;
     use foton_utils::serial::WriteTo as _;
     use foton_utils::types::UpdateFlags;
     use foton_utils::{BlockPos, Downcast as _};
+    use std::cell::Cell;
+    use std::ops::Deref;
     use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
     use text_components::TextComponent;
     use text_components::format::Color;
 
@@ -16983,11 +17137,100 @@ mod brewing_bridge_tests {
         }
     }
 
-    fn loaded_bridge_world() -> Arc<World> {
+    struct LoadedBridgeWorld(Arc<World>, brewing_union_jni::WorkerFailureObserver);
+
+    impl LoadedBridgeWorld {
+        fn new(world: Arc<World>) -> Self {
+            let failures = brewing_union_jni::WorkerFailureObserver::new(&world);
+            Self(world, failures)
+        }
+    }
+
+    impl Deref for LoadedBridgeWorld {
+        type Target = Arc<World>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl Drop for LoadedBridgeWorld {
+        fn drop(&mut self) {
+            let world = &self.0;
+            world.chunk_map.stop_generation_refill_loop();
+            world.chunk_map.cancel_token.cancel();
+            world.chunk_map.task_tracker.close();
+            Arc::clone(&world.chunk_map.chunk_runtime)
+                .block_on(world.chunk_map.task_tracker.wait());
+            let failures = self.1.failures();
+            if !thread::panicking() {
+                assert_eq!(
+                    failures, 0,
+                    "brewing world workers failed before teardown completed"
+                );
+            }
+        }
+    }
+
+    fn loaded_bridge_world() -> LoadedBridgeWorld {
         init_vanilla_registry();
         init_behaviors();
         init_block_entities();
-        super::entity_bridge_tests::rain_test_world()
+        let mut failures = None;
+        let world =
+            super::entity_bridge_tests::rain_test_world_with_worker_observer(|runtime, pool| {
+                failures = Some(brewing_union_jni::WorkerFailureObserver::for_workers(
+                    runtime, pool,
+                ));
+            });
+        LoadedBridgeWorld(
+            world,
+            failures.expect("worker observer installed before world creation"),
+        )
+    }
+
+    #[test]
+    fn loaded_bridge_world_teardown_joins_tracked_worldgen() {
+        use std::{
+            sync::mpsc::{self, RecvTimeoutError},
+            thread,
+        };
+        use tokio::time::sleep;
+        let world = loaded_bridge_world();
+        let weak_world = Arc::downgrade(&world);
+        let runtime = Arc::clone(&world.chunk_map.chunk_runtime);
+        let task_tracker = world.chunk_map.task_tracker.clone();
+
+        let cancel = world.chunk_map.cancel_token.clone();
+        let alive = weak_world.clone();
+        let task = task_tracker.spawn_on(
+            async move {
+                cancel.cancelled().await;
+                sleep(Duration::from_millis(20)).await;
+                assert!(
+                    alive.upgrade().is_some(),
+                    "world must outlive its tracked tasks"
+                );
+            },
+            runtime.handle(),
+        );
+        let (finished, completion) = mpsc::channel();
+        let teardown = thread::spawn(move || {
+            drop(world);
+            let _ = finished.send(());
+        });
+        // The deadline surrounds the destructor that actually blocks on the join.
+        let completed = completion.recv_timeout(Duration::from_secs(5));
+        assert!(
+            !matches!(completed, Err(RecvTimeoutError::Timeout)),
+            "brewing world teardown timed out"
+        );
+        teardown.join().expect("brewing world teardown panicked");
+        completed.expect("teardown completion channel disconnected");
+        runtime
+            .block_on(task)
+            .expect("tracked worldgen task panicked");
+        assert!(weak_world.upgrade().is_none());
     }
 
     fn installed_brewing_identity(world: &Arc<World>, pos: BlockPos) -> u64 {
@@ -17024,6 +17267,185 @@ mod brewing_bridge_tests {
             offset = start + length;
         }
         offset
+    }
+
+    #[test]
+    fn bridge_rejected_nested_lock_predicate_stays_below_one_mib() {
+        use foton_registry::data_component_predicate::{
+            CollectionPredicate, DataComponentExactPredicate, DataComponentMatchers,
+            DataComponentPredicateData, WrittenBookPagePredicate, WrittenBookPredicate,
+            vanilla_data_component_predicate_types,
+        };
+        init_vanilla_registry();
+        let partial = DataComponentPredicateData::new(
+            &vanilla_data_component_predicate_types::WRITTEN_BOOK_CONTENT,
+            WrittenBookPredicate::new(
+                Some(CollectionPredicate::new(
+                    Some(vec![WrittenBookPagePredicate::new(TextComponent::plain(
+                        "x".repeat(2 << 20),
+                    ))]),
+                    None,
+                    None,
+                )),
+                None,
+                None,
+                IntBounds::ANY,
+                None,
+            ),
+        );
+        let mut value = snapshot(vec![ItemStack::empty(); 5]);
+        value.lock = LockCode::new(ItemPredicate::new(
+            None,
+            IntBounds::ANY,
+            DataComponentMatchers::new(DataComponentExactPredicate::EMPTY, vec![partial])
+                .expect("unique predicate"),
+        ));
+        let stats = allocation_counter::measure(|| {
+            assert!(encode_brewing_snapshot(&value).is_none());
+        });
+        assert!(stats.bytes_max <= 1 << 20, "{stats:?}");
+    }
+
+    #[test]
+    fn live_item_length_preflight_precedes_copy_and_uses_shared_decode() {
+        init_vanilla_registry();
+        let copied = Cell::new(false);
+        assert!(
+            super::read_brewing_item_after_length_check(MAX_BREWING_ITEM_BYTES + 1, || {
+                copied.set(true);
+                Some(Vec::new())
+            })
+            .is_none()
+        );
+        assert!(!copied.get());
+        let mut item = ItemStack::with_count(&vanilla_items::STONE, -7);
+        item.set(CUSTOM_NAME, TextComponent::plain("negative"));
+        item.remove(ITEM_NAME);
+        let bytes = encode_brewing_item(&item).expect("encode");
+        let decoded = super::read_brewing_item_after_length_check(bytes.len(), || Some(bytes))
+            .expect("shared decode");
+        assert_eq!(decoded.item, item.item);
+        assert_eq!(decoded.count, item.count);
+        assert_eq!(decoded.components_patch(), item.components_patch());
+    }
+
+    #[test]
+    fn bridge_zero_count_preserves_raw_item_count_and_patch() {
+        init_vanilla_registry();
+        let mut item = ItemStack::with_count(&vanilla_items::STONE, 0);
+        item.set(CUSTOM_NAME, TextComponent::plain("zero"));
+        item.remove(ITEM_NAME);
+        let encoded = encode_brewing_item(&item).expect("item encodes");
+        let decoded = read_brewing_item(&encoded).expect("item decodes");
+        assert_eq!(decoded.item, item.item);
+        assert_eq!(decoded.count, item.count);
+        assert_eq!(decoded.components_patch(), item.components_patch());
+        let live =
+            super::read_brewing_item_after_length_check(encoded.len(), || Some(encoded.clone()))
+                .expect("shared live decode");
+        assert_eq!(live.item, item.item);
+        assert_eq!(live.count, item.count);
+        assert_eq!(live.components_patch(), item.components_patch());
+        let mut items = vec![ItemStack::empty(); 5];
+        items[0] = item;
+        let original = snapshot(items);
+        let encoded = encode_brewing_snapshot(&original).expect("snapshot encodes");
+        let decoded = decode_brewing_snapshot(&encoded).expect("snapshot decodes");
+        assert_eq!(decoded.items[0].item, original.items[0].item);
+        assert_eq!(decoded.items[0].count, original.items[0].count);
+        assert_eq!(
+            decoded.items[0].components_patch(),
+            original.items[0].components_patch()
+        );
+    }
+
+    #[test]
+    fn bridge_rejects_nonminimal_varints() {
+        init_vanilla_registry();
+        let mut bytes =
+            encode_brewing_item(&ItemStack::new(&vanilla_items::STONE)).expect("encode");
+        bytes.splice(0..1, [0x81, 0]);
+        assert!(read_brewing_item(&bytes).is_none());
+    }
+
+    #[test]
+    fn bridge_rejects_boolean_two() {
+        init_vanilla_registry();
+        let key = Identifier::vanilla_static("enchantment_glint_override");
+        let id = REGISTRY
+            .data_components
+            .id_from_key(&key)
+            .expect("registered");
+        let mut bytes = Vec::new();
+        for value in [1, vanilla_items::STONE.id() as i32, 1, 0, id as i32] {
+            VarInt(value).write(&mut bytes).expect("write");
+        }
+        bytes.push(2);
+        bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(read_brewing_item(&bytes).is_none());
+    }
+
+    #[test]
+    fn bridge_rejects_unsorted_and_duplicate_component_ids() {
+        init_vanilla_registry();
+        let mut ids = ["glider", "unbreakable"].map(|name| {
+            REGISTRY
+                .data_components
+                .id_from_key(&Identifier::vanilla_static(name))
+                .expect("registered")
+        });
+        ids.sort_unstable();
+        for (added, removed) in [
+            (vec![ids[1], ids[0]], vec![]),
+            (vec![], vec![ids[1], ids[0]]),
+            (vec![ids[0], ids[0]], vec![]),
+            (vec![], vec![ids[0], ids[0]]),
+            (vec![ids[0]], vec![ids[0]]),
+        ] {
+            let mut bytes = Vec::new();
+            for value in [
+                1,
+                vanilla_items::STONE.id() as i32,
+                added.len() as i32,
+                removed.len() as i32,
+            ] {
+                VarInt(value).write(&mut bytes).expect("header");
+            }
+            for id in added.into_iter().chain(removed) {
+                VarInt(id as i32).write(&mut bytes).expect("component id");
+            }
+            bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+            assert!(read_brewing_item(&bytes).is_none());
+        }
+    }
+
+    #[test]
+    fn bridge_rejected_text_conversion_stays_below_one_mib() {
+        init_vanilla_registry();
+        let mut value = snapshot(vec![ItemStack::empty(); 5]);
+        value.custom_name = Some(TextComponent::plain("x".repeat(2 << 20)));
+        let stats = allocation_counter::measure(|| {
+            assert!(encode_brewing_snapshot(&value).is_none());
+        });
+        assert!(stats.bytes_max <= 1 << 20, "{stats:?}");
+    }
+
+    #[test]
+    fn bridge_rejected_lock_conversion_stays_below_one_mib() {
+        init_vanilla_registry();
+        let mut value = snapshot(vec![ItemStack::empty(); 5]);
+        value.lock = LockCode::new(ItemPredicate::new(
+            Some(RegistryHolderSet::Direct(vec![
+                &vanilla_items::STONE;
+                100_000
+            ])),
+            IntBounds::ANY,
+            DataComponentMatchers::ANY,
+        ));
+        let stats = allocation_counter::measure(|| {
+            assert!(encode_brewing_snapshot(&value).is_none());
+        });
+        assert!(stats.bytes_max <= 1 << 20, "{stats:?}");
     }
 
     #[test]
@@ -17231,35 +17653,27 @@ mod brewing_bridge_tests {
     }
 
     #[test]
-    fn malformed_snapshot_item_metadata_is_rejected() {
+    fn malformed_snapshot_item_binary_components_are_rejected() {
         init_vanilla_registry();
-        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
-        items[0] = ItemStack::new(&vanilla_items::POTION);
-        let mut encoded =
-            encode_brewing_snapshot(&snapshot(items)).expect("test snapshot should encode");
-        let item_length_offset = 4 + 8 + 4 + 4 + 4;
-        let replacement = b"minecraft:potion 1\x1dunknown=metadata";
-        replace_snapshot_blob(&mut encoded, item_length_offset, replacement);
-
-        assert!(
-            decode_brewing_snapshot(&encoded).is_none(),
-            "snapshot item metadata must not be silently discarded"
-        );
-    }
-
-    #[test]
-    fn malformed_known_snapshot_item_components_are_rejected() {
-        init_vanilla_registry();
-        for malformed in [
-            b"minecraft:potion 1\x1dnbthex=0".as_slice(),
-            b"minecraft:potion 1\x1ddamage=not-a-number".as_slice(),
-            b"minecraft:potion 1\x1dpotioneffects=speed,20".as_slice(),
+        let entry = REGISTRY
+            .data_components
+            .id_from_key(&Identifier::vanilla_static("custom_name"))
+            .expect("registered");
+        for body in [
+            vec![8, 0, 4, b'x'],
+            vec![10, 8, 0],
+            vec![255],
+            vec![8, 0, 1, b'x', 0],
         ] {
-            let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
-            items[0] = ItemStack::new(&vanilla_items::POTION);
+            let mut item = Vec::new();
+            for value in [1, vanilla_items::STONE.id() as i32, 1, 0, entry as i32] {
+                VarInt(value).write(&mut item).expect("header");
+            }
+            item.extend(body);
+            item.extend_from_slice(&u32::MAX.to_be_bytes());
             let mut encoded =
-                encode_brewing_snapshot(&snapshot(items)).expect("test snapshot should encode");
-            replace_snapshot_blob(&mut encoded, 4 + 8 + 4 + 4 + 4, malformed);
+                encode_brewing_snapshot(&snapshot(vec![ItemStack::empty(); 5])).expect("snapshot");
+            replace_snapshot_blob(&mut encoded, 24, &item);
             assert!(decode_brewing_snapshot(&encoded).is_none());
         }
     }
@@ -17269,11 +17683,16 @@ mod brewing_bridge_tests {
         init_vanilla_registry();
         let encoded =
             encode_brewing_snapshot(&snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]))
-                .expect("test snapshot should encode");
+                .expect("snapshot");
         let name_offset = custom_name_length_offset(&encoded);
-        for replacement in [b"{".as_slice(), b"{}\x00".as_slice()] {
+        for replacement in [
+            vec![8, 0, 2, b'x'],
+            vec![8, 0, 1, b'x', 0],
+            vec![10, 8, 0],
+            vec![255],
+        ] {
             let mut malformed = encoded.clone();
-            replace_snapshot_blob(&mut malformed, name_offset, replacement);
+            replace_snapshot_blob(&mut malformed, name_offset, &replacement);
             assert!(decode_brewing_snapshot(&malformed).is_none());
         }
     }

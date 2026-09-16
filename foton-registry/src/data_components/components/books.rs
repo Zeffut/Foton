@@ -1,5 +1,9 @@
 //! Writable and written book item components.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_stream::{self, NbtWrite};
+use foton_utils::serial::text_stream;
+use foton_utils::text::from_nbt as decode_text_nbt;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -128,10 +132,10 @@ impl WriteTo for WritableBookContent {
 impl ReadFrom for WritableBookContent {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_bounded_count(data, Self::MAX_PAGES)?;
-        let mut pages = Vec::with_capacity(collection_capacity::<Filterable<String>>(
+        let mut pages = budget::read_vec(
             count,
-            DEFAULT_COLLECTION_ALLOCATION_BUDGET,
-        )?);
+            collection_capacity::<Filterable<String>>(count, DEFAULT_COLLECTION_ALLOCATION_BUDGET)?,
+        )?;
         for _ in 0..count {
             pages.push(read_filterable_string(data, Self::PAGE_EDIT_LENGTH)?);
         }
@@ -327,16 +331,75 @@ impl WriteTo for WrittenBookContent {
     }
 }
 
+impl WrittenBookContent {
+    pub(crate) fn validate_page(
+        value: &TextComponent,
+        writer: &dyn NbtWrite,
+        depth: usize,
+    ) -> Result<()> {
+        // Bound string/list classification before serde_json's escaping pass.
+        let mut sink = std::io::sink();
+        let mut preflight = nbt_stream::LimitedWriter::persistent(&mut sink, writer.remaining());
+        text_stream::write_payload(value, &mut preflight, depth)?;
+        struct JsonLength(usize);
+        impl Write for JsonLength {
+            fn write(&mut self, bytes: &[u8]) -> Result<usize> {
+                // serde_json emits UTF-8. Count leading bytes; astral scalars
+                // occupy two Java UTF-16 units, even across write boundaries.
+                for &byte in bytes {
+                    self.0 +=
+                        usize::from(!(0x80..0xc0).contains(&byte)) + usize::from(byte >= 0xf0);
+                    if self.0 > WrittenBookContent::PAGE_LENGTH {
+                        return Err(Error::other(
+                            "Written book page JSON exceeds persistent limit",
+                        ));
+                    }
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+        serde_json::to_writer(JsonLength(0), value).map_err(Error::other)
+    }
+    pub(crate) fn write_bounded(&self, budget: usize, writer: &mut dyn Write) -> Result<()> {
+        let mut writer = nbt_stream::LimitedWriter::new(writer, budget);
+        writer.ensure_remaining(
+            self.title
+                .raw()
+                .len()
+                .saturating_add(self.title.filtered().map_or(0, String::len))
+                .saturating_add(self.author.len()),
+        )?;
+        write_filterable_string(&self.title, Self::TITLE_MAX_LENGTH, &mut writer)?;
+        write_network_string(&self.author, MAX_NETWORK_STRING_LENGTH, &mut writer)?;
+        VarInt(self.generation).write(&mut writer)?;
+        write_count(self.pages.len(), &mut writer)?;
+        for page in &self.pages {
+            text_stream::write_bounded(page.raw(), writer.remaining(), &mut writer)?;
+            page.filtered().is_some().write(&mut writer)?;
+            if let Some(filtered) = page.filtered() {
+                text_stream::write_bounded(filtered, writer.remaining(), &mut writer)?;
+            }
+        }
+        self.resolved.write(&mut writer)
+    }
+}
+
 impl ReadFrom for WrittenBookContent {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let title = read_filterable_string(data, Self::TITLE_MAX_LENGTH)?;
         let author = read_network_string(data, MAX_NETWORK_STRING_LENGTH)?;
         let generation = VarInt::read(data)?.0;
         let count = read_count(data)?;
-        let mut pages = Vec::with_capacity(collection_capacity::<Filterable<TextComponent>>(
+        let mut pages = budget::read_vec(
             count,
-            DEFAULT_COLLECTION_ALLOCATION_BUDGET,
-        )?);
+            collection_capacity::<Filterable<TextComponent>>(
+                count,
+                DEFAULT_COLLECTION_ALLOCATION_BUDGET,
+            )?,
+        )?;
         for _ in 0..count {
             pages.push(read_filterable_component(data)?);
         }
@@ -448,7 +511,7 @@ fn filterable_component_from_nbt(tag: &NbtTag) -> Option<Filterable<TextComponen
 }
 
 fn restricted_component_from_nbt(tag: &NbtTag) -> Option<TextComponent> {
-    let component = TextComponent::from_nbt(tag)?;
+    let component = decode_text_nbt(tag)?;
     let encoded = serde_json::to_string(&component).ok()?;
     (encoded.encode_utf16().count() <= WrittenBookContent::PAGE_LENGTH).then_some(component)
 }
@@ -649,6 +712,18 @@ mod tests {
     }
 
     #[test]
+    fn writable_book_tiny_declared_pages_allocate_only_input_scale() {
+        let mut encoded = Vec::new();
+        VarInt(100).write(&mut encoded).expect("count");
+        let stats = allocation_counter::measure(|| {
+            let error = WritableBookContent::read(&mut Cursor::new(encoded.as_slice()))
+                .expect_err("missing pages");
+            assert_eq!(error.kind(), ErrorKind::InvalidData);
+        });
+        assert!(stats.bytes_max < 4096, "{stats:?}");
+    }
+
+    #[test]
     fn writable_pages_use_full_filterable_persistence_and_bounded_network() {
         let value = WritableBookContent::new(vec![Filterable::new(
             "raw".to_owned(),
@@ -722,8 +797,7 @@ mod tests {
             &mut encoded,
         )
         .expect("empty title should encode");
-        write_network_string(&String::new(), 32_767, &mut encoded)
-            .expect("empty author should encode");
+        write_network_string("", 32_767, &mut encoded).expect("empty author should encode");
         VarInt(0)
             .write(&mut encoded)
             .expect("generation should encode");

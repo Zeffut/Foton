@@ -56,6 +56,7 @@ pub fn read_utf(data: &mut Cursor<&[u8]>, max_utf16_units: usize) -> Result<Stri
         ));
     };
 
+    super::budget::charge::<u8>(encoded_len.saturating_mul(6))?;
     let decoded = decode_java_utf8_lossy(bytes);
     let end = u64::try_from(end).map_err(|_| {
         Error::new(
@@ -245,6 +246,8 @@ impl PrefixedRead for String {
             Err(Error::other("To long"))?;
         }
 
+        super::budget::check_collection_input(data, len, 1)?;
+        super::budget::charge::<u8>(len)?;
         let mut buf = vec![0; len];
         data.read_exact(&mut buf)?;
         String::from_utf8(buf).map_err(Error::other)
@@ -262,8 +265,15 @@ impl<T: ReadFrom> PrefixedRead for Vec<T> {
         if len > bound {
             return Err(Error::other("To long"));
         }
-        let mut items = Vec::with_capacity(len);
-        for _ in 0..len {
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        // Probe the first value before reserving: it may consume zero bytes, so
+        // the generic codec cannot infer a minimum wire size from its type.
+        let first = T::read(data)?;
+        let mut items = super::budget::read_vec::<T>(len, len)?;
+        items.push(first);
+        for _ in 1..len {
             items.push(T::read(data)?);
         }
         Ok(items)
@@ -285,11 +295,11 @@ impl<T: PrefixedRead> PrefixedRead for Option<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, ErrorKind};
+    use std::io::{Cursor, ErrorKind, Result};
 
     use crate::{
         codec::VarInt,
-        serial::{PrefixedRead as _, WriteTo as _, prefixed_read::read_utf},
+        serial::{PrefixedRead as _, ReadFrom, WriteTo as _, prefixed_read::read_utf},
     };
 
     fn encoded_string(bytes: &[u8]) -> Vec<u8> {
@@ -299,6 +309,21 @@ mod tests {
             .expect("test string length should encode");
         encoded.extend_from_slice(bytes);
         encoded
+    }
+
+    #[test]
+    fn truncated_vector_does_not_reserve_attacker_declared_capacity() {
+        let bytes = [0xff, 0xff, 0x01];
+        let stats = allocation_counter::measure(|| {
+            assert!(
+                Vec::<u64>::read_prefixed_bound::<VarInt>(
+                    &mut Cursor::new(bytes.as_slice()),
+                    32767
+                )
+                .is_err()
+            );
+        });
+        assert!(stats.bytes_max < 4096, "{stats:?}");
     }
 
     #[test]
@@ -391,8 +416,8 @@ mod tests {
     #[derive(Debug, PartialEq)]
     struct ZeroByte;
 
-    impl crate::serial::ReadFrom for ZeroByte {
-        fn read(_data: &mut Cursor<&[u8]>) -> std::io::Result<Self> {
+    impl ReadFrom for ZeroByte {
+        fn read(_data: &mut Cursor<&[u8]>) -> Result<Self> {
             Ok(Self)
         }
     }
@@ -406,5 +431,36 @@ mod tests {
             .expect("zero-byte element codecs may legally consume no body bytes");
 
         assert_eq!(values, vec![ZeroByte, ZeroByte]);
+    }
+}
+
+#[cfg(test)]
+mod allocation_policy_tests {
+    use super::*;
+    use crate::serial::{WriteTo as _, budget::DecodeBudget};
+    #[test]
+    fn ordinary_prefixed_vectors_reserve_once_and_preserve_zero_byte_elements() {
+        let mut bytes = Vec::new();
+        VarInt(1024).write(&mut bytes).expect("count");
+        bytes.extend_from_slice(&[7; 1024]);
+        let stats = allocation_counter::measure(|| {
+            let values = Vec::<u8>::read_prefixed::<VarInt>(&mut Cursor::new(bytes.as_slice()))
+                .expect("values");
+            assert_eq!(values.len(), 1024);
+            assert!(values.iter().all(|value| *value == 7));
+        });
+        assert_eq!(
+            stats.count_total, 1,
+            "ordinary vectors should reserve up front: {stats:?}"
+        );
+        for budgeted in [false, true] {
+            let decode = || Vec::<()>::read_prefixed::<u8>(&mut Cursor::new(&[9][..]));
+            let units = if budgeted {
+                DecodeBudget::new(0).decode(decode)
+            } else {
+                decode()
+            };
+            assert_eq!(units.expect("zero-byte elements").len(), 9);
+        }
     }
 }

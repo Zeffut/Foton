@@ -1,6 +1,10 @@
 //! Vanilla `minecraft:map_decorations` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_preflight;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::collections::BTreeMap;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -175,14 +179,13 @@ impl MapDecorations {
 
 impl WriteTo for MapDecorations {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut encoded = Vec::new();
-        self.to_nbt_tag_ref().write(&mut encoded);
-        writer.write_all(&encoded)
+        nbt_encode::write_bounded(self, usize::MAX, writer)
     }
 }
 
 impl ReadFrom for MapDecorations {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
+        nbt_preflight::check(data, true)?;
         let tag =
             read_tag(data).map_err(|error| Error::other(format!("Invalid NBT: {error:?}")))?;
         let Some(heap_size) = vanilla_nbt_heap_size(&tag) else {
@@ -244,6 +247,37 @@ const fn java_double_equals(left: f64, right: f64) -> bool {
 
 const fn java_float_equals(left: f32, right: f32) -> bool {
     (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
+}
+
+impl nbt_encode::NbtEncode for MapDecorationEntry {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("type", &(self.decoration_type), writer, depth)?;
+        field("x", &(self.x), writer, depth)?;
+        field("z", &(self.z), writer, depth)?;
+        field("rotation", &(self.rotation), writer, depth)?;
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for MapDecorations {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        for (id, decoration) in &self.decorations {
+            field(id.as_str(), &(decoration), writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

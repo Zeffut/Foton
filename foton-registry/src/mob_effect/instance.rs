@@ -1,5 +1,9 @@
 //! Vanilla mob-effect instance codec model.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -269,11 +273,20 @@ impl WriteTo for MobEffectInstance {
         let id = self
             .effect
             .try_id()
-            .ok_or_else(|| Error::other(format!("Unknown mob effect: {}", self.effect.key)))?;
+            .ok_or_else(|| Error::other("Unknown mob effect"))?;
         let id = i32::try_from(id)
             .map_err(|_| Error::other(format!("Mob effect id out of range: {id}")))?;
         VarInt(id).write(writer)?;
-        write_details(&self.details(), writer, 0)
+        VarInt(self.amplifier).write(writer)?;
+        VarInt(self.duration).write(writer)?;
+        self.ambient.write(writer)?;
+        self.show_particles.write(writer)?;
+        self.show_icon.write(writer)?;
+        self.hidden_effect.is_some().write(writer)?;
+        if let Some(hidden) = &self.hidden_effect {
+            write_details(hidden, writer, 1)?;
+        }
+        Ok(())
     }
 }
 
@@ -347,6 +360,7 @@ fn read_details(data: &mut Cursor<&[u8]>, depth: usize) -> Result<MobEffectInsta
     let show_particles = bool::read(data)?;
     let show_icon = bool::read(data)?;
     let hidden_effect = if bool::read(data)? {
+        budget::charge::<MobEffectInstanceDetails>(1)?;
         Some(read_details(data, depth + 1)?)
     } else {
         None
@@ -412,6 +426,60 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for MobEffectInstanceDetails {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if self.amplifier != 0 {
+            field("amplifier", &(self.amplifier as u8 as i8), writer, depth)?;
+        }
+        if self.duration != 0 {
+            field("duration", &self.duration, writer, depth)?;
+        }
+        if self.ambient {
+            field("ambient", &true, writer, depth)?;
+        }
+        if !self.show_particles {
+            field("show_particles", &false, writer, depth)?;
+        }
+        field("show_icon", &self.show_icon, writer, depth)?;
+        if let Some(hidden) = &self.hidden_effect {
+            field("hidden_effect", hidden, writer, depth)?;
+        }
+        end(writer)
+    }
+}
+impl nbt_encode::NbtEncode for MobEffectInstance {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if self.amplifier != 0 {
+            field("amplifier", &(self.amplifier as u8 as i8), writer, depth)?;
+        }
+        if self.duration != 0 {
+            field("duration", &self.duration, writer, depth)?;
+        }
+        if self.ambient {
+            field("ambient", &true, writer, depth)?;
+        }
+        if !self.show_particles {
+            field("show_particles", &false, writer, depth)?;
+        }
+        field("show_icon", &self.show_icon, writer, depth)?;
+        if let Some(hidden) = &self.hidden_effect {
+            field("hidden_effect", hidden, writer, depth)?;
+        }
+        field("id", &self.effect.key, writer, depth)?;
+        end(writer)
+    }
 }
 
 #[cfg(test)]

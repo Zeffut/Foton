@@ -1,5 +1,9 @@
 //! Armor trim pattern registry values.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use foton_utils::text::from_nbt as decode_text_nbt;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::Identifier;
@@ -58,7 +62,7 @@ impl TrimPatternValue {
 impl WriteTo for TrimPatternValue {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
         self.asset_id.write(writer)?;
-        WriteTo::write(&self.description.to_codec_nbt(), writer)?;
+        self.description.write(writer)?;
         self.decal.write(writer)
     }
 }
@@ -84,7 +88,7 @@ impl FromNbtTag for TrimPatternValue {
         let compound = tag.compound()?;
         Some(Self::new(
             Identifier::from_nbt_tag(compound.get("asset_id")?)?,
-            TextComponent::from_nbt(&compound.get("description")?.to_owned())?,
+            decode_text_nbt(&compound.get("description")?.to_owned())?,
             compound
                 .get("decal")
                 .map_or(Some(false), |decal| decal.codec_bool())?,
@@ -194,6 +198,21 @@ impl RegistryHolderEntry for TrimPattern {
 
     fn holder_by_key(key: &Identifier) -> Option<&'static Self> {
         REGISTRY.trim_patterns.by_key(key)
+    }
+}
+
+impl nbt_encode::NbtEncode for TrimPatternValue {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("asset_id", &(self.asset_id), writer, depth)?;
+        field("description", &(self.description), writer, depth)?;
+        field("decal", &(self.decal), writer, depth)?;
+        end(writer)
     }
 }
 

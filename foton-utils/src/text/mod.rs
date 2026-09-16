@@ -1,4 +1,8 @@
 //! This module contains everything related to text components.
+use crate::serial::nbt_preflight;
+mod decode;
+#[cfg(any(test, feature = "codec-test-support"))]
+pub mod decode_work;
 mod nbt;
 
 pub use nbt::command_nbt_component;
@@ -8,7 +12,7 @@ use crate::{
     serial::ReadFrom,
     translations_registry::TRANSLATIONS,
 };
-use simdnbt::owned::read_tag;
+use simdnbt::owned::{NbtTag, read_tag};
 use std::io::{self, Cursor};
 use text_components::{
     TextComponent,
@@ -38,14 +42,20 @@ impl TextResolutor for DisplayResolutor {
     }
 }
 
+/// Decodes owned NBT through borrowed descendants, preserving the pinned text validators.
+#[must_use]
+pub fn from_nbt(tag: &NbtTag) -> Option<TextComponent> {
+    decode::component(tag).ok()
+}
+
 impl ReadFrom for TextComponent {
     fn read(data: &mut Cursor<&[u8]>) -> io::Result<Self> {
         // ComponentSerialization.STREAM_CODEC writes one unnamed NBT tag.
+        nbt_preflight::check(data, true)?;
         let nbt_tag =
             read_tag(data).map_err(|e| io::Error::other(format!("Failed to read NBT: {e:?}")))?;
 
-        Self::from_nbt(&nbt_tag)
-            .ok_or_else(|| io::Error::other("Failed to parse TextComponent from NBT"))
+        from_nbt(&nbt_tag).ok_or_else(|| io::Error::other("Failed to parse TextComponent from NBT"))
     }
 }
 

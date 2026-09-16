@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:potion_contents` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -238,7 +242,8 @@ impl ReadFrom for PotionContents {
             None
         };
         let count = read_count(data)?;
-        let mut custom_effects = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 4)?;
+        let mut custom_effects = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             custom_effects.push(MobEffectInstance::read(data)?);
         }
@@ -343,6 +348,29 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl nbt_encode::NbtEncode for PotionContents {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if let Some(potion) = self.potion {
+            field("potion", &potion, writer, depth)?;
+        }
+        if let Some(color) = self.custom_color {
+            field("custom_color", &color, writer, depth)?;
+        }
+        if !self.custom_effects.is_empty() {
+            field("custom_effects", &self.custom_effects, writer, depth)?;
+        }
+        if let Some(name) = &self.custom_name {
+            field("custom_name", name, writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

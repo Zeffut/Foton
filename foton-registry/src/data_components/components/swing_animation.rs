@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:swing_animation` item component.
 
+use crate::data_components::registry::ValidatePersistentComponent;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -171,6 +175,39 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl ValidatePersistentComponent for SwingAnimation {
+    fn validate_persistent(&self) -> io::Result<()> {
+        if self.duration <= 0 {
+            return Err(io::Error::other("Invalid persistent swing duration"));
+        }
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for SwingAnimation {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        self.validate_persistent()?;
+        if self.animation_type != Self::DEFAULT.animation_type {
+            field(
+                "type",
+                &(self.animation_type.serialized_name()),
+                writer,
+                depth,
+            )?;
+        }
+        if self.duration != Self::DEFAULT.duration {
+            field("duration", &(self.duration), writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

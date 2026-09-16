@@ -2,13 +2,14 @@
     clippy::disallowed_types,
     reason = "HashMap is used directly to implement WriteTo; project types are not available here"
 )]
+use std::io;
 use std::{
     collections::HashMap,
     hash::BuildHasher,
     io::{Result, Write},
 };
 
-use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+use simdnbt::owned::{NbtCompound, NbtTag};
 use text_components::TextComponent;
 use uuid::Uuid;
 
@@ -18,103 +19,45 @@ use crate::{
     serial::{PrefixedWrite, WriteTo},
 };
 
-/// Writes an NBT tag after rejecting values that would exceed the temporary
-/// serialization budget.
+/// Streams owned NBT without allocating a serialization buffer. Validation and
+/// exact wire sizing stop as soon as the explicit caller budget is exhausted.
 pub fn write_nbt_tag_bounded(tag: &NbtTag, maximum: usize, writer: &mut dyn Write) -> Result<()> {
-    let wire_size = nbt_wire_size(tag)?;
-    if wire_size > maximum {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "NBT value exceeds serialization budget",
-        ));
-    }
-    let mut buf = Vec::new();
-    buf.try_reserve_exact(wire_size)
-        .map_err(|_| std::io::Error::other("NBT serialization allocation failed"))?;
-    tag.write(&mut buf);
-    writer.write_all(&buf)
+    super::nbt_stream::write_tag_bounded(tag, maximum, writer)
 }
 
+#[cfg(test)]
 fn nbt_wire_size(tag: &NbtTag) -> Result<usize> {
-    nbt_payload_size(tag)?
-        .checked_add(1)
-        .ok_or_else(|| std::io::Error::other("NBT wire size overflows"))
-}
-
-fn nbt_payload_size(tag: &NbtTag) -> Result<usize> {
-    match tag {
-        NbtTag::Byte(_) => Ok(1),
-        NbtTag::Short(_) => Ok(2),
-        NbtTag::Int(_) | NbtTag::Float(_) => Ok(4),
-        NbtTag::Long(_) | NbtTag::Double(_) => Ok(8),
-        NbtTag::ByteArray(values) => sized(4, values.len(), 1),
-        NbtTag::String(value) => value
-            .len()
-            .checked_add(2)
-            .ok_or_else(|| std::io::Error::other("NBT wire size overflows")),
-        NbtTag::List(list) => nbt_list_wire_size(list),
-        NbtTag::Compound(compound) => nbt_compound_wire_size(compound),
-        NbtTag::IntArray(values) => sized(4, values.len(), 4),
-        NbtTag::LongArray(values) => sized(4, values.len(), 8),
-    }
-}
-
-fn nbt_compound_wire_size(compound: &NbtCompound) -> Result<usize> {
-    compound.iter().try_fold(1usize, |size, (name, value)| {
-        let value_size = nbt_payload_size(value)?;
-        size.checked_add(3)
-            .and_then(|size| size.checked_add(name.len()))
-            .and_then(|size| size.checked_add(value_size))
-            .ok_or_else(|| std::io::Error::other("NBT wire size overflows"))
-    })
-}
-
-fn nbt_list_wire_size(list: &NbtList) -> Result<usize> {
-    let header = 5usize;
-    match list {
-        NbtList::Empty => Ok(header),
-        NbtList::Byte(v) => sized(header, v.len(), 1),
-        NbtList::Short(v) => sized(header, v.len(), 2),
-        NbtList::Int(v) => sized(header, v.len(), 4),
-        NbtList::Float(v) => sized(header, v.len(), 4),
-        NbtList::Long(v) => sized(header, v.len(), 8),
-        NbtList::Double(v) => sized(header, v.len(), 8),
-        NbtList::String(v) => v
-            .iter()
-            .try_fold(header, |size, value| add(size, value.len().checked_add(2))),
-        NbtList::Compound(v) => v.iter().try_fold(header, |size, value| {
-            add(size, Some(nbt_compound_wire_size(value)?))
-        }),
-        NbtList::List(v) => v.iter().try_fold(header, |size, value| {
-            add(size, Some(nbt_list_wire_size(value)?))
-        }),
-        NbtList::ByteArray(v) => v.iter().try_fold(header, |size, value| {
-            add(size, Some(sized(4, value.len(), 1)?))
-        }),
-        NbtList::IntArray(v) => v.iter().try_fold(header, |size, value| {
-            add(size, Some(sized(4, value.len(), 4)?))
-        }),
-        NbtList::LongArray(v) => v.iter().try_fold(header, |size, value| {
-            add(size, Some(sized(4, value.len(), 8)?))
-        }),
-    }
-}
-
-fn sized(header: usize, count: usize, width: usize) -> Result<usize> {
-    add(header, count.checked_mul(width))
-}
-fn add(size: usize, extra: Option<usize>) -> Result<usize> {
-    size.checked_add(extra.ok_or_else(|| std::io::Error::other("NBT wire size overflows"))?)
-        .ok_or_else(|| std::io::Error::other("NBT wire size overflows"))
+    super::nbt_stream::wire_size(tag, usize::MAX)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::ErrorKind;
+    use std::io::{ErrorKind, sink};
 
-    use simdnbt::owned::{NbtList, NbtTag};
+    use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 
     use super::write_nbt_tag_bounded;
+
+    #[test]
+    fn bounded_nbt_near_cap_never_allocates_a_growable_temporary() {
+        let cap = 1 << 20;
+        let mut compound = NbtCompound::new();
+        compound.insert("a", NbtTag::ByteArray(vec![0; cap - 15]));
+        compound.insert("b", NbtTag::Byte(1));
+        let tag = NbtTag::Compound(compound);
+        let exact = super::nbt_wire_size(&tag).expect("wire size");
+        assert_eq!(exact, cap);
+        let mut unbounded = Vec::with_capacity(exact);
+        tag.write(&mut unbounded);
+        assert!(
+            unbounded.capacity() > cap,
+            "fixture must expose simdnbt speculative growth"
+        );
+        let stats = allocation_counter::measure(|| {
+            write_nbt_tag_bounded(&tag, cap, &mut sink()).expect("fits exactly");
+        });
+        assert!(stats.bytes_max <= cap as u64, "{stats:?}");
+    }
 
     #[test]
     fn bounded_nbt_uses_mutf8_wire_length_not_java_heap_accounting() {
@@ -250,7 +193,10 @@ impl WriteTo for BlockPos {
 
 impl WriteTo for TextComponent {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        WriteTo::write(&self.to_codec_nbt(), writer)
+        super::text_stream::write(
+            self,
+            &mut super::nbt_stream::LimitedWriter::new(writer, usize::MAX),
+        )
     }
 }
 
@@ -265,25 +211,39 @@ impl WriteTo for Uuid {
 
 impl WriteTo for Identifier {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        self.to_string().write_prefixed::<VarInt>(writer)?;
-        Ok(())
+        let length = self
+            .namespace
+            .len()
+            .checked_add(self.path.len())
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(|| io::Error::other("Identifier length overflow"))?;
+        if length > super::DEFAULT_BOUND {
+            return Err(io::Error::other("Identifier exceeds network string limit"));
+        }
+        VarInt(i32::try_from(length).map_err(io::Error::other)?).write(writer)?;
+        writer.write_all(self.namespace.as_bytes())?;
+        writer.write_all(b":")?;
+        writer.write_all(self.path.as_bytes())
     }
 }
 
 impl WriteTo for NbtTag {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut buf = Vec::new();
-        self.write(&mut buf);
-        writer.write_all(&buf)
+        super::nbt_stream::write_tag(
+            self,
+            &mut super::nbt_stream::LimitedWriter::new(writer, usize::MAX),
+            0,
+        )
     }
 }
 
 impl WriteTo for NbtCompound {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut buf = Vec::new();
-        self.write(&mut buf);
-        writer.write_all(&buf)?;
-        Ok(())
+        super::nbt_stream::write_compound(
+            self,
+            &mut super::nbt_stream::LimitedWriter::new(writer, usize::MAX),
+            0,
+        )
     }
 }
 
@@ -303,9 +263,11 @@ impl WriteTo for OptionalNbt {
                 // Write compound tag type (0x0A) first, then the compound contents
                 // This matches vanilla's writeAnyTag format
                 writer.write_all(&[0x0A])?;
-                let mut buf = Vec::new();
-                compound.write(&mut buf);
-                writer.write_all(&buf)?;
+                super::nbt_stream::write_compound(
+                    compound,
+                    &mut super::nbt_stream::LimitedWriter::new(writer, usize::MAX),
+                    0,
+                )?;
             }
             None => {
                 // Write END tag (0x00) for null/absent NBT

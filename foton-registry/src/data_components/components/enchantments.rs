@@ -1,13 +1,36 @@
+use crate::data_components::registry::ValidatePersistentComponent;
 use foton_utils::Identifier;
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
 use foton_utils::nbt::NbtNumeric as _;
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use foton_utils::serial::nbt_stream::{LimitedWriter, ScratchWriter};
 use foton_utils::serial::{ReadFrom, WriteTo};
 use rustc_hash::FxHashMap;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
+use std::io;
 
 use crate::{REGISTRY, RegistryExt};
+
+#[cfg(test)]
+mod lookup_work {
+    use std::cell::Cell;
+
+    thread_local! { static LOOKUPS: Cell<usize> = const { Cell::new(0) }; }
+
+    pub(super) fn visit() {
+        LOOKUPS.set(LOOKUPS.get() + 1);
+    }
+
+    pub(super) fn measure(operation: impl FnOnce()) -> usize {
+        LOOKUPS.set(0);
+        operation();
+        LOOKUPS.get()
+    }
+}
 
 /// Enchantments stored on an item. Maps enchantment key to level.
 ///
@@ -21,6 +44,58 @@ pub struct ItemEnchantments {
 }
 
 impl ItemEnchantments {
+    pub(crate) fn write_bounded(
+        &self,
+        budget: usize,
+        writer: &mut dyn io::Write,
+    ) -> io::Result<()> {
+        let mut writer = LimitedWriter::new(writer, budget);
+        writer.ensure_remaining(self.levels.len().saturating_mul(2).saturating_add(1))?;
+        // Known keys cap the scratch vector at the native registry's size.
+        if self.levels.len() > REGISTRY.enchantments.len() {
+            return Err(io::Error::other("Too many enchantments"));
+        }
+        let required = self.levels.len().saturating_mul(size_of::<(usize, u32)>());
+        let mut writer = ScratchWriter::new(&mut writer, required)?;
+        // IDs carry no identifier bytes. Bound lookup work by registered key
+        // lengths without hashing an arbitrarily long unknown identifier.
+        let maximum_key_bytes = REGISTRY
+            .enchantments
+            .iter()
+            .map(|(_, value)| {
+                value
+                    .key
+                    .namespace
+                    .len()
+                    .saturating_add(value.key.path.len())
+            })
+            .max()
+            .unwrap_or(0);
+        let mut entries = Vec::with_capacity(self.levels.len());
+        for (key, &level) in &self.levels {
+            if key.namespace.len().saturating_add(key.path.len()) > maximum_key_bytes {
+                return Err(io::Error::other("Unknown enchantment"));
+            }
+            #[cfg(test)]
+            lookup_work::visit();
+            let id = REGISTRY
+                .enchantments
+                .id_from_key(key)
+                .ok_or_else(|| io::Error::other("Unknown enchantment"))?;
+            if level > 255 {
+                return Err(io::Error::other("Invalid enchantment level"));
+            }
+            entries.push((id, level));
+        }
+        entries.sort_unstable_by_key(|(id, _)| *id);
+        VarInt(i32::try_from(entries.len()).map_err(io::Error::other)?).write(&mut writer)?;
+        for (id, level) in entries {
+            VarInt(i32::try_from(id).map_err(io::Error::other)?).write(&mut writer)?;
+            VarInt(level as i32).write(&mut writer)?;
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -83,9 +158,9 @@ impl Default for ItemEnchantments {
 
 /// Network format: `VarInt` count, then (`VarInt` `enchantment_id`, `VarInt` level) pairs.
 impl WriteTo for ItemEnchantments {
-    fn write(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+    fn write(&self, writer: &mut impl io::Write) -> io::Result<()> {
         let count = i32::try_from(self.levels.len()).map_err(|_| {
-            std::io::Error::other(format!(
+            io::Error::other(format!(
                 "Enchantment map too large: {} entries",
                 self.levels.len()
             ))
@@ -95,14 +170,12 @@ impl WriteTo for ItemEnchantments {
             let id = REGISTRY
                 .enchantments
                 .id_from_key(key)
-                .ok_or_else(|| std::io::Error::other(format!("Unknown enchantment: {key}")))?;
+                .ok_or_else(|| io::Error::other("Unknown enchantment"))?;
             let id = i32::try_from(id).map_err(|_| {
-                std::io::Error::other(format!("Enchantment id out of protocol range: {id}"))
+                io::Error::other(format!("Enchantment id out of protocol range: {id}"))
             })?;
             if level > 255 {
-                return Err(std::io::Error::other(format!(
-                    "Enchantment {key} has invalid level {level}"
-                )));
+                return Err(io::Error::other("Invalid enchantment level"));
             }
             VarInt(id).write(writer)?;
             VarInt(level as i32).write(writer)?;
@@ -112,26 +185,28 @@ impl WriteTo for ItemEnchantments {
 }
 
 impl ReadFrom for ItemEnchantments {
-    fn read(data: &mut std::io::Cursor<&[u8]>) -> std::io::Result<Self> {
+    fn read(data: &mut std::io::Cursor<&[u8]>) -> io::Result<Self> {
         let count = VarInt::read(data)?.0;
         let count = usize::try_from(count)
-            .map_err(|_| std::io::Error::other(format!("Negative enchantment count: {count}")))?;
+            .map_err(|_| io::Error::other(format!("Negative enchantment count: {count}")))?;
+        budget::check_collection_input(data, count, 2)?;
+        budget::charge_map::<Identifier, u32>(count)?;
         let mut levels = FxHashMap::default();
         levels.reserve(count.min(65_536));
         for _ in 0..count {
             let id = VarInt::read(data)?.0;
             let id = usize::try_from(id)
-                .map_err(|_| std::io::Error::other(format!("Negative enchantment id: {id}")))?;
+                .map_err(|_| io::Error::other(format!("Negative enchantment id: {id}")))?;
             let level = VarInt::read(data)?.0;
             if !(0..=255).contains(&level) {
-                return Err(std::io::Error::other(format!(
+                return Err(io::Error::other(format!(
                     "Enchantment level out of range: {level}"
                 )));
             }
             let enchantment = REGISTRY
                 .enchantments
                 .by_id(id)
-                .ok_or_else(|| std::io::Error::other(format!("Unknown enchantment id: {id}")))?;
+                .ok_or_else(|| io::Error::other(format!("Unknown enchantment id: {id}")))?;
             levels.insert(enchantment.key.clone(), level as u32);
         }
         Ok(Self { levels })
@@ -191,6 +266,50 @@ impl HashComponent for ItemEnchantments {
     }
 }
 
+impl ValidatePersistentComponent for ItemEnchantments {
+    fn validate_persistent(&self) -> io::Result<()> {
+        for (key, level) in &self.levels {
+            if !(1..=255).contains(level) || REGISTRY.enchantments.by_key(key).is_none() {
+                return Err(io::Error::other("Invalid persistent enchantment"));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for ItemEnchantments {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end};
+        check_depth(depth)?;
+        let mut minimum = self.levels.len().saturating_mul(8).saturating_add(1);
+        writer.ensure_remaining(minimum)?;
+        if self.levels.len() > REGISTRY.enchantments.len() {
+            return Err(io::Error::other("Too many enchantments"));
+        }
+        for key in self.levels.keys() {
+            minimum = minimum
+                .saturating_add(key.namespace.len())
+                .saturating_add(key.path.len());
+            writer.ensure_remaining(minimum)?;
+        }
+        let required = self
+            .levels
+            .len()
+            .saturating_mul(size_of::<(&Identifier, &u32)>());
+        let mut writer = ScratchWriter::new(writer, required)?;
+        self.validate_persistent()?;
+        let mut entries: Vec<_> = self.levels.iter().collect();
+        entries.sort_unstable_by_key(|(key, _)| (key.namespace.as_ref(), key.path.as_ref()));
+        for (key, value) in entries {
+            nbt_encode::identifier_field(key, &(*value as i32), &mut *writer, depth)?;
+        }
+        end(&mut *writer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -228,5 +347,90 @@ mod tests {
         let mut out_of_range = NbtCompound::new();
         out_of_range.insert("minecraft:efficiency", 256);
         assert!(parse_enchantments(out_of_range).is_none());
+    }
+}
+
+#[cfg(test)]
+mod brewing_task12_tests {
+    use super::*;
+    use foton_utils::serial::nbt_encode::NbtEncode;
+    use foton_utils::serial::nbt_stream::ScratchWriter;
+    use std::io::{Write, sink};
+
+    #[test]
+    fn brewing_task12_enchantment_tiny_caps_precede_resolution_and_sorting() {
+        crate::init_vanilla_registry();
+        let value = ItemEnchantments {
+            levels: REGISTRY
+                .enchantments
+                .iter()
+                .map(|(_, v)| (v.key.clone(), 1))
+                .collect(),
+        };
+        let unknown = ItemEnchantments {
+            levels: [(Identifier::new("test", "x".repeat(2 * 1024 * 1024)), 1)]
+                .into_iter()
+                .collect(),
+        };
+        for value in [&unknown, &value] {
+            let stats = allocation_counter::measure(|| {
+                let error = value
+                    .write_bounded(2, &mut sink())
+                    .expect_err("tiny network cap");
+                assert!(
+                    error.to_string().contains("budget"),
+                    "resolved before rejecting: {error}"
+                );
+                let error = nbt_encode::write_bounded(value, 2, &mut sink())
+                    .expect_err("tiny persistent cap");
+                assert!(
+                    error.to_string().contains("budget"),
+                    "resolved before rejecting: {error}"
+                );
+            });
+            eprintln!("task12 enchantment tiny-cap {stats:?}");
+            assert!(
+                stats.bytes_max < 256,
+                "index allocated before cap check: {stats:?}"
+            );
+        }
+    }
+    #[test]
+    fn brewing_task12_unknown_network_key_work_is_bounded() {
+        crate::init_vanilla_registry();
+        let value = ItemEnchantments {
+            levels: [(Identifier::new("test", "x".repeat(32 * 1024 * 1024)), 1)]
+                .into_iter()
+                .collect(),
+        };
+        let stats = allocation_counter::measure(|| {
+            let lookups = super::lookup_work::measure(|| {
+                assert!(value.write_bounded(64, &mut sink()).is_err());
+            });
+            assert_eq!(lookups, 0, "oversized key reached registry hashing");
+        });
+        eprintln!("task12 unknown network key {stats:?}");
+        assert!(stats.bytes_max < 1024, "{stats:?}");
+    }
+    #[test]
+    fn brewing_task12_enchantment_persistent_shares_sorting_scratch() {
+        crate::init_vanilla_registry();
+        let value = ItemEnchantments {
+            levels: REGISTRY
+                .enchantments
+                .iter()
+                .map(|(_, v)| (v.key.clone(), 1))
+                .collect(),
+        };
+        let mut sink = sink();
+        let mut writer = LimitedWriter::persistent(&mut sink, 65536);
+        let scratch = writer.scratch_remaining();
+        let mut writer =
+            ScratchWriter::new(&mut writer, scratch).expect("reserve enclosing workspace");
+        writer.write_all(&[10]).expect("tag");
+        assert!(
+            value.write_nbt_payload(&mut *writer, 0).is_err(),
+            "map must respect enclosing scratch reservation"
+        );
     }
 }

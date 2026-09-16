@@ -1,6 +1,10 @@
 //! Vanilla `minecraft:debug_stick_state` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_preflight;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::collections::BTreeMap;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -123,14 +127,13 @@ impl DebugStickState {
 
 impl WriteTo for DebugStickState {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut encoded = Vec::new();
-        self.to_nbt_tag_ref().write(&mut encoded);
-        writer.write_all(&encoded)
+        nbt_encode::write_bounded(self, usize::MAX, writer)
     }
 }
 
 impl ReadFrom for DebugStickState {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
+        nbt_preflight::check(data, true)?;
         let tag =
             read_tag(data).map_err(|error| Error::other(format!("Invalid NBT: {error:?}")))?;
         let Some(heap_size) = vanilla_nbt_heap_size(&tag) else {
@@ -175,6 +178,20 @@ impl HashComponent for DebugStickState {
             hasher.put_raw_bytes(&entry.value_bytes);
         }
         hasher.end_map();
+    }
+}
+
+impl nbt_encode::NbtEncode for DebugStickState {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end};
+        check_depth(depth)?;
+        for property in self.properties.values() {
+            nbt_encode::identifier_field(&property.block.key, &property.property, writer, depth)?;
+        }
+        end(writer)
     }
 }
 

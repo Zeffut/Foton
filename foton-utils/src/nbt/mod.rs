@@ -3,6 +3,12 @@
 mod codec;
 mod path;
 mod snbt;
+#[cfg(feature = "codec-test-support")]
+pub use snbt::{compound_work, sort_work};
+
+use std::collections::BTreeMap;
+#[cfg(any(test, feature = "codec-test-support"))]
+pub mod normalization_work;
 
 use rustc_hash::FxHashSet;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
@@ -14,7 +20,7 @@ pub use path::{
 };
 pub use snbt::{
     SnbtError, SnbtErrorKind, SnbtNumberType, parse_snbt, parse_snbt_argument, parse_snbt_compound,
-    parse_snbt_compound_argument, to_canonical_snbt,
+    parse_snbt_compound_argument, to_canonical_snbt, write_compound_snbt_nbt,
 };
 
 /// Mirrors vanilla `NbtUtils.compareNbt`.
@@ -99,14 +105,24 @@ const fn double_tags_equal(left: f64, right: f64) -> bool {
 /// so codecs crossing a trust boundary normalize them explicitly.
 #[must_use]
 pub fn normalize_nbt_compound(compound: NbtCompound) -> Option<NbtCompound> {
-    let mut normalized = NbtCompound::new();
+    let mut normalized = BTreeMap::new();
     for (key, value) in compound {
         let key = key.try_into_string().ok()?;
         let value = normalize_nbt_tag(value)?;
-        while normalized.remove(&key).is_some() {}
+        #[cfg(any(test, feature = "codec-test-support"))]
+        let key = normalization_work::Key(key);
         normalized.insert(key, value);
     }
-    Some(normalized)
+    Some(NbtCompound::from_values(
+        normalized
+            .into_iter()
+            .map(|(key, value)| {
+                #[cfg(any(test, feature = "codec-test-support"))]
+                let key = key.0;
+                (key.into(), value)
+            })
+            .collect(),
+    ))
 }
 
 /// Converts an NBT value and all descendants to Vanilla's canonical in-memory
@@ -226,6 +242,26 @@ fn vanilla_nbt_list_heap_size(list: &NbtList) -> Option<u64> {
     36_u64
         .checked_add(4_u64.checked_mul(count)?)?
         .checked_add(elements?)
+}
+
+/// Reads list cardinality without cloning compound or nested-list descendants.
+#[must_use]
+pub const fn nbt_list_len(list: &NbtList) -> usize {
+    match list {
+        NbtList::Empty => 0,
+        NbtList::Byte(values) => values.len(),
+        NbtList::Short(values) => values.len(),
+        NbtList::Int(values) => values.len(),
+        NbtList::Long(values) => values.len(),
+        NbtList::Float(values) => values.len(),
+        NbtList::Double(values) => values.len(),
+        NbtList::ByteArray(values) => values.len(),
+        NbtList::String(values) => values.len(),
+        NbtList::List(values) => values.len(),
+        NbtList::Compound(values) => values.len(),
+        NbtList::IntArray(values) => values.len(),
+        NbtList::LongArray(values) => values.len(),
+    }
 }
 
 fn fixed_elements(count: usize, per_element: u64) -> Option<u64> {

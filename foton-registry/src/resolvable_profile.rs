@@ -1,5 +1,9 @@
 //! Vanilla resolvable player profiles used by item components and entity data.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::ops::Deref;
 
@@ -101,7 +105,7 @@ struct ProfileProperties(Vec<ProfileProperty>);
 impl ProfileProperties {
     fn new(properties: Vec<ProfileProperty>) -> Result<Self> {
         validate_properties(&properties)?;
-        let mut grouped = Vec::with_capacity(properties.len());
+        let mut grouped = budget::read_vec(properties.len(), properties.len())?;
         for property in properties {
             let insertion_index = grouped
                 .iter()
@@ -416,7 +420,15 @@ impl ResolvableProfile {
         NbtTag::Compound(compound)
     }
 
+    pub(crate) fn check_owned_property_count(tag: &NbtTag) -> Option<()> {
+        if let Some(compound) = tag.compound() {
+            property_count(compound.get("properties"))?;
+        }
+        Some(())
+    }
+
     fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+        Self::check_owned_property_count(tag)?;
         if let Some(name) = tag.string() {
             return Self::dynamic_name(name.to_string(), PlayerSkinPatch::default()).ok();
         }
@@ -446,22 +458,44 @@ impl ResolvableProfile {
 
 impl WriteTo for ResolvableProfile {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
+        self.write_network(writer, false)
+    }
+}
+impl ResolvableProfile {
+    pub(crate) fn write_canonical(
+        &self,
+        writer: &mut foton_utils::serial::nbt_stream::LimitedWriter<'_>,
+    ) -> Result<()> {
+        let properties = match &self.contents {
+            ResolvableProfileContents::StaticFull(profile) => &profile.properties,
+            ResolvableProfileContents::StaticPartial(profile) => &profile.properties,
+            _ => return self.write_network(writer, true),
+        };
+        let minimum = properties.iter().fold(0_usize, |size, property| {
+            size.saturating_add(property.name.len())
+                .saturating_add(property.value.len())
+                .saturating_add(property.signature.as_ref().map_or(0, String::len))
+        });
+        writer.ensure_remaining(minimum)?;
+        self.write_network(writer, true)
+    }
+    fn write_network(&self, writer: &mut impl Write, canonical: bool) -> Result<()> {
         match &self.contents {
             ResolvableProfileContents::StaticFull(profile) => {
                 true.write(writer)?;
-                write_full_profile(profile, writer)?;
+                write_full_profile(profile, writer, canonical)?;
             }
             ResolvableProfileContents::DynamicName(name) => {
                 false.write(writer)?;
-                write_partial_profile_fields(Some(name), None, &[], writer)?;
+                write_partial_profile_fields(Some(name), None, &[], writer, canonical)?;
             }
             ResolvableProfileContents::DynamicId(id) => {
                 false.write(writer)?;
-                write_partial_profile_fields(None, Some(*id), &[], writer)?;
+                write_partial_profile_fields(None, Some(*id), &[], writer, canonical)?;
             }
             ResolvableProfileContents::StaticPartial(profile) => {
                 false.write(writer)?;
-                write_partial_profile(profile, writer)?;
+                write_partial_profile(profile, writer, canonical)?;
             }
         }
         write_skin_patch(&self.skin_patch, writer)
@@ -492,6 +526,36 @@ impl ToNbtTag for ResolvableProfile {
 
 impl FromNbtTag for ResolvableProfile {
     fn from_nbt_tag(tag: simdnbt::borrow::NbtTag) -> Option<Self> {
+        if let Some(properties) = tag.compound().and_then(|value| value.get("properties")) {
+            if let Some(list) = properties.list() {
+                if list
+                    .compounds()
+                    .is_some_and(|values| values.len() > MAX_PROPERTIES)
+                {
+                    return None;
+                }
+            } else {
+                let groups = properties.compound()?;
+                if groups.len() > MAX_PROPERTIES {
+                    return None;
+                }
+                let mut count = 0usize;
+                for (_, values) in groups.iter() {
+                    let values = values.list()?;
+                    let length = if values.empty() {
+                        0
+                    } else {
+                        values.strings()?.len()
+                    };
+                    count = count.checked_add(length)?;
+                    if count > MAX_PROPERTIES {
+                        return None;
+                    }
+                }
+            }
+        }
+        #[cfg(feature = "codec-test-support")]
+        crate::codec_work::profile_copy();
         Self::from_owned_nbt(&tag.to_owned())
     }
 }
@@ -586,41 +650,58 @@ fn insert_properties(compound: &mut NbtCompound, properties: &[ProfileProperty])
     }
 }
 
-fn read_properties(tag: Option<&NbtTag>) -> Option<Vec<ProfileProperty>> {
+fn property_count(tag: Option<&NbtTag>) -> Option<usize> {
     let Some(tag) = tag else {
-        return Some(Vec::new());
+        return Some(0);
     };
     if let Some(list) = tag.list() {
-        let list = list.as_nbt_tags();
-        if list.len() > MAX_PROPERTIES {
-            return None;
-        }
-        return list
-            .iter()
-            .map(|tag| ProfileProperty::from_nbt_compound(tag.compound()?))
-            .collect();
+        let count = foton_utils::nbt::nbt_list_len(list);
+        return (count <= MAX_PROPERTIES).then_some(count);
     }
-
     let map = tag.compound()?;
     if map.len() > MAX_PROPERTIES {
         return None;
     }
-    let mut properties = Vec::new();
-    for (name, values) in map.iter() {
-        let values = values.list()?;
-        match values {
-            NbtList::Empty => {}
-            NbtList::String(values) => {
-                for value in values {
-                    properties.push(
-                        ProfileProperty::new(name.to_string(), value.to_string(), None).ok()?,
-                    );
-                }
-            }
+    let mut count = 0usize;
+    for (_, values) in map.iter() {
+        count = count.checked_add(match values.list()? {
+            NbtList::Empty => 0,
+            NbtList::String(values) => values.len(),
             _ => return None,
-        }
-        if properties.len() > MAX_PROPERTIES {
+        })?;
+        if count > MAX_PROPERTIES {
             return None;
+        }
+    }
+    Some(count)
+}
+
+fn read_properties(tag: Option<&NbtTag>) -> Option<Vec<ProfileProperty>> {
+    let count = property_count(tag)?;
+    let Some(tag) = tag else {
+        return Some(Vec::new());
+    };
+    if let Some(list) = tag.list() {
+        if count == 0 {
+            return Some(Vec::new());
+        }
+        return match list {
+            NbtList::Empty => Some(Vec::new()),
+            NbtList::Compound(values) => values
+                .iter()
+                .map(ProfileProperty::from_nbt_compound)
+                .collect(),
+            _ => None,
+        };
+    }
+    let map = tag.compound()?;
+    let mut properties = Vec::with_capacity(count);
+    for (name, values) in map.iter() {
+        if let NbtList::String(values) = values.list()? {
+            for value in values {
+                properties
+                    .push(ProfileProperty::new(name.to_string(), value.to_string(), None).ok()?);
+            }
         }
     }
     Some(properties)
@@ -666,10 +747,14 @@ fn read_optional_identifier(tag: Option<&NbtTag>) -> Option<Option<Identifier>> 
     }
 }
 
-fn write_full_profile(profile: &StoredGameProfile, writer: &mut impl Write) -> Result<()> {
+fn write_full_profile(
+    profile: &StoredGameProfile,
+    writer: &mut impl Write,
+    canonical: bool,
+) -> Result<()> {
     profile.id.write(writer)?;
     write_string(&profile.name, MAX_PLAYER_NAME, writer)?;
-    write_properties_network(&profile.properties, writer)
+    write_properties_network(&profile.properties, writer, canonical)
 }
 
 fn read_full_profile(data: &mut Cursor<&[u8]>) -> Result<StoredGameProfile> {
@@ -680,12 +765,17 @@ fn read_full_profile(data: &mut Cursor<&[u8]>) -> Result<StoredGameProfile> {
     )
 }
 
-fn write_partial_profile(profile: &PartialProfile, writer: &mut impl Write) -> Result<()> {
+fn write_partial_profile(
+    profile: &PartialProfile,
+    writer: &mut impl Write,
+    canonical: bool,
+) -> Result<()> {
     write_partial_profile_fields(
         profile.name.as_deref(),
         profile.id,
         &profile.properties,
         writer,
+        canonical,
     )
 }
 
@@ -694,6 +784,7 @@ fn write_partial_profile_fields(
     id: Option<Uuid>,
     properties: &[ProfileProperty],
     writer: &mut impl Write,
+    canonical: bool,
 ) -> Result<()> {
     name.is_some().write(writer)?;
     if let Some(name) = name {
@@ -703,7 +794,7 @@ fn write_partial_profile_fields(
     if let Some(id) = id {
         id.write(writer)?;
     }
-    write_properties_network(properties, writer)
+    write_properties_network(properties, writer, canonical)
 }
 
 fn read_partial_profile(data: &mut Cursor<&[u8]>) -> Result<PartialProfile> {
@@ -720,10 +811,20 @@ fn read_partial_profile(data: &mut Cursor<&[u8]>) -> Result<PartialProfile> {
     PartialProfile::new(name, id, read_properties_network(data)?)
 }
 
-fn write_properties_network(properties: &[ProfileProperty], writer: &mut impl Write) -> Result<()> {
+fn write_properties_network(
+    properties: &[ProfileProperty],
+    writer: &mut impl Write,
+    canonical: bool,
+) -> Result<()> {
     validate_properties(properties)?;
     VarInt(properties.len() as i32).write(writer)?;
-    for property in properties {
+    // At most sixteen properties; stable sorting preserves each name's value order.
+    let mut indices = std::array::from_fn::<_, MAX_PROPERTIES, _>(|i| i);
+    if canonical {
+        indices[..properties.len()].sort_by(|&a, &b| properties[a].name.cmp(&properties[b].name));
+    }
+    for &index in &indices[..properties.len()] {
+        let property = &properties[index];
         write_string(&property.name, MAX_PROPERTY_NAME, writer)?;
         write_string(&property.value, MAX_PROPERTY_VALUE, writer)?;
         property.signature.is_some().write(writer)?;
@@ -741,7 +842,8 @@ fn read_properties_network(data: &mut Cursor<&[u8]>) -> Result<Vec<ProfileProper
     if count > MAX_PROPERTIES {
         return Err(Error::other("A profile may contain at most 16 properties"));
     }
-    let mut properties = Vec::with_capacity(count);
+    budget::check_collection_input(data, count, 3)?;
+    let mut properties = budget::read_vec(count, count)?;
     for _ in 0..count {
         properties.push(ProfileProperty::new(
             read_string(data, MAX_PROPERTY_NAME)?,
@@ -848,6 +950,94 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for ProfileProperty {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        field("name", &self.name, writer, depth)?;
+        field("value", &self.value, writer, depth)?;
+        if let Some(signature) = &self.signature {
+            field("signature", signature, writer, depth)?;
+        }
+        end(writer)
+    }
+}
+impl nbt_encode::NbtEncode for ResolvableProfile {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        match &self.contents {
+            ResolvableProfileContents::StaticFull(profile) => {
+                field("id", &profile.id, writer, depth)?;
+                field("name", &profile.name, writer, depth)?;
+                if !profile.properties.is_empty() {
+                    field("properties", &profile.properties, writer, depth)?;
+                }
+            }
+            ResolvableProfileContents::DynamicName(name) => field("name", name, writer, depth)?,
+            ResolvableProfileContents::DynamicId(id) => field("id", id, writer, depth)?,
+            ResolvableProfileContents::StaticPartial(profile) => {
+                if let Some(name) = &profile.name {
+                    field("name", name, writer, depth)?;
+                }
+                if let Some(id) = &profile.id {
+                    field("id", id, writer, depth)?;
+                }
+                if !profile.properties.is_empty() {
+                    field("properties", &profile.properties, writer, depth)?;
+                }
+            }
+        }
+        if let Some(v) = &self.skin_patch.texture {
+            field("texture", v, writer, depth)?;
+        }
+        if let Some(v) = &self.skin_patch.cape {
+            field("cape", v, writer, depth)?;
+        }
+        if let Some(v) = &self.skin_patch.elytra {
+            field("elytra", v, writer, depth)?;
+        }
+        if let Some(v) = &self.skin_patch.model {
+            field("model", &v.serialized_name(), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for ProfileProperties {
+    fn nbt_id(&self) -> u8 {
+        (self.0).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        let mut minimum = self.0.len().saturating_mul(20).saturating_add(5);
+        writer.ensure_remaining(minimum)?;
+        for property in &self.0 {
+            minimum = minimum
+                .saturating_add(property.name.len())
+                .saturating_add(property.value.len());
+            if let Some(signature) = &property.signature {
+                minimum = minimum.saturating_add(14).saturating_add(signature.len());
+            }
+            writer.ensure_remaining(minimum)?;
+        }
+        let required = self
+            .0
+            .len()
+            .saturating_mul(size_of::<&ProfileProperty>() * 2);
+        let mut writer = foton_utils::serial::nbt_stream::ScratchWriter::new(writer, required)?;
+        let mut properties: Vec<_> = self.0.iter().collect();
+        // At most sixteen properties; include stable-sort workspace in the reservation.
+        properties.sort_by(|a, b| a.name.cmp(&b.name));
+        nbt_encode::list(&properties, &mut *writer, depth)
+    }
 }
 
 #[cfg(test)]
@@ -978,7 +1168,7 @@ mod tests {
         assert_ne!(first, same_key_reordered);
 
         let mut network = Vec::new();
-        write_properties_network(first.properties(), &mut network)
+        write_properties_network(first.properties(), &mut network, false)
             .expect("properties should encode");
         let decoded = read_properties_network(&mut Cursor::new(network.as_slice()))
             .expect("properties should decode");
@@ -997,5 +1187,115 @@ mod tests {
             })
             .collect();
         assert!(StoredGameProfile::new(Uuid::nil(), "A".to_owned(), properties).is_err());
+    }
+}
+
+#[cfg(test)]
+mod brewing_task12_tests {
+    use super::*;
+    use foton_utils::serial::nbt_encode::NbtEncode;
+    use foton_utils::serial::nbt_stream::{LimitedWriter, ScratchWriter};
+    use std::io::sink;
+
+    #[test]
+    fn brewing_task12_profile_tiny_cap_rejects_before_sorting() {
+        let properties = ProfileProperties::new(
+            (0..16)
+                .rev()
+                .map(|i| {
+                    ProfileProperty::new(format!("p{i:02}"), "value".into(), None)
+                        .expect("property")
+                })
+                .collect(),
+        )
+        .expect("properties");
+        let stats = allocation_counter::measure(|| {
+            assert!(nbt_encode::write_bounded(&properties, 2, &mut sink()).is_err());
+        });
+        eprintln!("task12 profile tiny-cap {stats:?}");
+        assert!(
+            stats.bytes_max < 128,
+            "sorted before impossible list minimum: {stats:?}"
+        );
+        let mut sink = sink();
+        let mut writer = LimitedWriter::persistent(&mut sink, 65536);
+        let scratch = writer.scratch_remaining();
+        let mut writer =
+            ScratchWriter::new(&mut writer, scratch).expect("reserve enclosing scratch");
+        assert!(
+            properties.write_nbt_payload(&mut *writer, 0).is_err(),
+            "profile must share scratch"
+        );
+    }
+}
+
+#[cfg(test)]
+mod brewing_task13_tests {
+    use super::*;
+    #[test]
+    fn brewing_task13_profile_cardinality_precedes_copying() {
+        let mut map = NbtCompound::new();
+        map.insert("textures", NbtList::String(vec!["value".into(); 128]));
+        let mut property = NbtCompound::new();
+        property.insert("name", "textures");
+        property.insert("value", "value");
+        let fixtures = [
+            NbtTag::Compound(map),
+            NbtTag::List(NbtList::Compound(vec![property; 128])),
+        ];
+        let mut copied = 0;
+        for tag in fixtures {
+            let stats = allocation_counter::measure(|| {
+                foton_utils::serial::budget::DecodeBudget::new(8)
+                    .decode(|| {
+                        assert!(read_properties(Some(&tag)).is_none());
+                        Ok(())
+                    })
+                    .expect("budget scope");
+            });
+            eprintln!("task13 profile reject {stats:?}");
+            copied += stats.count_total;
+        }
+        assert_eq!(
+            copied, 0,
+            "cardinality must reject before copying properties"
+        );
+    }
+    #[test]
+    fn brewing_task13_profile_cardinality_and_group_order() {
+        let mut map = NbtCompound::new();
+        map.insert("z", NbtList::String(vec!["first".into(), "second".into()]));
+        map.insert("a", NbtList::String(vec!["a".into(); 14]));
+        let accepted = NbtTag::Compound(map.clone());
+        let properties = read_properties(Some(&accepted)).expect("sixteen values");
+        assert_eq!(
+            properties
+                .iter()
+                .filter(|property| property.name == "z")
+                .map(|property| property.value.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        let mut root = NbtCompound::new();
+        root.insert("properties", map.clone());
+        let profile = ResolvableProfile::from_owned_nbt(&NbtTag::Compound(root))
+            .expect("profile production owned reader");
+        let mut bytes = Vec::new();
+        foton_utils::serial::nbt_encode::write_bounded(&profile, 65536, &mut bytes)
+            .expect("canonical profile");
+        let tag = simdnbt::borrow::read_tag(&mut Cursor::new(&bytes)).expect("tag");
+        let decoded = ResolvableProfile::from_nbt_tag(tag.as_tag()).expect("profile reader");
+        let mut reencoded = Vec::new();
+        foton_utils::serial::nbt_encode::write_bounded(&decoded, 65536, &mut reencoded)
+            .expect("profile reencode");
+        assert_eq!(bytes, reencoded);
+        map.insert("late", NbtList::String(vec!["overflow".into()]));
+        let invalid = NbtTag::Compound(map);
+        let stats =
+            allocation_counter::measure(|| assert!(read_properties(Some(&invalid)).is_none()));
+        assert_eq!(
+            stats.count_total, 0,
+            "aggregate prepass must precede earlier groups too"
+        );
     }
 }

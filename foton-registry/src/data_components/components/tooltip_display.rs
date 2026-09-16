@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:tooltip_display` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -95,10 +99,10 @@ impl WriteTo for TooltipDisplay {
             let entry = REGISTRY
                 .data_components
                 .by_key(component)
-                .ok_or_else(|| Error::other(format!("Unknown data component type: {component}")))?;
-            let id = entry.try_id().ok_or_else(|| {
-                Error::other(format!("Unregistered data component type: {component}"))
-            })?;
+                .ok_or_else(|| Error::other("Unknown data component type"))?;
+            let id = entry
+                .try_id()
+                .ok_or_else(|| Error::other("Unregistered data component type"))?;
             let id = i32::try_from(id)
                 .map_err(|_| Error::other(format!("Data component ID is too large: {id}")))?;
             VarInt(id).write(writer)?;
@@ -112,7 +116,8 @@ impl ReadFrom for TooltipDisplay {
         let hide_tooltip = bool::read(data)?;
         let count = usize::try_from(VarInt::read(data)?.0)
             .map_err(|_| Error::other("Negative hidden tooltip component count"))?;
-        let mut hidden_components = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 1)?;
+        let mut hidden_components = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             let id = usize::try_from(VarInt::read(data)?.0)
                 .map_err(|_| Error::other("Negative data component ID"))?;
@@ -221,6 +226,23 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     entries.push(HashEntry::new(key_hasher, value_hasher));
 }
 
+impl nbt_encode::NbtEncode for TooltipDisplay {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if self.hide_tooltip {
+            field("hide_tooltip", &true, writer, depth)?;
+        }
+        if !self.hidden_components.is_empty() {
+            field("hidden_components", &self.hidden_components, writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -271,5 +293,34 @@ mod tests {
             TooltipDisplay::from_nbt_tag(borrowed.as_tag()),
             Some(display)
         );
+    }
+}
+
+#[cfg(test)]
+mod brewing_rereview_tests {
+    use super::*;
+    use crate::{data_components::ComponentData, init_vanilla_registry};
+
+    #[test]
+    fn brewing_rereview_tooltip_unknown_identifier_error_is_bounded() {
+        init_vanilla_registry();
+        let display = TooltipDisplay::DEFAULT.with_hidden(
+            DataComponentType::<()>::new(Identifier::new("test", "x".repeat(2 << 20))),
+            true,
+        );
+        let data = ComponentData::new(display);
+        let entry = REGISTRY
+            .data_components
+            .by_key(&Identifier::vanilla_static("tooltip_display"))
+            .expect("registered tooltip");
+        let stats = allocation_counter::measure(|| {
+            assert!(
+                entry
+                    .write_network_bounded(&data, 256 * 1024, &mut io::sink())
+                    .is_err()
+            );
+        });
+        eprintln!("unknown 2 MiB tooltip identifier: {stats:?}");
+        assert!(stats.bytes_max < 1 << 20, "oversized error: {stats:?}");
     }
 }

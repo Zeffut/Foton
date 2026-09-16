@@ -144,6 +144,24 @@ struct BrewCompletionSnapshot {
     last_bottle_flags: [bool; BOTTLE_SLOTS],
 }
 
+/// A coherent borrowed bridge view, valid only while the container is locked.
+pub struct BrewingStandStateView<'a> {
+    /// Instance identity used to reject wrappers captured before replacement.
+    pub identity: u64,
+    /// The five live container slots.
+    pub items: &'a [ItemStack],
+    /// Remaining ticks in the current brew.
+    pub brew_time: i32,
+    /// Duration assigned to the next brew.
+    pub recipe_brew_time: i32,
+    /// Remaining fuel uses.
+    pub fuel: i32,
+    /// Optional custom display name.
+    pub custom_name: Option<&'a TextComponent>,
+    /// Vanilla item predicate lock.
+    pub lock: &'a LockCode,
+}
+
 /// Complete block-entity snapshot exposed to the Paper bridge.
 #[derive(Clone)]
 pub struct BrewingStandStateSnapshot {
@@ -333,6 +351,40 @@ impl BrewingStandBlockEntity {
             custom_name: container.custom_name.clone(),
             lock: container.lock.clone(),
         }
+    }
+
+    /// Reads a coherent state under the container lock without cloning payloads.
+    /// The callback must not re-enter the container or call plugin code.
+    pub fn with_state<R>(&self, read: impl FnOnce(BrewingStandStateView<'_>) -> R) -> R {
+        let container = self.container.lock();
+        read(BrewingStandStateView {
+            identity: self.identity,
+            items: &container.items,
+            brew_time: container.brew_time,
+            recipe_brew_time: container.recipe_brew_time,
+            fuel: container.fuel,
+            custom_name: container.custom_name.as_ref(),
+            lock: &container.lock,
+        })
+    }
+
+    /// Reads a live slot under its lock after the same identity checks as `live_item`.
+    /// The callback must not re-enter the container or call plugin code.
+    pub fn with_live_item<R>(
+        &self,
+        identity: u64,
+        slot: usize,
+        read: impl FnOnce(&ItemStack) -> R,
+    ) -> Option<R> {
+        if identity != self.identity || slot >= BREWING_STAND_SLOTS {
+            return None;
+        }
+        let world = self.get_level()?;
+        if !self.is_current_in(&world, self.get_block_pos()) {
+            return None;
+        }
+        let container = self.container.lock();
+        Some(read(&container.items[slot]))
     }
 
     /// Reads one live slot only while this exact placed instance is current.

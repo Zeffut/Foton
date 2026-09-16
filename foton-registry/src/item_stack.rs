@@ -100,6 +100,17 @@ impl ItemStack {
         }
     }
 
+    /// Constructs a lossless bridge value without normalizing its component patch.
+    #[must_use]
+    pub const fn from_raw_parts(item: ItemRef, count: i32, patch: DataComponentPatch) -> Self {
+        Self {
+            item,
+            count,
+            patch,
+            opaque_nbt: None,
+        }
+    }
+
     #[must_use]
     const fn prototype(&self) -> &'static DataComponentMap {
         &self.item.components

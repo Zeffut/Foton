@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:instrument` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::hash::{ComponentHasher, HashComponent};
@@ -59,6 +62,15 @@ impl FromNbtTag for InstrumentComponent {
 impl HashComponent for InstrumentComponent {
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         self.instrument.hash_component(hasher);
+    }
+}
+
+impl nbt_encode::NbtEncode for InstrumentComponent {
+    fn nbt_id(&self) -> u8 {
+        (self.instrument).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.instrument).write_nbt_payload(writer, depth)
     }
 }
 

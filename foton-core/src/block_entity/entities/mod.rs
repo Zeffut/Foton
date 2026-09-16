@@ -55,7 +55,7 @@ pub use beehive::{
 pub use bell::{BellBlockEntity, EVENT_BELL_RING};
 pub use brewing_stand::{
     BOTTLE_SLOTS, BREWING_STAND_SLOTS, BrewingStandBlockEntity, BrewingStandDataSlots,
-    SLOT_FIRST_BOTTLE, SLOT_INGREDIENT,
+    BrewingStandStateSnapshot, BrewingStandStateView, SLOT_FIRST_BOTTLE, SLOT_INGREDIENT,
 };
 pub use brushable::BrushableBlockEntity;
 pub use campfire::{CAMPFIRE_SLOTS, CampfireBlockEntity};

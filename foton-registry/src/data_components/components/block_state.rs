@@ -1,6 +1,10 @@
 //! Vanilla `minecraft:block_state` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::collections::BTreeMap;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::BlockStateId;
@@ -86,6 +90,7 @@ impl WriteTo for BlockItemStateProperties {
 impl ReadFrom for BlockItemStateProperties {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_count(data)?;
+        budget::charge::<u8>(count.saturating_mul(1024))?;
         let mut properties = BTreeMap::new();
         for _ in 0..count {
             let name = String::read_prefixed_bound::<VarInt>(data, i16::MAX as usize)?;
@@ -146,6 +151,20 @@ fn write_count(count: usize, writer: &mut impl Write) -> Result<()> {
 fn read_count(data: &mut Cursor<&[u8]>) -> Result<usize> {
     let count = VarInt::read(data)?.0;
     usize::try_from(count).map_err(|_| Error::other(format!("Negative map size: {count}")))
+}
+
+impl nbt_encode::NbtEncode for BlockItemStateProperties {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        for (name, value) in &self.properties {
+            field(name, value, writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

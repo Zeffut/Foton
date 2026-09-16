@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:bees` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -130,7 +134,8 @@ impl WriteTo for Bees {
 impl ReadFrom for Bees {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_count(data)?;
-        let mut bees = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 5)?;
+        let mut bees = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             bees.push(BeehiveOccupant::read(data)?);
         }
@@ -191,6 +196,52 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl nbt_encode::NbtEncode for BeehiveOccupant {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("entity_data", &(self.entity_data), writer, depth)?;
+        field("ticks_in_hive", &(self.ticks_in_hive), writer, depth)?;
+        field(
+            "min_ticks_in_hive",
+            &(self.min_ticks_in_hive),
+            writer,
+            depth,
+        )?;
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for Bees {
+    fn nbt_id(&self) -> u8 {
+        9
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        if self.bees.is_empty() {
+            return writer.write_all(&[0, 0, 0, 0, 0]);
+        }
+        nbt_encode::list(&self.bees, writer, depth)
+    }
+}
+
+impl Bees {
+    pub(crate) fn write_bounded(&self, budget: usize, writer: &mut dyn Write) -> Result<()> {
+        let mut writer = foton_utils::serial::nbt_stream::LimitedWriter::new(writer, budget);
+        write_count(self.bees.len(), &mut writer)?;
+        for bee in &self.bees {
+            bee.entity_data
+                .write_bounded(writer.remaining(), &mut writer)?;
+            VarInt(bee.ticks_in_hive).write(&mut writer)?;
+            VarInt(bee.min_ticks_in_hive).write(&mut writer)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

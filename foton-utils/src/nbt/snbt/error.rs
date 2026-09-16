@@ -64,6 +64,8 @@ pub enum SnbtErrorKind {
     /// Vanilla parity: the `NbtAccounter` depth guard, which every reader is
     /// built with at a limit of 512.
     TooDeep,
+    /// A caller-supplied recursive allocation allowance was exhausted.
+    AllocationLimit,
     /// A compound key was required at the cursor.
     ExpectedKey,
     /// A compound key was present but empty.
@@ -148,6 +150,7 @@ impl SnbtErrorKind {
             Self::ExpectedSymbol(symbol) => translations::ARGUMENT_LITERAL_INCORRECT
                 .message([symbol.to_string()])
                 .component(),
+            Self::AllocationLimit => TextComponent::plain("SNBT allocation limit exceeded"),
             Self::TooDeep | Self::ExpectedValue | Self::ExpectedUnquotedString => {
                 TextComponent::from(&translations::SNBT_PARSER_EXPECTED_UNQUOTED_STRING)
             }
@@ -240,6 +243,7 @@ impl fmt::Display for SnbtErrorKind {
             Self::TrailingData => formatter.write_str("trailing data"),
             Self::ExpectedSymbol(symbol) => write!(formatter, "expected '{symbol}'"),
             Self::ExpectedValue => formatter.write_str("expected tag"),
+            Self::AllocationLimit => formatter.write_str("allocation limit exceeded"),
             Self::TooDeep => formatter.write_str("value nested too deeply"),
             Self::ExpectedKey => formatter.write_str("expected compound key"),
             Self::EmptyKey => formatter.write_str("compound key cannot be empty"),

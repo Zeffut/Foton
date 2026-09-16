@@ -46,6 +46,7 @@ toml.workspace = true
 unicode_names2.workspace = true
 
 [dev-dependencies]
+allocation-counter = "0.8.1"
 criterion.workspace = true
 md5.workspace = true
 
@@ -81,3 +82,4 @@ workspace = true
 
 [features]
 fmt = []
+codec-test-support = []

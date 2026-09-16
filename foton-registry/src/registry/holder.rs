@@ -1,6 +1,9 @@
 //! Registry holders used by Vanilla registry-aware codecs.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::fmt::Debug;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -108,9 +111,9 @@ impl<T: RegistryHolderEntry> WriteTo for RegistryHolder<T> {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
         match self {
             Self::Reference(value) => {
-                let id = value.try_id().ok_or_else(|| {
-                    Error::other(format!("Unknown {}: {}", T::REGISTRY_NAME, value.key()))
-                })?;
+                let id = value
+                    .try_id()
+                    .ok_or_else(|| Error::other("Unknown registry holder"))?;
                 let id = i32::try_from(id).map_err(|_| {
                     Error::other(format!(
                         "{} id out of protocol range: {id}",
@@ -180,6 +183,23 @@ impl<T: RegistryHolderEntry> HashComponent for RegistryHolder<T> {
         match self {
             Self::Reference(value) => value.key().to_string().hash_component(hasher),
             Self::Direct(value) => value.hash_component(hasher),
+        }
+    }
+}
+impl<T: RegistryHolderEntry> nbt_encode::NbtEncode for RegistryHolder<T>
+where
+    T::Value: nbt_encode::NbtEncode,
+{
+    fn nbt_id(&self) -> u8 {
+        match self {
+            Self::Reference(_) => 8,
+            Self::Direct(value) => value.nbt_id(),
+        }
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        match self {
+            Self::Reference(value) => value.key().write_nbt_payload(writer, depth),
+            Self::Direct(value) => value.write_nbt_payload(writer, depth),
         }
     }
 }

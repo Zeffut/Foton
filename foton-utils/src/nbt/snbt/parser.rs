@@ -1,7 +1,11 @@
+use crate::serial::budget;
+#[cfg(any(test, feature = "codec-test-support"))]
+use compound_work::CompoundKey;
 use simdnbt::{
     Mutf8String,
     owned::{NbtCompound, NbtList, NbtTag},
 };
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{UuidExt, java};
@@ -98,15 +102,17 @@ struct Parser<'a> {
     recorded_error: Option<SnbtError>,
     /// How many nested compounds and lists are currently open.
     depth: usize,
+    budgeted: bool,
 }
 
 impl<'a> Parser<'a> {
-    const fn new(input: &'a str) -> Self {
+    fn new(input: &'a str) -> Self {
         Self {
             input,
             cursor: 0,
             recorded_error: None,
             depth: 0,
+            budgeted: budget::is_active(),
         }
     }
 
@@ -201,7 +207,21 @@ impl<'a> Parser<'a> {
         parsed
     }
 
+    fn charge(&self, bytes: usize) -> Result<(), SnbtError> {
+        if !self.budgeted {
+            return Ok(());
+        }
+        budget::charge::<u8>(bytes).map_err(|_| self.error(SnbtErrorKind::AllocationLimit))
+    }
+
     fn parse_tag(&mut self) -> Result<NbtTag, SnbtError> {
+        // Include the list/map backing and subsequent normalization copies at
+        // every enclosing level, before parsing any child or growing a collection.
+        self.charge(
+            (size_of::<NbtTag>() + size_of::<String>() + 64)
+                .saturating_mul(8)
+                .saturating_mul(self.depth + 1),
+        )?;
         self.skip_whitespace();
         let Some(ch) = self.peek() else {
             return Err(self.error(SnbtErrorKind::ExpectedValue));
@@ -223,28 +243,39 @@ impl<'a> Parser<'a> {
 
     fn parse_compound_inner(&mut self) -> Result<NbtCompound, SnbtError> {
         self.expect_char('{')?;
-        let mut compound = NbtCompound::new();
+        let mut compound = BTreeMap::new();
         if self.consume_char('}') {
-            return Ok(compound);
+            return Ok(NbtCompound::new());
         }
 
         loop {
             let key = self.parse_map_key()?;
             self.expect_char(':')?;
             let tag = self.parse_tag()?;
-            compound.remove(&key);
+            #[cfg(any(test, feature = "codec-test-support"))]
+            let key = CompoundKey(key);
             compound.insert(key, tag);
 
             if self.consume_repeated_separator(',') {
                 if self.consume_char('}') {
-                    return Ok(compound);
+                    break;
                 }
                 continue;
             }
 
             self.expect_char('}')?;
-            return Ok(compound);
+            break;
         }
+        Ok(NbtCompound::from_values(
+            compound
+                .into_iter()
+                .map(|(key, value)| {
+                    #[cfg(any(test, feature = "codec-test-support"))]
+                    let key = key.0;
+                    (key.into(), value)
+                })
+                .collect(),
+        ))
     }
 
     fn parse_map_key(&mut self) -> Result<String, SnbtError> {
@@ -302,7 +333,7 @@ impl<'a> Parser<'a> {
             break;
         }
 
-        Ok(NbtTag::List(NbtList::from(tags)))
+        Ok(NbtTag::List(list_from_tags(tags)))
     }
 
     fn parse_typed_array(&mut self, array_type: TypedArrayKind) -> Result<NbtTag, SnbtError> {
@@ -357,6 +388,7 @@ impl<'a> Parser<'a> {
                     SnbtErrorKind::InvalidArrayElementType,
                 ));
             }
+            self.charge(size_of::<i64>() * 4)?;
             values.push(value);
 
             if self.consume_repeated_separator(',') {
@@ -464,6 +496,7 @@ impl<'a> Parser<'a> {
         self.cursor += token_len;
 
         let token = &self.input[start..self.cursor];
+        self.charge(token.len().saturating_mul(4))?;
         let result = parse_number_token(token, default_kind);
         let records_float_candidate =
             allow_float && result.is_ok() && is_unsuffixed_decimal_integer_token(token);
@@ -475,12 +508,23 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_quoted_string(&mut self) -> Result<String, SnbtError> {
+        if self.budgeted {
+            self.parse_quoted_string_inner::<true>()
+        } else {
+            self.parse_quoted_string_inner::<false>()
+        }
+    }
+
+    fn parse_quoted_string_inner<const BUDGETED: bool>(&mut self) -> Result<String, SnbtError> {
         let Some(terminator @ ('"' | '\'')) = self.read() else {
             return Err(self.error(SnbtErrorKind::ExpectedQuotedString));
         };
 
         let mut value = String::new();
         while let Some(ch) = self.read() {
+            if BUDGETED {
+                self.charge(16_usize.saturating_mul(self.depth + 1))?;
+            }
             match ch {
                 ch if ch == terminator => return Ok(value),
                 '\\' => value.push(self.parse_escape()?),
@@ -567,6 +611,7 @@ impl<'a> Parser<'a> {
             return Err(self.error(SnbtErrorKind::UnclosedCharacterName));
         }
 
+        self.charge((self.cursor - name_start).saturating_mul(4))?;
         let name = self.input[name_start..self.cursor].to_owned();
         self.read();
         unicode_names2::character(&name)
@@ -583,6 +628,11 @@ impl<'a> Parser<'a> {
             return Err(Self::error_at(start, SnbtErrorKind::ExpectedUnquotedString));
         }
 
+        self.charge(
+            (self.cursor - start)
+                .saturating_mul(6)
+                .saturating_mul(self.depth + 1),
+        )?;
         Ok(self.input[start..self.cursor].to_owned())
     }
 }
@@ -592,4 +642,84 @@ enum TypedArrayKind {
     Byte,
     Int,
     Long,
+}
+
+/// Consumes each completed descendant once, including heterogeneous wrappers.
+fn list_from_tags(tags: Vec<NbtTag>) -> NbtList {
+    let Some(first) = tags.first() else {
+        return NbtList::Empty;
+    };
+    let id = first.id();
+    if tags.iter().any(|tag| tag.id() != id) {
+        return NbtList::Compound(tags.into_iter().map(Into::into).collect());
+    }
+    macro_rules! consume {
+        ($variant:ident, $into:ident) => {
+            NbtList::$variant(tags.into_iter().filter_map(NbtTag::$into).collect())
+        };
+    }
+    match first {
+        NbtTag::Byte(_) => consume!(Byte, into_byte),
+        NbtTag::Short(_) => consume!(Short, into_short),
+        NbtTag::Int(_) => consume!(Int, into_int),
+        NbtTag::Long(_) => consume!(Long, into_long),
+        NbtTag::Float(_) => consume!(Float, into_float),
+        NbtTag::Double(_) => consume!(Double, into_double),
+        NbtTag::ByteArray(_) => consume!(ByteArray, into_byte_array),
+        NbtTag::String(_) => consume!(String, into_string),
+        NbtTag::List(_) => consume!(List, into_list),
+        NbtTag::Compound(_) => consume!(Compound, into_compound),
+        NbtTag::IntArray(_) => consume!(IntArray, into_int_array),
+        NbtTag::LongArray(_) => consume!(LongArray, into_long_array),
+    }
+}
+
+/// Test-only observations of actual SNBT compound-key comparisons.
+#[cfg(any(test, feature = "codec-test-support"))]
+pub mod compound_work {
+    use std::{cell::Cell, cmp::Ordering};
+    #[derive(Eq, PartialEq)]
+    pub(super) struct CompoundKey(pub(super) String);
+    impl PartialOrd for CompoundKey {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl Ord for CompoundKey {
+        fn cmp(&self, other: &Self) -> Ordering {
+            visit();
+            self.0.cmp(&other.0)
+        }
+    }
+    thread_local! { static COMPARISONS: Cell<usize> = const { Cell::new(0) }; }
+    pub(super) fn visit() {
+        COMPARISONS.set(COMPARISONS.get() + 1);
+    }
+    /// Counts parser key comparisons made by an actual integration route.
+    pub fn measure(operation: impl FnOnce()) -> usize {
+        COMPARISONS.set(0);
+        operation();
+        COMPARISONS.get()
+    }
+    #[test]
+    fn brewing_task13_snbt_compound_comparisons_are_n_log_n() {
+        for count in [64, 256] {
+            let input = format!(
+                "{{{}}}",
+                (0..count)
+                    .map(|i| format!("a{i:04}:0"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            let comparisons = measure(|| {
+                let compound = super::parse_snbt_compound(&input).expect("valid compound");
+                assert_eq!(compound.len(), count);
+            });
+            eprintln!("task13 SNBT count={count} comparisons={comparisons}");
+            assert!(
+                comparisons < count * count.ilog2() as usize * 3,
+                "quadratic duplicate search: {comparisons}"
+            );
+        }
+    }
 }

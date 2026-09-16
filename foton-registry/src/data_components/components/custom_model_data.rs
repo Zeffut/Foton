@@ -1,5 +1,6 @@
 //! Vanilla `minecraft:custom_model_data` item component.
 
+use foton_utils::serial::budget;
 use std::io::{Cursor, Error, Read, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -149,12 +150,37 @@ impl WriteTo for CustomModelData {
     }
 }
 
+impl CustomModelData {
+    pub(crate) fn write_bounded(
+        &self,
+        mut writer: &mut dyn foton_utils::serial::nbt_stream::NbtWrite,
+    ) -> Result<()> {
+        write_count(self.floats.len(), &mut writer)?;
+        for value in &self.floats {
+            value.write(&mut writer)?;
+        }
+        write_count(self.flags.len(), &mut writer)?;
+        for value in &self.flags {
+            value.write(&mut writer)?;
+        }
+        write_count(self.strings.len(), &mut writer)?;
+        for value in &self.strings {
+            crate::item_predicate::write_utf_bounded(value, writer)?;
+        }
+        write_count(self.colors.len(), &mut writer)?;
+        for value in &self.colors {
+            value.write(&mut writer)?;
+        }
+        Ok(())
+    }
+}
+
 impl ReadFrom for CustomModelData {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
-        let floats = read_list(data, f32::read)?;
-        let flags = read_list(data, bool::read)?;
-        let strings = read_list(data, read_network_string)?;
-        let colors = read_list(data, i32::read)?;
+        let floats = read_list(data, 4, f32::read)?;
+        let flags = read_list(data, 1, bool::read)?;
+        let strings = read_list(data, 1, read_network_string)?;
+        let colors = read_list(data, 4, i32::read)?;
         Ok(Self::new(floats, flags, strings, colors))
     }
 }
@@ -166,11 +192,13 @@ fn write_count(count: usize, writer: &mut impl Write) -> Result<()> {
 
 fn read_list<T>(
     data: &mut Cursor<&[u8]>,
+    minimum_width: usize,
     mut read_value: impl FnMut(&mut Cursor<&[u8]>) -> Result<T>,
 ) -> Result<Vec<T>> {
     let count = VarInt::read(data)?.0;
     let count = usize::try_from(count).map_err(|_| Error::other("Negative list length"))?;
-    let mut values = Vec::with_capacity(count.min(MAX_INITIAL_LIST_CAPACITY));
+    budget::check_collection_input(data, count, minimum_width)?;
+    let mut values = budget::read_vec(count, count.min(MAX_INITIAL_LIST_CAPACITY))?;
     for _ in 0..count {
         values.push(read_value(data)?);
     }
@@ -178,7 +206,10 @@ fn read_list<T>(
 }
 
 fn write_network_string(value: &str, writer: &mut impl Write) -> Result<()> {
-    if value.encode_utf16().count() > MAX_NETWORK_STRING_LENGTH {
+    let units = value.encode_utf16();
+    #[cfg(feature = "codec-test-support")]
+    let units = units.inspect(|_| crate::codec_work::utf16());
+    if units.count() > MAX_NETWORK_STRING_LENGTH {
         return Err(Error::other("String is longer than 32767 UTF-16 units"));
     }
     if value.len() > MAX_NETWORK_STRING_BYTES {
@@ -196,6 +227,8 @@ fn read_network_string(data: &mut Cursor<&[u8]>) -> Result<String> {
         return Err(Error::other("Encoded string is longer than 98301 bytes"));
     }
 
+    budget::check_collection_input(data, byte_count, 1)?;
+    budget::charge::<u8>(byte_count.saturating_mul(7))?;
     let mut bytes = vec![0; byte_count];
     data.read_exact(&mut bytes)?;
     let value = String::from_utf8_lossy(&bytes).into_owned();

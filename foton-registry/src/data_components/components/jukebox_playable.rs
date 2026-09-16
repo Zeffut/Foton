@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:jukebox_playable` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -69,6 +72,19 @@ impl ReadFrom for JukeboxPlayable {
 impl WriteTo for JukeboxPlayable {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
         self.song.write(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for JukeboxPlayable {
+    fn nbt_id(&self) -> u8 {
+        8
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        let song = self
+            .song
+            .as_reference()
+            .ok_or_else(|| Error::other("Direct jukebox song holder is not persistent"))?;
+        song.key.write_nbt_payload(writer, depth)
     }
 }
 

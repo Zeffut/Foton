@@ -7,7 +7,10 @@
     )
 )]
 
-use std::io::{Cursor, Result, Write};
+use foton_utils::serial::nbt_stream::NbtWrite;
+use foton_utils::serial::{budget, nbt_encode};
+use foton_utils::text::from_nbt as decode_text_nbt;
+use std::io::{self, Cursor, Result, Write};
 
 use foton_utils::Identifier;
 use foton_utils::codec::VarInt;
@@ -113,8 +116,8 @@ impl ItemAttributeModifierDisplay {
             "hidden" => Some(Self::Hidden),
             "override" => {
                 let value = compound.get("value")?;
-                Some(Self::OverrideText(Box::new(TextComponent::from_nbt_tag(
-                    value,
+                Some(Self::OverrideText(Box::new(decode_text_nbt(
+                    &value.to_owned(),
                 )?)))
             }
             _ => None,
@@ -134,7 +137,7 @@ impl ItemAttributeModifierDisplay {
 impl WriteTo for ItemAttributeModifiers {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
         let count = i32::try_from(self.modifiers.len()).map_err(|_| {
-            std::io::Error::other(format!(
+            io::Error::other(format!(
                 "Attribute modifier list too large: {} entries",
                 self.modifiers.len()
             ))
@@ -150,10 +153,10 @@ impl WriteTo for ItemAttributeModifiers {
 impl ReadFrom for ItemAttributeModifiers {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = VarInt::read(data)?.0;
-        let count = usize::try_from(count).map_err(|_| {
-            std::io::Error::other(format!("Negative attribute modifier count: {count}"))
-        })?;
-        let mut modifiers = Vec::with_capacity(count.min(65_536));
+        let count = usize::try_from(count)
+            .map_err(|_| io::Error::other(format!("Negative attribute modifier count: {count}")))?;
+        budget::check_collection_input(data, count, 13)?;
+        let mut modifiers = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             modifiers.push(ItemAttributeModifierEntry::read(data)?);
         }
@@ -163,11 +166,12 @@ impl ReadFrom for ItemAttributeModifiers {
 
 impl WriteTo for ItemAttributeModifierEntry {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let attribute_id = self.attribute.try_id().ok_or_else(|| {
-            std::io::Error::other(format!("Unknown attribute: {}", self.attribute.key))
-        })?;
+        let attribute_id = self
+            .attribute
+            .try_id()
+            .ok_or_else(|| io::Error::other("Unknown attribute"))?;
         let attribute_id = i32::try_from(attribute_id).map_err(|_| {
-            std::io::Error::other(format!(
+            io::Error::other(format!(
                 "Attribute id out of protocol range: {attribute_id}"
             ))
         })?;
@@ -184,10 +188,11 @@ impl ReadFrom for ItemAttributeModifierEntry {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let attribute_id = VarInt::read(data)?.0;
         let attribute_id = usize::try_from(attribute_id)
-            .map_err(|_| std::io::Error::other(format!("Negative attribute id: {attribute_id}")))?;
-        let attribute = REGISTRY.attributes.by_id(attribute_id).ok_or_else(|| {
-            std::io::Error::other(format!("Unknown attribute id: {attribute_id}"))
-        })?;
+            .map_err(|_| io::Error::other(format!("Negative attribute id: {attribute_id}")))?;
+        let attribute = REGISTRY
+            .attributes
+            .by_id(attribute_id)
+            .ok_or_else(|| io::Error::other(format!("Unknown attribute id: {attribute_id}")))?;
         let id = Identifier::read(data)?;
         let amount = f64::read(data)?;
         let operation = AttributeModifierOperation::read(data)?;
@@ -221,7 +226,10 @@ impl ReadFrom for ItemAttributeModifierDisplay {
         let display_id = VarInt::read(data)?.0;
         match display_id {
             1 => Ok(Self::Hidden),
-            2 => Ok(Self::OverrideText(Box::new(TextComponent::read(data)?))),
+            2 => {
+                budget::charge::<TextComponent>(1)?;
+                Ok(Self::OverrideText(Box::new(TextComponent::read(data)?)))
+            }
             _ => Ok(Self::Default),
         }
     }
@@ -356,6 +364,55 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl nbt_encode::NbtEncode for ItemAttributeModifierEntry {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("type", &(self.attribute.key), writer, depth)?;
+        field("id", &(self.id), writer, depth)?;
+        field("amount", &(self.amount), writer, depth)?;
+        field("operation", &(self.operation.name()), writer, depth)?;
+        if self.slot != EquipmentSlotGroup::Any {
+            field("slot", &(self.slot.name()), writer, depth)?;
+        }
+        if !matches!(self.display, ItemAttributeModifierDisplay::Default) {
+            field("display", &(self.display), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for ItemAttributeModifierDisplay {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("type", &(self.name()), writer, depth)?;
+        if let Self::OverrideText(text) = self {
+            field("value", &(text), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for ItemAttributeModifiers {
+    fn nbt_id(&self) -> u8 {
+        9
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::check_depth;
+        check_depth(depth)?;
+        nbt_encode::list(&self.modifiers, writer, depth)
+    }
 }
 
 #[cfg(test)]

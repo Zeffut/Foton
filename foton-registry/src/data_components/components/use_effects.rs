@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:use_effects` item component.
 
+use crate::data_components::registry::ValidatePersistentComponent;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
@@ -145,6 +149,46 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
 
 const fn java_float_equals(left: f32, right: f32) -> bool {
     (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
+}
+
+impl ValidatePersistentComponent for UseEffects {
+    fn validate_persistent(&self) -> io::Result<()> {
+        if !self.speed_multiplier.is_finite()
+            || self.speed_multiplier.is_sign_negative()
+            || self.speed_multiplier > 1.0
+        {
+            return Err(io::Error::other("Invalid use-effect speed"));
+        }
+
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for UseEffects {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        self.validate_persistent()?;
+
+        if self.can_sprint != Self::DEFAULT.can_sprint {
+            field("can_sprint", &(self.can_sprint), writer, depth)?;
+        }
+        if self.interact_vibrations != Self::DEFAULT.interact_vibrations {
+            field(
+                "interact_vibrations",
+                &(self.interact_vibrations),
+                writer,
+                depth,
+            )?;
+        }
+        if self.speed_multiplier.to_bits() != Self::DEFAULT.speed_multiplier.to_bits() {
+            field("speed_multiplier", &(self.speed_multiplier), writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

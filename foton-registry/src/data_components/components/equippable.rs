@@ -1,5 +1,8 @@
 //! Equippable component for armor and equipment items.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 use std::str::FromStr;
 
@@ -231,6 +234,64 @@ fn optional_bool(tag: Option<simdnbt::borrow::NbtTag<'_, '_>>, default: bool) ->
     match tag {
         Some(tag) => tag.codec_bool(),
         None => Some(default),
+    }
+}
+
+impl nbt_encode::NbtEncode for Equippable {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("slot", &(self.slot.name()), writer, depth)?;
+        if self.equip_sound != SoundEventHolder::registry(&sound_events::ITEM_ARMOR_EQUIP_GENERIC) {
+            field("equip_sound", &(self.equip_sound), writer, depth)?;
+        }
+        if let Some(asset_id) = &self.asset_id {
+            field("asset_id", &(asset_id), writer, depth)?;
+        }
+        if let Some(camera_overlay) = &self.camera_overlay {
+            field("camera_overlay", &(camera_overlay), writer, depth)?;
+        }
+        if !self.dispensable {
+            field("dispensable", &(i8::from(self.dispensable)), writer, depth)?;
+        }
+        if !self.swappable {
+            field("swappable", &(i8::from(self.swappable)), writer, depth)?;
+        }
+        if !self.damage_on_hurt {
+            field(
+                "damage_on_hurt",
+                &(i8::from(self.damage_on_hurt)),
+                writer,
+                depth,
+            )?;
+        }
+        if self.equip_on_interact {
+            field(
+                "equip_on_interact",
+                &(i8::from(self.equip_on_interact)),
+                writer,
+                depth,
+            )?;
+        }
+        if self.can_be_sheared {
+            field(
+                "can_be_sheared",
+                &(i8::from(self.can_be_sheared)),
+                writer,
+                depth,
+            )?;
+        }
+        if self.shearing_sound != SoundEventHolder::registry(&sound_events::ITEM_SHEARS_SNIP) {
+            field("shearing_sound", &(self.shearing_sound), writer, depth)?;
+        }
+        if let Some(allowed_entities) = &self.allowed_entities {
+            field("allowed_entities", &(allowed_entities), writer, depth)?;
+        }
+        end(writer)
     }
 }
 

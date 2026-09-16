@@ -234,6 +234,8 @@ pub struct ChunkMap {
     pub pending_generation_tasks: SyncMutex<Vec<Arc<ChunkGenerationTask>>>,
     /// Tracker for background scheduling, generation, save, and unload tasks.
     pub task_tracker: TaskTracker,
+    #[cfg(feature = "test-support")]
+    scheduling_test_hook: SyncMutex<Option<fn()>>,
     /// Ordered ticket ingress and background scheduling epoch handoff.
     scheduling: ChunkSchedulingCoordinator,
     /// Full status completions awaiting lifecycle-boundary reconciliation.
@@ -376,6 +378,8 @@ impl ChunkMap {
             deferred_generation_schedules: SyncMutex::new(FxHashMap::default()),
             pending_generation_tasks: SyncMutex::new(Vec::new()),
             task_tracker: TaskTracker::new(),
+            #[cfg(feature = "test-support")]
+            scheduling_test_hook: SyncMutex::new(None),
             scheduling: ChunkSchedulingCoordinator::new(chunk_tickets),
             full_publications,
             full_neighborhood: SyncMutex::new(FullNeighborhoodIndex::default()),
@@ -1151,6 +1155,13 @@ impl ChunkMap {
         timings
     }
 
+    /// Installs a one-shot callback in the actual background scheduling worker.
+    /// Available only to test harnesses that need to exercise worker failures.
+    #[cfg(feature = "test-support")]
+    pub fn run_before_next_scheduling_epoch_for_test(&self, hook: fn()) {
+        *self.scheduling_test_hook.lock() = Some(hook);
+    }
+
     fn spawn_scheduling_epoch(
         self: &Arc<Self>,
         ticket_manager: ChunkTicketManager,
@@ -1179,6 +1190,13 @@ impl ChunkMap {
         applied_revision: ChunkTicketRevision,
         holders_to_schedule: Vec<(Arc<ChunkHolder>, ChunkTicketLevel)>,
     ) -> PreparedChunkSchedulingEpoch {
+        #[cfg(feature = "test-support")]
+        {
+            let hook = self.scheduling_test_hook.lock().take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
         let mut timings = ChunkMapPreparationTimings::default();
 
         let applied_revision = {

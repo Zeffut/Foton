@@ -1,5 +1,6 @@
 //! Vanilla firework explosion and rocket components.
 
+use foton_utils::serial::budget;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -341,7 +342,8 @@ impl ReadFrom for Fireworks {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let flight_duration = VarInt::read(data)?.0;
         let count = read_count(data, Self::MAX_EXPLOSIONS)?;
-        let mut explosions = Vec::with_capacity(count);
+        budget::check_collection_input(data, count, 5)?;
+        let mut explosions = budget::read_vec(count, count)?;
         for _ in 0..count {
             explosions.push(FireworkExplosion::read(data)?);
         }
@@ -439,7 +441,8 @@ fn write_int_list(values: &[i32], writer: &mut impl Write) -> Result<()> {
 
 fn read_int_list(data: &mut Cursor<&[u8]>) -> Result<Vec<i32>> {
     let count = read_count(data, i32::MAX as usize)?;
-    let mut values = Vec::with_capacity(count.min(65_536));
+    budget::check_collection_input(data, count, 4)?;
+    let mut values = budget::read_vec(count, count.min(65_536))?;
     for _ in 0..count {
         values.push(i32::read(data)?);
     }

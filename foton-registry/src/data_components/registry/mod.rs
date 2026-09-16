@@ -37,11 +37,16 @@ use super::vanilla_components::{
 };
 use crate::{sound_event::SoundEventHolder, sound_events};
 
+mod bounded_nbt;
 pub(crate) mod codecs;
+mod indirect_text;
+mod validation;
+pub(crate) use validation::PersistentValidationScope;
 mod component_map;
 mod patch;
 mod patch_network;
 mod patch_persistence;
+mod recursive_codec;
 
 pub(crate) use codecs::ValidatePersistentComponent;
 pub use codecs::{
@@ -51,9 +56,11 @@ pub use component_map::DataComponentMap;
 pub use patch::{ComponentPatchEntry, DataComponentPatch};
 pub use patch_persistence::component_try_into;
 
+use foton_utils::serial::nbt_encode::NbtEncode;
+
 use codecs::{
-    PersistentCodecFns, hash_component, read_typed_nbt, read_typed_network, validate_component,
-    write_typed_nbt, write_typed_network,
+    PersistentCodecFns, borrowed_nbt, hash_component, read_typed_nbt, read_typed_network,
+    validate_component, write_typed_nbt, write_typed_network,
 };
 
 /// A typed handle for a data component.
@@ -163,6 +170,7 @@ impl DataComponentRegistry {
             + Clone
             + WriteTo
             + ReadFrom
+            + NbtEncode
             + ToNbtTag
             + FromNbtTag
             + HashComponent,
@@ -192,6 +200,7 @@ impl DataComponentRegistry {
             + Clone
             + WriteTo
             + ReadFrom
+            + NbtEncode
             + ToNbtTag
             + FromNbtTag
             + HashComponent,
@@ -203,6 +212,7 @@ impl DataComponentRegistry {
             Some((
                 read_typed_nbt::<T>,
                 write_typed_nbt::<T>,
+                borrowed_nbt::<T>,
                 hash_component::<T>,
                 None,
             )),
@@ -216,6 +226,7 @@ impl DataComponentRegistry {
             + Clone
             + WriteTo
             + ReadFrom
+            + NbtEncode
             + ToNbtTag
             + FromNbtTag
             + HashComponent
@@ -228,6 +239,7 @@ impl DataComponentRegistry {
             Some((
                 read_typed_nbt::<T>,
                 write_typed_nbt::<T>,
+                borrowed_nbt::<T>,
                 hash_component::<T>,
                 Some(validate_component::<T>),
             )),
@@ -245,7 +257,7 @@ impl DataComponentRegistry {
         network_reader: NetworkReader,
         network_writer: NetworkWriter,
     ) where
-        T: Component + DowncastType + Clone + ToNbtTag + FromNbtTag + HashComponent,
+        T: Component + DowncastType + Clone + NbtEncode + ToNbtTag + FromNbtTag + HashComponent,
     {
         self.register_implemented(
             component,
@@ -254,6 +266,7 @@ impl DataComponentRegistry {
             Some((
                 read_typed_nbt::<T>,
                 write_typed_nbt::<T>,
+                borrowed_nbt::<T>,
                 hash_component::<T>,
                 None,
             )),
@@ -261,7 +274,7 @@ impl DataComponentRegistry {
     }
 
     /// Registers a component with explicit network and persistent codecs.
-    pub(crate) fn register_with_codecs<T: Component + DowncastType + HashComponent>(
+    pub(crate) fn register_with_codecs<T: Component + DowncastType + HashComponent + NbtEncode>(
         &mut self,
         component: DataComponentType<T>,
         network_reader: NetworkReader,
@@ -273,7 +286,13 @@ impl DataComponentRegistry {
             component,
             network_reader,
             network_writer,
-            Some((nbt_reader, nbt_writer, hash_component::<T>, None)),
+            Some((
+                nbt_reader,
+                nbt_writer,
+                borrowed_nbt::<T>,
+                hash_component::<T>,
+                None,
+            )),
         )
     }
 
@@ -305,9 +324,8 @@ impl DataComponentRegistry {
             !self.by_key.contains_key(&key),
             "Cannot register duplicate data component key {key}"
         );
-        let entry = Box::leak(Box::new(ComponentEntry::implemented(
+        let entry = Box::leak(Box::new(ComponentEntry::implemented::<T>(
             key.clone(),
-            T::TYPE_KEY,
             network_reader,
             network_writer,
             persistent_codecs,
@@ -343,3 +361,6 @@ crate::impl_registry!(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod task14_tests;
