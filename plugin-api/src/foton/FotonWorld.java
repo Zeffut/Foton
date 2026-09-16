@@ -220,6 +220,10 @@ public final class FotonWorld implements World {
         if (location == null) {
             throw new IllegalArgumentException("Location cannot be null");
         }
+        if (!Double.isFinite(location.getX()) || !Double.isFinite(location.getY())
+                || !Double.isFinite(location.getZ())) {
+            throw new IllegalArgumentException("Location coordinates must be finite");
+        }
         String id = Native.spawnEntityPending(
             name, location.getX(), location.getY(), location.getZ(), type.getName(), initialization);
         if (id == null) {

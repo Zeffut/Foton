@@ -13,6 +13,10 @@ public final class SpawnBridgeCheck {
     private static java.util.UUID rolledBackCustomSourceArrow;
     private static java.util.UUID failedPublishCustomSourceArrow;
 
+    public static org.bukkit.projectiles.ProjectileSource customSource() {
+        return new org.bukkit.projectiles.ProjectileSource() { };
+    }
+
     public static void install() {
         var owner = new org.bukkit.plugin.java.JavaPlugin() {};
         owner.setEnabled(true);

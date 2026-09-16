@@ -3573,4 +3573,4 @@ fn plugin_message_call(vm: &JavaVM, uuid: &str, channel: &str, payload: &[u8]) {
 }
 
 #[cfg(test)]
-mod spawn_bridge_tests;
+pub(crate) mod spawn_bridge_tests;

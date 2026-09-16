@@ -332,12 +332,8 @@ pub(crate) fn remove_projectile_source(id: &Uuid) {
 }
 
 fn discard_unpublished_entity(entity: &SharedEntity) {
-    let stale = {
-        let mut sources = projectile_sources().write();
-        entity.set_removed(RemovalReason::Discarded);
-        sources.remove(&entity.uuid())
-    };
-    drop(stale);
+    entity.set_removed(RemovalReason::Discarded);
+    remove_projectile_source(&entity.uuid());
 }
 
 fn world_creation_requests() -> &'static SyncMutex<FxHashMap<u64, WorldCreationRequest>> {
@@ -1406,11 +1402,11 @@ extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: 
     else {
         return;
     };
-    let Some((world, entity)) = entity_by_uuid(&id) else {
+    let Some((_, entity)) = entity_by_uuid(&id) else {
         remove_projectile_source(&id);
         return;
     };
-    let _ = world.remove_entity(entity.id());
+    entity.set_removed(RemovalReason::Discarded);
     remove_projectile_source(&id);
 }
 
@@ -6320,14 +6316,16 @@ extern "system" fn entity_projectile_owner(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return null_mut();
     };
-    let owner = entity_by_uuid(&id).and_then(|(_, entity)| {
+    let owner = {
         let sources = projectile_sources().read();
-        if sources.contains_key(&id) {
-            None
-        } else {
-            entity.projectile_owner_uuid()
-        }
-    });
+        entity_by_uuid(&id).and_then(|(_, entity)| {
+            if entity.is_removed() || sources.contains_key(&id) {
+                None
+            } else {
+                entity.projectile_owner_uuid()
+            }
+        })
+    };
     to_java(&mut env, owner.map(|value| value.to_string()))
 }
 
@@ -6342,7 +6340,12 @@ extern "system" fn entity_projectile_source(
     let Ok(id) = Uuid::parse_str(&uuid) else {
         return null_mut();
     };
-    let source = { projectile_sources().read().get(&id).cloned() };
+    let source = {
+        let sources = projectile_sources().read();
+        entity_by_uuid(&id)
+            .filter(|(_, entity)| !entity.is_removed())
+            .and_then(|_| sources.get(&id).cloned())
+    };
     let Some(source) = source else {
         return null_mut();
     };
@@ -6361,11 +6364,14 @@ extern "system" fn entity_projectile_shooter(
     let Ok(id) = Uuid::parse_str(&uuid) else {
         return null_mut();
     };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
     let (source, owner) = {
         let sources = projectile_sources().read();
+        let Some((_, entity)) = entity_by_uuid(&id) else {
+            return null_mut();
+        };
+        if entity.is_removed() {
+            return null_mut();
+        }
         let source = sources.get(&id).cloned();
         let owner = if source.is_none() {
             entity.projectile_owner_uuid()
@@ -6414,6 +6420,8 @@ extern "system" fn set_entity_projectile_source(
         remove_projectile_source(&id);
         return 0;
     };
+    #[cfg(test)]
+    task_one_tests::after_source_resolution();
     let Some(projectile) = entity.as_projectile() else {
         remove_projectile_source(&id);
         return 0;
@@ -6429,7 +6437,9 @@ extern "system" fn set_entity_projectile_source(
 
     let replaced = {
         let mut sources = projectile_sources().write();
-        if entity.is_removed() {
+        if entity.is_removed()
+            || !entity_by_uuid(&id).is_some_and(|(_, current)| Arc::ptr_eq(&current, &entity))
+        {
             return 0;
         }
         projectile.set_owner_uuid(owner);
@@ -16235,3 +16245,7 @@ mod slot_codec_tests {
         assert_eq!(decoded.opaque_nbt(), Some("{foo:1b}"));
     }
 }
+
+#[cfg(test)]
+#[path = "task_one_tests.rs"]
+mod task_one_tests;

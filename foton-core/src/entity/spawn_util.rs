@@ -100,6 +100,9 @@ pub fn create_entity_at(
     key: &Identifier,
     position: DVec3,
 ) -> Option<SharedEntity> {
+    if !position.is_finite() {
+        return None;
+    }
     let entity_type = REGISTRY.entity_types.by_key(key)?;
     ENTITIES.create(
         entity_type,
@@ -130,6 +133,9 @@ pub fn create_entity_at_initialized(
     position: DVec3,
     initialization: SpawnEntityInitialization,
 ) -> Option<SharedEntity> {
+    if !position.is_finite() {
+        return None;
+    }
     let entity_type = REGISTRY.entity_types.by_key(key)?;
     match initialization {
         SpawnEntityInitialization::ArrowPotion(potion)
@@ -210,6 +216,7 @@ fn is_refused_underfoot(state: BlockStateId) -> bool {
 
 #[cfg(test)]
 mod initialized_spawn_tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::Arc;
 
     use foton_registry::data_components::components::PotionContents;
@@ -218,7 +225,53 @@ mod initialized_spawn_tests {
 
     use super::*;
     use crate::entity::entities::ArrowEntity;
+    use crate::entity::init_entities;
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    #[test]
+    fn non_finite_spawn_coordinates_never_construct_entities() {
+        init_vanilla_registry();
+        init_entities();
+        let world = fresh_test_world("non_finite_spawn");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let mut rejected = 0;
+        for axis in 0..3 {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut position = DVec3::new(8.5, 64.0, 8.5);
+                position[axis] = value;
+                for initialized in [false, true] {
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        if initialized {
+                            create_entity_at_initialized(
+                                &world,
+                                &vanilla_entities::ARROW.key,
+                                position,
+                                SpawnEntityInitialization::ArrowPotion(&vanilla_potions::WATER),
+                            )
+                        } else {
+                            create_entity_at(&world, &vanilla_entities::ARROW.key, position)
+                        }
+                    }));
+                    if matches!(result, Ok(None)) {
+                        rejected += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            rejected, 18,
+            "all invalid inputs must return None without panicking"
+        );
+        assert!(world.accessible_entities().is_empty());
+        assert!(
+            create_entity_at(
+                &world,
+                &vanilla_entities::ARROW.key,
+                DVec3::new(8.5, 64.0, 8.5)
+            )
+            .is_some()
+        );
+    }
 
     #[test]
     fn tipped_arrow_is_water_before_publication() {

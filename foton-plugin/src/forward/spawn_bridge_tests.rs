@@ -123,7 +123,7 @@ fn live_animal_breed_items_before_registry_publication_are_safe() -> Result<(), 
     Ok(())
 }
 
-fn spawn_check_host() -> Result<(tempfile::TempDir, crate::PluginHost), Box<dyn Error>> {
+pub(crate) fn spawn_check_host() -> Result<(tempfile::TempDir, crate::PluginHost), Box<dyn Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let scratch = tempfile::tempdir()?;
     let java_home = if let Some(home) = var_os("JAVA_HOME") {
@@ -180,7 +180,7 @@ fn spawn_check_host() -> Result<(tempfile::TempDir, crate::PluginHost), Box<dyn 
     clippy::default_trait_access,
     reason = "CancellationToken is not re-exported by foton-core or a direct dependency here"
 )]
-fn live_test_server() -> Result<(tempfile::TempDir, Arc<Server>), Box<dyn Error>> {
+pub(crate) fn live_test_server() -> Result<(tempfile::TempDir, Arc<Server>), Box<dyn Error>> {
     // Server configuration requires a relative save path; TempDir removes only
     // this test's directory, including when the Java assertion fails.
     let storage = tempfile::Builder::new()

@@ -3,6 +3,7 @@ final class EntityCheck {
     private EntityCheck() {}
 
     static void check() {
+        SpawnCoordinatesCheck.main(new String[0]);
         suppliedRegistryTypeSelectsTheWrapperWithoutAnotherLookup();
         generatedClassLookupPreservesUnderscoredRegistryKeys();
         generatedClassLookupUsesCanonicalPaperClasses();
