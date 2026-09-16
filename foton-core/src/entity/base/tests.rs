@@ -4,6 +4,7 @@ use super::{
     EntityMovementEmission, EntityMovementFlags, EntityMovementProgress, EntityPhysicsStateInput,
     EntityPistonMovement, EntityVerticalMovementStateUpdate, MAX_ENTITY_TAGS,
 };
+use std::panic::resume_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Weak};
 use std::thread;
@@ -59,6 +60,10 @@ fn raw_entity(id: i32) -> SharedEntity {
 }
 
 #[test]
+#[expect(
+    clippy::float_cmp,
+    reason = "the writer stores these exact finite values and the test checks atomic snapshots"
+)]
 fn position_and_rotation_snapshot_never_mixes_atomic_state_updates() {
     let base = Arc::new(EntityBase::new(
         8,
@@ -90,7 +95,7 @@ fn position_and_rotation_snapshot_never_mixes_atomic_state_updates() {
     }
     stop.store(true, Ordering::Release);
     if let Err(payload) = writer.join() {
-        std::panic::resume_unwind(payload);
+        resume_unwind(payload);
     }
 }
 

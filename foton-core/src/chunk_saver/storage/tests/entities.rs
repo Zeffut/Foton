@@ -1,5 +1,6 @@
 use super::*;
 use foton_registry::RegistryEntry as _;
+use simdnbt::owned::NbtTag;
 
 fn test_persistent_end_crystal(pos: DVec3) -> PersistentEntity {
     PersistentEntity {
@@ -631,10 +632,7 @@ fn absent_plugin_spawn_reason_loads_as_default() {
 fn unknown_or_malformed_plugin_spawn_reason_loads_as_default() {
     init_globals_once();
 
-    for stored_reason in [
-        simdnbt::owned::NbtTag::String("FUTURE_REASON".into()),
-        simdnbt::owned::NbtTag::Int(47),
-    ] {
+    for stored_reason in [NbtTag::String("FUTURE_REASON".into()), NbtTag::Int(47)] {
         let expected_position = DVec3::new(1.0, 2.0, 3.0);
         let mut persistent = test_persistent_end_crystal(expected_position);
         let mut nbt = NbtCompound::new();
