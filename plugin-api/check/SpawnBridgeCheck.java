@@ -34,6 +34,11 @@ public final class SpawnBridgeCheck {
             == CreatureSpawnEvent.SpawnReason.DEFAULT;
     }
 
+    public static void assertPrePublicationArrowPotionNoOp() {
+        foton.Native.setArrowPotion(
+            "00000000-0000-0000-0000-000000000099", "minecraft:water");
+    }
+
     public static void allowBeehiveRelease() {
         cancelSpawns = false;
         spawnCalls = 0;
@@ -57,9 +62,33 @@ public final class SpawnBridgeCheck {
 
         org.bukkit.entity.AbstractCow cow = world.spawn(
             location, org.bukkit.entity.AbstractCow.class);
-        if (!(cow instanceof org.bukkit.entity.Cow)
+        if (!(cow instanceof org.bukkit.entity.Cow liveCow)
                 || cow.getType() != org.bukkit.entity.EntityType.COW) {
             throw new AssertionError("AbstractCow class spawn must return a Cow wrapper");
+        }
+        liveCow.setVariant(org.bukkit.entity.Cow.Variant.COLD);
+        liveCow.setSoundVariant(org.bukkit.entity.Cow.SoundVariant.MOODY);
+        if (liveCow.getVariant() != org.bukkit.entity.Cow.Variant.COLD
+                || liveCow.getSoundVariant() != org.bukkit.entity.Cow.SoundVariant.MOODY) {
+            throw new AssertionError("Cow variant and sound variant must round-trip native state");
+        }
+        java.util.UUID cause = java.util.UUID.fromString(
+            "00000000-0000-0000-0000-000000000042");
+        cow.setBreedCause(cause);
+        cow.setLoveModeTicks(42);
+        if (!cause.equals(cow.getBreedCause()) || !cow.isLoveMode()
+                || cow.getLoveModeTicks() != 42 || !cow.canBreed()) {
+            throw new AssertionError("Animals breeding state must round-trip through native state");
+        }
+        if (!cow.isBreedItem(org.bukkit.Material.WHEAT)
+                || cow.isBreedItem(org.bukkit.Material.STONE)
+                || !cow.isBreedItem(new org.bukkit.inventory.ItemStack(org.bukkit.Material.WHEAT))) {
+            throw new AssertionError("Animals breed-item checks must use the native food predicate");
+        }
+        cow.setBreedCause(null);
+        cow.setBreed(false);
+        if (cow.getBreedCause() != null || cow.isLoveMode() || cow.getLoveModeTicks() != 0) {
+            throw new AssertionError("Animals state clearing must update the native animal");
         }
 
         org.bukkit.entity.AbstractCubeMob cube = world.spawn(
@@ -88,6 +117,11 @@ public final class SpawnBridgeCheck {
         if (!cube.canWander()) {
             throw new AssertionError("setWander(true) must update native cube state");
         }
+        ((org.bukkit.entity.LivingEntity) cube).setHealth(0.0);
+        cube.setSize(5);
+        if (((org.bukkit.entity.LivingEntity) cube).getHealth() != 0.0) {
+            throw new AssertionError("resizing a dead cube mob must not heal it");
+        }
 
         org.bukkit.entity.SizedFireball fireball = world.spawn(
             location, org.bukkit.entity.SizedFireball.class);
@@ -115,5 +149,22 @@ public final class SpawnBridgeCheck {
                 || ordinary.getBasePotionType() != null) {
             throw new AssertionError("ordinary Arrow identity and potion state must remain ordinary");
         }
+
+        int entityCount = world.getEntities().size();
+        expectIllegalArgument(() -> world.spawn(location, (Class) null));
+        expectIllegalArgument(() -> world.spawn(location, org.bukkit.entity.Entity.class));
+        expectIllegalArgument(() -> world.spawn(location, org.bukkit.entity.Egg.class));
+        if (world.getEntities().size() != entityCount) {
+            throw new AssertionError("failed class spawns must not leave native orphan entities");
+        }
+    }
+
+    private static void expectIllegalArgument(Runnable action) {
+        try {
+            action.run();
+        } catch (IllegalArgumentException expected) {
+            return;
+        }
+        throw new AssertionError("unsupported class spawn must throw IllegalArgumentException");
     }
 }

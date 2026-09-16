@@ -7,6 +7,13 @@ public final class FotonEntityFactory implements org.bukkit.entity.EntityFactory
         return org.bukkit.entity.EntityType.fromEntityClass(entityClass);
     }
 
+    /** Returns whether the generated runtime wrapper satisfies the requested API class. */
+    public static boolean supportsSpawn(Class<? extends org.bukkit.entity.Entity> entityClass,
+            org.bukkit.entity.EntityType type) {
+        return entityClass != null && type != null
+            && GeneratedEntityWrapperSupport.supports(entityClass, type);
+    }
+
     @Override public org.bukkit.entity.EntitySnapshot createEntitySnapshot(String data) {
         if (data == null) return null;
         int at = data.indexOf('@');

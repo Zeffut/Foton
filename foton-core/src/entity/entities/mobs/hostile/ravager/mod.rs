@@ -29,10 +29,9 @@ use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
 use simdnbt::owned::NbtCompound;
 
 use crate::entity::LivingEntitySyncedData;
-use crate::entity::ai::goal::GoalControl;
 use crate::entity::ai::goal::{
-    FloatGoal, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal, MeleeAttackGoal,
-    NearestAttackableTargetGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal,
+    FloatGoal, GoalControls, HurtByTargetGoal, LongDistancePatrolGoal, LookAtPlayerGoal,
+    MeleeAttackGoal, NearestAttackableTargetGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal,
     RaiderCelebrationGoal, RaiderMoveThroughVillageGoal, WaterAvoidingRandomStrollGoal,
 };
 use crate::entity::ai::path::PathType;
@@ -670,11 +669,15 @@ impl Mob for RavagerEntity {
             .vehicle()
             .is_none_or(|vehicle| !vehicle.entity_type().is_abstract_boat);
 
+        let mut enabled_controls = GoalControls::EMPTY;
+        if no_controller {
+            enabled_controls = GoalControls::MOVE | GoalControls::LOOK | GoalControls::TARGET;
+        }
+        if no_controller && not_in_boat {
+            enabled_controls = enabled_controls | GoalControls::JUMP;
+        }
         let mut selector = self.mob_base().goal_selector().lock();
-        selector.set_control(GoalControl::Move, no_controller);
-        selector.set_control(GoalControl::Jump, no_controller && not_in_boat);
-        selector.set_control(GoalControl::Look, no_controller);
-        selector.set_control(GoalControl::Target, no_controller);
+        selector.set_mob_controls(enabled_controls);
     }
 
     fn max_head_y_rot(&self) -> f32 {

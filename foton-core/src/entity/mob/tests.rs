@@ -21,7 +21,7 @@ use super::{
 };
 use crate::behavior::init_behaviors;
 use crate::entity::ai::control::{DEFAULT_LOOK_X_MAX_ROT_ANGLE, DEFAULT_LOOK_Y_MAX_ROT_SPEED};
-use crate::entity::ai::goal::GoalControl;
+use crate::entity::ai::goal::{GoalControl, GoalControls};
 use crate::entity::ai::node::Node;
 use crate::entity::ai::path::{Path, PathType};
 use crate::entity::damage::DamageSource;
@@ -322,7 +322,7 @@ fn mob_control_flags_enable_goals_without_controller_or_boat() {
     let mob = DespawnTestMob::new(None, false);
     {
         let mut selector = mob.mob_base().goal_selector().lock();
-        selector.set_mob_controls(false, false, false);
+        selector.set_mob_controls(GoalControls::TARGET);
     }
 
     mob.update_control_flags();

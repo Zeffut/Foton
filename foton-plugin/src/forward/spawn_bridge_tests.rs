@@ -18,6 +18,68 @@ use glam::DVec3;
 #[test]
 #[ignore = "requires the built plugin API; dev/ci.sh runs this after the Java build"]
 fn spawn_bridge_dispatches_cancellation_and_queries_released_bee() -> Result<(), Box<dyn Error>> {
+    let (_scratch, host) = spawn_check_host()?;
+    let mut env = host.vm.attach_current_thread()?;
+    env.call_static_method("SpawnBridgeCheck", "install", "()V", &[])?;
+    let pre = pre_creature_spawn_call(
+        &host.vm,
+        "minecraft:overworld",
+        1.0,
+        64.0,
+        2.0,
+        "minecraft:bee",
+        PluginSpawnReason::TrialSpawner,
+    );
+    let spawn = creature_spawn_call(
+        &host.vm,
+        "00000000-0000-0000-0000-000000000007",
+        "minecraft:overworld",
+        1.0,
+        64.0,
+        2.0,
+        PluginSpawnReason::Beehive,
+    );
+    assert_eq!(
+        (pre, spawn),
+        (false, false),
+        "both Java cancellations must cross JNI"
+    );
+    assert_eq!(
+        env.get_static_field("SpawnBridgeCheck", "preCalls", "I")?
+            .i()?,
+        1
+    );
+    assert_eq!(
+        env.get_static_field("SpawnBridgeCheck", "spawnCalls", "I")?
+            .i()?,
+        1
+    );
+    assert!(
+        env.call_static_method("SpawnBridgeCheck", "absentEntityIsDefault", "()Z", &[])?
+            .z()?
+    );
+    drop(env);
+    live_beehive_release_returns_java_provenance(&host)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires the built plugin API and must run alone before registry publication"]
+fn stale_arrow_potion_before_registry_publication_is_safe() -> Result<(), Box<dyn Error>> {
+    let (_scratch, host) = spawn_check_host()?;
+    let mut env = host.vm.attach_current_thread()?;
+    env.call_static_method(
+        "SpawnBridgeCheck",
+        "assertPrePublicationArrowPotionNoOp",
+        "()V",
+        &[],
+    )?;
+    drop(env);
+    host.disable_all()?;
+    Ok(())
+}
+
+fn spawn_check_host() -> Result<(tempfile::TempDir, crate::PluginHost), Box<dyn Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let scratch = tempfile::tempdir()?;
     let java_home = if let Some(home) = var_os("JAVA_HOME") {
@@ -67,48 +129,7 @@ fn spawn_bridge_dispatches_cancellation_and_queries_released_bee() -> Result<(),
         },
         &Weak::new(),
     )?;
-    let mut env = host.vm.attach_current_thread()?;
-    env.call_static_method("SpawnBridgeCheck", "install", "()V", &[])?;
-    let pre = pre_creature_spawn_call(
-        &host.vm,
-        "minecraft:overworld",
-        1.0,
-        64.0,
-        2.0,
-        "minecraft:bee",
-        PluginSpawnReason::TrialSpawner,
-    );
-    let spawn = creature_spawn_call(
-        &host.vm,
-        "00000000-0000-0000-0000-000000000007",
-        "minecraft:overworld",
-        1.0,
-        64.0,
-        2.0,
-        PluginSpawnReason::Beehive,
-    );
-    assert_eq!(
-        (pre, spawn),
-        (false, false),
-        "both Java cancellations must cross JNI"
-    );
-    assert_eq!(
-        env.get_static_field("SpawnBridgeCheck", "preCalls", "I")?
-            .i()?,
-        1
-    );
-    assert_eq!(
-        env.get_static_field("SpawnBridgeCheck", "spawnCalls", "I")?
-            .i()?,
-        1
-    );
-    assert!(
-        env.call_static_method("SpawnBridgeCheck", "absentEntityIsDefault", "()Z", &[])?
-            .z()?
-    );
-    drop(env);
-    live_beehive_release_returns_java_provenance(&host)?;
-    Ok(())
+    Ok((scratch, host))
 }
 
 fn live_test_server() -> Result<(tempfile::TempDir, Arc<Server>), Box<dyn Error>> {

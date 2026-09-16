@@ -191,12 +191,32 @@ public final class FotonWorld implements World {
     }
 
     @Override public <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) {
-        org.bukkit.entity.Entity entity = spawnEntity(location, FotonEntityFactory.typeFor(clazz));
+        if (clazz == null) {
+            throw new IllegalArgumentException("Entity class cannot be null");
+        }
+        org.bukkit.entity.EntityType type = FotonEntityFactory.typeFor(clazz);
+        if (type == null) {
+            throw new IllegalArgumentException("Unsupported entity class: " + clazz.getName());
+        }
+        if (!FotonEntityFactory.supportsSpawn(clazz, type)) {
+            throw new IllegalArgumentException(
+                "Entity class has no compatible Foton wrapper: " + clazz.getName());
+        }
+
+        org.bukkit.entity.Entity entity = spawnEntity(location, type);
+        if (entity == null) {
+            throw new IllegalArgumentException("Unable to spawn entity class: " + clazz.getName());
+        }
         if (clazz == org.bukkit.entity.TippedArrow.class && entity instanceof FotonArrow arrow) {
             arrow.setBasePotionType(org.bukkit.potion.PotionType.WATER);
             entity = new FotonTippedArrow(arrow.getUniqueId());
         }
-        return clazz != null && clazz.isInstance(entity) ? clazz.cast(entity) : null;
+        if (!clazz.isInstance(entity)) {
+            entity.remove();
+            throw new IllegalArgumentException(
+                "Spawned wrapper does not implement requested class: " + clazz.getName());
+        }
+        return clazz.cast(entity);
     }
 
     @Override

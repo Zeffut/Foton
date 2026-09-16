@@ -133,6 +133,16 @@ entity_classes = {
     "GLOW_ITEM_FRAME": "FotonItemFrame", "PAINTING": "FotonPainting", "ARMOR_STAND": "FotonArmorStand",
     "BLOCK_DISPLAY": "FotonBlockDisplay", "FIREWORK_ROCKET": "FotonFirework",
     "END_CRYSTAL": "FotonEnderCrystal", "ARROW": "FotonArrow", "SPECTRAL_ARROW": "FotonArrow",
+    "SLIME": "FotonSlime", "FIREBALL": "FotonSizedFireball",
+    "LIGHTNING_BOLT": "FotonLightningStrike", "COPPER_GOLEM": "FotonCopperGolem",
+    "PIGLIN": "FotonPiglin", "ZOGLIN": "FotonZoglin", "TADPOLE": "FotonTadpole",
+    "TROPICAL_FISH": "FotonTropicalFish", "MOOSHROOM": "FotonMushroomCow",
+    "BEE": "FotonBee", "EXPERIENCE_ORB": "FotonExperienceOrb",
+    "HOPPER_MINECART": "FotonHopperMinecart", "TNT": "FotonTNTPrimed",
+    "EXPERIENCE_BOTTLE": "FotonThrownExpBottle", "FISHING_BOBBER": "FotonFishHook",
+    "AREA_EFFECT_CLOUD": "FotonAreaEffectCloud", "SPLASH_POTION": "FotonThrownPotion",
+    "LINGERING_POTION": "FotonThrownPotion", "SMALL_FIREBALL": "FotonSizedFireball",
+    "ZOMBIFIED_PIGLIN": "FotonPigZombie",
 }
 class_cases = "\n".join(
     f"            case {name} -> foton.{class_name}.class;" for name, class_name in entity_classes.items()
@@ -174,6 +184,33 @@ out.write_text(
     "        return switch (entityClass.getName()) {\n"
     + class_to_type_cases + "\n"
     + "            default -> null;\n        };\n    }\n"
+    "}\n",
+    encoding="utf-8",
+)
+
+wrapper_out = Path(sys.argv[1]) / "foton/GeneratedEntityWrapperSupport.java"
+wrapper_out.parent.mkdir(parents=True, exist_ok=True)
+wrapper_cases = "\n".join(
+    f"            case {name} -> foton.{class_name}.class;"
+    for name, class_name in entity_classes.items()
+)
+wrapper_out.write_text(
+    "package foton;\n\n"
+    "/** Runtime wrapper support generated from the same mapping as EntityType. */\n"
+    "final class GeneratedEntityWrapperSupport {\n"
+    "    private GeneratedEntityWrapperSupport() {}\n\n"
+    "    static boolean supports(Class<? extends org.bukkit.entity.Entity> requested,\n"
+    "            org.bukkit.entity.EntityType type) {\n"
+    "        if (requested == org.bukkit.entity.TippedArrow.class\n"
+    "                && type == org.bukkit.entity.EntityType.ARROW) {\n"
+    "            return requested.isAssignableFrom(foton.FotonTippedArrow.class);\n"
+    "        }\n"
+    "        Class<? extends org.bukkit.entity.Entity> wrapper = switch (type) {\n"
+    + wrapper_cases + "\n"
+    + "            default -> null;\n"
+    "        };\n"
+    "        return wrapper != null && requested.isAssignableFrom(wrapper);\n"
+    "    }\n"
     "}\n",
     encoding="utf-8",
 )

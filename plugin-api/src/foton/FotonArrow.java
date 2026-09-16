@@ -39,7 +39,7 @@ public class FotonArrow extends FotonProjectile implements Arrow {
 
     @Override public org.bukkit.Color getColor() {
         int raw = Native.arrowPotionColor(getUniqueId().toString());
-        return raw < 0 ? null : org.bukkit.Color.fromRGB(raw & 0x00ffffff);
+        return raw == -1 ? null : org.bukkit.Color.fromRGB(raw & 0x00ffffff);
     }
 
     @Override public List<PotionEffect> getCustomEffects() {

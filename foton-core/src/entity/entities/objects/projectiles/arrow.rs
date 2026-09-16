@@ -10,6 +10,7 @@ use foton_macros::entity_behavior;
 use foton_protocol::packets::game::{CGameEvent, GameEventType};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::item_stack::ItemStack;
+use foton_registry::mob_effect::instance::MobEffectInstance as RegistryMobEffectInstance;
 use foton_registry::potion::PotionRef;
 use foton_registry::vanilla_entity_data::ArrowEntityData;
 use foton_registry::{
@@ -35,7 +36,9 @@ use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::{ClipHitResult, World};
 use foton_registry::data_components::components::PotionContents;
-use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
+use foton_registry::data_components::vanilla_components::{POTION_CONTENTS, POTION_DURATION_SCALE};
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 
 /// Damage an arrow carries before speed is taken into account.
 ///
@@ -131,8 +134,6 @@ struct ArrowState {
     fired_from_weapon: Option<ItemStack>,
     /// The ammunition item, including `PotionContents` for tipped arrows.
     fired_from_ammo: Option<ItemStack>,
-    /// Effects the arrow hands to whatever it hits.
-    effects: Vec<MobEffectInstance>,
     /// Entities this shot has already gone through.
     ///
     /// Vanilla parity: `AbstractArrow.piercingIgnoreEntityIds`. It is what
@@ -151,7 +152,6 @@ impl ArrowState {
             pickup: ArrowPickup::Disallowed,
             fired_from_weapon: None,
             fired_from_ammo: None,
-            effects: Vec::new(),
             piercing_ignore_entity_ids: Vec::new(),
         }
     }
@@ -265,19 +265,40 @@ impl ArrowEntity {
 
     /// Adds an effect the arrow will apply to whatever it hits.
     ///
-    /// Vanilla parity: `Arrow.addEffect`. Vanilla keeps the effect in the
-    /// arrow's `PotionContents` component and scales its duration by
-    /// `POTION_DURATION_SCALE`; Foton has no potion component on projectiles
-    /// yet, so effects are held on the entity and applied at full duration.
-    /// That matches the mobs that add effects directly, such as a stray's
-    /// slowness, and only diverges for the tipped arrows Foton cannot fire yet.
+    /// Vanilla parity: `Arrow.addEffect`, which appends to the pickup origin's
+    /// `PotionContents` and therefore survives pickup and persistence.
     pub fn add_effect(&self, effect: MobEffectInstance) {
-        self.state.lock().effects.push(effect);
+        let custom_effect = RegistryMobEffectInstance::new(
+            effect.effect(),
+            effect.duration(),
+            effect.amplifier(),
+            effect.is_ambient(),
+            effect.is_visible(),
+            effect.show_icon(),
+            None,
+        );
+        let contents = self
+            .ammo_potion_contents()
+            .unwrap_or_else(PotionContents::empty)
+            .with_effect_added(custom_effect);
+        let mut ammo = self
+            .ammo_item()
+            .unwrap_or_else(|| ItemStack::new(&vanilla_items::TIPPED_ARROW));
+        ammo.set(POTION_CONTENTS, contents);
+        self.set_ammo_item(ammo);
     }
 
     /// Returns the effects this arrow applies on impact.
     pub fn effects(&self) -> Vec<MobEffectInstance> {
-        self.state.lock().effects.clone()
+        self.ammo_potion_contents()
+            .map(|contents| {
+                contents
+                    .custom_effects()
+                    .iter()
+                    .map(core_effect_from_component)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Hands the arrow's effects to a living target.
@@ -287,8 +308,29 @@ impl ArrowEntity {
         let Some(living) = target.as_living_entity() else {
             return;
         };
-        // Cloned out of the lock: applying an effect reaches back into the world.
-        let effects = self.state.lock().effects.clone();
+        let Some(ammo) = self.ammo_item() else {
+            return;
+        };
+        let Some(contents) = ammo.get(POTION_CONTENTS) else {
+            return;
+        };
+        let duration_scale = ammo.get(POTION_DURATION_SCALE).copied().unwrap_or(1.0);
+        let mut effects = Vec::new();
+        if let Some(potion) = contents.potion() {
+            effects.extend(potion.value().effects.iter().map(|effect| {
+                MobEffectInstance::with_duration(
+                    effect.effect,
+                    scaled_effect_duration(effect.duration, duration_scale),
+                    effect.amplifier,
+                )
+            }));
+        }
+        effects.extend(contents.custom_effects().iter().map(|effect| {
+            core_effect_from_component_with_duration(
+                effect,
+                scaled_effect_duration(effect.duration(), duration_scale),
+            )
+        }));
         for effect in effects {
             living.add_mob_effect(effect);
         }
@@ -333,19 +375,12 @@ impl ArrowEntity {
 
     /// The stack a player picking this arrow up receives.
     ///
-    /// Vanilla parity: `Arrow.getDefaultPickupItem`, which is what
-    /// `AbstractArrow.getPickupItemStackOrigin` answers with until something
-    /// overrides it. Vanilla keeps that stack per arrow, so a tipped one comes
-    /// back tipped; Foton has no potion component on projectiles yet -- the
-    /// same gap `on_hit_entity` documents -- and this is the one place that
-    /// changes when it does.
+    /// Vanilla parity: `AbstractArrow.getPickupItemStackOrigin` returns the
+    /// per-arrow ammunition stack, including all potion components.
     #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "vanilla reads the per-arrow origin stack through this receiver"
-    )]
     pub fn pickup_item(&self) -> ItemStack {
-        ItemStack::new(&vanilla_items::ARROW)
+        self.ammo_item()
+            .unwrap_or_else(|| ItemStack::new(&vanilla_items::ARROW))
     }
 
     /// Returns who may collect this arrow.
@@ -401,38 +436,17 @@ impl ArrowEntity {
     #[must_use]
     pub fn ammo_potion_color(&self) -> Option<i32> {
         let contents = self.ammo_potion_contents()?;
-        if let Some(color) = contents.custom_color() {
-            return Some(color);
-        }
-        let mut red = 0i64;
-        let mut green = 0i64;
-        let mut blue = 0i64;
-        let mut weight = 0i64;
-        if let Some(potion) = contents.potion() {
-            for effect in potion.value().effects {
-                let color = effect.effect.color;
-                let effect_weight = i64::from(effect.amplifier + 1);
-                red += i64::from(color.red()) * effect_weight;
-                green += i64::from(color.green()) * effect_weight;
-                blue += i64::from(color.blue()) * effect_weight;
-                weight += effect_weight;
-            }
-        }
-        for effect in contents.custom_effects() {
-            let color = effect.effect().color;
-            let effect_weight = i64::from(effect.amplifier() + 1);
-            red += i64::from(color.red()) * effect_weight;
-            green += i64::from(color.green()) * effect_weight;
-            blue += i64::from(color.blue()) * effect_weight;
-            weight += effect_weight;
-        }
-        (weight > 0)
-            .then(|| ((red / weight) << 16 | (green / weight) << 8 | (blue / weight)) as i32)
+        (contents != PotionContents::empty()).then(|| contents.color())
     }
 
     /// Records the ammunition item used to create this arrow.
     pub fn set_ammo_item(&self, ammo: ItemStack) {
+        let color = ammo
+            .get(POTION_CONTENTS)
+            .filter(|contents| **contents != PotionContents::empty())
+            .map_or(-1, PotionContents::color);
         self.state.lock().fired_from_ammo = Some(ammo);
+        self.entity_data.lock().id_effect_color.set(color);
     }
 
     /// Changes the base potion in the arrow's native ammunition component.
@@ -665,6 +679,23 @@ impl Entity for ArrowEntity {
 
     fn is_pickable(&self) -> bool {
         true
+    }
+
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        self.save_projectile(nbt);
+        if let Some(ammo) = self.ammo_item() {
+            nbt.insert("item", ammo.to_nbt_tag_ref());
+        }
+    }
+
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        self.load_projectile(nbt);
+        if let Some(ammo) = nbt
+            .compound("item")
+            .and_then(|item| ItemStack::from_borrowed_compound(&item))
+        {
+            self.set_ammo_item(ammo);
+        }
     }
 
     /// Lets a player collect an arrow that has landed.
@@ -913,6 +944,28 @@ impl Projectile for ArrowEntity {
     }
 }
 
+fn scaled_effect_duration(duration: i32, scale: f32) -> i32 {
+    if duration == -1 || duration == 0 {
+        duration
+    } else {
+        ((duration as f32 * scale).floor() as i32).max(1)
+    }
+}
+
+const fn core_effect_from_component(effect: &RegistryMobEffectInstance) -> MobEffectInstance {
+    core_effect_from_component_with_duration(effect, effect.duration())
+}
+
+const fn core_effect_from_component_with_duration(
+    effect: &RegistryMobEffectInstance,
+    duration: i32,
+) -> MobEffectInstance {
+    MobEffectInstance::with_duration(effect.effect(), duration, effect.amplifier())
+        .with_ambient(effect.ambient())
+        .with_visible(effect.show_particles())
+        .with_show_icon(effect.show_icon())
+}
+
 /// Vanilla parity: `RandomSource.triangle`.
 fn triangle(mode: f64, deviation: f64) -> f64 {
     mode + deviation * (rand::random::<f64>() - rand::random::<f64>())
@@ -920,24 +973,33 @@ fn triangle(mode: f64, deviation: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
     use std::sync::Arc;
 
+    use foton_registry::data_components::vanilla_components::{
+        POTION_CONTENTS, POTION_DURATION_SCALE,
+    };
     use foton_registry::{
-        init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_potions,
+        init_vanilla_registry, vanilla_blocks, vanilla_entities, vanilla_items,
+        vanilla_mob_effects, vanilla_potions,
     };
     use foton_utils::types::UpdateFlags;
     use foton_utils::{BlockPos, ChunkPos};
     use glam::DVec3;
+    use simdnbt::borrow::read_compound;
+    use simdnbt::owned::NbtCompound;
 
     use crate::behavior::init_behaviors;
     use crate::entity::entities::PigEntity;
-    use crate::entity::{Entity, LivingEntity, RemovalReason, SharedEntity, next_entity_id};
+    use crate::entity::{
+        Entity, LivingEntity, MobEffectInstance, RemovalReason, SharedEntity, next_entity_id,
+    };
     use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
     use crate::world::World;
 
     use crate::entity::projectile::Projectile as _;
 
-    use super::{ArrowEntity, SHAKE_TIME};
+    use super::{ArrowEntity, PotionContents, SHAKE_TIME};
 
     /// The block face an arrow is fired at in the landing tests.
     const WALL_X: i32 = 12;
@@ -987,7 +1049,10 @@ mod tests {
         let contents = arrow
             .ammo_potion_contents()
             .unwrap_or_else(|| panic!("WATER must be stored in the arrow ammunition"));
-        assert!(contents.is(&vanilla_potions::WATER));
+        assert_eq!(
+            contents.potion().map(|potion| potion.value()),
+            Some(&vanilla_potions::WATER)
+        );
         arrow.set_base_potion(None);
         assert!(
             arrow
@@ -995,6 +1060,116 @@ mod tests {
                 .is_some_and(|contents| contents.potion().is_none()),
             "clearing the base potion must preserve a native, potionless contents value"
         );
+    }
+
+    #[test]
+    fn tipped_arrow_applies_base_and_custom_effects_at_ammunition_scale() {
+        let world = arrow_world("tipped_arrow_hit_effects");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        let pig = spawn_pig(&world, DVec3::new(1.0, 0.0, 0.0));
+        arrow.set_base_potion(Some(&vanilla_potions::SWIFTNESS));
+        arrow.add_effect(MobEffectInstance::with_duration(
+            &vanilla_mob_effects::LUCK,
+            80,
+            2,
+        ));
+
+        let target: SharedEntity = pig.clone();
+        arrow.do_post_hurt_effects(&target);
+
+        let scale = arrow
+            .ammo_item()
+            .and_then(|ammo| ammo.get(POTION_DURATION_SCALE).copied())
+            .unwrap_or(1.0);
+        let base = vanilla_potions::SWIFTNESS.effects[0];
+        let expected_base_duration = ((base.duration as f32 * scale).floor() as i32).max(1);
+        let base_effect = pig
+            .mob_effect(base.effect)
+            .unwrap_or_else(|| panic!("the base potion effect must hit the target"));
+        let custom_effect = pig
+            .mob_effect(&vanilla_mob_effects::LUCK)
+            .unwrap_or_else(|| panic!("the custom potion effect must hit the target"));
+        assert_eq!(base_effect.duration(), expected_base_duration);
+        assert_eq!(custom_effect.duration(), 10);
+        assert_eq!(custom_effect.amplifier(), 2);
+    }
+
+    #[test]
+    fn water_tipped_arrow_keeps_pickup_identity_and_synchronized_color() {
+        let world = arrow_world("water_tipped_arrow_pickup");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+
+        arrow.set_base_potion(Some(&vanilla_potions::WATER));
+
+        let pickup = arrow.pickup_item();
+        assert_eq!(pickup.item(), &*vanilla_items::TIPPED_ARROW);
+        assert!(
+            pickup
+                .get(POTION_CONTENTS)
+                .is_some_and(|contents| contents.is(&vanilla_potions::WATER))
+        );
+        assert_eq!(
+            arrow.ammo_potion_color(),
+            Some(PotionContents::BASE_POTION_COLOR)
+        );
+        assert_eq!(
+            *arrow.entity_data.lock().id_effect_color.get(),
+            PotionContents::BASE_POTION_COLOR
+        );
+
+        arrow.set_base_potion(Some(&vanilla_potions::SWIFTNESS));
+        let effect_color = vanilla_potions::SWIFTNESS.effects[0]
+            .effect
+            .color
+            .with_alpha(u8::MAX)
+            .raw();
+        assert_eq!(arrow.ammo_potion_color(), Some(effect_color));
+        assert_eq!(
+            *arrow.entity_data.lock().id_effect_color.get(),
+            effect_color
+        );
+    }
+
+    #[test]
+    fn tipped_arrow_persists_pickup_potion_and_custom_effects() {
+        let world = arrow_world("tipped_arrow_persistence");
+        let arrow = spawn_arrow(&world, DVec3::ZERO, DVec3::ZERO);
+        arrow.add_effect(MobEffectInstance::with_duration(
+            &vanilla_mob_effects::LUCK,
+            80,
+            1,
+        ));
+        arrow.set_base_potion(Some(&vanilla_potions::WATER));
+
+        let mut saved = NbtCompound::new();
+        arrow.save_additional(&mut saved);
+        let mut bytes = Vec::new();
+        saved.write(&mut bytes);
+        let borrowed = read_compound(&mut Cursor::new(bytes.as_slice()))
+            .unwrap_or_else(|_| panic!("saved arrow NBT must reborrow"));
+        let loaded = ArrowEntity::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            DVec3::ZERO,
+            Arc::downgrade(&world),
+        );
+        loaded.load_additional((&borrowed).into());
+
+        let pickup = loaded.pickup_item();
+        assert_eq!(pickup.item(), &*vanilla_items::TIPPED_ARROW);
+        let contents = pickup
+            .get(POTION_CONTENTS)
+            .unwrap_or_else(|| panic!("loaded tipped arrow must retain potion contents"));
+        assert_eq!(
+            contents.potion().map(|potion| potion.value()),
+            Some(&vanilla_potions::WATER)
+        );
+        assert_eq!(contents.custom_effects().len(), 1);
+        assert_eq!(
+            contents.custom_effects()[0].effect(),
+            &*vanilla_mob_effects::LUCK
+        );
+        assert_eq!(contents.custom_effects()[0].duration(), 80);
     }
 
     /// Flies an arrow into whatever is in front of it, one tick at a time,

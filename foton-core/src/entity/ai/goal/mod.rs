@@ -121,7 +121,9 @@ pub(crate) use ranged_crossbow_attack::RangedCrossbowAttackGoal;
 pub(crate) use reset_universal_anger_target::ResetUniversalAngerTargetGoal;
 pub(crate) use restrict_sun::RestrictSunGoal;
 pub(crate) use run_around_like_crazy::RunAroundLikeCrazyGoal;
-pub(crate) use selector::{Goal, GoalControl, GoalControls, GoalSelector};
+#[cfg(test)]
+pub(crate) use selector::GoalControl;
+pub(crate) use selector::{Goal, GoalControls, GoalSelector};
 pub(crate) use sit_when_ordered_to::SitWhenOrderedToGoal;
 pub(crate) use spellcaster_casting_spell::SpellcasterCastingSpellGoal;
 pub(crate) use spellcaster_use_spell::{DEFAULT_CAST_WARMUP_TIME, SpellcasterUseSpellBase};

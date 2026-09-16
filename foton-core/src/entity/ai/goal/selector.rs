@@ -288,23 +288,14 @@ impl GoalSelector {
     ///
     /// Transient rider controls remain separate from API-owned controls, so a
     /// per-tick mob update cannot undo a persistent external setting.
-    pub const fn set_mob_controls(
-        &mut self,
-        move_enabled: bool,
-        jump_enabled: bool,
-        look_enabled: bool,
-    ) {
-        let mut controls = GoalControls::EMPTY;
-        if !move_enabled {
-            controls.insert(GoalControl::Move);
-        }
-        if !jump_enabled {
-            controls.insert(GoalControl::Jump);
-        }
-        if !look_enabled {
-            controls.insert(GoalControl::Look);
-        }
-        self.mob_disabled_controls = controls;
+    pub const fn set_mob_controls(&mut self, enabled_controls: GoalControls) {
+        self.mob_disabled_controls = GoalControls(
+            (GoalControls::MOVE.0
+                | GoalControls::JUMP.0
+                | GoalControls::LOOK.0
+                | GoalControls::TARGET.0)
+                & !enabled_controls.0,
+        );
         self.refresh_disabled_controls();
     }
 
@@ -425,6 +416,11 @@ impl fmt::Debug for GoalSelector {
             .field("available_goals", &self.available_goals.len())
             .field("running_goals", &self.running_goal_count())
             .field("disabled_controls", &self.disabled_controls)
+            .field("mob_disabled_controls", &self.mob_disabled_controls)
+            .field(
+                "externally_disabled_controls",
+                &self.externally_disabled_controls,
+            )
             .finish()
     }
 }

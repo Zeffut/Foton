@@ -8,6 +8,7 @@ final class EntityCheck {
         generatedClassLookupUsesCanonicalPaperClasses();
         generatedClassLookupPreservesPaperDefaultsAndAmbiguity();
         generatedClassLookupPreservesPaperAbstractAndSpecializedDefaults();
+        generatedWrapperSupportMatchesRuntimeWrappers();
         entityContractsPreservePaperInheritance();
         dimensionsComeFromTheBoundingBox();
         destinationLocationIsFilledInPlace();
@@ -66,13 +67,31 @@ final class EntityCheck {
             org.bukkit.entity.EntityType.ARROW, "TippedArrow defaults to Arrow");
     }
 
+    private static void generatedWrapperSupportMatchesRuntimeWrappers() {
+        Checks.expect(foton.FotonEntityFactory.supportsSpawn(
+                org.bukkit.entity.AbstractCow.class, org.bukkit.entity.EntityType.COW),
+            "AbstractCow must be supported by the generated Cow wrapper metadata");
+        Checks.expect(foton.FotonEntityFactory.supportsSpawn(
+                org.bukkit.entity.TippedArrow.class, org.bukkit.entity.EntityType.ARROW),
+            "TippedArrow must use its specialized generated wrapper metadata");
+        Checks.expect(!foton.FotonEntityFactory.supportsSpawn(
+                org.bukkit.entity.Egg.class, org.bukkit.entity.EntityType.EGG),
+            "Egg must not be spawnable until its runtime wrapper implements Egg");
+    }
+
     private static void entityContractsPreservePaperInheritance() {
-        Checks.expect(org.bukkit.entity.Animal.class.isAssignableFrom(
-                org.bukkit.entity.AbstractCow.class),
-            "AbstractCow must preserve Foton's animal hierarchy");
+        Checks.expect(java.util.Arrays.asList(org.bukkit.entity.AbstractCow.class.getInterfaces())
+                .contains(org.bukkit.entity.Animals.class),
+            "AbstractCow must directly extend Paper's Animals contract");
+        Checks.expect(org.bukkit.entity.Breedable.class.isAssignableFrom(
+                org.bukkit.entity.Animals.class),
+            "Animals must preserve Paper's Breedable hierarchy");
         Checks.expect(org.bukkit.entity.AbstractCow.class.isAssignableFrom(
                 org.bukkit.entity.Cow.class),
             "Cow must inherit AbstractCow");
+        Checks.expect(java.util.Arrays.asList(org.bukkit.entity.MushroomCow.class.getInterfaces())
+                .contains(org.bukkit.entity.AbstractCow.class),
+            "MushroomCow must directly extend AbstractCow rather than Cow");
         Checks.expect(org.bukkit.entity.Creature.class.isAssignableFrom(
                 org.bukkit.entity.AbstractCubeMob.class),
             "AbstractCubeMob must inherit Creature");
@@ -162,6 +181,29 @@ final class EntityCheck {
         entity.setSilent(silent);
         entity.setRotation(90.0f, 30.0f);
         boolean raining = entity.isInRain();
+    }
+
+    @SuppressWarnings("unused")
+    private static void compileAnimalsSurface(org.bukkit.entity.Animals animal,
+            java.util.UUID cause, org.bukkit.inventory.ItemStack stack,
+            org.bukkit.Material material) {
+        java.util.UUID currentCause = animal.getBreedCause();
+        animal.setBreedCause(cause);
+        boolean loveMode = animal.isLoveMode();
+        int loveTicks = animal.getLoveModeTicks();
+        animal.setLoveModeTicks(loveTicks);
+        boolean stackFood = animal.isBreedItem(stack);
+        boolean materialFood = animal.isBreedItem(material);
+    }
+
+    @SuppressWarnings("unused")
+    private static void compileCowSurface(org.bukkit.entity.Cow cow) {
+        org.bukkit.entity.Cow.Variant variant = cow.getVariant();
+        cow.setVariant(org.bukkit.entity.Cow.Variant.COLD);
+        org.bukkit.entity.Cow.SoundVariant sounds = cow.getSoundVariant();
+        cow.setSoundVariant(org.bukkit.entity.Cow.SoundVariant.MOODY);
+        org.bukkit.NamespacedKey variantKey = variant.getKey();
+        org.bukkit.NamespacedKey soundKey = sounds.getKey();
     }
 
     private static final class DerivedEntity extends foton.FotonEntity {

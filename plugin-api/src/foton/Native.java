@@ -393,6 +393,15 @@ public final class Native {
     public static native boolean entityIsBaby(String uuid);
     public static native boolean entityCanBreed(String uuid);
     public static native void setEntityBreed(String uuid, boolean breed);
+    public static native String animalBreedCause(String uuid);
+    public static native void setAnimalBreedCause(String uuid, String cause);
+    public static native int animalLoveTicks(String uuid);
+    public static native void setAnimalLoveTicks(String uuid, int ticks);
+    public static native boolean animalIsBreedItem(String uuid, String item);
+    public static native String cowVariant(String uuid);
+    public static native void setCowVariant(String uuid, String variant);
+    public static native String cowSoundVariant(String uuid);
+    public static native void setCowSoundVariant(String uuid, String variant);
     public static native int entityAge(String uuid);
     public static native void setEntityAge(String uuid, int age);
     public static native boolean entityCanPickupItems(String uuid);

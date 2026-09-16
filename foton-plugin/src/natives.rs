@@ -57,6 +57,7 @@ use foton_core::entity::entities::mobs::passive::AxolotlEntity;
 use foton_core::entity::entities::mobs::passive::BeeEntity;
 use foton_core::entity::entities::mobs::passive::CatEntity;
 use foton_core::entity::entities::mobs::passive::ChickenEntity;
+use foton_core::entity::entities::mobs::passive::CowEntity;
 use foton_core::entity::entities::mobs::passive::NautilusEntity;
 use foton_core::entity::entities::mobs::passive::PigEntity;
 use foton_core::entity::entities::mobs::passive::SheepEntity;
@@ -84,7 +85,7 @@ use foton_core::entity::entities::objects::vehicles::{BoatEntity, RaftEntity};
 use foton_core::entity::spawn_util::spawn_entity_at;
 use foton_core::entity::spellcaster_illager::{IllagerSpell, SpellcasterIllager};
 use foton_core::entity::{
-    Entity, LlamaVariant, MobEffectInstance, PluginSpawnReason, is_tamed, owner_uuid,
+    Animal, Entity, LlamaVariant, MobEffectInstance, PluginSpawnReason, is_tamed, owner_uuid,
     set_owner_uuid, set_tamed, start_riding_entities,
 };
 use foton_core::inventory::container::Container;
@@ -2904,7 +2905,7 @@ extern "system" fn set_slime_size(
     let Some(slime) = entity.as_ref().downcast_ref::<SlimeEntity>() else {
         return;
     };
-    slime.set_cube_size(size, true);
+    slime.set_cube_size(size, Entity::is_alive(slime));
 }
 
 extern "system" fn cube_mob_can_wander(
@@ -4497,6 +4498,233 @@ extern "system" fn set_entity_breed(
         return;
     };
     animal.set_in_love_time(if breed != 0 { 600 } else { 0 });
+}
+
+extern "system" fn animal_breed_cause(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = text.parse() else {
+        return null_mut();
+    };
+    let value = entity_by_uuid(&id)
+        .and_then(|(_, entity)| {
+            entity
+                .as_ref()
+                .as_animal()
+                .and_then(Animal::love_cause_uuid)
+        })
+        .map(|cause| cause.to_string());
+    to_java(&mut env, value)
+}
+
+extern "system" fn set_animal_breed_cause(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    cause: JString<'_>,
+) {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return;
+    };
+    let Ok(cause_text): Result<String, _> = env.get_string(&cause).map(Into::into) else {
+        return;
+    };
+    let cause = if cause_text.is_empty() {
+        None
+    } else {
+        let Ok(cause) = cause_text.parse() else {
+            return;
+        };
+        Some(cause)
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(animal) = entity.as_ref().as_animal() else {
+        return;
+    };
+    animal.set_love_cause_uuid(cause);
+}
+
+extern "system" fn animal_love_ticks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jint {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(id) = text.parse() else {
+        return 0;
+    };
+    entity_by_uuid(&id)
+        .and_then(|(_, entity)| entity.as_ref().as_animal().map(Animal::in_love_time))
+        .unwrap_or(0)
+}
+
+extern "system" fn set_animal_love_ticks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    ticks: jint,
+) {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = text.parse() else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(animal) = entity.as_ref().as_animal() else {
+        return;
+    };
+    animal.set_in_love_time(ticks);
+}
+
+extern "system" fn animal_is_breed_item(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    item: JString<'_>,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return 0;
+    };
+    let Ok(item_text): Result<String, _> = env.get_string(&item).map(Into::into) else {
+        return 0;
+    };
+    let Ok(item_key) = Identifier::from_str(&item_text) else {
+        return 0;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return 0;
+    };
+    let Some(animal) = entity.as_ref().as_animal() else {
+        return 0;
+    };
+    let Some(item) = REGISTRY.items.by_key(&item_key) else {
+        return 0;
+    };
+    animal.is_food(&ItemStack::new(item)).into()
+}
+
+extern "system" fn cow_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = text.parse() else {
+        return null_mut();
+    };
+    let value = entity_by_uuid(&id).and_then(|(_, entity)| {
+        entity
+            .as_ref()
+            .downcast_ref::<CowEntity>()
+            .map(|cow| cow.variant().key.to_string())
+    });
+    to_java(&mut env, value)
+}
+
+extern "system" fn set_cow_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    variant: JString<'_>,
+) {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return;
+    };
+    let Ok(variant_text): Result<String, _> = env.get_string(&variant).map(Into::into) else {
+        return;
+    };
+    let Ok(key) = Identifier::from_str(&variant_text) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(cow) = entity.as_ref().downcast_ref::<CowEntity>() else {
+        return;
+    };
+    let Some(registry) = REGISTRY.get() else {
+        return;
+    };
+    let Some(variant) = registry.cow_variants.by_key(&key) else {
+        return;
+    };
+    cow.set_variant(variant);
+}
+
+extern "system" fn cow_sound_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = text.parse() else {
+        return null_mut();
+    };
+    let value = entity_by_uuid(&id).and_then(|(_, entity)| {
+        entity
+            .as_ref()
+            .downcast_ref::<CowEntity>()
+            .map(|cow| cow.sound_variant().key.to_string())
+    });
+    to_java(&mut env, value)
+}
+
+extern "system" fn set_cow_sound_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    variant: JString<'_>,
+) {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return;
+    };
+    let Ok(variant_text): Result<String, _> = env.get_string(&variant).map(Into::into) else {
+        return;
+    };
+    let Ok(key) = Identifier::from_str(&variant_text) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(cow) = entity.as_ref().downcast_ref::<CowEntity>() else {
+        return;
+    };
+    let Some(registry) = REGISTRY.get() else {
+        return;
+    };
+    let Some(variant) = registry.cow_sound_variants.by_key(&key) else {
+        return;
+    };
+    cow.set_sound_variant(variant);
 }
 
 extern "system" fn bee_anger(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
@@ -6401,20 +6629,28 @@ extern "system" fn set_arrow_potion(
     let Ok(potion_text) = env.get_string(&potion) else {
         return;
     };
-    let potion = potion_text.to_str().ok().and_then(|value| {
-        if value.is_empty() {
-            None
-        } else {
-            Identifier::from_str(value)
-                .ok()
-                .and_then(|key| REGISTRY.potions.by_key(&key))
-        }
-    });
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return;
     };
     let Some(arrow) = entity.as_ref().downcast_ref::<ArrowEntity>() else {
         return;
+    };
+    let Some(potion_text) = potion_text.to_str().ok() else {
+        return;
+    };
+    let potion = if potion_text.is_empty() {
+        None
+    } else {
+        let Some(registry) = REGISTRY.get() else {
+            return;
+        };
+        let Ok(key) = Identifier::from_str(potion_text) else {
+            return;
+        };
+        let Some(potion) = registry.potions.by_key(&key) else {
+            return;
+        };
+        Some(potion)
     };
     arrow.set_base_potion(potion);
 }
@@ -12730,6 +12966,51 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_entity_breed as *mut c_void,
         ),
         method(
+            "animalBreedCause",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            animal_breed_cause as *mut c_void,
+        ),
+        method(
+            "setAnimalBreedCause",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_animal_breed_cause as *mut c_void,
+        ),
+        method(
+            "animalLoveTicks",
+            "(Ljava/lang/String;)I",
+            animal_love_ticks as *mut c_void,
+        ),
+        method(
+            "setAnimalLoveTicks",
+            "(Ljava/lang/String;I)V",
+            set_animal_love_ticks as *mut c_void,
+        ),
+        method(
+            "animalIsBreedItem",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            animal_is_breed_item as *mut c_void,
+        ),
+        method(
+            "cowVariant",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            cow_variant as *mut c_void,
+        ),
+        method(
+            "setCowVariant",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_cow_variant as *mut c_void,
+        ),
+        method(
+            "cowSoundVariant",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            cow_sound_variant as *mut c_void,
+        ),
+        method(
+            "setCowSoundVariant",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_cow_sound_variant as *mut c_void,
+        ),
+        method(
             "beeAnger",
             "(Ljava/lang/String;)I",
             bee_anger as *mut c_void,
@@ -14956,6 +15237,25 @@ pub(crate) mod entity_bridge_tests {
             ("setEntitySilent", "(Ljava/lang/String;Z)V"),
             ("setEntityRotation", "(Ljava/lang/String;FF)V"),
             ("entityInRain", "(Ljava/lang/String;)Z"),
+            ("animalBreedCause", "(Ljava/lang/String;)Ljava/lang/String;"),
+            (
+                "setAnimalBreedCause",
+                "(Ljava/lang/String;Ljava/lang/String;)V",
+            ),
+            ("animalLoveTicks", "(Ljava/lang/String;)I"),
+            ("setAnimalLoveTicks", "(Ljava/lang/String;I)V"),
+            (
+                "animalIsBreedItem",
+                "(Ljava/lang/String;Ljava/lang/String;)Z",
+            ),
+            ("cowVariant", "(Ljava/lang/String;)Ljava/lang/String;"),
+            ("setCowVariant", "(Ljava/lang/String;Ljava/lang/String;)V"),
+            ("cowSoundVariant", "(Ljava/lang/String;)Ljava/lang/String;"),
+            (
+                "setCowSoundVariant",
+                "(Ljava/lang/String;Ljava/lang/String;)V",
+            ),
+            ("setArrowPotion", "(Ljava/lang/String;Ljava/lang/String;)V"),
         ];
         let methods = bindings();
 

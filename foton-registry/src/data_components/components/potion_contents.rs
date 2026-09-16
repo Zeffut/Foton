@@ -3,6 +3,7 @@
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
+use foton_utils::color::RgbColor;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
 use foton_utils::nbt::NbtNumeric as _;
 use foton_utils::serial::{PrefixedRead as _, PrefixedWrite as _, ReadFrom, WriteTo};
@@ -24,6 +25,8 @@ pub struct PotionContents {
 
 impl PotionContents {
     const MAX_NETWORK_STRING_LENGTH: usize = 32_767;
+    /// Vanilla's fallback color when potion contents have no visible effects.
+    pub const BASE_POTION_COLOR: i32 = -13_083_194;
 
     #[must_use]
     pub const fn empty() -> Self {
@@ -45,6 +48,52 @@ impl PotionContents {
             potion: Some(potion),
             ..self
         }
+    }
+
+    /// Returns these contents with one custom effect appended.
+    ///
+    /// Vanilla parity: `PotionContents.withEffectAdded` preserves every other
+    /// component field and appends without replacing existing custom effects.
+    #[must_use]
+    pub fn with_effect_added(mut self, effect: MobEffectInstance) -> Self {
+        self.custom_effects.push(effect);
+        self
+    }
+
+    /// Returns Vanilla's ARGB potion display color.
+    #[must_use]
+    pub fn color(&self) -> i32 {
+        if let Some(custom_color) = self.custom_color {
+            return custom_color;
+        }
+
+        let mut red = 0;
+        let mut green = 0;
+        let mut blue = 0;
+        let mut total_weight = 0;
+        if let Some(potion) = self.potion {
+            for effect in potion.value().effects {
+                let weight = effect.amplifier + 1;
+                red += i32::from(effect.effect.color.red()) * weight;
+                green += i32::from(effect.effect.color.green()) * weight;
+                blue += i32::from(effect.effect.color.blue()) * weight;
+                total_weight += weight;
+            }
+        }
+        for effect in &self.custom_effects {
+            if effect.show_particles() {
+                let weight = effect.amplifier() + 1;
+                red += i32::from(effect.effect().color.red()) * weight;
+                green += i32::from(effect.effect().color.green()) * weight;
+                blue += i32::from(effect.effect().color.blue()) * weight;
+                total_weight += weight;
+            }
+        }
+        if total_weight == 0 {
+            return Self::BASE_POTION_COLOR;
+        }
+        let rgb = (red / total_weight) << 16 | (green / total_weight) << 8 | (blue / total_weight);
+        RgbColor::new(rgb).with_alpha(u8::MAX).raw()
     }
 
     #[must_use]

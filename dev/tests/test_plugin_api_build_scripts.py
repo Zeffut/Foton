@@ -95,6 +95,9 @@ class PluginApiBuildScriptTests(unittest.TestCase):
             generated = (output / "org/bukkit/entity/EntityType.java").read_text(
                 encoding="utf-8"
             )
+            wrappers = (output / "foton/GeneratedEntityWrapperSupport.java").read_text(
+                encoding="utf-8"
+            )
             emitted = set(
                 re.findall(
                     r'case "(org\.bukkit\.entity\.[A-Za-z0-9_.]+)"', generated
@@ -110,6 +113,10 @@ class PluginApiBuildScriptTests(unittest.TestCase):
                 "org.bukkit.entity.TextDisplay",
             }
             self.assertEqual(emitted - source_classes - planned_interfaces, set())
+            self.assertIn("case SLIME -> foton.FotonSlime.class", wrappers)
+            self.assertIn("case FIREBALL -> foton.FotonSizedFireball.class", wrappers)
+            self.assertIn("foton.FotonTippedArrow.class", wrappers)
+            self.assertNotIn("case EGG ->", wrappers)
 
     def test_archive_extraction_rejects_parent_traversal(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton archive traversal ", dir="/tmp") as temporary:
