@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
+use foton_core::block_entity::entities::FurnaceBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
@@ -118,6 +119,7 @@ use foton_protocol::packets::game::{
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
+use foton_registry::blocks::properties::BlockStateProperties;
 use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
 };
@@ -142,6 +144,7 @@ use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
+use foton_registry::fuel;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
     vanilla_items,
@@ -166,9 +169,11 @@ use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use foton_utils::{Downcast as _, Identifier};
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JDoubleArray, JObject, JObjectArray, JString};
+use jni::objects::{
+    JByteArray, JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString,
+};
 use jni::sys::{
-    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jlong, jobjectArray, jstring,
+    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jintArray, jlong, jobjectArray, jstring,
 };
 use rustc_hash::FxHashMap;
 use simdnbt::owned::NbtCompound;
@@ -10272,6 +10277,99 @@ extern "system" fn hopper_inventory_slot(
     to_java(&mut env, value)
 }
 
+/// `foton.Native.isFuel`: whether a furnace burns the encoded stack.
+extern "system" fn is_fuel(mut env: JNIEnv<'_>, _class: JClass<'_>, item: JString<'_>) -> jboolean {
+    let Ok(text) = env.get_string(&item) else {
+        return 0;
+    };
+    let text: String = text.into();
+    jboolean::from(parse_slot(&text).is_some_and(|stack| fuel::is_fuel(&stack)))
+}
+
+/// `foton.Native.cookingRecipe`: the recipe by which a furnace, blast furnace
+/// or smoker (`block`) cooks the encoded stack, described as
+/// [`crate::relay::describe_cooking`] does, or null when none does.
+extern "system" fn cooking_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    block: JString<'_>,
+    item: JString<'_>,
+) -> jstring {
+    let block: Option<String> = env.get_string(&block).ok().map(Into::into);
+    let item: Option<String> = env.get_string(&item).ok().map(Into::into);
+    let value = block.zip(item).and_then(|(block, item)| {
+        let kind = crate::relay::cooking_kind(&block)?;
+        let stack = parse_slot(&item).filter(|stack| !stack.is_empty())?;
+        let recipe = REGISTRY.recipes.find_cooking_recipe(kind, &stack)?;
+        Some(crate::relay::describe_cooking(recipe))
+    });
+    to_java(&mut env, value)
+}
+
+/// `foton.Native.furnaceTimes`: `{burn, cook, cookTotal}`, or null where no
+/// furnace, smoker or blast furnace stands.
+extern "system" fn furnace_times(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jintArray {
+    let Some(times) = world(&mut env, &name).and_then(|world| {
+        let entity = world.get_block_entity(BlockPos::new(x, y, z))?;
+        let furnace = entity.downcast_ref::<FurnaceBlockEntity>()?;
+        Some(furnace.times())
+    }) else {
+        return null_mut();
+    };
+    let Ok(array) = env.new_int_array(3) else {
+        return null_mut();
+    };
+    if env.set_int_array_region(&array, 0, &times).is_err() {
+        return null_mut();
+    }
+    array.into_raw()
+}
+
+/// `foton.Native.setFurnaceTimes`: writes a `Furnace` snapshot's times back,
+/// lighting or putting out the block to match the burn, as Bukkit does.
+extern "system" fn set_furnace_times(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    times: JIntArray<'_>,
+) {
+    let mut values = [0; 3];
+    if env.get_int_array_region(&times, 0, &mut values).is_err() {
+        return;
+    }
+    let Some(world) = world(&mut env, &name) else {
+        return;
+    };
+    let pos = BlockPos::new(x, y, z);
+    let Some(entity) = world.get_block_entity(pos) else {
+        return;
+    };
+    let Some(furnace) = entity.downcast_ref::<FurnaceBlockEntity>() else {
+        return;
+    };
+    furnace.set_times(values);
+    let state = world.get_block_state(pos);
+    let lit = state.set_value(&BlockStateProperties::LIT, values[0] > 0);
+    if lit == state {
+        return;
+    }
+    if on_tick() {
+        world.set_block(pos, lit, UpdateFlags::UPDATE_ALL);
+    } else {
+        DEFERRED.lock().push((world.key.clone(), pos, lit));
+    }
+}
+
 extern "system" fn hopper_set_inventory_slot(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -11615,6 +11713,22 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "hopperInventorySlot",
             "(Ljava/lang/String;IIII)Ljava/lang/String;",
             hopper_inventory_slot as *mut c_void,
+        ),
+        method("isFuel", "(Ljava/lang/String;)Z", is_fuel as *mut c_void),
+        method(
+            "cookingRecipe",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            cooking_recipe as *mut c_void,
+        ),
+        method(
+            "furnaceTimes",
+            "(Ljava/lang/String;III)[I",
+            furnace_times as *mut c_void,
+        ),
+        method(
+            "setFurnaceTimes",
+            "(Ljava/lang/String;III[I)V",
+            set_furnace_times as *mut c_void,
         ),
         method(
             "hopperSetInventorySlot",

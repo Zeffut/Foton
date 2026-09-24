@@ -154,6 +154,10 @@ public final class FotonBlock implements Block {
         if (getType() == Material.HOPPER) {
             return new FotonHopper(this, getBlockData());
         }
+        if (getType() == Material.FURNACE || getType() == Material.BLAST_FURNACE
+                || getType() == Material.SMOKER) {
+            return new FotonFurnace(this, getBlockData());
+        }
         if (getType() == Material.CRAFTER) {
             return new FotonCrafter(this, getBlockData());
         }

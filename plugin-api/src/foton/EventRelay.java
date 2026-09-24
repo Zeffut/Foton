@@ -232,6 +232,85 @@ public final class EventRelay {
         return answer(event.isCancelled(), kept);
     }
 
+    /** A cooking recipe as the relay describes one:
+     * `key, experience, cookingTime, result, inputs`, typed by the block that
+     * cooks it. Null for an empty or unreadable description. */
+    static org.bukkit.inventory.CookingRecipe<?> cookingRecipe(org.bukkit.Material block, String description) {
+        if (description == null || description.isEmpty()) return null;
+        String[] parts = description.split(FIELD, -1);
+        if (parts.length < 5) return null;
+        org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.fromString(parts[0]);
+        if (key == null) return null;
+        float experience = Float.parseFloat(parts[1]);
+        int time = Integer.parseInt(parts[2]);
+        org.bukkit.inventory.ItemStack result = FotonInventory.decode(parts[3]);
+        java.util.List<org.bukkit.Material> inputs = new java.util.ArrayList<>();
+        for (String input : parts[4].split(" ")) {
+            org.bukkit.Material material = input.isEmpty() ? null : org.bukkit.Material.matchMaterial(input);
+            if (material != null) inputs.add(material);
+        }
+        org.bukkit.inventory.RecipeChoice choice = new org.bukkit.inventory.RecipeChoice.MaterialChoice(inputs);
+        return switch (block) {
+            case BLAST_FURNACE -> new org.bukkit.inventory.BlastingRecipe(key, result, choice, experience, time);
+            case SMOKER -> new org.bukkit.inventory.SmokingRecipe(key, result, choice, experience, time);
+            default -> new org.bukkit.inventory.FurnaceRecipe(key, result, choice, experience, time);
+        };
+    }
+
+    /** Stacks slot by slot: an empty entry is an empty slot, kept in place. */
+    static java.util.List<org.bukkit.inventory.ItemStack> slots(String encoded) {
+        java.util.List<org.bukkit.inventory.ItemStack> list = new java.util.ArrayList<>();
+        for (String one : encoded.split(ITEM, -1)) {
+            org.bukkit.inventory.ItemStack stack = FotonInventory.decode(one);
+            list.add(stack == null ? new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR) : stack);
+        }
+        return list;
+    }
+
+    /** Answers `cancelled, burnTime, burning, consumeFuel`. */
+    public static String fireFurnaceBurn(String world, String block, String fuel, String burnTime) {
+        org.bukkit.event.inventory.FurnaceBurnEvent event = new org.bukkit.event.inventory.FurnaceBurnEvent(
+            block(world, block), FotonInventory.decode(fuel), Integer.parseInt(burnTime));
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled(), event.getBurnTime(), event.isBurning(), event.willConsumeFuel());
+    }
+
+    /** Answers `totalCookTime`. */
+    public static String fireFurnaceStartSmelt(String world, String block, String source, String recipe,
+            String total) {
+        FotonBlock at = block(world, block);
+        org.bukkit.event.inventory.FurnaceStartSmeltEvent event = new org.bukkit.event.inventory.FurnaceStartSmeltEvent(
+            at, FotonInventory.decode(source), cookingRecipe(at.getType(), recipe), Integer.parseInt(total));
+        EventBridge.dispatch(event);
+        return answer(event.getTotalCookTime());
+    }
+
+    /** Answers `cancelled, result`. */
+    public static String fireFurnaceSmelt(String world, String block, String source, String result,
+            String recipe) {
+        FotonBlock at = block(world, block);
+        org.bukkit.event.inventory.FurnaceSmeltEvent event = new org.bukkit.event.inventory.FurnaceSmeltEvent(
+            at, FotonInventory.decode(source), FotonInventory.decode(result), cookingRecipe(at.getType(), recipe));
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled(), FotonInventory.encode(event.getResult()));
+    }
+
+    /** Answers `cancelled, results`, the results slot by slot. */
+    public static String fireBrew(String world, String block, String results, String fuel) {
+        FotonBlock at = block(world, block);
+        org.bukkit.event.inventory.BrewEvent event = new org.bukkit.event.inventory.BrewEvent(
+            at, new FotonBrewerInventory(new FotonBlockState(at, at.getBlockData())), slots(results),
+            Integer.parseInt(fuel));
+        EventBridge.dispatch(event);
+        StringBuilder out = new StringBuilder();
+        java.util.List<org.bukkit.inventory.ItemStack> brewed = event.getResults();
+        for (int slot = 0; slot < 3; slot++) {
+            if (slot > 0) out.append(ITEM);
+            if (slot < brewed.size()) out.append(FotonInventory.encode(brewed.get(slot)));
+        }
+        return answer(event.isCancelled(), out);
+    }
+
     /** Answers `cancelled, stacks`. */
     public static String fireHarvest(String uuid, String world, String block, String hand,
             String items) {

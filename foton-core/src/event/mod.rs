@@ -31,6 +31,8 @@ pub mod block;
 pub mod command;
 /// A command a player typed, before the server has read it.
 pub mod command_preprocess;
+/// Blocks that cook and brew on their own.
+pub mod cooking;
 /// Damage no entity is behind.
 pub mod damage;
 /// What a block gives when a player breaks or picks from it.
@@ -58,6 +60,7 @@ pub use block::{
 };
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
+pub use cooking::{BrewEvent, FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
 pub use damage::EntityDamageEvent;
 pub use drops::{BlockDropItemEvent, PlayerHarvestBlockEvent};
 pub use entity::{

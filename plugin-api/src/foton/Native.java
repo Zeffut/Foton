@@ -105,6 +105,14 @@ public final class Native {
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
+    /** Whether a furnace burns the encoded stack. */
+    public static native boolean isFuel(String item);
+    /** The recipe by which the furnace-like block `block` cooks the encoded
+     * stack, as {@link EventRelay#cookingRecipe} reads it, or null. */
+    public static native String cookingRecipe(String block, String item);
+    /** `{burn, cook, cookTotal}` of a furnace, smoker or blast furnace, or null. */
+    public static native int[] furnaceTimes(String world, int x, int y, int z);
+    public static native void setFurnaceTimes(String world, int x, int y, int z, int[] times);
     public static native boolean jukeboxIsPlaying(String world, int x, int y, int z);
     public static native String jukeboxRecord(String world, int x, int y, int z);
     public static native void jukeboxSetRecord(String world, int x, int y, int z, String item);

@@ -11,12 +11,17 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    BlockBreakEvent, BlockDropItemEvent, EntitiesLoadEvent, EntityDamageEvent,
+    BlockBreakEvent, BlockDropItemEvent, BrewEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
+    FurnaceStartSmeltEvent, EntitiesLoadEvent, EntityDamageEvent,
     PlayerHarvestBlockEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
     PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent,
     PlayerToggleFlightEvent, PlayerVelocityEvent,
 };
+use foton_registry::REGISTRY;
 use foton_registry::equipment::EquipmentSlot;
+use foton_registry::item_stack::ItemStack;
+use foton_registry::recipe::{CookingKind, SmeltingRecipe};
+use foton_utils::Identifier;
 use foton_utils::types::InteractionHand;
 use foton_utils::{BlockPos, ChunkPos};
 use uuid::Uuid;
@@ -403,6 +408,163 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             .unwrap_or_default();
         event.set_items(harvested);
     });
+
+    subscribe_cooking(server, vm);
+}
+
+/// The furnace and brewing stand events.
+fn subscribe_cooking(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
+
+    let jvm = Arc::clone(vm);
+    events.on::<FurnaceBurnEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireFurnaceBurn",
+            &[
+                event.world(),
+                &block_position(event.position()),
+                &describe_slot(event.fuel()),
+                &event.burn_time().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(burn_time) = answer.get(1).and_then(|text| text.parse::<i32>().ok()) {
+            event.set_burn_time(burn_time);
+        }
+        if let Some(burning) = flag(answer.get(2)) {
+            event.set_burning(burning);
+        }
+        if let Some(consume) = flag(answer.get(3)) {
+            event.set_consume_fuel(consume);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<FurnaceStartSmeltEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireFurnaceStartSmelt",
+            &[
+                event.world(),
+                &block_position(event.position()),
+                &describe_slot(event.source()),
+                &describe_cooking_id(event.recipe()),
+                &event.total_cook_time().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        if let Some(total) = fields(&answer)
+            .first()
+            .and_then(|text| text.parse::<i32>().ok())
+        {
+            event.set_total_cook_time(total);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<FurnaceSmeltEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireFurnaceSmelt",
+            &[
+                event.world(),
+                &block_position(event.position()),
+                &describe_slot(event.source()),
+                &describe_slot(event.result()),
+                &describe_cooking_id(event.recipe()),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(result) = answer.get(1).and_then(|text| parse_slot(text)) {
+            event.set_result(result);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<BrewEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireBrew",
+            &[
+                event.world(),
+                &block_position(event.position()),
+                &slot_list(event.results()),
+                &event.fuel_level().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        let Some(list) = answer.get(1) else {
+            return;
+        };
+        let results: Option<Vec<ItemStack>> = list.split(ITEM).map(parse_slot).collect();
+        if let Some(results) = results {
+            event.set_results(results);
+        }
+    });
+}
+
+/// The cooking family of a furnace-like block, by the block's key.
+pub(crate) fn cooking_kind(block: &str) -> Option<CookingKind> {
+    match block {
+        "minecraft:furnace" => Some(CookingKind::Smelting),
+        "minecraft:blast_furnace" => Some(CookingKind::Blasting),
+        "minecraft:smoker" => Some(CookingKind::Smoking),
+        _ => None,
+    }
+}
+
+/// Describes a cooking recipe as `key, experience, cooking time, result,
+/// inputs`, the inputs being item keys separated by spaces.
+pub(crate) fn describe_cooking(recipe: &SmeltingRecipe) -> String {
+    let inputs = recipe
+        .ingredient
+        .get_items()
+        .iter()
+        .map(|item| item.key.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    [
+        recipe.id.to_string(),
+        recipe.experience.to_string(),
+        recipe.cooking_time.to_string(),
+        describe_slot(&recipe.assemble_result(1, false)),
+        inputs,
+    ]
+    .join(&FIELD.to_string())
+}
+
+/// Describes the cooking recipe stored under `id`, or nothing.
+fn describe_cooking_id(id: &Identifier) -> String {
+    REGISTRY
+        .recipes
+        .find_cooking_recipe_by_id(id)
+        .map(describe_cooking)
+        .unwrap_or_default()
+}
+
+/// Writes stacks slot by slot, an empty slot as an empty entry.
+fn slot_list(stacks: &[ItemStack]) -> String {
+    stacks.iter().map(describe_slot).collect::<Vec<_>>().join(ITEM)
 }
 
 /// The Bukkit `SlotType` name of an armor slot.
