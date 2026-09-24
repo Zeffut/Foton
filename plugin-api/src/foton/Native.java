@@ -557,6 +557,8 @@ public final class Native {
     /** One block as `minecraft:name[state=value]`, or null if unreadable. */
     public static native String blockPistonReaction(String world, int x, int y, int z);
     public static native String blockState(String world, int x, int y, int z);
+    /** Every value a block's property can take, in registry order; null for an unknown block or property. */
+    public static native String[] blockPropertyValues(String block, String property);
     public static native String biomeKey(String world, int x, int y, int z);
     public static native String recipeResult(String key);
     public static native String[] recipeList();

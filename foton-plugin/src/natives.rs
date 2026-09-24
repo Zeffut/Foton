@@ -414,6 +414,40 @@ fn enchantment_named(env: &mut JNIEnv<'_>, key: &JString<'_>) -> Option<Enchantm
     REGISTRY.enchantments.by_key(&key)
 }
 
+/// `foton.Native.blockPropertyValues`
+extern "system" fn block_property_values(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    block: JString<'_>,
+    property: JString<'_>,
+) -> jobjectArray {
+    let Some(block) = env
+        .get_string(&block)
+        .ok()
+        .and_then(|text| text.to_str().ok()?.parse::<Identifier>().ok())
+        .and_then(|key| REGISTRY.blocks.by_key(&key))
+    else {
+        return null_mut();
+    };
+    let Ok(property) = env.get_string(&property) else {
+        return null_mut();
+    };
+    let property = String::from(property);
+    let Some(found) = block
+        .properties
+        .iter()
+        .find(|candidate| candidate.get_name() == property)
+    else {
+        return null_mut();
+    };
+    let values: Vec<String> = found
+        .get_possible_value_names()
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    string_array(&mut env, &values)
+}
+
 /// `foton.Native.enchantmentsConflict`
 extern "system" fn enchantments_conflict(
     mut env: JNIEnv<'_>,
@@ -11387,6 +11421,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "enchantmentCanEnchant",
             "(Ljava/lang/String;Ljava/lang/String;)Z",
             enchantment_can_enchant as *mut c_void,
+        ),
+        method(
+            "blockPropertyValues",
+            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+            block_property_values as *mut c_void,
         ),
         method(
             "enchantmentsConflict",

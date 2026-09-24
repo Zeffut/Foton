@@ -101,6 +101,9 @@ public final class FotonBlock implements Block {
         if (text != null && text.startsWith("minecraft:piston_head")) {
             return new org.bukkit.block.data.type.SimplePistonHeadData(text);
         }
+        if (text != null && (text.contains("[age=") || text.contains(",age="))) {
+            return new org.bukkit.block.data.SimpleAgeableData(text);
+        }
         if (text != null && text.contains("[rotation=")) {
             return new org.bukkit.block.data.SimpleRotatableData(text);
         }
