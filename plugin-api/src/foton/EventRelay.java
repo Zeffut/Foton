@@ -111,4 +111,61 @@ public final class EventRelay {
         return answer(event.isCancelled(), FotonInventory.encode(event.getItem()),
             replacement != null, replacement == null ? "" : FotonInventory.encode(replacement));
     }
+
+    static FotonBlock block(String world, String position) {
+        String[] parts = position.split(" ");
+        return new FotonBlock(new FotonWorld(world), Integer.parseInt(parts[0]),
+            Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+    }
+
+    static org.bukkit.inventory.EquipmentSlot hand(String hand) {
+        return org.bukkit.inventory.EquipmentSlot.valueOf(hand);
+    }
+
+    static java.util.List<org.bukkit.entity.Entity> entities(String uuids) {
+        java.util.List<org.bukkit.entity.Entity> list = new java.util.ArrayList<>();
+        if (uuids == null || uuids.isEmpty()) return list;
+        for (String uuid : uuids.split(",")) {
+            org.bukkit.entity.Entity entity = FotonEntity.handle(Native.parse(uuid));
+            if (entity != null) list.add(entity);
+        }
+        return list;
+    }
+
+    /** Answers `cancelled`. */
+    public static String fireEntityPlace(String entity, String player, String world,
+            String block, String face, String hand) {
+        org.bukkit.event.entity.EntityPlaceEvent event = new org.bukkit.event.entity.EntityPlaceEvent(
+            FotonEntity.handle(Native.parse(entity)), player(player), block(world, block),
+            org.bukkit.block.BlockFace.valueOf(face), hand(hand));
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled());
+    }
+
+    /** Answers `cancelled`. */
+    public static String fireDismount(String entity, String vehicle, String cancellable) {
+        org.bukkit.event.entity.EntityDismountEvent event = new org.bukkit.event.entity.EntityDismountEvent(
+            FotonEntity.handle(Native.parse(entity)), FotonEntity.handle(Native.parse(vehicle)),
+            flag(cancellable));
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled());
+    }
+
+    /** Answers nothing. */
+    public static String fireEntitiesLoad(String world, String chunk, String uuids) {
+        String[] at = chunk.split(" ");
+        EventBridge.dispatch(new org.bukkit.event.world.EntitiesLoadEvent(
+            new FotonChunk(new FotonWorld(world), Integer.parseInt(at[0]), Integer.parseInt(at[1])),
+            entities(uuids)));
+        return "";
+    }
+
+    /** Answers nothing. */
+    public static String fireEntitiesUnload(String world, String chunk, String uuids) {
+        String[] at = chunk.split(" ");
+        EventBridge.dispatch(new org.bukkit.event.world.EntitiesUnloadEvent(
+            new FotonChunk(new FotonWorld(world), Integer.parseInt(at[0]), Integer.parseInt(at[1])),
+            entities(uuids)));
+        return "";
+    }
 }

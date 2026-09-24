@@ -13,14 +13,14 @@ use foton_macros::item_behavior;
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::vanilla_game_events;
 use foton_utils::BlockPos;
-use glam::DVec3;
 
+use crate::behavior::items::entity_place::entity_place_allowed;
 use crate::behavior::{InteractionResult, ItemBehavior, UseItemContext};
 use crate::entity::{ENTITIES, Entity, next_entity_id};
 use crate::physics::collision::{WorldCollisionProvider, has_collision};
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
-use crate::world::{ClipBlockShape, ClipFluid, World};
+use crate::world::{ClipBlockShape, ClipFluid, ClipHitResult, World};
 
 /// Behavior for every boat item.
 #[item_behavior]
@@ -49,9 +49,10 @@ impl ItemBehavior for BoatItem {
     /// query yet, so that check is missing and a boat may be placed while
     /// standing in another.
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
-        let Some(location) = looked_at_point(context.world, context.player) else {
+        let Some(hit) = looked_at(context.world, context.player) else {
             return InteractionResult::Pass;
         };
+        let location = hit.location;
 
         let Some(boat) = ENTITIES.create(
             self.entity_type,
@@ -74,7 +75,16 @@ impl ItemBehavior for BoatItem {
             return InteractionResult::Fail;
         }
 
-        if context.world.try_add_entity(boat).is_err() {
+        if context.world.try_add_entity(boat.clone()).is_err() {
+            return InteractionResult::Fail;
+        }
+        if !entity_place_allowed(
+            context.world,
+            &boat,
+            context.player,
+            (hit.block_pos, hit.direction),
+            context.hand,
+        ) {
             return InteractionResult::Fail;
         }
 
@@ -95,13 +105,13 @@ impl ItemBehavior for BoatItem {
 /// Returns where the player is looking, stopping at fluid as well as blocks.
 ///
 /// Vanilla parity: `Item.getPlayerPOVHitResult` with `ClipContext.Fluid.ANY`.
-fn looked_at_point(world: &Arc<World>, player: &Player) -> Option<DVec3> {
+fn looked_at(world: &Arc<World>, player: &Player) -> Option<ClipHitResult> {
     let from = player.position().with_y(player.get_eye_y());
     let (yaw, pitch) = player.rotation();
     let to = from + player.calculate_view_vector(pitch, yaw) * player.block_interaction_range();
 
     let hit = world.clip(from, to, ClipBlockShape::Outline, ClipFluid::Any);
-    (!hit.miss).then_some(hit.location)
+    (!hit.miss).then_some(hit)
 }
 
 #[cfg(test)]

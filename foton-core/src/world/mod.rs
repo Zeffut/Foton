@@ -179,7 +179,9 @@ pub use weather::Precipitation;
 pub(crate) use worldgen_level::WorldGenLevel;
 
 use crate::entity::RemovalReason::Discarded;
-use crate::event::{ChunkLoadEvent, ChunkPopulateEvent, Event, PlayerVelocityEvent};
+use crate::event::{
+    ChunkLoadEvent, ChunkPopulateEvent, EntitiesLoadEvent, Event, PlayerVelocityEvent,
+};
 use foton_registry::entity_type::MobCategory;
 #[cfg(test)]
 use level_effects::sound_is_within_range;
@@ -407,6 +409,10 @@ pub struct World {
     dragon_fight: Option<EnderDragonFight>,
     /// World-change requests queued by world-local ticks for server safe-point processing.
     pending_world_changes: SyncMutex<Vec<(SharedEntity, WorldChangeRequest)>>,
+    /// Entities that came back with a chunk, waiting to be announced from the
+    /// tick. Chunks load on storage tasks, and a plugin listening for them
+    /// expects to be called on the main thread.
+    loaded_entity_batches: SyncMutex<Vec<(ChunkPos, Vec<uuid::Uuid>)>>,
     /// The level's own random source.
     ///
     /// Vanilla parity: `Level.random`, which vanilla creates unseeded. Feature code
@@ -738,6 +744,7 @@ impl World {
                 raids,
                 dragon_fight,
                 pending_world_changes: SyncMutex::new(Vec::new()),
+                loaded_entity_batches: SyncMutex::new(Vec::new()),
                 level_random: SyncMutex::new(RandomSource::Legacy(LegacyRandom::from_seed(
                     rand::random(),
                 ))),
@@ -957,6 +964,14 @@ impl World {
             if generated {
                 self.fire_event(&mut ChunkPopulateEvent::new(self.key.to_string(), pos));
             }
+        }
+        let loaded_entities = mem::take(&mut *self.loaded_entity_batches.lock());
+        for (pos, entities) in loaded_entities {
+            self.fire_event(&mut EntitiesLoadEvent::new(
+                self.key.to_string(),
+                pos,
+                entities,
+            ));
         }
 
         if runs_normally {

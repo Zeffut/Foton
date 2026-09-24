@@ -26,6 +26,7 @@ mod default;
 mod dye;
 mod dynamic_name;
 mod end_crystal_item;
+mod entity_place;
 mod ender_eye;
 mod ender_pearl;
 mod firework_rocket;

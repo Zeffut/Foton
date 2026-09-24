@@ -1708,6 +1708,10 @@ impl Entity for Player {
         let Some(old_vehicle) = old_vehicle else {
             return;
         };
+        // A plugin kept the player on.
+        if self.vehicle().is_some() {
+            return;
+        }
 
         self.remove_active_effects_for_vehicle(old_vehicle.as_ref());
         self.send_packet(CSetPassengers::new(

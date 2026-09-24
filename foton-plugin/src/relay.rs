@@ -11,11 +11,14 @@
 use std::sync::Arc;
 
 use foton_core::event::{
+    EntitiesLoadEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
     PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent,
     PlayerToggleFlightEvent, PlayerVelocityEvent,
 };
 use foton_registry::equipment::EquipmentSlot;
 use foton_utils::types::InteractionHand;
+use foton_utils::{BlockPos, ChunkPos};
+use uuid::Uuid;
 use foton_core::server::Server;
 use glam::DVec3;
 use jni::JavaVM;
@@ -180,14 +183,14 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
 
     let jvm = Arc::clone(vm);
     events.on::<PlayerItemConsumeEvent, _>(owner(), move |event| {
-        let hand = match event.hand() {
-            InteractionHand::MainHand => "HAND",
-            InteractionHand::OffHand => "OFF_HAND",
-        };
         let Some(answer) = text_call(
             &jvm,
             "fireItemConsume",
-            &[&event.player().to_string(), hand, &describe_slot(event.item())],
+            &[
+                &event.player().to_string(),
+                hand_name(event.hand()),
+                &describe_slot(event.item()),
+            ],
         ) else {
             return;
         };
@@ -203,6 +206,71 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             event.set_replacement(answer.get(3).and_then(|text| parse_slot(text)));
         }
     });
+
+    let jvm = Arc::clone(vm);
+    events.on::<EntityPlaceEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireEntityPlace",
+            &[
+                &event.entity().to_string(),
+                &event.player().to_string(),
+                event.world(),
+                &block_position(event.block()),
+                event.face(),
+                hand_name(event.hand()),
+            ],
+        ) else {
+            return;
+        };
+        if flag(fields(&answer).first()) == Some(true) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<EntityDismountEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireDismount",
+            &[
+                &event.entity().to_string(),
+                &event.vehicle().to_string(),
+                bit(event.cancellable()),
+            ],
+        ) else {
+            return;
+        };
+        if flag(fields(&answer).first()) == Some(true) {
+            event.set_cancelled(true);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<EntitiesLoadEvent, _>(owner(), move |event| {
+        let _ = text_call(
+            &jvm,
+            "fireEntitiesLoad",
+            &[
+                event.world(),
+                &chunk_position(event.chunk()),
+                &uuid_list(event.entities()),
+            ],
+        );
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<EntitiesUnloadEvent, _>(owner(), move |event| {
+        let _ = text_call(
+            &jvm,
+            "fireEntitiesUnload",
+            &[
+                event.world(),
+                &chunk_position(event.chunk()),
+                &uuid_list(event.entities()),
+            ],
+        );
+    });
 }
 
 /// The Bukkit `SlotType` name of an armor slot.
@@ -214,4 +282,30 @@ const fn armor_slot_name(slot: EquipmentSlot) -> Option<&'static str> {
         EquipmentSlot::Feet => Some("FEET"),
         _ => None,
     }
+}
+
+/// The Bukkit `EquipmentSlot` name of a hand.
+const fn hand_name(hand: InteractionHand) -> &'static str {
+    match hand {
+        InteractionHand::MainHand => "HAND",
+        InteractionHand::OffHand => "OFF_HAND",
+    }
+}
+
+/// Writes a block position as `x y z`.
+fn block_position(pos: BlockPos) -> String {
+    format!("{} {} {}", pos.x(), pos.y(), pos.z())
+}
+
+/// Writes a chunk position as `x z`.
+fn chunk_position(pos: ChunkPos) -> String {
+    format!("{} {}", pos.0.x, pos.0.y)
+}
+
+/// Writes entity ids comma-separated.
+fn uuid_list(ids: &[Uuid]) -> String {
+    ids.iter()
+        .map(Uuid::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
 }

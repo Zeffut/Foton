@@ -33,6 +33,8 @@ pub mod command;
 pub mod command_preprocess;
 /// Events about entities that are not players.
 pub mod entity;
+/// Entities arriving in the world and leaving their vehicles.
+pub mod entity_lifecycle;
 /// What a player wears and what they finish using.
 pub mod equipment;
 mod fertilize;
@@ -59,6 +61,9 @@ pub use entity::{
     EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTargetEvent, EntityTransformEvent,
     ExpBottleEvent, ExplosionPrimeEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent,
     LightningStrikeEvent, PreCreatureSpawnEvent, ProjectileLaunchEvent,
+};
+pub use entity_lifecycle::{
+    EntitiesLoadEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
 };
 pub use equipment::{PlayerArmorChangeEvent, PlayerItemConsumeEvent};
 pub use fertilize::BlockFertilizeEvent;
