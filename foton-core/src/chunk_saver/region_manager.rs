@@ -1075,6 +1075,24 @@ mod tests {
         ))
     }
 
+    /// Sparsely extends `file` one byte past the region format limit.
+    ///
+    /// Returns `false` when the filesystem cannot hold a file that large:
+    /// ext4 with 4 KiB blocks caps a file at exactly `MAX_REGION_FILE_SIZE`,
+    /// so there the oversized region these tests guard against cannot exist.
+    async fn extend_past_format_limit(file: &File, directory: &Path) -> bool {
+        match file.set_len(MAX_REGION_FILE_SIZE + 1).await {
+            Ok(()) => true,
+            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => {
+                fs::remove_dir_all(directory)
+                    .await
+                    .expect("test directory should be removable");
+                false
+            }
+            Err(error) => panic!("sparse file should extend without allocating: {error}"),
+        }
+    }
+
     async fn write_test_region(
         directory: &Path,
         pos: ChunkPos,
@@ -1398,9 +1416,9 @@ mod tests {
             .open(&path)
             .await
             .expect("test region should reopen");
-        file.set_len(MAX_REGION_FILE_SIZE + 1)
-            .await
-            .expect("sparse file should extend without allocating its contents");
+        if !extend_past_format_limit(&file, &directory).await {
+            return;
+        }
 
         let Err(error) = manager.acquire_chunk(pos).await else {
             panic!("a region larger than the format capacity must be rejected");
@@ -1676,9 +1694,9 @@ mod tests {
             .open(&region_path)
             .await
             .expect("old region should reopen");
-        file.set_len(MAX_REGION_FILE_SIZE + 1)
-            .await
-            .expect("sparse old region should extend without allocating its contents");
+        if !extend_past_format_limit(&file, &directory).await {
+            return;
+        }
 
         let manager = RegionManager::new(&directory);
         assert!(
