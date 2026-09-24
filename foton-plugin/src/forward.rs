@@ -20,7 +20,7 @@ use foton_core::event::Event;
 use foton_core::event::EntityTargetEvent;
 use foton_core::event::ExplosionPrimeEvent;
 use foton_core::event::{
-    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
+    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBurnEvent,
     BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
     BlockFertilizeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
     BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent,
@@ -1123,12 +1123,6 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         }
     });
 
-    let jvm = Arc::clone(&vm);
-    events.on::<BlockBreakEvent, _>(owner(), move |event| {
-        if !block_call(&jvm, "fireBlockBreak", event.player(), event.position()) {
-            event.set_cancelled(true);
-        }
-    });
 
     let jvm = Arc::clone(&vm);
     events.on::<BlockPlaceEvent, _>(owner(), move |event| {
@@ -1939,32 +1933,6 @@ fn hanging_place_call(
 ///
 /// A failed crossing answers `true`: a plugin host that cannot be reached must
 /// not silently start cancelling the world's block changes.
-fn block_call(vm: &JavaVM, method: &str, player: &Arc<Player>, position: BlockPos) -> bool {
-    let Some(mut env) = BridgeEnv::attach(vm) else {
-        return true;
-    };
-    let Ok(uuid) = env.new_string(player.gameprofile.id.to_string()) else {
-        return true;
-    };
-    let Ok(world) = env.new_string(player.get_world().key.to_string()) else {
-        return true;
-    };
-    env.call_static_method(
-        BRIDGE,
-        method,
-        "(Ljava/lang/String;IIILjava/lang/String;)Z",
-        &[
-            JValue::Object(&uuid),
-            JValue::Int(position.x()),
-            JValue::Int(position.y()),
-            JValue::Int(position.z()),
-            JValue::Object(&world),
-        ],
-    )
-    .and_then(JValueGen::z)
-    .unwrap_or(true)
-}
-
 fn block_place_call(
     vm: &JavaVM,
     player: &Arc<Player>,

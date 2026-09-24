@@ -179,4 +179,66 @@ public final class EventRelay {
         if (event.getEntity() != null) EventBridge.setLastDamageCause(event.getEntity().getUniqueId(), event);
         return answer(event.isCancelled(), event.getDamage());
     }
+
+    /** Separates the stacks of a list. */
+    static final String ITEM = "\u001e";
+
+    static java.util.List<org.bukkit.inventory.ItemStack> stacks(String encoded) {
+        java.util.List<org.bukkit.inventory.ItemStack> list = new java.util.ArrayList<>();
+        if (encoded == null || encoded.isEmpty()) return list;
+        for (String one : encoded.split(ITEM, -1)) {
+            org.bukkit.inventory.ItemStack stack = FotonInventory.decode(one);
+            if (stack != null) list.add(stack);
+        }
+        return list;
+    }
+
+    static String encodeStacks(java.util.List<org.bukkit.inventory.ItemStack> stacks) {
+        StringBuilder out = new StringBuilder();
+        for (org.bukkit.inventory.ItemStack stack : stacks) {
+            if (stack == null) continue;
+            if (out.length() > 0) out.append(ITEM);
+            out.append(FotonInventory.encode(stack));
+        }
+        return out.toString();
+    }
+
+    /** Answers `cancelled, dropItems, expToDrop`. */
+    public static String fireBlockBreak(String uuid, String world, String block, String exp) {
+        org.bukkit.event.block.BlockBreakEvent event =
+            new org.bukkit.event.block.BlockBreakEvent(block(world, block), player(uuid));
+        event.setExpToDrop(Integer.parseInt(exp));
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled(), event.isDropItems(), event.getExpToDrop());
+    }
+
+    /** Answers `cancelled, kept item uuids`. */
+    public static String fireBlockDropItem(String uuid, String world, String block, String state,
+            String items) {
+        FotonBlock at = block(world, block);
+        java.util.List<org.bukkit.entity.Item> dropped = new java.util.ArrayList<>();
+        for (org.bukkit.entity.Entity entity : entities(items)) {
+            if (entity instanceof org.bukkit.entity.Item item) dropped.add(item);
+        }
+        org.bukkit.event.block.BlockDropItemEvent event = new org.bukkit.event.block.BlockDropItemEvent(
+            at, new FotonBlockState(at, FotonBlock.dataOf(state)), player(uuid), dropped);
+        EventBridge.dispatch(event);
+        StringBuilder kept = new StringBuilder();
+        for (org.bukkit.entity.Item item : event.getItems()) {
+            if (item == null) continue;
+            if (kept.length() > 0) kept.append(',');
+            kept.append(item.getUniqueId());
+        }
+        return answer(event.isCancelled(), kept);
+    }
+
+    /** Answers `cancelled, stacks`. */
+    public static String fireHarvest(String uuid, String world, String block, String hand,
+            String items) {
+        org.bukkit.event.player.PlayerHarvestBlockEvent event =
+            new org.bukkit.event.player.PlayerHarvestBlockEvent(player(uuid), block(world, block),
+                hand(hand), stacks(items));
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled(), encodeStacks(event.getItemsHarvested()));
+    }
 }

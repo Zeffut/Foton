@@ -608,10 +608,7 @@ public final class EventBridge {
 
     /** A player is breaking a block. Returns false when a plugin stopped it. */
     public static boolean fireBlockBreak(String uuid, int x, int y, int z, String world) {
-        BlockBreakEvent event =
-            new BlockBreakEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid));
-        dispatch(event);
-        return !event.isCancelled();
+        return EventRelay.fireBlockBreak(uuid, world, x + " " + y + " " + z, "0").startsWith("0");
     }
 
     /** A player is placing a block. Returns false when a plugin stopped it. */

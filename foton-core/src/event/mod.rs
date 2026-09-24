@@ -33,6 +33,8 @@ pub mod command;
 pub mod command_preprocess;
 /// Damage no entity is behind.
 pub mod damage;
+/// What a block gives when a player breaks or picks from it.
+pub mod drops;
 /// Events about entities that are not players.
 pub mod entity;
 /// Entities arriving in the world and leaving their vehicles.
@@ -57,6 +59,7 @@ pub use block::{
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use damage::EntityDamageEvent;
+pub use drops::{BlockDropItemEvent, PlayerHarvestBlockEvent};
 pub use entity::{
     BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
     EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,

@@ -27,7 +27,9 @@ use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, ITEM_BEHAVIORS};
 use crate::block_entity::SharedBlockEntity;
 use crate::entity::{Entity, LivingEntity};
 use crate::event::BlockDamageEvent;
-use crate::event::{BlockBreakEvent, Event as _};
+use crate::entity::RemovalReason;
+use crate::entity::entities::objects::items::ItemEntity;
+use crate::event::{BlockBreakEvent, BlockDropItemEvent, Event as _};
 use crate::fluid::fluid_state_to_block;
 use crate::player::Player;
 use crate::player::food_data::food_constants;
@@ -375,23 +377,42 @@ impl BlockBreakingManager {
             return false;
         };
 
+        let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
+
+        // Paper parity: the experience is sampled before the break, from the
+        // standing block and the tool as it is, so `BlockBreakEvent` can offer
+        // it; it only drops for a break that would drop the block's loot.
+        let expected_exp = {
+            let game_mode = player.game_mode();
+            let tool = {
+                let inv = player.inventory.lock();
+                let main_hand = inv.get_item_in_hand(InteractionHand::MainHand);
+                main_hand.copy_with_count(main_hand.count)
+            };
+            let harvests = tool.is_correct_tool_for_drops(state) || !requires_correct_tool(state);
+            if game_mode != GameType::Creative && game_mode != GameType::Spectator && harvests {
+                behavior.experience_drop(state, world, pos, &tool)
+            } else {
+                0
+            }
+        };
+
         // Before anything touches the block, so cancelling leaves the world as
         // it was rather than having to put it back.
-        let event_drop_items = if let Some(shared) = player.shared() {
-            let mut event = BlockBreakEvent::new(shared, pos, state);
+        let (event_drop_items, exp_to_drop) = if let Some(shared) = player.shared() {
+            let mut event = BlockBreakEvent::new(shared, pos, state).with_exp_to_drop(expected_exp);
             player.fire_event(&mut event);
             if event.is_cancelled() {
                 return false;
             }
-            event.drop_items()
+            (event.drop_items(), event.exp_to_drop())
         } else {
-            true
+            (true, expected_exp)
         };
 
         // TODO: Check for GameMasterBlock (command blocks, etc.)
         // TODO: Check blockActionRestricted
 
-        let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
         // Vanilla parity: `ServerPlayerGameMode.destroyBlock` reads the block
         // entity before it removes the block, then hands that one to the loot
         // roll and to `playerDestroy`. Looking it up afterwards finds nothing:
@@ -477,7 +498,7 @@ impl BlockBreakingManager {
                 && game_mode != GameType::Creative
                 && has_correct_tool
             {
-                drop_block_loot(
+                let dropped = drop_block_loot(
                     player,
                     world,
                     pos,
@@ -500,7 +521,12 @@ impl BlockBreakingManager {
                     block_entity.as_ref(),
                     &destroyed_with,
                 );
+                offer_block_drops(player, world, pos, adjusted_state, dropped);
             }
+
+            // Paper parity: what the event settled on drops once the block is
+            // gone, whether or not its items did.
+            world.pop_experience(pos, exp_to_drop);
         }
 
         changed
@@ -674,6 +700,10 @@ fn dig_speed_amplification(player: &Player) -> Option<i32> {
 }
 
 /// Drops loot for a destroyed block using its loot table.
+/// Drops a broken block's loot and returns the item entities it made.
+///
+/// Experience is not dropped here: a player's break drops what its
+/// `BlockBreakEvent` settled on instead.
 fn drop_block_loot(
     player: &Player,
     world: &Arc<World>,
@@ -681,7 +711,7 @@ fn drop_block_loot(
     state: BlockStateId,
     tool: &ItemStack,
     block_entity: Option<&SharedBlockEntity>,
-) {
+) -> Vec<Arc<ItemEntity>> {
     let luck = player
         .attributes()
         .lock()
@@ -695,15 +725,49 @@ fn drop_block_loot(
         .get_drops(state);
 
     // Spawn each dropped item using the player's world reference (Arc<World>)
+    let mut dropped = Vec::new();
     for item in drops {
-        if !item.is_empty() {
-            player.get_world().pop_resource(pos, item);
+        if !item.is_empty()
+            && let Some(entity) = player.get_world().pop_resource(pos, item)
+        {
+            dropped.push(entity);
         }
     }
 
     BLOCK_BEHAVIORS
         .get_behavior(state.get_block())
-        .spawn_after_break(state, world, pos, tool, true);
+        .spawn_after_break(state, world, pos, tool, false);
+    dropped
+}
+
+/// Lets plugins keep, change or take back the items a broken block dropped.
+///
+/// Paper parity: `CraftEventFactory.handleBlockDropItemEvent`. Paper holds
+/// the items back until the event is decided; Foton has already spawned them,
+/// so a refused item is removed before the tracker has shown it to anyone.
+fn offer_block_drops(
+    player: &Player,
+    world: &Arc<World>,
+    pos: BlockPos,
+    broken: BlockStateId,
+    dropped: Vec<Arc<ItemEntity>>,
+) {
+    if dropped.is_empty() {
+        return;
+    }
+    let mut event = BlockDropItemEvent::new(
+        player.gameprofile.id,
+        world.key.to_string(),
+        pos,
+        broken,
+        dropped.iter().map(|item| item.uuid()).collect(),
+    );
+    player.fire_event(&mut event);
+    for item in dropped {
+        if event.is_cancelled() || !event.items().contains(&item.uuid()) {
+            item.set_removed(RemovalReason::Discarded);
+        }
+    }
 }
 
 /// Runs the held item's veto on breaking `state`.

@@ -73,7 +73,7 @@ pub use block::{
     EntityFallOnContext, EntityFallOnFacts, EntityLandingContext, Fallable, RailBehavior,
 };
 pub(crate) use block::{
-    pickup_waterlogged_block, try_drop_experience, update_from_neighbour_shapes,
+    pickup_waterlogged_block, sample_block_experience, update_from_neighbour_shapes,
 };
 use block_behaviors::register_block_behaviors;
 pub use context::{

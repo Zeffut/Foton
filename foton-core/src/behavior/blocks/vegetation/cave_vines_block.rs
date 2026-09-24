@@ -17,6 +17,7 @@ use crate::behavior::blocks::vegetation::bonemealable::BonemealAction;
 use crate::behavior::blocks::vegetation::growing_plant_head_block::{
     GrowingPlantHead, GrowingPlantHeadBlock,
 };
+use crate::behavior::block::offer_harvest;
 use crate::behavior::context::BlockPlaceContext;
 use crate::behavior::{InteractionResult, InventoryAccess};
 use crate::behavior::{block::BlockBehavior, blocks::vegetation::bonemealable::Bonemealable};
@@ -86,7 +87,13 @@ impl CaveVinesBlock {
             .with_block_state(state)
             .with_interacting_entity(entity_loot_ref(source_entity));
 
-        let items = vanilla_loot_tables::HARVEST_CAVE_VINE.get_random_items(&mut ctx);
+        let mut items = vanilla_loot_tables::HARVEST_CAVE_VINE.get_random_items(&mut ctx);
+        if let Some(player) = source_entity.as_player() {
+            let Some(harvested) = offer_harvest(player, world, pos, items) else {
+                return InteractionResult::Success;
+            };
+            items = harvested;
+        }
         for item in items {
             world.pop_resource(pos, item);
         }

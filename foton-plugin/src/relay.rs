@@ -11,7 +11,8 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    EntitiesLoadEvent, EntityDamageEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
+    BlockBreakEvent, BlockDropItemEvent, EntitiesLoadEvent, EntityDamageEvent,
+    PlayerHarvestBlockEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
     PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent,
     PlayerToggleFlightEvent, PlayerVelocityEvent,
 };
@@ -25,13 +26,16 @@ use jni::JavaVM;
 use jni::objects::{JObject, JString, JValue};
 
 use crate::forward::{BridgeEnv, owner};
-use crate::natives::{describe_slot, parse_slot};
+use crate::natives::{describe_slot, describe_state, parse_slot};
 
 /// The Java class these events are built in.
 const RELAY: &str = "foton/EventRelay";
 
 /// Separates the fields of one answer.
 const FIELD: char = '\u{1f}';
+
+/// Separates the stacks of an item list within one field.
+const ITEM: &str = "\u{1e}";
 
 /// Calls `EventRelay.<method>(String...)` and returns its `String` answer.
 ///
@@ -297,6 +301,107 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
         {
             event.set_damage(damage);
         }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<BlockBreakEvent, _>(owner(), move |event| {
+        let player = event.player();
+        let Some(answer) = text_call(
+            &jvm,
+            "fireBlockBreak",
+            &[
+                &player.gameprofile.id.to_string(),
+                &player.get_world().key.to_string(),
+                &block_position(event.position()),
+                &event.exp_to_drop().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(drop_items) = flag(answer.get(1)) {
+            event.set_drop_items(drop_items);
+        }
+        if let Some(exp) = answer.get(2).and_then(|text| text.parse::<i32>().ok()) {
+            event.set_exp_to_drop(exp);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<BlockDropItemEvent, _>(owner(), move |event| {
+        let Some(state) = describe_state(event.broken()) else {
+            return;
+        };
+        let Some(answer) = text_call(
+            &jvm,
+            "fireBlockDropItem",
+            &[
+                &event.player().to_string(),
+                event.world(),
+                &block_position(event.position()),
+                &state,
+                &uuid_list(event.items()),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        let kept = answer
+            .get(1)
+            .map(|list| {
+                list.split(',')
+                    .filter_map(|id| id.parse::<Uuid>().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        event.set_items(kept);
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerHarvestBlockEvent, _>(owner(), move |event| {
+        let items = event
+            .items()
+            .iter()
+            .map(describe_slot)
+            .collect::<Vec<_>>()
+            .join(ITEM);
+        let Some(answer) = text_call(
+            &jvm,
+            "fireHarvest",
+            &[
+                &event.player().to_string(),
+                event.world(),
+                &block_position(event.position()),
+                hand_name(event.hand()),
+                &items,
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        let harvested = answer
+            .get(1)
+            .map(|list| {
+                list.split(ITEM)
+                    .filter(|one| !one.is_empty())
+                    .filter_map(parse_slot)
+                    .filter(|stack| !stack.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        event.set_items(harvested);
     });
 }
 
