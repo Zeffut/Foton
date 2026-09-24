@@ -15,7 +15,7 @@ use foton_core::event::{
     FurnaceSmeltEvent, FurnaceStartSmeltEvent, PlayerPurchaseEvent, PrepareItemEnchantEvent,
     PrepareSmithingEvent, EntitiesLoadEvent, EntityDamageEvent,
     PlayerHarvestBlockEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
-    PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent,
+    PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent, ServerListPingEvent,
     PlayerToggleFlightEvent, PlayerVelocityEvent,
 };
 use foton_registry::REGISTRY;
@@ -30,6 +30,8 @@ use uuid::Uuid;
 use foton_core::event::Event as _;
 use foton_core::server::Server;
 use glam::DVec3;
+use text_components::TextComponent;
+use foton_utils::text::json;
 use jni::JavaVM;
 use jni::objects::{JObject, JString, JValue};
 
@@ -106,6 +108,12 @@ fn location(position: DVec3, rotation: (f32, f32)) -> String {
         "{} {} {} {} {}",
         position.x, position.y, position.z, rotation.0, rotation.1
     )
+}
+
+/// Reads a component the Java side wrote as JSON text; anything that is not
+/// JSON text is taken as plain text, which is what a legacy string is.
+pub(crate) fn component(text: &str) -> TextComponent {
+    json::from_json(text).unwrap_or_else(|| TextComponent::from(text.to_owned()))
 }
 
 /// Subscribes the relay to the events it carries.
@@ -414,6 +422,29 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
 
     subscribe_cooking(server, vm);
     subscribe_menus(server, vm);
+
+    let jvm = Arc::clone(vm);
+    events.on::<ServerListPingEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireServerListPing",
+            &[
+                &event.address().to_string(),
+                &json::to_json(event.motd()).to_string(),
+                &event.online().to_string(),
+                &event.max_players().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if let Some(motd) = answer.first() {
+            event.set_motd(component(motd));
+        }
+        if let Some(max) = answer.get(1).and_then(|text| text.parse::<i32>().ok()) {
+            event.set_max_players(max);
+        }
+    });
 }
 
 /// Separates the fields of one merchant offer.
@@ -740,3 +771,4 @@ fn uuid_list(ids: &[Uuid]) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
+

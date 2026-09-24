@@ -157,7 +157,7 @@ impl JavaTcpClient {
         let mut login = PlayerLoginEvent::new(Arc::clone(&player));
         self.server.events().fire(&mut login);
         if let Some(message) = login.kick_message() {
-            self.kick(message.to_owned().into()).await;
+            self.kick(message.clone()).await;
             return ConnectionAction::none();
         }
         self.server.queue_player_join(player);

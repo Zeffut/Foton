@@ -183,15 +183,18 @@ public final class EventBridge {
 
     /** A player joined. Returns what to announce, or null to announce nothing. */
     public static String fireJoin(String uuid, String message) {
-        PlayerJoinEvent event = new PlayerJoinEvent(player(uuid), message);
+        PlayerJoinEvent event = new PlayerJoinEvent(player(uuid), FotonText.component(message));
         dispatch(event);
-        return event.getJoinMessage();
+        return FotonText.json(event.joinMessage());
     }
 
+    /** Answers the kick message as JSON text, or an empty string to admit. */
     public static String fireLogin(String uuid) {
         PlayerLoginEvent event = new PlayerLoginEvent(player(uuid));
         dispatch(event);
-        return event.isCancelled() ? event.getKickMessage() : "";
+        if (!event.isCancelled()) return "";
+        net.kyori.adventure.text.Component reason = event.kickMessage();
+        return FotonText.json(reason == null ? net.kyori.adventure.text.Component.empty() : reason);
     }
 
     public static String fireAsyncPreLogin(String name, String uuid, String address) {
@@ -503,10 +506,10 @@ public final class EventBridge {
 
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
-        PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);
+        PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), FotonText.component(message));
         dispatch(event);
         FotonMessenger.forgetPlayer(uuid);
-        return event.getQuitMessage();
+        return FotonText.json(event.quitMessage());
     }
 
     /** Somebody asked for completions. Returns the list a listener claimed,

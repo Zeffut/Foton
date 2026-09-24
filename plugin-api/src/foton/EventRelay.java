@@ -427,6 +427,20 @@ public final class EventRelay {
         return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot);
     }
 
+    /** Answers `motd, maxPlayers`, the MOTD as JSON text. */
+    public static String fireServerListPing(String address, String motd, String online, String max) {
+        java.net.InetAddress from;
+        try {
+            from = java.net.InetAddress.getByName(address);
+        } catch (java.net.UnknownHostException unreadable) {
+            from = null;
+        }
+        org.bukkit.event.server.ServerListPingEvent event = new org.bukkit.event.server.ServerListPingEvent(
+            from, FotonText.component(motd), Integer.parseInt(online), Integer.parseInt(max));
+        EventBridge.dispatch(event);
+        return answer(FotonText.json(event.motd()), event.getMaxPlayers());
+    }
+
     /** Answers `cancelled, stacks`. */
     public static String fireHarvest(String uuid, String world, String block, String hand,
             String items) {

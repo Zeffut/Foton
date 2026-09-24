@@ -97,7 +97,7 @@ pub use player::{
     PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent,
     PlayerQuitEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent,
 };
-pub use server::ServerTickEvent;
+pub use server::{ServerListPingEvent, ServerTickEvent};
 pub use world::{
     ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent, PortalCreateEvent, ThunderChangeEvent,
     WeatherChangeEvent,

@@ -47,14 +47,13 @@ use foton_core::event::{
 use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
-use foton_utils::text::DisplayResolutor;
+use foton_utils::text::json;
 use foton_utils::types::InteractionHand;
 use foton_utils::{BlockPos, Identifier};
 use jni::objects::{JObject, JString, JValue, JValueGen};
 use jni::{AttachGuard, JNIEnv, JavaVM};
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use text_components::TextComponent;
 use uuid::Uuid;
 
 /// The Java class that owns the handler lists.
@@ -749,7 +748,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<PlayerLoginEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
         if let Some(message) = login_call(&jvm, &uuid) {
-            event.deny(message);
+            event.deny(crate::relay::component(&message));
         }
     });
 
@@ -976,22 +975,22 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<PlayerJoinEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
-        let message = event.message().map(plain);
+        let message = event.message().map(|message| json::to_json(message).to_string());
         match string_call(&jvm, "fireJoin", &uuid, message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
-            Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+            Answer::Message(text) => event.set_message(Some(crate::relay::component(&text))),
         }
     });
 
     let jvm = Arc::clone(&vm);
     events.on::<PlayerQuitEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
-        let message = event.message().map(plain);
+        let message = event.message().map(|message| json::to_json(message).to_string());
         match string_call(&jvm, "fireQuit", &uuid, message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
-            Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+            Answer::Message(text) => event.set_message(Some(crate::relay::component(&text))),
         }
     });
 
@@ -1234,10 +1233,6 @@ fn world_call(vm: &JavaVM, method: &str, world: &str) {
         "(Ljava/lang/String;)V",
         &[JValue::Object(&world)],
     );
-}
-
-fn plain(message: &TextComponent) -> String {
-    message.to_plain(&DisplayResolutor)
 }
 
 /// What the plugins decided about a message.
