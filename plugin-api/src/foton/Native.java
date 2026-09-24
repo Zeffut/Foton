@@ -180,6 +180,19 @@ public final class Native {
     public static native String worldDropItem(String world, double x, double y, double z, String item);
     public static native String[] scoreboardTeamEntries(String world, String team);
     public static native String scoreboardEntryTeam(String world, String entry);
+    public static native String[] scoreboardTeamNames(String world);
+    /** False when the name is already a team, or empty. */
+    public static native boolean scoreboardRegisterTeam(String world, String team);
+    public static native boolean scoreboardUnregisterTeam(String world, String team);
+    /** Moves the entry onto the team; false when the team is gone. */
+    public static native boolean scoreboardAddTeamEntry(String world, String team, String entry);
+    /** Takes the entry off the team, only if it is on that team. */
+    public static native boolean scoreboardRemoveTeamEntry(String world, String team, String entry);
+    /** displayName, prefix, suffix (JSON text, "" for none), color, nameTagVisibility,
+     * collisionRule (snake-case names), friendlyFire, seeFriendlyInvisibles (true/false);
+     * null when the team does not exist. */
+    public static native String scoreboardTeamProperty(String world, String team, String property);
+    public static native boolean scoreboardSetTeamProperty(String world, String team, String property, String value);
 
     /** A player's name, or null once they are gone. */
     public static native String playerName(String uuid);

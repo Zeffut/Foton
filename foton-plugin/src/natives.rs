@@ -178,6 +178,7 @@ use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
 use crate::item_components;
+use crate::scoreboard_natives;
 
 /// The server the natives answer about.
 ///
@@ -264,7 +265,7 @@ extern "system" fn set_compass_target(
 }
 
 /// The server, if there still is one.
-fn server() -> Option<Arc<Server>> {
+pub(crate) fn server() -> Option<Arc<Server>> {
     SERVER.get().and_then(|slot| slot.read().upgrade())
 }
 
@@ -315,14 +316,14 @@ fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
 }
 
 /// Returns a Java string, or Java's null when there is nothing to say.
-fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
+pub(crate) fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
     value
         .and_then(|text| env.new_string(text).ok())
         .map_or_else(null_mut, JString::into_raw)
 }
 
 /// Returns a Java `String[]`, or null if the array could not be built.
-fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
+pub(crate) fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
     let Ok(empty) = env.new_string("") else {
         return null_mut();
     };
@@ -11877,6 +11878,41 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "scoreboardTeamEntries",
             "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
             scoreboard_team_entries as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamNames",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            scoreboard_natives::team_names as *mut c_void,
+        ),
+        method(
+            "scoreboardRegisterTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::register_team as *mut c_void,
+        ),
+        method(
+            "scoreboardUnregisterTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::unregister_team as *mut c_void,
+        ),
+        method(
+            "scoreboardAddTeamEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::add_team_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardRemoveTeamEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::remove_team_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            scoreboard_natives::team_property as *mut c_void,
+        ),
+        method(
+            "scoreboardSetTeamProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::set_team_property as *mut c_void,
         ),
         method(
             "scoreboardEntryTeam",

@@ -25,6 +25,7 @@ log.workspace = true
 libloading = "0.8"
 rustc-hash.workspace = true
 # Book pages cross as vanilla's JSON text components.
+serde.workspace = true
 serde_json.workspace = true
 simdnbt.workspace = true
 thiserror.workspace = true
