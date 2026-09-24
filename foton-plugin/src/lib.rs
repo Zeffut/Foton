@@ -184,6 +184,12 @@ impl PluginHost {
                 "-Dfoton.plugins-directory={}",
                 config.plugin_directory.display()
             ))?;
+            // The process belongs to Foton, and so do its signals. Without
+            // this, HotSpot installs its own SIGTERM and SIGINT handlers and
+            // answers them by exiting the process on the spot: no world is
+            // saved, no plugin is disabled, and the operator's `docker stop`
+            // loses whatever the last autosave missed.
+            let reduced_signals = CString::new("-Xrs")?;
             let mut options = [
                 JavaVMOption {
                     optionString: class_path.as_ptr().cast_mut(),
@@ -191,6 +197,10 @@ impl PluginHost {
                 },
                 JavaVMOption {
                     optionString: plugins_directory.as_ptr().cast_mut(),
+                    extraInfo: ptr::null_mut(),
+                },
+                JavaVMOption {
+                    optionString: reduced_signals.as_ptr().cast_mut(),
                     extraInfo: ptr::null_mut(),
                 },
             ];
