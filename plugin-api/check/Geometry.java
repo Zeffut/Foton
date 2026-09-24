@@ -5,7 +5,28 @@ import org.bukkit.util.Vector;
 final class Geometry {
     private Geometry() {}
 
+    /** The box ray traces and entity sweeps are built on. */
+    private static void boundingBox() {
+        org.bukkit.util.BoundingBox box = new org.bukkit.util.BoundingBox(1, 0, 1, 0, 2, 0);
+        Checks.same(box.getMinX(), 0.0, "corners are sorted");
+        Checks.same(box.expandDirectional(-3, 0, 1).getMinX(), -3.0, "a sweep grows the face it moves toward");
+        Checks.same(box.getMaxZ(), 2.0, "and only that face");
+        Checks.same(box.clone().expand(1, 0, 0).getWidthX(), 6.0, "expand grows both faces of an axis");
+
+        org.bukkit.util.BoundingBox unit = new org.bukkit.util.BoundingBox(0, 0, 0, 1, 1, 1);
+        org.bukkit.util.RayTraceResult hit = unit.rayTrace(new Vector(-2, 0.5, 0.5), new Vector(1, 0, 0), 10);
+        Checks.same(hit == null ? null : hit.getHitBlockFace(), org.bukkit.block.BlockFace.WEST,
+            "a ray along +x enters through the west face");
+        Checks.same(hit == null ? null : hit.getHitPosition().getX(), 0.0, "at the face itself");
+        org.bukkit.util.RayTraceResult inside = unit.rayTrace(new Vector(0.5, 0.5, 0.5), new Vector(0, 1, 0), 10);
+        Checks.same(inside == null ? null : inside.getHitBlockFace(), org.bukkit.block.BlockFace.UP,
+            "a ray starting inside answers where it leaves");
+        Checks.same(unit.rayTrace(new Vector(-2, 0.5, 0.5), new Vector(1, 0, 0), 1.5), null,
+            "a box beyond the distance is missed");
+    }
+
     static void check() {
+        boundingBox();
         Location at = new Location(null, 1.5, 64.0, -2.5, 90f, -10f);
 
         Checks.same(at.getX(), 1.5, "x");

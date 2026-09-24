@@ -19,7 +19,11 @@ public interface Entity extends CommandSender, org.bukkit.Nameable, org.bukkit.p
     default org.bukkit.event.entity.EntityDamageEvent getLastDamageCause() { return null; }
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
 
-    default org.bukkit.util.BoundingBox getBoundingBox() { return null; }
+    /** The entity's box in world coordinates, or null once it is gone. */
+    default org.bukkit.util.BoundingBox getBoundingBox() {
+        double[] b = foton.Native.entityBoundingBox(getUniqueId().toString());
+        return b == null || b.length < 6 ? null : new org.bukkit.util.BoundingBox(b[0], b[1], b[2], b[3], b[4], b[5]);
+    }
     default float getYaw() { return 0.0f; }
     default float getPitch() { return 0.0f; }
     default boolean isOnGround() { return false; }

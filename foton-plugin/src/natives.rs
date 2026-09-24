@@ -171,6 +171,7 @@ use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
 mod attributes;
+mod blocks;
 mod displays;
 mod entities;
 mod lifecycle;
@@ -13343,6 +13344,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     ];
     // Entities, players and world queries live in their own modules.
     bindings.extend(attributes::bindings());
+    bindings.extend(blocks::bindings());
     bindings.extend(particles::bindings());
     bindings.extend(entities::bindings());
     bindings.extend(displays::bindings());

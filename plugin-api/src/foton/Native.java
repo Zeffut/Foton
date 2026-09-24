@@ -712,6 +712,14 @@ public final class Native {
     public static native String merchantTrader(String handle);
     public static native boolean openMerchant(String uuid, String handle, boolean force);
 
+    /** A block's outline (kind 0) or collision (kind 1) boxes, six values each, block-local. */
+    public static native double[] blockShapeBoxes(String world, int x, int y, int z, int kind);
+    /** Flags of a block data string: 1 liquid, 2 occluding. */
+    public static native int blockStateFlags(String data);
+    /** {hit x, y, z, block x, y, z, BlockFace ordinal} or null on a miss. */
+    public static native double[] rayTraceBlocks(String world, double startX, double startY, double startZ,
+        double endX, double endY, double endZ, int fluidMode, boolean ignorePassable);
+
     public static UUID parse(String uuid) {
         if (uuid == null) return null;
         try {

@@ -26,4 +26,7 @@ public interface BlockData {
     }
 
     default boolean matches(BlockData other) { return other != null && getMaterial() == other.getMaterial() && getAsString().equalsIgnoreCase(other.getAsString()); }
+
+    /** Whether the state hides the faces of its neighbours: vanilla's {@code canOcclude}. */
+    default boolean isOccluding() { return (foton.Native.blockStateFlags(getAsString()) & 2) != 0; }
 }

@@ -370,4 +370,112 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
         }
     }
 
+    default Material getType(int x, int y, int z) { return getBlockAt(x, y, z).getType(); }
+    default Material getType(Location location) { return getBlockAt(location).getType(); }
+
+    /** Every entity whose box overlaps {@code box}. */
+    default java.util.Collection<org.bukkit.entity.Entity> getNearbyEntities(org.bukkit.util.BoundingBox box) {
+        return getNearbyEntities(box, null);
+    }
+    default java.util.Collection<org.bukkit.entity.Entity> getNearbyEntities(org.bukkit.util.BoundingBox box,
+            java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        if (box == null) throw new IllegalArgumentException("BoundingBox cannot be null");
+        return getNearbyEntities(new Location(this, box.getCenterX(), box.getCenterY(), box.getCenterZ()),
+            box.getWidthX() / 2, box.getHeight() / 2, box.getWidthZ() / 2,
+            filter == null ? null : filter::test);
+    }
+
+    private static void checkRay(World world, Location start, org.bukkit.util.Vector direction) {
+        if (start == null) throw new IllegalArgumentException("Location start cannot be null");
+        if (start.getWorld() != null && !world.getName().equals(start.getWorld().getName()))
+            throw new IllegalArgumentException("Location start cannot be in a different world");
+        if (!Double.isFinite(start.getX()) || !Double.isFinite(start.getY()) || !Double.isFinite(start.getZ()))
+            throw new IllegalArgumentException("Location start is not finite");
+        if (direction == null) throw new IllegalArgumentException("Vector direction cannot be null");
+        if (!Double.isFinite(direction.getX()) || !Double.isFinite(direction.getY()) || !Double.isFinite(direction.getZ()))
+            throw new IllegalArgumentException("Vector direction is not finite");
+        if (direction.lengthSquared() <= 0) throw new IllegalArgumentException("Direction's magnitude (0) need to be greater than 0");
+    }
+
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance) {
+        return rayTraceEntities(start, direction, maxDistance, 0.0, null);
+    }
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance, double raySize) {
+        return rayTraceEntities(start, direction, maxDistance, raySize, null);
+    }
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        return rayTraceEntities(start, direction, maxDistance, 0.0, filter);
+    }
+
+    /** The nearest entity whose box, grown by {@code raySize}, the ray meets within {@code maxDistance}. */
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            double raySize, java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        checkRay(this, start, direction);
+        if (maxDistance < 0.0) return null;
+        org.bukkit.util.Vector startPos = start.toVector();
+        org.bukkit.util.Vector dir = direction.clone().normalize().multiply(maxDistance);
+        org.bukkit.util.BoundingBox aabb = org.bukkit.util.BoundingBox.of(startPos, startPos).expandDirectional(dir).expand(raySize);
+        org.bukkit.entity.Entity nearestHitEntity = null;
+        org.bukkit.util.RayTraceResult nearestHitResult = null;
+        double nearestDistanceSq = Double.MAX_VALUE;
+        for (org.bukkit.entity.Entity entity : getNearbyEntities(aabb, filter)) {
+            org.bukkit.util.BoundingBox box = entity.getBoundingBox();
+            if (box == null) continue;
+            org.bukkit.util.RayTraceResult hitResult = box.expand(raySize).rayTrace(startPos, direction, maxDistance);
+            if (hitResult == null) continue;
+            double distanceSq = startPos.distanceSquared(hitResult.getHitPosition());
+            if (distanceSq < nearestDistanceSq) {
+                nearestHitEntity = entity;
+                nearestHitResult = hitResult;
+                nearestDistanceSq = distanceSq;
+            }
+        }
+        return nearestHitEntity == null ? null
+            : new org.bukkit.util.RayTraceResult(nearestHitResult.getHitPosition(), nearestHitEntity, nearestHitResult.getHitBlockFace());
+    }
+
+    default org.bukkit.util.RayTraceResult rayTraceBlocks(Location start, org.bukkit.util.Vector direction, double maxDistance) {
+        return rayTraceBlocks(start, direction, maxDistance, FluidCollisionMode.NEVER, false);
+    }
+    default org.bukkit.util.RayTraceResult rayTraceBlocks(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            FluidCollisionMode fluidCollisionMode) {
+        return rayTraceBlocks(start, direction, maxDistance, fluidCollisionMode, false);
+    }
+
+    /** The first block the ray meets within {@code maxDistance}: its
+     * collision shape when passable blocks are ignored, its outline
+     * otherwise, and fluids as the mode says. */
+    default org.bukkit.util.RayTraceResult rayTraceBlocks(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            FluidCollisionMode fluidCollisionMode, boolean ignorePassableBlocks) {
+        checkRay(this, start, direction);
+        if (fluidCollisionMode == null) throw new IllegalArgumentException("FluidCollisionMode cannot be null");
+        if (maxDistance < 0.0) return null;
+        org.bukkit.util.Vector dir = direction.clone().normalize().multiply(maxDistance);
+        double[] hit = foton.Native.rayTraceBlocks(getName(), start.getX(), start.getY(), start.getZ(),
+            start.getX() + dir.getX(), start.getY() + dir.getY(), start.getZ() + dir.getZ(),
+            fluidCollisionMode.ordinal(), ignorePassableBlocks);
+        if (hit == null || hit.length < 7) return null;
+        org.bukkit.block.Block block = getBlockAt((int) hit[3], (int) hit[4], (int) hit[5]);
+        return new org.bukkit.util.RayTraceResult(new org.bukkit.util.Vector(hit[0], hit[1], hit[2]), block,
+            org.bukkit.block.BlockFace.values()[(int) hit[6]]);
+    }
+
+    /** Blocks and entities together: whichever the ray meets first. */
+    default org.bukkit.util.RayTraceResult rayTrace(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            FluidCollisionMode fluidCollisionMode, boolean ignorePassableBlocks, double raySize,
+            java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        org.bukkit.util.RayTraceResult blockHit = rayTraceBlocks(start, direction, maxDistance, fluidCollisionMode, ignorePassableBlocks);
+        org.bukkit.util.Vector startVec = null;
+        double blockHitDistance = maxDistance;
+        if (blockHit != null) {
+            startVec = start.toVector();
+            blockHitDistance = startVec.distance(blockHit.getHitPosition());
+        }
+        org.bukkit.util.RayTraceResult entityHit = rayTraceEntities(start, direction, blockHitDistance, raySize, filter);
+        if (blockHit == null) return entityHit;
+        if (entityHit == null) return blockHit;
+        double entityHitDistanceSquared = startVec.distanceSquared(entityHit.getHitPosition());
+        return entityHitDistanceSquared < blockHitDistance * blockHitDistance ? entityHit : blockHit;
+    }
 }

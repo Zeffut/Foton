@@ -28,7 +28,6 @@ public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributa
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
     default boolean isHandRaised() { return false; }
     default void clearActiveItem() { }
-    default org.bukkit.util.BoundingBox getBoundingBox() { return null; }
     default boolean isInvisible() { return false; }
     default boolean isCustomNameVisible() { return false; }
     default double getEyeHeight() { return 1.62; }
