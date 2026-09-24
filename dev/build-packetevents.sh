@@ -37,15 +37,16 @@ CODEMC="https://repo.codemc.io/repository/maven-releases"
 #
 # PacketEvents 2.13.0 is the release that knows protocol 776, Minecraft 26.2,
 # which is what Foton speaks. Netty is the buffer implementation PacketEvents'
-# wrappers read and write through; Foton has no Netty of its own. Adventure's
+# wrappers read and write through; Foton has no Netty of its own, so this is
+# the version Paper 26.2 build 129 carries (META-INF/libraries.list). Adventure's
 # NBT module and Examination are what PacketEvents' bundled text serializers
 # link against and a Paper server has on its class path; they go inside this
 # plugin, not on every plugin's class path.
 PINNED=$(cat <<'LIST'
 codemc com/github/retrooper packetevents-api 2.13.0 c7feb88872d9065037d45190de2e96f69ebe039f2e9b28b1e74669595107ee8f
 codemc com/github/retrooper packetevents-netty-common 2.13.0 89b44ffea051a1242aee4e0703cf5722c436f7354ad9d52148c8d6ef0d0ae843
-mirror io/netty netty-buffer 4.2.18.Final fdf236d2b76aa9710684401fdad7dff9dec56e43da5d39172c9a55ba5f14b360
-mirror io/netty netty-common 4.2.18.Final 5d97cae5669685872339698efe13f74fe3cdb2dccdb36963b2352bd95acf7070
+mirror io/netty netty-buffer 4.2.15.Final 1361fd9c9ba85b9831cf54a1b2e45ddc3ce34a768931726c099d3f5ef0efe4a3
+mirror io/netty netty-common 4.2.15.Final 78206aa7f6d197caa926291408c01889b6b910ca0f74017d3fcbdaccf9562959
 mirror net/kyori adventure-nbt 5.2.0 834e94d6c883ac5dba43054632bc383eee6e39bd42ba1b87b6b6f47bcf84554b
 mirror net/kyori examination-api 1.3.0 c9237ffecb05428f6eff86216246ac70ce0b47b04c08ea7ca35020fde57f8492
 mirror net/kyori examination-string 1.3.0 7d01fc25a4bb3af0e1662685455f4541fbf4626216ea5846e455c1491e156b8c

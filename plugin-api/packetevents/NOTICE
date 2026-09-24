@@ -8,7 +8,7 @@ It is combined with these unmodified third-party components:
 
 - PacketEvents 2.13.0 (packetevents-api, packetevents-netty-common),
   GPL-3.0, https://github.com/retrooper/packetevents (tag v2.13.0).
-- Netty 4.2.18.Final (netty-buffer, netty-common), Apache-2.0,
+- Netty 4.2.15.Final (netty-buffer, netty-common), Apache-2.0,
   https://github.com/netty/netty.
 - Adventure NBT 5.2.0, MIT, https://github.com/KyoriPowered/adventure.
 - Examination 1.3.0 (api, string), MIT, https://github.com/KyoriPowered/examination.
