@@ -1,7 +1,10 @@
 // The Bedrock settings live in `foton-bedrock` rather than here: the login
 // path reads them too, and `foton-login` cannot depend on this binary crate.
 pub use foton_bedrock::config::BedrockConfig;
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    path::Path,
+};
 
 use foton_core::{
     chunk::chunk_ticket_manager::MAX_SUPPORTED_VIEW_DISTANCE,
@@ -137,6 +140,19 @@ impl ServerConfig {
     ///
     /// Returns a message describing any setting that cannot be resolved.
     pub fn into_runtime_config(self) -> Result<RuntimeConfig, String> {
+        // Vanilla parity: `MinecraftServer.loadStatusIcon` logs an unusable
+        // icon and serves none; it never stops the server from starting.
+        let favicon = if self.use_favicon {
+            RuntimeConfig::load_favicon(Path::new(&self.favicon)).map_or_else(
+                |error| {
+                    log::error!("Couldn't load server icon: {error}");
+                    None
+                },
+                Some,
+            )
+        } else {
+            None
+        };
         let bug_report_webhook = self.bug_reports.into_webhook()?;
         Ok(RuntimeConfig {
             max_players: self.max_players,
@@ -152,8 +168,8 @@ impl ServerConfig {
             encryption: self.encryption,
             allow_flight: self.allow_flight,
             motd: self.motd,
-            use_favicon: self.use_favicon,
-            favicon: self.favicon,
+            use_favicon: favicon.is_some(),
+            favicon: favicon.unwrap_or_default(),
             enforce_secure_chat: self.enforce_secure_chat,
             chat_spam_threshold_seconds: self.chat_spam_threshold_seconds,
             command_spam_threshold_seconds: self.command_spam_threshold_seconds,
@@ -235,6 +251,9 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
     if config.server_port == 0 {
         return Err("server_port must not be 0");
     }
+    if !(1..=i32::MAX as u32).contains(&config.max_players) {
+        return Err("max_players must be in range 1..=2147483647");
+    }
     if !config.allow_extended_view_distance && !(1..=32).contains(&config.view_distance) {
         return Err("View distance must in range 1..32");
     }
@@ -304,38 +323,7 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         }
     }
     if config.bedrock.enable {
-        // `bedrock.port` may legitimately be `0` (share `server_port`, see
-        // `BedrockConfig::resolved_port`) or equal to `server_port` itself:
-        // TCP (Java) and UDP (Bedrock/RakNet) do not share a port namespace,
-        // so neither is a collision.
-        if config.bedrock.trusted_proxies.is_empty() {
-            return Err("bedrock.trusted_proxies must list at least one address");
-        }
-        // A non-parseable entry is silently dropped by `is_trusted`
-        // (`foton-login`'s login path), not rejected -- so a list that is
-        // non-empty but entirely unparsable (`["localhost"]`, say) passes
-        // the check above and then refuses every Bedrock login. At least one
-        // entry has to actually be an address for `trusted_proxies` to do
-        // anything.
-        if !config
-            .bedrock
-            .trusted_proxies
-            .iter()
-            .any(|entry| entry.parse::<IpAddr>().is_ok())
-        {
-            return Err(
-                "bedrock.trusted_proxies must contain at least one address that parses as an IP",
-            );
-        }
-        // Bounded by bytes, not characters: `java_username` truncates the
-        // prefix and gamertag together to 16 *bytes* (what the login packet's
-        // encoder actually enforces -- see `foton-bedrock`'s `floodgate`
-        // module), so a prefix that is itself 16+ bytes leaves no room for
-        // any of the gamertag, even if it is fewer than 16 characters (a
-        // multi-byte prefix, e.g. six CJK characters at 18 bytes).
-        if config.bedrock.username_prefix.len() >= 16 {
-            return Err("bedrock.username_prefix leaves no room for a username");
-        }
+        validate_bedrock(&config.bedrock)?;
     }
     if config.enforce_secure_chat {
         if !config.online_mode {
@@ -344,6 +332,42 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
         if !config.encryption {
             return Err("encryption must be true when enforce_secure_chat is enabled");
         }
+    }
+    Ok(())
+}
+
+/// Validates an enabled Bedrock listener.
+///
+/// `bedrock.port` may legitimately be `0` (share `server_port`, see
+/// `BedrockConfig::resolved_port`) or equal to `server_port` itself: TCP
+/// (Java) and UDP (Bedrock/RakNet) do not share a port namespace, so neither
+/// is a collision.
+fn validate_bedrock(bedrock: &BedrockConfig) -> Result<(), &'static str> {
+    if bedrock.trusted_proxies.is_empty() {
+        return Err("bedrock.trusted_proxies must list at least one address");
+    }
+    // A non-parseable entry is silently dropped by `is_trusted`
+    // (`foton-login`'s login path), not rejected -- so a list that is
+    // non-empty but entirely unparsable (`["localhost"]`, say) passes the
+    // check above and then refuses every Bedrock login. At least one entry
+    // has to actually be an address for `trusted_proxies` to do anything.
+    if !bedrock
+        .trusted_proxies
+        .iter()
+        .any(|entry| entry.parse::<IpAddr>().is_ok())
+    {
+        return Err(
+            "bedrock.trusted_proxies must contain at least one address that parses as an IP",
+        );
+    }
+    // Bounded by bytes, not characters: `java_username` truncates the prefix
+    // and gamertag together to 16 *bytes* (what the login packet's encoder
+    // actually enforces -- see `foton-bedrock`'s `floodgate` module), so a
+    // prefix that is itself 16+ bytes leaves no room for any of the gamertag,
+    // even if it is fewer than 16 characters (a multi-byte prefix, e.g. six
+    // CJK characters at 18 bytes).
+    if bedrock.username_prefix.len() >= 16 {
+        return Err("bedrock.username_prefix leaves no room for a username");
     }
     Ok(())
 }

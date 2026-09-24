@@ -9,25 +9,31 @@ import org.bukkit.inventory.InventoryView;
 public final class FotonInventoryView extends InventoryView {
     private final FotonPlayer player;
     private final Inventory top;
-    private final String title;
+    private String title;
 
     public FotonInventoryView(FotonPlayer player) { this(player, null); }
 
     FotonInventoryView(FotonPlayer player, Inventory suppliedTop) {
         this.player = player;
-        String owner = player.getUniqueId().toString();
+        this.top = suppliedTop != null ? suppliedTop : liveTop(player.getUniqueId().toString());
+    }
+
+    private static Inventory liveTop(String owner) {
         String menuType = Native.openMenuType(owner);
-        this.top = suppliedTop != null ? suppliedTop : "minecraft:crafting".equals(menuType)
-            ? new FotonCraftingInventory(owner)
-            : "minecraft:grindstone".equals(menuType)
-                ? new FotonGrindstoneInventory(owner)
-                : new FotonMenuInventory(owner);
-        String title = Native.openMenuTitle(player.getUniqueId().toString());
-        this.title = title == null ? "" : title;
+        if ("minecraft:crafting".equals(menuType)) return new FotonCraftingInventory(owner);
+        if ("minecraft:grindstone".equals(menuType)) return new FotonGrindstoneInventory(owner);
+        return new FotonMenuInventory(owner);
     }
 
     @Override public Inventory getTopInventory() { return top; }
     @Override public Inventory getBottomInventory() { return player.getInventory(); }
     @Override public HumanEntity getPlayer() { return player; }
-    @Override public String getTitle() { return title; }
+    /** Read on first use, so an event view built from a snapshot needs no live menu. */
+    @Override public String getTitle() {
+        if (title == null) {
+            String live = Native.openMenuTitle(player.getUniqueId().toString());
+            title = live == null ? "" : live;
+        }
+        return title;
+    }
 }

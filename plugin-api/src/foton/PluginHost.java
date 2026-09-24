@@ -1,7 +1,10 @@
 package foton;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLConnection;
@@ -14,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.jar.JarFile;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.InvalidDescriptionException;
@@ -29,38 +33,198 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class PluginHost {
     private static final List<Plugin> loaded = new ArrayList<>();
     private static final Map<String, org.bukkit.plugin.java.PluginClassLoader> pluginLoaders = new HashMap<>();
+    private static final Map<Plugin, org.bukkit.plugin.java.PluginClassLoader> loadersByPlugin =
+        new java.util.IdentityHashMap<>();
+    private static final Map<Plugin, InvocationState> invocations =
+        new java.util.IdentityHashMap<>();
+    private static final ThreadLocal<Map<InvocationState, Integer>> threadInvocations =
+        ThreadLocal.withInitial(java.util.IdentityHashMap::new);
+    private static final ThreadLocal<Integer> lifecycleCallbackDepth =
+        ThreadLocal.withInitial(() -> 0);
+    private static final Object lifecycle = new Object();
+    /** Serializes lifecycle callbacks without holding the state monitor.
+     *
+     * <p>The lock is reentrant because Bukkit permits a plugin callback to
+     * disable that same plugin. State transitions still use {@link #lifecycle}
+     * so an in-flight event can drain without needing this operation lock. */
+    private static final ReentrantLock lifecycleOperation = new ReentrantLock(true);
 
     private PluginHost() {}
 
-    /** Loads and enables every plugin in a directory. Returns how many worked. */
-    public static int loadAll(String directory) {
-        loadAllOnLoad(directory);
-        return enableAll();
+    /** Marks a real host shutdown; ordinary plugin disable/re-enable does not call this. */
+    public static void markStopping() {
+        org.bukkit.Bukkit.markStopping();
     }
 
-    /** Discovers and loads plugins, invoking only their onLoad lifecycle phase. */
+    static Object lifecycleLock() {
+        return lifecycle;
+    }
+
+    static void requireEnabled(Plugin plugin, String operation) {
+        if (plugin == null) {
+            throw new IllegalArgumentException("plugin cannot be null");
+        }
+        if (!plugin.isEnabled()) {
+            throw new IllegalStateException(
+                "Plugin attempted to " + operation + " while disabled: " + plugin.getName());
+        }
+    }
+
+    static Invocation beginInvocation(Plugin plugin) {
+        synchronized (lifecycle) {
+            InvocationState state = invocations.get(plugin);
+            if (state == null || !state.accepting || !plugin.isEnabled()) {
+                return null;
+            }
+            state.active++;
+            threadInvocations.get().merge(state, 1, Integer::sum);
+            return new Invocation(state);
+        }
+    }
+
+    /** Loads and enables every plugin in a directory. Returns how many worked. */
+    public static int loadAll(String directory) {
+        lifecycleOperation.lock();
+        try {
+            loadAllOnLoadSerialized(directory);
+            return enableAllSerialized();
+        } finally {
+            lifecycleOperation.unlock();
+        }
+    }
+
+    /**
+     * Discovers and loads plugins, invoking only their onLoad lifecycle phase.
+     *
+     * <p>Construction and publication are deliberately a separate pass from
+     * callbacks. Bukkit exposes the complete plugin set by the time any
+     * {@code onLoad} runs; ViaVersion relies on that to discover companion
+     * plugins such as ViaBackwards during bootstrap.
+     */
     public static int loadAllOnLoad(String directory) {
+        lifecycleOperation.lock();
+        try {
+            return loadAllOnLoadSerialized(directory);
+        } finally {
+            lifecycleOperation.unlock();
+        }
+    }
+
+    private static int loadAllOnLoadSerialized(String directory) {
         ensureServer();
         List<File> ordered = orderedJars(new File(directory));
-        int loadedNow = 0;
+        List<JavaPlugin> constructed = new ArrayList<>();
         for (File jar : ordered) {
             try {
-                if (load(jar, false)) loadedNow++;
+                JavaPlugin plugin = constructAndRegister(jar);
+                if (plugin != null) constructed.add(plugin);
             } catch (Throwable error) {
                 System.out.println("[host] " + jar.getName() + " failed: " + error);
                 error.printStackTrace(System.out);
             }
         }
+
+        int loadedNow = 0;
+        for (JavaPlugin plugin : constructed) {
+            try {
+                String unavailable = unavailableLoadedDependency(plugin);
+                if (unavailable != null) {
+                    System.out.println("[host] " + plugin.getName()
+                        + ": required dependency " + unavailable + " failed to load");
+                    synchronized (lifecycle) {
+                        InvocationState state = invocations.get(plugin);
+                        if (state != null) {
+                            state.loading = false;
+                            lifecycle.notifyAll();
+                        }
+                    }
+                    discard(plugin);
+                    continue;
+                }
+                boolean discardRequested;
+                boolean disableRequested;
+                try {
+                    invokeLifecycleCallback(plugin::onLoad);
+                } finally {
+                    synchronized (lifecycle) {
+                        InvocationState state = invocations.get(plugin);
+                        discardRequested = state != null && state.discardRequested;
+                        disableRequested = state != null && state.disableRequested;
+                        if (state != null) {
+                            state.loading = false;
+                            lifecycle.notifyAll();
+                        }
+                    }
+                    if (discardRequested) discardSerialized(plugin);
+                    else if (disableRequested) disableSerialized(plugin);
+                }
+                synchronized (lifecycle) {
+                    if (isPublishedLocked(plugin)) loadedNow++;
+                }
+            } catch (Throwable error) {
+                System.out.println("[host] " + plugin.getName() + " failed: " + error);
+                error.printStackTrace(System.out);
+                discard(plugin);
+            }
+        }
         return loadedNow;
+    }
+
+    private static List<String> requiredDependencies(Plugin plugin) {
+        return requiredDependencies(plugin.getDescription());
+    }
+
+    /** Dependencies without which the plugin must not load: Bukkit's
+     * {@code depend}, or the {@code required} entries of paper-plugin.yml. */
+    private static List<String> requiredDependencies(PluginDescriptionFile descriptor) {
+        if (!(descriptor instanceof PaperPluginDescriptor paper)) return descriptor.getDepend();
+        List<String> names = new ArrayList<>();
+        for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
+            if (dependency.required() && !names.contains(dependency.name())) {
+                names.add(dependency.name());
+            }
+        }
+        return names;
+    }
+
+    private static String unavailableLoadedDependency(Plugin plugin) {
+        for (String name : requiredDependencies(plugin)) {
+            if (byName(name) == null) return name;
+        }
+        return null;
     }
 
     /** Enables every plugin successfully loaded by loadAllOnLoad. */
     public static int enableAll() {
+        lifecycleOperation.lock();
+        try {
+            return enableAllSerialized();
+        } finally {
+            lifecycleOperation.unlock();
+        }
+    }
+
+    private static int enableAllSerialized() {
         int enabledNow = 0;
-        for (Plugin plugin : new ArrayList<>(loaded)) {
+        List<Plugin> snapshot;
+        synchronized (lifecycle) {
+            snapshot = new ArrayList<>(loaded);
+        }
+        for (Plugin plugin : snapshot) {
             if (plugin.isEnabled()) continue;
             try {
                 if (!(plugin instanceof JavaPlugin java)) continue;
+                synchronized (lifecycle) {
+                    InvocationState state = invocations.get(plugin);
+                    if (state == null || state.loading) continue;
+                }
+                String unavailable = unavailableRequiredDependency(plugin);
+                if (unavailable != null) {
+                    System.out.println("[host] " + plugin.getName()
+                        + ": required dependency " + unavailable + " failed to enable");
+                    disable(plugin);
+                    continue;
+                }
                 enable(java);
                 enabledNow++;
             } catch (Throwable error) {
@@ -70,6 +234,16 @@ public final class PluginHost {
             }
         }
         return enabledNow;
+    }
+
+    private static String unavailableRequiredDependency(Plugin plugin) {
+        for (String name : requiredDependencies(plugin)) {
+            Plugin dependency = byName(name);
+            if (dependency == null || !dependency.isEnabled()) {
+                return name;
+            }
+        }
+        return null;
     }
 
     private static void ensureServer() {
@@ -100,62 +274,170 @@ public final class PluginHost {
                 error.printStackTrace(System.out);
             }
         }
+        Set<String> valid = hardDependencyClosure(jarsByName, descriptors);
+        Map<String, Set<String>> edges = new HashMap<>();
+        for (String key : valid) edges.put(key, new java.util.TreeSet<>());
+        for (String key : valid) {
+            PluginDescriptionFile descriptor = descriptors.get(key);
+            if (descriptor instanceof PaperPluginDescriptor paper) {
+                for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
+                    if (dependency.load() == PaperPluginDescriptor.LoadOrder.BEFORE) {
+                        addEdge(edges, pluginKey(dependency.name()), key);
+                    } else if (dependency.load() == PaperPluginDescriptor.LoadOrder.AFTER) {
+                        addEdge(edges, key, pluginKey(dependency.name()));
+                    }
+                }
+            } else {
+                for (String dependency : descriptor.getDepend()) {
+                    addEdge(edges, pluginKey(dependency), key);
+                }
+            }
+        }
+
+        List<OrderingEdge> optional = new ArrayList<>();
+        for (String key : valid) {
+            PluginDescriptionFile descriptor = descriptors.get(key);
+            if (!(descriptor instanceof PaperPluginDescriptor)) {
+                for (String dependency : descriptor.getSoftDepend()) {
+                    optional.add(new OrderingEdge(pluginKey(dependency), key));
+                }
+                for (String target : descriptor.getLoadBefore()) {
+                    optional.add(new OrderingEdge(key, pluginKey(target)));
+                }
+            }
+        }
+        optional.sort(java.util.Comparator.comparing(OrderingEdge::from)
+            .thenComparing(OrderingEdge::to));
+        for (OrderingEdge edge : optional) {
+            if (!valid.contains(edge.from()) || !valid.contains(edge.to())
+                    || edge.from().equals(edge.to())) {
+                continue;
+            }
+            // Soft dependencies and load-before hints only influence order.
+            // Ignore the deterministic edge that would close a cycle; unlike
+            // a hard dependency cycle, it must never make a plugin unloadable.
+            if (!reachable(edges, edge.to(), edge.from())) {
+                addEdge(edges, edge.from(), edge.to());
+            }
+        }
+
         List<File> ordered = new ArrayList<>();
-        Map<String, Integer> states = new HashMap<>();
-        Set<String> failed = new HashSet<>();
-        for (String key : new java.util.TreeSet<>(jarsByName.keySet())) {
-            order(key, jarsByName, descriptors, states, failed, ordered);
+        for (String key : topologicalOrder(valid, edges)) {
+            ordered.add(jarsByName.get(key));
         }
         return ordered;
     }
 
-    private static boolean order(String key, Map<String, File> jars,
-                                 Map<String, PluginDescriptionFile> descriptors,
-                                 Map<String, Integer> states, Set<String> failed,
-                                 List<File> ordered) {
-        Integer state = states.get(key);
-        if (state != null) {
-            if (state == 1) {
-                System.out.println("[host] dependency cycle involving " + descriptors.get(key).getName());
-                failed.add(key);
-                return false;
+    private static Set<String> hardDependencyClosure(Map<String, File> jars,
+            Map<String, PluginDescriptionFile> descriptors) {
+        Set<String> eligible = new java.util.TreeSet<>(jars.keySet());
+        boolean changed;
+        do {
+            changed = false;
+            for (String key : new ArrayList<>(eligible)) {
+                PluginDescriptionFile descriptor = descriptors.get(key);
+                String unavailable = requiredDependencies(descriptor).stream()
+                    .filter(name -> !eligible.contains(pluginKey(name)))
+                    .findFirst().orElse(null);
+                if (unavailable == null) continue;
+                System.out.println("[host] " + descriptor.getName()
+                    + ": missing or unavailable required dependency " + unavailable);
+                eligible.remove(key);
+                changed = true;
             }
-            return !failed.contains(key);
-        }
-        states.put(key, 1);
-        PluginDescriptionFile descriptor = descriptors.get(key);
-        boolean valid = descriptor != null;
-        if (descriptor != null) {
-            for (String dependency : descriptor.getDepend()) {
-                String dep = dependency.toLowerCase(java.util.Locale.ROOT);
-                if (!jars.containsKey(dep)) {
-                    System.out.println("[host] " + descriptor.getName() + ": missing required dependency " + dependency);
-                    valid = false;
-                } else if (!order(dep, jars, descriptors, states, failed, ordered)) {
-                    valid = false;
+        } while (changed);
+
+        Map<String, Set<String>> hardEdges = new HashMap<>();
+        for (String key : eligible) hardEdges.put(key, new java.util.TreeSet<>());
+        for (String key : eligible) {
+            PluginDescriptionFile descriptor = descriptors.get(key);
+            if (descriptor instanceof PaperPluginDescriptor paper) {
+                for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
+                    if (dependency.required()
+                            && dependency.load() == PaperPluginDescriptor.LoadOrder.BEFORE) {
+                        addEdge(hardEdges, pluginKey(dependency.name()), key);
+                    } else if (dependency.required()
+                            && dependency.load() == PaperPluginDescriptor.LoadOrder.AFTER) {
+                        addEdge(hardEdges, key, pluginKey(dependency.name()));
+                    }
+                }
+            } else {
+                for (String dependency : descriptor.getDepend()) {
+                    addEdge(hardEdges, pluginKey(dependency), key);
                 }
             }
-            for (String dependency : descriptor.getSoftDepend()) {
-                String dep = dependency.toLowerCase(java.util.Locale.ROOT);
-                if (jars.containsKey(dep)) order(dep, jars, descriptors, states, failed, ordered);
+        }
+        List<String> ordered = topologicalOrder(eligible, hardEdges);
+        if (ordered.size() == eligible.size()) return new java.util.TreeSet<>(ordered);
+
+        Set<String> valid = new java.util.TreeSet<>(ordered);
+        for (String key : eligible) {
+            if (!valid.contains(key)) {
+                System.out.println("[host] hard dependency cycle or dependent involving "
+                    + descriptors.get(key).getName());
             }
         }
-        states.put(key, 2);
-        if (!valid) {
-            failed.add(key);
-            return false;
-        }
-        ordered.add(jars.get(key));
-        return true;
+        return valid;
     }
+
+    private static void addEdge(Map<String, Set<String>> edges, String from, String to) {
+        Set<String> outgoing = edges.get(from);
+        if (outgoing != null && edges.containsKey(to)) outgoing.add(to);
+    }
+
+    private static boolean reachable(Map<String, Set<String>> edges, String start,
+            String target) {
+        if (start.equals(target)) return true;
+        Set<String> seen = new HashSet<>();
+        java.util.ArrayDeque<String> pending = new java.util.ArrayDeque<>();
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            String current = pending.removeFirst();
+            if (!seen.add(current)) continue;
+            for (String next : edges.getOrDefault(current, Set.of())) {
+                if (next.equals(target)) return true;
+                pending.addLast(next);
+            }
+        }
+        return false;
+    }
+
+    private static List<String> topologicalOrder(Set<String> nodes,
+            Map<String, Set<String>> edges) {
+        Map<String, Integer> indegree = new HashMap<>();
+        for (String key : nodes) indegree.put(key, 0);
+        for (Set<String> outgoing : edges.values()) {
+            for (String target : outgoing) indegree.merge(target, 1, Integer::sum);
+        }
+        java.util.PriorityQueue<String> ready = new java.util.PriorityQueue<>();
+        for (Map.Entry<String, Integer> entry : indegree.entrySet()) {
+            if (entry.getValue() == 0) ready.add(entry.getKey());
+        }
+        List<String> ordered = new ArrayList<>();
+        while (!ready.isEmpty()) {
+            String current = ready.remove();
+            ordered.add(current);
+            for (String target : edges.getOrDefault(current, Set.of())) {
+                int remaining = indegree.merge(target, -1, Integer::sum);
+                if (remaining == 0) ready.add(target);
+            }
+        }
+        return ordered;
+    }
+
+    private record OrderingEdge(String from, String to) {}
 
     private static PluginDescriptionFile readDescriptor(File jar) throws Exception {
         try (JarFile archive = new JarFile(jar)) {
-            // Paper plugins may omit the legacy descriptor.
-            for (String descriptorName : new String[] {"plugin.yml", "paper-plugin.yml"}) {
-                var entry = archive.getEntry(descriptorName);
-                if (entry == null) continue;
-                try (InputStream stream = archive.getInputStream(entry)) {
+            var paper = archive.getEntry("paper-plugin.yml");
+            if (paper != null) {
+                try (InputStream stream = archive.getInputStream(paper)) {
+                    return PaperPluginDescriptor.read(stream);
+                }
+            }
+            var legacy = archive.getEntry("plugin.yml");
+            if (legacy != null) {
+                try (InputStream stream = archive.getInputStream(legacy)) {
                     return new PluginDescriptionFile(stream);
                 }
             }
@@ -163,14 +445,21 @@ public final class PluginHost {
         }
     }
 
-    private static boolean load(File jar, boolean enableNow) throws Exception {
+    private static JavaPlugin constructAndRegister(File jar) throws Exception {
         PluginDescriptionFile descriptor = readDescriptor(jar);
         if (byName(descriptor.getName()) != null) {
-            System.out.println("[host] " + descriptor.getName() + " is already enabled; skipping " + jar.getName());
-            return false;
+            System.out.println("[host] " + descriptor.getName() + " is already loaded; skipping " + jar.getName());
+            return null;
+        }
+        for (String name : requiredDependencies(descriptor)) {
+            if (byName(name) == null) {
+                System.out.println("[host] " + descriptor.getName()
+                    + ": required dependency " + name + " failed to construct");
+                return null;
+            }
         }
         org.bukkit.plugin.java.PluginClassLoader loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar), dependencyParent(descriptor));
-        boolean enabled = false;
+        boolean registered = false;
         JavaPlugin plugin = null;
         try {
             File dataFolder = new File(jar.getParentFile(), descriptor.getName());
@@ -182,24 +471,45 @@ public final class PluginHost {
             if (!(instance instanceof JavaPlugin candidate)) {
                 System.out.println(
                     "[host] " + descriptor.getName() + ": main class is not a JavaPlugin");
-                return false;
+                return null;
             }
             plugin = candidate;
 
             loader.setPlugin(plugin);
             plugin.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
-            plugin.onLoad();
-            loaded.add(plugin);
-            pluginLoaders.put(descriptor.getName().toLowerCase(java.util.Locale.ROOT), loader);
-            enabled = true;
-            if (enableNow) enable(plugin);
-            return true;
+            synchronized (lifecycle) {
+                if (findByNameLocked(descriptor.getName()) != null) {
+                    System.out.println("[host] " + descriptor.getName()
+                        + " was published concurrently; skipping " + jar.getName());
+                    return null;
+                }
+                loaded.add(plugin);
+                InvocationState state = new InvocationState();
+                state.loading = true;
+                invocations.put(plugin, state);
+                loadersByPlugin.put(plugin, loader);
+                pluginLoaders.put(pluginKey(descriptor.getName()), loader);
+            }
+            registered = true;
+            return plugin;
         } finally {
-            if (!enabled) {
-                if (plugin != null) plugin.setEnabled(false);
+            if (!registered) {
+                if (plugin == null) plugin = loader.getPlugin();
+                if (plugin != null) cleanupUnpublished(plugin);
                 loader.close();
             }
         }
+    }
+
+    private static void cleanupUnpublished(JavaPlugin plugin) {
+        plugin.setEnabled(false);
+        org.bukkit.Bukkit.getScheduler().cancelTasks(plugin);
+        FotonPlayer.removeAttachments(plugin);
+        CommandMap.forget(plugin);
+        org.bukkit.Bukkit.getServicesManager().unregisterAll(plugin);
+        org.bukkit.Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin);
+        org.bukkit.Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin);
+        EventBridge.unregister(plugin);
     }
 
     private static URL[] pluginUrls(File jar) throws Exception {
@@ -224,28 +534,104 @@ public final class PluginHost {
                 String artifact = parts[1];
                 // Select the JVM variant for Kotlin Multiplatform artifacts.
                 if (parts[0].startsWith("org.jetbrains.kotlinx") && !artifact.endsWith("-jvm")) artifact += "-jvm";
-                Path target = libraries.toPath().resolve(parts[0].replace(".", "/")).resolve(artifact).resolve(parts[2]).resolve(artifact+"-"+parts[2]+".jar");
-                if (!Files.exists(target)) {
-                    Files.createDirectories(target.getParent());
-                    URLConnection connection = new java.net.URL("https://repo.maven.apache.org/maven2/"+parts[0].replace(".", "/")+"/"+artifact+"/"+parts[2]+"/"+artifact+"-"+parts[2]+".jar").openConnection();
-                    connection.setConnectTimeout(10_000); connection.setReadTimeout(30_000);
-                    try (InputStream input = connection.getInputStream()) { Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING); }
+                String repositoryPath = parts[0].replace(".", "/") + "/" + artifact + "/"
+                    + parts[2] + "/" + artifact + "-" + parts[2] + ".jar";
+                Path libraryRoot = libraries.toPath().toAbsolutePath().normalize();
+                Path target = libraryRoot.resolve(repositoryPath).normalize();
+                if (!target.startsWith(libraryRoot)) {
+                    throw new IOException("Invalid runtime library coordinate: " + coordinate);
                 }
+                URL source = java.net.URI.create(
+                    "https://repo.maven.apache.org/maven2/" + repositoryPath).toURL();
+                cacheLibrary(source, target);
                 urls.add(target.toUri().toURL());
             }
         }
         return urls.toArray(new URL[0]);
     }
 
+    /** Ensures a cached runtime library is a complete, readable jar. */
+    static void cacheLibrary(URL source, Path target) throws IOException {
+        if (isUsableLibrary(target)) return;
+
+        Files.createDirectories(target.getParent());
+        Path temporary = Files.createTempFile(target.getParent(),
+            "." + target.getFileName() + ".", ".part");
+        try {
+            URLConnection connection = source.openConnection();
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(30_000);
+            try (InputStream input = connection.getInputStream()) {
+                Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING);
+            }
+            try {
+                validateLibrary(temporary);
+            } catch (SecurityException error) {
+                throw new IOException("Downloaded library failed jar verification: " + source,
+                    error);
+            }
+            try {
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException error) {
+                // Another downloader may have won the atomic publication race.
+                if (!isUsableLibrary(target)) throw error;
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private static boolean isUsableLibrary(Path library) {
+        try {
+            validateLibrary(library);
+            return true;
+        } catch (IOException | SecurityException invalid) {
+            return false;
+        }
+    }
+
+    private static void validateLibrary(Path library) throws IOException {
+        if (!Files.isRegularFile(library)) {
+            throw new IOException("Runtime library is not a regular file: " + library);
+        }
+        boolean hasFile = false;
+        try (JarFile archive = new JarFile(library.toFile(), true)) {
+            var entries = archive.entries();
+            while (entries.hasMoreElements()) {
+                var entry = entries.nextElement();
+                if (entry.isDirectory()) continue;
+                hasFile = true;
+                try (InputStream input = archive.getInputStream(entry)) {
+                    input.transferTo(java.io.OutputStream.nullOutputStream());
+                }
+            }
+        }
+        if (!hasFile) {
+            throw new IOException("Runtime library contains no files: " + library);
+        }
+    }
+
     private static ClassLoader dependencyParent(PluginDescriptionFile descriptor) {
         List<ClassLoader> dependencies = new ArrayList<>();
-        for (String name : descriptor.getDepend()) {
-            org.bukkit.plugin.java.PluginClassLoader loader = pluginLoaders.get(name.toLowerCase(java.util.Locale.ROOT));
-            if (loader != null) dependencies.add(loader);
+        List<String> visible = new ArrayList<>();
+        if (descriptor instanceof PaperPluginDescriptor paper) {
+            // Paper shares a dependency's classes only when it joins the classpath.
+            for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
+                if (dependency.joinClasspath()) visible.add(dependency.name());
+            }
+        } else {
+            visible.addAll(descriptor.getDepend());
+            visible.addAll(descriptor.getSoftDepend());
         }
-        for (String name : descriptor.getSoftDepend()) {
-            org.bukkit.plugin.java.PluginClassLoader loader = pluginLoaders.get(name.toLowerCase(java.util.Locale.ROOT));
-            if (loader != null && !dependencies.contains(loader)) dependencies.add(loader);
+        synchronized (lifecycle) {
+            for (String name : visible) {
+                org.bukkit.plugin.java.PluginClassLoader loader =
+                    pluginLoaders.get(pluginKey(name));
+                if (loader != null && !dependencies.contains(loader)) {
+                    dependencies.add(loader);
+                }
+            }
         }
         return dependencies.isEmpty() ? PluginHost.class.getClassLoader() : new DependencyClassLoader(dependencies);
     }
@@ -276,41 +662,296 @@ public final class PluginHost {
     }
 
     private static void enable(JavaPlugin plugin) {
-        plugin.setEnabled(true);
-        plugin.onEnable();
+        synchronized (lifecycle) {
+            InvocationState state = invocations.get(plugin);
+            if (state == null || !isPublishedLocked(plugin)) {
+                throw new IllegalStateException("Plugin disappeared while enabling: "
+                    + plugin.getName());
+            }
+            if (state.loading || state.enabling || state.disabling) {
+                throw new IllegalStateException("Plugin is already changing lifecycle state: "
+                    + plugin.getName());
+            }
+            state.disableComplete = false;
+            state.disableRequested = false;
+            state.enabling = true;
+            state.accepting = true;
+            plugin.setEnabled(true);
+        }
+        boolean disableRequested;
+        boolean discardRequested;
+        try {
+            invokeLifecycleCallback(plugin::onEnable);
+        } finally {
+            synchronized (lifecycle) {
+                InvocationState state = invocations.get(plugin);
+                disableRequested = state != null && state.disableRequested;
+                discardRequested = state != null && state.discardRequested;
+                if (state != null) {
+                    state.enabling = false;
+                    lifecycle.notifyAll();
+                }
+            }
+            if (discardRequested) discardSerialized(plugin);
+            else if (disableRequested) disableSerialized(plugin);
+        }
+        synchronized (lifecycle) {
+            InvocationState state = invocations.get(plugin);
+            if (state == null || !plugin.isEnabled()) {
+                throw new IllegalStateException("Plugin disappeared while enabling: "
+                    + plugin.getName());
+            }
+        }
         FotonLifecycle.dispatchCommands(plugin);
-        EventBridge.dispatch(new org.bukkit.event.server.PluginEnableEvent(plugin));
+        invokeLifecycleCallback(() ->
+            EventBridge.dispatch(new org.bukkit.event.server.PluginEnableEvent(plugin)));
         System.out.println("[host] enabled " + plugin.getDescription().getFullName());
     }
 
-    /** Disables one plugin, and lets go of what it claimed. */
+    /** Disables one plugin while keeping its Paper-visible loaded identity. */
     public static void disable(Plugin plugin) {
-        if (plugin == null || !loaded.remove(plugin)) {
-            return;
+        lifecycleOperation.lock();
+        try {
+            disableSerialized(plugin);
+        } finally {
+            lifecycleOperation.unlock();
         }
+    }
+
+    private static void disableSerialized(Plugin plugin) {
+        final boolean wasEnabled;
+        final InvocationState state;
+        synchronized (lifecycle) {
+            if (plugin == null || !isPublishedLocked(plugin)) return;
+            state = invocations.get(plugin);
+            if (state == null || state.disabling || state.disableComplete) return;
+            if (state.loading || state.enabling) {
+                state.disableRequested = true;
+                return;
+            }
+            state.accepting = false;
+            state.disabling = true;
+            wasEnabled = plugin.isEnabled();
+            if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
+                java.setEnabled(false);
+            }
+        }
+        // Bukkit calls onDisable while the plugin still owns its listeners,
+        // tasks, services, channels, and commands. This lets it release its
+        // own state deliberately; the host then guarantees cleanup even when
+        // the callback throws.
+        if (wasEnabled) {
+            try {
+                invokeLifecycleCallback(plugin::onDisable);
+            } catch (Throwable error) {
+                System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);
+            }
+        }
+        // Paper publishes the event before its manager tears down the plugin's
+        // registrations. Other plugins can still discover the disabled plugin
+        // and inspect its commands/services/resources from this callback.
+        if (wasEnabled) {
+            invokeLifecycleCallback(() ->
+                EventBridge.dispatch(new org.bukkit.event.server.PluginDisableEvent(plugin)));
+        }
+        cleanupPublished(plugin);
+        awaitInvocations(state, () -> finishNormalDisable(plugin, state));
+    }
+
+    private static void cleanupPublished(Plugin plugin) {
+        org.bukkit.Bukkit.getScheduler().cancelTasks(plugin);
+        FotonPlayer.removeAttachments(plugin);
         CommandMap.forget(plugin);
         org.bukkit.Bukkit.getServicesManager().unregisterAll(plugin);
         org.bukkit.Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin);
         org.bukkit.Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin);
         EventBridge.unregister(plugin);
+    }
+
+    private static void finishNormalDisable(Plugin plugin, InvocationState state) {
+        boolean discardRequested = false;
+        synchronized (lifecycle) {
+            if (invocations.get(plugin) == state) {
+                state.disabling = false;
+                state.disableComplete = true;
+                discardRequested = state.discardRequested;
+            }
+            lifecycle.notifyAll();
+        }
+        if (discardRequested) {
+            discard(plugin);
+        }
+    }
+
+    /** Permanently unpublishes a plugin after a failed load or host shutdown. */
+    private static void discard(Plugin plugin) {
+        lifecycleOperation.lock();
         try {
-            plugin.onDisable();
-        } catch (Throwable error) {
-            System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);
+            discardSerialized(plugin);
+        } finally {
+            lifecycleOperation.unlock();
         }
-        if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
-            java.setEnabled(false);
+    }
+
+    private static void discardSerialized(Plugin plugin) {
+        if (plugin == null) return;
+        InvocationState state;
+        boolean needsDisable;
+        synchronized (lifecycle) {
+            if (!isPublishedLocked(plugin)) return;
+            state = invocations.get(plugin);
+            if (state != null && (state.loading || state.enabling)) {
+                state.discardRequested = true;
+                state.disableRequested = true;
+                return;
+            }
+            if (state != null && state.disabling) {
+                state.discardRequested = true;
+                return;
+            }
+            needsDisable = state != null && !state.disabling && !state.disableComplete;
         }
-        org.bukkit.plugin.java.PluginClassLoader loader =
-            pluginLoaders.remove(plugin.getName().toLowerCase(java.util.Locale.ROOT));
+        if (state == null) return;
+
+        if (needsDisable) disableSerialized(plugin);
+
+        final org.bukkit.plugin.java.PluginClassLoader loader;
+        synchronized (lifecycle) {
+            removePublishedLocked(plugin);
+            loader = loadersByPlugin.get(plugin);
+            if (loader != null) {
+                pluginLoaders.remove(pluginKey(plugin.getName()), loader);
+            }
+        }
+        awaitInvocations(state, () -> finishDiscard(plugin, state, loader));
+    }
+
+    private static void finishDiscard(Plugin plugin, InvocationState state,
+            org.bukkit.plugin.java.PluginClassLoader loader) {
+        synchronized (lifecycle) {
+            invocations.remove(plugin, state);
+            if (loader != null) loadersByPlugin.remove(plugin, loader);
+            lifecycle.notifyAll();
+        }
         if (loader != null) {
             try {
                 loader.close();
             } catch (java.io.IOException error) {
-                System.out.println("[host] " + plugin.getName() + " classloader failed to close: " + error);
+                System.out.println("[host] " + plugin.getName()
+                    + " classloader failed to close: " + error);
             }
         }
-        EventBridge.dispatch(new org.bukkit.event.server.PluginDisableEvent(plugin));
+    }
+
+    private static void awaitInvocations(InvocationState state, Runnable onDrained) {
+        boolean interrupted = false;
+        int operationHolds = 0;
+        boolean operationReleased = false;
+        try {
+            synchronized (lifecycle) {
+                if (state.active != 0 && isInsidePluginCallback()) {
+                    appendOnDrained(state, onDrained);
+                    return;
+                }
+                operationHolds = lifecycleOperation.getHoldCount();
+                while (state.active != 0) {
+                    if (!operationReleased) {
+                        for (int hold = 0; hold < operationHolds; hold++) {
+                            lifecycleOperation.unlock();
+                        }
+                        operationReleased = true;
+                    }
+                    try {
+                        lifecycle.wait();
+                    } catch (InterruptedException ignored) {
+                        interrupted = true;
+                    }
+                }
+            }
+            // Complete the state transition before reacquiring the operation
+            // lock. A callback that acquired it while draining may itself be
+            // waiting for this disable to become complete.
+            onDrained.run();
+        } finally {
+            if (operationReleased) {
+                for (int hold = 0; hold < operationHolds; hold++) {
+                    lifecycleOperation.lock();
+                }
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static boolean isInsidePluginCallback() {
+        return !threadInvocations.get().isEmpty() || lifecycleCallbackDepth.get() != 0;
+    }
+
+    /** Invokes foreign plugin code without making lifecycle helper threads wait on their caller. */
+    private static void invokeLifecycleCallback(Runnable callback) {
+        int operationHolds = lifecycleOperation.getHoldCount();
+        for (int hold = 0; hold < operationHolds; hold++) {
+            lifecycleOperation.unlock();
+        }
+        int depth = lifecycleCallbackDepth.get();
+        lifecycleCallbackDepth.set(depth + 1);
+        try {
+            callback.run();
+        } finally {
+            if (depth == 0) lifecycleCallbackDepth.remove();
+            else lifecycleCallbackDepth.set(depth);
+            for (int hold = 0; hold < operationHolds; hold++) {
+                lifecycleOperation.lock();
+            }
+        }
+    }
+
+    private static void appendOnDrained(InvocationState state, Runnable action) {
+        Runnable previous = state.onDrained;
+        state.onDrained = previous == null ? action : () -> {
+            previous.run();
+            action.run();
+        };
+    }
+
+    private static final class InvocationState {
+        boolean loading;
+        boolean enabling;
+        boolean disableRequested;
+        boolean discardRequested;
+        boolean accepting;
+        boolean disabling;
+        boolean disableComplete;
+        int active;
+        Runnable onDrained;
+    }
+
+    static final class Invocation implements AutoCloseable {
+        private InvocationState state;
+
+        private Invocation(InvocationState state) {
+            this.state = state;
+        }
+
+        @Override public void close() {
+            Runnable onDrained = null;
+            synchronized (lifecycle) {
+                if (state == null) return;
+                Map<InvocationState, Integer> current = threadInvocations.get();
+                int depth = current.getOrDefault(state, 0);
+                if (depth <= 1) current.remove(state);
+                else current.put(state, depth - 1);
+                state.active--;
+                if (state.active == 0) {
+                    onDrained = state.onDrained;
+                    state.onDrained = null;
+                }
+                state = null;
+                lifecycle.notifyAll();
+            }
+            if (onDrained != null) onDrained.run();
+        }
     }
 
     /** The plugin with this name, or null. Case-insensitive, as Bukkit is. */
@@ -318,23 +959,53 @@ public final class PluginHost {
         if (name == null) {
             return null;
         }
+        synchronized (lifecycle) {
+            return findByNameLocked(name);
+        }
+    }
+
+    private static Plugin findByNameLocked(String name) {
         for (Plugin plugin : loaded) {
-            if (plugin.getName().equalsIgnoreCase(name)) {
-                return plugin;
-            }
+            if (plugin.getName().equalsIgnoreCase(name)) return plugin;
         }
         return null;
     }
 
-    /** Everything enabled, in the order it was enabled. */
-    public static Plugin[] all() {
-        return loaded.toArray(new Plugin[0]);
+    private static boolean isPublishedLocked(Plugin candidate) {
+        for (Plugin plugin : loaded) {
+            if (plugin == candidate) return true;
+        }
+        return false;
     }
 
-    /** Disables everything, newest first. */
+    private static void removePublishedLocked(Plugin candidate) {
+        loaded.removeIf(plugin -> plugin == candidate);
+    }
+
+    private static String pluginKey(String name) {
+        return name.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** Everything loaded, in dependency/load order. */
+    public static Plugin[] all() {
+        synchronized (lifecycle) {
+            return loaded.toArray(new Plugin[0]);
+        }
+    }
+
+    /** Disables and discards everything, newest first, for JVM shutdown. */
     public static void disableAll() {
-        while (!loaded.isEmpty()) {
-            disable(loaded.get(loaded.size() - 1));
+        lifecycleOperation.lock();
+        try {
+            List<Plugin> snapshot;
+            synchronized (lifecycle) {
+                snapshot = new ArrayList<>(loaded);
+            }
+            for (int index = snapshot.size() - 1; index >= 0; index--) {
+                discardSerialized(snapshot.get(index));
+            }
+        } finally {
+            lifecycleOperation.unlock();
         }
     }
 }

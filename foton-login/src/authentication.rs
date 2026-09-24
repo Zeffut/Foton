@@ -7,7 +7,9 @@ use std::{io, net::IpAddr, sync::OnceLock, time::Duration};
 use foton_core::player::GameProfile;
 use reqwest::{StatusCode, Url, redirect::Policy};
 use thiserror::Error;
+use tokio::sync::{Semaphore, SemaphorePermit};
 use tokio::time::timeout as tokio_timeout;
+use tokio_util::sync::CancellationToken;
 
 const DEFAULT_AUTH_SERVER: &str = "https://sessionserver.mojang.com/session/minecraft/hasJoined";
 
@@ -28,6 +30,31 @@ const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTH_TOTAL_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_AUTH_RESPONSE_BODY_BYTES: usize = 1024 * 1024;
 const MAX_AUTH_REDIRECT_HOPS: usize = 10;
+
+/// Maximum number of expensive RSA/session-server authentications in flight.
+///
+/// Login sockets are accepted before the player cap can apply. Without a
+/// separate pre-login bound, a connection flood can make every runtime worker
+/// perform private-key operations and hold an HTTP request at the same time.
+const AUTHENTICATION_CONCURRENCY_LIMIT: usize = 32;
+
+/// How long a login may wait for one of the bounded authentication slots.
+const AUTHENTICATION_QUEUE_TIMEOUT: Duration = Duration::from_secs(5);
+
+static AUTHENTICATION_SLOTS: Semaphore = Semaphore::const_new(AUTHENTICATION_CONCURRENCY_LIMIT);
+
+/// Reserves capacity for the complete encrypted-login authentication path.
+///
+/// The returned permit must be retained across both RSA operations and the
+/// session-server request. `None` means the pre-login admission queue remained
+/// saturated long enough that retaining this unauthenticated socket is no
+/// longer useful.
+pub(crate) async fn acquire_authentication_slot() -> Option<SemaphorePermit<'static>> {
+    tokio_timeout(AUTHENTICATION_QUEUE_TIMEOUT, AUTHENTICATION_SLOTS.acquire())
+        .await
+        .ok()?
+        .ok()
+}
 
 /// The HTTP clients every session-server call goes through, split by the
 /// configured remote-HTTP policy captured by their redirect handlers.
@@ -102,6 +129,9 @@ pub enum AuthError {
     /// The authentication server attempted a redirect forbidden by endpoint policy.
     #[error("Authentication server redirect was rejected by endpoint policy")]
     RedirectRejected,
+    /// The connection closed or the server started shutting down.
+    #[error("Authentication was cancelled")]
+    Cancelled,
     /// An unknown status code was returned.
     #[error("Unknown Status Code {0}")]
     UnknownStatusCode(StatusCode),
@@ -144,6 +174,26 @@ pub async fn mojang_authenticate(
         AUTH_TOTAL_TIMEOUT,
     )
     .await
+}
+
+/// Authenticates like [`mojang_authenticate`], but gives up as soon as the
+/// login connection or the server is cancelled.
+pub(crate) async fn mojang_authenticate_with_cancel(
+    username: &str,
+    server_hash: &str,
+    auth_server: Option<&str>,
+    allow_insecure_auth_server: bool,
+    cancellation: &CancellationToken,
+) -> Result<GameProfile, AuthError> {
+    tokio::select! {
+        () = cancellation.cancelled() => Err(AuthError::Cancelled),
+        result = mojang_authenticate(
+            username,
+            server_hash,
+            auth_server,
+            allow_insecure_auth_server,
+        ) => result,
+    }
 }
 
 async fn mojang_authenticate_with_timeout(

@@ -6,6 +6,15 @@ distance to that, and the order it gets closed in.
 Numbers come from `python3 dev/coverage.py` and the machine-checked ledger in
 `dev/parity-gaps.txt`. Nothing here is an estimate by eye.
 
+Client-version translation is a separate, opt-in compatibility layer rather
+than vanilla parity. Foton's plugin runtime contains the five pinned Netty
+4.2.15.Final modules needed by the direct Via transport bridge, but does not
+redistribute ViaVersion or ViaBackwards. Operators supply the official 5.11.0
+JARs themselves. The real-client `dev/via-test.sh` acceptance test verifies
+Minecraft 1.21.11 (protocol 774) joining the 26.2 server (protocol 776), and a
+native 26.2 client joining while both plugins remain active. API linkage or a
+successful plugin `onEnable` alone is not counted as proof of translation.
+
 ## How the measurement was wrong, and what it says now
 
 `dev/coverage.py` counted behavior classes. Three things made that number lie,
@@ -321,26 +330,19 @@ cannot.
       villagers. The copper golem's `Brain` half is done -- see the brain entry
       below -- so the limit there is the POI tracker, not the layer.
 
-- [ ] **Villager, trading, iron golem in a village.** One mob unlocks a whole
-      economy, and the zombie villager behind it. It is also what would make
-      the iron golem's village goals and its poppy worth writing: with no
-      villagers, an iron golem currently offers flowers only to copper golems.
-- [ ] **Mounts**: horse, donkey, mule, skeleton horse, llama, camel.
+- [~] **Villagers and trading.** Villagers, professions, schedules, offers,
+      reputation, gossip and zombie-villager curing are implemented and covered
+      by unit and live day-cycle tests. The remaining partial edge is the full
+      POI-distance integration used by village-level iron-golem behaviour.
+- [x] **Mounts**: horse, donkey, mule, skeleton horse, zombie horse, llama,
+      trader llama, camel and nautilus. See the detailed horse-family entry below.
 - [ ] **The rest of the passive roster**: cat, ocelot, fox, rabbit, panda,
       goat, turtle, dolphin, parrot, bee, axolotl, frog, sniffer, armadillo.
 - [ ] **The rest of the hostile roster**: blaze, ghast, phantom, guardian,
       shulker, piglin and brute, hoglin, endermite, vex, breeze, creaking.
-- [~] **Raids**: the five illagers and the ravager are in, with the shared
-      `PatrollingMonster`, `Raider`, `AbstractIllager` and
-      `SpellcasterIllager` layers under them, the ominous banner a patrol
-      captain wears, and all five spells. The raid itself is not: `Raid`
-      and `Raids` stand on villagers, an occupied village POI index, a
-      saved-data manager and a boss bar, and Foton has none of the four.
-      Every seam that needs a live raid is written and answers from
-      `Raider::current_raid_status`, which is always `None`; landing the
-      raid manager means giving that one method something to read. What is
-      inert until then: the door goals, the celebration, the wave buffs,
-      and the bad-omen path.
+- [x] **Raids**: `Raid` and `Raids`, wave spawning, raider membership, door
+      goals, celebration, wave buffs, bad omen, boss bar and persistence are
+      implemented. `dev/raid-test.sh` exercises the live chain.
 
 Ghast and phantom need flying navigation, which does not exist yet; that is one
 piece of work that unlocks several mobs at once, and should come before the
@@ -475,12 +477,12 @@ mobs that need it.
 
 - [ ] Elder guardian, eye of ender.
 
-### Blocked, and honestly so
+### Partial systems
 
-- **Statistics and advancements.** Both need `stat_type` and `custom_stat`
-  registries that come from FotonExtractor, an external tool not in this
-  repository. `AGENTS.md` forbids hand-writing extracted data, so these cannot
-  be done here. Every `TODO: award stat ...` in the tree is waiting on this.
+- [~] **Statistics and advancements.** Both registries, persistence, protocol
+  synchronization and live tests now exist. Statistics are not yet wired into
+  scoreboard objectives, and advancement function/loot rewards remain to be
+  implemented; those are functional gaps rather than missing extractor data.
 
 ## Running all of it
 

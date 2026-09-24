@@ -14,6 +14,7 @@ const MAX_PROFILE_LOOKUP_ATTEMPTS: usize = 3;
 const PROFILE_LOOKUP_RETRY_DELAY: Duration = Duration::from_millis(750);
 /// Bounds every attempt so suspended administrative commands always release their ordering barrier.
 const PROFILE_LOOKUP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_PROFILE_RESPONSE_BYTES: usize = 64 * 1024;
 
 /// Failure while resolving a player identity through the configured profile service.
 #[derive(Debug, Error)]
@@ -125,16 +126,44 @@ fn profile_lookup_url(
 }
 
 async fn parse_profile_response(
-    response: reqwest::Response,
+    mut response: reqwest::Response,
     requested_name: &str,
 ) -> Result<KnownPlayer, ProfileLookupError> {
-    let profile = response
-        .json::<ProfileLookupResponse>()
-        .await
-        .map_err(|source| ProfileLookupError::InvalidResponse {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_PROFILE_RESPONSE_BYTES as u64)
+    {
+        return Err(ProfileLookupError::InvalidResponse {
+            name: requested_name.to_owned(),
+            reason: format!("response exceeds the {MAX_PROFILE_RESPONSE_BYTES}-byte limit"),
+        });
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) =
+        response
+            .chunk()
+            .await
+            .map_err(|source| ProfileLookupError::InvalidResponse {
+                name: requested_name.to_owned(),
+                reason: source.to_string(),
+            })?
+    {
+        let remaining = MAX_PROFILE_RESPONSE_BYTES.saturating_sub(body.len());
+        if chunk.len() > remaining {
+            return Err(ProfileLookupError::InvalidResponse {
+                name: requested_name.to_owned(),
+                reason: format!("response exceeds the {MAX_PROFILE_RESPONSE_BYTES}-byte limit"),
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let profile = serde_json::from_slice::<ProfileLookupResponse>(&body).map_err(|source| {
+        ProfileLookupError::InvalidResponse {
             name: requested_name.to_owned(),
             reason: source.to_string(),
-        })?;
+        }
+    })?;
     let uuid =
         Uuid::parse_str(&profile.id).map_err(|source| ProfileLookupError::InvalidResponse {
             name: requested_name.to_owned(),
@@ -145,7 +174,17 @@ async fn parse_profile_response(
 
 #[cfg(test)]
 mod tests {
-    use super::profile_lookup_url;
+    use std::time::Duration;
+
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    use super::{
+        MAX_PROFILE_RESPONSE_BYTES, ProfileLookupError, lookup_online_profile_once,
+        profile_lookup_url,
+    };
 
     #[test]
     fn profile_lookup_url_uses_mojangs_default_endpoint() {
@@ -166,5 +205,48 @@ mod tests {
             panic!("configured profile lookup URL should build");
         };
         assert_eq!(url.as_str(), "https://profiles.example.com/lookup/steve");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_oversized_profile_response_from_its_headers() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have an address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("client should connect");
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let count = socket
+                    .read(&mut chunk)
+                    .await
+                    .expect("request should be readable");
+                assert_ne!(count, 0, "request ended before its headers");
+                request.extend_from_slice(&chunk[..count]);
+            }
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                MAX_PROFILE_RESPONSE_BYTES + 1
+            );
+            socket
+                .write_all(headers.as_bytes())
+                .await
+                .expect("headers should write");
+        });
+        let client = reqwest::Client::new();
+        let url = format!("http://{address}/steve");
+
+        let result =
+            lookup_online_profile_once(&client, &url, "Steve", Duration::from_secs(1)).await;
+
+        assert!(matches!(
+            result,
+            Err(ProfileLookupError::InvalidResponse { reason, .. })
+                if reason.contains("exceeds")
+        ));
+        server.await.expect("test server should stop cleanly");
     }
 }

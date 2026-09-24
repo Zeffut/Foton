@@ -26,6 +26,7 @@ libloading = "0.8"
 rustc-hash.workspace = true
 simdnbt.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

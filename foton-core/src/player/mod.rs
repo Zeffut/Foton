@@ -1108,14 +1108,19 @@ impl Player {
             } else {
                 Vec::new()
             };
+        let rendered_death_message = death_message.to_plain(&DisplayResolutor);
         let mut death_event = PlayerDeathEvent::with_drops(
             self.gameprofile.id,
-            death_message.to_plain(&DisplayResolutor),
+            rendered_death_message.clone(),
             drops,
             world.get_game_rule(&KEEP_INVENTORY) || self.game_mode() == GameType::Spectator,
         );
         self.fire_event(&mut death_event);
+        // Plugins see a rendered string, but vanilla sends the translatable
+        // component so each client localizes it. Only a message a plugin
+        // actually rewrote goes out as plain text.
         let death_message = match death_event.death_message() {
+            Some(message) if message == rendered_death_message => death_message,
             Some(message) => TextComponent::plain(message.to_owned()),
             None => TextComponent::const_plain(""),
         };

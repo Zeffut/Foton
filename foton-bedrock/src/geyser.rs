@@ -14,6 +14,7 @@
 //! cleanly against the pinned build, with every override (including an
 //! escaped MOTD) surviving intact.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf, absolute};
 use std::process::{ExitStatus, Stdio};
 use std::time::{Duration, Instant};
@@ -21,7 +22,9 @@ use std::{env, io};
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt as _, AsyncRead, BufReader};
+use tokio::io::{
+    AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader,
+};
 use tokio::process::{Child, Command};
 use tokio::{fs, task, time};
 use tokio_util::sync::CancellationToken;
@@ -76,6 +79,13 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(10);
 /// finite. `dev/doctor.sh`'s `curl --max-time 10` is sized for a small API
 /// ping, not a multi-megabyte transfer — too short a bound to reuse here.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Maximum accepted size of the pinned standalone jar.
+///
+/// Build 1233 is 29,614,100 bytes. Sixty-four MiB leaves more than twice that
+/// verified size for HTTP representation differences while still bounding a
+/// corrupt cache or hostile response well below an unbounded disk write.
+const MAX_GEYSER_JAR_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Bounded timeout for the `java -version` probe in [`resolve_java`].
 ///
@@ -157,6 +167,14 @@ pub enum GeyserError {
         expected: String,
         /// What the jar's bytes actually hashed to.
         actual: String,
+    },
+    /// A cache entry or response exceeded [`MAX_GEYSER_JAR_BYTES`].
+    #[error("Geyser jar at {location} exceeds the {limit} byte safety limit")]
+    JarTooLarge {
+        /// URL or filesystem path whose bytes crossed the limit.
+        location: String,
+        /// Maximum accepted byte count.
+        limit: u64,
     },
     /// A file under the Bedrock directory could not be read or written.
     #[error("failed to access {path}: {source}")]
@@ -325,7 +343,11 @@ fn to_hex(bytes: &[u8]) -> String {
 /// Returns [`GeyserError::ChecksumMismatch`] if the digests differ.
 pub fn verify_checksum(bytes: &[u8], expected: &str) -> Result<(), GeyserError> {
     let digest = Sha256::digest(bytes);
-    let actual = to_hex(&digest);
+    verify_digest(&digest, expected)
+}
+
+fn verify_digest(digest: &[u8], expected: &str) -> Result<(), GeyserError> {
+    let actual = to_hex(digest);
     if actual.eq_ignore_ascii_case(expected) {
         Ok(())
     } else {
@@ -453,17 +475,20 @@ async fn resolve_java(
     Ok(binary)
 }
 
-/// Downloads `url` whole into memory, aborting the whole attempt — DNS,
-/// connect, TLS and body included — if it has not finished within `timeout`.
-/// The pinned jar is tens of megabytes, so buffering it rather than
-/// streaming to disk keeps the checksum check — which must happen before
-/// anything is written — simple.
+/// Downloads `url` into a private sibling of `target`, hashing while bytes are
+/// written and atomically publishing only a complete matching artifact.
 ///
 /// A dedicated [`reqwest::Client`] is built for this rather than the
 /// crate-wide convenience of `reqwest::get`, because that bare function uses
 /// a lazily-initialized client with no timeout at all — exactly the hang
 /// this bound exists to prevent.
-async fn download(url: &str, timeout: Duration) -> Result<Vec<u8>, GeyserError> {
+async fn download(
+    url: &str,
+    target: &Path,
+    expected: &str,
+    max_bytes: u64,
+    timeout: Duration,
+) -> Result<(), GeyserError> {
     let wrap = |source: reqwest::Error| GeyserError::Download {
         url: url.to_owned(),
         source,
@@ -472,15 +497,140 @@ async fn download(url: &str, timeout: Duration) -> Result<Vec<u8>, GeyserError> 
         .timeout(timeout)
         .build()
         .map_err(wrap)?;
-    let response = client
+    let mut response = client
         .get(url)
         .send()
         .await
         .map_err(wrap)?
         .error_for_status()
         .map_err(wrap)?;
-    let bytes = response.bytes().await.map_err(wrap)?;
-    Ok(bytes.to_vec())
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes)
+    {
+        return Err(GeyserError::JarTooLarge {
+            location: url.to_owned(),
+            limit: max_bytes,
+        });
+    }
+
+    let temporary = sibling_download_path(target);
+    let result = async {
+        let mut output = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .await
+            .map_err(|source| GeyserError::Io {
+                path: temporary.clone(),
+                source,
+            })?;
+        let mut digest = Sha256::new();
+        let mut written = 0_u64;
+        while let Some(chunk) = response.chunk().await.map_err(wrap)? {
+            let chunk_len =
+                u64::try_from(chunk.len()).map_err(|_too_large| GeyserError::JarTooLarge {
+                    location: url.to_owned(),
+                    limit: max_bytes,
+                })?;
+            written = written.saturating_add(chunk_len);
+            if written > max_bytes {
+                return Err(GeyserError::JarTooLarge {
+                    location: url.to_owned(),
+                    limit: max_bytes,
+                });
+            }
+            output
+                .write_all(&chunk)
+                .await
+                .map_err(|source| GeyserError::Io {
+                    path: temporary.clone(),
+                    source,
+                })?;
+            digest.update(&chunk);
+        }
+        output.sync_all().await.map_err(|source| GeyserError::Io {
+            path: temporary.clone(),
+            source,
+        })?;
+        verify_digest(&digest.finalize(), expected)
+    }
+    .await;
+
+    if let Err(error) = result {
+        let _ignored = fs::remove_file(&temporary).await;
+        return Err(error);
+    }
+    if let Err(source) = fs::rename(&temporary, target).await {
+        let _ignored = fs::remove_file(&temporary).await;
+        return Err(GeyserError::Io {
+            path: target.to_owned(),
+            source,
+        });
+    }
+    Ok(())
+}
+
+fn sibling_download_path(target: &Path) -> PathBuf {
+    let name = target
+        .file_name()
+        .map_or_else(|| JAR_FILE_NAME.into(), OsStr::to_string_lossy);
+    target.with_file_name(format!(".{name}.{}.part", uuid::Uuid::new_v4()))
+}
+
+async fn verify_file_checksum(
+    path: &Path,
+    expected: &str,
+    max_bytes: u64,
+) -> Result<(), GeyserError> {
+    let mut file = fs::File::open(path)
+        .await
+        .map_err(|source| GeyserError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    let length = file
+        .metadata()
+        .await
+        .map_err(|source| GeyserError::Io {
+            path: path.to_owned(),
+            source,
+        })?
+        .len();
+    if length > max_bytes {
+        return Err(GeyserError::JarTooLarge {
+            location: path.display().to_string(),
+            limit: max_bytes,
+        });
+    }
+    let mut digest = Sha256::new();
+    let mut read = 0_u64;
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .await
+            .map_err(|source| GeyserError::Io {
+                path: path.to_owned(),
+                source,
+            })?;
+        if count == 0 {
+            break;
+        }
+        let count_u64 = u64::try_from(count).map_err(|_too_large| GeyserError::JarTooLarge {
+            location: path.display().to_string(),
+            limit: max_bytes,
+        })?;
+        read = read.saturating_add(count_u64);
+        if read > max_bytes {
+            return Err(GeyserError::JarTooLarge {
+                location: path.display().to_string(),
+                limit: max_bytes,
+            });
+        }
+        digest.update(&buffer[..count]);
+    }
+    verify_digest(&digest.finalize(), expected)
 }
 
 /// Picks the jar path [`resolve_jar`] should use, made absolute (see
@@ -505,13 +655,7 @@ async fn resolve_jar(options: &GeyserOptions, bedrock_dir: &Path) -> Result<Path
     let jar_path = jar_candidate_path(options, bedrock_dir)?;
 
     if jar_path.is_file() {
-        let bytes = fs::read(&jar_path)
-            .await
-            .map_err(|source| GeyserError::Io {
-                path: jar_path.clone(),
-                source,
-            })?;
-        verify_checksum(&bytes, GEYSER_SHA256)?;
+        verify_file_checksum(&jar_path, GEYSER_SHA256, MAX_GEYSER_JAR_BYTES).await?;
         return Ok(jar_path);
     }
 
@@ -519,14 +663,14 @@ async fn resolve_jar(options: &GeyserOptions, bedrock_dir: &Path) -> Result<Path
         target: "geyser",
         "downloading Geyser {GEYSER_VERSION} build {GEYSER_BUILD} from {GEYSER_URL}"
     );
-    let bytes = download(GEYSER_URL, DOWNLOAD_TIMEOUT).await?;
-    verify_checksum(&bytes, GEYSER_SHA256)?;
-    fs::write(&jar_path, &bytes)
-        .await
-        .map_err(|source| GeyserError::Io {
-            path: jar_path.clone(),
-            source,
-        })?;
+    download(
+        GEYSER_URL,
+        &jar_path,
+        GEYSER_SHA256,
+        MAX_GEYSER_JAR_BYTES,
+        DOWNLOAD_TIMEOUT,
+    )
+    .await?;
     Ok(jar_path)
 }
 
@@ -872,15 +1016,18 @@ impl Supervisor {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::{read, read_dir, write};
     use std::future::pending;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
 
+    use sha2::{Digest as _, Sha256};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::TcpListener;
 
     use super::{
         GeyserError, GeyserOptions, download, jar_candidate_path, java_binary_path, render_config,
-        to_absolute, verify_checksum,
+        to_absolute, verify_checksum, verify_file_checksum,
     };
     use crate::key;
 
@@ -1085,6 +1232,139 @@ mod tests {
         assert!(verify_checksum(b"", empty_uppercase).is_ok());
     }
 
+    fn checksum(bytes: &[u8]) -> String {
+        super::to_hex(&Sha256::digest(bytes))
+    }
+
+    async fn serve_once(body: Vec<u8>, content_length: Option<usize>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binding the loopback test server");
+        let address = listener.local_addr().expect("bound listener address");
+        tokio::spawn(async move {
+            let Ok((mut socket, _peer)) = listener.accept().await else {
+                return;
+            };
+            let mut request = [0_u8; 1024];
+            let _ignored = socket.read(&mut request).await;
+            let length = content_length
+                .map(|length| format!("Content-Length: {length}\r\n"))
+                .unwrap_or_default();
+            let header = format!("HTTP/1.1 200 OK\r\n{length}Connection: close\r\n\r\n");
+            if socket.write_all(header.as_bytes()).await.is_ok() {
+                let _ignored = socket.write_all(&body).await;
+            }
+            let _ignored = socket.shutdown().await;
+        });
+        format!("http://{address}/geyser.jar")
+    }
+
+    fn assert_no_partial_sibling(target: &Path) {
+        let parent = target.parent().expect("test target has a parent");
+        let leaked = read_dir(parent)
+            .expect("reading test target parent")
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".part"));
+        assert!(
+            !leaked,
+            "download left a private partial file beside {target:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_matching_stream_is_atomically_published() {
+        let work = tempfile::tempdir().expect("temp dir");
+        let target = work.path().join("Geyser.jar");
+        let body = b"a small stand-in for the pinned jar".to_vec();
+        let url = serve_once(body.clone(), Some(body.len())).await;
+
+        download(
+            &url,
+            &target,
+            &checksum(&body),
+            1024,
+            Duration::from_secs(2),
+        )
+        .await
+        .expect("matching response should publish");
+
+        assert_eq!(read(&target).expect("published jar"), body);
+        assert_no_partial_sibling(&target);
+    }
+
+    #[tokio::test]
+    async fn an_oversize_stream_is_stopped_and_never_published() {
+        let work = tempfile::tempdir().expect("temp dir");
+        let target = work.path().join("Geyser.jar");
+        let body = vec![0x5a; 33];
+        // No Content-Length: this exercises the incremental ceiling rather
+        // than only the early header rejection.
+        let url = serve_once(body.clone(), None).await;
+
+        let result = download(&url, &target, &checksum(&body), 32, Duration::from_secs(2)).await;
+
+        assert!(matches!(result, Err(GeyserError::JarTooLarge { .. })));
+        assert!(!target.exists());
+        assert_no_partial_sibling(&target);
+    }
+
+    #[tokio::test]
+    async fn a_cut_off_response_is_never_published() {
+        let work = tempfile::tempdir().expect("temp dir");
+        let target = work.path().join("Geyser.jar");
+        let body = b"only half of the promised response".to_vec();
+        let url = serve_once(body.clone(), Some(body.len() * 2)).await;
+
+        let result = download(
+            &url,
+            &target,
+            &checksum(&body),
+            1024,
+            Duration::from_secs(2),
+        )
+        .await;
+
+        assert!(matches!(result, Err(GeyserError::Download { .. })));
+        assert!(!target.exists());
+        assert_no_partial_sibling(&target);
+    }
+
+    #[tokio::test]
+    async fn a_hash_mismatch_is_never_published() {
+        let work = tempfile::tempdir().expect("temp dir");
+        let target = work.path().join("Geyser.jar");
+        let body = b"wrong artifact".to_vec();
+        let url = serve_once(body.clone(), Some(body.len())).await;
+
+        let result = download(
+            &url,
+            &target,
+            &checksum(b"expected artifact"),
+            1024,
+            Duration::from_secs(2),
+        )
+        .await;
+
+        assert!(matches!(result, Err(GeyserError::ChecksumMismatch { .. })));
+        assert!(!target.exists());
+        assert_no_partial_sibling(&target);
+    }
+
+    #[tokio::test]
+    async fn cache_hashing_is_streamed_and_size_bounded() {
+        let work = tempfile::tempdir().expect("temp dir");
+        let matching = work.path().join("matching.jar");
+        let oversize = work.path().join("oversize.jar");
+        write(&matching, b"cached artifact").expect("write cache fixture");
+        write(&oversize, [0_u8; 17]).expect("write oversize fixture");
+
+        verify_file_checksum(&matching, &checksum(b"cached artifact"), 16)
+            .await
+            .expect("matching cache should verify");
+        let result = verify_file_checksum(&oversize, &checksum(&[0_u8; 17]), 16).await;
+        assert!(matches!(result, Err(GeyserError::JarTooLarge { .. })));
+    }
+
     #[test]
     fn reads_a_modern_java_version_banner() {
         let banner = "openjdk version \"21.0.5\" 2024-10-15\nOpenJDK Runtime Environment\n";
@@ -1129,7 +1409,16 @@ mod tests {
         });
 
         let url = format!("http://{address}/geyser.jar");
-        let result = download(&url, Duration::from_millis(200)).await;
+        let download_dir = tempfile::tempdir().expect("temp dir");
+        let target = download_dir.path().join("Geyser.jar");
+        let result = download(
+            &url,
+            &target,
+            super::GEYSER_SHA256,
+            1024,
+            Duration::from_millis(200),
+        )
+        .await;
 
         match result {
             Err(GeyserError::Download { source, .. }) => {

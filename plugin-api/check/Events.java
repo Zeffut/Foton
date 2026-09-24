@@ -26,6 +26,22 @@ final class Events {
 
         Checks.same(foton.EventBridge.fireJoin(id, "original"), "rewritten by the fixture",
             "a handler's rewrite did not travel back");
+        Checks.same(example.EventFixture.privateHandlers, 2,
+            "private handlers from both hierarchy levels were not discovered");
+        Checks.same(example.EventFixture.protectedHandlers, 1,
+            "a protected declared handler was not discovered");
+        Checks.same(example.EventFixture.inheritedHandlers, 2,
+            "protected/public inherited handlers were not each registered once");
+        Checks.same(example.EventFixture.overriddenHandlers, 0,
+            "an unannotated override did not mask its inherited handler");
+        Checks.same(example.EventFixture.genericHandlers, 1,
+            "a generic bridge registered the same handler more than once");
+
+        Checks.same(
+            foton.EventBridge.firePrepareGrindstone(id, "minecraft:iron_sword 1",
+                "minecraft:golden_sword 1", "minecraft:iron_sword 1"),
+            "minecraft:diamond 2\u001fminecraft:gold_ingot 3\u001fminecraft:emerald 4",
+            "grindstone slot changes did not travel back");
 
         Checks.expect(foton.EventBridge.fireChat(id, "hush now") == null,
             "a cancelled chat should come back as nothing");

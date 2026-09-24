@@ -894,6 +894,32 @@ pub struct PlayerLoginEvent {
     kick_message: Option<String>,
 }
 
+/// A protocol login that fired [`PlayerLoginEvent`] but never reached the join event.
+pub struct PlayerLoginAbortEvent {
+    player: Arc<Player>,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for PlayerLoginAbortEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_login_abort");
+}
+
+impl Event for PlayerLoginAbortEvent {}
+
+impl PlayerLoginAbortEvent {
+    /// Creates an abort notification for the exact connection attempt.
+    #[must_use]
+    pub const fn new(player: Arc<Player>) -> Self {
+        Self { player }
+    }
+
+    /// Returns the player handle whose login attempt ended.
+    #[must_use]
+    pub const fn player(&self) -> &Arc<Player> {
+        &self.player
+    }
+}
+
 /// A player attempted to interact with an entity.
 #[derive(Debug)]
 pub struct PlayerInteractEntityEvent {

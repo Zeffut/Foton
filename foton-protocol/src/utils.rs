@@ -8,6 +8,10 @@ use std::{
 };
 
 use aes::cipher::{Array, BlockModeDecrypt, BlockModeEncrypt, BlockSizeUser};
+use foton_utils::{
+    codec::VarInt,
+    serial::{ReadFrom, WriteTo},
+};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -86,6 +90,28 @@ impl RawPacket {
     pub fn payload(&self) -> &[u8] {
         &self.buffer[self.payload_start as usize..]
     }
+
+    /// Parses an unframed, decompressed `[VarInt packet id][payload]` body.
+    pub fn from_packet_data(packet_data: Vec<u8>) -> Result<Self, PacketError> {
+        if packet_data.is_empty() || packet_data.len() > MAX_PACKET_DATA_SIZE {
+            return Err(PacketError::OutOfBounds);
+        }
+        let mut cursor = io::Cursor::new(packet_data.as_slice());
+        let id = VarInt::read(&mut cursor)?.0;
+        let payload_start = cursor.position() as usize;
+        Ok(Self::from_buffer(id, packet_data, payload_start))
+    }
+
+    /// Serializes this packet as `[VarInt packet id][payload]` without framing.
+    pub fn to_packet_data(&self) -> Result<Vec<u8>, PacketError> {
+        let mut output = Vec::with_capacity(self.payload().len() + VarInt::MAX_SIZE);
+        VarInt(self.id).write(&mut output)?;
+        output.extend_from_slice(self.payload());
+        if output.len() > MAX_PACKET_DATA_SIZE {
+            return Err(PacketError::TooLong(output.len()));
+        }
+        Ok(output)
+    }
 }
 
 /// An error that can occur when handling packets.
@@ -112,15 +138,23 @@ pub enum PacketError {
     #[error("failed to compress packet: {0}")]
     /// Failed to compress the packet.
     CompressionFailed(String),
-    #[error("packet is uncompressed but greater than the threshold")]
-    /// The packet is uncompressed but greater than the threshold.
-    NotCompressed,
+    #[error("compressed packet length {declared} is below threshold {threshold}")]
+    /// A compressed packet declared less data than the negotiated threshold.
+    CompressedBelowThreshold {
+        /// Declared decompressed packet length.
+        declared: usize,
+        /// Negotiated compression threshold.
+        threshold: usize,
+    },
     #[error("failed to decrypt packet: {0}")]
     /// Failed to decrypt the packet.
     DecryptionFailed(String),
     #[error("failed to encrypt packet: {0}")]
     /// Failed to encrypt the packet.
     EncryptionFailed(String),
+    #[error("network write timed out")]
+    /// The peer stopped reading long enough for a network write to time out.
+    WriteTimeout,
     #[error("the connection has closed")]
     /// The connection has closed.
     ConnectionClosed,

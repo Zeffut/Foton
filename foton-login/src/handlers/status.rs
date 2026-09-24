@@ -26,7 +26,7 @@ impl JavaTcpClient {
                     .collect(),
             }),
             enforces_secure_chat: self.server.enforces_secure_chat(),
-            favicon: load_favicon(&self.server.config),
+            favicon: cached_favicon(&self.server.config),
             version: Some(Version {
                 name: MC_VERSION,
                 protocol: CURRENT_MC_PROTOCOL,
@@ -43,26 +43,60 @@ impl JavaTcpClient {
     }
 }
 
-/// Loads the favicon from config.
-fn load_favicon(config: &RuntimeConfig) -> Option<String> {
-    use base64::{Engine, prelude::BASE64_STANDARD};
-    use std::fs;
-    use std::path::Path;
+fn cached_favicon(config: &RuntimeConfig) -> Option<String> {
+    config.use_favicon.then(|| config.favicon.clone())
+}
 
-    const ICON_PREFIX: &str = "data:image/png;base64,";
+#[cfg(test)]
+mod tests {
+    use std::env::temp_dir;
+    use std::fs::{remove_file, write};
 
-    if !config.use_favicon {
-        return None;
+    use foton_core::config::RuntimeConfig;
+
+    use super::cached_favicon;
+
+    fn runtime_config(favicon: String) -> RuntimeConfig {
+        RuntimeConfig {
+            max_players: 20,
+            view_distance: 10,
+            simulation_distance: 10,
+            max_chained_neighbor_updates: 1_000_000,
+            online_mode: true,
+            whitelist_enabled: false,
+            auth_server: None,
+            allow_insecure_auth_server: false,
+            profile_server: None,
+            services_server: None,
+            encryption: true,
+            allow_flight: false,
+            motd: String::new(),
+            use_favicon: true,
+            favicon,
+            enforce_secure_chat: false,
+            chat_spam_threshold_seconds: 10,
+            command_spam_threshold_seconds: 10,
+            compression: None,
+            server_links: None,
+            packet_workers: None,
+            chunk_generation_threads: None,
+            chunk_encoding_threads: None,
+            bug_report_webhook: None,
+        }
     }
 
-    let path = Path::new(&config.favicon);
-    let Ok(icon) = fs::read(path) else {
-        return None;
-    };
+    #[test]
+    fn deleting_the_source_after_startup_does_not_break_status_favicon() {
+        let path = temp_dir().join(format!("foton-status-favicon-{}.png", uuid::Uuid::new_v4()));
+        write(
+            &path,
+            include_bytes!("../../../package-content/favicon.png"),
+        )
+        .expect("write favicon fixture");
+        let encoded = RuntimeConfig::load_favicon(&path).expect("load favicon during startup");
+        remove_file(&path).expect("delete source after startup");
+        let config = runtime_config(encoded.clone());
 
-    let cap = ICON_PREFIX.len() + icon.len().div_ceil(3) * 4;
-    let mut base64 = String::with_capacity(cap);
-    base64 += ICON_PREFIX;
-    BASE64_STANDARD.encode_string(icon, &mut base64);
-    Some(base64)
+        assert_eq!(cached_favicon(&config), Some(encoded));
+    }
 }

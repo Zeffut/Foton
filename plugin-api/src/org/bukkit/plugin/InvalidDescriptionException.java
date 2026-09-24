@@ -11,4 +11,8 @@ public class InvalidDescriptionException extends Exception {
     public InvalidDescriptionException(Throwable cause) {
         super(cause);
     }
+
+    public InvalidDescriptionException(Throwable cause, String message) {
+        super(message, cause);
+    }
 }

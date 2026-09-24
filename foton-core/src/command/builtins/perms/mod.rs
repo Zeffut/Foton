@@ -19,6 +19,7 @@ use crate::permission::{
     PermissionMetadataExpression, PermissionMetadataValue, PermissionResolutionSource,
     PermissionRuleExpression, PermissionState, PermissionSubjectState,
 };
+use crate::player::player_data_storage::PersistenceUpdateOutcome;
 use foton_utils::Identifier;
 use text_components::TextComponent;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -26,6 +27,18 @@ use tokio::{sync::oneshot, task::JoinHandle};
 pub(super) const MANAGE_ALL_PERMISSION: &str = "foton.permission.manage.*";
 pub(super) const GROUP_ALL_PERMISSION: &str = "foton.permission.group.*";
 pub(super) const METADATA_PERMISSION: &str = "foton.permission.metadata";
+
+fn log_user_permission_persistence_warning(uuid: uuid::Uuid, outcome: &PersistenceUpdateOutcome) {
+    let PersistenceUpdateOutcome::CommittedWithError(error) = outcome else {
+        return;
+    };
+    tracing::error!(
+        %uuid,
+        command = "perms",
+        %error,
+        "Permission command update is visible, but its durability or backup rotation could not be confirmed"
+    );
+}
 
 pub(super) fn registration() -> CommandRegistration<CommandSource> {
     CommandRegistration::new(Identifier::from_foton("perms"), |_| command())
@@ -858,6 +871,7 @@ async fn user_permission_operation(
             })
             .await
             .map_err(dynamic_error)?;
+        log_user_permission_persistence_warning(target.uuid, &result.2);
         if result.1 {
             changed += 1;
         }
@@ -957,6 +971,7 @@ async fn user_metadata_operation(
             })
             .await
             .map_err(dynamic_error)?;
+        log_user_permission_persistence_warning(target.uuid, &result.2);
         if result.1 {
             changed += 1;
         }
@@ -1051,6 +1066,7 @@ async fn user_group_operation(
             })
             .await
             .map_err(dynamic_error)?;
+        log_user_permission_persistence_warning(target.uuid, &result.2);
         if result.1 {
             changed += 1;
         }

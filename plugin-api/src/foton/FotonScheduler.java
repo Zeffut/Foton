@@ -75,39 +75,51 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     private static BukkitTask offTick(Plugin plugin, Runnable body, long delay, long period) {
-        Async task = new Async(nextId.getAndIncrement(), plugin, period > 0);
-        active.put(task.id, task);
-        Runnable guarded = () -> {
-            if (task.cancelled) {
-                return;
-            }
-            task.running = true;
-            task.thread = Thread.currentThread();
-            try {
-                body.run();
-            } catch (Throwable error) {
-                // Nothing above this catches: an exception on the executor
-                // thread would silently stop a repeating task forever.
-                System.out.println("[scheduler] " + plugin.getName()
-                    + " threw in an async task: " + error);
-            } finally {
-                task.running = false;
-                task.thread = null;
-                if (!task.repeating) {
-                    active.remove(task.id, task);
+        synchronized (PluginHost.lifecycleLock()) {
+            validate(plugin, body);
+            Async task = new Async(nextId.getAndIncrement(), plugin, period > 0);
+            active.put(task.id, task);
+            Runnable guarded = () -> {
+                PluginHost.Invocation invocation;
+                synchronized (PluginHost.lifecycleLock()) {
+                    if (task.cancelled) return;
+                    invocation = PluginHost.beginInvocation(plugin);
+                    if (invocation == null) {
+                        task.cancel();
+                        return;
+                    }
+                    task.running = true;
+                    task.thread = Thread.currentThread();
                 }
-            }
-        };
-        // A tick is fifty milliseconds. Bukkit measures async delays in ticks
-        // too, which reads oddly and is what plugins pass.
-        long delayMillis = delay * 50;
-        java.util.concurrent.ScheduledFuture<?> handle = period > 0
-            ? OFF_TICK.scheduleAtFixedRate(guarded, delayMillis, period * 50,
-                java.util.concurrent.TimeUnit.MILLISECONDS)
-            : OFF_TICK.schedule(guarded, delayMillis,
-                java.util.concurrent.TimeUnit.MILLISECONDS);
-        task.bind(handle);
-        return task;
+                try {
+                    body.run();
+                } catch (Throwable error) {
+                    // Nothing above this catches: an exception on the executor
+                    // thread would silently stop a repeating task forever.
+                    System.out.println("[scheduler] " + plugin.getName()
+                        + " threw in an async task: " + error);
+                } finally {
+                    synchronized (PluginHost.lifecycleLock()) {
+                        task.running = false;
+                        task.thread = null;
+                        if (!task.repeating) {
+                            active.remove(task.id, task);
+                        }
+                        invocation.close();
+                    }
+                }
+            };
+            // A tick is fifty milliseconds. Bukkit measures async delays in ticks
+            // too, which reads oddly and is what plugins pass.
+            long delayMillis = delay * 50;
+            java.util.concurrent.ScheduledFuture<?> handle = period > 0
+                ? OFF_TICK.scheduleAtFixedRate(guarded, delayMillis, period * 50,
+                    java.util.concurrent.TimeUnit.MILLISECONDS)
+                : OFF_TICK.schedule(guarded, delayMillis,
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+            task.bind(handle);
+            return task;
+        }
     }
 
     /** A task running off the tick, cancellable from anywhere. */
@@ -126,7 +138,7 @@ public final class FotonScheduler implements BukkitScheduler {
             this.repeating = repeating;
         }
 
-        synchronized void bind(java.util.concurrent.ScheduledFuture<?> handle) {
+        void bind(java.util.concurrent.ScheduledFuture<?> handle) {
             this.handle = handle;
             if (cancelled) {
                 handle.cancel(false);
@@ -142,11 +154,13 @@ public final class FotonScheduler implements BukkitScheduler {
         @Override public boolean isCancelled() { return cancelled; }
 
         @Override public void cancel() {
-            cancelled = true;
-            active.remove(id, this);
-            java.util.concurrent.ScheduledFuture<?> future = handle;
-            if (future != null) {
-                future.cancel(false);
+            synchronized (PluginHost.lifecycleLock()) {
+                cancelled = true;
+                active.remove(id, this);
+                java.util.concurrent.ScheduledFuture<?> future = handle;
+                if (future != null) {
+                    future.cancel(false);
+                }
             }
         }
     }
@@ -177,9 +191,11 @@ public final class FotonScheduler implements BukkitScheduler {
 
     @Override
     public void cancelTasks(Plugin plugin) {
-        for (BukkitTask task : active.values()) {
-            if (task.getOwner() == plugin) {
-                task.cancel();
+        synchronized (PluginHost.lifecycleLock()) {
+            for (BukkitTask task : active.values()) {
+                if (task.getOwner() == plugin) {
+                    task.cancel();
+                }
             }
         }
     }
@@ -207,10 +223,22 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     private static Scheduled submit(Plugin plugin, Runnable body, long delay, long period) {
-        Scheduled task = new Scheduled(nextId.getAndIncrement(), plugin, body, delay, period);
-        active.put(task.id, task);
-        pending.add(task);
-        return task;
+        synchronized (PluginHost.lifecycleLock()) {
+            validate(plugin, body);
+            Scheduled task = new Scheduled(nextId.getAndIncrement(), plugin, body, delay, period);
+            active.put(task.id, task);
+            pending.add(task);
+            return task;
+        }
+    }
+
+    private static void validate(Plugin plugin, Runnable body) {
+        java.util.Objects.requireNonNull(plugin, "plugin");
+        java.util.Objects.requireNonNull(body, "task");
+        if (!plugin.isEnabled()) {
+            throw new IllegalStateException(
+                "Plugin attempted to register a task while disabled: " + plugin.getName());
+        }
     }
 
     /** Runs what this tick owes. Called by Foton, from the tick, once.
@@ -221,37 +249,45 @@ public final class FotonScheduler implements BukkitScheduler {
     public static int tick() {
         List<Scheduled> due = new ArrayList<>();
         List<Scheduled> keep = new ArrayList<>();
-        Scheduled task;
-        while ((task = pending.poll()) != null) {
-            if (task.cancelled) {
-                continue;
+        synchronized (PluginHost.lifecycleLock()) {
+            Scheduled task;
+            while ((task = pending.poll()) != null) {
+                if (task.cancelled) {
+                    continue;
+                }
+                // Count this tick down first, then ask whether the task is due.
+                // Doing it the other way round costs a tick on every repeat: a
+                // period of 2 would fire every 3. CraftBukkit stores an absolute
+                // "next run" tick instead, and this is the same arithmetic said
+                // as a countdown -- delay 0 and delay 1 both mean the next tick.
+                task.remaining--;
+                if (task.remaining > 0) {
+                    keep.add(task);
+                    continue;
+                }
+                due.add(task);
+                if (task.period > 0) {
+                    task.remaining = task.period;
+                    keep.add(task);
+                }
             }
-            // Count this tick down first, then ask whether the task is due.
-            // Doing it the other way round costs a tick on every repeat: a
-            // period of 2 would fire every 3. CraftBukkit stores an absolute
-            // "next run" tick instead, and this is the same arithmetic said
-            // as a countdown -- delay 0 and delay 1 both mean the next tick.
-            task.remaining--;
-            if (task.remaining > 0) {
-                keep.add(task);
-                continue;
-            }
-            due.add(task);
-            if (task.period > 0) {
-                task.remaining = task.period;
-                keep.add(task);
-            }
+            pending.addAll(keep);
         }
-        pending.addAll(keep);
 
         int ran = 0;
         for (Scheduled ready : due) {
-            if (ready.cancelled) {
-                continue;
-            }
-            try {
+            PluginHost.Invocation invocation;
+            synchronized (PluginHost.lifecycleLock()) {
+                if (ready.cancelled) continue;
+                invocation = PluginHost.beginInvocation(ready.plugin);
+                if (invocation == null) {
+                    ready.cancel();
+                    continue;
+                }
                 ready.running = true;
                 ready.thread = Thread.currentThread();
+            }
+            try {
                 ready.body.run();
                 ran++;
             } catch (Throwable error) {
@@ -260,10 +296,13 @@ public final class FotonScheduler implements BukkitScheduler {
                 System.out.println("[scheduler] " + ready.plugin.getName()
                     + " threw in a task: " + error);
             } finally {
-                ready.running = false;
-                ready.thread = null;
-                if (ready.period <= 0) {
-                    active.remove(ready.id, ready);
+                synchronized (PluginHost.lifecycleLock()) {
+                    ready.running = false;
+                    ready.thread = null;
+                    if (ready.period <= 0) {
+                        active.remove(ready.id, ready);
+                    }
+                    invocation.close();
                 }
             }
         }
@@ -272,11 +311,13 @@ public final class FotonScheduler implements BukkitScheduler {
 
     /** Forgets everything, for a shutdown. */
     public static void clear() {
-        for (BukkitTask task : active.values()) {
-            task.cancel();
+        synchronized (PluginHost.lifecycleLock()) {
+            for (BukkitTask task : active.values()) {
+                task.cancel();
+            }
+            active.clear();
+            pending.clear();
         }
-        active.clear();
-        pending.clear();
     }
 
     private static final class Worker implements org.bukkit.scheduler.BukkitWorker {
@@ -314,8 +355,10 @@ public final class FotonScheduler implements BukkitScheduler {
         @Override public boolean isSync() { return true; }
         @Override public boolean isCancelled() { return cancelled; }
         @Override public void cancel() {
-            cancelled = true;
-            active.remove(id, this);
+            synchronized (PluginHost.lifecycleLock()) {
+                cancelled = true;
+                active.remove(id, this);
+            }
         }
     }
 }

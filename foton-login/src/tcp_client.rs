@@ -6,6 +6,7 @@
 use std::{
     cmp::Ordering,
     fmt::{self, Debug, Formatter},
+    future::Future,
     io::Cursor,
     net::SocketAddr,
     sync::Arc,
@@ -16,14 +17,17 @@ use crossbeam::atomic::AtomicCell;
 use foton_core::player::{
     ClientInformation, PlayerConnection,
     connection::{
-        JavaNetworkWriter, OutboundPacket, OutboundReceiver, OutboundSender, outbound_channel,
-        write_final_disconnect,
+        JavaNetworkWriter, OutboundPacket, OutboundPacketReceiver, OutboundPacketSender,
+        outbound_packet_channel, write_final_disconnect,
     },
 };
 use foton_core::server::Server;
 use foton_protocol::{
     packet_reader::TCPNetworkDecoder,
-    packet_traits::{ClientPacket, CompressionInfo, EncodedPacket, ServerPacket},
+    packet_traits::{
+        ClientPacket, CompressionInfo, EncodedPacket, PacketDirection, PacketTranslation,
+        ServerPacket, TranslationBatch,
+    },
     packet_writer::TCPNetworkEncoder,
     packets::{
         common::{CDisconnect, SClientInformation, SCustomPayload, SPingRequest},
@@ -49,11 +53,11 @@ use tokio::{
     net::{TcpStream, tcp::OwnedReadHalf},
     select,
     sync::{
-        Notify,
+        Notify, OwnedSemaphorePermit, Semaphore,
         broadcast::{self, Sender, error::RecvError},
-        mpsc::error::TryRecvError,
+        mpsc,
     },
-    time::timeout,
+    time::{Instant, MissedTickBehavior, interval, sleep_until, timeout, timeout_at},
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use uuid::Uuid;
@@ -72,6 +76,52 @@ use crate::pre_play_state::{PacketSequenceError, PrePlayPacket, PrePlayState};
 /// halves and a broadcast channel open forever while sending nothing at all --
 /// and nothing existed to kick them, since bans and player caps come later.
 const PRE_PLAY_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Absolute ceiling for handshake, login and configuration combined.
+///
+/// The read timeout above is intentionally idle-based for Vanilla parity, but
+/// configuration packets and registry writes are progress too. Without a
+/// separate absolute deadline, a peer can send one permitted packet before
+/// each idle timeout and retain its pre-play resources forever.
+const PRE_PLAY_LIFETIME_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// A peer that stops reading must not keep login or shutdown tasks alive.
+const NETWORK_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Maximum number of accepted Java sockets alive at the same time.
+///
+/// This is deliberately independent of `max_players`: status requests and
+/// connections still negotiating login are not players yet, but each owns a
+/// socket, buffered halves, channels and two tasks. Five hundred and twelve
+/// leaves ample room for ordinary server-list traffic while putting a fixed
+/// ceiling on the resources silent pre-play peers can retain for their 30
+/// second timeout.
+const MAX_LIVE_JAVA_CONNECTIONS: usize = 512;
+
+const TRANSLATED_SERVERBOUND_CAPACITY: usize = 256;
+const TRANSLATION_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+fn translation_handoff<T>(
+    upgrade: T,
+    remaining: impl Iterator<Item = Vec<u8>>,
+) -> (T, Vec<Vec<u8>>) {
+    (upgrade, remaining.collect())
+}
+
+/// One admission permit shared by both halves of an accepted connection.
+/// The semaphore slot is returned only after the final clone is dropped.
+#[derive(Clone)]
+struct ConnectionLifetimePermit {
+    _permit: Arc<OwnedSemaphorePermit>,
+}
+
+impl ConnectionLifetimePermit {
+    fn new(permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            _permit: Arc::new(permit),
+        }
+    }
+}
 
 /// Represents updates to the connection state.
 #[derive(Clone)]
@@ -160,11 +210,15 @@ pub struct JavaTcpClient {
     pub cancel_token: CancellationToken,
 
     /// A queue of encoded packets to send to the network.
-    pub outgoing_queue: OutboundSender,
+    pub outgoing_queue: OutboundPacketSender,
     /// The packet encoder for outgoing packets.
     pub network_writer: JavaNetworkWriter,
     /// Current compression settings.
     pub compression: Arc<AtomicCell<Option<CompressionInfo>>>,
+    /// Optional Via pipeline retained unchanged through every protocol state.
+    pub translation: Option<PacketTranslation>,
+    pub(crate) translated_serverbound: mpsc::Sender<Vec<u8>>,
+    translated_serverbound_recv: SyncMutex<Option<mpsc::Receiver<Vec<u8>>>>,
 
     /// The shared server state.
     pub server: Arc<Server>,
@@ -189,10 +243,34 @@ pub struct JavaTcpClient {
     /// hostname takes the ordinary Java path, including one carrying a
     /// Floodgate payload.
     pub(crate) bedrock: BedrockConfig,
+    /// Admission slot retained by both network tasks through play shutdown.
+    connection_lifetime: ConnectionLifetimePermit,
+    /// Per-source admission retained only until pre-play finishes.
+    ///
+    /// This is type-erased so the listener can own its IP accounting without
+    /// making `foton-login` depend on the binary crate. Dropping the client at
+    /// the play handoff releases the source slot while the global lifetime
+    /// permit continues with both network halves.
+    _pre_play_source_permit: Box<dyn Send + Sync>,
     task_tracker: TaskTracker,
 }
 
 impl JavaTcpClient {
+    /// Maximum number of accepted Java sockets alive at once.
+    pub const MAX_LIVE_CONNECTIONS: usize = MAX_LIVE_JAVA_CONNECTIONS;
+
+    /// Creates the one global admission limiter owned by the Java listener.
+    #[must_use]
+    pub fn connection_limiter() -> Arc<Semaphore> {
+        Arc::new(Semaphore::new(MAX_LIVE_JAVA_CONNECTIONS))
+    }
+
+    /// Attempts to reserve one live-connection slot without delaying accept.
+    #[must_use]
+    pub fn try_acquire_connection_slot(limiter: &Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(limiter).try_acquire_owned().ok()
+    }
+
     /// Creates a new `JavaTcpClient`.
     #[must_use]
     #[expect(
@@ -201,7 +279,7 @@ impl JavaTcpClient {
                   accept loop already holds; bundling them into a struct would move \
                   the same list one indirection away without removing anything"
     )]
-    pub fn new(
+    pub fn new<S>(
         tcp_stream: TcpStream,
         address: SocketAddr,
         id: u64,
@@ -210,14 +288,22 @@ impl JavaTcpClient {
         connection_session: Arc<ServerConnectionSession>,
         task_tracker: TaskTracker,
         bedrock: BedrockConfig,
+        connection_permit: OwnedSemaphorePermit,
+        pre_play_source_permit: S,
+        translation: Option<PacketTranslation>,
     ) -> (
         Self,
-        OutboundReceiver,
+        OutboundPacketReceiver,
         TCPNetworkDecoder<BufReader<OwnedReadHalf>>,
-    ) {
+    )
+    where
+        S: Send + Sync + 'static,
+    {
         let (read, write) = tcp_stream.into_split();
-        let (outgoing_queue, recv) = outbound_channel();
+        let (outgoing_queue, recv) = outbound_packet_channel();
         let (connection_updates, _) = broadcast::channel(128);
+        let (translated_serverbound, translated_serverbound_recv) =
+            mpsc::channel(TRANSLATED_SERVERBOUND_CAPACITY);
 
         let client = Self {
             id,
@@ -231,6 +317,9 @@ impl JavaTcpClient {
                 BufWriter::new(write),
             )))),
             compression: Arc::new(AtomicCell::new(None)),
+            translation,
+            translated_serverbound,
+            translated_serverbound_recv: SyncMutex::new(Some(translated_serverbound_recv)),
             server,
             connection_session,
             challenge: AtomicCell::new([0; 4]),
@@ -239,6 +328,8 @@ impl JavaTcpClient {
             pre_play_state: SyncMutex::new(PrePlayState::new()),
             hostname: SyncMutex::new(String::new()),
             bedrock,
+            connection_lifetime: ConnectionLifetimePermit::new(connection_permit),
+            _pre_play_source_permit: Box::new(pre_play_source_permit),
             task_tracker,
         };
 
@@ -270,11 +361,21 @@ impl JavaTcpClient {
             return;
         };
 
-        if let Err(err) = Self::write_network_packet(&self.network_writer, &packet).await
-            && !self.cancel_token.is_cancelled()
+        match Self::write_network_packet_until_cancelled(
+            &self.cancel_token,
+            &self.network_writer,
+            self.translation.as_ref(),
+            &self.translated_serverbound,
+            self.compression.load(),
+            &packet,
+        )
+        .await
         {
-            log::warn!("Failed to send packet to client {}: {}", self.id, err);
-            self.close();
+            Ok(_) => {}
+            Err(err) => {
+                log::warn!("Failed to send packet to client {}: {}", self.id, err);
+                self.close();
+            }
         }
     }
 
@@ -301,23 +402,111 @@ impl JavaTcpClient {
 
     /// Sends an already encoded packet immediately, without queuing.
     pub async fn send_packet_now(&self, packet: &EncodedPacket) {
-        if let Err(err) = Self::write_network_packet(&self.network_writer, packet).await
-            && !self.cancel_token.is_cancelled()
+        match Self::write_network_packet_until_cancelled(
+            &self.cancel_token,
+            &self.network_writer,
+            self.translation.as_ref(),
+            &self.translated_serverbound,
+            self.compression.load(),
+            packet,
+        )
+        .await
         {
-            log::warn!("Failed to send packet to client {}: {}", self.id, err);
-            self.close();
+            Ok(_) => {}
+            Err(err) => {
+                log::warn!("Failed to send packet to client {}: {}", self.id, err);
+                self.close();
+            }
         }
+    }
+
+    /// Writes one immediate pre-play packet unless connection shutdown wins.
+    ///
+    /// Configuration registry synchronization uses immediate writes. A peer
+    /// that acknowledged known packs and stopped reading could otherwise make
+    /// shutdown wait for the per-write timeout once for every remaining
+    /// registry packet.
+    async fn write_network_packet_until_cancelled(
+        cancel_token: &CancellationToken,
+        network_writer: &JavaNetworkWriter,
+        translation: Option<&PacketTranslation>,
+        translated_serverbound: &mpsc::Sender<Vec<u8>>,
+        compression: Option<CompressionInfo>,
+        packet: &EncodedPacket,
+    ) -> Result<bool, PacketError> {
+        select! {
+            biased;
+            () = cancel_token.cancelled() => Ok(false),
+            result = Self::write_clientbound_packet(network_writer, translation, translated_serverbound, compression, packet) => result.map(|()| true),
+        }
+    }
+
+    async fn write_clientbound_packet(
+        network_writer: &JavaNetworkWriter,
+        translation: Option<&PacketTranslation>,
+        translated_serverbound: &mpsc::Sender<Vec<u8>>,
+        compression: Option<CompressionInfo>,
+        packet: &EncodedPacket,
+    ) -> Result<(), PacketError> {
+        let Some(translation) = translation else {
+            return Self::write_network_packet(network_writer, packet).await;
+        };
+        let data = packet.to_packet_data(compression)?;
+        let batch = translation
+            .exchange(PacketDirection::Clientbound, data)
+            .await?;
+        for serverbound in batch.serverbound {
+            translated_serverbound.try_send(serverbound).map_err(|_| {
+                PacketError::SendError("translated serverbound queue is full or closed".to_owned())
+            })?;
+        }
+        for clientbound in batch.clientbound {
+            let encoded = EncodedPacket::from_packet_data(&clientbound, compression)?;
+            Self::write_network_packet(network_writer, &encoded).await?;
+        }
+        Ok(())
+    }
+
+    async fn write_translation_clientbound(
+        &self,
+        clientbound: Vec<Vec<u8>>,
+    ) -> Result<(), PacketError> {
+        let compression = self.compression.load();
+        for packet in clientbound {
+            let encoded = EncodedPacket::from_packet_data(&packet, compression)?;
+            Self::write_network_packet(&self.network_writer, &encoded).await?;
+        }
+        Ok(())
+    }
+
+    async fn translate_serverbound(
+        &self,
+        packet: RawPacket,
+    ) -> Result<TranslationBatch, PacketError> {
+        let Some(translation) = &self.translation else {
+            return Ok(TranslationBatch {
+                serverbound: vec![packet.to_packet_data()?],
+                clientbound: Vec::new(),
+            });
+        };
+        translation
+            .exchange(PacketDirection::Serverbound, packet.to_packet_data()?)
+            .await
     }
 
     async fn write_network_packet(
         network_writer: &JavaNetworkWriter,
         packet: &EncodedPacket,
     ) -> Result<(), PacketError> {
-        let mut network_writer = network_writer.lock().await;
-        let Some(network_writer) = network_writer.as_mut() else {
-            return Err(PacketError::ConnectionClosed);
-        };
-        network_writer.write_packet(packet).await
+        timeout(NETWORK_WRITE_TIMEOUT, async {
+            let mut network_writer = network_writer.lock().await;
+            let Some(network_writer) = network_writer.as_mut() else {
+                return Err(PacketError::ConnectionClosed);
+            };
+            network_writer.write_packet(packet).await
+        })
+        .await
+        .map_err(|_| PacketError::WriteTimeout)?
     }
 
     async fn release_network_writer(network_writer: &JavaNetworkWriter) {
@@ -327,7 +516,7 @@ impl JavaTcpClient {
     /// Queues an already encoded packet to be sent.
     pub fn send_packet(&self, packet: EncodedPacket) -> Result<(), PacketError> {
         self.outgoing_queue
-            .try_send_packet(packet)
+            .try_send(OutboundPacket::Packet(packet))
             .map_err(|error| {
                 self.close();
                 PacketError::SendError(format!(
@@ -346,12 +535,16 @@ impl JavaTcpClient {
             reason = "this task is only started for a connection this file built as PlayerConnection::Java; the other arm exists to keep the match exhaustive"
         )
     )]
-    pub fn start_outgoing_packet_task(self: &Arc<Self>, mut sender_recv: OutboundReceiver) {
+    pub fn start_outgoing_packet_task(self: &Arc<Self>, mut sender_recv: OutboundPacketReceiver) {
         let cancel_token = self.cancel_token.clone();
         let network_writer = self.network_writer.clone();
         let id = self.id;
         let mut connection_updates_recv = self.connection_updates.subscribe();
         let connection_updated = self.connection_updated.clone();
+        let connection_lifetime = self.connection_lifetime.clone();
+        let translation = self.translation.clone();
+        let translated_serverbound = self.translated_serverbound.clone();
+        let compression = self.compression.clone();
 
         self.task_tracker.spawn(async move {
             let mut connection = None;
@@ -359,33 +552,26 @@ impl JavaTcpClient {
                 select! {
                     biased;
                     () = cancel_token.cancelled() => {
-                        Self::write_queued_disconnect(&network_writer, &mut sender_recv, id).await;
+                        Self::write_queued_disconnect(&network_writer, translation.as_ref(), &translated_serverbound, compression.load(), &mut sender_recv, id).await;
                         break;
                     }
                     outbound = sender_recv.recv() => {
                         if let Some(outbound) = outbound {
-                            let (packet, close_after_write) = match outbound {
-                                OutboundPacket::Packet(packet) => (packet, false),
-                                OutboundPacket::Disconnect(packet) => (packet, true),
-                            };
+                            let (packet, close_after_write) = outbound.write_parts();
 
                             if close_after_write {
-                                if let Err(err) = write_final_disconnect(
-                                    Self::write_network_packet(&network_writer, &packet),
-                                )
-                                .await
-                                {
+                                if let Err(err) = Self::write_clientbound_packet(&network_writer, translation.as_ref(), &translated_serverbound, compression.load(), packet).await {
                                     log::warn!("Failed to send disconnect packet to client {id}: {err}");
                                 }
                                 cancel_token.cancel();
                                 break;
                             }
 
-                            let write_result = Self::write_network_packet(&network_writer, &packet);
+                            let write_result = Self::write_clientbound_packet(&network_writer, translation.as_ref(), &translated_serverbound, compression.load(), packet);
                             select! {
                                 biased;
                                 () = cancel_token.cancelled() => {
-                                    Self::write_queued_disconnect(&network_writer, &mut sender_recv, id).await;
+                                    Self::write_queued_disconnect(&network_writer, translation.as_ref(), &translated_serverbound, compression.load(), &mut sender_recv, id).await;
                                     break;
                                 },
                                 result = write_result => {
@@ -443,29 +629,43 @@ impl JavaTcpClient {
             } else {
                 Self::release_network_writer(&network_writer).await;
                 drop(network_writer);
+                if let Some(translation) = &translation
+                    && let Err(error) = translation.close().await
+                {
+                    log::debug!("Failed to close protocol translator for client {id}: {error}");
+                }
             }
+            drop(connection_lifetime);
         });
     }
 
     async fn write_queued_disconnect(
         network_writer: &JavaNetworkWriter,
-        sender_recv: &mut OutboundReceiver,
+        translation: Option<&PacketTranslation>,
+        translated_serverbound: &mpsc::Sender<Vec<u8>>,
+        compression: Option<CompressionInfo>,
+        sender_recv: &mut OutboundPacketReceiver,
         id: u64,
     ) {
         let mut disconnect_packet = None;
-        loop {
-            match sender_recv.try_recv() {
-                Ok(OutboundPacket::Packet(_)) => {}
-                Ok(OutboundPacket::Disconnect(packet)) => disconnect_packet = Some(packet),
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        while let Ok(outbound) = sender_recv.try_recv() {
+            if outbound.write_parts().1 {
+                disconnect_packet = Some(outbound);
             }
         }
 
-        let Some(packet) = disconnect_packet else {
+        let Some(outbound) = disconnect_packet else {
             return;
         };
-        if let Err(err) =
-            write_final_disconnect(Self::write_network_packet(network_writer, &packet)).await
+        let (packet, _) = outbound.write_parts();
+        if let Err(err) = Self::write_clientbound_packet(
+            network_writer,
+            translation,
+            translated_serverbound,
+            compression,
+            packet,
+        )
+        .await
         {
             log::warn!("Failed to send disconnect packet to client {id} during close: {err}");
         }
@@ -480,47 +680,60 @@ impl JavaTcpClient {
             reason = "this task is only started for a connection this file built as PlayerConnection::Java; the other arm exists to keep the match exhaustive"
         )
     )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the select loop keeps the pre-play lifetime, network, Via and upgrade events in one place so their cancellation and handoff order stays visible"
+    )]
     pub fn start_incoming_packet_task(
         self: &Arc<Self>,
         mut reader: TCPNetworkDecoder<BufReader<OwnedReadHalf>>,
     ) {
+        let Some(mut translated_serverbound_recv) = self.translated_serverbound_recv.lock().take()
+        else {
+            self.close();
+            return;
+        };
         let cancel_token = self.cancel_token.clone();
         let id = self.id;
         let mut connection_updates_recv = self.connection_updates.subscribe();
+        let connection_lifetime = self.connection_lifetime.clone();
 
         let self_clone = self.clone();
 
         self.task_tracker.spawn(async move {
+            let pre_play_deadline = Instant::now() + PRE_PLAY_LIFETIME_TIMEOUT;
+            let mut translation_poll = interval(TRANSLATION_POLL_INTERVAL);
+            translation_poll.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut connection = None;
             loop {
                 select! {
                     () = cancel_token.cancelled() => {
                         break;
                     }
-                    packet = timeout(PRE_PLAY_READ_TIMEOUT, reader.get_raw_packet()) => {
+                    () = sleep_until(pre_play_deadline) => {
+                        Self::close_after_pre_play_timeout(id, pre_play_deadline, &cancel_token);
+                        break;
+                    }
+                    packet = timeout_at(
+                        pre_play_deadline.min(Instant::now() + PRE_PLAY_READ_TIMEOUT),
+                        reader.get_raw_packet(),
+                    ) => {
                         let Ok(packet) = packet else {
-                            log::debug!(
-                                "Client {id} sent nothing for {}s; closing the connection",
-                                PRE_PLAY_READ_TIMEOUT.as_secs()
-                            );
-                            cancel_token.cancel();
+                            Self::close_after_pre_play_timeout(id, pre_play_deadline, &cancel_token);
                             break;
                         };
                         match packet {
                             Ok(packet) => {
-                                match self_clone.process_packet(packet).await {
-                                    Ok(action) => {
-                                        if let Some(key) = action.reader_encryption {
-                                            reader.set_encryption(&key);
-                                        }
-                                        if let Some(compression) = action.reader_compression {
-                                            reader.set_compression(compression.threshold);
-                                        }
-                                        if let Some(upgrade) = action.upgrade {
-                                            connection = Some(upgrade);
-                                            break;
-                                        }
-                                    }
+                                let Some(processed) = Self::run_pre_play_step(&cancel_token, pre_play_deadline, async {
+                                    let batch = self_clone.translate_serverbound(packet).await?;
+                                    self_clone.process_translation_batch(batch, &mut reader).await
+                                }).await else {
+                                    cancel_token.cancel();
+                                    break;
+                                };
+                                match processed {
+                                    Ok(Some((upgrade, pending))) => { connection = Some((upgrade, pending)); break; }
+                                    Ok(None) => {}
                                     Err(err) => {
                                         // Vanilla closes the channel on any
                                         // decode failure. This branch is the
@@ -553,11 +766,37 @@ impl JavaTcpClient {
                             }
                         }
                     }
+                    translated = translated_serverbound_recv.recv() => {
+                        let Some(translated) = translated else { cancel_token.cancel(); break; };
+                        match self_clone.process_translation_batch(
+                            TranslationBatch { serverbound: vec![translated], clientbound: Vec::new() },
+                            &mut reader,
+                        ).await {
+                            Ok(Some((upgrade, pending))) => { connection = Some((upgrade, pending)); break; }
+                            Ok(None) => {}
+                            Err(error) => { log::warn!("Client {id} Via output failed: {error}"); cancel_token.cancel(); }
+                        }
+                    }
+                    _ = translation_poll.tick(), if self_clone.translation.is_some() => {
+                        let result = match &self_clone.translation {
+                            Some(translation) => translation.poll().await,
+                            None => continue,
+                        };
+                        let processed = match result {
+                            Ok(batch) => self_clone.process_translation_batch(batch, &mut reader).await,
+                            Err(error) => Err(error),
+                        };
+                        match processed {
+                            Ok(Some((upgrade, pending))) => { connection = Some((upgrade, pending)); break; }
+                            Ok(None) => {}
+                            Err(error) => { log::warn!("Client {id} Via scheduled output failed: {error}"); cancel_token.cancel(); }
+                        }
+                    }
                     connection_update = connection_updates_recv.recv() => {
                         match connection_update {
                             Ok(ConnectionUpdate::EnableEncryption(_)) => {}
                             Ok(ConnectionUpdate::Upgrade(upgrade)) => {
-                                connection = Some(upgrade);
+                                connection = Some((upgrade, Vec::new()));
                                 break;
                             }
                             Err(err) => {
@@ -574,16 +813,81 @@ impl JavaTcpClient {
             drop(cancel_token);
             drop(connection_updates_recv);
 
-            if let Some(connection) = connection {
+            if let Some((connection, pending_serverbound)) = connection {
                 let server = self_clone.server.clone();
                 drop(self_clone);
 
                 match &*connection {
-                    PlayerConnection::Java(java) => java.listener(reader, server).await,
+                    PlayerConnection::Java(java) => java.listener(
+                        reader,
+                        server,
+                        pending_serverbound,
+                        translated_serverbound_recv,
+                    ).await,
                     PlayerConnection::Other(_) => unreachable!("Expected Java connection"),
                 }
             }
+            drop(connection_lifetime);
         });
+    }
+
+    async fn process_translation_batch(
+        &self,
+        batch: TranslationBatch,
+        reader: &mut TCPNetworkDecoder<BufReader<OwnedReadHalf>>,
+    ) -> Result<Option<(Arc<PlayerConnection>, Vec<Vec<u8>>)>, PacketError> {
+        self.write_translation_clientbound(batch.clientbound)
+            .await?;
+        let mut serverbound = batch.serverbound.into_iter();
+        while let Some(packet) = serverbound.next() {
+            let action = self
+                .process_packet(RawPacket::from_packet_data(packet)?)
+                .await?;
+            if let Some(key) = action.reader_encryption {
+                reader.set_encryption(&key);
+            }
+            if let Some(compression) = action.reader_compression {
+                reader.set_compression(compression.threshold);
+            }
+            if let Some(upgrade) = action.upgrade {
+                return Ok(Some(translation_handoff(upgrade, serverbound)));
+            }
+        }
+        Ok(None)
+    }
+
+    fn close_after_pre_play_timeout(
+        id: u64,
+        pre_play_deadline: Instant,
+        cancel_token: &CancellationToken,
+    ) {
+        if Instant::now() >= pre_play_deadline {
+            log::debug!(
+                "Client {id} exceeded the {}s total pre-play deadline; closing the connection",
+                PRE_PLAY_LIFETIME_TIMEOUT.as_secs()
+            );
+        } else {
+            log::debug!(
+                "Client {id} sent nothing for {}s; closing the connection",
+                PRE_PLAY_READ_TIMEOUT.as_secs()
+            );
+        }
+        cancel_token.cancel();
+    }
+
+    async fn run_pre_play_step<F, T>(
+        cancel_token: &CancellationToken,
+        deadline: Instant,
+        step: F,
+    ) -> Option<T>
+    where
+        F: Future<Output = T>,
+    {
+        select! {
+            biased;
+            () = cancel_token.cancelled() => None,
+            result = timeout_at(deadline, step) => result.ok(),
+        }
     }
 
     async fn process_packet(&self, packet: RawPacket) -> Result<ConnectionAction, PacketError> {
@@ -787,5 +1091,112 @@ impl TextResolutor for JavaTcpClient {
 
     fn translate(&self, _key: &str) -> Option<String> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use foton_utils::FrontVec;
+    use tokio::{task::yield_now, time::sleep};
+
+    use super::*;
+
+    #[test]
+    fn translation_handoff_preserves_every_packet_after_upgrade_in_order() {
+        let packets = vec![vec![1], vec![2], vec![3]];
+        let (upgrade, pending) = translation_handoff("play", packets.into_iter());
+        assert_eq!(upgrade, "play");
+        assert_eq!(pending, vec![vec![1], vec![2], vec![3]]);
+    }
+
+    #[test]
+    fn java_connection_limiter_rejects_after_the_documented_global_limit() {
+        let limiter = JavaTcpClient::connection_limiter();
+        let permits: Vec<_> = (0..MAX_LIVE_JAVA_CONNECTIONS)
+            .map(|_| {
+                JavaTcpClient::try_acquire_connection_slot(&limiter)
+                    .expect("every slot up to the documented limit must be available")
+            })
+            .collect();
+
+        assert!(JavaTcpClient::try_acquire_connection_slot(&limiter).is_none());
+        drop(permits);
+        assert!(JavaTcpClient::try_acquire_connection_slot(&limiter).is_some());
+    }
+
+    #[test]
+    fn java_connection_slot_lives_until_both_network_tasks_finish() {
+        let limiter = Arc::new(Semaphore::new(1));
+        let admitted = JavaTcpClient::try_acquire_connection_slot(&limiter)
+            .expect("the test limiter starts with one slot");
+        let lifetime = ConnectionLifetimePermit::new(admitted);
+        let incoming_task = lifetime.clone();
+        let outgoing_task = lifetime.clone();
+        drop(lifetime);
+
+        assert!(JavaTcpClient::try_acquire_connection_slot(&limiter).is_none());
+        drop(incoming_task);
+        assert!(
+            JavaTcpClient::try_acquire_connection_slot(&limiter).is_none(),
+            "one completed half must not admit a replacement while the other half is alive"
+        );
+        drop(outgoing_task);
+        assert!(JavaTcpClient::try_acquire_connection_slot(&limiter).is_some());
+    }
+
+    #[tokio::test]
+    async fn shutdown_interrupts_immediate_configuration_write_waiting_for_writer() {
+        let writer: JavaNetworkWriter = Arc::new(AsyncMutex::new(None));
+        let writer_guard = writer.lock().await;
+        let cancel_token = CancellationToken::new();
+        let packet = EncodedPacket {
+            encoded_data: Arc::new(FrontVec::new(0)),
+        };
+        let (translated, _translated_recv) = mpsc::channel(1);
+
+        let write = JavaTcpClient::write_network_packet_until_cancelled(
+            &cancel_token,
+            &writer,
+            None,
+            &translated,
+            None,
+            &packet,
+        );
+        tokio::pin!(write);
+        yield_now().await;
+        cancel_token.cancel();
+
+        assert!(
+            !timeout(Duration::from_millis(100), &mut write)
+                .await
+                .expect("shutdown should interrupt a blocked configuration write")
+                .expect("cancellation is not a network error")
+        );
+        drop(writer_guard);
+    }
+
+    #[tokio::test]
+    async fn repeated_pre_play_progress_cannot_extend_the_absolute_deadline() {
+        let cancel_token = CancellationToken::new();
+        let deadline = Instant::now() + Duration::from_millis(80);
+        let mut completed_steps = 0;
+
+        while JavaTcpClient::run_pre_play_step(&cancel_token, deadline, async {
+            sleep(Duration::from_millis(20)).await;
+        })
+        .await
+        .is_some()
+        {
+            completed_steps += 1;
+        }
+
+        assert!(
+            completed_steps < 5,
+            "successful intermediate work must not reset the absolute deadline"
+        );
+        assert!(
+            Instant::now() < deadline + Duration::from_millis(100),
+            "the absolute deadline should end the sequence promptly"
+        );
     }
 }

@@ -69,6 +69,8 @@ cleanup() {
   for _ in $(seq 1 30); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
   kill -9 "$PID" 2>/dev/null
 }
+trap cleanup EXIT
+trap 'cleanup; trap - EXIT; exit 130' INT TERM
 
 for _ in $(seq 1 180); do
   python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1 && break
@@ -119,9 +121,10 @@ JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
 
 cleanup
+trap - EXIT INT TERM
 
 echo "=== what happened ==="
-grep -E "server says: WARDEN|walked .* strides|saw a warden|effect darkness|death\.attack" join.log
+grep -E "server says: WARDEN|walked .* strides|saw a warden|effect darkness|death screen|death\.attack" join.log
 echo "=== server ==="
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | grep -iE "error|panic" | tail -5
 
@@ -137,7 +140,7 @@ said "server says: WARDEN_ALIVE" \
   || fail "the warden is not in the world a moment after it was summoned"
 said "got the effect darkness" \
   || fail "no darkness reached the player, so the warden's pulse never ran"
-said "death.attack.mob" \
+said "the death screen opened" && said "death.attack.mob" \
   || fail "the player survived, so the walk never became a warden coming for them"
 
 echo "########## WARDEN TEST PASSED ##########"

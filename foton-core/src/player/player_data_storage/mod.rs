@@ -4,12 +4,13 @@ mod known_players;
 mod permissions;
 
 use std::{
-    io::{Cursor, Read},
-    path::{Path, PathBuf},
-    sync::Arc,
+    hash::{Hash, Hasher},
+    io::{Cursor, Read as _},
+    path::{Component, Path, PathBuf},
+    str::from_utf8,
 };
 
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHasher;
 use simdnbt::{ToNbtTag, borrow::read_compound as read_borrowed_compound, owned::NbtTag};
 use tokio::{
     fs,
@@ -39,7 +40,7 @@ use crate::permission::PermissionSubjectState;
 use crate::player::KnownPlayers;
 use crate::player::Player;
 use foton_registry::item_stack::ItemStack;
-use foton_utils::locks::{AsyncMutex, SyncMutex};
+use foton_utils::locks::AsyncMutex;
 use foton_utils::{BlockPos, Identifier};
 
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
@@ -48,9 +49,27 @@ const PLAYER_STORAGE_VERSION: u16 = 11;
 const GLOBAL_STORAGE_VERSION: u16 = 3;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
 /// Largest compressed player data file accepted from disk.
-const MAX_COMPRESSED_PLAYER_FILE_BYTES: u64 = 8 * 1024 * 1024;
-/// Largest decompressed player data payload accepted from disk.
-const MAX_DECOMPRESSED_PLAYER_FILE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_PLAYER_DATA_FILE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_DECOMPRESSED_PLAYER_DATA_BYTES: usize = 64 * 1024 * 1024;
+const PLAYER_DATA_DECOMPRESSION_BUFFER_BYTES: usize = 8 * 1024;
+const FILE_LOCK_STRIPES: usize = 256;
+
+#[derive(Debug)]
+enum AtomicWriteOutcome {
+    Durable,
+    /// The new primary is already visible, but a post-rename durability or
+    /// backup-rotation operation failed.
+    CommittedWithError(io::Error),
+}
+
+impl AtomicWriteOutcome {
+    fn into_result(self) -> io::Result<()> {
+        match self {
+            Self::Durable => Ok(()),
+            Self::CommittedWithError(error) => Err(error),
+        }
+    }
+}
 
 /// Server-wide player data.
 #[derive(Debug, Clone)]
@@ -68,6 +87,16 @@ pub struct GlobalPlayerData {
     pub whitelisted: bool,
 }
 
+/// Result of a state write after its new primary file becomes visible.
+#[derive(Debug)]
+pub enum PersistenceUpdateOutcome {
+    /// The primary and its directory metadata were durably synchronized.
+    Durable,
+    /// The primary is visible and must be published to memory, but a later
+    /// durability or backup-rotation operation failed.
+    CommittedWithError(io::Error),
+}
+
 /// Manages player data persistence.
 pub struct PlayerDataStorage {
     backend: PlayerDataStorageBackend,
@@ -79,7 +108,7 @@ enum PlayerDataStorageBackend {
 
 struct FilePlayerDataStorage {
     save_root: PathBuf,
-    file_locks: SyncMutex<FxHashMap<PathBuf, Arc<AsyncMutex<()>>>>,
+    file_locks: Box<[AsyncMutex<()>]>,
 }
 
 #[derive(SchemaWrite, SchemaRead)]
@@ -223,10 +252,6 @@ impl PlayerDataStorage {
     pub async fn save(&self, player: &Player) -> io::Result<()> {
         let domain = player.get_world().domain().to_owned();
         self.save_domain(&domain, player).await?;
-        let whitelisted = self
-            .load_global(player.gameprofile.id)
-            .await?
-            .is_some_and(|data| data.whitelisted);
         self.save_global(
             player.gameprofile.id,
             &GlobalPlayerData {
@@ -234,7 +259,9 @@ impl PlayerDataStorage {
                 first_played: 0,
                 last_played: unix_epoch_millis(),
                 statistics: Vec::new(),
-                whitelisted,
+                // `save_global` deliberately ignores this snapshot. Whitelist
+                // membership has its own serialized update path.
+                whitelisted: false,
             },
         )
         .await
@@ -315,11 +342,29 @@ impl PlayerDataStorage {
         }
     }
 
+    /// Changes only whitelist membership, serialized with gameplay metadata updates.
+    pub async fn set_player_whitelisted(
+        &self,
+        uuid: Uuid,
+        whitelisted: bool,
+        fallback: &GlobalPlayerData,
+        is_current: impl FnOnce() -> bool + Send,
+        publish: impl FnOnce(GlobalPlayerData) + Send,
+    ) -> io::Result<Option<PersistenceUpdateOutcome>> {
+        match &self.backend {
+            PlayerDataStorageBackend::File(storage) => {
+                storage
+                    .set_player_whitelisted(uuid, whitelisted, fallback, is_current, publish)
+                    .await
+            }
+        }
+    }
+
     /// Persists the server's complete UUID-keyed permission snapshot.
     pub async fn save_permission_subjects(
         &self,
         subjects: &PermissionSubjectIndex,
-    ) -> io::Result<()> {
+    ) -> io::Result<PersistenceUpdateOutcome> {
         match &self.backend {
             PlayerDataStorageBackend::File(storage) => {
                 storage.save_permission_subjects(subjects).await
@@ -333,7 +378,9 @@ impl FilePlayerDataStorage {
         fs::create_dir_all(save_root.join("global").join("players")).await?;
         Ok(Self {
             save_root,
-            file_locks: SyncMutex::new(FxHashMap::default()),
+            file_locks: (0..FILE_LOCK_STRIPES)
+                .map(|_| AsyncMutex::new(()))
+                .collect(),
         })
     }
 
@@ -351,8 +398,8 @@ impl FilePlayerDataStorage {
     ) -> io::Result<()> {
         let file = PlayerDataFile::from_persistent(data)?;
         let bytes = encode_player_file(&file)?;
-        self.write_atomic(&self.domain_players_dir(domain), uuid, bytes)
-            .await?;
+        let players_dir = self.domain_players_dir(domain)?;
+        self.write_atomic(&players_dir, uuid, bytes).await?;
         log::debug!("Saved player data for {uuid} in domain {domain}");
         Ok(())
     }
@@ -362,15 +409,19 @@ impl FilePlayerDataStorage {
         domain: &str,
         uuid: Uuid,
     ) -> io::Result<Option<PersistentPlayerData>> {
-        let path = Self::player_file(&self.domain_players_dir(domain), uuid);
+        let path = Self::player_file(&self.domain_players_dir(domain)?, uuid);
         let lock = self.file_lock(&path);
         let _guard = lock.lock().await;
         if !Self::recover_missing_atomic_path_locked(&path).await? {
             return Ok(None);
         }
-        let bytes = Self::read_bounded_file(&path, MAX_COMPRESSED_PLAYER_FILE_BYTES).await?;
-        let file = decode_player_file(&bytes)?;
-        let data = file.into_persistent()?;
+        let (data, recovered_bytes) = Self::read_with_valid_backup(&path, |bytes| {
+            decode_player_file(bytes)?.into_persistent()
+        })
+        .await?;
+        if let Some(bytes) = recovered_bytes {
+            Self::restore_valid_backup_locked(&path, &bytes).await?;
+        }
         log::debug!("Loaded player data for {uuid} in domain {domain}");
         Ok(Some(data))
     }
@@ -379,18 +430,42 @@ impl FilePlayerDataStorage {
         let path = Self::player_file(&self.global_players_dir(), uuid);
         let lock = self.file_lock(&path);
         let _guard = lock.lock().await;
-        if !Self::recover_missing_atomic_path_locked(&path).await? {
+        let Some(file) = Self::read_global_file_locked(&path).await? else {
+            return Ok(None);
+        };
+        Ok(Some(Self::global_data_from_file(file, Vec::new())))
+    }
+
+    async fn read_global_file_locked(path: &Path) -> io::Result<Option<GlobalPlayerDataFile>> {
+        let had_primary = fs::try_exists(path).await?;
+        if !Self::recover_missing_atomic_path_locked(path).await? {
             return Ok(None);
         }
-        let bytes = Self::read_bounded_file(&path, MAX_COMPRESSED_PLAYER_FILE_BYTES).await?;
-        let file = decode_global_file(&bytes)?;
-        Ok(Some(GlobalPlayerData {
+        let (mut file, recovered_bytes) =
+            Self::read_with_valid_backup(path, decode_global_file).await?;
+        if !had_primary || recovered_bytes.is_some() {
+            file.whitelisted = false;
+            let bytes = encode_global_file(&file)?;
+            Self::restore_valid_backup_locked(path, &bytes).await?;
+            tracing::warn!(
+                path = %path.display(),
+                "Recovered global player data with whitelist membership cleared"
+            );
+        }
+        Ok(Some(file))
+    }
+
+    fn global_data_from_file(
+        file: GlobalPlayerDataFile,
+        statistics: Vec<PersistentStatistic>,
+    ) -> GlobalPlayerData {
+        GlobalPlayerData {
             last_active_domain: file.last_active_domain,
             first_played: file.first_played,
             last_played: file.last_played,
-            statistics: Vec::new(),
+            statistics,
             whitelisted: file.whitelisted,
-        }))
+        }
     }
 
     async fn load_permission_subjects(&self) -> io::Result<PermissionSubjectIndex> {
@@ -419,51 +494,8 @@ impl FilePlayerDataStorage {
         if !Self::recover_missing_atomic_path_locked(path).await? {
             return Ok(KnownPlayers::new());
         }
-        let bytes = Self::read_bounded_file(path, MAX_COMPRESSED_PLAYER_FILE_BYTES).await?;
+        let bytes = Self::read_bounded_file(path).await?;
         decode_known_players_file(&bytes)?.into_known_players()
-    }
-
-    async fn read_bounded_file(path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
-        let max_bytes_usize = usize::try_from(max_bytes).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "player data file size limit does not fit in memory",
-            )
-        })?;
-        let mut file = fs::File::open(path).await?;
-        let file_size = file.metadata().await?.len();
-        if file_size > max_bytes {
-            return Err(oversized_player_file_error(file_size, max_bytes));
-        }
-
-        let initial_capacity = usize::try_from(file_size).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "player data file size does not fit in memory",
-            )
-        })?;
-        let mut bytes = Vec::with_capacity(initial_capacity);
-        let mut buffer = vec![0_u8; 16 * 1024];
-        loop {
-            let read = file.read(&mut buffer).await?;
-            if read == 0 {
-                break;
-            }
-            let new_len = bytes.len().checked_add(read).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "player data file size overflowed memory limits",
-                )
-            })?;
-            if new_len > max_bytes_usize {
-                return Err(oversized_player_file_error(new_len as u64, max_bytes));
-            }
-            if bytes.capacity() < new_len {
-                bytes.reserve_exact(new_len - bytes.len());
-            }
-            bytes.extend_from_slice(&buffer[..read]);
-        }
-        Ok(bytes)
     }
 
     async fn save_known_players_if_current(
@@ -478,43 +510,96 @@ impl FilePlayerDataStorage {
             return Ok(false);
         }
         let bytes = encode_known_players_file(&KnownPlayersFile::from_known_players(players))?;
-        Self::write_atomic_path_locked(&path, bytes).await?;
+        Self::write_atomic_path_locked(&path, bytes)
+            .await?
+            .into_result()?;
         Ok(true)
     }
 
     pub(crate) async fn save_global(&self, uuid: Uuid, data: &GlobalPlayerData) -> io::Result<()> {
-        let existing = self.load_global(uuid).await?.unwrap_or(GlobalPlayerData {
-            last_active_domain: String::new(),
-            first_played: 0,
-            last_played: 0,
-            statistics: Vec::new(),
-            whitelisted: false,
-        });
+        validate_domain_name(&data.last_active_domain, true, io::ErrorKind::InvalidInput)?;
+        let path = Self::player_file(&self.global_players_dir(), uuid);
+        let lock = self.file_lock(&path);
+        let _guard = lock.lock().await;
+        let existing = Self::read_global_file_locked(&path).await?;
         let file = GlobalPlayerDataFile {
             data_version: GLOBAL_PLAYER_DATA_VERSION,
             last_active_domain: data.last_active_domain.clone(),
             first_played: if data.first_played == 0 {
-                if existing.first_played == 0 {
+                let existing_first_played = existing.as_ref().map_or(0, |file| file.first_played);
+                if existing_first_played == 0 {
                     unix_epoch_millis()
                 } else {
-                    existing.first_played
+                    existing_first_played
                 }
             } else {
                 data.first_played
             },
             last_played: if data.last_played == 0 {
-                existing.last_played
+                existing.as_ref().map_or(0, |file| file.last_played)
             } else {
                 data.last_played
             },
-            whitelisted: data.whitelisted,
+            whitelisted: existing.is_some_and(|file| file.whitelisted),
         };
         let bytes = encode_global_file(&file)?;
-        self.write_atomic(&self.global_players_dir(), uuid, bytes)
-            .await
+        Self::write_atomic_path_locked(&path, bytes)
+            .await?
+            .into_result()
     }
 
-    async fn save_permission_subjects(&self, subjects: &PermissionSubjectIndex) -> io::Result<()> {
+    async fn set_player_whitelisted(
+        &self,
+        uuid: Uuid,
+        whitelisted: bool,
+        fallback: &GlobalPlayerData,
+        is_current: impl FnOnce() -> bool + Send,
+        publish: impl FnOnce(GlobalPlayerData) + Send,
+    ) -> io::Result<Option<PersistenceUpdateOutcome>> {
+        validate_domain_name(
+            &fallback.last_active_domain,
+            true,
+            io::ErrorKind::InvalidInput,
+        )?;
+        let path = Self::player_file(&self.global_players_dir(), uuid);
+        let lock = self.file_lock(&path);
+        let _guard = lock.lock().await;
+        if !is_current() {
+            return Ok(None);
+        }
+        let existing = Self::read_global_file_locked(&path).await?;
+        let file = GlobalPlayerDataFile {
+            data_version: GLOBAL_PLAYER_DATA_VERSION,
+            last_active_domain: existing.as_ref().map_or_else(
+                || fallback.last_active_domain.clone(),
+                |file| file.last_active_domain.clone(),
+            ),
+            first_played: existing
+                .as_ref()
+                .map_or(fallback.first_played, |file| file.first_played),
+            last_played: existing
+                .as_ref()
+                .map_or(fallback.last_played, |file| file.last_played),
+            whitelisted,
+        };
+        let bytes = encode_global_file(&file)?;
+        let outcome = Self::write_atomic_path_locked(&path, bytes).await?;
+        publish(Self::global_data_from_file(
+            file,
+            fallback.statistics.clone(),
+        ));
+        Ok(Some(match outcome {
+            AtomicWriteOutcome::Durable => PersistenceUpdateOutcome::Durable,
+            AtomicWriteOutcome::CommittedWithError(error) => {
+                PersistenceUpdateOutcome::CommittedWithError(error)
+            }
+        }))
+    }
+
+    async fn save_permission_subjects(
+        &self,
+        subjects: &PermissionSubjectIndex,
+    ) -> io::Result<PersistenceUpdateOutcome> {
         let path = self.player_permissions_file();
         let lock = self.file_lock(&path);
         let _guard = lock.lock().await;
@@ -534,11 +619,37 @@ impl FilePlayerDataStorage {
         &self,
         path: &Path,
     ) -> io::Result<PlayerPermissionsFile> {
-        if !Self::recover_missing_atomic_path_locked(path).await? {
+        if !fs::try_exists(path).await? {
+            let temp_path = Self::atomic_temp_path(path);
+            if fs::try_exists(&temp_path).await?
+                && let Err(error) = fs::remove_file(&temp_path).await
+            {
+                tracing::warn!(
+                    %error,
+                    path = %temp_path.display(),
+                    "Failed to remove an uncommitted permission-file temporary"
+                );
+            }
             return Ok(PlayerPermissionsFile::default());
         }
-        let contents = fs::read_to_string(path).await?;
-        let file = toml::from_str::<PlayerPermissionsFile>(&contents).map_err(|error| {
+        let bytes = Self::read_bounded_file(path).await?;
+        Self::decode_player_permissions_file(path, &bytes)
+    }
+
+    fn decode_player_permissions_file(
+        path: &Path,
+        bytes: &[u8],
+    ) -> io::Result<PlayerPermissionsFile> {
+        let contents = from_utf8(bytes).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "player permissions file {} is not valid UTF-8: {error}",
+                    path.display()
+                ),
+            )
+        })?;
+        let file = toml::from_str::<PlayerPermissionsFile>(contents).map_err(|error| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
@@ -555,14 +666,21 @@ impl FilePlayerDataStorage {
         &self,
         path: &Path,
         file: &PlayerPermissionsFile,
-    ) -> io::Result<()> {
+    ) -> io::Result<PersistenceUpdateOutcome> {
         let contents = serialize_player_permissions_file(file).map_err(|error| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("failed to serialize player permissions TOML: {error}"),
             )
         })?;
-        Self::write_atomic_path_locked(path, contents.into_bytes()).await
+        Ok(
+            match Self::write_atomic_path_locked(path, contents.into_bytes()).await? {
+                AtomicWriteOutcome::Durable => PersistenceUpdateOutcome::Durable,
+                AtomicWriteOutcome::CommittedWithError(error) => {
+                    PersistenceUpdateOutcome::CommittedWithError(error)
+                }
+            },
+        )
     }
 
     fn global_dir(&self) -> PathBuf {
@@ -581,30 +699,46 @@ impl FilePlayerDataStorage {
         self.global_dir().join("known_players.dat")
     }
 
-    fn domain_players_dir(&self, domain: &str) -> PathBuf {
-        self.save_root.join(domain).join("players")
+    fn domain_players_dir(&self, domain: &str) -> io::Result<PathBuf> {
+        validate_domain_name(domain, false, io::ErrorKind::InvalidInput)?;
+        Ok(self.save_root.join(domain).join("players"))
     }
 
     fn player_file(players_dir: &Path, uuid: Uuid) -> PathBuf {
         players_dir.join(format!("{uuid}.dat"))
     }
 
-    fn file_lock(&self, path: &Path) -> Arc<AsyncMutex<()>> {
-        let mut locks = self.file_locks.lock();
-        locks
-            .entry(path.to_path_buf())
-            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-            .clone()
+    fn file_lock(&self, path: &Path) -> &AsyncMutex<()> {
+        let mut hasher = FxHasher::default();
+        path.hash(&mut hasher);
+        let index = hasher.finish() as usize % self.file_locks.len();
+        &self.file_locks[index]
     }
 
     async fn write_atomic(&self, players_dir: &Path, uuid: Uuid, bytes: Vec<u8>) -> io::Result<()> {
         let final_path = Self::player_file(players_dir, uuid);
         let lock = self.file_lock(&final_path);
         let _guard = lock.lock().await;
-        Self::write_atomic_path_locked(&final_path, bytes).await
+        Self::write_atomic_path_locked(&final_path, bytes)
+            .await?
+            .into_result()
     }
 
-    async fn write_atomic_path_locked(final_path: &Path, bytes: Vec<u8>) -> io::Result<()> {
+    async fn write_atomic_path_locked(
+        final_path: &Path,
+        bytes: Vec<u8>,
+    ) -> io::Result<AtomicWriteOutcome> {
+        if bytes.len() as u64 > MAX_PLAYER_DATA_FILE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "refusing to write {} bytes to player data file {}; the limit is {} bytes",
+                    bytes.len(),
+                    final_path.display(),
+                    MAX_PLAYER_DATA_FILE_BYTES
+                ),
+            ));
+        }
         let Some(parent) = final_path.parent() else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -617,19 +751,115 @@ impl FilePlayerDataStorage {
         let backup_temp_path = Self::atomic_temp_path(&backup_path);
 
         Self::write_synced_file(&temp_path, &bytes).await?;
-        if fs::try_exists(final_path).await? {
+        let had_primary = fs::try_exists(final_path).await?;
+        if had_primary {
             Self::copy_synced_file(final_path, &backup_temp_path).await?;
-            fs::rename(&backup_temp_path, &backup_path).await?;
         }
         fs::rename(&temp_path, final_path).await?;
+        // Commit the new primary before rotating its predecessor into the
+        // backup slot. At every interruption point either the old backup or
+        // the new primary therefore remains intact.
         if let Err(error) = Self::sync_parent(parent).await {
-            tracing::error!(
-                %error,
-                path = %final_path.display(),
-                "Atomic data-file replacement committed, but directory sync failed; crash durability is uncertain"
-            );
+            return Ok(AtomicWriteOutcome::CommittedWithError(error));
         }
-        Ok(())
+        if had_primary {
+            // Tokio delegates to `std::fs::rename`; on Windows that operation
+            // replaces an existing destination. The native three-generation
+            // regression test below keeps this backup rotation guarantee live.
+            if let Err(error) = fs::rename(&backup_temp_path, &backup_path).await {
+                return Ok(AtomicWriteOutcome::CommittedWithError(error));
+            }
+        }
+        if let Err(error) = Self::sync_parent(parent).await {
+            return Ok(AtomicWriteOutcome::CommittedWithError(error));
+        }
+        Ok(AtomicWriteOutcome::Durable)
+    }
+
+    async fn read_with_valid_backup<T>(
+        path: &Path,
+        decode: impl Fn(&[u8]) -> io::Result<T>,
+    ) -> io::Result<(T, Option<Vec<u8>>)> {
+        let primary = Self::read_bounded_file(path)
+            .await
+            .and_then(|bytes| decode(&bytes));
+        let primary_error = match primary {
+            Ok(value) => return Ok((value, None)),
+            Err(error) => error,
+        };
+        if primary_error.kind() != io::ErrorKind::InvalidData {
+            return Err(primary_error);
+        }
+
+        let backup_path = Self::atomic_backup_path(path);
+        let Ok(backup_bytes) = Self::read_bounded_file(&backup_path).await else {
+            return Err(primary_error);
+        };
+        match decode(&backup_bytes) {
+            Ok(value) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    backup = %backup_path.display(),
+                    %primary_error,
+                    "Loaded the last committed backup because the current data file is invalid"
+                );
+                Ok((value, Some(backup_bytes)))
+            }
+            Err(_) => Err(primary_error),
+        }
+    }
+
+    async fn restore_valid_backup_locked(path: &Path, bytes: &[u8]) -> io::Result<()> {
+        let Some(parent) = path.parent() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "atomic recovery path has no parent",
+            ));
+        };
+        let temp_path = Self::atomic_temp_path(path);
+        Self::write_synced_file(&temp_path, bytes).await?;
+        fs::rename(&temp_path, path).await?;
+        Self::sync_parent(parent).await
+    }
+
+    async fn read_bounded_file(path: &Path) -> io::Result<Vec<u8>> {
+        let file = fs::File::open(path).await?;
+        let declared_len = file.metadata().await?.len();
+        if declared_len > MAX_PLAYER_DATA_FILE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "player data file {} declares {declared_len} bytes, which exceeds the {} byte limit",
+                    path.display(),
+                    MAX_PLAYER_DATA_FILE_BYTES
+                ),
+            ));
+        }
+
+        let capacity = usize::try_from(declared_len).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "player data file {} is too large to address",
+                    path.display()
+                ),
+            )
+        })?;
+        let mut bytes = Vec::with_capacity(capacity);
+        file.take(MAX_PLAYER_DATA_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .await?;
+        if bytes.len() as u64 > MAX_PLAYER_DATA_FILE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "player data file {} grew beyond the {} byte limit while being read",
+                    path.display(),
+                    MAX_PLAYER_DATA_FILE_BYTES
+                ),
+            ));
+        }
+        Ok(bytes)
     }
 
     fn atomic_temp_path(path: &Path) -> PathBuf {
@@ -741,7 +971,7 @@ impl PlayerDataFile {
             });
         }
 
-        Ok(Self {
+        let file = Self {
             data_version: data.data_version,
             pos: data.pos,
             motion: data.motion,
@@ -824,7 +1054,9 @@ impl PlayerDataFile {
                 })
                 .collect(),
             living_nbt: data.living_nbt.clone(),
-        })
+        };
+        file.validate_finite_values()?;
+        Ok(file)
     }
 
     fn into_persistent(self) -> io::Result<PersistentPlayerData> {
@@ -837,6 +1069,7 @@ impl PlayerDataFile {
                 ),
             ));
         }
+        self.validate_finite_values()?;
 
         let mut ender_items = Vec::with_capacity(self.ender_items.len());
         for slot in self.ender_items {
@@ -917,6 +1150,64 @@ impl PlayerDataFile {
             living_nbt: self.living_nbt,
         })
     }
+
+    fn validate_finite_values(&self) -> io::Result<()> {
+        validate_finite_f64("position", &self.pos)?;
+        validate_finite_f64("motion", &self.motion)?;
+        validate_finite_f32("rotation", &self.rotation)?;
+        validate_finite_f32("health", &[self.health])?;
+        validate_finite_f32(
+            "ability speeds",
+            &[self.abilities.flying_speed, self.abilities.walking_speed],
+        )?;
+        validate_finite_f32(
+            "food state",
+            &[self.food_saturation_level, self.food_exhaustion_level],
+        )?;
+        validate_finite_f32("experience progress", &[self.experience_progress])?;
+        if let Some(respawn) = &self.respawn_config {
+            validate_finite_f32("respawn rotation", &[respawn.yaw, respawn.pitch])?;
+        }
+        if let Some(root_vehicle) = &self.root_vehicle {
+            validate_persistent_entity_finite_values(&root_vehicle.entity)?;
+        }
+        for pearl in &self.ender_pearls {
+            validate_persistent_entity_finite_values(&pearl.entity)?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_finite_f64(field: &str, values: &[f64]) -> io::Result<()> {
+    if values.iter().all(|value| value.is_finite()) {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("player data {field} contains a non-finite value"),
+    ))
+}
+
+fn validate_finite_f32(field: &str, values: &[f32]) -> io::Result<()> {
+    if values.iter().all(|value| value.is_finite()) {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("player data {field} contains a non-finite value"),
+    ))
+}
+
+fn validate_persistent_entity_finite_values(root: &PersistentEntity) -> io::Result<()> {
+    let mut pending = vec![root];
+    while let Some(entity) = pending.pop() {
+        validate_finite_f64("persisted entity position", &entity.pos)?;
+        validate_finite_f64("persisted entity motion", &entity.motion)?;
+        validate_finite_f32("persisted entity rotation", &entity.rotation)?;
+        validate_finite_f64("persisted entity fall distance", &[entity.fall_distance])?;
+        pending.extend(entity.passengers.iter().map(|passenger| &passenger.0));
+    }
+    Ok(())
 }
 
 /// Vanilla parity: nothing -- these are only here to keep `into_persistent`
@@ -1033,11 +1324,11 @@ fn decode_global_file(bytes: &[u8]) -> io::Result<GlobalPlayerDataFile> {
         ));
     }
     let version = u16::from_le_bytes([bytes[4], bytes[5]]);
-    let payload = decode_zstd_payload(&bytes[6..], MAX_DECOMPRESSED_PLAYER_FILE_BYTES)?;
+    let payload = decompress_player_data(&bytes[6..])?;
     if version == 1 {
         let legacy: LegacyGlobalPlayerDataFile = wincode::deserialize(&payload)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        return Ok(GlobalPlayerDataFile {
+        return validate_global_player_data_file(GlobalPlayerDataFile {
             data_version: GLOBAL_PLAYER_DATA_VERSION,
             last_active_domain: legacy.last_active_domain,
             first_played: 0,
@@ -1048,7 +1339,7 @@ fn decode_global_file(bytes: &[u8]) -> io::Result<GlobalPlayerDataFile> {
     if version == 2 {
         let legacy: LegacyGlobalPlayerDataFileV2 = wincode::deserialize(&payload)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        return Ok(GlobalPlayerDataFile {
+        return validate_global_player_data_file(GlobalPlayerDataFile {
             data_version: GLOBAL_PLAYER_DATA_VERSION,
             last_active_domain: legacy.last_active_domain,
             first_played: legacy.first_played,
@@ -1062,8 +1353,45 @@ fn decode_global_file(bytes: &[u8]) -> io::Result<GlobalPlayerDataFile> {
             format!("unsupported global player data storage version {version}"),
         ));
     }
-    wincode::deserialize(&payload)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+    let file = wincode::deserialize(&payload)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    validate_global_player_data_file(file)
+}
+
+fn validate_global_player_data_file(
+    file: GlobalPlayerDataFile,
+) -> io::Result<GlobalPlayerDataFile> {
+    validate_domain_name(&file.last_active_domain, true, io::ErrorKind::InvalidData)?;
+    Ok(file)
+}
+
+fn validate_domain_name(
+    domain: &str,
+    allow_empty: bool,
+    error_kind: io::ErrorKind,
+) -> io::Result<()> {
+    if allow_empty && domain.is_empty() {
+        return Ok(());
+    }
+    let mut components = Path::new(domain).components();
+    let is_single_normal_component = matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(component)), None) if component == domain
+    );
+    if domain.is_empty()
+        || domain == "."
+        || domain == ".."
+        || domain == "global"
+        || domain.ends_with(['.', ' '])
+        || !is_single_normal_component
+        || !Identifier::validate_namespace(domain)
+    {
+        return Err(io::Error::new(
+            error_kind,
+            format!("invalid player data domain name {domain:?}"),
+        ));
+    }
+    Ok(())
 }
 
 fn unix_epoch_millis() -> i64 {
@@ -1090,44 +1418,6 @@ fn encode_file(
     Ok(bytes)
 }
 
-fn decode_zstd_payload(bytes: &[u8], max_bytes: usize) -> io::Result<Vec<u8>> {
-    let mut decoder = zstd::stream::read::Decoder::new(Cursor::new(bytes))?;
-    let mut payload = Vec::new();
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let read = Read::read(&mut decoder, &mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        let new_len = payload.len().checked_add(read).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "player data payload size overflowed memory limits",
-            )
-        })?;
-        if new_len > max_bytes {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("player data payload exceeds decompressed size limit of {max_bytes} bytes"),
-            ));
-        }
-        if payload.capacity() < new_len {
-            payload.reserve_exact(new_len - payload.len());
-        }
-        payload.extend_from_slice(&buffer[..read]);
-    }
-    Ok(payload)
-}
-
-fn oversized_player_file_error(size: u64, max_bytes: u64) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!(
-            "compressed player data file is too large: {size} bytes (maximum {max_bytes} bytes)"
-        ),
-    )
-}
-
 fn decode_file(
     expected_magic: [u8; 4],
     expected_version: u16,
@@ -1152,7 +1442,35 @@ fn decode_file(
             format!("unsupported player data storage version {version}"),
         ));
     }
-    decode_zstd_payload(&bytes[6..], MAX_DECOMPRESSED_PLAYER_FILE_BYTES)
+    decompress_player_data(&bytes[6..])
+}
+
+fn decompress_player_data(bytes: &[u8]) -> io::Result<Vec<u8>> {
+    let decoder = zstd::stream::read::Decoder::new(bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("player data zstd payload is invalid: {error}"),
+        )
+    })?;
+    let mut bytes = Vec::with_capacity(PLAYER_DATA_DECOMPRESSION_BUFFER_BYTES);
+    decoder
+        .take((MAX_DECOMPRESSED_PLAYER_DATA_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("player data zstd payload is invalid: {error}"),
+            )
+        })?;
+    if bytes.len() > MAX_DECOMPRESSED_PLAYER_DATA_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "player data zstd payload exceeds the {MAX_DECOMPRESSED_PLAYER_DATA_BYTES} byte limit"
+            ),
+        ));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -1165,9 +1483,15 @@ mod tests {
     use simdnbt::owned::NbtCompound;
     use std::{
         env,
-        io::Write,
-        time::{SystemTime, UNIX_EPOCH},
+        io::{Write, repeat},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
+    use tokio::{sync::oneshot, time::timeout};
 
     fn temp_storage_root(name: &str) -> PathBuf {
         let suffix = SystemTime::now()
@@ -1184,15 +1508,17 @@ mod tests {
             .await
             .expect("test storage should initialize");
         let uuid = Uuid::from_u128(7);
-        let path =
-            FilePlayerDataStorage::player_file(&storage.domain_players_dir("minecraft"), uuid);
+        let players_dir = storage
+            .domain_players_dir("minecraft")
+            .expect("the test domain name is valid");
+        let path = FilePlayerDataStorage::player_file(&players_dir, uuid);
         fs::create_dir_all(path.parent().expect("player path should have a parent"))
             .await
             .expect("player directory should be created");
         let file = fs::File::create(&path)
             .await
             .expect("player file should be created");
-        file.set_len(MAX_COMPRESSED_PLAYER_FILE_BYTES + 1)
+        file.set_len(MAX_PLAYER_DATA_FILE_BYTES + 1)
             .await
             .expect("sparse player file should be extended");
 
@@ -1201,7 +1527,7 @@ mod tests {
             .await
             .expect_err("oversized compressed input must be rejected");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert!(error.to_string().contains("compressed player data file"));
+        assert!(error.to_string().contains("exceeds the"));
 
         fs::remove_dir_all(root)
             .await
@@ -1215,7 +1541,7 @@ mod tests {
             let mut encoder = zstd::stream::Encoder::new(&mut compressed, 1)
                 .expect("test encoder should initialize");
             let block = vec![0u8; 1024 * 1024];
-            for _ in 0..=(MAX_DECOMPRESSED_PLAYER_FILE_BYTES / block.len()) {
+            for _ in 0..=(MAX_DECOMPRESSED_PLAYER_DATA_BYTES / block.len()) {
                 encoder
                     .write_all(&block)
                     .expect("test bomb should compress");
@@ -1402,7 +1728,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn interrupted_permission_publication_recovers_before_the_next_update() {
+    async fn missing_permission_primary_does_not_restore_a_privileged_backup() {
         let root = temp_storage_root("permission-recovery");
         let storage = FilePlayerDataStorage::new(root.clone())
             .await
@@ -1435,19 +1761,11 @@ mod tests {
         let mut recovered = storage
             .load_permission_subjects()
             .await
-            .expect("last committed permissions should recover");
-        assert_eq!(recovered.len(), 2);
-        assert_eq!(
-            recovered
-                .get(Uuid::from_u128(10))
-                .map(PermissionSubjectState::groups),
-            Some(["builder".to_owned()].as_slice())
-        );
-        assert_eq!(
-            recovered
-                .get(Uuid::from_u128(20))
-                .map(PermissionSubjectState::groups),
-            Some(["moderator".to_owned()].as_slice())
+            .expect("a missing primary should fail closed");
+        assert!(recovered.is_empty());
+        assert!(
+            backup.exists(),
+            "the backup should remain for operator recovery"
         );
         assert!(!temporary.exists());
 
@@ -1463,7 +1781,7 @@ mod tests {
             .load_permission_subjects()
             .await
             .expect("updated permissions should load");
-        assert_eq!(updated.len(), 3);
+        assert_eq!(updated.len(), 1);
 
         fs::remove_dir_all(root)
             .await
@@ -1471,7 +1789,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn corrupt_live_permission_file_does_not_fall_back_to_its_backup() {
+    async fn corrupt_live_permission_file_fails_closed_despite_a_valid_backup() {
         let root = temp_storage_root("corrupt-live-permissions");
         let storage = FilePlayerDataStorage::new(root.clone())
             .await
@@ -1497,7 +1815,7 @@ mod tests {
         let error = storage
             .load_permission_subjects()
             .await
-            .expect_err("a corrupt live permission file must remain startup-fatal");
+            .expect_err("a stale permission backup must not restore revoked privileges");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(
             fs::read_to_string(&path)
@@ -1505,6 +1823,40 @@ mod tests {
                 .expect("corrupt live file should remain in place"),
             "not valid permission TOML"
         );
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[tokio::test]
+    async fn operational_read_error_does_not_fall_back_to_stale_data() {
+        let root = temp_storage_root("operational-read-error");
+        let path = root.join("state.dat");
+        let backup = FilePlayerDataStorage::atomic_backup_path(&path);
+        fs::create_dir_all(&root)
+            .await
+            .expect("temporary storage should initialize");
+        fs::write(&path, b"primary")
+            .await
+            .expect("primary should be staged");
+        fs::write(&backup, b"backup")
+            .await
+            .expect("backup should be staged");
+
+        let error = FilePlayerDataStorage::read_with_valid_backup(&path, |bytes| {
+            if bytes == b"primary" {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "simulated operational failure",
+                ))
+            } else {
+                Ok(bytes.to_vec())
+            }
+        })
+        .await
+        .expect_err("an operational failure must not be hidden by stale data");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
 
         fs::remove_dir_all(root)
             .await
@@ -1767,6 +2119,259 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recovered_global_backup_clears_whitelist_and_repairs_the_primary() {
+        let root = temp_storage_root("global-backup-whitelist");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+        let uuid = Uuid::from_u128(42);
+        let path = FilePlayerDataStorage::player_file(&storage.global_players_dir(), uuid);
+        let backup = FilePlayerDataStorage::atomic_backup_path(&path);
+        let privileged = GlobalPlayerDataFile {
+            data_version: GLOBAL_PLAYER_DATA_VERSION,
+            last_active_domain: "minecraft".to_owned(),
+            first_played: 1_000,
+            last_played: 2_000,
+            whitelisted: true,
+        };
+        fs::write(
+            &backup,
+            encode_global_file(&privileged).expect("backup should encode"),
+        )
+        .await
+        .expect("backup should be staged");
+
+        let recovered = storage
+            .load_global(uuid)
+            .await
+            .expect("backup recovery should succeed")
+            .expect("backup should provide player data");
+        assert!(!recovered.whitelisted);
+        let repaired = decode_global_file(
+            &fs::read(&path)
+                .await
+                .expect("repaired primary should be readable"),
+        )
+        .expect("repaired primary should decode");
+        assert!(!repaired.whitelisted);
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[tokio::test]
+    async fn stale_gameplay_save_cannot_overwrite_whitelist_on_disk() {
+        let root = temp_storage_root("global-domain-whitelist-isolation");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+        let uuid = Uuid::from_u128(42);
+        let stale = GlobalPlayerData {
+            last_active_domain: "old".to_owned(),
+            first_played: 1_000,
+            last_played: 2_000,
+            statistics: Vec::new(),
+            whitelisted: false,
+        };
+        storage
+            .save_global(uuid, &stale)
+            .await
+            .expect("initial gameplay data should persist");
+        let (published, published_rx) = mpsc::sync_channel(1);
+        storage
+            .set_player_whitelisted(
+                uuid,
+                true,
+                &stale,
+                || true,
+                move |data| {
+                    published
+                        .send(data)
+                        .expect("publication receiver should remain open");
+                },
+            )
+            .await
+            .expect("whitelist update should persist");
+        let whitelisted = published_rx
+            .recv()
+            .expect("whitelist update should publish");
+        assert!(whitelisted.whitelisted);
+
+        let mut newer_stale_snapshot = stale;
+        newer_stale_snapshot.last_active_domain = "new".to_owned();
+        newer_stale_snapshot.last_played = 3_000;
+        storage
+            .save_global(uuid, &newer_stale_snapshot)
+            .await
+            .expect("gameplay update should persist");
+        let loaded = storage
+            .load_global(uuid)
+            .await
+            .expect("global data should load")
+            .expect("global data should exist");
+        assert_eq!(loaded.last_active_domain, "new");
+        assert_eq!(loaded.last_played, 3_000);
+        assert!(loaded.whitelisted);
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[tokio::test]
+    async fn committed_whitelist_is_published_when_backup_rotation_fails() {
+        let root = temp_storage_root("whitelist-committed-warning");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+        let uuid = Uuid::from_u128(43);
+        let fallback = GlobalPlayerData {
+            last_active_domain: "minecraft".to_owned(),
+            first_played: 1_000,
+            last_played: 2_000,
+            statistics: Vec::new(),
+            whitelisted: false,
+        };
+        storage
+            .save_global(uuid, &fallback)
+            .await
+            .expect("initial global data should persist");
+
+        let path = FilePlayerDataStorage::player_file(&storage.global_players_dir(), uuid);
+        fs::create_dir(FilePlayerDataStorage::atomic_backup_path(&path))
+            .await
+            .expect("a directory should obstruct only backup rotation");
+        let published = Arc::new(AtomicBool::new(false));
+        let published_by_callback = Arc::clone(&published);
+
+        let outcome = storage
+            .set_player_whitelisted(
+                uuid,
+                true,
+                &fallback,
+                || true,
+                move |data| {
+                    published_by_callback.store(data.whitelisted, Ordering::SeqCst);
+                },
+            )
+            .await
+            .expect("the primary replacement itself should commit");
+
+        assert!(matches!(
+            outcome,
+            Some(PersistenceUpdateOutcome::CommittedWithError(_))
+        ));
+        assert!(
+            published.load(Ordering::SeqCst),
+            "a visible primary must also become visible to synchronous admission checks"
+        );
+        let persisted = storage
+            .load_global(uuid)
+            .await
+            .expect("committed global data should load")
+            .expect("committed global data should exist");
+        assert!(persisted.whitelisted);
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+    async fn whitelist_disk_and_cache_publication_are_ordered_together() {
+        let root = temp_storage_root("whitelist-publication-order");
+        let storage = Arc::new(
+            FilePlayerDataStorage::new(root.clone())
+                .await
+                .expect("test storage should initialize"),
+        );
+        let uuid = Uuid::from_u128(42);
+        let fallback = GlobalPlayerData {
+            last_active_domain: "minecraft".to_owned(),
+            first_played: 1_000,
+            last_played: 2_000,
+            statistics: Vec::new(),
+            whitelisted: false,
+        };
+        let cached = Arc::new(AtomicBool::new(false));
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+
+        let first_storage = Arc::clone(&storage);
+        let first_cached = Arc::clone(&cached);
+        let first_fallback = fallback.clone();
+        let first = tokio::spawn(async move {
+            first_storage
+                .set_player_whitelisted(
+                    uuid,
+                    true,
+                    &first_fallback,
+                    || true,
+                    move |_| {
+                        let _ = entered_tx.send(());
+                        release_rx
+                            .recv()
+                            .expect("the first publication should be released");
+                        first_cached.store(true, Ordering::SeqCst);
+                    },
+                )
+                .await
+        });
+        entered_rx
+            .await
+            .expect("the first update should reach cache publication");
+
+        let second_storage = Arc::clone(&storage);
+        let second_cached = Arc::clone(&cached);
+        let (second_published_tx, second_published_rx) = oneshot::channel();
+        let second = tokio::spawn(async move {
+            second_storage
+                .set_player_whitelisted(
+                    uuid,
+                    false,
+                    &fallback,
+                    || true,
+                    move |_| {
+                        second_cached.store(false, Ordering::SeqCst);
+                        let _ = second_published_tx.send(());
+                    },
+                )
+                .await
+        });
+
+        assert!(
+            timeout(Duration::from_millis(100), second_published_rx)
+                .await
+                .is_err(),
+            "a later disk write must not pass an earlier cache publication"
+        );
+        release_tx
+            .send(())
+            .expect("the first publication should still be waiting");
+        first
+            .await
+            .expect("first update task should finish")
+            .expect("first update should succeed");
+        second
+            .await
+            .expect("second update task should finish")
+            .expect("second update should succeed");
+
+        let persisted = storage
+            .load_global(uuid)
+            .await
+            .expect("global data should load")
+            .expect("global data should exist");
+        assert!(!persisted.whitelisted);
+        assert!(!cached.load(Ordering::SeqCst));
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[tokio::test]
     async fn permission_subject_snapshot_removes_noncanonical_uuid_key() {
         let root = temp_storage_root("permission-uuid-key");
         let storage = match FilePlayerDataStorage::new(root.clone()).await {
@@ -1912,6 +2517,233 @@ mod tests {
             persistent.ender_pearls[0].entity.pos.map(f64::to_bits),
             [4.0_f64.to_bits(), 65.0_f64.to_bits(), 6.0_f64.to_bits()]
         );
+    }
+
+    #[test]
+    fn compressed_player_payload_cannot_expand_past_the_storage_ceiling() {
+        const EXPECTED_MAX_PLAYER_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
+        let compressed = zstd::encode_all(repeat(0).take(EXPECTED_MAX_PLAYER_PAYLOAD_BYTES + 1), 3)
+            .expect("the highly compressible payload should encode");
+        let mut bytes = Vec::with_capacity(6 + compressed.len());
+        bytes.extend_from_slice(&PLAYER_MAGIC);
+        bytes.extend_from_slice(&PLAYER_STORAGE_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&compressed);
+
+        let Err(error) = decode_file(PLAYER_MAGIC, PLAYER_STORAGE_VERSION, &bytes) else {
+            panic!("an oversized expanded payload must be refused");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn sparse_player_file_is_rejected_before_its_declared_size_is_allocated() {
+        const EXPECTED_MAX_PLAYER_FILE_BYTES: u64 = 64 * 1024 * 1024;
+        let root = temp_storage_root("sparse-oversized-player");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+        let uuid = Uuid::from_u128(42);
+        let path = FilePlayerDataStorage::player_file(
+            &storage
+                .domain_players_dir("minecraft")
+                .expect("minecraft is a valid domain"),
+            uuid,
+        );
+        fs::create_dir_all(path.parent().expect("player path has a parent"))
+            .await
+            .expect("player directory should exist");
+        let file = fs::File::create(&path)
+            .await
+            .expect("sparse test file should be created");
+        file.set_len(EXPECTED_MAX_PLAYER_FILE_BYTES + 1)
+            .await
+            .expect("sparse test file should expose an oversized length");
+
+        let error = storage
+            .load_domain("minecraft", uuid)
+            .await
+            .expect_err("an oversized file must be refused");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("exceeds"));
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[tokio::test]
+    async fn persisted_domain_name_cannot_escape_the_save_root() {
+        let root = temp_storage_root("domain-traversal");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+
+        for domain in [
+            ".",
+            "..",
+            "../outside",
+            "inside/outside",
+            "inside\\outside",
+            "alias.",
+            "alias ",
+            "global",
+        ] {
+            let error = storage
+                .load_domain(domain, Uuid::from_u128(42))
+                .await
+                .expect_err("path-like and aliased domain names must be refused");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{domain:?}");
+        }
+
+        let players = storage
+            .domain_players_dir("minecraft")
+            .expect("a normal namespace should be accepted");
+        assert_eq!(
+            players
+                .strip_prefix(&root)
+                .expect("a domain path must remain below its save root"),
+            Path::new("minecraft").join("players")
+        );
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[test]
+    fn traversing_last_active_domain_is_rejected_when_global_data_is_decoded() {
+        let file = GlobalPlayerDataFile {
+            data_version: GLOBAL_PLAYER_DATA_VERSION,
+            last_active_domain: "../outside".to_owned(),
+            first_played: 1_000,
+            last_played: 2_000,
+            whitelisted: false,
+        };
+        let encoded = encode_global_file(&file).expect("hostile fixture should encode");
+
+        let Err(error) = decode_global_file(&encoded) else {
+            panic!("a path-like last-active domain must be treated as corrupt data");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn non_finite_player_state_is_rejected_before_materialization() {
+        let mut non_finite_position = sample_player_file(PLAYER_DATA_VERSION);
+        non_finite_position.pos[0] = f64::NAN;
+        assert_eq!(
+            non_finite_position
+                .into_persistent()
+                .expect_err("NaN position must be refused")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let mut non_finite_health = sample_player_file(PLAYER_DATA_VERSION);
+        non_finite_health.health = f32::INFINITY;
+        assert_eq!(
+            non_finite_health
+                .into_persistent()
+                .expect_err("infinite health must be refused")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[tokio::test]
+    async fn valid_backup_is_loaded_when_the_current_player_file_is_corrupt() {
+        let root = temp_storage_root("corrupt-current-valid-backup");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+        let uuid = Uuid::from_u128(42);
+        let mut first = sample_player_file(PLAYER_DATA_VERSION);
+        first.score = 10;
+        let mut second = sample_player_file(PLAYER_DATA_VERSION);
+        second.score = 20;
+        storage
+            .write_atomic(
+                &storage
+                    .domain_players_dir("minecraft")
+                    .expect("minecraft is a valid domain"),
+                uuid,
+                encode_player_file(&first).expect("first generation should encode"),
+            )
+            .await
+            .expect("first generation should publish");
+        storage
+            .write_atomic(
+                &storage
+                    .domain_players_dir("minecraft")
+                    .expect("minecraft is a valid domain"),
+                uuid,
+                encode_player_file(&second).expect("second generation should encode"),
+            )
+            .await
+            .expect("second generation should publish");
+        let path = FilePlayerDataStorage::player_file(
+            &storage
+                .domain_players_dir("minecraft")
+                .expect("minecraft is a valid domain"),
+            uuid,
+        );
+        fs::write(&path, b"corrupt current generation")
+            .await
+            .expect("current generation should be corrupted for the test");
+
+        let restored = storage
+            .load_domain("minecraft", uuid)
+            .await
+            .expect("the valid backup should recover")
+            .expect("a committed player generation should exist");
+        assert_eq!(restored.score, 10);
+        assert_eq!(
+            fs::read(&path)
+                .await
+                .expect("the recovered primary should be readable"),
+            encode_player_file(&first).expect("first generation should encode"),
+            "loading a backup should heal the corrupt primary"
+        );
+
+        let backup = FilePlayerDataStorage::atomic_backup_path(&path);
+        assert_eq!(
+            fs::read(&backup)
+                .await
+                .expect("the known-good backup should remain readable"),
+            encode_player_file(&first).expect("first generation should encode"),
+            "recovery must preserve the last known-good backup"
+        );
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[tokio::test]
+    async fn third_atomic_publication_replaces_an_existing_windows_backup() {
+        let root = temp_storage_root("third-atomic-publication");
+        let path = root.join("state.dat");
+
+        for generation in [b"first".as_slice(), b"second", b"third"] {
+            FilePlayerDataStorage::write_atomic_path_locked(&path, generation.to_vec())
+                .await
+                .expect("every generation should publish atomically");
+        }
+
+        assert_eq!(
+            fs::read(&path).await.expect("live file should be readable"),
+            b"third"
+        );
+        assert_eq!(
+            fs::read(FilePlayerDataStorage::atomic_backup_path(&path))
+                .await
+                .expect("backup should be readable"),
+            b"second"
+        );
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
     }
 
     #[test]

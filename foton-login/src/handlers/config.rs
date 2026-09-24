@@ -124,6 +124,8 @@ impl JavaTcpClient {
                 self.id,
                 self.address,
                 player_weak.clone(),
+                self.translation.clone(),
+                Some(self.translated_serverbound.clone()),
             );
             let connection = Arc::new(PlayerConnection::Java(java_connection));
 
@@ -157,6 +159,7 @@ impl JavaTcpClient {
         let mut login = PlayerLoginEvent::new(Arc::clone(&player));
         self.server.events().fire(&mut login);
         if let Some(message) = login.kick_message() {
+            self.server.abort_player_login(&player);
             self.kick(message.to_owned().into()).await;
             return ConnectionAction::none();
         }

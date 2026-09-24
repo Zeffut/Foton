@@ -40,6 +40,7 @@ $Api = "https://api.github.com/repos/$Repo/releases/latest"
 # The installed binary's name. Every reference to it below goes through this
 # variable, mirroring install.sh's $BIN.
 $Bin = 'foton.exe'
+$RuntimeAsset = 'foton-plugin-runtime.zip'
 
 function Write-Bold {
     param([string]$Text)
@@ -54,6 +55,7 @@ function Die {
 }
 
 function Test-Interactive {
+    if ($env:FOTON_INSTALL_NONINTERACTIVE -eq '1') { return $false }
     if (-not [Environment]::UserInteractive) { return $false }
     try {
         $null = $Host.UI.RawUI.WindowSize
@@ -99,9 +101,209 @@ function Set-TomlKey {
     [System.IO.File]::WriteAllText($Path, $content, $utf8NoBom)
 }
 
-$TempDir = $null
+function Test-RegularFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force
+    return -not (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+}
 
-try {
+function Test-DirectDirectory {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force
+    return -not (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+function Assert-SafeTransaction {
+    param([string]$Path)
+    if (-not (Test-DirectDirectory $Path)) { throw "$Path is not a direct transaction directory" }
+    $owner = Join-Path $Path 'owner'
+    if (-not (Test-RegularFile $owner) -or
+        ([System.IO.File]::ReadAllText($owner).Trim()) -notmatch '^\d+:[0-9a-f]{32}$') {
+        throw "$Path has an invalid ownership marker"
+    }
+    $allowedMarkers = @('owner', 'committed', 'replace-binary-started', 'replace-runtime-started')
+    $allowedBinaries = @('new-binary', 'previous-binary')
+    $allowedDirectories = @('new-runtime', 'previous-runtime')
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Force)) {
+        if ($entry.Name -in $allowedMarkers) {
+            if (-not (Test-RegularFile $entry.FullName)) { throw "unsafe transaction file $($entry.FullName)" }
+            if ($entry.Name -ne 'owner' -and $entry.Length -ne 0) { throw "non-empty transaction marker $($entry.FullName)" }
+        } elseif ($entry.Name -in $allowedBinaries) {
+            if (-not (Test-RegularFile $entry.FullName)) { throw "unsafe transaction binary $($entry.FullName)" }
+        } elseif ($entry.Name -in $allowedDirectories) {
+            if (-not (Test-DirectDirectory $entry.FullName)) { throw "unsafe transaction directory $($entry.FullName)" }
+            $pending = New-Object 'System.Collections.Generic.Stack[string]'
+            $pending.Push($entry.FullName)
+            while ($pending.Count -gt 0) {
+                $current = $pending.Pop()
+                foreach ($child in @(Get-ChildItem -LiteralPath $current -Force)) {
+                    if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        throw "transaction runtime contains a reparse point: $($child.FullName)"
+                    }
+                    if ($child.PSIsContainer) { $pending.Push($child.FullName) }
+                    elseif (-not (Test-RegularFile $child.FullName)) { throw "transaction runtime contains a special file: $($child.FullName)" }
+                }
+            }
+        } else {
+            throw "unexpected transaction entry $($entry.FullName)"
+        }
+    }
+}
+
+function Test-RuntimeComplete {
+    param([string]$Path, [string]$Tag, [bool]$RequireReleaseTag = $true)
+    $api = Join-Path $Path 'foton-plugin-api.jar'
+    $libraries = Join-Path $Path 'lib'
+    $manifest = Join-Path $Path 'SHA256SUMS'
+    $releaseTag = Join-Path $Path '.release-tag'
+    $licenses = Join-Path $Path 'licenses'
+    if (-not (Test-RegularFile $api) -or
+        -not (Test-Path -LiteralPath $libraries -PathType Container) -or
+        ((Get-Item -LiteralPath $libraries -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not (Test-Path -LiteralPath $licenses -PathType Container) -or
+        ((Get-Item -LiteralPath $licenses -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not (Test-RegularFile $manifest)) {
+        return $false
+    }
+    if ($RequireReleaseTag) {
+        if (-not (Test-RegularFile $releaseTag) -or
+            ([System.IO.File]::ReadAllText($releaseTag).Trim()) -ne $Tag) { return $false }
+        $expectedRootEntries = 5
+    } else {
+        if (Get-Item -LiteralPath $releaseTag -Force -ErrorAction SilentlyContinue) { return $false }
+        $expectedRootEntries = 4
+    }
+    if (@(Get-ChildItem -LiteralPath $Path -Force).Count -ne $expectedRootEntries) { return $false }
+
+    $expectedLibraries = @(
+        'adventure-api-5.2.0.jar',
+        'adventure-key-5.2.0.jar',
+        'adventure-text-logger-slf4j-5.2.0.jar',
+        'adventure-text-serializer-plain-5.2.0.jar',
+        'annotations-26.1.0.jar',
+        'brigadier-1.3.10.jar',
+        'error_prone_annotations-2.47.0.jar',
+        'failureaccess-1.0.3.jar',
+        'gson-2.14.0.jar',
+        'guava-33.6.0-jre.jar',
+        'j2objc-annotations-3.1.jar',
+        'joml-1.10.8.jar',
+        'jspecify-1.0.0.jar',
+        'kotlin-stdlib-1.8.20.jar',
+        'kotlin-stdlib-common-1.8.20.jar',
+        'kotlin-stdlib-jdk7-1.8.20.jar',
+        'kotlin-stdlib-jdk8-1.8.20.jar',
+        'netty-buffer-4.2.15.Final.jar',
+        'netty-codec-base-4.2.15.Final.jar',
+        'netty-common-4.2.15.Final.jar',
+        'netty-resolver-4.2.15.Final.jar',
+        'netty-transport-4.2.15.Final.jar',
+        'slf4j-api-2.0.17.jar',
+        'snakeyaml-2.2.jar'
+    )
+
+    $apiSeen = 0
+    $librariesSeen = 0
+    $licensesSeen = 0
+    $manifestEntries = 0
+    $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($line in Get-Content -Path $manifest) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line -notmatch '^([0-9a-fA-F]{64})\s+\*?(.+)$') { return $false }
+        $expected = $Matches[1]
+        $relative = $Matches[2]
+        if (-not $seenPaths.Add($relative)) { return $false }
+        if ($relative -eq 'foton-plugin-api.jar') {
+            $apiSeen++
+        } elseif ($relative -match '^lib/([^/]+\.jar)$' -and $Matches[1] -cin $expectedLibraries) {
+            $librariesSeen++
+        } elseif ($relative -match '^licenses/[A-Za-z0-9._+-]+$') {
+            $licensesSeen++
+        } else {
+            return $false
+        }
+        $file = Join-Path $Path ($relative -replace '/', '\')
+        if (-not (Test-RegularFile $file)) { return $false }
+        $actual = (Get-FileHash -Algorithm SHA256 -Path $file).Hash
+        if ($actual.ToUpperInvariant() -ne $expected.ToUpperInvariant()) { return $false }
+        $manifestEntries++
+    }
+    $actualFiles = @(Get-ChildItem -Path $Path -Recurse -File | Where-Object {
+        $_.Name -ne 'SHA256SUMS' -and $_.Name -ne '.release-tag'
+    })
+    $libraryEntries = @(Get-ChildItem -LiteralPath $libraries -Force)
+    if (@($libraryEntries | Where-Object {
+        $_.PSIsContainer -or (($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+    }).Count -gt 0) { return $false }
+    $libraryFiles = @($libraryEntries | Where-Object { -not $_.PSIsContainer })
+    $jarFiles = @($libraryFiles | Where-Object { $_.Extension -eq '.jar' })
+    $actualLibraryNames = @($jarFiles | ForEach-Object { $_.Name } | Sort-Object)
+    $sortedExpectedLibraries = @($expectedLibraries | Sort-Object)
+    if (($actualLibraryNames -join "`n") -cne ($sortedExpectedLibraries -join "`n")) { return $false }
+    $expectedLicenses = @(
+        'ADVENTURE-MIT.txt', 'APACHE-2.0.txt', 'BRIGADIER-MIT.txt',
+        'JOML-MIT.txt', 'SLF4J-MIT.txt', 'THIRD-PARTY-NOTICES.txt'
+    )
+    $licenseEntries = @(Get-ChildItem -LiteralPath $licenses -Force)
+    if ($licenseEntries.Count -ne $expectedLicenses.Count) { return $false }
+    foreach ($licenseName in $expectedLicenses) {
+        if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
+    }
+    return $apiSeen -eq 1 -and $librariesSeen -eq 24 -and
+        $jarFiles.Count -eq 24 -and $libraryFiles.Count -eq 24 -and
+        $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
+}
+
+function Restore-PendingTransaction {
+    param([string]$Path, [string]$InstallDir, [string]$BinaryName)
+    if (-not (Test-Path $Path)) { return $false }
+    Assert-SafeTransaction $Path
+    if (Test-Path (Join-Path $Path 'committed')) {
+        Remove-Item -Recurse -Force $Path
+        return $false
+    }
+
+    $errors = New-Object System.Collections.Generic.List[string]
+    $finalBinary = Join-Path $InstallDir $BinaryName
+    $finalRuntime = Join-Path $InstallDir 'plugin-runtime'
+    $previousBinary = Join-Path $Path 'previous-binary'
+    $previousRuntime = Join-Path $Path 'previous-runtime'
+    if ((Test-Path $previousRuntime) -or (Test-Path (Join-Path $Path 'replace-runtime-started'))) {
+        if (Test-Path $finalRuntime) {
+            try { Remove-Item -Recurse -Force $finalRuntime } catch { $errors.Add('current runtime') }
+        }
+        if ((Test-Path $previousRuntime) -and -not (Test-Path $finalRuntime)) {
+            try { Copy-Item -Recurse -Force $previousRuntime $finalRuntime } catch { $errors.Add("runtime backup $previousRuntime") }
+        }
+    }
+    if ((Test-Path $previousBinary) -or (Test-Path (Join-Path $Path 'replace-binary-started'))) {
+        if (Test-Path $finalBinary) {
+            try { Remove-Item -Force $finalBinary } catch { $errors.Add('current binary') }
+        }
+        if ((Test-Path $previousBinary) -and -not (Test-Path $finalBinary)) {
+            try { Copy-Item -Force $previousBinary $finalBinary } catch { $errors.Add("binary backup $previousBinary") }
+        }
+    }
+    if ($errors.Count -gt 0) {
+        throw "rollback was incomplete: $($errors -join ', ')"
+    }
+    Remove-Item -Recurse -Force $Path
+    return $true
+}
+
+function Invoke-FotonInstaller {
+    $TempDir = $null
+    $StagedBin = $null
+    $StagedRuntime = $null
+    $LockStream = $null
+    $LockOwned = $false
+    $LockPath = $null
+    $TransactionDir = $null
+    $Dir = '.'
+
+    try {
     Write-Bold 'Foton installer'
 
     # Foton publishes no Windows ARM build. $env:PROCESSOR_ARCHITECTURE
@@ -111,6 +313,34 @@ try {
         'AMD64' { $Asset = 'foton-windows-x86_64.exe' }
         'ARM64' { Die "Foton publishes no Windows ARM build yet. Build from source instead: https://github.com/$Repo" }
         default { Die "unsupported processor: $($env:PROCESSOR_ARCHITECTURE). Foton publishes Windows x86_64 builds only." }
+    }
+
+    $LockPath = Join-Path $Dir '.foton-install.lock'
+    $existingLock = Get-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+    if ($existingLock -and ($existingLock.PSIsContainer -or
+        (($existingLock.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0))) {
+        Die "$LockPath is not a direct regular lock file"
+    }
+    try {
+        $LockStream = [System.IO.File]::Open(
+            $LockPath,
+            [System.IO.FileMode]::OpenOrCreate,
+            [System.IO.FileAccess]::ReadWrite,
+            [System.IO.FileShare]::None
+        )
+    } catch {
+        Die "another installer is already modifying $Dir"
+    }
+    $LockOwned = $true
+    $ownerBytes = [System.Text.Encoding]::UTF8.GetBytes("$PID`n")
+    $LockStream.SetLength(0)
+    $LockStream.Write($ownerBytes, 0, $ownerBytes.Length)
+    $LockStream.Flush()
+
+    $TransactionDir = Join-Path $Dir '.foton-install-transaction'
+    if ((Get-Item -LiteralPath $TransactionDir -Force -ErrorAction SilentlyContinue)) {
+        $recovered = Restore-PendingTransaction $TransactionDir $Dir $Bin
+        if ($recovered) { Write-Bold 'Recovered an interrupted installation before continuing.' }
     }
 
     $script:Interactive = Test-Interactive
@@ -149,6 +379,10 @@ try {
     if (-not $SumsInfo) {
         Die "SHA256SUMS is missing from the $Tag release"
     }
+    $RuntimeInfo = $Assets | Where-Object { $_.name -eq $RuntimeAsset } | Select-Object -First 1
+    if (-not $RuntimeInfo) {
+        Die "$RuntimeAsset is missing from the $Tag release"
+    }
 
     if ($Update) {
         if (-not (Test-Path ".\$Bin")) {
@@ -156,16 +390,20 @@ try {
         }
         $versionOutput = & ".\$Bin" --version 2>$null
         $current = (($versionOutput -join ' ') -split '\s+')[1]
-        if ("v$current" -eq $Tag) {
+        if (("v$current" -eq $Tag) -and (Test-RuntimeComplete '.\plugin-runtime' $Tag)) {
             Write-Bold "Already on $Tag. Nothing to do."
-            exit 0
+            return
         }
-        Write-Host "Updating from $current to $Tag"
+        if ("v$current" -eq $Tag) {
+            Write-Host "Repairing the plugin runtime for $Tag"
+        } else {
+            Write-Host "Updating from $current to $Tag"
+        }
         $Dir = '.'
     } else {
         $Dir = '.'
-        if (Test-Path (Join-Path $Dir $Bin)) {
-            $overwrite = Read-Answer 'This directory already has Foton. Replace the binary?' 'no'
+        if ((Test-Path (Join-Path $Dir $Bin)) -or (Test-Path (Join-Path $Dir 'plugin-runtime'))) {
+            $overwrite = Read-Answer 'This directory already has a Foton binary or plugin runtime. Replace the binary/runtime pair? Config, plugins and saves stay untouched.' 'no'
             if ($overwrite -notmatch '^(y|yes)$') {
                 Die 'stopping, nothing was changed'
             }
@@ -175,6 +413,7 @@ try {
     $TempDir = Join-Path $env:TEMP ('foton-install-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
     $tempBin = Join-Path $TempDir $Bin
+    $tempRuntime = Join-Path $TempDir $RuntimeAsset
     $tempSums = Join-Path $TempDir 'SHA256SUMS'
 
     Write-Host 'Downloading...'
@@ -184,6 +423,11 @@ try {
         Die "could not download $Asset from $Tag"
     }
     try {
+        Invoke-WebRequest -Uri $RuntimeInfo.browser_download_url -OutFile $tempRuntime -UseBasicParsing -ErrorAction Stop
+    } catch {
+        Die "could not download $RuntimeAsset from $Tag"
+    }
+    try {
         Invoke-WebRequest -Uri $SumsInfo.browser_download_url -OutFile $tempSums -UseBasicParsing -ErrorAction Stop
     } catch {
         Die 'could not download SHA256SUMS'
@@ -191,47 +435,110 @@ try {
 
     Write-Host 'Verifying...'
     $sumsLines = Get-Content -Path $tempSums
-    $expected = $null
-    $escapedAsset = [regex]::Escape($Asset)
-    foreach ($line in $sumsLines) {
-        if ($line -match "^\s*([0-9a-fA-F]{64})\s+\*?$escapedAsset\s*$") {
-            $expected = $Matches[1]
-            break
+    foreach ($download in @(
+        @{ Path = $tempBin; Name = $Asset },
+        @{ Path = $tempRuntime; Name = $RuntimeAsset }
+    )) {
+        $expected = $null
+        $escapedName = [regex]::Escape($download.Name)
+        foreach ($line in $sumsLines) {
+            if ($line -match "^\s*([0-9a-fA-F]{64})\s+\*?$escapedName\s*$") {
+                $expected = $Matches[1]
+                break
+            }
+        }
+        if (-not $expected) { Die "$($download.Name) is not listed in SHA256SUMS" }
+        # Get-FileHash returns uppercase hex; shasum/sha256sum write lowercase.
+        $actual = (Get-FileHash -Algorithm SHA256 -Path $download.Path).Hash
+        if ($expected.ToUpperInvariant() -ne $actual.ToUpperInvariant()) {
+            Remove-Item -Force $download.Path -ErrorAction SilentlyContinue
+            Die "checksum mismatch for $($download.Name) -- the download does not match the published release"
         }
     }
-    if (-not $expected) { Die "$Asset is not listed in SHA256SUMS" }
-    # Get-FileHash returns uppercase hex; shasum/sha256sum write lowercase.
-    # Compare case-insensitively rather than relying on -eq's default
-    # case-insensitivity, so the intent reads plainly at the call site.
-    $actual = (Get-FileHash -Algorithm SHA256 -Path $tempBin).Hash
-    if ($expected.ToUpperInvariant() -ne $actual.ToUpperInvariant()) {
-        Remove-Item -Force $tempBin -ErrorAction SilentlyContinue
-        Die 'checksum mismatch -- the download does not match the published release'
+
+    $unpackedRuntime = Join-Path $TempDir 'plugin-runtime'
+    Expand-Archive -Path $tempRuntime -DestinationPath $unpackedRuntime -Force
+    if (-not (Test-Path (Join-Path $unpackedRuntime 'foton-plugin-api.jar'))) {
+        Die "$RuntimeAsset has no plugin API jar"
+    }
+    $unpackedLibraries = Join-Path $unpackedRuntime 'lib'
+    if (-not (Test-Path $unpackedLibraries) -or
+        -not (Get-ChildItem -Path $unpackedLibraries -Filter '*.jar' -File | Select-Object -First 1)) {
+        Die "$RuntimeAsset has no runtime library jars"
+    }
+    if (-not (Test-RuntimeComplete $unpackedRuntime $Tag $false)) {
+        Die "$RuntimeAsset has an incomplete, unsafe or invalid runtime manifest"
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Join-Path $unpackedRuntime '.release-tag'), "$Tag`n", $utf8NoBom)
+    if (-not (Test-RuntimeComplete $unpackedRuntime $Tag)) {
+        Die "$RuntimeAsset has an incomplete or invalid runtime manifest"
     }
 
     $finalBin = Join-Path $Dir $Bin
-    $stagedBin = Join-Path $Dir "$Bin.new"
-    $previousBin = Join-Path $Dir "$Bin.previous"
-    # Stage in the target directory first. A temporary directory may be on a
-    # different volume, where Move-Item is a copy that can fail mid-operation.
-    Move-Item -Force $tempBin $stagedBin
+    $finalRuntime = Join-Path $Dir 'plugin-runtime'
+    New-Item -ItemType Directory -Path $TransactionDir | Out-Null
+    [System.IO.File]::WriteAllText(
+        (Join-Path $TransactionDir 'owner'),
+        "${PID}:$([Guid]::NewGuid().ToString('N'))`n",
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+    $StagedBin = Join-Path $TransactionDir 'new-binary'
+    $StagedRuntime = Join-Path $TransactionDir 'new-runtime'
+    $previousBin = Join-Path $TransactionDir 'previous-binary'
+    $previousRuntime = Join-Path $TransactionDir 'previous-runtime'
+    # The fixed transaction directory is both staging area and durable journal.
+    # A later invocation can therefore recover after process termination.
+    Move-Item -Force $tempBin $StagedBin
+    New-Item -ItemType Directory -Path $StagedRuntime | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $unpackedRuntime '*') $StagedRuntime
+
     try {
         if (Test-Path $finalBin) {
+            if (-not (Test-RegularFile $finalBin)) { throw "existing binary is not a direct regular file: $finalBin" }
             Move-Item -Force $finalBin $previousBin
         }
-        Move-Item -Force $stagedBin $finalBin
-    } catch {
-        if (-not (Test-Path $finalBin) -and (Test-Path $previousBin)) {
-            Move-Item -Force $previousBin $finalBin
+        if (Test-Path $finalRuntime) {
+            if (-not (Test-DirectDirectory $finalRuntime)) { throw "existing plugin runtime is not a direct directory: $finalRuntime" }
+            Move-Item -Force $finalRuntime $previousRuntime
         }
-        Remove-Item -Force $stagedBin -ErrorAction SilentlyContinue
-        throw 'could not replace the existing binary; the previous binary was restored'
+        New-Item -ItemType File -Path (Join-Path $TransactionDir 'replace-binary-started') | Out-Null
+        Move-Item -Force $StagedBin $finalBin
+        $StagedBin = $null
+        New-Item -ItemType File -Path (Join-Path $TransactionDir 'replace-runtime-started') | Out-Null
+        Move-Item -Force $StagedRuntime $finalRuntime
+        $StagedRuntime = $null
+
+        $installedVersionOutput = & $finalBin --version 2>$null
+        if ($LASTEXITCODE -ne 0) { throw 'the new binary failed its version check' }
+        $installedVersion = (($installedVersionOutput -join ' ') -split '\s+')[1]
+        if ("v$installedVersion" -ne $Tag) {
+            throw "the new binary reports version $installedVersion instead of $($Tag.Substring(1))"
+        }
+    } catch {
+        $replacementError = $_.Exception.Message
+        $hadPrevious = (Test-Path $previousBin) -or (Test-Path $previousRuntime)
+        try {
+            $null = Restore-PendingTransaction $TransactionDir $Dir $Bin
+        } catch {
+            throw "$replacementError; $($_.Exception.Message)"
+        }
+        if ($hadPrevious) {
+            throw "$replacementError; the previous installation was restored"
+        }
+        throw "$replacementError; the incomplete new installation was removed"
     }
-    Write-Bold "Installed $Tag to .\$Bin"
+    New-Item -ItemType File -Path (Join-Path $TransactionDir 'committed') | Out-Null
+    try {
+        Remove-Item -Recurse -Force $TransactionDir
+    } catch {
+        Write-Host "warning: committed transaction cleanup remains at $TransactionDir" -ForegroundColor Yellow
+    }
+    Write-Bold "Installed $Tag to .\$Bin with the optional plugin runtime in .\plugin-runtime\"
 
     if ($Update) {
-        Write-Bold 'Updated. Your config\ and saves\ were left alone.'
-        exit 0
+        Write-Bold 'Updated. Your config\, plugins\ and saves\ were left alone.'
+        return
     }
 
     Write-Host 'Writing the default configuration...'
@@ -245,7 +552,7 @@ try {
 
     if (-not $script:Interactive) {
         Write-Bold 'No terminal here, so the defaults were kept. Edit .\config\ to change them.'
-        exit 0
+        return
     }
 
     $name = Read-Answer 'Server name' 'A Foton Server'
@@ -284,11 +591,36 @@ try {
         Set-Location $Dir
         & ".\$Bin"
     }
-} catch {
-    Write-Host "error: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
-} finally {
-    if ($TempDir -and (Test-Path $TempDir)) {
-        Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
+    } catch {
+        $failureMessage = $_.Exception.Message
+        Write-Host "error: $failureMessage" -ForegroundColor Red
+        throw $failureMessage
+    } finally {
+        if ($TransactionDir -and (Test-Path $TransactionDir) -and
+            -not (Test-Path (Join-Path $TransactionDir 'committed'))) {
+            try {
+                $null = Restore-PendingTransaction $TransactionDir $Dir $Bin
+            } catch {
+                Write-Host "error: interrupted installation; $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+        if ($TempDir -and (Test-Path $TempDir)) {
+            Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
+        }
+        if ($StagedBin -and (Test-Path $StagedBin)) {
+            Remove-Item -Force $StagedBin -ErrorAction SilentlyContinue
+        }
+        if ($StagedRuntime -and (Test-Path $StagedRuntime)) {
+            Remove-Item -Recurse -Force $StagedRuntime -ErrorAction SilentlyContinue
+        }
+        if ($LockStream) {
+            $LockStream.Dispose()
+            $LockStream = $null
+        }
+        if ($LockOwned -and $LockPath -and (Test-Path $LockPath)) {
+            Remove-Item -Force $LockPath -ErrorAction SilentlyContinue
+        }
     }
 }
+
+Invoke-FotonInstaller

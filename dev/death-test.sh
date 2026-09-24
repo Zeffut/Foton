@@ -53,6 +53,8 @@ cleanup() {
   for _ in $(seq 1 30); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
   kill -9 "$PID" 2>/dev/null
 }
+trap cleanup EXIT
+trap 'cleanup; trap - EXIT; exit 130' INT TERM
 
 for _ in $(seq 1 180); do
   python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1 && break
@@ -75,9 +77,12 @@ JOIN_WATCH_SECONDS=2 python3 "$ROOT/dev/join.py" "$PORT" > join.log 2>&1
 STATUS=$?
 
 cleanup
+trap - EXIT INT TERM
 
 # The command that caused this carries no marker of its own, so the server's
-# broadcast is the only line that mentions the message key.
+# broadcast is the only line that mentions the message key. Vanilla sends the
+# translatable component, not text rendered on the server: a line without the
+# key means the client can no longer localize it.
 DEATH_LINE=$(grep "server says" join.log | grep "death.attack.mob" | head -1)
 echo "=== the death line ==="
 echo "$DEATH_LINE"

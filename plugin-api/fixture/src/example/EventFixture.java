@@ -6,8 +6,11 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.inventory.PrepareGrindstoneEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** Exercises the parts of the event path that are easy to get wrong. */
@@ -25,10 +28,17 @@ public final class EventFixture extends JavaPlugin implements Listener, org.bukk
     public static int immediate = 0;
     public static int delayed = 0;
     public static int repeating = 0;
+    public static int privateHandlers = 0;
+    public static int protectedHandlers = 0;
+    public static int inheritedHandlers = 0;
+    public static int overriddenHandlers = 0;
+    public static int genericHandlers = 0;
 
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(this, this);
+        getServer().getPluginManager().registerEvents(new VisibilityListener(), this);
+        getServer().getPluginManager().registerEvents(new JoinListener(), this);
 
         // Exactly what a plugin does: lay the jar's config.yml down if the
         // operator has none, then read through it.
@@ -86,5 +96,67 @@ public final class EventFixture extends JavaPlugin implements Listener, org.bukk
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBreakLater(BlockBreakEvent event) {
         event.setCancelled(false);
+    }
+
+    /** All three grindstone slots must make the Java-to-Rust return trip. */
+    @EventHandler
+    private void onPrepareGrindstone(PrepareGrindstoneEvent event) {
+        event.getInventory().setUpperItem(new ItemStack(Material.DIAMOND, 2));
+        event.getInventory().setLowerItem(new ItemStack(Material.GOLD_INGOT, 3));
+        event.setResult(new ItemStack(Material.EMERALD, 4));
+    }
+
+    private static class VisibilityBase implements Listener {
+        @EventHandler
+        private void hidden(PlayerJoinEvent event) {
+            privateHandlers++;
+        }
+
+        @EventHandler
+        protected void inheritedProtected(PlayerJoinEvent event) {
+            inheritedHandlers++;
+        }
+
+        @EventHandler
+        public void inheritedPublic(PlayerJoinEvent event) {
+            inheritedHandlers++;
+        }
+
+        @EventHandler
+        protected void replaced(PlayerJoinEvent event) {
+            overriddenHandlers += 100;
+        }
+    }
+
+    private static final class VisibilityListener extends VisibilityBase {
+        @EventHandler
+        private void hidden(PlayerJoinEvent event) {
+            privateHandlers++;
+        }
+
+        @EventHandler
+        protected void localProtected(PlayerJoinEvent event) {
+            protectedHandlers++;
+        }
+
+        @Override
+        protected void replaced(PlayerJoinEvent event) {
+            overriddenHandlers++;
+        }
+    }
+
+    private static class GenericListener<T extends org.bukkit.event.Event> implements Listener {
+        @EventHandler
+        public void generic(T event) {
+            genericHandlers += 100;
+        }
+    }
+
+    private static final class JoinListener extends GenericListener<PlayerJoinEvent> {
+        @Override
+        @EventHandler
+        public void generic(PlayerJoinEvent event) {
+            genericHandlers++;
+        }
     }
 }

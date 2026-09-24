@@ -17,6 +17,7 @@ use super::super::{
 };
 use crate::{
     permission::{OP_GROUP, PermissionSubjectState},
+    player::player_data_storage::PersistenceUpdateOutcome,
     server::Server,
 };
 
@@ -133,7 +134,34 @@ async fn update_operator_group(
         })
         .await
         .map_err(|error| CommandSyntaxError::dynamic(error.to_string()))?;
-    Ok(result.1)
+    Ok(complete_operator_update(uuid, action, result))
+}
+
+fn complete_operator_update(
+    uuid: uuid::Uuid,
+    action: OperatorAction,
+    result: (PermissionSubjectState, bool, PersistenceUpdateOutcome),
+) -> bool {
+    log_operator_persistence_warning(uuid, action, &result.2);
+    result.1
+}
+
+fn log_operator_persistence_warning(
+    uuid: uuid::Uuid,
+    action: OperatorAction,
+    outcome: &PersistenceUpdateOutcome,
+) {
+    let PersistenceUpdateOutcome::CommittedWithError(error) = outcome else {
+        return;
+    };
+    let operator = matches!(action, OperatorAction::Grant);
+    tracing::error!(
+        %uuid,
+        operator,
+        command = action.command_name(),
+        %error,
+        "Operator command update is visible, but its durability or backup rotation could not be confirmed"
+    );
 }
 
 fn update_groups(groups: &mut Vec<String>, action: OperatorAction) -> bool {
@@ -198,14 +226,52 @@ impl CommandResultSuspension for OperatorCommandSuspension {
 
 #[cfg(test)]
 mod tests {
+    use std::{io, sync::Arc};
+
     use foton_protocol::packets::game::{
         ArgumentType as ProtocolArgumentType, SuggestionType as ProtocolSuggestionType,
     };
     use foton_registry::init_vanilla_registry;
+    use foton_utils::locks::SyncMutex;
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::fmt::MakeWriter;
 
-    use super::{OperatorAction, update_groups};
+    use super::{OperatorAction, complete_operator_update, update_groups};
     use crate::command::builtins::create_dispatcher;
     use crate::command::execution::FotonArgumentType;
+    use crate::permission::PermissionSubjectState;
+    use crate::player::player_data_storage::PersistenceUpdateOutcome;
+
+    #[derive(Clone, Default)]
+    struct CapturedLogs(Arc<SyncMutex<Vec<u8>>>);
+
+    struct CapturedLogWriter(Arc<SyncMutex<Vec<u8>>>);
+
+    impl io::Write for CapturedLogWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.0.lock().extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'writer> MakeWriter<'writer> for CapturedLogs {
+        type Writer = CapturedLogWriter;
+
+        fn make_writer(&'writer self) -> Self::Writer {
+            CapturedLogWriter(Arc::clone(&self.0))
+        }
+    }
+
+    impl CapturedLogs {
+        fn contents(&self) -> String {
+            let bytes = self.0.lock();
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+    }
 
     #[test]
     fn operator_group_updates_are_idempotent_and_preserve_other_groups() {
@@ -216,6 +282,36 @@ mod tests {
         assert!(update_groups(&mut groups, OperatorAction::Revoke));
         assert_eq!(groups, ["builder"]);
         assert!(!update_groups(&mut groups, OperatorAction::Revoke));
+    }
+
+    #[test]
+    fn direct_operator_command_logs_a_visible_commit_with_uncertain_durability() {
+        let uuid = uuid::Uuid::from_u128(0x0000_4f50_4552_4154_4f52);
+        let logs = CapturedLogs::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(logs.clone())
+            .finish();
+        with_default(subscriber, || {
+            assert!(complete_operator_update(
+                uuid,
+                OperatorAction::Grant,
+                (
+                    PermissionSubjectState::default(),
+                    true,
+                    PersistenceUpdateOutcome::CommittedWithError(io::Error::other(
+                        "backup rotation failed",
+                    )),
+                ),
+            ));
+        });
+
+        let output = logs.contents();
+        assert!(output.contains(&uuid.to_string()));
+        assert!(output.contains("operator=true"));
+        assert!(output.contains("backup rotation failed"));
+        assert!(output.contains("visible"));
     }
 
     #[test]

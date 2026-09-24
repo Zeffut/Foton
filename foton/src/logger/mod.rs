@@ -8,7 +8,10 @@ use foton_utils::locks::AsyncRwLock;
 use foton_utils::logger::{FOTON_LOGGER, FotonLogger, Level, LogData};
 use std::{
     io::Write,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{self, Instant},
 };
 use tokio::{sync::mpsc, task, time::timeout};
@@ -24,6 +27,11 @@ mod output;
 mod selection;
 mod state;
 mod suggestions;
+
+/// Logging must never become an attacker-controlled unbounded allocation.
+const LOG_QUEUE_CAPACITY: usize = 8_192;
+const LOG_PRIORITY_QUEUE_CAPACITY: usize = 256;
+const LOG_SHUTDOWN_DRAIN_LIMIT: usize = 256;
 
 /// Returns the terminal width, falling back to 80 columns if unavailable or it's <= 0.
 fn terminal_width() -> usize {
@@ -45,7 +53,10 @@ pub(crate) enum Move {
 /// A logger implementation with commands suggestions
 pub struct CommandLogger {
     input: Arc<AsyncRwLock<LogState>>,
-    sender: mpsc::UnboundedSender<(Level, LogData)>,
+    sender: mpsc::Sender<(Level, LogData)>,
+    priority_sender: mpsc::Sender<(Level, LogData)>,
+    dropped_entries: AtomicU64,
+    dropped_priority_entries: AtomicU64,
     cancel_token: CancellationToken,
     stopped: CancellationToken,
     log_stopped: CancellationToken,
@@ -59,7 +70,8 @@ impl CommandLogger {
         cancel_token: CancellationToken,
         log_config: Option<LogConfig>,
     ) -> Result<Arc<Self>, String> {
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = mpsc::channel(LOG_QUEUE_CAPACITY);
+        let (priority_sender, priority_receiver) = mpsc::channel(LOG_PRIORITY_QUEUE_CAPACITY);
         let log_cancel_token = CancellationToken::new();
         let input = LogState::new(log_config.as_ref(), cancel_token)
             .await
@@ -68,13 +80,16 @@ impl CommandLogger {
         let log = Arc::new(Self {
             input: Arc::new(AsyncRwLock::const_new(input)),
             sender,
+            priority_sender,
+            dropped_entries: AtomicU64::new(0),
+            dropped_priority_entries: AtomicU64::new(0),
             cancel_token: log_cancel_token.clone(),
             stopped: CancellationToken::new(),
             log_stopped: CancellationToken::new(),
             start_time: Instant::now(),
             log_config,
         });
-        task::spawn(log.clone().log_loop(receiver));
+        task::spawn(log.clone().log_loop(receiver, priority_receiver));
         task::spawn(log.clone().input_main());
         FOTON_LOGGER
             .set(log.clone())
@@ -97,26 +112,56 @@ impl CommandLogger {
             .is_err()
         {
             eprintln!("Timed out waiting for logger to flush pending entries");
-            self.log_stopped.cancel();
         }
     }
 
-    async fn log_loop(self: Arc<Self>, mut receiver: mpsc::UnboundedReceiver<(Level, LogData)>) {
+    async fn log_loop(
+        self: Arc<Self>,
+        mut receiver: mpsc::Receiver<(Level, LogData)>,
+        mut priority_receiver: mpsc::Receiver<(Level, LogData)>,
+    ) {
         loop {
             tokio::select! {
                 biased;
-                Some((lvl, data)) = receiver.recv() => {
-                    self.write_entry(lvl, data).await;
-                }
                 () = self.cancel_token.cancelled() => {
-                    while let Ok((lvl, data)) = receiver.try_recv() {
+                    let (pending, abandoned_priority, abandoned) = take_shutdown_batch(
+                        &mut priority_receiver,
+                        &mut receiver,
+                        LOG_SHUTDOWN_DRAIN_LIMIT,
+                    );
+                    self.dropped_priority_entries
+                        .fetch_add(abandoned_priority, Ordering::Relaxed);
+                    self.dropped_entries.fetch_add(abandoned, Ordering::Relaxed);
+                    for (lvl, data) in pending {
                         self.write_entry(lvl, data).await;
                     }
+                    self.report_dropped_entries();
                     self.flush_file().await;
                     self.log_stopped.cancel();
                     break;
                 }
+                Some((lvl, data)) = priority_receiver.recv() => {
+                    self.report_dropped_entries();
+                    self.write_entry(lvl, data).await;
+                }
+                Some((lvl, data)) = receiver.recv() => {
+                    self.report_dropped_entries();
+                    self.write_entry(lvl, data).await;
+                }
             }
+        }
+    }
+
+    fn report_dropped_entries(&self) {
+        let dropped_priority = self.dropped_priority_entries.swap(0, Ordering::Relaxed);
+        if dropped_priority != 0 {
+            eprintln!(
+                "Foton priority logger queue full; dropped {dropped_priority} WARN/ERROR entries"
+            );
+        }
+        let dropped = self.dropped_entries.swap(0, Ordering::Relaxed);
+        if dropped != 0 {
+            eprintln!("Foton logger queue full; dropped {dropped} log entries");
         }
     }
 
@@ -259,8 +304,68 @@ fn normalize_terminal_newlines(rendered: &str) -> String {
 
 impl FotonLogger for CommandLogger {
     fn log(&self, lvl: Level, data: LogData) {
-        self.sender.send((lvl, data)).ok();
+        enqueue_log(
+            &self.sender,
+            &self.priority_sender,
+            &self.dropped_entries,
+            &self.dropped_priority_entries,
+            (lvl, data),
+        );
     }
+}
+
+fn enqueue_log(
+    sender: &mpsc::Sender<(Level, LogData)>,
+    priority_sender: &mpsc::Sender<(Level, LogData)>,
+    dropped_entries: &AtomicU64,
+    dropped_priority_entries: &AtomicU64,
+    entry: (Level, LogData),
+) {
+    let (sender, dropped_entries) = if is_priority_level(&entry.0) {
+        (priority_sender, dropped_priority_entries)
+    } else {
+        (sender, dropped_entries)
+    };
+    if sender.try_send(entry).is_ok() {
+        return;
+    }
+    dropped_entries.fetch_add(1, Ordering::Relaxed);
+}
+
+const fn is_priority_level(level: &Level) -> bool {
+    matches!(
+        level,
+        Level::Tracing(tracing::Level::WARN | tracing::Level::ERROR)
+    )
+}
+
+fn take_shutdown_batch<T>(
+    priority_receiver: &mut mpsc::Receiver<T>,
+    receiver: &mut mpsc::Receiver<T>,
+    normal_limit: usize,
+) -> (Vec<T>, u64, u64) {
+    priority_receiver.close();
+    receiver.close();
+    let mut pending = Vec::with_capacity(
+        priority_receiver
+            .len()
+            .saturating_add(normal_limit.min(receiver.len())),
+    );
+    while let Ok(entry) = priority_receiver.try_recv() {
+        pending.push(entry);
+    }
+    let priority_len = pending.len();
+    while pending.len() - priority_len < normal_limit {
+        let Ok(entry) = receiver.try_recv() else {
+            break;
+        };
+        pending.push(entry);
+    }
+    (
+        pending,
+        priority_receiver.len() as u64,
+        receiver.len() as u64,
+    )
 }
 
 /// A logger layer for tracing
@@ -300,12 +405,96 @@ fn should_render_extra(lvl: &Level, log_config: Option<&LogConfig>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use crate::config::{LogLevel, RotationTimeFormat};
+    use tokio::sync::mpsc;
 
     use super::{
-        Level, LogConfig, LogTimeFormat, normalize_terminal_newlines, rendered_terminal_rows,
-        should_render_extra,
+        LOG_PRIORITY_QUEUE_CAPACITY, LOG_QUEUE_CAPACITY, LOG_SHUTDOWN_DRAIN_LIMIT, Level,
+        LogConfig, LogTimeFormat, enqueue_log, normalize_terminal_newlines, rendered_terminal_rows,
+        should_render_extra, take_shutdown_batch,
     };
+    use foton_utils::logger::LogData;
+
+    #[test]
+    fn logger_queue_drops_excess_instead_of_growing_without_bound() {
+        let (sender, _receiver) = mpsc::channel(LOG_QUEUE_CAPACITY);
+        let (priority_sender, _priority_receiver) = mpsc::channel(LOG_PRIORITY_QUEUE_CAPACITY);
+        let dropped = AtomicU64::new(0);
+        let dropped_priority = AtomicU64::new(0);
+        for _ in 0..LOG_QUEUE_CAPACITY + 3 {
+            enqueue_log(
+                &sender,
+                &priority_sender,
+                &dropped,
+                &dropped_priority,
+                (Level::Tracing(tracing::Level::INFO), LogData::new()),
+            );
+        }
+        assert_eq!(dropped.load(Ordering::Relaxed), 3);
+        assert_eq!(dropped_priority.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn error_is_preserved_behind_a_saturated_info_queue() {
+        let (sender, _receiver) = mpsc::channel(LOG_QUEUE_CAPACITY);
+        let (priority_sender, mut priority_receiver) = mpsc::channel(LOG_PRIORITY_QUEUE_CAPACITY);
+        let dropped = AtomicU64::new(0);
+        let dropped_priority = AtomicU64::new(0);
+        for _ in 0..LOG_QUEUE_CAPACITY {
+            enqueue_log(
+                &sender,
+                &priority_sender,
+                &dropped,
+                &dropped_priority,
+                (Level::Tracing(tracing::Level::INFO), LogData::new()),
+            );
+        }
+        enqueue_log(
+            &sender,
+            &priority_sender,
+            &dropped,
+            &dropped_priority,
+            (Level::Tracing(tracing::Level::ERROR), LogData::new()),
+        );
+
+        let (level, _) = priority_receiver
+            .try_recv()
+            .expect("ERROR should use the reserved priority capacity");
+        assert!(matches!(level, Level::Tracing(tracing::Level::ERROR)));
+        assert_eq!(dropped_priority.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn shutdown_closes_producers_and_caps_the_drain() {
+        let (sender, mut receiver) = mpsc::channel(LOG_SHUTDOWN_DRAIN_LIMIT + 3);
+        let (priority_sender, mut priority_receiver) = mpsc::channel(1);
+        for sequence in 0..LOG_SHUTDOWN_DRAIN_LIMIT + 3 {
+            sender
+                .try_send(sequence)
+                .expect("the shutdown fixture should fit in the queue");
+        }
+        priority_sender
+            .try_send(usize::MAX)
+            .expect("priority fixture should fit");
+
+        let (pending, abandoned_priority, abandoned) = take_shutdown_batch(
+            &mut priority_receiver,
+            &mut receiver,
+            LOG_SHUTDOWN_DRAIN_LIMIT,
+        );
+
+        assert_eq!(pending.len(), LOG_SHUTDOWN_DRAIN_LIMIT + 1);
+        assert_eq!(pending[0], usize::MAX);
+        assert_eq!(abandoned_priority, 0);
+        assert_eq!(abandoned, 3);
+        assert!(sender.try_send(0).is_err(), "shutdown must close producers");
+        assert!(
+            priority_sender.try_send(0).is_err(),
+            "shutdown must close priority producers"
+        );
+    }
 
     fn config_with_extra(extra: bool) -> LogConfig {
         LogConfig {

@@ -77,11 +77,22 @@ cargo run
 The JVM must be **Java 21 or newer** -- the API jar is compiled with
 `--release 21`, matching what Paper 26.2 itself requires.
 
-The API jar defaults to `plugin-api/build/foton-plugin-api.jar`. Override it
-with FOTON_PLUGIN_API_JAR; external dependency jars may be placed in a
-folder selected by FOTON_PLUGIN_LIBRARY_DIRECTORY. With no
-FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
-unchanged.
+The installers place the compatible API jar and its pinned runtime libraries
+in `plugin-runtime/`, beside the server binary, and update that directory as
+one verified release asset. A source checkout falls back to
+`plugin-api/build/foton-plugin-api.jar` and `plugin-api/lib/`. Override either
+location with `FOTON_PLUGIN_API_JAR` or `FOTON_PLUGIN_LIBRARY_DIRECTORY` when
+running a custom build. With no FOTON_PLUGIN_DIRECTORY, Foton neither opens
+the runtime bundle nor starts a JVM, so the normal server path is unchanged.
+
+Direct ViaVersion and ViaBackwards 5.11.0 support is opt-in: download their
+official plugin JARs into `FOTON_PLUGIN_DIRECTORY`. Those plugins are not
+redistributed by Foton. The plugin runtime does include the five pinned Netty
+4.2.15.Final modules required by the direct transport bridge. Compatibility is
+still experimental. The real-client `dev/via-test.sh` acceptance test verifies
+Minecraft 1.21.11 (protocol 774) joining Foton 26.2 (protocol 776) through the
+unmodified official 5.11.0 JARs, and separately verifies that a native 26.2
+client can still join while both plugins are active.
 
 ## License
 

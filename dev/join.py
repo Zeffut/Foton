@@ -910,7 +910,8 @@ def pump(connection, seconds, spawned):
             # stream exactly the way a quiet one does. Recording it is the only
             # thing that tells the two apart later.
             connection.note_drop(f"{type(error).__name__}: {error}")
-            break
+            connection.sock.settimeout(TIMEOUT_SECONDS)
+            return False
 
         if packet_id == PLAY_C_PLAYER_COMBAT_KILL:
             note_combat_kill(connection)

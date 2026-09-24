@@ -57,6 +57,8 @@ public final class Bukkit {
     }
     private static volatile boolean stopping;
     public static boolean isStopping() { return stopping; }
+    /** Marks the beginning of an actual server shutdown before plugins observe teardown. */
+    public static void markStopping() { stopping = true; }
     public static String getMinecraftVersion() { return server == null ? "" : server.getMinecraftVersion(); }
     public static String getMotd() { return server == null ? "" : server.getMotd(); }
     public static double[] getTPS() { return foton.Native.serverTps(); }
@@ -66,7 +68,7 @@ public final class Bukkit {
     }
 
     public static void shutdown() {
-        stopping = true;
+        markStopping();
         if (server != null) server.shutdown();
     }
 

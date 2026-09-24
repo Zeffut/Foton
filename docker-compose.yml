@@ -1,7 +1,9 @@
 services:
   foton:
-    # The published image is not built yet -- docker-build.yml has never
-    # completed on the ARM runner. Until it does, build locally:
+    # This compose file builds the current checkout locally. To run the
+    # last master commit that passed Test, replace `build: .` with:
+    #   image: ghcr.io/zeffut/foton:nightly
+    # To keep local source changes, continue using:
     #   docker compose build
     build: .
     stdin_open: true

@@ -69,8 +69,9 @@ pub use player::{
     PlayerCommandSendEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
     PlayerFishEvent, PlayerGameModeChangeEvent, PlayerInteractEntityEvent, PlayerInteractEvent,
     PlayerItemBreakEvent, PlayerItemHeldEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
-    PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent,
-    PlayerQuitEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent,
+    PlayerLoginAbortEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause,
+    PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent, PlayerRespawnEvent,
+    PlayerSpawnLocationEvent,
 };
 pub use server::ServerTickEvent;
 pub use world::{

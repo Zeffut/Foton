@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::natives;
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
+use foton_core::entity::Entity as _;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
@@ -34,8 +35,8 @@ use foton_core::event::{
     PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
     PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
     PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
-    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginEvent, PlayerMoveEvent,
-    PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
+    PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
     PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
     PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
     SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
@@ -739,9 +740,18 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<PlayerLoginEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
-        if let Some(message) = login_call(&jvm, &uuid) {
+        if let Some(message) = login_call(&jvm, &uuid, event.player().id()) {
             event.deny(message);
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerLoginAbortEvent, _>(owner(), move |event| {
+        let _ = abort_login_call(
+            &jvm,
+            &event.player().gameprofile.id.to_string(),
+            event.player().id(),
+        );
     });
 
     let jvm = Arc::clone(&vm);
@@ -968,7 +978,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<PlayerJoinEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
         let message = event.message().map(plain);
-        match string_call(&jvm, "fireJoin", &uuid, message.as_deref()) {
+        match join_call(&jvm, &uuid, event.player().id(), message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
             Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
@@ -1313,15 +1323,15 @@ fn chat_call(vm: &JavaVM, uuid: &str, message: &str) -> Option<(String, Vec<Uuid
     Some((text, recipients))
 }
 
-fn login_call(vm: &JavaVM, uuid: &str) -> Option<String> {
+fn login_call(vm: &JavaVM, uuid: &str, attempt_id: i32) -> Option<String> {
     let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let answer = env
         .call_static_method(
             BRIDGE,
             "fireLogin",
-            "(Ljava/lang/String;)Ljava/lang/String;",
-            &[JValue::Object(&uuid)],
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            &[JValue::Object(&uuid), JValue::Int(attempt_id)],
         )
         .ok()?
         .l()
@@ -1332,6 +1342,70 @@ fn login_call(vm: &JavaVM, uuid: &str) -> Option<String> {
     let answer: JString<'_> = answer.into();
     let message: String = env.get_string(&answer).ok()?.into();
     (!message.is_empty()).then_some(message)
+}
+
+fn abort_login_call(vm: &JavaVM, uuid: &str, attempt_id: i32) -> bool {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return false;
+    };
+    let Ok(uuid) = env.new_string(uuid) else {
+        return false;
+    };
+    env.call_static_method(
+        BRIDGE,
+        "abortLogin",
+        "(Ljava/lang/String;I)V",
+        &[JValue::Object(&uuid), JValue::Int(attempt_id)],
+    )
+    .is_ok()
+}
+
+fn join_call(vm: &JavaVM, uuid: &str, attempt_id: i32, message: Option<&str>) -> Answer {
+    let reach = || -> Option<Option<String>> {
+        let mut env = BridgeEnv::attach(vm)?;
+        let uuid = env.new_string(uuid).ok()?;
+        let message: JString<'_> = match message {
+            Some(text) => env.new_string(text).ok()?,
+            None => JString::default(),
+        };
+        let answer = env
+            .call_static_method(
+                BRIDGE,
+                "fireJoin",
+                "(Ljava/lang/String;ILjava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&uuid),
+                    JValue::Int(attempt_id),
+                    JValue::Object(&message),
+                ],
+            )
+            .ok()?
+            .l()
+            .ok()?;
+        if answer.is_null() {
+            return Some(None);
+        }
+        let answer: JString<'_> = answer.into();
+        Some(Some(env.get_string(&answer).ok()?.into()))
+    };
+
+    match reach() {
+        None => Answer::Unreachable,
+        Some(None) => Answer::Nothing,
+        Some(Some(message)) => Answer::Message(message),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn login_lifecycle_bridge_check(vm: &JavaVM) -> bool {
+    const UUID: &str = "00000000-0000-0000-0000-000000000042";
+    login_call(vm, UUID, 41).is_none()
+        && abort_login_call(vm, UUID, 41)
+        && login_call(vm, UUID, 42).is_none()
+        && matches!(
+            join_call(vm, UUID, 42, Some("joined")),
+            Answer::Message(message) if message == "joined"
+        )
 }
 
 fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
