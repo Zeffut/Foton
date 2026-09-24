@@ -26,7 +26,7 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 JAR = REPO / "plugin-api" / "build" / "foton-plugin-api.jar"
-NATIVES_RS = REPO / "foton-plugin" / "src" / "natives.rs"
+NATIVES_SRC = REPO / "foton-plugin" / "src"
 NATIVE_CLASS = "foton.Native"
 
 
@@ -61,7 +61,10 @@ def declared():
 
 def registered():
     """The (name, signature) of every method handed to RegisterNatives."""
-    source = NATIVES_RS.read_text(encoding="utf-8")
+    # Every module may register natives; `natives.rs` extends its table
+    # with the others'.
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(NATIVES_SRC.glob("*.rs")))
     # method(\n  "name",\n  "signature",\n  rust_fn as *mut c_void,\n)
     pattern = re.compile(
         r'method\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,', re.MULTILINE)
@@ -84,7 +87,7 @@ def main():
 
     if not args.quiet:
         print(f"{len(on_class)} natives declared by {NATIVE_CLASS}")
-        print(f"{len(in_table)} registered by foton-plugin/src/natives.rs")
+        print(f"{len(in_table)} registered by foton-plugin/src/")
         if ghosts:
             print(f"\n{len(ghosts)} registered but NOT declared -- "
                   "RegisterNatives throws and no plugin loads:")

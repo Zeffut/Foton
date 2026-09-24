@@ -268,6 +268,13 @@ public final class Native {
 
     /** Sends one custom payload packet to one online player. */
     public static native void sendPluginMessage(String uuid, String channel, byte[] message);
+
+    // The packet tap: see PacketBridge. Ids and payloads are protocol bytes
+    // for the phase the packet belongs to, exactly as a client reads them.
+    public static native boolean packetTapEnable(boolean enable);
+    public static native void packetTapSkipOutbound(int packetId, boolean skip);
+    public static native boolean packetSend(String uuid, int packetId, byte[] payload, boolean silent);
+    public static native boolean packetReceive(String uuid, int packetId, byte[] payload, boolean silent);
     public static native void sendBlockChange(String uuid, String world, int x, int y, int z, String block);
     public static native void sendSignChange(String uuid, String world, int x, int y, int z, String[] lines, int color);
 

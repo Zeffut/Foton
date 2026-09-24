@@ -38,6 +38,7 @@ use thiserror::Error;
 
 mod forward;
 mod natives;
+mod packet_tap;
 
 /// The class the Java side exposes to this one.
 const HOST_CLASS: &str = "foton/PluginHost";
@@ -96,6 +97,17 @@ impl PluginHostConfig {
             "lib/server/libjvm.so"
         };
         self.java_home.join(name)
+    }
+
+    /// Plugins Foton ships because their upstream builds cannot run on it.
+    ///
+    /// Beside the API jar, because they are built with it and against it:
+    /// `dev/build-packetevents.sh` writes there. The host loads them before
+    /// the plugin directory, and one of theirs wins a name collision.
+    fn bundled_directory(&self) -> PathBuf {
+        self.api_jar
+            .parent()
+            .map_or_else(|| PathBuf::from("bundled"), |parent| parent.join("bundled"))
     }
 
     /// Everything a plugin is allowed to see, in the order it is searched.
@@ -184,6 +196,10 @@ impl PluginHost {
                 "-Dfoton.plugins-directory={}",
                 config.plugin_directory.display()
             ))?;
+            let bundled_plugins = CString::new(format!(
+                "-Dfoton.bundled-plugins={}",
+                config.bundled_directory().display()
+            ))?;
             // The process belongs to Foton, and so do its signals. Without
             // this, HotSpot installs its own SIGTERM and SIGINT handlers and
             // answers them by exiting the process on the spot: no world is
@@ -197,6 +213,10 @@ impl PluginHost {
                 },
                 JavaVMOption {
                     optionString: plugins_directory.as_ptr().cast_mut(),
+                    extraInfo: ptr::null_mut(),
+                },
+                JavaVMOption {
+                    optionString: bundled_plugins.as_ptr().cast_mut(),
                     extraInfo: ptr::null_mut(),
                 },
                 JavaVMOption {

@@ -9,6 +9,7 @@
 //! World mutations remain scheduler-owned; narrowly scoped plugin registries
 //! (such as runtime recipes) expose their own synchronized write path.
 
+use crate::packet_tap;
 use std::fmt::Write;
 use std::mem;
 use std::ptr::null_mut;
@@ -261,7 +262,7 @@ extern "system" fn set_compass_target(
 }
 
 /// The server, if there still is one.
-fn server() -> Option<Arc<Server>> {
+pub(crate) fn server() -> Option<Arc<Server>> {
     SERVER.get().and_then(|slot| slot.read().upgrade())
 }
 
@@ -305,7 +306,7 @@ fn boss_bar(env: &mut JNIEnv<'_>, id: &JString<'_>) -> Option<Arc<ServerBossEven
 }
 
 /// Resolves a Java-side handle back to a player who is still online.
-fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
+pub(crate) fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
     let text: String = env.get_string(uuid).ok()?.into();
     let uuid = Uuid::parse_str(&text).ok()?;
     server()?.online_players().get_by_uuid(&uuid)
@@ -11294,7 +11295,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         }
     }
 
-    vec![
+    let mut methods = vec![
         method(
             "mergeItemSnbt",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
@@ -13738,7 +13739,10 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             effective_permissions as *mut c_void,
         ),
-    ]
+    ];
+    // Beside the table rather than in it: the packet tap is its own module.
+    methods.extend(packet_tap::bindings());
+    methods
 }
 
 #[cfg(test)]
