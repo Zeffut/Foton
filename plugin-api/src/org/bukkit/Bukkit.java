@@ -59,7 +59,9 @@ public final class Bukkit {
     public static boolean isStopping() { return stopping; }
     public static String getMinecraftVersion() { return server == null ? "" : server.getMinecraftVersion(); }
     public static String getMotd() { return server == null ? "" : server.getMotd(); }
-    public static double[] getTPS() { return foton.Native.serverTps(); }
+    public static double[] getTPS() { return server.getTPS(); }
+    public static String getUpdateFolder() { return server.getUpdateFolder(); }
+    public static java.io.File getUpdateFolderFile() { return server.getUpdateFolderFile(); }
     public static double getAverageTickTime() { return foton.Native.serverAverageTickTime(); }
     public static org.bukkit.block.data.BlockData createBlockData(String data) {
         return new org.bukkit.block.data.SimpleBlockData(data);

@@ -129,6 +129,13 @@ public interface Server {
     String getBukkitVersion();
     /** Average tick duration in milliseconds, measured by the server. */
     default double getAverageTickTime() { return foton.Native.serverAverageTickTime(); }
+    /** Ticks per second measured over the last 1, 5 and 15 minutes. */
+    double[] getTPS();
+    /** The name of the folder, under the plugins folder, whose jars replace
+     * same-named plugin jars at the next start. */
+    String getUpdateFolder();
+    /** The update folder itself. */
+    java.io.File getUpdateFolderFile();
 
     default String getMotd() { return ""; }
     default Warning.WarningState getWarningState() { return Warning.WarningState.DEFAULT; }

@@ -10,6 +10,8 @@ mod run_loop;
 mod service_keys;
 /// The tick rate manager for the server.
 pub mod tick_rate_manager;
+/// Paper's one, five and fifteen minute TPS averages.
+pub mod tps_average;
 mod world_tick_workers;
 /// Domain-aware loaded world map.
 pub mod worlds;

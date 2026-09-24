@@ -38,9 +38,22 @@ public final class PluginHost {
         return enableAll();
     }
 
+    /** bukkit.yml's default `settings.update-folder`. */
+    public static final String UPDATE_FOLDER = "update";
+
+    /** The plugin directory last loaded from; the update folder lives in it. */
+    private static volatile File pluginDirectory = new File("plugins");
+
+    /** Where a plugin stages a new copy of its own jar for the next start. */
+    public static File updateFolder() {
+        return new File(pluginDirectory, UPDATE_FOLDER);
+    }
+
     /** Discovers and loads plugins, invoking only their onLoad lifecycle phase. */
     public static int loadAllOnLoad(String directory) {
         ensureServer();
+        pluginDirectory = new File(directory).getAbsoluteFile();
+        applyUpdates(pluginDirectory);
         List<File> ordered = orderedJars(new File(directory));
         int loadedNow = 0;
         for (File jar : ordered) {
@@ -75,6 +88,27 @@ public final class PluginHost {
     private static void ensureServer() {
         if (org.bukkit.Bukkit.getServer() == null) {
             org.bukkit.Bukkit.setServer(new FotonServer());
+        }
+    }
+
+    /** SimplePluginManager's update step: a jar in the update folder with the
+     * same file name as a plugin jar replaces it before anything is loaded,
+     * and is removed once copied. A self-updating plugin stages its download
+     * there because the running jar cannot be overwritten safely. */
+    private static void applyUpdates(File dir) {
+        File updates = new File(dir, UPDATE_FOLDER);
+        File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar"));
+        if (jars == null || !updates.isDirectory()) return;
+        for (File jar : jars) {
+            File staged = new File(updates, jar.getName());
+            if (!staged.isFile()) continue;
+            try {
+                Files.copy(staged.toPath(), jar.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                Files.delete(staged.toPath());
+                System.out.println("[host] updated " + jar.getName() + " from " + UPDATE_FOLDER + "/");
+            } catch (java.io.IOException error) {
+                System.out.println("[host] could not apply update for " + jar.getName() + ": " + error);
+            }
         }
     }
 

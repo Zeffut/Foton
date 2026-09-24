@@ -62,6 +62,21 @@ public final class FotonServer implements Server {
     }
 
     @Override
+    public double[] getTPS() {
+        return Native.serverTps();
+    }
+
+    @Override
+    public String getUpdateFolder() {
+        return PluginHost.UPDATE_FOLDER;
+    }
+
+    @Override
+    public java.io.File getUpdateFolderFile() {
+        return PluginHost.updateFolder();
+    }
+
+    @Override
     public boolean isPrimaryThread() {
         return Native.isPrimaryThread();
     }

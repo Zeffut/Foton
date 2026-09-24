@@ -9501,9 +9501,7 @@ extern "system" fn server_tps(env: JNIEnv<'_>, _class: JClass<'_>) -> jdoubleArr
     let Some(server) = server() else {
         return null_mut();
     };
-    let manager = server.tick_rate_manager.read();
-    let tps = f64::from(manager.get_tps());
-    let values = [tps, tps, tps];
+    let values = server.tick_rate_manager.read().tps_averages();
     let Ok(array) = env.new_double_array(3) else {
         return null_mut();
     };
