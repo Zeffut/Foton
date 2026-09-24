@@ -61,7 +61,7 @@ fn a_call_made_in_java_reaches_foton() {
     let config = PluginHostConfig {
         java_home,
         api_jar,
-        library_directory: Some(repo().join("plugin-api/lib")),
+        library_directories: vec![repo().join("plugin-api/lib")],
         plugin_directory: repo().join("plugin-api/build/no-plugins"),
     };
 

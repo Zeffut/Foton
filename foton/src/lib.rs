@@ -199,24 +199,33 @@ impl FotonServer {
                     PathBuf::from,
                 );
                 // A Paper server puts Adventure, Gson, Guava and the rest on
-                // every plugin's class path, and plugins do not ship them.
-                // plugin-api/lib holds exactly the set Paper declares, beside
-                // the API jar; without it, the first plugin to print a
-                // Component fails to load. So it is the default.
-                let library_directory = env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
-                    .map(PathBuf::from)
-                    .or_else(|| {
-                        api_jar
-                            .parent()
-                            .and_then(Path::parent)
-                            .map(|root| root.join("lib"))
-                            .filter(|lib| lib.is_dir())
-                    });
+                // every plugin's class path, and plugins do not ship them:
+                // plugin-api/lib holds the set Paper's API declares. Its
+                // server jar adds run-time libraries -- the SQLite and MySQL
+                // drivers plugins open their databases with -- which
+                // dev/fetch-plugin-runtime-libs.sh puts beside the API jar.
+                // Without these, the first plugin to print a Component or open
+                // a database fails, so they are the default.
+                let library_directories = env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
+                    .map_or_else(
+                        || {
+                            let built = api_jar.parent();
+                            [
+                                built.and_then(Path::parent).map(|root| root.join("lib")),
+                                built.map(|build| build.join("runtime-libs")),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            .filter(|directory| directory.is_dir())
+                            .collect()
+                        },
+                        |paths| env::split_paths(&paths).collect(),
+                    );
                 let host = PluginHost::start(
                     &PluginHostConfig {
                         java_home: java_home.into(),
                         api_jar,
-                        library_directory,
+                        library_directories,
                         plugin_directory: plugin_directory.clone(),
                     },
                     &Weak::new(),

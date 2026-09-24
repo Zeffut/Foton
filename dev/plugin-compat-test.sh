@@ -26,6 +26,7 @@ PROBE_SRC="$ROOT/plugin-api/packetevents/check/probe"
 
 [ -f "$API_JAR" ] || { echo "no API jar; run dev/build-plugin-api.sh"; exit 1; }
 [ -f "$ROOT/plugin-api/build/bundled/packetevents.jar" ] || { echo "no packetevents.jar; run dev/build-packetevents.sh"; exit 1; }
+bash "$ROOT/dev/fetch-plugin-runtime-libs.sh" || exit 1
 
 echo "=== Building ==="
 cargo build -p foton 2>&1 | tail -3
@@ -63,7 +64,6 @@ sed -i \
 
 echo "=== Booting with $(ls plugins | tr '\n' ' ')==="
 FOTON_PLUGIN_DIRECTORY="$RUN_DIR/plugins" FOTON_JAVA_HOME="$JAVA_HOME_DIR" FOTON_PLUGIN_API_JAR="$API_JAR" \
-  FOTON_PLUGIN_LIBRARY_DIRECTORY="${FOTON_PLUGIN_LIBRARY_DIRECTORY:-$ROOT/plugin-api/lib}" \
   nohup "$BIN" > server.log 2>&1 < /dev/null &
 PID=$!
 UP=1

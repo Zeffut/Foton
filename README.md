@@ -80,7 +80,10 @@ The JVM must be **Java 21 or newer** -- the API jar is compiled with
 The API jar defaults to `plugin-api/build/foton-plugin-api.jar`. Override it
 with FOTON_PLUGIN_API_JAR. The libraries a Paper server puts on every
 plugin's class path -- Adventure, Gson, Guava and the rest -- come from
-`plugin-api/lib` beside it, or from FOTON_PLUGIN_LIBRARY_DIRECTORY. With no
+`plugin-api/lib` beside it; the run-time libraries Paper's server jar adds,
+the SQLite and MySQL drivers among them, come from
+`plugin-api/build/runtime-libs`, which `bash dev/fetch-plugin-runtime-libs.sh`
+fills. FOTON_PLUGIN_LIBRARY_DIRECTORY, a path list, replaces both. With no
 FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
 unchanged.
 

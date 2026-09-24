@@ -81,7 +81,11 @@ pub struct PluginHostConfig {
     /// Not an afterthought: a plugin compiled against a Paper server assumes
     /// Gson and the rest are simply there, and the first real plugin tried
     /// against this failed on exactly that.
-    pub library_directory: Option<PathBuf>,
+    ///
+    /// Several, searched in order: the libraries Paper declares for its API,
+    /// and the ones its server jar carries at run time -- JDBC drivers among
+    /// them, which plugins use without shipping.
+    pub library_directories: Vec<PathBuf>,
     /// Where plugin jars are found.
     pub plugin_directory: PathBuf,
 }
@@ -120,7 +124,7 @@ impl PluginHostConfig {
             return Err(PluginHostError::NoApiJar(self.api_jar.clone()));
         }
         let mut entries = vec![self.api_jar.to_string_lossy().into_owned()];
-        if let Some(directory) = &self.library_directory {
+        for directory in &self.library_directories {
             entries.extend(jars_in(directory));
         }
         Ok(entries.join(if cfg!(target_os = "windows") {
