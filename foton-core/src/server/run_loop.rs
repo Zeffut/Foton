@@ -222,6 +222,8 @@ impl Server {
                 player_info_ticks = 0;
             }
             self.tick_jobs(tick_count, runs_normally);
+            // Before joins: a joining player's snapshot already holds these.
+            self.flush_team_updates();
             self.process_player_joins();
 
             {

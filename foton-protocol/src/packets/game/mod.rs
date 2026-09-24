@@ -57,6 +57,7 @@ mod c_set_health;
 mod c_set_held_slot;
 mod c_set_passengers;
 mod c_set_player_inventory;
+mod c_set_player_team;
 mod c_set_time;
 mod c_sound;
 mod c_stop_sound;
@@ -182,6 +183,9 @@ pub use c_set_health::CSetHealth;
 pub use c_set_held_slot::CSetHeldSlot;
 pub use c_set_passengers::CSetPassengers;
 pub use c_set_player_inventory::CSetPlayerInventory;
+pub use c_set_player_team::{
+    CSetPlayerTeam, TeamCollisionRule, TeamColor, TeamMethod, TeamParameters, TeamVisibility,
+};
 pub use c_set_time::CSetTime;
 pub use c_sound::{CSound, SoundSource};
 pub use c_stop_sound::CStopSound;
