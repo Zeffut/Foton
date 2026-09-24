@@ -35,6 +35,16 @@ final class RegistryValues {
         Checks.same(new Pattern(org.bukkit.DyeColor.RED, PatternType.CROSS),
             new Pattern(org.bukkit.DyeColor.RED, PatternType.CROSS), "equal layers are equal");
 
+        // Paper plugins hand a NamespacedKey wherever an Adventure Key goes,
+        // and a set built by the server must still recognise it.
+        io.papermc.paper.registry.set.RegistryKeySet<org.bukkit.inventory.ItemType> swords =
+            io.papermc.paper.registry.set.RegistrySet.keySet(io.papermc.paper.registry.RegistryKey.ITEM,
+                java.util.List.of(io.papermc.paper.registry.TypedKey.create(
+                    io.papermc.paper.registry.RegistryKey.ITEM, "minecraft:diamond_sword")));
+        Checks.expect(swords.contains(io.papermc.paper.registry.TypedKey.create(
+                io.papermc.paper.registry.RegistryKey.ITEM, org.bukkit.Material.DIAMOND_SWORD.getKey())),
+            "a key set matches a NamespacedKey against the same key text");
+
         // Data the pack gives, not a guess.
         Checks.same(MusicInstrument.PONDER_GOAT_HORN.getRange(), 256.0f, "horn range from the data pack");
         Checks.same(TrimMaterial.AMETHYST.getTranslationKey(), "trim_material.minecraft.amethyst",

@@ -126,6 +126,7 @@ use foton_registry::data_components::vanilla_components::{
     FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
     TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
+use foton_registry::enchantment::{Enchantment, EnchantmentRef};
 use foton_registry::entity_data::{Quaternionf, Vector3f};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
@@ -404,6 +405,70 @@ extern "system" fn enchantment_can_enchant(
         return 0;
     };
     jboolean::from(enchantment.can_enchant(item))
+}
+
+fn enchantment_named(env: &mut JNIEnv<'_>, key: &JString<'_>) -> Option<EnchantmentRef> {
+    let key: Identifier = env.get_string(key).ok()?.to_str().ok()?.parse().ok()?;
+    REGISTRY.enchantments.by_key(&key)
+}
+
+/// `foton.Native.enchantmentsConflict`
+extern "system" fn enchantments_conflict(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    enchantment: JString<'_>,
+    other: JString<'_>,
+) -> jboolean {
+    let (Some(enchantment), Some(other)) = (
+        enchantment_named(&mut env, &enchantment),
+        enchantment_named(&mut env, &other),
+    ) else {
+        return 0;
+    };
+    jboolean::from(!Enchantment::are_compatible(enchantment, other))
+}
+
+/// `foton.Native.enchantmentItems`: the item keys an enchantment's primary or
+/// supported holder set names, or null when it names none.
+extern "system" fn enchantment_items(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    enchantment: JString<'_>,
+    primary: jboolean,
+) -> jobjectArray {
+    let Some(enchantment) = enchantment_named(&mut env, &enchantment) else {
+        return null_mut();
+    };
+    let holders = if primary == 0 {
+        Some(enchantment.supported_items)
+    } else {
+        enchantment.primary_items
+    };
+    let Some(holders) = holders else {
+        return null_mut();
+    };
+    // The data pack writes these as a tag (`#minecraft:enchantable/sword`) or
+    // a single item, never inline lists, which is also all Foton parses.
+    let items: Vec<String> = match holders.strip_prefix('#') {
+        Some(tag) => {
+            let Ok(tag) = tag.parse::<Identifier>() else {
+                return null_mut();
+            };
+            REGISTRY
+                .items
+                .iter_tag(&tag)
+                .map(|item| item.key.to_string())
+                .collect()
+        }
+        None => holders
+            .parse::<Identifier>()
+            .ok()
+            .and_then(|key| REGISTRY.items.by_key(&key))
+            .map(|item| item.key.to_string())
+            .into_iter()
+            .collect(),
+    };
+    string_array(&mut env, &items)
 }
 
 fn parse_item_snbt_patch(input: &str) -> Option<NbtCompound> {
@@ -11329,6 +11394,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "enchantmentCanEnchant",
             "(Ljava/lang/String;Ljava/lang/String;)Z",
             enchantment_can_enchant as *mut c_void,
+        ),
+        method(
+            "enchantmentsConflict",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            enchantments_conflict as *mut c_void,
+        ),
+        method(
+            "enchantmentItems",
+            "(Ljava/lang/String;Z)[Ljava/lang/String;",
+            enchantment_items as *mut c_void,
         ),
         method(
             "dyeFireworkColor",

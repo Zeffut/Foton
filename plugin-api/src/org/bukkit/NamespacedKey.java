@@ -2,7 +2,15 @@ package org.bukkit;
 
 import org.bukkit.plugin.Plugin;
 
-public final class NamespacedKey {
+/** A namespaced identifier.
+ *
+ * <p>An Adventure {@link net.kyori.adventure.key.Key}, as in Paper: a plugin
+ * compiled against Paper passes {@code material.getKey()} wherever a
+ * {@code Key} is wanted ({@code TypedKey.create(RegistryKey.ITEM, ...)}), and
+ * the first {@code Key} method called on it would otherwise throw
+ * {@code IncompatibleClassChangeError}.</p>
+ */
+public final class NamespacedKey implements net.kyori.adventure.key.Key {
     /** The namespace of everything vanilla. */
     public static final String MINECRAFT = "minecraft";
 
@@ -25,6 +33,8 @@ public final class NamespacedKey {
 
     public String getNamespace() { return namespace; }
     public String getKey() { return key; }
+    @Override public String namespace() { return namespace; }
+    @Override public String value() { return key; }
 
     /** Reads `namespace:key`, defaulting the namespace to minecraft.
      *
@@ -55,5 +65,5 @@ public final class NamespacedKey {
     }
 
     @Override public String toString() { return namespace + ":" + key; }
-    public String asString() { return toString(); }
+    @Override public String asString() { return toString(); }
 }

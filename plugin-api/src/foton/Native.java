@@ -27,6 +27,10 @@ public final class Native {
     public static native String[] tagValues(String registry, String tag);
     public static native int dyeFireworkColor(int dyeOrdinal);
     public static native boolean enchantmentCanEnchant(String enchantment, String item);
+    /** Whether vanilla refuses the two on one item; an enchantment conflicts with itself. */
+    public static native boolean enchantmentsConflict(String enchantment, String other);
+    /** The primary (or, when false, supported) items as item keys; null when the enchantment names none. */
+    public static native String[] enchantmentItems(String enchantment, boolean primary);
 
     /** Merges a Vanilla SNBT compound into an item opaque component. */
     public static native String mergeItemSnbt(String existing, String patch);
