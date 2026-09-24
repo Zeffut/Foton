@@ -54,7 +54,7 @@ const INITIAL_LINE_WIDTH: i32 = 200;
 /// Default background, a quarter-opaque black in ARGB.
 ///
 /// Vanilla parity: `Display.TextDisplay.INITIAL_BACKGROUND`.
-const INITIAL_BACKGROUND: i32 = 1_073_741_824;
+pub const INITIAL_BACKGROUND: i32 = 1_073_741_824;
 
 /// Default opacity byte. `-1` is vanilla's "fully opaque" sentinel.
 ///
@@ -257,6 +257,19 @@ impl TextDisplayEntity {
     #[must_use]
     pub fn align(&self) -> TextAlign {
         TextAlign::from_flags(self.style_flags())
+    }
+
+    /// Sets or clears one of the boolean style flags (`FLAG_SHADOW`,
+    /// `FLAG_SEE_THROUGH`, `FLAG_USE_DEFAULT_BACKGROUND`).
+    pub fn set_style_flag(&self, flag: i8, enabled: bool) {
+        let flags = self.style_flags();
+        self.set_style_flags(if enabled { flags | flag } else { flags & !flag });
+    }
+
+    /// Moves the text to `align`, leaving the other style flags as they are.
+    pub fn set_align(&self, align: TextAlign) {
+        let flags = self.style_flags() & !(FLAG_ALIGN_LEFT | FLAG_ALIGN_RIGHT);
+        self.set_style_flags(flags | align.flag_bits());
     }
 }
 

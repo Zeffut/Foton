@@ -191,9 +191,37 @@ public final class FotonWorld implements World {
     }
 
     @Override public <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) {
-        String name = clazz == null ? null : clazz.getSimpleName().replaceFirst("Entity$", "");
-        org.bukkit.entity.Entity entity = spawnEntity(location, name == null ? null : org.bukkit.entity.EntityType.fromName(name));
-        return clazz != null && clazz.isInstance(entity) ? clazz.cast(entity) : null;
+        org.bukkit.entity.Entity entity = spawnEntity(location, typeFor(clazz));
+        if (clazz != null && clazz.isInstance(entity)) return clazz.cast(entity);
+        // Spawned but not what was asked for: do not leave it standing.
+        if (entity != null) entity.remove();
+        return null;
+    }
+
+    /** The entity type a Paper interface spawns: its name in snake case
+     * ({@code ItemDisplay} is {@code item_display}), save for the interfaces
+     * whose name is not their type's. */
+    static org.bukkit.entity.EntityType typeFor(Class<?> clazz) {
+        if (clazz == null) return null;
+        String name = clazz.getSimpleName();
+        String key = switch (name) {
+            case "Boat" -> "oak_boat";
+            case "ChestBoat" -> "oak_chest_boat";
+            case "Firework" -> "firework_rocket";
+            case "TNTPrimed" -> "tnt";
+            case "LightningStrike" -> "lightning_bolt";
+            case "EnderCrystal" -> "end_crystal";
+            case "MushroomCow" -> "mooshroom";
+            case "PigZombie" -> "zombified_piglin";
+            case "Snowman" -> "snow_golem";
+            case "ThrownExpBottle" -> "experience_bottle";
+            case "FishHook" -> "fishing_bobber";
+            case "LeashHitch" -> "leash_knot";
+            case "EnderSignal" -> "eye_of_ender";
+            case "Item" -> "item";
+            default -> name.replaceFirst("^Foton", "").replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(java.util.Locale.ROOT);
+        };
+        return org.bukkit.entity.EntityType.fromName(key);
     }
 
     @Override
@@ -301,6 +329,14 @@ public final class FotonWorld implements World {
         if ("leash_knot".equalsIgnoreCase(type)) return new FotonHanging(uuid);
         if ("armor_stand".equalsIgnoreCase(type)) return new FotonArmorStand(uuid);
         if ("block_display".equalsIgnoreCase(type)) return new FotonBlockDisplay(uuid);
+        if ("item_display".equalsIgnoreCase(type)) return new FotonItemDisplay(uuid);
+        if ("text_display".equalsIgnoreCase(type)) return new FotonTextDisplay(uuid);
+        if ("interaction".equalsIgnoreCase(type)) return new FotonInteraction(uuid);
+        if ("mannequin".equalsIgnoreCase(type)) return new FotonMannequin(uuid);
+        if ("allay".equalsIgnoreCase(type)) return new FotonAllay(uuid);
+        if ("shulker".equalsIgnoreCase(type)) return new FotonShulker(uuid);
+        if (type != null && (type.toLowerCase(java.util.Locale.ROOT).endsWith("_chest_boat")
+            || type.equalsIgnoreCase("bamboo_chest_raft"))) return new FotonChestBoat(uuid);
         if ("firework_rocket".equalsIgnoreCase(type)) return new FotonFirework(uuid);
         if ("end_crystal".equalsIgnoreCase(type)) return new FotonEnderCrystal(uuid);
         if ("bee".equalsIgnoreCase(type)) return new FotonBee(uuid);

@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Boat entity handle; boat variants currently share Steel's vehicle state. */
-public final class FotonBoat extends FotonVehicle implements org.bukkit.entity.Boat {
+public class FotonBoat extends FotonVehicle implements org.bukkit.entity.Boat {
     public FotonBoat(UUID id) { super(id); }
     @Override public org.bukkit.entity.Boat.Type getBoatType() {
         try { return org.bukkit.entity.Boat.Type.valueOf(Native.boatType(getUniqueId().toString())); } catch (RuntimeException e) { return org.bukkit.entity.Boat.Type.OAK; }

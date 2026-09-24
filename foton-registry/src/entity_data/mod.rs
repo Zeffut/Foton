@@ -100,6 +100,17 @@ impl<T: Clone + PartialEq> SyncedValue<T> {
         }
     }
 
+    /// Sets the value and sends it even when unchanged.
+    ///
+    /// Vanilla parity: `SynchedEntityData.set(key, value, true)`, for values the
+    /// client acts on each time they arrive -- a display's interpolation start
+    /// restarts the interpolation even when the delay is the same.
+    #[inline]
+    pub fn set_forced(&mut self, value: T) {
+        self.value = value;
+        self.dirty = true;
+    }
+
     /// Returns true if the value has been modified since last sync.
     #[inline]
     pub const fn is_dirty(&self) -> bool {

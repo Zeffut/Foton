@@ -3,53 +3,80 @@
 use std::ffi::c_void;
 use std::ptr::null_mut;
 
+use foton_core::entity::SharedEntity;
 use foton_core::entity::damage::DamageSource;
+use foton_core::entity::entities::decoration::MannequinEntity;
+use foton_core::entity::entities::mobs::hostile::ShulkerEntity;
 use foton_core::entity::entities::objects::display_ui::{GlowItemFrameEntity, ItemFrameEntity};
 use foton_core::entity::entities::objects::items::ItemEntity;
 use foton_core::entity::entities::objects::projectiles::FireworkRocketEntity;
-use foton_core::inventory::container::Container as _;
+use foton_core::entity::entities::objects::vehicles::{ChestBoatEntity, ChestRaftEntity};
+use foton_core::inventory::container::{Container as _, SimpleContainer};
+use foton_registry::DyeColor;
+use foton_registry::resolvable_profile::{
+    PartialProfile, PlayerSkinPatch, ProfileProperty, ResolvableProfile, ResolvableProfileContents,
+    StoredGameProfile,
+};
 use foton_registry::vanilla_damage_types;
+use foton_utils::Direction;
 use foton_utils::Downcast as _;
 use jni::JNIEnv;
-use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jdouble, jfloat, jint, jobjectArray, jstring};
+use jni::objects::{JClass, JObjectArray, JString};
+use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jint, jobjectArray, jstring};
 use uuid::Uuid;
 
-use super::support::{component, entity, method, text};
-use super::{describe_slot, equipment_slot_from_index, parse_slot, string_array, to_java};
+use super::support::{component, doubles, entity, method, text};
+use super::{
+    describe_slot, equipment_slot_from_index, parse_slot, read_string_array, string_array, to_java,
+};
 
-/// The number of slots a mob carries, or -1 when it carries none.
-extern "system" fn carried_inventory_size(
+/// Runs `f` on the container an entity holds: a mob's carried inventory
+/// (villager, allay, piglin) or a chest boat's chest.
+fn with_container<R>(
+    entity: &SharedEntity,
+    f: impl FnOnce(&mut SimpleContainer) -> R,
+) -> Option<R> {
+    if let Some(carrier) = entity.as_inventory_carrier() {
+        return Some(f(&mut carrier.carried_inventory().lock()));
+    }
+    if let Some(boat) = entity.as_ref().downcast_ref::<ChestBoatEntity>() {
+        return Some(f(&mut boat.container().lock()));
+    }
+    if let Some(raft) = entity.as_ref().downcast_ref::<ChestRaftEntity>() {
+        return Some(f(&mut raft.container().lock()));
+    }
+    None
+}
+
+/// The number of slots the entity's container has, or -1 when it has none.
+extern "system" fn entity_container_size(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jint {
-    let Some((_, entity)) = entity(&mut env, &uuid) else {
-        return -1;
-    };
-    entity.as_inventory_carrier().map_or(-1, |carrier| {
-        i32::try_from(carrier.carried_inventory().lock().get_container_size()).unwrap_or(-1)
-    })
+    entity(&mut env, &uuid)
+        .and_then(|(_, entity)| with_container(&entity, |container| container.get_container_size()))
+        .and_then(|size| i32::try_from(size).ok())
+        .unwrap_or(-1)
 }
 
-extern "system" fn carried_inventory_slot(
+extern "system" fn entity_container_slot(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     uuid: JString<'_>,
     slot: jint,
 ) -> jstring {
-    let Some((_, entity)) = entity(&mut env, &uuid) else {
-        return null_mut();
-    };
-    let described = entity.as_inventory_carrier().and_then(|carrier| {
-        let inventory = carrier.carried_inventory().lock();
-        let slot = usize::try_from(slot).ok()?;
-        (slot < inventory.get_container_size()).then(|| describe_slot(inventory.get_item(slot)))
+    let described = usize::try_from(slot).ok().and_then(|slot| {
+        let (_, entity) = entity(&mut env, &uuid)?;
+        with_container(&entity, |container| {
+            (slot < container.get_container_size()).then(|| describe_slot(container.get_item(slot)))
+        })
+        .flatten()
     });
     to_java(&mut env, described)
 }
 
-extern "system" fn set_carried_inventory_slot(
+extern "system" fn set_entity_container_slot(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     uuid: JString<'_>,
@@ -65,13 +92,12 @@ extern "system" fn set_carried_inventory_slot(
     let Some((_, entity)) = entity(&mut env, &uuid) else {
         return;
     };
-    let Some(carrier) = entity.as_inventory_carrier() else {
-        return;
-    };
-    let mut inventory = carrier.carried_inventory().lock();
-    if slot < inventory.get_container_size() {
-        inventory.set_item(slot, stack);
-    }
+    with_container(&entity, |container| {
+        if slot < container.get_container_size() {
+            container.set_item(slot, stack);
+            container.set_changed();
+        }
+    });
 }
 
 /// The entity's scoreboard tags, the ones `/tag` lists and saves with it.
@@ -445,22 +471,297 @@ extern "system" fn set_entity_equipment_item(
     }
 }
 
+/// A mannequin's profile as `[id, name, (property name, value, signature)...]`,
+/// empty strings standing for absent values.
+extern "system" fn mannequin_profile(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let Some((_, entity)) = entity(&mut env, &uuid) else {
+        return null_mut();
+    };
+    let Some(mannequin) = entity.as_ref().downcast_ref::<MannequinEntity>() else {
+        return null_mut();
+    };
+    let profile = mannequin.profile();
+    let (id, name, properties) = match profile.contents() {
+        ResolvableProfileContents::DynamicName(name) => (None, Some(name.clone()), &[][..]),
+        ResolvableProfileContents::DynamicId(id) => (Some(*id), None, &[][..]),
+        ResolvableProfileContents::StaticFull(profile) => (
+            Some(profile.id()),
+            Some(profile.name().to_owned()),
+            profile.properties(),
+        ),
+        ResolvableProfileContents::StaticPartial(profile) => (
+            profile.id(),
+            profile.name().map(ToOwned::to_owned),
+            profile.properties(),
+        ),
+    };
+    let mut values = vec![
+        id.map(|id| id.to_string()).unwrap_or_default(),
+        name.unwrap_or_default(),
+    ];
+    for property in properties {
+        values.push(property.name().to_owned());
+        values.push(property.value().to_owned());
+        values.push(property.signature().unwrap_or_default().to_owned());
+    }
+    string_array(&mut env, &values)
+}
+
+/// A full profile when both id and name are given, a partial one otherwise --
+/// the split vanilla's profile component makes when it reads one.
+extern "system" fn set_mannequin_profile(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    profile_id: JString<'_>,
+    name: JString<'_>,
+    properties: JObjectArray<'_>,
+) {
+    let id = text(&mut env, &profile_id).and_then(|value| Uuid::parse_str(&value).ok());
+    let name = text(&mut env, &name);
+    let Some(raw) = read_string_array(&mut env, &properties) else {
+        return;
+    };
+    let Some(properties) = raw
+        .chunks_exact(3)
+        .map(|property| {
+            let signature = (!property[2].is_empty()).then(|| property[2].clone());
+            ProfileProperty::new(property[0].clone(), property[1].clone(), signature).ok()
+        })
+        .collect::<Option<Vec<_>>>()
+    else {
+        return;
+    };
+    let profile = match (id, name) {
+        (Some(id), Some(name)) => StoredGameProfile::new(id, name, properties)
+            .ok()
+            .map(|profile| ResolvableProfile::static_full(profile, PlayerSkinPatch::default())),
+        (id, name) => PartialProfile::new(name, id, properties)
+            .ok()
+            .map(|profile| ResolvableProfile::static_partial(profile, PlayerSkinPatch::default())),
+    };
+    let Some(profile) = profile else {
+        return;
+    };
+    if let Some((_, entity)) = entity(&mut env, &uuid)
+        && let Some(mannequin) = entity.as_ref().downcast_ref::<MannequinEntity>()
+    {
+        mannequin.set_profile(profile);
+    }
+}
+
+extern "system" fn mannequin_immovable(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    entity(&mut env, &uuid)
+        .and_then(|(_, entity)| {
+            let mannequin = entity.as_ref().downcast_ref::<MannequinEntity>()?;
+            Some(jboolean::from(mannequin.is_immovable()))
+        })
+        .unwrap_or(0)
+}
+
+extern "system" fn set_mannequin_immovable(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    immovable: jboolean,
+) {
+    if let Some((_, entity)) = entity(&mut env, &uuid)
+        && let Some(mannequin) = entity.as_ref().downcast_ref::<MannequinEntity>()
+    {
+        mannequin.set_immovable(immovable != 0);
+    }
+}
+
+/// The line under the name, from a component's JSON; null hides it.
+extern "system" fn set_mannequin_description(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    json: JString<'_>,
+) {
+    let description = component(&mut env, &json);
+    if description.is_none() && !json.is_null() {
+        return;
+    }
+    let Some((_, entity)) = entity(&mut env, &uuid) else {
+        return;
+    };
+    let Some(mannequin) = entity.as_ref().downcast_ref::<MannequinEntity>() else {
+        return;
+    };
+    match description {
+        Some(description) => {
+            mannequin.set_description(description);
+            mannequin.set_hide_description(false);
+        }
+        None => mannequin.set_hide_description(true),
+    }
+}
+
+fn with_shulker<R>(
+    env: &mut JNIEnv<'_>,
+    uuid: &JString<'_>,
+    f: impl FnOnce(&ShulkerEntity) -> R,
+) -> Option<R> {
+    let (_, entity) = entity(env, uuid)?;
+    entity.as_ref().downcast_ref::<ShulkerEntity>().map(f)
+}
+
+/// `{raw peek (0-100), 0, dye colour id or -1}`.
+extern "system" fn shulker_state(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jdoubleArray {
+    let state = with_shulker(&mut env, &uuid, |shulker| {
+        [
+            f64::from(shulker.raw_peek_amount()),
+            0.0,
+            f64::from(shulker.color().map_or(-1, |color| color.id())),
+        ]
+    });
+    doubles(&mut env, state.as_ref().map(<[f64; 3]>::as_slice))
+}
+
+/// The face the shulker clings to, by Bukkit `BlockFace` name.
+extern "system" fn shulker_attached_face(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let face = with_shulker(&mut env, &uuid, |shulker| {
+        match shulker.attach_face() {
+            Direction::Down => "DOWN",
+            Direction::Up => "UP",
+            Direction::North => "NORTH",
+            Direction::South => "SOUTH",
+            Direction::West => "WEST",
+            Direction::East => "EAST",
+        }
+        .to_owned()
+    });
+    to_java(&mut env, face)
+}
+
+extern "system" fn set_shulker_attached_face(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    face: JString<'_>,
+) {
+    let direction = match text(&mut env, &face).as_deref() {
+        Some("DOWN") => Direction::Down,
+        Some("UP") => Direction::Up,
+        Some("NORTH") => Direction::North,
+        Some("SOUTH") => Direction::South,
+        Some("WEST") => Direction::West,
+        Some("EAST") => Direction::East,
+        _ => return,
+    };
+    with_shulker(&mut env, &uuid, |shulker| {
+        shulker.set_attach_face(direction)
+    });
+}
+
+/// Opens or closes the shell, with vanilla's armour change and sound.
+extern "system" fn set_shulker_peek(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    peek: jint,
+) {
+    with_shulker(&mut env, &uuid, |shulker| {
+        shulker.set_raw_peek_amount(peek.clamp(0, 100))
+    });
+}
+
+/// A dye colour id, or -1 for the undyed shell.
+extern "system" fn set_shulker_color(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    color: jint,
+) {
+    let color = DyeColor::VALUES
+        .get(usize::try_from(color).unwrap_or(usize::MAX))
+        .copied();
+    with_shulker(&mut env, &uuid, |shulker| shulker.set_color(color));
+}
+
 pub(super) fn bindings() -> Vec<jni::NativeMethod> {
     vec![
         method(
-            "carriedInventorySize",
+            "entityContainerSize",
             "(Ljava/lang/String;)I",
-            carried_inventory_size as *mut c_void,
+            entity_container_size as *mut c_void,
         ),
         method(
-            "carriedInventorySlot",
+            "entityContainerSlot",
             "(Ljava/lang/String;I)Ljava/lang/String;",
-            carried_inventory_slot as *mut c_void,
+            entity_container_slot as *mut c_void,
         ),
         method(
-            "setCarriedInventorySlot",
+            "setEntityContainerSlot",
             "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_carried_inventory_slot as *mut c_void,
+            set_entity_container_slot as *mut c_void,
+        ),
+        method(
+            "mannequinProfile",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            mannequin_profile as *mut c_void,
+        ),
+        method(
+            "setMannequinProfile",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V",
+            set_mannequin_profile as *mut c_void,
+        ),
+        method(
+            "mannequinImmovable",
+            "(Ljava/lang/String;)Z",
+            mannequin_immovable as *mut c_void,
+        ),
+        method(
+            "setMannequinImmovable",
+            "(Ljava/lang/String;Z)V",
+            set_mannequin_immovable as *mut c_void,
+        ),
+        method(
+            "setMannequinDescription",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_mannequin_description as *mut c_void,
+        ),
+        method(
+            "shulkerState",
+            "(Ljava/lang/String;)[D",
+            shulker_state as *mut c_void,
+        ),
+        method(
+            "shulkerAttachedFace",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            shulker_attached_face as *mut c_void,
+        ),
+        method(
+            "setShulkerAttachedFace",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_shulker_attached_face as *mut c_void,
+        ),
+        method(
+            "setShulkerPeek",
+            "(Ljava/lang/String;I)V",
+            set_shulker_peek as *mut c_void,
+        ),
+        method(
+            "setShulkerColor",
+            "(Ljava/lang/String;I)V",
+            set_shulker_color as *mut c_void,
         ),
         method(
             "entityTags",

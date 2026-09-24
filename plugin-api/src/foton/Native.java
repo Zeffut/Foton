@@ -398,12 +398,6 @@ public final class Native {
     public static native void setBlockDisplayBlock(String uuid, String state);
     public static native String boatType(String uuid);
     public static native void setBoatType(String uuid, String type);
-    public static native void setBlockDisplayBrightness(String uuid, int block, int sky);
-    public static native void setBlockDisplayViewRange(String uuid, float range);
-    public static native void setBlockDisplayShadowRadius(String uuid, float radius);
-    public static native void setBlockDisplayTransformation(String uuid, float tx, float ty, float tz,
-            float sx, float sy, float sz, float lx, float ly, float lz, float lw,
-            float rx, float ry, float rz, float rw);
     public static native boolean entityEject(String uuid);
     public static native String entityVehicle(String uuid);
     public static native boolean entityLeaveVehicle(String uuid);
@@ -600,10 +594,54 @@ public final class Native {
     /** Particles sent to one player, wherever they are. */
     public static native void playerParticles(String uuid, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, String data, boolean force);
 
-    /** A mob's carried inventory (villager, allay, piglin): -1 when it has none. */
-    public static native int carriedInventorySize(String uuid);
-    public static native String carriedInventorySlot(String uuid, int slot);
-    public static native void setCarriedInventorySlot(String uuid, int slot, String item);
+    /** An entity's container -- a mob's carried inventory or a chest boat's
+     * chest: -1 when it has none. */
+    public static native int entityContainerSize(String uuid);
+    public static native String entityContainerSlot(String uuid, int slot);
+    public static native void setEntityContainerSlot(String uuid, int slot, String item);
+    /** A mannequin's profile as {@code [id, name, (name, value, signature)...]}. */
+    public static native String[] mannequinProfile(String uuid);
+    public static native void setMannequinProfile(String uuid, String profileId, String name, String[] properties);
+    public static native boolean mannequinImmovable(String uuid);
+    public static native void setMannequinImmovable(String uuid, boolean immovable);
+    public static native void setMannequinDescription(String uuid, String json);
+    /** {@code {raw peek, 0, dye colour id or -1}}. */
+    public static native double[] shulkerState(String uuid);
+    public static native String shulkerAttachedFace(String uuid);
+    public static native void setShulkerAttachedFace(String uuid, String face);
+    public static native void setShulkerPeek(String uuid, int peek);
+    public static native void setShulkerColor(String uuid, int color);
+    /** Every {@code Display} field at once; see {@code FotonDisplay} for the layout. */
+    public static native double[] displayState(String uuid);
+    public static native void setDisplayInterpolationDuration(String uuid, int ticks);
+    public static native void setDisplayInterpolationDelay(String uuid, int ticks);
+    public static native void setDisplayTeleportDuration(String uuid, int ticks);
+    public static native void setDisplayBillboard(String uuid, int billboard);
+    public static native void setDisplayBrightness(String uuid, int block, int sky);
+    public static native void setDisplayGlowColor(String uuid, int argb);
+    public static native void setDisplayFloat(String uuid, int field, float value);
+    public static native void setDisplayTransformation(String uuid, float tx, float ty, float tz,
+            float sx, float sy, float sz, float lx, float ly, float lz, float lw,
+            float rx, float ry, float rz, float rw);
+    public static native String blockDisplayBlock(String uuid);
+    public static native String itemDisplayItem(String uuid);
+    public static native void setItemDisplayItem(String uuid, String item);
+    public static native String itemDisplayTransform(String uuid);
+    public static native void setItemDisplayTransform(String uuid, String transform);
+    public static native void setTextDisplayText(String uuid, String json);
+    public static native String textDisplayPlainText(String uuid);
+    /** {@code {line width, background ARGB, text opacity, style flags}}. */
+    public static native double[] textDisplayState(String uuid);
+    public static native void setTextDisplayLineWidth(String uuid, int width);
+    public static native void setTextDisplayBackground(String uuid, int argb);
+    public static native void resetTextDisplayBackground(String uuid);
+    public static native void setTextDisplayOpacity(String uuid, byte opacity);
+    public static native void setTextDisplayFlag(String uuid, String flag, boolean enabled);
+    public static native void setTextDisplayAlignment(String uuid, String alignment);
+    /** {@code {width, height, responsive}}. */
+    public static native double[] interactionState(String uuid);
+    /** Width (0), height (1) or responsiveness (2). */
+    public static native void setInteractionValue(String uuid, int field, float value);
 
     public static native String[] entityTags(String uuid);
     public static native boolean addEntityTag(String uuid, String tag);

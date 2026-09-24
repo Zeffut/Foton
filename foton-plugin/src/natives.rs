@@ -123,7 +123,6 @@ use foton_registry::data_components::vanilla_components::{
     FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
     TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
-use foton_registry::entity_data::{Quaternionf, Vector3f};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
@@ -172,6 +171,7 @@ use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
 mod attributes;
+mod displays;
 mod entities;
 mod particles;
 mod support;
@@ -4919,108 +4919,6 @@ extern "system" fn set_boat_type(
             BoatEntity::new(target, new_id, pos, weak)
         });
     }
-}
-
-extern "system" fn set_block_display_brightness(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    block: jint,
-    sky: jint,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_brightness(block, sky);
-    }
-}
-
-extern "system" fn set_block_display_view_range(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    value: jfloat,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_view_range(value);
-    }
-}
-
-extern "system" fn set_block_display_shadow_radius(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    value: jfloat,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_shadow_radius(value);
-    }
-}
-
-extern "system" fn set_block_display_transformation(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    tx: jfloat,
-    ty: jfloat,
-    tz: jfloat,
-    sx: jfloat,
-    sy: jfloat,
-    sz: jfloat,
-    lx: jfloat,
-    ly: jfloat,
-    lz: jfloat,
-    lw: jfloat,
-    rx: jfloat,
-    ry: jfloat,
-    rz: jfloat,
-    rw: jfloat,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>() else {
-        return;
-    };
-    let mut data = display.entity_data().lock();
-    data.display_mut()
-        .translation
-        .set(Vector3f::new(tx, ty, tz));
-    data.display_mut().scale.set(Vector3f::new(sx, sy, sz));
-    data.display_mut()
-        .left_rotation
-        .set(Quaternionf::new(lx, ly, lz, lw));
-    data.display_mut()
-        .right_rotation
-        .set(Quaternionf::new(rx, ry, rz, rw));
 }
 
 extern "system" fn entity_type(
@@ -12261,26 +12159,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_boat_type as *mut c_void,
         ),
         method(
-            "setBlockDisplayBrightness",
-            "(Ljava/lang/String;II)V",
-            set_block_display_brightness as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayViewRange",
-            "(Ljava/lang/String;F)V",
-            set_block_display_view_range as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayShadowRadius",
-            "(Ljava/lang/String;F)V",
-            set_block_display_shadow_radius as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayTransformation",
-            "(Ljava/lang/String;FFFFFFFFFFFFFF)V",
-            set_block_display_transformation as *mut c_void,
-        ),
-        method(
             "areaEffectCloudRadius",
             "(Ljava/lang/String;)F",
             area_effect_cloud_radius as *mut c_void,
@@ -13462,6 +13340,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     bindings.extend(attributes::bindings());
     bindings.extend(particles::bindings());
     bindings.extend(entities::bindings());
+    bindings.extend(displays::bindings());
     bindings
 }
 

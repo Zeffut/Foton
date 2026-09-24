@@ -6,7 +6,8 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 
-/** The inventory a mob carries: a villager's eight slots, an allay's one.
+/** An entity's own container: a villager's eight slots, an allay's one, a
+ * chest boat's chest.
  *
  * <p>Live, like every Foton inventory view: each call reads or writes the
  * entity's own container, so a plugin sees what the villager picked up since. */
@@ -18,9 +19,9 @@ final class FotonCarriedInventory implements Inventory {
     private String id() { return holder.getUniqueId().toString(); }
 
     @Override public InventoryHolder getHolder() { return (InventoryHolder) holder; }
-    @Override public int getSize() { return Math.max(0, Native.carriedInventorySize(id())); }
-    @Override public ItemStack getItem(int slot) { return FotonInventory.decode(Native.carriedInventorySlot(id(), slot)); }
-    @Override public void setItem(int slot, ItemStack item) { Native.setCarriedInventorySlot(id(), slot, FotonInventory.encode(item)); }
+    @Override public int getSize() { return Math.max(0, Native.entityContainerSize(id())); }
+    @Override public ItemStack getItem(int slot) { return FotonInventory.decode(Native.entityContainerSlot(id(), slot)); }
+    @Override public void setItem(int slot, ItemStack item) { Native.setEntityContainerSlot(id(), slot, FotonInventory.encode(item)); }
 
     @Override public HashMap<Integer, ItemStack> addItem(ItemStack... items) {
         HashMap<Integer, ItemStack> leftovers = new HashMap<>();
