@@ -371,12 +371,6 @@ public final class FotonInventory implements PlayerInventory {
             }
             for (org.bukkit.Color valuePart : model.getColors()) value += "\u001dmodelcolor=" + valuePart.asRGB();
         }
-        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
-            String name = item.getItemMeta().getDisplayName();
-            StringBuilder hex = new StringBuilder();
-            for (byte byteValue : name.getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
-            value += "\u001dnamehex=" + hex;
-        }
         if (item.hasItemMeta()) {
             for (java.util.Map.Entry<org.bukkit.enchantments.Enchantment, Integer> entry : item.getItemMeta().getEnchants().entrySet()) {
                 StringBuilder hex = new StringBuilder();
@@ -389,13 +383,6 @@ public final class FotonInventory implements PlayerInventory {
                     for (byte byteValue : entry.getKey().getKey().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
                     value += "\u001dstoredenchhex=" + hex + ":" + entry.getValue();
                 }
-        }
-        if (item.hasItemMeta() && item.getItemMeta().hasLore()) {
-            for (String line : item.getItemMeta().getLore()) {
-                StringBuilder hex = new StringBuilder();
-                for (byte byteValue : line.getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
-                value += "\u001dlorehex=" + hex;
-            }
         }
         if (item.hasItemMeta() && item.getItemMeta() instanceof org.bukkit.inventory.meta.SimpleItemMeta simple) {
             value += ItemComponents.encode(simple, item.getType());

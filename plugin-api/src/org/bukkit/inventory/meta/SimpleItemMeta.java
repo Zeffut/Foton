@@ -40,8 +40,10 @@ public class SimpleItemMeta implements Damageable {
     }
 
     private foton.FotonPersistentDataContainer persistentData = new foton.FotonPersistentDataContainer();
-    private String displayName;
-    private List<String> lore;
+    /** custom_name, a component so colour and formatting survive; null when unnamed. */
+    private net.kyori.adventure.text.Component displayName;
+    /** lore, one component per line; null when the item has none. */
+    private List<net.kyori.adventure.text.Component> lore;
     private Integer customModelData;
     private boolean unbreakable;
     private int damage;
@@ -69,16 +71,28 @@ public class SimpleItemMeta implements Damageable {
 
     @Override
     public boolean hasDisplayName() {
-        return displayName != null && !displayName.isEmpty();
+        return displayName != null;
     }
 
+    /** The name as section-sign text, which is what Bukkit's string API speaks. */
     @Override
     public String getDisplayName() {
-        return displayName == null ? "" : displayName;
+        return displayName == null ? "" : legacy(displayName);
+    }
+
+    /** A string name is kept as text: the client draws its section-sign codes itself. */
+    @Override
+    public void setDisplayName(String name) {
+        this.displayName = name == null || name.isEmpty() ? null : net.kyori.adventure.text.Component.text(name);
     }
 
     @Override
-    public void setDisplayName(String name) {
+    public net.kyori.adventure.text.Component displayName() {
+        return displayName;
+    }
+
+    @Override
+    public void displayName(net.kyori.adventure.text.Component name) {
         this.displayName = name;
     }
 
@@ -92,12 +106,35 @@ public class SimpleItemMeta implements Damageable {
      * matching the surprise is the compatible choice. */
     @Override
     public List<String> getLore() {
+        return lore == null ? null : lore.stream().map(SimpleItemMeta::legacy).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+
+    @Override
+    public void setLore(List<String> lines) {
+        this.lore = lines == null ? null : lines.stream()
+            .map(line -> (net.kyori.adventure.text.Component) net.kyori.adventure.text.Component.text(line == null ? "" : line))
+            .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+
+    @Override
+    public List<net.kyori.adventure.text.Component> lore() {
         return lore == null ? null : new ArrayList<>(lore);
     }
 
     @Override
-    public void setLore(List<String> lore) {
-        this.lore = lore == null ? null : new ArrayList<>(lore);
+    public void lore(List<net.kyori.adventure.text.Component> lines) {
+        this.lore = lines == null ? null : lines.stream()
+            .map(line -> line == null ? net.kyori.adventure.text.Component.empty() : line)
+            .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+
+    /** Plain text stays itself; styled text becomes section-sign codes. */
+    private static String legacy(net.kyori.adventure.text.Component component) {
+        if (component instanceof net.kyori.adventure.text.TextComponent text
+                && text.children().isEmpty() && text.style().isEmpty()) {
+            return text.content();
+        }
+        return foton.ComponentJson.legacy(component);
     }
 
     @Override

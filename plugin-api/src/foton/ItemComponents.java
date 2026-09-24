@@ -35,6 +35,8 @@ final class ItemComponents {
 
     static String encode(SimpleItemMeta meta, Material type) {
         StringBuilder out = new StringBuilder();
+        if (meta.displayName() != null) field(out, "namejsonhex", hex(ComponentJson.json(meta.displayName())));
+        if (meta.hasLore()) for (Component line : meta.lore()) field(out, "lorejsonhex", hex(ComponentJson.json(line)));
         for (String hidden : meta.getHiddenComponents()) field(out, "hide", hidden);
         if (meta.hasEnchantmentGlintOverride()) field(out, "glint", String.valueOf(meta.getEnchantmentGlintOverride()));
         if (meta.hasMaxStackSize()) field(out, "maxstack", String.valueOf(meta.getMaxStackSize()));
@@ -78,6 +80,7 @@ final class ItemComponents {
         List<String> hidden = new ArrayList<>();
         List<Pattern> patterns = new ArrayList<>();
         List<Component> pages = new ArrayList<>();
+        List<Component> lore = new ArrayList<>();
         Float cooldown = null;
         NamespacedKey cooldownGroup = null;
         for (String field : fields) {
@@ -87,6 +90,8 @@ final class ItemComponents {
             String value = field.substring(equals + 1);
             try {
                 switch (name) {
+                    case "namejsonhex" -> meta.displayName(ComponentJson.parse(unhex(value)));
+                    case "lorejsonhex" -> lore.add(ComponentJson.parse(unhex(value)));
                     case "hide" -> hidden.add(value);
                     case "glint" -> meta.setEnchantmentGlintOverride(Boolean.parseBoolean(value));
                     case "maxstack" -> meta.setMaxStackSize(Integer.parseInt(value));
@@ -127,6 +132,7 @@ final class ItemComponents {
                 // One malformed field loses that component, not the item.
             }
         }
+        if (!lore.isEmpty()) meta.lore(lore);
         if (!hidden.isEmpty()) meta.setHiddenComponents(hidden);
         if (!patterns.isEmpty()) meta.setBannerPatternsComponent(patterns);
         if (cooldown != null && cooldown > 0) {

@@ -9,11 +9,12 @@ use std::fmt::{Display, Write as _};
 
 use foton_registry::data_components::components::{
     ArmorTrim, BannerPatternLayer, BannerPatternLayers, CustomData, Filterable,
-    InstrumentComponent, TooltipDisplay, UseCooldown, WritableBookContent, WrittenBookContent,
+    InstrumentComponent, ItemLore, TooltipDisplay, UseCooldown, WritableBookContent,
+    WrittenBookContent,
 };
 use foton_registry::data_components::vanilla_components::{
-    BANNER_PATTERNS, BASE_COLOR, CUSTOM_DATA, ENCHANTMENT_GLINT_OVERRIDE, INSTRUMENT,
-    MAX_STACK_SIZE, TOOLTIP_DISPLAY, TRIM, USE_COOLDOWN, WRITABLE_BOOK_CONTENT,
+    BANNER_PATTERNS, BASE_COLOR, CUSTOM_DATA, CUSTOM_NAME, ENCHANTMENT_GLINT_OVERRIDE, INSTRUMENT,
+    LORE, MAX_STACK_SIZE, TOOLTIP_DISPLAY, TRIM, USE_COOLDOWN, WRITABLE_BOOK_CONTENT,
     WRITTEN_BOOK_CONTENT,
 };
 use foton_registry::item_stack::ItemStack;
@@ -61,6 +62,21 @@ fn holder_key<T: RegistryEntry + foton_registry::RegistryHolderEntry>(
 
 /// Appends every component this module carries, in the order Java reads them.
 pub(crate) fn describe(stack: &ItemStack, out: &mut String) {
+    // Name and lore as JSON text, so colour and formatting reach the plugin
+    // and come back; `namehex`/`lorehex`, their plain-text forms, are still
+    // read.
+    if let Some(name) = stack.get(CUSTOM_NAME)
+        && let Ok(json) = serde_json::to_string(name)
+    {
+        field(out, "namejsonhex", hex(&json));
+    }
+    if let Some(lore) = stack.get(LORE) {
+        for line in lore.lines() {
+            if let Ok(json) = serde_json::to_string(line) {
+                field(out, "lorejsonhex", hex(&json));
+            }
+        }
+    }
     if let Some(display) = stack.get(TOOLTIP_DISPLAY) {
         for hidden in display.hidden_components() {
             field(out, "hide", hidden);
@@ -145,8 +161,17 @@ pub(crate) fn parse(stack: &mut ItemStack, fields: &[&str]) {
     let mut cooldown: Option<f32> = None;
     let mut cooldown_group = None;
     let mut book = BookFields::default();
+    let mut lore = Vec::new();
     for (name, value) in fields.iter().filter_map(|field| field.split_once('=')) {
         match name {
+            "namejsonhex" => {
+                if let Some(name) = unhex(value).and_then(|json| serde_json::from_str(&json).ok()) {
+                    stack.set(CUSTOM_NAME, name);
+                }
+            }
+            "lorejsonhex" => lore.extend(
+                unhex(value).and_then(|json| serde_json::from_str::<TextComponent>(&json).ok()),
+            ),
             "hide" => hidden.extend(value.parse::<Identifier>().ok()),
             "glint" => {
                 if let Ok(glint) = value.parse::<bool>() {
@@ -197,6 +222,11 @@ pub(crate) fn parse(stack: &mut ItemStack, fields: &[&str]) {
             "bookpagehex" => book.pages.extend(unhex(value)),
             _ => {}
         }
+    }
+    if !lore.is_empty()
+        && let Ok(lore) = ItemLore::new(lore)
+    {
+        stack.set(LORE, lore);
     }
     if !hidden.is_empty() {
         let hide_tooltip = stack
@@ -282,8 +312,8 @@ fn apply_book(stack: &mut ItemStack, book: BookFields) {
 #[cfg(test)]
 mod tests {
     use foton_registry::data_components::vanilla_components::{
-        BANNER_PATTERNS, CUSTOM_DATA, MAX_STACK_SIZE, POTION_CONTENTS, TOOLTIP_DISPLAY, TRIM,
-        WRITTEN_BOOK_CONTENT,
+        BANNER_PATTERNS, CUSTOM_DATA, CUSTOM_NAME, LORE, MAX_STACK_SIZE, POTION_CONTENTS,
+        TOOLTIP_DISPLAY, TRIM, WRITTEN_BOOK_CONTENT,
     };
     use text_components::TextComponent;
 
@@ -397,5 +427,30 @@ mod tests {
             .expect("a readable slot");
         assert!(stack.get(TRIM).is_none());
         assert!(stack.get(POTION_CONTENTS).is_some());
+    }
+
+    /// A coloured name set by a plugin is the name the item carries, and
+    /// what the server hands back reads as the same component.
+    #[test]
+    fn a_styled_name_keeps_its_style() {
+        foton_registry::init_vanilla_registry();
+        let name = r#"{"text":"Bouclier","color":"gold","italic":false}"#;
+        let stack = parse_slot(&slot(&[
+            "minecraft:shield 1",
+            &format!("namejsonhex={}", hex(name)),
+            &format!(
+                "lorejsonhex={}",
+                hex(r#"{"text":"une ligne","color":"gray"}"#)
+            ),
+        ]))
+        .expect("a readable slot");
+        let expected: TextComponent = serde_json::from_str(name).expect("valid JSON text");
+        assert_eq!(stack.get(CUSTOM_NAME), Some(&expected));
+        assert_eq!(stack.get(LORE).map(|lore| lore.lines().len()), Some(1));
+        let described = describe_slot(&stack);
+        assert!(
+            described.contains(&format!("namejsonhex={}", hex(name))),
+            "{described}"
+        );
     }
 }

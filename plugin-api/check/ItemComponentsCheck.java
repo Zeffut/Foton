@@ -112,6 +112,18 @@ final class ItemComponentsCheck {
         Checks.same(foton.ComponentJson.parse(foton.ComponentJson.json(styled)), styled,
             "a component survives its JSON form");
 
+        ItemStack gem = new ItemStack(Material.EMERALD);
+        ItemMeta gemMeta = gem.getItemMeta();
+        Component gemName = Component.text("Rubis", NamedTextColor.RED)
+            .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false);
+        gemMeta.displayName(gemName);
+        gemMeta.lore(List.of(Component.text("précieux", NamedTextColor.GRAY)));
+        gem.setItemMeta(gemMeta);
+        ItemMeta gemBack = roundTrip(gem).getItemMeta();
+        Checks.same(gemBack.displayName(), gemName, "a coloured name survives the slot string");
+        Checks.same(gemBack.getDisplayName(), "§cRubis", "and reads as section-sign text");
+        Checks.same(gemBack.lore(), List.of(Component.text("précieux", NamedTextColor.GRAY)), "coloured lore survives");
+
         ItemMeta plain = new ItemStack(Material.STONE).getItemMeta();
         plain.addItemFlags(ItemFlag.HIDE_ENCHANTS);
         plain.removeItemFlags(ItemFlag.HIDE_ENCHANTS);

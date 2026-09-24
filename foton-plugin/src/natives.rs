@@ -122,9 +122,9 @@ use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
-    CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
-    FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
-    TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+    CUSTOM_MODEL_DATA, ENCHANTMENTS, FIREWORKS, FireworkExplosion, FireworkExplosionShape,
+    Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS, TOOLTIP_DISPLAY, TOOLTIP_STYLE,
+    UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
 use foton_registry::enchantment::{Enchantment, EnchantmentRef};
 use foton_registry::entity_data::{Quaternionf, Vector3f};
@@ -7765,22 +7765,6 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         value.push('\u{1d}');
         value.push_str("nbthex=");
         value.push_str(&hex_encode(opaque.as_bytes()));
-    }
-    if let Some(name) = stack.get(CUSTOM_NAME) {
-        value.push('\u{1d}');
-        value.push_str("namehex=");
-        for byte in name.to_string().as_bytes() {
-            let _ = write!(value, "{byte:02x}");
-        }
-    }
-    if let Some(lore) = stack.get(LORE) {
-        for line in lore.lines() {
-            value.push('\u{1d}');
-            value.push_str("lorehex=");
-            for byte in line.to_string().as_bytes() {
-                let _ = write!(value, "{byte:02x}");
-            }
-        }
     }
     if stack.has(UNBREAKABLE) {
         value.push('\u{1d}');
