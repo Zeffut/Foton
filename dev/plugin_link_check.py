@@ -33,8 +33,10 @@ Standard library only, like the rest of `dev/`.
 import argparse
 import collections
 import pathlib
+import subprocess
 import struct
 import sys
+import tempfile
 import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -43,6 +45,55 @@ import plugin_api_usage as usage  # noqa: E402
 REPO = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_API = REPO / "plugin-api" / "build" / "foton-plugin-api.jar"
 DEFAULT_LIBS = REPO / "plugin-api" / "lib"
+JDK_CACHE = REPO / "plugin-api" / "build" / "jdk-classes.jar"
+
+# The runtime's own classes, copied out of jrt:/ once. Without them a member a
+# plugin reaches through a JDK supertype -- `ItemMeta.clone()` through
+# Cloneable, `Registry.forEach` through Iterable -- cannot be judged, and a
+# check that cannot judge must not accuse, so it passed. Missing members hid
+# behind that until a stricter reading found them.
+JDK_DUMP = """
+import java.net.URI;
+import java.nio.file.*;
+import java.util.zip.*;
+
+public class JdkDump {
+    public static void main(String[] args) throws Exception {
+        FileSystem jrt = FileSystems.getFileSystem(URI.create("jrt:/"));
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(Path.of(args[0])))) {
+            out.putNextEntry(new ZipEntry("META-INF/jdk-version"));
+            out.write(System.getProperty("java.version").getBytes());
+            for (String module : new String[] {"java.base", "java.logging", "java.sql", "java.desktop",
+                                               "java.net.http", "java.management", "java.xml"}) {
+                Path root = jrt.getPath("/modules", module);
+                if (!Files.exists(root)) continue;
+                try (var files = Files.walk(root)) {
+                    for (Path file : (Iterable<Path>) files::iterator) {
+                        String name = root.relativize(file).toString();
+                        if (!name.endsWith(".class") || name.equals("module-info.class")) continue;
+                        out.putNextEntry(new ZipEntry(name));
+                        out.write(Files.readAllBytes(file));
+                    }
+                }
+            }
+        }
+    }
+}
+"""
+
+
+def jdk_classes():
+    """The JDK's classes as a layer, extracted once and cached beside the API jar."""
+    if not JDK_CACHE.is_file():
+        JDK_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory() as work:
+            source = pathlib.Path(work) / "JdkDump.java"
+            source.write_text(JDK_DUMP)
+            partial = JDK_CACHE.with_suffix(".part")
+            subprocess.run(["java", str(source), str(partial)], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            partial.replace(JDK_CACHE)
+    return read_jar(JDK_CACHE)
 
 ACC_STATIC = 0x0008
 ACC_INTERFACE = 0x0200
@@ -216,7 +267,7 @@ class World:
         return self.classes.get(name)
 
     def _jdk_has(self, name, signature):
-        """A JDK class this tool does not model; only the common members are known."""
+        """A JDK class missing from the extracted set; only the common members are known."""
         known = usage.FROM_JDK.get(name)
         if known is None:
             return None  # unknown: cannot say, so do not accuse
@@ -344,7 +395,10 @@ def check(plugin_path, world, plugin_classes):
             if found is False:
                 problems["missing member"].add(f"{owner}#{signature}")
 
-        for parent in [info.super, *info.interfaces]:
+        # An abstract class, an interface, or an enum whose constants each
+        # supply the body (javac marks that enum abstract) owes nothing here.
+        implementors = [] if info.flags & (ACC_ABSTRACT | ACC_INTERFACE) else [info.super, *info.interfaces]
+        for parent in implementors:
             if not parent or not served(parent):
                 continue
             target = world.find(parent)
@@ -374,7 +428,7 @@ def main():
 
     if not args.api.is_file():
         raise SystemExit(f"no API jar at {args.api}; run dev/build-plugin-api.sh")
-    layers = [read_jar(args.api)]
+    layers = [read_jar(args.api), jdk_classes()]
     layers += [read_jar(jar) for jar in sorted(args.libs.glob("*.jar"))]
     layers += [read_jar(jar) for jar in args.provided_by]
 
