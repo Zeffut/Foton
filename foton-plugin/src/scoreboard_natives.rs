@@ -252,6 +252,8 @@ mod tests {
     use foton_core::scoreboard::TeamDisplay;
     use foton_protocol::packets::game::TeamColor;
 
+    use text_components::TextComponent;
+
     use super::{apply_display, deserialized, serialized};
 
     /// Java names colours by their snake-case form, and so does the scoreboard's save.
@@ -281,5 +283,16 @@ mod tests {
         assert!(apply_display(&mut display, "prefix", "").is_some());
         assert!(display.prefix.is_none());
         assert!(apply_display(&mut display, "prefix", "{not json").is_none());
+    }
+
+    /// What `foton.ComponentJson` writes comes back in the same JSON, so a
+    /// plugin reading a prefix gets the component it set.
+    #[test]
+    fn java_component_json_survives_the_server() {
+        let json = r#"{"text":"[H] ","color":"gold","bold":true,"shadow_color":0,"extra":[{"translate":"race.hylian","with":[{"text":"x"}]}]}"#;
+        let component: TextComponent = serde_json::from_str(json).expect("Java's JSON parses");
+        let back = serde_json::to_value(&component).expect("the component serializes");
+        let original: serde_json::Value = serde_json::from_str(json).expect("valid JSON");
+        assert_eq!(back, original);
     }
 }

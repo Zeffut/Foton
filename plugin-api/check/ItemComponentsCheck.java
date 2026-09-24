@@ -102,6 +102,16 @@ final class ItemComponentsCheck {
         Checks.same(bookBack.pages().get(0), Component.text("one", NamedTextColor.RED), "a styled page survives");
         Checks.same(bookBack.getPage(2), "two", "a plain page reads as its text");
 
+        // Team prefixes and book pages cross as JSON; a plugin comparing what
+        // it set with what it reads back (to skip a redundant packet) needs
+        // the trip to be exact.
+        Component styled = Component.text("[Hylien] ", NamedTextColor.GOLD)
+            .decoration(net.kyori.adventure.text.format.TextDecoration.BOLD, true)
+            .shadowColor(net.kyori.adventure.text.format.ShadowColor.none())
+            .append(Component.translatable("race.hylian", Component.text("x")));
+        Checks.same(foton.ComponentJson.parse(foton.ComponentJson.json(styled)), styled,
+            "a component survives its JSON form");
+
         ItemMeta plain = new ItemStack(Material.STONE).getItemMeta();
         plain.addItemFlags(ItemFlag.HIDE_ENCHANTS);
         plain.removeItemFlags(ItemFlag.HIDE_ENCHANTS);

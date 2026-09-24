@@ -112,6 +112,9 @@ public final class ComponentJson {
         if (object.has("font")) style.font(net.kyori.adventure.key.Key.key(object.get("font").getAsString()));
         if (object.has("insertion")) style.insertion(object.get("insertion").getAsString());
         out = out.style(style.build());
+        if (object.has("shadow_color")) {
+            out = out.shadowColor(net.kyori.adventure.text.format.ShadowColor.shadowColor(object.get("shadow_color").getAsInt()));
+        }
         if (object.has("extra")) for (com.google.gson.JsonElement child : object.getAsJsonArray("extra")) out = out.append(read(child));
         return out;
     }
@@ -125,6 +128,7 @@ public final class ComponentJson {
             out.addProperty(decoration.name().toLowerCase(Locale.ROOT), state == TextDecoration.State.TRUE);
         }
         if (style.font() != null) out.addProperty("font", style.font().asString());
+        if (style.shadowColor() != null) out.addProperty("shadow_color", style.shadowColor().value());
         if (style.insertion() != null) out.addProperty("insertion", style.insertion());
     }
 
