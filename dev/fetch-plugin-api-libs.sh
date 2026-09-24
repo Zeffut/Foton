@@ -30,6 +30,10 @@ net/kyori adventure-key 5.2.0 0184d173200e2eef8fbc791f622d1d58fd459f8930c616b5a4
 net/kyori adventure-text-minimessage 5.2.0 e1871aba1511dbe49cff211c10f85682886014161e5d629318aa69583c31a2c0
 net/kyori adventure-text-logger-slf4j 5.2.0 ae79b7f3846c5d973b37c7eec03190bd44e182918d1346e7705c5991a1b5dfb3
 net/kyori adventure-text-serializer-plain 5.2.0 f6424cc038a631b79cc4b74b6b353d5d007c99b38f9be482e0c2448a00eecd21
+net/kyori adventure-text-serializer-gson 5.2.0 5b2ad1c8a65e7fa0811279b51a45d5fc574b6a6354097b545e4fdb5b68aaed73
+net/kyori adventure-text-serializer-json 5.2.0 adb5410006175b9aa6343bfadd0bd11c4a6955ee2abc1a58abe2a3fa6cbd9ab5
+net/kyori adventure-text-serializer-commons 5.2.0 64b3e45d93aa57f4da9b257d16c8f2172612d9e3312b061f4892fd426922d2c3
+net/kyori option 1.1.0 97b69b4b17dfe02217c9131ad342564cbc9aebd04c75eb689639b5f78fd4b11c
 org/jetbrains annotations 26.1.0 ebc7aec252ed0c7d2d04c039d7f00e69f7b86b1f493c741d67b3ef31b986b054
 com/mojang brigadier 1.3.10 c8ee4136e474ac7723ca2b432ec8d1a2bc88ef7d1ec57c314ba9e33cdc83dd75
 com/google/code/gson gson 2.14.0 2cbd119bf1961c28788310963dc80ba65f58cdeec1dd139c8bdb1240faa2c36f

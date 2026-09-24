@@ -2,8 +2,8 @@
 
 The Bukkit API this server implements is written against Adventure, Brigadier
 and a handful of ordinary Java libraries. These jars are here so that `javac`
-can resolve those names; nothing in them ships inside the server binary, and
-Foton does not call into any of them at runtime.
+can resolve those names; nothing in them ships inside the server binary. The
+one Foton itself calls at runtime is the Gson component serializer, below.
 
 They are committed rather than fetched. The alternative makes a build step
 depend on Maven Central being reachable, and this repository has just spent an
@@ -31,8 +31,15 @@ pinned by digest and checked rather than trusted for compiling.
 it is here because Paper puts it on every plugin's classpath and plugins rely on
 that rather than shading it. Observer and Zelda Civ both call
 `MiniMessage.miniMessage()` without carrying a copy. Paper also provides
-`adventure-text-serializer-gson` and `-legacy`; neither of those two plugins
-references them, so they are not here until a plugin that does is tried.
+`-legacy`; neither of those two plugins references it, so it is not here until
+a plugin that does is tried.
+
+`adventure-text-serializer-gson` is here for Foton's own use, and paper-api
+declares it too. A component a plugin hands over -- a join or quit message, a
+kick reason, a server-list MOTD -- crosses to the Rust side as Minecraft's JSON
+text, and that is what this serializer writes and reads, colours and all. It
+pulls in `adventure-text-serializer-json`, `adventure-text-serializer-commons`
+and `net.kyori:option`, at the versions its POM and adventure-bom 5.2.0 name.
 
 `examination-api` and `examination-string` are gone rather than updated:
 Adventure 5 dropped the dependency, and `adventure-api:5.2.0` names neither.
@@ -54,6 +61,10 @@ POM, not from memory and not carried over from the previous version.
 | adventure-text-logger-slf4j | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-minimessage | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-plain | 5.2.0 | MIT | Maven Central POM |
+| adventure-text-serializer-gson | 5.2.0 | MIT | PaperMC Maven POM |
+| adventure-text-serializer-json | 5.2.0 | MIT | PaperMC Maven POM |
+| adventure-text-serializer-commons | 5.2.0 | MIT | PaperMC Maven POM |
+| option (net.kyori) | 1.1.0 | MIT | PaperMC Maven POM |
 | annotations (JetBrains) | 26.1.0 | Apache-2.0 | Maven Central POM |
 | brigadier | 1.3.10 | MIT | `LICENSE` in Mojang/brigadier |
 | gson | 2.14.0 | Apache-2.0 | POM inside the jar |
