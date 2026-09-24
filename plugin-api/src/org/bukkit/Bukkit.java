@@ -279,7 +279,7 @@ public final class Bukkit {
     }
 
     public static <T extends Keyed> Tag<T> getTag(String registry, NamespacedKey key, Class<T> type) {
-        return key == null || type == null ? null : new Tag<>(key, type, registry);
+        return key == null || type == null ? null : new foton.FotonTag<>(registry, key, type);
     }
 
     /** Every tag in a registry.

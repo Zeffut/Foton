@@ -22,6 +22,33 @@ public interface Registry<T extends Keyed> extends Iterable<T> {
     @Override
     default java.util.Iterator<T> iterator() { return stream().iterator(); }
 
+    /** Whether the data pack defines this tag for this registry. */
+    default boolean hasTag(io.papermc.paper.registry.tag.TagKey<T> key) {
+        return key != null && foton.Native.tagValues(key.registryKey().key().value(), key.key().asString()) != null;
+    }
+
+    /** The tag's members by key; throws, as Paper does, when there is no such tag. */
+    default io.papermc.paper.registry.tag.Tag<T> getTag(io.papermc.paper.registry.tag.TagKey<T> key) {
+        java.util.Objects.requireNonNull(key, "key");
+        String[] members = foton.Native.tagValues(key.registryKey().key().value(), key.key().asString());
+        if (members == null) throw new java.util.NoSuchElementException("No tag " + key + " in " + key.registryKey());
+        io.papermc.paper.registry.tag.SimpleTag<T> tag = new io.papermc.paper.registry.tag.SimpleTag<>(key);
+        java.util.List<io.papermc.paper.registry.TypedKey<T>> entries = new java.util.ArrayList<>();
+        for (String member : members) entries.add(io.papermc.paper.registry.TypedKey.create(key.registryKey(), member));
+        tag.addAll(entries);
+        return tag;
+    }
+
+    /** The tag's members as values of this registry. */
+    default java.util.Collection<T> getTagValues(io.papermc.paper.registry.tag.TagKey<T> key) {
+        java.util.List<T> values = new java.util.ArrayList<>();
+        for (io.papermc.paper.registry.TypedKey<T> member : getTag(key).values()) {
+            T value = get(NamespacedKey.fromString(member.asString()));
+            if (value != null) values.add(value);
+        }
+        return java.util.List.copyOf(values);
+    }
+
     default NamespacedKey getKey(T value) { return value == null ? null : value.getKey(); }
 
     default NamespacedKey getKeyOrThrow(T value) {

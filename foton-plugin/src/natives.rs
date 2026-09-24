@@ -459,6 +459,38 @@ extern "system" fn server_motd(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstri
     to_java(&mut env, server().map(|value| value.config.motd.clone()))
 }
 
+/// The members of `tag` in the registry a plugin names, or `None` when that
+/// registry has no such tag.
+///
+/// Registries are named as Paper's `RegistryKey`s are (`item`,
+/// `worldgen/biome`), and also as Bukkit's `Tag.REGISTRY_*` strings
+/// (`items`, `blocks`, `fluids`, `entity_types`, `game_events`).
+fn tag_members(registry: &str, tag: &Identifier) -> Option<Vec<String>> {
+    fn keys<T: foton_registry::RegistryEntry + 'static>(
+        entries: Option<Vec<&'static T>>,
+    ) -> Option<Vec<String>> {
+        entries.map(|entries| {
+            entries
+                .iter()
+                .map(|entry| entry.key().to_string())
+                .collect()
+        })
+    }
+    match registry.strip_prefix("minecraft:").unwrap_or(registry) {
+        "item" | "items" => keys(REGISTRY.items.get_tag(tag)),
+        "block" | "blocks" => keys(REGISTRY.blocks.get_tag(tag)),
+        "fluid" | "fluids" => keys(REGISTRY.fluids.get_tag(tag)),
+        "entity_type" | "entity_types" => keys(REGISTRY.entity_types.get_tag(tag)),
+        "game_event" | "game_events" => keys(REGISTRY.game_events.get_tag(tag)),
+        "enchantment" => keys(REGISTRY.enchantments.get_tag(tag)),
+        "banner_pattern" => keys(REGISTRY.banner_patterns.get_tag(tag)),
+        "instrument" => keys(REGISTRY.instruments.get_tag(tag)),
+        "worldgen/biome" => keys(REGISTRY.biomes.get_tag(tag)),
+        "potion" => keys(REGISTRY.potions.get_tag(tag)),
+        _ => None,
+    }
+}
+
 extern "system" fn is_tagged(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -483,19 +515,23 @@ extern "system" fn is_tagged(
     };
     let registry = String::from(registry);
     let answer = match registry.as_str() {
-        "minecraft:items" | "items" => REGISTRY
+        // The two a plugin asks about every tick keep their direct lookup.
+        "minecraft:items" | "items" | "item" => REGISTRY
             .items
             .by_key(&value)
             .is_some_and(|item| REGISTRY.items.is_in_tag(item, &tag)),
-        "minecraft:blocks" | "blocks" => REGISTRY
+        "minecraft:blocks" | "blocks" | "block" => REGISTRY
             .blocks
             .by_key(&value)
             .is_some_and(|block| REGISTRY.blocks.is_in_tag(block, &tag)),
-        _ => false,
+        other => tag_members(other, &tag)
+            .is_some_and(|members| members.iter().any(|member| *member == value.to_string())),
     };
     jboolean::from(answer)
 }
 
+/// `foton.Native.tagValues`: the tag's members, or null when the registry has
+/// no such tag -- which is how `Registry#hasTag` tells absent from empty.
 extern "system" fn tag_values(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -511,19 +547,8 @@ extern "system" fn tag_values(
     let Ok(tag) = String::from(tag).parse::<Identifier>() else {
         return null_mut();
     };
-    let registry = String::from(registry);
-    let values: Vec<String> = match registry.as_str() {
-        "minecraft:items" | "items" => REGISTRY
-            .items
-            .iter_tag(&tag)
-            .map(|entry| entry.key().to_string())
-            .collect(),
-        "minecraft:blocks" | "blocks" => REGISTRY
-            .blocks
-            .iter_tag(&tag)
-            .map(|entry| entry.key().to_string())
-            .collect(),
-        _ => Vec::new(),
+    let Some(values) = tag_members(&String::from(registry), &tag) else {
+        return null_mut();
     };
     string_array(&mut env, &values)
 }
@@ -13753,5 +13778,37 @@ mod snbt_tests {
     fn malformed_or_unknown_prefix_is_rejected() {
         assert!(parse_item_snbt_patch("not valid{foo:1}").is_none());
         assert!(parse_item_snbt_patch("minecraft:stone{foo:}").is_none());
+    }
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::tag_members;
+    use foton_utils::Identifier;
+
+    fn tag(path: &'static str) -> Identifier {
+        Identifier::vanilla_static(path)
+    }
+
+    /// `Registry#hasTag` reads absence from `None`, so an unknown tag must not
+    /// look like an empty one.
+    #[test]
+    fn an_unknown_tag_is_absent_rather_than_empty() {
+        foton_registry::init_vanilla_registry();
+        assert!(tag_members("enchantment", &tag("not_a_tag")).is_none());
+        assert!(tag_members("not_a_registry", &tag("in_enchanting_table")).is_none());
+    }
+
+    /// Paper's registry names and Bukkit's legacy ones reach the same tags.
+    #[test]
+    fn registries_are_named_either_way() {
+        foton_registry::init_vanilla_registry();
+        let table = tag_members("enchantment", &tag("in_enchanting_table")).unwrap_or_default();
+        assert!(table.iter().any(|key| key == "minecraft:sharpness"));
+        assert!(!table.iter().any(|key| key == "minecraft:mending"));
+        assert_eq!(
+            tag_members("items", &tag("trimmable_armor")),
+            tag_members("minecraft:item", &tag("trimmable_armor"))
+        );
     }
 }
