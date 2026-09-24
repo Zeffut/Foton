@@ -1,0 +1,5 @@
+# Chunk, light and biome data are not shown to PacketEvents listeners unless
+# this is true. Foton has already compressed them by the time they could be
+# shown, so each one costs an inflate and a copy for every player. Turn it on
+# only for a plugin that really reads chunk packets, such as an anti-xray.
+show-chunk-packets: false

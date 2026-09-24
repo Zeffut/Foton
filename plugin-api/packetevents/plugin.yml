@@ -1,0 +1,8 @@
+# The name upstream PacketEvents uses, so that plugins declaring
+# `depend: [packetevents]` or `softdepend: [packetevents]` find this one.
+name: packetevents
+version: '2.13.0+foton'
+main: foton.packetevents.FotonPacketEventsPlugin
+api-version: '1.13'
+description: PacketEvents, on Foton's packet tap
+website: https://github.com/retrooper/packetevents

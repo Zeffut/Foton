@@ -83,6 +83,37 @@ folder selected by FOTON_PLUGIN_LIBRARY_DIRECTORY. With no
 FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
 unchanged.
 
+### PacketEvents
+
+Plugins that read or rewrite raw packets usually do it through
+[PacketEvents](https://github.com/retrooper/packetevents), and expect a plugin
+named `packetevents` beside them. The upstream jar cannot run here -- it
+reaches into CraftBukkit to find Netty's pipeline -- so Foton builds its own:
+
+```sh
+bash dev/build-plugin-api.sh
+bash dev/build-packetevents.sh   # fetches PacketEvents 2.13.0, pinned by digest
+```
+
+The result, `plugin-api/build/bundled/packetevents.jar`, is PacketEvents' own
+unmodified API standing on Foton's packet tap (`foton-core/src/packet_tap.rs`)
+instead of a Netty pipeline. The host loads it before the plugin directory; an
+upstream `packetevents` jar dropped into `plugins/` is skipped with a message.
+The build refuses the jar if PacketEvents and Foton disagree on a single packet
+id.
+
+What differs from a Netty server, on purpose:
+
+- Chunk, light and biome packets are not shown to listeners by default: Foton
+  has already compressed them by then. `show-chunk-packets: true` in
+  `plugins/packetevents/config.yml` turns them back on.
+- Sending or injecting a packet works in the play phase only.
+- PacketEvents 2.13.0 was compiled against Adventure 4; Paper 26.2, and so
+  Foton, provide Adventure 5. `dev/plugin_link_check.py` finds 25 references
+  in PacketEvents that Adventure 5 no longer answers, all in its text
+  serializers (click events, show-item hovers, translation arguments, SNBT).
+  A packet carrying such a component fails to convert; nothing else does.
+
 ## License
 
 Foton is free software under the

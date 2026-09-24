@@ -1,0 +1,5 @@
+name: PacketProbe
+version: '1'
+main: foton.probe.PacketProbe
+api-version: '1.21'
+depend: [packetevents]
