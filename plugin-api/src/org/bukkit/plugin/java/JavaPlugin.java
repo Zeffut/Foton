@@ -158,6 +158,7 @@ public abstract class JavaPlugin implements Plugin {
         return config;
     }
 
+    @Override
     public void reloadConfig() {
         config = YamlConfiguration.loadConfiguration(configFile());
         InputStream bundled = getResource("config.yml");
@@ -171,12 +172,12 @@ public abstract class JavaPlugin implements Plugin {
         }
     }
 
+    /** Paper saves `getConfig()`, so a config never read is loaded and
+     * written rather than skipped. */
+    @Override
     public void saveConfig() {
-        if (config == null) {
-            return;
-        }
         try {
-            config.save(configFile());
+            getConfig().save(configFile());
         } catch (IOException error) {
             getLogger().log(Level.SEVERE, "cannot write " + configFile(), error);
         }

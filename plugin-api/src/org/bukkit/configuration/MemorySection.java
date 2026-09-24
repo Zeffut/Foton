@@ -98,12 +98,42 @@ public class MemorySection implements ConfigurationSection {
 
     @Override
     public boolean contains(String path) {
-        return get(path) != null;
+        return contains(path, false);
     }
 
     @Override
+    public boolean contains(String path, boolean ignoreDefault) {
+        return (ignoreDefault ? lookup(path) : get(path)) != null;
+    }
+
+    /** Bukkit's rule: a value only in the defaults counts as set when the
+     * root copies its defaults, because saving would then write it out. */
+    @Override
     public boolean isSet(String path) {
-        return get(path) != null;
+        if (root != null && root.options() != null && root.options().copyDefaults()) {
+            return contains(path);
+        }
+        return lookup(path) != null;
+    }
+
+    /** The value stored at the path in this tree itself, never a default. */
+    private Object lookup(String path) {
+        if (path == null || path.isEmpty()) {
+            return this;
+        }
+        char separator = separator();
+        MemorySection section = this;
+        int start = 0;
+        int next;
+        while ((next = path.indexOf(separator, start)) != -1) {
+            Object child = section.map.get(path.substring(start, next));
+            if (!(child instanceof MemorySection)) {
+                return null;
+            }
+            section = (MemorySection) child;
+            start = next + 1;
+        }
+        return section.map.get(path.substring(start));
     }
 
     @Override
