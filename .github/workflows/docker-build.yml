@@ -1,28 +1,273 @@
 name: Docker build
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - Test
+      - Build Release
+    types:
+      - completed
     branches:
       - master
-    tags:
-      - v**
-  repository_dispatch:
-    types:
-      - foton-released
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing Foton release tag to recover (leave both fields empty for nightly)
+        required: false
+        type: string
+      release_sha:
+        description: Exact commit SHA of the existing release
+        required: false
+        type: string
 
 permissions:
   contents: read
-  packages: write
+  actions: read
+
+concurrency:
+  group: docker-${{ (inputs.release_sha || github.event.workflow_run.name == 'Build Release') && format('release-{0}', inputs.release_sha || github.event.workflow_run.head_sha) || 'nightly' }}
+  cancel-in-progress: ${{ github.event.workflow_run.name != 'Build Release' && inputs.release_sha == '' }}
 
 env:
   REGISTRY: ghcr.io
   IMAGE_DESCRIPTION: Foton is a lightweight Rust implementation of the Minecraft server. It focuses on clean code, performance, extensibility, and ease of use.
 
 jobs:
+  gate:
+    name: Verify publication gate
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.name == 'Build Release' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'Test' &&
+      github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.source.outputs.image_tag }}
+      is_release: ${{ steps.source.outputs.is_release }}
+      publish: ${{ steps.source.outputs.publish }}
+      release_tag: ${{ steps.source.outputs.release_tag }}
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Select an already-tested source commit
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_RELEASE_SHA: ${{ inputs.release_sha }}
+          MANUAL_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          successful_workflow_runs() {
+            workflow=$1
+            source_sha=$2
+            gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+              -f "head_sha=${source_sha}" -f status=success -f per_page=20 \
+              --jq '[.workflow_runs[] | select(.conclusion == "success")] | length'
+          }
+
+          release_job_conclusion() {
+            run_id=$1
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?filter=all&per_page=100" \
+              --jq '
+                if any(.jobs[]; .name == "Create immutable GitHub release" and .conclusion == "success")
+                then "success"
+                elif any(.jobs[]; .name == "Create immutable GitHub release" and .conclusion == "skipped")
+                then "skipped"
+                elif any(.jobs[]; .name == "Create immutable GitHub release")
+                then "failed"
+                else "missing"
+                end
+              '
+          }
+
+          approved_release_run() {
+            source_sha=$1
+            runs_json=$(gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/runs" \
+              -f "head_sha=${source_sha}" -f status=completed -f per_page=100)
+            mapfile -t run_ids < <(jq -r --arg sha "${source_sha}" '
+              .workflow_runs[]
+              | select(.head_sha == $sha and .head_branch == "master")
+              | .id
+            ' <<< "${runs_json}")
+            for run_id in "${run_ids[@]}"; do
+              if [[ "$(release_job_conclusion "${run_id}")" == success ]]; then
+                printf '%s\n' "${run_id}"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          release_tag_for_sha() {
+            source_sha=$1
+            cargo_toml=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/contents/Cargo.toml?ref=${source_sha}" \
+              --jq .content | base64 --decode)
+            version=$(awk '
+              $0 == "[workspace.package]" { in_workspace = 1; next }
+              in_workspace && /^\[/ { exit }
+              in_workspace && /^version = "/ {
+                sub(/^version = "/, "")
+                sub(/".*$/, "")
+                print
+                exit
+              }
+            ' <<< "${cargo_toml}")
+            [[ -n "${version}" ]] || {
+              echo "could not resolve the released version from ${source_sha}" >&2
+              return 1
+            }
+            printf 'v%s\n' "${version}"
+          }
+
+          validate_release() {
+            release_tag=$1
+            source_sha=$2
+            [[ "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\+mc[0-9]+(\.[0-9]+)*$ ]] || {
+              echo "release tag has an unsupported format: ${release_tag}" >&2
+              exit 1
+            }
+            expected_release_tag=$(release_tag_for_sha "${source_sha}")
+            [[ "${release_tag}" == "${expected_release_tag}" ]] || {
+              echo "release tag ${release_tag} does not match workspace version ${expected_release_tag}" >&2
+              exit 1
+            }
+            [[ "${source_sha}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "release source is not a full commit SHA: ${source_sha}" >&2
+              exit 1
+            }
+
+            ref_name=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" --jq .ref)
+            [[ "${ref_name}" == "refs/tags/${release_tag}" ]] || {
+              echo "release tag ref does not exist exactly: ${release_tag}" >&2
+              exit 1
+            }
+            tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${release_tag}" --jq .sha)
+            [[ "${tag_sha}" == "${source_sha}" ]] || {
+              echo "release tag ${release_tag} resolves to ${tag_sha}, not ${source_sha}" >&2
+              exit 1
+            }
+
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}")
+            [[ "$(jq -r .tag_name <<< "${release_json}")" == "${release_tag}" ]] \
+              && [[ "$(jq -r .target_commitish <<< "${release_json}")" == "${source_sha}" ]] \
+              && [[ "$(jq -r .draft <<< "${release_json}")" == false ]] || {
+                echo "${release_tag} is not an approved published release for ${source_sha}" >&2
+                exit 1
+              }
+
+            image_tag=${release_tag/+/-}
+            [[ "${#image_tag}" -le 128 \
+              && "${image_tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || {
+                echo "canonical OCI tag is invalid: ${image_tag}" >&2
+                exit 1
+              }
+            collision_count=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${image_tag}" \
+              | jq --arg ref "refs/tags/${image_tag}" \
+                '[.[] | select(.ref == $ref)] | length')
+            [[ "${collision_count}" -eq 0 ]] || {
+              echo "OCI tag ${image_tag} collides with an existing Git release tag" >&2
+              exit 1
+            }
+          }
+
+          is_release=false
+          publish=true
+          release_tag=
+          image_tag=nightly
+          if [[ "${EVENT_NAME}" == workflow_dispatch \
+            && "${EVENT_REF}" != refs/heads/master ]]; then
+            echo "manual Docker runs must target refs/heads/master" >&2
+            exit 1
+          fi
+          case "${EVENT_NAME}" in
+            workflow_run)
+              source_sha="${TESTED_SHA}"
+              if [[ "${SOURCE_WORKFLOW}" == "Build Release" ]]; then
+                [[ "${SOURCE_BRANCH}" == master ]] || {
+                  echo "Build Release run ${SOURCE_RUN_ID} did not run on master" >&2
+                  exit 1
+                }
+                release_conclusion=$(release_job_conclusion "${SOURCE_RUN_ID}")
+                if [[ "${release_conclusion}" == success ]]; then
+                  release_tag=$(release_tag_for_sha "${source_sha}")
+                  validate_release "${release_tag}" "${source_sha}"
+                  image_tag=${release_tag/+/-}
+                  is_release=true
+                elif [[ "${release_conclusion}" == skipped \
+                  && "${SOURCE_CONCLUSION}" == success ]]; then
+                  publish=false
+                  echo "Build Release had no version bump; Docker publication is a clean no-op"
+                else
+                  echo "release creation job concluded ${release_conclusion}; refusing publication" >&2
+                  exit 1
+                fi
+              elif [[ "${SOURCE_WORKFLOW}" != Test ]]; then
+                echo "unsupported source workflow: ${SOURCE_WORKFLOW}" >&2
+                exit 1
+              fi
+              ;;
+            workflow_dispatch)
+              if [[ -n "${MANUAL_RELEASE_TAG}" || -n "${MANUAL_RELEASE_SHA}" ]]; then
+                [[ -n "${MANUAL_RELEASE_TAG}" && -n "${MANUAL_RELEASE_SHA}" ]] || {
+                  echo "release recovery requires both release_tag and release_sha" >&2
+                  exit 1
+                }
+                release_tag="${MANUAL_RELEASE_TAG}"
+                source_sha="${MANUAL_RELEASE_SHA}"
+                approved_run=$(approved_release_run "${source_sha}") || {
+                  echo "${source_sha} has no successful Create immutable GitHub release job on master" >&2
+                  exit 1
+                }
+                echo "release recovery approved by Build Release run ${approved_run}"
+                validate_release "${release_tag}" "${source_sha}"
+                image_tag=${release_tag/+/-}
+                is_release=true
+              else
+                source_sha="${GITHUB_SHA}"
+                successful_runs=$(successful_workflow_runs test.yml "${source_sha}")
+                if [[ "${successful_runs}" -eq 0 ]]; then
+                  echo "${source_sha} has no successful push run of the Test workflow" >&2
+                  exit 1
+                fi
+              fi
+              ;;
+            *)
+              echo "unsupported Docker publication event: ${EVENT_NAME}" >&2
+              exit 1
+              ;;
+          esac
+          [[ "${source_sha}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "publication source is not a full commit SHA: ${source_sha}" >&2
+            exit 1
+          }
+          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "is_release=${is_release}" >> "${GITHUB_OUTPUT}"
+          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "sha=${source_sha}" >> "${GITHUB_OUTPUT}"
+
   docker:
     name: Build (${{ matrix.platform }})
+    if: >-
+      needs.gate.outputs.publish == 'true' &&
+      (github.event_name == 'workflow_run' || github.ref == 'refs/heads/master')
+    needs:
+      - gate
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -36,12 +281,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.client_payload.sha || github.sha }}
+          ref: ${{ needs.gate.outputs.sha }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Normalize image name
         id: image
@@ -50,17 +295,20 @@ jobs:
 
       - name: Create Docker metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
           tags: |
-            type=raw,value=nightly,enable=${{ github.event_name != 'repository_dispatch' && github.ref == 'refs/heads/master' }}
-            type=raw,value=${{ github.event.client_payload.tag || github.ref_name }},enable=${{ github.event_name == 'repository_dispatch' || startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=nightly,enable=${{ needs.gate.outputs.is_release != 'true' }}
+            type=raw,value=${{ needs.gate.outputs.image_tag }},enable=${{ needs.gate.outputs.is_release == 'true' }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.gate.outputs.sha }}
           annotations: |
             org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
+            org.opencontainers.image.revision=${{ needs.gate.outputs.sha }}
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -68,7 +316,7 @@ jobs:
 
       - name: Build Docker image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ./Dockerfile
@@ -87,7 +335,7 @@ jobs:
           touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: digests-${{ matrix.platform_pair }}
           path: ${{ runner.temp }}/digests/*
@@ -96,20 +344,27 @@ jobs:
 
   merge:
     name: Merge manifest
+    if: >-
+      needs.gate.outputs.publish == 'true' &&
+      (github.event_name == 'workflow_run' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     needs:
       - docker
+      - gate
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: digests-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Normalize image name
         id: image
@@ -118,15 +373,17 @@ jobs:
 
       - name: Create Docker metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
           tags: |
-            type=raw,value=nightly,enable=${{ github.event_name != 'repository_dispatch' && github.ref == 'refs/heads/master' }}
-            type=raw,value=${{ github.event.client_payload.tag || github.ref_name }},enable=${{ github.event_name == 'repository_dispatch' || startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=nightly,enable=${{ needs.gate.outputs.is_release != 'true' }}
+            type=raw,value=${{ needs.gate.outputs.image_tag }},enable=${{ needs.gate.outputs.is_release == 'true' }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.gate.outputs.sha }}
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -136,8 +393,53 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ needs.gate.outputs.image_tag }}
+          IS_RELEASE: ${{ needs.gate.outputs.is_release }}
+          RELEASE_TAG: ${{ needs.gate.outputs.release_tag }}
+          SOURCE_SHA: ${{ needs.gate.outputs.sha }}
         run: |
+          if [[ "${IS_RELEASE}" == true ]]; then
+            current_sha=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" --jq .sha)
+            source_name="release tag ${RELEASE_TAG}"
+            release_json=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")
+            [[ "$(jq -r .target_commitish <<< "${release_json}")" == "${SOURCE_SHA}" \
+              && "$(jq -r .draft <<< "${release_json}")" == false ]] || {
+                echo "release approval changed while the image was building" >&2
+                exit 1
+              }
+          else
+            current_sha=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha)
+            source_name="HEAD of master"
+          fi
+          if [[ "${current_sha}" != "${SOURCE_SHA}" ]]; then
+            echo "${source_name} moved to ${current_sha}; refusing to publish stale ${SOURCE_SHA}" >&2
+            exit 1
+          fi
+
+          target_image="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          if [[ "${IS_RELEASE}" == true ]] \
+            && existing_index=$(docker buildx imagetools inspect --raw "${target_image}" 2>/dev/null); then
+            if ! jq -e --arg revision "${SOURCE_SHA}" '
+              .mediaType == "application/vnd.oci.image.index.v1+json"
+              and .annotations["org.opencontainers.image.revision"] == $revision
+              and (.manifests | length == 2)
+              and ([.manifests[]
+                | select(.mediaType == "application/vnd.oci.image.manifest.v1+json")
+                | (.platform.os + "/" + .platform.architecture)]
+                | sort == ["linux/amd64", "linux/arm64"])
+            ' <<< "${existing_index}" >/dev/null; then
+              echo "OCI tag ${IMAGE_TAG} exists but is not the exact approved amd64/arm64 index" >&2
+              exit 1
+            fi
+            echo "${target_image} already publishes ${SOURCE_SHA}; recovery is complete"
+            exit 0
+          fi
+
           tag_args=()
           while IFS= read -r tag; do
             tag_args+=("-t" "${tag}")
@@ -151,5 +453,6 @@ jobs:
           docker buildx imagetools create \
             "${tag_args[@]}" \
             --annotation "index:org.opencontainers.image.description=${IMAGE_DESCRIPTION}" \
+            --annotation "index:org.opencontainers.image.revision=${SOURCE_SHA}" \
             --annotation "index:org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             "${source_args[@]}"

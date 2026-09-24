@@ -61,6 +61,11 @@ run "cargo test --workspace"                       cargo test --workspace
 # is why Build Release failed on the runner while passing on every developer's
 # machine, where the file was left over from an earlier build.
 run "plugin api builds"                            bash dev/build-plugin-api.sh --check
+run "plugin runtime dependency closure"            bash dev/plugin-runtime-test.sh
+# The release path has its own packaging logic and must stay aligned with the
+# workflow without actually creating a tag or contacting GitHub during CI.
+run "manual release packaging"                    bash dev/release-test.sh
+run "POSIX installer transactions"                bash dev/install-test.sh
 # RegisterNatives is all-or-nothing: one registered method the class does
 # not declare and no plugin loads at all, one declared method left
 # unregistered and the first plugin to call it takes an

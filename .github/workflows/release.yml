@@ -6,6 +6,13 @@ on:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -13,38 +20,49 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-10
         with:
           toolchain: nightly-2026-07-23
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       # build-plugin-api.sh asks for a JDK 21 or newer and the workflow never
       # said which one it would get, so the suite ran on whatever ubuntu-latest
       # happens to default to. That is older than 21, and the API failed to
       # compile there while building on every developer's machine. A build that
       # needs a Java version has to name it.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '21'
-      - uses: crate-ci/typos@v1.48.0
+      - uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14 # v1.48.0
       # The action above runs typos itself and does not leave the binary on
       # the PATH, so `dev/ci.sh` -- which runs the same check as part of the
       # whole suite -- failed instantly with "typos: command not found". The
       # zero-second failure was the tell.
       - name: Install typos for the suite
-        run: cargo install typos-cli --locked
-      - name: Verify the full release candidate
+        run: cargo install typos-cli --version 1.48.0 --locked
+      - name: Verify repository checks for the release candidate
         run: bash dev/ci.sh
+      - name: Verify the release candidate on a real server
+        run: |
+          bash dev/smoke-test.sh
+          bash dev/join-test.sh
+      - name: Preserve the verified plugin API jar
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: foton-plugin-api
+          path: plugin-api/build/foton-plugin-api.jar
+          if-no-files-found: error
 
   version:
+    name: Check release version
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.version.outputs.changed }}
       current: ${{ steps.version.outputs.current }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -54,26 +72,89 @@ jobs:
         env:
           BEFORE_SHA: ${{ github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          current=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          current=$(awk '
+            $0 == "[workspace.package]" { in_workspace = 1; next }
+            in_workspace && /^\[/ { exit }
+            in_workspace && /^version = "/ {
+              sub(/^version = "/, "")
+              sub(/".*$/, "")
+              print
+              exit
+            }
+          ' Cargo.toml)
+          tag="v${current}"
+
+          published_release_matches_head() {
+            tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${tag}" --jq .sha 2>/dev/null) \
+              || return 1
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" 2>/dev/null) \
+              || return 1
+            [[ "${tag_sha}" == "${HEAD_SHA}" \
+              && "$(jq -r .tag_name <<< "${release_json}")" == "${tag}" \
+              && "$(jq -r .target_commitish <<< "${release_json}")" == "${HEAD_SHA}" \
+              && "$(jq -r .draft <<< "${release_json}")" == false ]]
+          }
 
           echo "current=${current}" >> "$GITHUB_OUTPUT"
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${EVENT_REF}" != "refs/heads/master" ]]; then
+              echo "manual releases must be dispatched from refs/heads/master, not ${EVENT_REF}" >&2
+              exit 1
+            fi
+            if git rev-parse --verify --quiet "refs/tags/v${current}" >/dev/null; then
+              if published_release_matches_head; then
+                echo "${tag} is already published for this exact commit; continuing idempotently"
+              else
+                echo "${tag} exists but is not this commit's approved release; bump Cargo.toml" >&2
+                exit 1
+              fi
+            fi
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          previous=$(git show "${BEFORE_SHA}:Cargo.toml" | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/')
+          previous=$(git show "${BEFORE_SHA}:Cargo.toml" | awk '
+            $0 == "[workspace.package]" { in_workspace = 1; next }
+            in_workspace && /^\[/ { exit }
+            in_workspace && /^version = "/ {
+              sub(/^version = "/, "")
+              sub(/".*$/, "")
+              print
+              exit
+            }
+          ')
           if [[ "${previous}" == "${current}" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
+            if git rev-parse --verify --quiet "refs/tags/v${current}" >/dev/null; then
+              if published_release_matches_head; then
+                echo "${tag} is already published for this exact commit; continuing idempotently"
+              else
+                echo "${tag} exists but is not this commit's approved release" >&2
+                exit 1
+              fi
+            fi
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+  installer-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-10
+      - name: Verify PowerShell installer transactions
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File dev/install-test.ps1
 
   build:
     needs:
       - ci
       - version
+      - installer-windows
     if: needs.version.outputs.changed == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
@@ -105,8 +186,8 @@ jobs:
             artifact: foton
             target: x86_64-apple-darwin
     steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Install musl toolchain
         if: contains(matrix.target, 'musl')
         run: |
@@ -118,12 +199,13 @@ jobs:
         run: rustup target add ${{ matrix.target }}
       - name: Build portable release binary
         run: cargo build --locked --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --features stand-alone,deadlock_detection --verbose
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.target && format('target/{0}/release/{1}', matrix.target, matrix.artifact) || format('target/release/{0}', matrix.artifact) }}
 
   release:
+    name: Create immutable GitHub release
     needs:
       - version
       - build
@@ -131,9 +213,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
@@ -146,24 +233,111 @@ jobs:
           mv artifacts/foton-macos-aarch64/foton release/foton-macos-aarch64
           mv artifacts/foton-macos-x86_64/foton release/foton-macos-x86_64
 
+      - name: Package the optional plugin runtime
+        run: |
+          bash dev/fetch-plugin-api-libs.sh --check
+          test "$(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 24
+          test "$(find plugin-api/lib/licenses -maxdepth 1 -type f -name '*.txt' | wc -l)" -eq 6
+          for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
+            test -f "plugin-api/lib/licenses/${license}" && test ! -L "plugin-api/lib/licenses/${license}"
+          done
+          mkdir -p release/plugin-runtime/lib release/plugin-runtime/licenses
+          cp artifacts/foton-plugin-api/foton-plugin-api.jar release/plugin-runtime/
+          cp plugin-api/lib/*.jar release/plugin-runtime/lib/
+          cp plugin-api/lib/licenses/*.txt release/plugin-runtime/licenses/
+          (cd release/plugin-runtime && shasum -a 256 foton-plugin-api.jar lib/*.jar licenses/*.txt > SHA256SUMS)
+          tar -czf release/foton-plugin-runtime.tar.gz -C release/plugin-runtime .
+          jar --create --file release/foton-plugin-runtime.zip --no-manifest -C release/plugin-runtime .
+          rm -rf release/plugin-runtime
+
       - name: Generate checksums
         run: |
           cd release
           shasum -a 256 * > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.version.outputs.current }}
-          name: v${{ needs.version.outputs.current }}
-          target_commitish: ${{ github.sha }}
-          draft: false
-          prerelease: false
-          files: release/*
-          generate_release_notes: true
+      - name: Create immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ needs.version.outputs.current }}
+        run: |
+          expected_assets=(
+            SHA256SUMS
+            foton-linux-aarch64-musl
+            foton-linux-x86_64-musl
+            foton-macos-aarch64
+            foton-macos-x86_64
+            foton-plugin-runtime.tar.gz
+            foton-plugin-runtime.zip
+            foton-windows-x86_64.exe
+          )
+          expected_names=$(printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort)
+          for expected_asset in "${expected_assets[@]}"; do
+            [[ -f "release/${expected_asset}" && ! -L "release/${expected_asset}" ]] || {
+              echo "unsafe local release asset: ${expected_asset}" >&2
+              exit 1
+            }
+          done
+          local_names=$(find release -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          if [[ "${local_names}" != "${expected_names}" ]]; then
+            echo "local release directory is not the exact expected asset set" >&2
+            exit 1
+          fi
+          expected_payload_names=$(printf '%s\n' "${expected_assets[@]:1}" | LC_ALL=C sort)
+          manifest_names=$(awk 'NF == 2 { sub(/^\*/, "", $2); print $2 }' \
+            release/SHA256SUMS | LC_ALL=C sort)
+          if [[ "${manifest_names}" != "${expected_payload_names}" ]]; then
+            echo "local SHA256SUMS is not the exact expected payload manifest" >&2
+            exit 1
+          fi
+          if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>/dev/null); then
+            tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" --jq .sha)
+            if [[ "${tag_sha}" == "${GITHUB_SHA}" \
+              && "$(jq -r .tag_name <<< "${release_json}")" == "${RELEASE_TAG}" \
+              && "$(jq -r .target_commitish <<< "${release_json}")" == "${GITHUB_SHA}" \
+              && "$(jq -r .draft <<< "${release_json}")" == false ]]; then
+              remote_names=$(jq -r '.assets[].name' <<< "${release_json}" | LC_ALL=C sort)
+              if [[ "${remote_names}" != "${expected_names}" ]]; then
+                echo "${RELEASE_TAG} has a partial or unexpected release asset set" >&2
+                exit 1
+              fi
+              verification_dir=$(mktemp -d)
+              trap 'rm -rf "${verification_dir}"' EXIT
+              gh release download "${RELEASE_TAG}" --dir "${verification_dir}"
+              cmp release/SHA256SUMS "${verification_dir}/SHA256SUMS" || {
+                echo "${RELEASE_TAG} has a different SHA256SUMS manifest" >&2
+                exit 1
+              }
+              (cd "${verification_dir}" && shasum -a 256 --check SHA256SUMS) || {
+                echo "${RELEASE_TAG} contains an asset that fails SHA256SUMS" >&2
+                exit 1
+              }
+              echo "${RELEASE_TAG} already exists for this exact commit; leaving it immutable"
+              exit 0
+            fi
+            echo "release ${RELEASE_TAG} already exists with different provenance" >&2
+            exit 1
+          fi
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")" ]]; then
+            echo "${RELEASE_TAG} already exists remotely; choose a new version" >&2
+            exit 1
+          fi
+          gh release create "${RELEASE_TAG}" release/* \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_TAG}" \
+            --generate-notes
 
-      - name: Trigger release workflows
+  notify-live-forever:
+    name: Dispatch live_forever archive
+    needs:
+      - version
+      - release
+    if: needs.version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Trigger live_forever
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: v${{ needs.version.outputs.current }}
